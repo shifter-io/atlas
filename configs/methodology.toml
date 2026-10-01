@@ -1,0 +1,94 @@
+name = "Measured draft v1"
+status = "draft"
+windows = [24, 168, 720]
+refresh_seconds = 60
+required_targets = ["generic_http", "generic_https"]
+minimum_requests = 4000
+minimum_coverage = 0.90
+score_valid_hours = 24
+sample_limit = 50
+
+[weights]
+reliability = 22
+speed = 14
+uptime = 10
+coverage = 12
+diversity = 8
+dcAsns = 10
+authenticity = 10
+value = 14
+
+[target_weights]
+reliability = 80
+speed = 20
+
+[benchmark_weights]
+generic_http = 1
+generic_https = 1
+
+[curves.reliability]
+kind = "linear"
+low = 0.6
+high = 1.0
+[curves.speed]
+kind = "log_inverse"
+low = 60
+high = 2000
+[curves.uptime]
+kind = "linear"
+low = 97
+high = 100
+[curves.coverage]
+kind = "log"
+low = 10000
+high = 2000000
+[curves.dcAsns]
+kind = "inverse"
+low = 0
+high = 0.25
+[curves.value]
+kind = "cost"
+anchor = 0.005
+penalty = 26
+[curves.authenticity]
+blocklist_penalty = 120
+[curves.diversity]
+countries = [6, 50, 0.30]
+regions = [10, 100, 0.20]
+cities = [15, 120, 0.25]
+asns = [6, 40, 0.25]
+
+[grades]
+"A+" = 88
+A = 80
+"B+" = 72
+B = 64
+"C+" = 56
+C = 48
+D = 0
+
+[profiles.balanced]
+reliability = 22
+speed = 14
+uptime = 10
+coverage = 12
+diversity = 8
+dcAsns = 10
+authenticity = 10
+value = 14
+[profiles.latency_first]
+reliability = 16
+speed = 38
+uptime = 8
+coverage = 8
+diversity = 6
+dcAsns = 6
+authenticity = 6
+value = 12
+
+# Optional overrides: [products."provider/product"] and [targets.target_id].
+# Override weights, target_weights, curves, required_targets or eligibility settings.
+# Product settings are applied first; target settings take precedence for target scores.
+[products."shifter/residential"]
+kind = "residential"
+display_name = "Shifter"

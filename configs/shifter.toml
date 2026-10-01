@@ -1,0 +1,26 @@
+# Current Residential product. Never put account credentials in this file.
+schema_version = 1
+provider = "shifter"
+
+[credentials]
+account_env = "SHIFTER_ACCOUNT" # Base account ID, optionally prefixed with customer-
+password_env = "SHIFTER_PASSWORD"
+
+[settings]
+scheme = "http" # http or socks5; either supports generic_http and generic_https
+gateway = "auto" # auto, fra, ams, lon, nyc, tor, sgp, blr, syd; port 443
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+# pool = "full_geo" # Set only if verified: full_geo, country_geo, non_geo
+
+[parameters]
+# All optional. Omit sid for rotation; an explicit sid implies fixed sessions.
+# country = "us"
+# region = "california"
+# city = "los_angeles"
+# asn = 7922
+# strict = true
+# sid = "example-session"
+# ttl = 120 # Requires sid or a generated-session policy
+
+[extra_flags]
+# Explicit escape hatch for future Shifter flags; support is not guaranteed.

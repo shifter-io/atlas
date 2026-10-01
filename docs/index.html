@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proxy testing framework · Developer guide</title>
+<style>
+:root{color-scheme:light;--ink:#192b34;--muted:#556772;--line:#d7dfdf;--accent:#086e62;--paper:#fafbf8}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,sans-serif}
+main{max-width:1050px;margin:auto;padding:50px 32px 90px}header{border-top:5px solid var(--accent);padding-top:24px;margin-bottom:32px}
+.eyebrow{font:12px/1.4 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.13em;color:var(--accent)}
+h1{font-size:34px;line-height:1.18;letter-spacing:-.03em;margin:14px 0}h2{font-size:23px;line-height:1.3;margin:38px 0 14px}
+h3{font-size:17px;margin:24px 0 8px}p{max-width:82ch}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 22px;border-block:1px solid var(--line);padding:14px 0}
+pre{overflow:auto;background:#152c35;color:#edf4ef;padding:20px;font:13px/1.7 ui-monospace,monospace;border-radius:4px}
+code{font-family:ui-monospace,monospace;font-size:.9em}li{margin:6px 0}.note{padding:15px 20px;background:#eef4ef;border-left:3px solid var(--accent)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}.muted,footer{color:var(--muted);font-size:14px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:12px 10px}th{background:#eff3ef}td:first-child{width:25%;font-family:ui-monospace,monospace}footer{margin-top:48px;border-top:1px solid var(--line);padding-top:18px}
+@media(max-width:650px){main{padding:25px 18px}.grid{grid-template-columns:1fr}h1{font-size:28px}table{font-size:12px}td,th{padding:9px 5px}}@media print{pre{white-space:pre-wrap}nav{display:none}main{max-width:none;padding:0}}
+</style>
+<main>
+<header><div class="eyebrow">Framework / v0.4 / Python 3.12+</div>
+<h1>Repeatable proxy measurements.</h1>
+<p>Two baseline targets, HTTP and SOCKS5 gateways, bounded asynchronous execution, portable JSON results and optional local DB-IP enrichment. The Python API runs independently of the website, PostgreSQL or any scheduler.</p></header>
+<nav><a href="#start">Run a test</a><a href="shifter-parameters.html">Shifter adapter</a><a href="#api">Python API</a><a href="#contract">Results</a><a href="#dbip">Local MMDB</a><a href="#extend">Add a target</a><a href="#database">PostgreSQL</a><a href="#test">Validation</a></nav>
+
+<section id="start"><h2>1. Run a test</h2>
+<p>From the standalone <code>framework</code> directory, install the locked dependencies. The MMDB stays in the local <code>db-ip</code> directory and is not included in wheels, source distributions or Git.</p>
+<pre>uv sync --locked --no-editable
+uv run --no-editable proxy-framework targets
+
+# Supply a gateway privately through your environment:
+# PROXY_URL accepts http://user:password@host:port or socks5://user:password@host:port.
+# Percent-encode reserved characters in URL credentials.
+uv run --no-editable proxy-framework run \
+  --target generic_http --requests 5000 --concurrency 100 \
+  --provider example --product residential_rotating \
+  --country US --location dubai --output results</pre>
+<p>Use <code>generic_https</code> for TLS tests. Both HTTP and SOCKS5 gateways support optional username/password authentication. SOCKS5 resolves the destination through the proxy. For static <code>PROXY_URL</code> runs, <code>--country</code> records requested geography; targeting flags must already be present in the supplied credentials.</p>
+<p class="note"><strong>Shifter Residential is implemented.</strong> Use <code>--provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml</code>. The private file uses owner-only permissions and is excluded from Git, packages and remote uploads; copy <a href="../credentials.toml.example">credentials.toml.example</a> to set up your own. Add optional overrides such as <code>--param country=us</code>. See the <a href="shifter-parameters.html">adapter guide, session policies and Python examples</a>.</p>
+<p>Set <code>--url http://checkip.amazonaws.com/</code> (or another plain-IP echo endpoint) per test. For Generic HTTPS, use an HTTPS URL. Python callers pass <code>RunConfig(target_url=...)</code>. Amazon is the default if omitted; the effective URL is recorded in each summary.</p>
+<p>Defaults: 100 requests, concurrency 10, timeout 15 seconds, no rate cap. Optional <code>--rate 50</code> paces request starts. There are no automatic retries, redirects, cookies or connection reuse. Response bodies are limited to 512 bytes, plus one byte to detect overflow.</p>
+<p class="note">A request succeeds only when the response is HTTP 200 and its complete trimmed body is one valid IPv4 or IPv6 address. HTTPS verifies the target certificate. Only Generic HTTP contributes IP observations and pool uniqueness metrics.</p>
+</section>
+
+<section id="api"><h2>2. Call the runner from other code</h2>
+<pre>import asyncio
+import os
+from proxy_framework import JsonSink, ProxyConfig, RunConfig, run
+
+async def measure():
+    return await run(
+        RunConfig(
+            target="generic_http",
+            proxy=ProxyConfig.from_url(os.environ["PROXY_URL"]),
+            requests=5_000,
+            concurrency=100,
+            provider="example",
+            product="residential_rotating",
+        ),
+        JsonSink("results"),
+    )
+
+summary = asyncio.run(measure())
+print(summary.to_dict())</pre>
+<p>A future methodology layer chooses the target and configuration and invokes this function. It decides cadence, geography, budgets and which results to enrich/publish. Those policies do not live inside targets.</p>
+<p>Pass an <code>asyncio.Event</code> as <code>stop=</code> for graceful interruption; it returns a partial summary with <code>status="cancelled"</code>. Cancelling the caller task also saves partial results, then propagates cancellation. CLI SIGINT/SIGTERM does the former and exits 130. A normally completed measurement exits 0 even when proxies fail; configuration, storage or framework failures exit 2.</p>
+</section>
+
+<section id="contract"><h2>3. Result contract</h2>
+<p>Each invocation creates a unique run directory. <code>summary.json</code> is written last and serves as the completion marker. Interrupted or failed runs are explicitly marked; a directory without a summary is incomplete.</p>
+<div class="grid"><div><h3>summary.json</h3><p>Schema/framework/target versions; sanitized configuration; UTC start/end; requested, started, completed, cancelled and not-started counts; successes, errors by category, HTTP statuses, body bytes, throughput, latency percentiles and exact HTTP unique IPs. Includes five-minute counters/histograms and the IP file checksum/row count.</p></div>
+<div><h3>ips.jsonl.gz</h3><p>One row per run × five-minute UTC bucket × normalized IP. Each row contains <code>schema_version</code>, <code>run_id</code>, <code>bucket_start</code>, <code>ip</code>, <code>count</code>, <code>first_seen</code> and <code>last_seen</code>. HTTPS produces an empty IP file and null <code>unique_ips</code>.</p></div></div>
+<h3>Definitions that downstream consumers must preserve</h3>
+<ul>
+<li><code>requested = started + not_started</code>; <code>started = completed + cancelled</code>; <code>completed = successes + total_errors</code>. On a framework failure, “cancelled” includes requests aborted by that failure.</li>
+<li>Latency is measured with a monotonic clock from request execution through complete body receipt, including connection setup and TLS, excluding runner queue/rate waits. Percentiles include successes only; absent samples produce nulls.</li>
+<li>The sparse <code>ceil_ms_v1</code> histogram stores <code>[upper_bound_ms, count]</code> bins with 1 ms resolution. Percentiles use nearest-rank selection and round upward by less than 1 ms. Merge bin counts before calculating combined percentiles.</li>
+<li>Throughput is completed requests divided by elapsed run time. <code>response_body_bytes</code> counts bytes read from bodies, including failed responses; it is not provider-billed traffic or total TCP/TLS bytes.</li>
+<li>Observations belong to the bucket in which the response completes. UTC is anchored to the monotonic run clock so clock corrections do not reopen flushed buckets.</li>
+<li>Deduplicate IPs across buckets/runs when computing window or fleet uniques. Adding per-run unique counts would overcount recurring addresses.</li>
+<li>Error categories: proxy authentication, proxy connection, DNS, TLS, timeout, HTTP status, invalid body, oversized body, connection and protocol. Returned error data never includes raw exception messages or credentials.</li>
+</ul>
+<p>Memory scales with distinct IPs, the current bucket, a bounded export backlog and small aggregate histograms. A fixed pool bounds active requests. Bucket serialization runs on one background writer; slow storage delays new requests instead of blocking the event loop during existing requests. No list of all request objects is retained.</p>
+</section>
+
+<section id="dbip"><h2>4. Enrich from the existing MMDB</h2>
+<p>The supplied file is <code>db-ip/dbip-full-2026-09-14.mmdb</code>, identified internally as <code>DBIP-Location-ISP (compat=Enterprise)</code>. It is a local copy from the existing DB-IP folder. Its SHA-256 is <code style="overflow-wrap:anywhere">ca81b1d51dd4e502bc9c9568b5c3dd7a865094f7c29ed6b63947d1763ac6c4f2</code>.</p>
+<pre>uv run --no-editable proxy-framework db-info
+uv run --no-editable proxy-framework enrich results/RUN_ID
+
+# Select a different local release explicitly:
+uv run --no-editable proxy-framework enrich results/RUN_ID --mmdb /path/to/release.mmdb</pre>
+<p><code>DBIP_MMDB</code> is the environment alternative. Automatic discovery requires exactly one file; with multiple releases, select one explicitly. The database is memory-mapped. A bounded cache reuses lookups; no geolocation API requests are made.</p>
+<p>Enrichment validates the IP artifact checksum, then writes a separate compressed JSON Lines file and release report. Original measurements are preserved. Each row records the release checksum and country, region, city, coordinates, ISP, organization, ASN, connection type and usage type. Missing records remain unknown. Re-enriching with another MMDB creates another version; repeating the same release refuses to overwrite existing output.</p>
+<p>Enrichment is optional and only accepts Generic HTTP pool results. The source MMDB is a separate licensed data asset; the framework’s MIT license covers its code. Field definitions follow the <a href="https://db-ip.com/db/format/ip-to-location-isp/mmdb.html">DB-IP MMDB specification</a>.</p>
+</section>
+
+<section id="extend"><h2>5. Add or change a target</h2>
+<p>Targets expose an ID, version, engine, pool eligibility, <code>build_request()</code> and <code>assess(status, body)</code>. Register a new implementation in a <code>TargetRegistry</code> and pass it to <code>run(..., targets=registry)</code>. Adding a built-in also registers it in the default registry; the CLI automatically lists it. Change the target version whenever measurement semantics change.</p>
+<pre>from proxy_framework.targets import EchoIpTarget, TargetRegistry
+
+targets = TargetRegistry()
+targets.register(EchoIpTarget("my_ip_target", "https://example.test/ip"))
+# await run(config_for_my_ip_target, sink, targets=targets)</pre>
+<p><code>Transport.execute(target, *, context=None)</code> returns a normalized outcome. Since v0.2 the runner supplies a <code>RequestContext</code> with run, request and worker identities for provider sessions; custom transports must accept this keyword. A future browser adapter can implement the same execution protocol through <code>transport_factory</code>; browser targets can carry additional settings in their own implementation. Playwright is not needed or installed for baseline targets. Custom sinks implement <code>start</code>, <code>observations</code>, <code>finish</code> and <code>abort</code>. Observation writes are serialized on one background thread; finish runs only after they complete.</p>
+</section>
+
+<section id="database"><h2>6. PostgreSQL persistence · implemented</h2>
+<p>This project has its own PostgreSQL 17.11 cluster at <code>127.0.0.1:55432</code>, database/user <code>proxy_reviews</code>. Its data lives under <code>framework/.state/postgres/data</code>; it does not share data or roles with the other local projects. The application role is not a superuser and cannot create roles or databases. TCP access is loopback-only and uses SCRAM authentication.</p>
+<p><strong>The live Shifter run is imported:</strong> 5,000 completed requests, 4,997 successes, 4,967 historical IPs, 4,967 IP observations and 4,967 versioned enrichment records. Cached results include a 99.94% success rate, 4,967 unique IPs and p50/p95/p99 of 1,113/1,644/3,292 ms. Re-importing the same run leaves all totals unchanged. <a href="../artifacts/postgresql.json">Database verification evidence</a>.</p>
+<h3>Start, stop and configure</h3>
+<pre># From framework/; the cluster is already initialized on this Mac.
+uv sync --locked --no-editable
+uv run --no-editable python scripts/postgres_local.py status
+uv run --no-editable python scripts/postgres_local.py start
+uv run --no-editable python scripts/postgres_local.py stop
+
+# On a new machine, point to a working PostgreSQL 17+ bin directory:
+uv run --no-editable python scripts/postgres_local.py init \
+  --bin-dir /path/to/postgresql/bin --port 55432
+uv run --no-editable proxy-framework db-init --database-file .secrets/database.toml</pre>
+<p>The local manager reuses the working PostgreSQL binaries currently installed under the Scraping/pulse project; only the executables are shared. Their path is recorded in <code>.state/postgres/runtime.json</code>. Cluster data, socket, log, database and credentials are dedicated to this project. The server runs in the background; login/reboot autostart has not been installed. Run <code>start</code> after restarting the Mac.</p>
+<p>Private connection settings are in <code>.secrets/database.toml</code>, with a separate <code>.secrets/postgres-admin.toml</code> for local administration. Both use owner-only file permissions and generated passwords. Data and secrets are excluded from Git, packages and remote test uploads. Community members receive only <a href="../database.toml.example">database.toml.example</a>. Proxy credentials remain in their separate private file.</p>
+<h3>Import existing data or save future runs automatically</h3>
+<pre>uv run --no-editable proxy-framework ingest results/RUN_ID \
+  --database-file .secrets/database.toml
+uv run --no-editable proxy-framework db-status --database-file .secrets/database.toml
+
+# Saves files first, then imports the completed or partial measurement.
+uv run --no-editable proxy-framework run \
+  --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml \
+  --target generic_http --url http://checkip.amazonaws.com/ \
+  --param country=us --requests 5000 --concurrency 100 \
+  --database-file .secrets/database.toml
+
+# Offline enrichment can be imported later without counting the run twice.
+uv run --no-editable proxy-framework enrich results/RUN_ID \
+  --database-file .secrets/database.toml</pre>
+<p>Database persistence is explicit: include <code>--database-file</code> for automatic CLI imports. Without it, runs continue to save files only. Python code can call <code>proxy_framework.storage.ingest(run_directory, credentials_file)</code> after <code>run()</code>. Rules/schedulers can therefore control when to ingest and enrich. If PostgreSQL is unavailable, the durable JSON artifacts remain available for retrying <code>ingest</code>.</p>
+<div style="overflow:auto"><table><thead><tr><th>Table / key</th><th>Implemented behavior</th></tr></thead><tbody>
+<tr><td>providers / products</td><td>Provider and product identities; no passwords or full proxy authentication strings.</td></tr>
+<tr><td>test_runs / run_key</td><td>Internal bigint key; unique external UUID retained once for replay protection. Compact run metadata and checksum. Full summaries are reconstructed through test_run_details or storage.read_summary().</td></tr>
+<tr><td>ip_addresses / ip_id</td><td>One unique native inet address, shared by every provider and product. Historical addresses are retained.</td></tr>
+<tr><td>product_ips / (product_id, ip_id)</td><td>One relationship per product and IP: first/last seen, observation count and run count. Addresses and enrichment are referenced, not copied.</td></tr>
+<tr><td>provider_overlap / (provider_a, provider_b)</td><td>Cached lifetime shared-IP counts. Each IP contributes once per provider pair, even across multiple products or runs.</td></tr>
+<tr><td>ip_observations / (run_key, bucket, ip_id)</td><td>Counts and first/last seen per five-minute bucket. Monthly partitions are created on import; indexes support run and IP/time lookups.</td></tr>
+<tr><td>run_buckets / (run_key, bucket)</td><td>Monthly-partitioned request/error/status counters and mergeable latency histograms for both targets.</td></tr>
+<tr><td>dbip_releases / ip_enrichment</td><td>MMDB release checksum/metadata and one enrichment record per IP × release. Previous releases remain available. References point to shared typed enrichment_locations and enrichment_networks records; all 14 fields are exposed by ip_enrichment_details. Indexes cover release/location, release/network, country/city and ASN; the network tuple key begins with ISP.</td></tr>
+<tr><td>run_enrichments / (run_key, release_id)</td><td>Enrichment artifact checksum and cached country counts for each run/release.</td></tr>
+<tr><td>pool_ips / (pool_id, ip_id)</td><td>Exact membership shared across concurrency, timeout and rate-limit settings. pool_stats stores cached pool unique counts. Full performance scopes remain separate; their exact unique counts use indexed history checks during ingestion without another stored membership set.</td></tr>
+<tr><td>scope_stats / scope_id</td><td>Precomputed lifetime run/request/error totals, success rate, exact unique-IP count and merged latency histogram/percentiles. Website reads can fetch one cache row.</td></tr>
+<tr><td>schema_versions</td><td>Applied schema version and checksum. Incompatible versions are rejected; use a verified staged rebuild instead of silently rewriting a deployed schema.</td></tr>
+</tbody></table></div>
+<p><strong>Schema v4:</strong> the active database was rebuilt into a verified compact layout. Numeric run references replace repeated UUIDs; a run-leading primary key eliminates the extra observation run index. Product and release IDs use integers; global IP and run IDs retain bigint range. Empty extra_attributes uses NULL physically and is exposed as an empty object in views. Detailed observations and lifetime product membership remain separate.</p>
+<p>Full summaries remain available through <code>proxy_framework.storage.read_summary(run_id, credentials_file)</code>, the SQL function <code>stored_run_summary(run_key)</code>, or <code>test_run_details.summary</code>. Original portable artifacts remain unchanged. Bucket histograms are checked against the run histogram on import. The database stores configuration once per performance scope and histogram detail once per bucket; lifetime histogram caches remain for fast website metrics.</p>
+<p>Pool scope version 1 excludes only concurrency, timeout and request rate. Provider/product, target URL/version, runner location, gateway, geographic filters, ASN, session policy and all adapter flags remain distinct. This conservative policy avoids merging different pools; changes to it require an explicit methodology migration. Pool counts are exposed separately as <code>cached_pools</code>; <code>cached_scopes</code> retains exact performance-scope totals.</p>
+<p><strong>Upgrade:</strong> current <code>db-init</code> initializes or verifies v4; it refuses older schemas. The local controlled upgrade is <code>PYTHONPATH=src .venv/bin/python scripts/rebuild_database.py</code>. It requires matching saved artifacts for every stored run, takes a dump, builds a separate database, verifies all history/enrichment/caches, benchmarks queries and tests replay before swapping. It retains the old database offline. The latest dump is <code>.state/postgres/backups/20260926_124224/database.dump</code> and old database is <code>proxy_reviews_before_20260926_124224</code>. It is deliberately restricted to this project's local server. Community installations need the same staged procedure adapted to their server.</p>
+<p><a href="../artifacts/storage-optimization.html">Measured optimization results and query tradeoffs</a>. No proxy requests were needed. No observation history was deleted. Historical backup databases and dumps are excluded from active-table storage figures.</p>
+<p>The complete field list is <code>matched</code> (boolean); <code>country_code</code>, <code>country</code>, <code>region_code</code>, <code>region</code>, <code>city</code>, <code>isp</code>, <code>organization</code>, <code>asn_organization</code>, <code>connection_type</code>, <code>usage_type</code> (text); <code>latitude</code>, <code>longitude</code> (double precision); and <code>asn</code> (bigint). Missing values remain NULL. An automated contract check ensures every field emitted by the enricher has a typed column. Location tuples include coordinates; network tuples include ISP, both organizations, ASN, connection type and usage type. Neither city name nor ASN alone is treated as a unique identity.</p>
+<p><strong>Earlier v2 rebuild:</strong> the database was rebuilt from preserved artifacts after a custom-format backup. The original database is retained offline under <code>proxy_reviews_before_20260926_115701</code>; the dump is in <code>.state/postgres/backups/20260926_115701/database.dump</code>. Connection settings are unchanged. Reconnect and refresh DBeaver after the rebuild.</p>
+<p>For readable browsing, open the views <code>product_ip_details</code>, <code>ip_enrichment_details</code> and <code>test_run_details</code>. They join numeric references to addresses and provider names without storing extra address copies. Provider first/last seen across products can be derived using minimum/maximum product timestamps. Geographic filters use ordinary indexed columns; only unexpected future attributes stay in <code>extra_attributes</code> JSONB; known values are not duplicated there. These indexes do not replace precomputed website aggregates.</p>
+<p>Each scope includes the effective target URL/version and safe test configuration, including concurrency, requested geography, gateway, session policy and runner location. Request quantity is excluded so runs of different sizes can accumulate. Stored durations are summed run durations, not a trailing wall-clock window. HTTPS never contributes pool IP records.</p>
+<p><strong>Import transaction:</strong> validate counters/checksums → COPY observations into staging → insert run/history → import optional MMDB releases → update cached metrics → commit. Imports are serialized with a database advisory lock; measurement requests run independently. Invalid data rolls the entire import back. Replays validate the same content and can attach a newly generated enrichment release without counting measurements again.</p>
+<p><strong>Calculated website layer:</strong> exact 24h/7d/30d results, configurable draft scores and immutable API snapshots are implemented below. Collection schedules, final methodology approval, automated backups and public deployment remain separate work.</p>
+</section>
+
+<section id="calculated"><h2>Calculated results, scores and website API</h2>
+<p>The source history stays in schema v4. The additive calculated schema has its own version/checksum. No IP membership is stored per reporting window; observations supply exact distinct counts. A calculation reads a repeatable snapshot of history and writes all prepared results in one transaction. Publication switches a single pointer only after validation. Failed calculations keep the previous publication intact.</p>
+<div class="table-wrap"><table><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody>
+<tr><td>methodologies</td><td>Immutable TOML configuration represented as canonical JSON, identified by SHA-256.</td></tr>
+<tr><td>calculation_roles</td><td>Explicit exploratory, pool_sampling, benchmark or monitor assignment per run. Unassigned runs are exploratory.</td></tr>
+<tr><td>metric_evidence</td><td>Future collector contract: product, cohort, metric/value, period, expiry, provenance and replay checksum.</td></tr>
+<tr><td>calculation_builds</td><td>Cutoff, methodology and input fingerprint. Identical replays return the same build; late results create a new one. The snapshot also identifies the calculation implementation checksum.</td></tr>
+<tr><td>calculated_windows</td><td>Typed product/target counters, percentiles, distinct IP totals, dimensions, coverage and last measurement.</td></tr>
+<tr><td>calculated_breakdowns / calculated_series</td><td>Prepared geographic/ASN counts and chart points with NULL gaps. No averages of percentiles.</td></tr>
+<tr><td>calculated_scores</td><td>Version-associated component scores, readiness reasons, overall scores, grades, ranks and validity deadlines.</td></tr>
+<tr><td>calculated_overlaps</td><td>Exact product-pair intersections for matching conditions/window. One provider has no exclusivity estimate.</td></tr>
+<tr><td>calculated_snapshots / current_calculation</td><td>Immutable prepared website/API payload (including cohort fleet totals) and the atomic publication pointer. This JSON cache intentionally duplicates small calculated results, never the complete history or IP memberships.</td></tr>
+</tbody></table></div>
+<p>All windows are half-open [start,end) and end on a closed five-minute boundary. Latency bins are merged before nearest-rank percentiles at 1 ms ceiling precision. Coverage is the fraction of five-minute slots with requests, not measured uptime. Daily charts group successive 24-hour intervals from the window start. Pool samples remain visible, but only benchmark-role runs can produce benchmark scores. New-IP counts use lifetime product first-seen timestamps; recurrence counts IPs seen on multiple UTC dates. DB-IP enrichment uses one identified release, with unknown values preserved.</p>
+<p>Edit <code>configs/methodology.toml</code>: target weights initially 80% success / 20% speed; product weights 22/14/10/12/8/10/10/14. Curves, thresholds, grade boundaries, required targets, minimum samples, coverage, validity, refresh interval, product/target overrides and ranking profiles are configurable. The balanced profile uses the top-level weights. Scores do not replace missing inputs with zero or redistribute missing weights. Previous complete scores retain their dates; expired scores and scores from an older methodology leave current rankings. Editorial content never enters scoring.</p>
+<pre>proxy-framework calculate-init --database-file .secrets/database.toml
+proxy-framework run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
+proxy-framework calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
+proxy-framework snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
+proxy-framework serve --database-file .secrets/database.toml
+
+# Calculate without publishing, inspect the immutable ID, then publish explicitly:
+proxy-framework calculate --as-of 2026-09-25T15:25:00Z --database-file .secrets/database.toml
+proxy-framework snapshot-publish SNAPSHOT_ID --database-file .secrets/database.toml
+
+# Future collector evidence (use real measurements, not the example value):
+proxy-framework metric-evidence configs/evidence.json --database-file .secrets/database.toml</pre>
+<p>Historical cutoffs can be calculated and exported, but cannot rewind the current publication. The saved Shifter receipt reconciles 5,000 requests, 4,997 successes, 4,967 IPs; p50/p90/p95/p99 are 1113/1395/1644/3292 ms. Its original run date remains visible even after it leaves a reporting window.</p>
+<pre>GET /v1/snapshots/current
+GET /v1/snapshots/ID
+GET /v1/snapshots/ID/products?window=7d&amp;product=1&amp;cohort=COHORT
+GET /v1/snapshots/ID/targets
+GET /v1/snapshots/ID/scores
+GET /v1/snapshots/ID/series
+GET /v1/snapshots/ID/breakdowns
+GET /v1/snapshots/ID/overlap
+GET /v1/snapshots/ID/fleet
+GET /v1/snapshots/ID/methodology
+GET /v1/snapshots/ID/runs</pre>
+<p>Resource shortcuts such as <code>/v1/products</code> select the current snapshot. Every resource response includes snapshot, period, methodology and readiness. Pin the ID for multi-request consumers. GET only; the API reads prepared rows and uses ETag/304 without aggregating history. Credentials stay in the private database TOML. The API defaults to loopback port 8081.</p>
+<p>The existing Astro website embeds an initial snapshot and checks every 60 seconds, configurable. A validated whole-page replacement prevents mixed versions. Failed fetches retain the previous view and retry with bounded backoff. <code>MEASUREMENTS_URL</code> configures the server-side API proxy; database access stays in Python. New provider routes need a site build. Measurements on existing routes refresh through the API. <code>npm run build</code> never generates demo measurements; the optional demo generator writes only to <code>fixtures/demo</code>.</p>
+<p>Validation uses automated tests and the connected local website. No separate validation report or dashboard is produced. Untested uptime, reputation, sticky sessions and actual billed usage remain unavailable.</p>
+</section>
+
+<section id="test"><h2>7. Validate locally and on the Mac Mini</h2>
+<pre>uv run --no-editable ruff check src tests scripts
+uv run --no-editable pytest --cov=proxy_framework --cov-branch
+uv run --no-editable python scripts/benchmark.py
+
+# Upload locally maintained source into a unique remote test directory:
+REMOTE_HOST=your-ssh-alias bash scripts/test-remote.sh</pre>
+<p>Tests use loopback HTTP/SOCKS5 gateways and a private test certificate authority. They check both TLS verification outcomes, authentication, proxy-side DNS, no hidden retry, fragmented/oversized bodies, concurrency, timeouts, cancellation, exact counts, bucket transitions, checksums and versioned enrichment. The optional real-MMDB test uses the local licensed file and is skipped in public builds.</p>
+<p>The scale script simulates 5,000 successful requests with 5,000 distinct IPs at concurrency 100 and checks exported counts/percentiles. It reports wall time, peak in-flight requests and peak process memory. This is a processing benchmark, not an estimate of real proxy throughput.</p>
+<p>Remote scripts copy locally maintained code to a dedicated directory and retrieve evidence. They do not edit source remotely. Normal remote tests omit the large MMDB; set <code>INCLUDE_MMDB=1</code> to copy the local file for enrichment tests. A configured SSH identity and a remote <code>uv</code> executable are required.</p>
+<p>Live proxy tests require <code>PROXY_URL</code> or a provider config with a private credential file (environment credentials also remain supported). Automated unit/integration tests never send traffic to Amazon; live measurements are explicitly invoked. Provider tests cover Shifter flags, overrides, session isolation, both targets/transports, status preservation, secret redaction, credential-file permissions and configurable URLs.</p>
+</section>
+<footer>Standalone HTML · no server, build step or external assets required.<br>Targets, portable results, local MMDB enrichment, PostgreSQL history, calculated snapshots, configurable scoring and the local website API. Collection schedules and public deployment follow separately.</footer>
+</main></html>

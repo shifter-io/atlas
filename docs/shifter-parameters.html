@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shifter Residential · Adapter guide</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fafbf8;color:#192b34;font:16px/1.65 system-ui,sans-serif}
+main{max-width:1050px;margin:auto;padding:45px 28px 70px}header{border-top:5px solid #086e62;padding-top:22px}
+.label{font:12px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#086e62}
+h1{font-size:30px;line-height:1.2;margin:15px 0}h2{font-size:21px;margin:32px 0 12px}
+a{color:#086e62}code{font:13px ui-monospace,monospace;overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;font-size:14px}
+pre{overflow:auto;background:#152c35;color:#edf4ef;padding:20px;font:13px/1.7 ui-monospace,monospace;border-radius:4px}
+th,td{padding:12px 10px;text-align:left;vertical-align:top;border-bottom:1px solid #d7dfdf}th{background:#eef3ee}
+td:first-child{white-space:nowrap}.note{background:#eef4ef;border-left:3px solid #086e62;padding:14px 18px}
+li{margin:8px 0}.hosts{columns:2;font:13px/1.8 ui-monospace,monospace}footer{margin-top:35px;border-top:1px solid #d7dfdf;padding-top:16px;color:#556772;font-size:13px}
+@media(max-width:650px){main{padding:24px 16px}h1{font-size:25px}.hosts{columns:1}table{font-size:12px}td,th{padding:9px 6px}}
+</style>
+<main>
+<header><div class="label">Implemented / adapter v1 / framework v0.3 / 25 September 2026</div>
+<h1>Shifter Residential adapter</h1>
+<p>Current bandwidth-based Residential Proxies product. Both Generic HTTP and Generic HTTPS accept this adapter over HTTP or SOCKS5. Provider parameters and session controls are independent of target definitions.</p></header>
+
+<h2 id="start">Start with the shared configuration</h2>
+<p>From the <code>framework</code> directory, use <a href="../configs/shifter.toml">configs/shifter.toml</a> for public settings and copy <a href="../credentials.toml.example">credentials.toml.example</a> to <code>.secrets/credentials.toml</code> for private credentials. Edit the private copy locally. The account is the base ID, optionally prefixed with <code>customer-</code>; exclude country/session flags. The password is the original unescaped value, not a URL-encoded string.</p>
+<pre>mkdir -m 700 .secrets
+cp credentials.toml.example .secrets/credentials.toml
+chmod 600 .secrets/credentials.toml
+# Edit .secrets/credentials.toml locally to replace the placeholders.</pre>
+<p>The private file is plaintext protected by filesystem permissions: current-user ownership, no group/other access, and no symlink. It is excluded from Git, source packages and remote test uploads. Only the example belongs in the community repository. Other providers use their own table in this file. When <code>--credentials-file</code> is supplied it takes precedence over the environment; without it, <code>SHIFTER_ACCOUNT</code>/<code>SHIFTER_PASSWORD</code> remain supported. Credentials are never copied into result metadata.</p>
+<pre>uv sync --locked --no-editable
+uv run --no-editable proxy-framework providers
+
+# HTTP: US targeting only, default rotation, 5,000 requests.
+uv run --no-editable proxy-framework run \
+  --provider-config configs/shifter.toml --target generic_http \
+  --credentials-file .secrets/credentials.toml \
+  --url http://checkip.amazonaws.com/ \
+  --requests 5000 --concurrency 100 --param country=us
+
+# HTTPS with one generated session per worker, lifetime 600 seconds.
+uv run --no-editable proxy-framework run \
+  --provider-config configs/shifter.toml --target generic_https \
+  --credentials-file .secrets/credentials.toml \
+  --url https://checkip.amazonaws.com/ \
+  --requests 10 --concurrency 2 --param country=us --param ttl=600 \
+  --session-policy per_worker
+
+# Explicit removal of an optional parameter configured in the TOML file:
+# --param country=null</pre>
+<p>These commands send real traffic when run with credentials. Use <code>--requests 5000 --concurrency 100</code> for a larger run when selected by your methodology. Automated tests and the 5,000-request processing benchmark use local/simulated responses.</p>
+<p>Repeat <code>--param name=value</code> for each override. Booleans and numbers use JSON syntax; strings can be unquoted. <code>null</code> removes a file parameter. Parameters not supplied by either the file or overrides stay absent. <code>--country</code> remains a metadata label: use <code>--param country=us</code> to change targeting. Conflicting metadata labels are rejected. Static <code>PROXY_URL</code> runs remain supported.</p>
+<p><code>--url</code> overrides the echo-IP endpoint per run. Its HTTP/HTTPS scheme must match the target; the response must still be a plain IP address. Amazon remains the default when omitted. The effective URL is saved in the summary; URLs with embedded credentials or fragments are rejected. Use public, non-secret query parameters only.</p>
+
+<h2>Call it from a rule, scheduler or script</h2>
+<pre>import asyncio
+from proxy_framework import JsonSink, RunConfig, load_provider, run
+
+proxy = load_provider(
+    "configs/shifter.toml",
+    credentials_file=".secrets/credentials.toml",
+    parameters={"country": "us"},
+    session_policy="rotate",
+)
+
+async def measure():
+    return await run(
+        RunConfig("generic_http", proxy, requests=5_000, concurrency=100,
+                  target_url="http://checkip.amazonaws.com/"),
+        JsonSink("results"),
+    )
+
+summary = asyncio.run(measure())
+print(summary.to_dict())</pre>
+<p>Use the same API with <code>generic_https</code>. Configuration snapshots are immutable and safe to reuse in concurrent runs. Provider, product and requested country are derived from the adapter. Only Generic HTTP contributes unique-IP metrics and IP artifacts, as before.</p>
+
+<h2>Documented username flags</h2>
+<div style="overflow:auto"><table>
+<thead><tr><th>Flag</th><th>Value / example</th><th>Meaning and omission</th></tr></thead>
+<tbody>
+<tr><td><code>country</code></td><td><code>country-us</code></td><td>Two-letter ISO country code. Optional geographic constraint.</td></tr>
+<tr><td><code>region</code></td><td><code>region-california</code></td><td>State/province slug.</td></tr>
+<tr><td><code>city</code></td><td><code>city-new_york</code></td><td>City slug; country is not universally required by the gateway examples.</td></tr>
+<tr><td><code>asn</code></td><td><code>asn-7922</code></td><td>Numeric autonomous system number.</td></tr>
+<tr><td><code>strict</code></td><td><code>strict-true</code></td><td>Disable broader-pool fallback; no matching capacity returns 502. Omission permits fallback.</td></tr>
+<tr><td><code>sid</code></td><td><code>sid-example42</code></td><td>Caller-chosen sticky-session key. Omit for rotation.</td></tr>
+<tr><td><code>ttl</code></td><td><code>ttl-600</code></td><td>Session lifetime in seconds; requires <code>sid</code>. Default 120, minimum 1; maximum undocumented.</td></tr>
+</tbody></table></div>
+<p>Geographic values are lowercase; spaces become underscores. Full Geo supports all four geographic selectors; Country Geo supports country; Non-Geo supports none. <a href="https://shifter.io/docs/products/residential-proxies/geo-targeting/">Geo documentation</a>.</p>
+<p>A residential peer can disconnect before its TTL. Sessions are regional: sharing one SID across machines requires the same regional gateway to share one exit. Supplied IDs preserve their case and hyphens. <a href="https://shifter.io/docs/products/residential-proxies/sessions/">Session documentation</a>.</p>
+<p>Validation is local and syntactic; it does not prove that an ASN/city is available or confirm account entitlements. Set <code>pool</code> only when known; incompatible geographic parameters then fail before traffic. ASCII letters, digits and underscores are accepted in geographic slugs. Session IDs additionally accept dots and hyphens; username flag delimiters, whitespace and template placeholders such as <code>{SESSION}</code> are rejected. Use a generated session policy instead of a placeholder. SOCKS5 credentials must fit its 255-byte authentication fields and the transport library's ASCII encoding.</p>
+
+<h2>Session policies</h2>
+<ul>
+<li><code>rotate</code>: omit SID; Shifter rotates per request. Rotation does not guarantee every IP is unique.</li>
+<li><code>fixed</code>: require an explicit <code>sid</code>. This is also inferred when SID is supplied and no policy is specified. Reusing it intentionally shares the provider session.</li>
+<li><code>per_request</code>: generate a new SID for every request.</li>
+<li><code>per_worker</code>: generate one SID for each worker in a run; successive requests from that worker reuse it.</li>
+<li><code>per_run</code>: all workers in one run share one generated SID.</li>
+</ul>
+<p>Without SID or an explicit policy, the adapter uses <code>rotate</code>. Generated IDs use the run UUID, policy and zero-based request/worker identity; separate runs do not share them. <code>ttl</code> requires fixed or generated sessions. A supplied SID cannot be combined with rotation or a generated policy. For stable entry routing choose a regional gateway, for example <code>gateway = "fra"</code>.</p>
+
+<h2>Connection and account settings</h2>
+<p>Default gateway: <code>p.shifter.io:443</code>. Authentication uses <code>customer-ACCOUNT</code> plus selected flags and a separate password. Flag ordering is unrestricted. HTTP(S) and SOCKS5 use the same endpoint. These are connection settings, not additional username flags. <a href="https://shifter.io/docs/products/residential-proxies/gateway-and-auth/">Gateway documentation</a>.</p>
+<p>Optional regional gateways, all on port 443:</p>
+<div class="hosts">fra.p.shifter.io — Frankfurt<br>ams.p.shifter.io — Amsterdam<br>lon.p.shifter.io — London<br>nyc.p.shifter.io — New York<br>tor.p.shifter.io — Toronto<br>sgp.p.shifter.io — Singapore<br>blr.p.shifter.io — Bangalore<br>syd.p.shifter.io — Sydney</div>
+<p>The default gateway selects a nearby region with failover. A regional hostname fixes entry location and has no automatic failover; it does not choose exit geography. <a href="https://shifter.io/docs/products/residential-proxies/gateway-and-auth/#regional-entry-points">Regional gateways</a>.</p>
+<p>Shifter describes 407 as credentials/flag errors, 502 as unavailable matching capacity, and 509 as exhausted bandwidth when extra traffic is disabled. Preserve status codes rather than silently broadening parameters or retrying measurements. <a href="https://shifter.io/docs/products/residential-proxies/gateway-and-auth/#common-errors">Documented errors</a>.</p>
+
+<h2>Implemented framework integration</h2>
+<ul>
+<li><strong>One adapter per provider.</strong> It owns supported parameter names, normalization, validation, username formatting and endpoint resolution. Both current targets consume the same resolved connection.</li>
+<li><strong>Per-test optional parameters.</strong> Keep account credentials and gateway settings separate from test parameters. Emit only supplied flags; do not silently insert country, strict matching or a sticky session.</li>
+<li><strong>Explicit session policy.</strong> Support omitted SID, a supplied fixed SID, or generated IDs per request/per worker/per run. These policies belong to the framework; Shifter receives only the resulting <code>sid</code> and optional <code>ttl</code>.</li>
+<li><strong>Concurrency-safe resolution.</strong> Resolve credentials for each request. HTTP authentication can vary per request; SOCKS5 connections must retain their own resolved credentials without changing shared connector state.</li>
+<li><strong>Extensible parameters.</strong> Each provider defines its own schema rather than a global common subset. Support an explicit extra-flags mapping for future provider options, validating serialization without claiming undocumented flags work.</li>
+<li><strong>Reproducible results.</strong> Record provider/adapter version, safe effective parameters, gateway and session-generation policy. Keep passwords and complete authentication strings out of public artifacts.</li>
+</ul>
+<p class="note">Defaults: automatic gateway, HTTP proxy transport, empty optional-parameter set. A test explicitly requests US targeting or a session when needed. <code>strict=false</code> is omitted because only <code>strict-true</code> is documented. Pool capabilities remain account metadata; the supplied connection string does not establish which pool the account uses.</p>
+
+<h2>Result metadata and future providers</h2>
+<p><code>summary.json → config.provider_config</code> records adapter/version, gateway, pool if known, normalized parameters, session policy and effective TTL. Account/password and full authentication strings are excluded; fixed SID and extra-flag values are redacted. Generated SIDs can be reconstructed from the run identity and adapter version. Parameter values in ordinary geographic fields are public configuration.</p>
+<p><code>extra_flags</code> is an explicit opt-in escape hatch for future flags, not a bypass for known-parameter validation. Names must be lowercase ASCII tokens; values must be single ASCII letter/digit/underscore tokens or integers/booleans. Reserved names and delimiter injection are rejected. This serializes a flag without claiming Shifter supports it; undocumented options may return 407. Values are redacted because their sensitivity is unknown.</p>
+<p>New providers implement <code>ProxySource</code>: a stable <code>scheme</code>, a synchronous <code>resolve(RequestContext)</code> returning a <code>ProxyConfig</code>, and <code>public()</code> returning explicitly safe metadata. Register a factory in <code>ProviderRegistry</code>. Each factory owns its parameter schema; TOML <code>settings</code>, <code>parameters</code>, <code>extra_flags</code>, and credentials resolved from environment references are passed to it. Registering with the default registry also makes the provider available to the CLI. Targets require no provider-specific edits.</p>
+<p>Custom transports now accept <code>execute(target, *, context=None)</code>. The runner supplies <code>RequestContext(run_id, request_index, worker_index)</code>; static transport implementations may ignore it. Resolve before each request. HTTP credentials belong to the request or CONNECT handshake. Dynamic SOCKS5 requests own their connectors, close them on completion/cancellation, and do not retain a cache of session IDs. Latency excludes credential resolution, connector allocation and post-response cleanup.</p>
+
+<h2>Optional selector discovery</h2>
+<p>A separate API lists countries, regions, cities and ASNs under <code>/api/v1/residential/geo/</code>. It requires an account API key, distinct from proxy authentication. Region, city and ASN lookups require country; cities optionally accept region. This can later refresh cached selector lists without entering the measured request path. <a href="https://shifter.io/docs/api/proxies/residential-proxies/">Residential API reference</a>.</p>
+<footer>Implemented and covered by local unit/integration tests. Live Shifter behavior and account entitlements require a provider smoke run. No legacy port-model settings are included. <a href="index.html">Framework guide</a> · <a href="../artifacts/validation.html">Local validation report</a>.</footer>
+</main></html>

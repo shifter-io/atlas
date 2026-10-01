@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "proxy-testing-framework"
+version = "0.8.0"
+description = "Composable proxy targets, bounded asynchronous runs and local IP enrichment"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+  "aiohttp>=3.14.3,<4",
+  "aiohttp-socks>=0.11,<0.12",
+  "maxminddb>=2.8,<4",
+  "psycopg[binary]>=3.2,<4",
+]
+
+[project.scripts]
+proxy-framework = "proxy_framework.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "ruff>=0.12", "trustme>=1.2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/proxy_framework"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "scripts", "docs", "configs", "credentials.toml.example", "database.toml.example", "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".github", "db-ip/README.html"]
+exclude = [".secrets/**", ".state/**", "**/credentials.toml", "**/database.toml", "**/.env", "**/.env.*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+markers = ["scale: simulated high-volume benchmark"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]

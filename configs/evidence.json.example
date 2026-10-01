@@ -1,0 +1,10 @@
+{
+  "product_id": 1,
+  "cohort": "COPY_THE_COMPARABLE_COHORT_ID_FROM_THE_SNAPSHOT",
+  "metric": "uptime_pct",
+  "value": 99.9,
+  "period_start": "2026-09-01T00:00:00Z",
+  "period_end": "2026-09-02T00:00:00Z",
+  "valid_until": "2026-09-03T00:00:00Z",
+  "source": "collector-artifact-sha256:REPLACE_WITH_REAL_EVIDENCE"
+}
