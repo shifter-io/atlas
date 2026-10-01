@@ -9,8 +9,8 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from proxy_framework.providers.credentials import read_credentials
-from proxy_framework.storage import ENRICHMENT_FIELDS, SCHEMA_VERSION, connect, initialize, status
+from milf_framework.providers.credentials import read_credentials
+from milf_framework.storage import ENRICHMENT_FIELDS, SCHEMA_VERSION, connect, initialize, status
 
 ROOT = Path(__file__).resolve().parents[1]
 

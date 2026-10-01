@@ -1,4 +1,4 @@
-# Proxy testing framework
+# MILF framework
 
 Standalone Python 3.12+ library and CLI for HTTP/SOCKS5 proxy measurements.
 MIT licensed. No database server or scheduler is required.
@@ -8,10 +8,10 @@ measurement definitions, result contracts and the implemented PostgreSQL schema.
 
 ```sh
 uv sync --locked --no-editable
-uv run --no-editable proxy-framework targets
+uv run --no-editable milf-framework targets
 # Set PROXY_URL privately in your environment first.
-uv run --no-editable proxy-framework run --target generic_http --requests 5000 --concurrency 100
-uv run --no-editable proxy-framework enrich results/RUN_ID
+uv run --no-editable milf-framework run --target generic_http --requests 5000 --concurrency 100
+uv run --no-editable milf-framework enrich results/RUN_ID
 ```
 
 Shifter Residential: see [the adapter guide](docs/shifter-parameters.html).
@@ -20,7 +20,7 @@ and set directory/file permissions to `700`/`600`. The private copy is excluded 
 Git, packages and remote uploads. Then:
 
 ```sh
-uv run --no-editable proxy-framework run --provider-config configs/shifter.toml \
+uv run --no-editable milf-framework run --provider-config configs/shifter.toml \
   --credentials-file .secrets/credentials.toml --target generic_http \
   --url http://checkip.amazonaws.com/ --requests 5000 --concurrency 100 --param country=us
 ```
@@ -38,7 +38,7 @@ PostgreSQL: this project uses a dedicated local cluster on `127.0.0.1:55432`.
 Run `uv run --no-editable python scripts/postgres_local.py start` after reboot.
 Private database credentials are in `.secrets/database.toml`; the public template is
 `database.toml.example`. Add `--database-file .secrets/database.toml` to `run` or
-`enrich` for automatic ingestion, or use `proxy-framework ingest results/RUN_ID`
+`enrich` for automatic ingestion, or use `milf-framework ingest results/RUN_ID`
 with the same flag. Replaying an import does not double-count data. See the HTML
 guide for initialization on a new machine and the schema.
 
@@ -70,11 +70,11 @@ The existing HTML guide now includes the calculated schema, API and command work
 Collection still runs independently; calculation requires PostgreSQL and never sends proxy traffic.
 
 ```sh
-proxy-framework calculate-init --database-file .secrets/database.toml
-proxy-framework run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
-proxy-framework calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
-proxy-framework snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
-proxy-framework serve --database-file .secrets/database.toml
+milf-framework calculate-init --database-file .secrets/database.toml
+milf-framework run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
+milf-framework calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
+milf-framework snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
+milf-framework serve --database-file .secrets/database.toml
 ```
 
 From the website root, `npm run build` exports the measured dataset and builds the site;

@@ -5,10 +5,10 @@ from pathlib import Path
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from proxy_framework import JsonSink, ProxyConfig, RunConfig, load_provider, run
-from proxy_framework.cli import main
-from proxy_framework.providers.credentials import read_credentials
-from proxy_framework.targets import registry
+from milf_framework import JsonSink, ProxyConfig, RunConfig, load_provider, run
+from milf_framework.cli import main
+from milf_framework.providers.credentials import read_credentials
+from milf_framework.targets import registry
 
 CONFIG = Path(__file__).parents[1] / "configs/shifter.toml"
 
@@ -114,7 +114,7 @@ def test_cli_uses_private_file_and_url(tmp_path, monkeypatch, capsys):
 
         return Summary()
 
-    monkeypatch.setattr("proxy_framework.cli.run", fake_run)
+    monkeypatch.setattr("milf_framework.cli.run", fake_run)
     assert main(["run", "--target", "generic_http", "--provider-config", str(CONFIG),
                  "--credentials-file", str(path), "--url", "http://example.test/ip"]) == 0
     output = capsys.readouterr()

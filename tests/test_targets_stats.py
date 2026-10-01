@@ -2,9 +2,9 @@ import math
 
 import pytest
 
-from proxy_framework import ProxyConfig, RunConfig
-from proxy_framework.stats import Histogram, bucket_of
-from proxy_framework.targets import EchoIpTarget, TargetRegistry, registry
+from milf_framework import ProxyConfig, RunConfig
+from milf_framework.stats import Histogram, bucket_of
+from milf_framework.targets import EchoIpTarget, TargetRegistry, registry
 
 
 @pytest.mark.parametrize("body,expected", [

@@ -13,7 +13,7 @@ from pathlib import Path
 import psycopg
 from psycopg import sql
 
-from proxy_framework.providers.credentials import read_credentials
+from milf_framework.providers.credentials import read_credentials
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / ".state" / "postgres"

@@ -11,8 +11,8 @@ import resource
 import time
 from pathlib import Path
 
-from proxy_framework import JsonSink, ProxyConfig, RunConfig, run
-from proxy_framework.models import Outcome
+from milf_framework import JsonSink, ProxyConfig, RunConfig, run
+from milf_framework.models import Outcome
 
 
 class SyntheticTransport:

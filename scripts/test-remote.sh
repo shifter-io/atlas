@@ -6,7 +6,7 @@ remote_host=${REMOTE_HOST:?Set REMOTE_HOST to an SSH alias or user@host}
 # Conservative validation keeps shell/rsync interpolation unambiguous.
 [[ "$remote_host" =~ ^[a-zA-Z0-9_.@-]+$ ]] || { echo "Invalid REMOTE_HOST" >&2; exit 2; }
 run_stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
-remote_dir="proxy-framework-tests/$run_stamp"
+remote_dir="milf-framework-tests/$run_stamp"
 evidence="artifacts/remote-$run_stamp"
 mkdir -p "$evidence"
 ssh -o BatchMode=yes "$remote_host" "mkdir -p '$remote_dir'"

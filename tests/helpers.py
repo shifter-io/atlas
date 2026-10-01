@@ -171,6 +171,6 @@ class FakeTransport:
         pass
 
     async def execute(self, target, *, context=None):
-        from proxy_framework.models import Outcome
+        from milf_framework.models import Outcome
         self.count += 1
         return Outcome(10.1, ip="8.8.8.8", status=200, response_body_bytes=8)

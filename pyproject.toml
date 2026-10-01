@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "proxy-testing-framework"
+name = "milf-framework"
 version = "0.8.0"
 description = "Composable proxy targets, bounded asynchronous runs and local IP enrichment"
 readme = "README.md"
@@ -17,13 +17,13 @@ dependencies = [
 ]
 
 [project.scripts]
-proxy-framework = "proxy_framework.cli:main"
+milf-framework = "milf_framework.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "ruff>=0.12", "trustme>=1.2"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/proxy_framework"]
+packages = ["src/milf_framework"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "scripts", "docs", "configs", "credentials.toml.example", "database.toml.example", "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".github", "db-ip/README.html"]

@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from proxy_framework.storage import connect
+from milf_framework.storage import connect
 
 
 def size(conn, name):

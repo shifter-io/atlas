@@ -6,9 +6,9 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_framework import JsonSink, ProxyConfig, RunConfig, run
-from proxy_framework.targets import Assessment, EchoIpTarget, RequestSpec, TargetRegistry
-from proxy_framework.transport import HttpTransport
+from milf_framework import JsonSink, ProxyConfig, RunConfig, run
+from milf_framework.targets import Assessment, EchoIpTarget, RequestSpec, TargetRegistry
+from milf_framework.transport import HttpTransport
 
 
 def config(port, *, scheme="http", **kwargs):

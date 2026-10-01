@@ -7,12 +7,12 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from test_storage import measurement
 
-from proxy_framework.calculated import store
-from proxy_framework.calculated.aggregate import metrics, target_score
-from proxy_framework.calculated.api import app
-from proxy_framework.calculated.calculator import calculate, retain
-from proxy_framework.calculated.policy import composite, digest, effective, load
-from proxy_framework.storage import connect, ingest
+from milf_framework.calculated import store
+from milf_framework.calculated.aggregate import metrics, target_score
+from milf_framework.calculated.api import app
+from milf_framework.calculated.calculator import calculate, retain
+from milf_framework.calculated.policy import composite, digest, effective, load
+from milf_framework.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 
@@ -160,7 +160,7 @@ def test_saved_shifter_reconciliation(database):
 
 
 def ready_inputs():
-    from proxy_framework.calculated.calculator import cohort_for
+    from milf_framework.calculated.calculator import cohort_for
 
     config, _ = load(POLICY)
     config["minimum_requests"] = 1
@@ -254,7 +254,7 @@ def ready_inputs():
 
 
 def test_complete_scores_ranks_overrides_and_stale_evidence():
-    from proxy_framework.calculated.calculator import build
+    from milf_framework.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
     result = build(r, b, o, e, c, digest(c), now, 1, None, None)
@@ -281,7 +281,7 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
 
 
 def test_score_retention_and_methodology_change():
-    from proxy_framework.calculated.calculator import build
+    from milf_framework.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
     previous = store.jsonable(build(r, b, o, e, c, digest(c), now, 1, None, None))
@@ -300,7 +300,7 @@ def test_score_retention_and_methodology_change():
 
 
 def test_cohorts_and_duplicate_overlap():
-    from proxy_framework.calculated.calculator import build, cohort_for
+    from milf_framework.calculated.calculator import build, cohort_for
 
     c, now, r, b, o, e = ready_inputs()
     base = cohort_for(r[0]["scope"], "residential")[0]
@@ -364,7 +364,7 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     import psycopg
     from psycopg import sql
 
-    from proxy_framework.calculated import calculator
+    from milf_framework.calculated import calculator
 
     store.initialize(database)
     directory = await measurement(tmp_path, requests=5)

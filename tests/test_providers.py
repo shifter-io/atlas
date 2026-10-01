@@ -8,7 +8,7 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_framework import (
+from milf_framework import (
     JsonSink,
     ProviderRegistry,
     ProxyConfig,
@@ -18,10 +18,10 @@ from proxy_framework import (
     load_provider,
     run,
 )
-from proxy_framework.cli import main
-from proxy_framework.providers.shifter import REGIONAL_GATEWAYS
-from proxy_framework.targets import EchoIpTarget, TargetRegistry
-from proxy_framework.transport import HttpTransport
+from milf_framework.cli import main
+from milf_framework.providers.shifter import REGIONAL_GATEWAYS
+from milf_framework.targets import EchoIpTarget, TargetRegistry
+from milf_framework.transport import HttpTransport
 
 CONTEXT = RequestContext("run-one", 0, 0)
 CONFIG = Path(__file__).parents[1] / "configs" / "shifter.toml"
@@ -208,7 +208,7 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
 
         return Summary()
 
-    monkeypatch.setattr("proxy_framework.cli.run", fake_run)
+    monkeypatch.setattr("milf_framework.cli.run", fake_run)
     assert main(["providers"]) == 0
     assert json.loads(capsys.readouterr().out) == ["shifter"]
     for target in ("generic_http", "generic_https"):

@@ -12,10 +12,10 @@ from helpers import FakeTransport
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from proxy_framework import JsonSink, ProxyConfig, RunConfig, run
-from proxy_framework.cli import main
-from proxy_framework.providers.credentials import read_credentials
-from proxy_framework.storage import (
+from milf_framework import JsonSink, ProxyConfig, RunConfig, run
+from milf_framework.cli import main
+from milf_framework.providers.credentials import read_credentials
+from milf_framework.storage import (
     ENRICHMENT_FIELDS,
     connect,
     ingest,
@@ -212,7 +212,7 @@ def test_cli_automatic_ingest_and_durable_fallback(
     async def simulated_run(config, sink, **kwargs):
         return await run(config, sink, transport_factory=FakeTransport, **kwargs)
 
-    monkeypatch.setattr("proxy_framework.cli.run", simulated_run)
+    monkeypatch.setattr("milf_framework.cli.run", simulated_run)
     monkeypatch.setenv("PROXY_URL", "http://unused.invalid:8080")
     credentials = database if available else tmp_path / "missing.toml"
     output = tmp_path / "saved"
@@ -351,7 +351,7 @@ def test_v2_migration_preserves_every_field_and_is_atomic(database, invalid):
             with connect(database) as conn:
                 conn.execute(
                     (
-                        Path(__file__).parents[1] / "src/proxy_framework/migrate_v2_v3.sql"
+                        Path(__file__).parents[1] / "src/milf_framework/migrate_v2_v3.sql"
                     ).read_text()
                 )
         with connect(database) as conn:
@@ -360,7 +360,7 @@ def test_v2_migration_preserves_every_field_and_is_atomic(database, invalid):
     else:
         with connect(database) as conn:
             conn.execute(
-                (Path(__file__).parents[1] / "src/proxy_framework/migrate_v2_v3.sql").read_text()
+                (Path(__file__).parents[1] / "src/milf_framework/migrate_v2_v3.sql").read_text()
             )
         with connect(database) as conn:
             row = conn.execute(
@@ -456,7 +456,7 @@ async def test_bucket_histogram_mismatch_rejected(database, tmp_path):
 
 
 async def test_dimensions_keep_same_city_and_asn_with_different_details(database, tmp_path):
-    from proxy_framework.models import Outcome
+    from milf_framework.models import Outcome
 
     class SecondIP(FakeTransport):
         async def execute(self, target, *, context=None):
