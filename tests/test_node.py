@@ -369,7 +369,9 @@ async def test_operator_kill_stops_and_discards_the_run(database, orchestrator, 
         (agent,) = agents_for(base, [token], port, tmp_path)
         task = asyncio.create_task(agent.run(stop))
         try:
-            await wait_for(lambda: gateway.served > 20)
+            # Kill only once a progress post has recorded requests for the run.
+            await wait_for(lambda: gateway.served > 20 and query(
+                database, "SELECT requests>0 FROM batch_runs") == [(True,)])
             with connect(database) as conn:
                 conn.execute("UPDATE test_batches SET status='killed',finished_at=now()")
                 conn.execute("UPDATE batch_runs SET status='killed',finished_at=now()")
