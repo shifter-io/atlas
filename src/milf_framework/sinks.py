@@ -14,6 +14,8 @@ from .models import RunSummary
 class ResultSink(Protocol):
     def start(self, run_id: str) -> None: ...
     def observations(self, rows: list[dict[str, Any]]) -> None: ...
+    # Called only when the run has an enricher; an empty list still creates the artifact.
+    def geo(self, rows: list[dict[str, Any]]) -> None: ...
     def finish(self, summary: RunSummary) -> None: ...
     def abort(self) -> None: ...
 
@@ -26,11 +28,15 @@ class JsonSink:
         self.directory: Path | None = None
         self._stream = None
         self._rows = 0
+        self._geo_stream = None
+        self._geo_rows = 0
 
     def start(self, run_id: str) -> None:
         if self._stream is not None and not self._stream.closed:
             raise RuntimeError("A sink cannot serve concurrent runs")
         self._rows = 0
+        self._geo_stream = None
+        self._geo_rows = 0
         self.directory = self.output / run_id
         self.directory.mkdir(parents=True, exist_ok=False, mode=0o700)
         path = self.directory / "ips.jsonl.gz.partial"
@@ -44,17 +50,37 @@ class JsonSink:
             self._rows += 1
         self._stream.flush()
 
+    def geo(self, rows: list[dict[str, Any]]) -> None:
+        assert self.directory is not None
+        if self._geo_stream is None:
+            path = self.directory / "geo.jsonl.gz.partial"
+            self._geo_stream = gzip.open(path, "xt", encoding="utf-8")
+            path.chmod(0o600)
+        for row in rows:
+            self._geo_stream.write(json.dumps(row, separators=(",", ":")) + "\n")
+            self._geo_rows += 1
+        self._geo_stream.flush()
+
+    def _publish(self, name: str, stream, rows: int) -> dict[str, Any]:
+        stream.close()
+        assert self.directory is not None
+        destination = self.directory / f"{name}.jsonl.gz"
+        (self.directory / f"{name}.jsonl.gz.partial").replace(destination)
+        with destination.open("rb") as source:
+            checksum = hashlib.file_digest(source, "sha256").hexdigest()
+        return {"file": destination.name, "rows": rows, "sha256": checksum}
+
     def finish(self, summary: RunSummary) -> None:
         assert self._stream is not None and self.directory is not None
-        self._stream.close()
-        source = self.directory / "ips.jsonl.gz.partial"
-        destination = self.directory / "ips.jsonl.gz"
-        source.replace(destination)
-        with destination.open("rb") as stream:
-            checksum = hashlib.file_digest(stream, "sha256").hexdigest()
-        summary.artifacts = {
-            "ips": {"file": destination.name, "rows": self._rows, "sha256": checksum},
-        }
+        # The runner may pre-fill descriptive keys (the geo DB-IP release);
+        # file, rows and checksum always come from the sink.
+        given = summary.artifacts
+        artifacts = {"ips": self._publish("ips", self._stream, self._rows)}
+        if self._geo_stream is not None:
+            artifacts["geo"] = given.get("geo", {}) | self._publish(
+                "geo", self._geo_stream, self._geo_rows,
+            )
+        summary.artifacts = artifacts
         temporary = self.directory / "summary.json.partial"
         with temporary.open("x", encoding="utf-8") as stream:
             os.chmod(temporary, 0o600)
@@ -65,5 +91,6 @@ class JsonSink:
         temporary.replace(self.directory / "summary.json")
 
     def abort(self) -> None:
-        if self._stream is not None:
-            self._stream.close()
+        for stream in (self._stream, self._geo_stream):
+            if stream is not None:
+                stream.close()

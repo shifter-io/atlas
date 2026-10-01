@@ -63,7 +63,8 @@ with connect(".secrets/database.toml") as c:
     c.execute(f"INSERT INTO audit_scope SELECT * FROM {membership}")
     data["scope_fresh"] = size(c, "audit_scope")
     data["scope_configs"] = c.execute(
-        "SELECT scope-'config',scope->'config' FROM scope_stats"
+        "SELECT scope-'config',scope->'config' FROM "
+        + ("scope_details" if version >= 5 else "scope_stats")
     ).fetchall()
     data["field_cardinality"] = c.execute(
         "SELECT count(DISTINCT country_code),"

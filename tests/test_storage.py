@@ -17,37 +17,55 @@ from milf_framework.cli import main
 from milf_framework.providers.credentials import read_credentials
 from milf_framework.storage import (
     ENRICHMENT_FIELDS,
+    _bucket,
+    _profile,
+    _steps,
+    column,
     connect,
     ingest,
     initialize,
+    migrate,
     read_summary,
     status,
 )
 
 
 @pytest.fixture
-def database(tmp_path):
+def databases(tmp_path):
     path = os.environ.get("PG_TEST_ADMIN_FILE")
     if not path:
         pytest.skip("Set PG_TEST_ADMIN_FILE for isolated real PostgreSQL integration tests")
     admin = read_credentials(path, "postgres")
-    name = "proxy_test_" + uuid.uuid4().hex
-    with psycopg.connect(**admin, autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-    config = tmp_path / "database.toml"
-    config.write_text(
-        "[postgres]\n"
-        + "\n".join(
-            f"{key} = {json.dumps(value)}" for key, value in (admin | {"dbname": name}).items()
+    names = []
+
+    def create():
+        name = "proxy_test_" + uuid.uuid4().hex
+        with psycopg.connect(**admin, autocommit=True) as conn:
+            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        names.append(name)
+        config = tmp_path / f"{name}.toml"
+        config.write_text(
+            "[postgres]\n"
+            + "\n".join(
+                f"{key} = {json.dumps(value)}" for key, value in (admin | {"dbname": name}).items()
+            )
         )
-    )
-    config.chmod(0o600)
-    initialize(config)
+        config.chmod(0o600)
+        return config
+
     try:
-        yield config
+        yield create
     finally:
         with psycopg.connect(**admin, autocommit=True) as conn:
-            conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+            for name in names:
+                conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+@pytest.fixture
+def database(databases):
+    config = databases()
+    initialize(config)
+    return config
 
 
 async def measurement(
@@ -60,6 +78,7 @@ async def measurement(
     concurrency=100,
     timeout_seconds=15,
     requested_country=None,
+    transport_factory=FakeTransport,
 ):
     sink = JsonSink(tmp_path / "results")
     await run(
@@ -74,7 +93,7 @@ async def measurement(
             product=product,
         ),
         sink,
-        transport_factory=FakeTransport,
+        transport_factory=transport_factory,
     )
     return sink.directory
 
@@ -275,7 +294,10 @@ async def test_shared_ip_memberships_and_overlap_are_deduplicated(database, tmp_
         assert conn.execute("SELECT count(*) FROM test_run_details").fetchone()[0] == 6
 
 
-def test_initialize_refuses_incompatible_schema(database):
+def test_initialize_refuses_incompatible_schema(database, databases):
+    assert migrate(database)["migrated"] is False
+    with pytest.raises(ValueError, match="db-init"):
+        migrate(databases())
     with connect(database) as conn:
         conn.execute("UPDATE schema_versions SET version=1")
     with pytest.raises(ValueError, match="rebuild"):
@@ -382,6 +404,8 @@ async def test_complete_summary_reconstructed_and_numeric_keys(database, tmp_pat
         assert conn.execute("SELECT summary FROM test_run_details").fetchone()[0] == original
         compact = conn.execute("SELECT summary FROM test_runs").fetchone()[0]
         assert not {"buckets", "latency_histogram", "config", "target"} & compact.keys()
+        # Columns reproduce these exactly, so the summary does not repeat them.
+        assert not {"run_id", "status", "started_at", "finished_at"} & compact.keys()
         assert (
             conn.execute("SELECT pg_typeof(run_key)::text FROM ip_observations").fetchone()[0]
             == "bigint"
@@ -538,5 +562,138 @@ async def test_multiple_buckets_reconstruct_and_count_one_product_run(database, 
             2,
             1,
         )
+        # The hand-written later label lacks microseconds, so it is kept verbatim.
+        extras = conn.execute("SELECT extra FROM run_buckets ORDER BY bucket_start").fetchall()
+        assert extras == [(None,), ({"bucket_start": later["bucket_start"]},)]
         assert conn.execute("SELECT count(*) FROM ip_observations").fetchone()[0] == 2
     assert status(database)["cached_scopes"][0]["metrics"]["unique_ips"] == 1
+
+
+SHIFTER = {
+    "adapter": "shifter",
+    "version": "1",
+    "gateway": {"host": "p.example", "port": 443},
+    "pool": None,
+    "parameters": {"country": "us", "sid": "[redacted]"},
+    "session_policy": "fixed",
+    "effective_ttl_seconds": 120,
+    "extra_flags": {"x": "[redacted]"},
+}
+
+
+def edit_summary(directory, change):
+    path = directory / "summary.json"
+    summary = json.loads(path.read_text())
+    change(summary)
+    path.write_text(json.dumps(summary))
+    return summary
+
+
+def test_typed_columns_keep_json_forms():
+    assert column("number", 15) == 15 and str(column("number", 15.0)) == "15.0"
+    assert str(column("number", 1e-05)) == "0.00001"
+    for kind, value in [
+        ("number", 1e16),
+        ("number", float("inf")),
+        ("number", True),
+        ("integer", 2**31),
+        ("integer", "4"),
+        ("text", 3),
+    ]:
+        with pytest.raises(TypeError):
+            column(kind, value)
+    assert column("text", None) is None and column("json", None) is None
+    assert _steps([[10, 2], [12, 1], [40, 5]]) == ([10, 2, 28], [2, 1, 5])
+
+
+def test_bucket_counters_split_into_columns_and_extra():
+    from datetime import UTC, datetime
+
+    start = datetime(2026, 9, 25, 15, 20, tzinfo=UTC)
+    counters = {
+        "bucket_start": "2026-09-25T15:20:00+00:00",
+        "completed": 3,
+        "successes": 2,
+        "response_body_bytes": 16,
+        "errors": {"timeout": 1},
+        "status_codes": {"200": 2},
+        "latency_histogram": {"format": "ceil_ms_v1", "bins": [[11, 1], [15, 1]]},
+        "future": 1,
+    }
+    row = _bucket(start, counters)
+    assert row[:3] == (3, 2, 16) and row[5:7] == ([11, 4], [1, 1])
+    assert row[7].obj == {"future": 1, "bucket_start": counters["bucket_start"]}
+    canonical = counters | {"bucket_start": "2026-09-25T15:20:00.000000+00:00"}
+    del canonical["future"]
+    assert _bucket(start, canonical)[7] is None
+    with pytest.raises(ValueError, match="bucket counters"):
+        _bucket(start, counters | {"completed": 3.0})
+
+
+def test_profile_types_known_fields_and_keeps_the_rest():
+    target = {"id": "generic_http", "url": "http://x/", "engine": "http", "version": "1"}
+    config = {
+        "target": "generic_http",
+        "provider": "p",
+        "product": "r",
+        "requested_country": "us",
+        "runner_location": None,
+        "proxy_protocol": "http",
+        "provider_config": SHIFTER,
+        "future": [1],
+    }
+    row = _profile({"target": target, "config": config}, "p", "r")
+    assert (row["adapter"], row["gateway_port"], row["ttl_seconds"]) == ("shifter", 443, 120)
+    assert row["extra"].obj == {"config": {"future": [1]}}
+    odd = config | {
+        "proxy_protocol": None,
+        "provider_config": SHIFTER | {"effective_ttl_seconds": "300"},
+    }
+    row = _profile({"target": target | {"label": 2}, "config": odd}, "p", "r")
+    assert row["adapter"] is None and row["proxy_protocol"] is None
+    assert row["extra"].obj == {
+        "config": {
+            "proxy_protocol": None,
+            "provider_config": odd["provider_config"],
+            "future": [1],
+        },
+        "target": {"label": 2},
+    }
+
+
+async def test_profiles_round_trip_through_typed_columns(database, tmp_path):
+    variants = [
+        lambda c: c.update(provider_config=SHIFTER, timeout_seconds=7.5, requests_per_second=2.5),
+        lambda c: c.update(
+            provider_config=SHIFTER | {"gateway": "p.example"}, future={"a": [1, 2.0, None]}
+        ),
+        lambda c: c.update(proxy_protocol=None, requested_country="de"),
+    ]
+    for variant in variants:
+        directory = await measurement(tmp_path)
+        summary = edit_summary(directory, lambda s, v=variant: v(s["config"]))
+        ingest(directory, database)
+        assert read_summary(summary["run_id"], database) == summary
+    with connect(database) as conn:
+        rows = conn.execute(
+            "SELECT adapter,gateway_host,ttl_seconds,proxy_protocol,extra FROM pool_stats "
+            "ORDER BY pool_id"
+        ).fetchall()
+        timeouts = conn.execute("SELECT timeout_seconds::text FROM scope_stats").fetchall()
+    assert rows[0][:4] == ("shifter", "p.example", 120, "http") and rows[0][4] is None
+    assert rows[1][0] is None and rows[1][4]["config"]["future"] == {"a": [1, 2.0, None]}
+    assert rows[2][3] is None and rows[2][4] == {"config": {"proxy_protocol": None}}
+    assert ("7.5",) in timeouts and ("15",) in timeouts
+
+
+async def test_unrepresentable_runs_are_rejected(database, tmp_path):
+    for change, message in [
+        (lambda s: s["config"].pop("runner_location"), "losslessly"),
+        (lambda s: s["config"].update(concurrency="4"), "concurrency"),
+        (lambda s: s["buckets"][0].pop("status_codes"), "bucket counters"),
+    ]:
+        directory = await measurement(tmp_path)
+        edit_summary(directory, change)
+        with pytest.raises(ValueError, match=message):
+            ingest(directory, database)
+    assert all(value == 0 for value in status(database)["counts"].values())

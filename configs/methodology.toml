@@ -6,7 +6,44 @@ required_targets = ["generic_http", "generic_https"]
 minimum_requests = 4000
 minimum_coverage = 0.90
 score_valid_hours = 24
+# minimum_coverage: for unbatched runs, the share of 5-minute buckets with data. For census/pulse
+# (batch-linked) cohorts it is the share of the product's pulse slots in the window that it filled:
+# slots are pulse batches with a batch_runs row for the product, except operator-skipped or killed
+# batches and runs our infrastructure lost (error no_node, not_started, stale); a slot is filled
+# by a 'done' run with at least one completed request. 47 of 48 slots (0.979) passes; 40 does not.
 sample_limit = 50
+# Collection roles whose buckets feed target scores. Census runs are pool_sampling and pulse runs
+# monitor unless a calculation_roles row says otherwise; pulses are the comparable benchmark.
+scored_roles = ["benchmark", "monitor"]
+
+# Uptime is outage time: 1 - downtime / (window length x countries the product was tested in during
+# the window), where downtime sums, per country, the union of its outages clipped to the window (one
+# still open runs to the cutoff). Outages open when a pulse reports a product down (from its last
+# healthy pulse there) or a census stalls (no success for census.stall_seconds after it had some;
+# from its last success), and close with the next healthy pulse or census in the country.
+# min_successes still defines an "up" pulse batch for the reference counts (uptime.batches/up).
+# Uptime feeds the uptime score component once min_batches pulse batches finished in the window;
+# until then uptime_pct evidence, if any, is used instead.
+[uptime]
+min_successes = 1
+min_batches = 10
+
+# Live tape detection (milf_framework.detect). Not part of the methodology id: changing these
+# never changes a calculation. Rates are fractions; *_pp are percentage points as fractions.
+[events]
+baseline_batches = 48         # trailing pulse batches of the same product, country and target
+min_baseline_batches = 6      # fewer: no success, block or latency comparison yet
+min_requests = 20             # smaller pulses are not judged
+min_latency_samples = 10      # successes needed before a latency spike counts
+success_drop_pp = 0.15        # success rate below baseline - 15 pp
+latency_spike_ratio = 2.0     # median latency above 2x the baseline median
+block_spike_pp = 0.10         # challenge + block share above baseline + 10 pp
+down_baseline = 0.5           # no success at all while the baseline was above 50%
+pulse_change_pp = 0.05        # pulse_finished only when success moved 5 pp from the last pulse,
+pulse_latency_ratio = 1.5     # the median latency moved 1.5x, or challenges/blocks appeared/went
+hosting_usage_types = ["hosting", "datacenter"]
+settle_seconds = 120          # batches finished this recently wait for the next run
+initial_lookback_minutes = 60 # first run without a watermark
 
 [weights]
 reliability = 22

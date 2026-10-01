@@ -5,7 +5,8 @@ import ipaddress
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .models import ErrorCode
+from .models import ErrorCode, VerdictName
+from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,8 @@ class RequestSpec:
 class Assessment:
     ip: str | None = None
     error: ErrorCode | None = None
+    # None lets the transport classify a failure from its status and body.
+    verdict: VerdictName | None = None
 
 
 class Target(Protocol):
@@ -45,18 +48,22 @@ class EchoIpTarget:
         return RequestSpec(self.url)
 
     def assess(self, status: int, body: bytes) -> Assessment:
+        """Pass condition: a 200 whose whole body is one bare IP address."""
         if status == 407:
-            return Assessment(error="proxy_auth")
+            return Assessment(error="proxy_auth", verdict=Verdict.PROXY_ERROR)
         if status != 200:
-            return Assessment(error="http_status")
+            return Assessment(error="http_status", verdict=failed_response(status, body))
         try:
             value = body.decode("ascii").strip()
             # A zone identifier describes a local interface, not an exit address.
             if "%" in value:
                 raise ValueError
-            return Assessment(ip=str(ipaddress.ip_address(value)))
+            return Assessment(ip=str(ipaddress.ip_address(value)), verdict=Verdict.OK)
         except (ValueError, UnicodeDecodeError):
-            return Assessment(error="invalid_body")
+            sniffed = sniff_body(body)
+            if sniffed is not None:
+                return Assessment(error=BODY_CODES[sniffed], verdict=sniffed)
+            return Assessment(error="invalid_body", verdict=Verdict.ERROR)
 
 
 class TargetRegistry:

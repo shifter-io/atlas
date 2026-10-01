@@ -126,17 +126,35 @@ def main(argv: list[str] | None = None) -> int:
     ingest_parser.add_argument("--database-file", required=True)
     for name, help_text in (
         ("db-init", "Apply the PostgreSQL schema"),
+        ("db-migrate", "Upgrade a v4 or v5 database in place to the current schema"),
         ("db-status", "Inspect stored runs and cached totals"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--database-file", required=True)
+    seed = commands.add_parser(
+        "db-seed", help="Upsert runner regions, countries and targets from configs/"
+    )
+    seed.add_argument("--database-file", required=True)
+    seed.add_argument("--regions", help="Region patterns YAML (default configs/regions.yaml)")
+    seed.add_argument("--targets", help="Targets TOML (default configs/targets.toml)")
+    seed.add_argument("--countries", help="Country names JSON (default configs/countries.json)")
+    seed.add_argument(
+        "--reset-times",
+        action="store_true",
+        help="Put every census time back on the staggered default slots",
+    )
     database = commands.add_parser("db-info", help="Identify the local MMDB and show its checksum")
     database.add_argument("--mmdb")
     from .calculated.cli import register
 
     register(commands)
+    from .orchestrator import cli as fleet
+
+    fleet.register(commands)
     args = parser.parse_args(argv)
     try:
+        if args.command in fleet.COMMANDS:
+            return fleet.dispatch(args)
         if args.command in {
             "calculate-init",
             "calculate",
@@ -145,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             "run-role",
             "metric-evidence",
             "serve",
+            "report",
         }:
             from .calculated.cli import dispatch
 
@@ -177,14 +196,32 @@ def main(argv: list[str] | None = None) -> int:
                 from .storage import ingest
 
                 print(json.dumps({"database_import": ingest(args.directory, args.database_file)}))
-        elif args.command in ("ingest", "db-init", "db-status"):
-            from .storage import ingest, initialize, status
+        elif args.command == "db-seed":
+            from .storage import seed
 
-            result = (
-                ingest(args.directory, args.database_file)
-                if args.command == "ingest"
-                else (initialize if args.command == "db-init" else status)(args.database_file)
+            result = seed(
+                args.database_file,
+                args.regions,
+                args.targets,
+                countries_path=args.countries,
+                reset_times=args.reset_times,
             )
+            print(json.dumps(result, indent=2))
+        elif args.command in ("ingest", "db-init", "db-migrate", "db-status"):
+            from .calculated.store import initialize as initialize_all
+            from .storage import ingest, initialize, migrate, status
+
+            if args.command == "db-init":
+                # The orchestrator calculates on the same database: create both layers.
+                result = initialize(args.database_file) | initialize_all(args.database_file)
+            else:
+                result = (
+                    ingest(args.directory, args.database_file)
+                    if args.command == "ingest"
+                    else {"db-migrate": migrate, "db-status": status}[args.command](
+                        args.database_file
+                    )
+                )
             print(json.dumps(result, indent=2))
         else:
             from .enrichment import LocalEnricher

@@ -5,10 +5,17 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlsplit
 
+from .outcome import from_error
+
 ErrorCode = Literal[
     "proxy_auth", "proxy_connect", "dns", "tls", "timeout", "http_status",
     "invalid_body", "body_too_large", "connection", "protocol",
+    # A 200 whose body is a challenge or block page (see outcome.sniff_body).
+    "challenge", "blocked",
 ]
+VerdictName = Literal["ok", "challenge", "block", "timeout", "proxy_error", "error"]
+VERDICTS = ("ok", "challenge", "block", "timeout", "proxy_error", "error")
+StopRule = Literal["count", "unique_ratio"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,11 +82,16 @@ class ProxyConfig:
             raise ValueError("Invalid proxy URL; expected http:// or socks5:// gateway") from None
 
 
+# Written to a run's config only for non-count runs (RunConfig.public).
+STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds")
+
+
 @dataclass(frozen=True, slots=True)
 class RunConfig:
     target: str
     proxy: ProxySource = field(repr=False)
-    requests: int = 100
+    # None is unbounded and requires a stop rule that ends the run by itself.
+    requests: int | None = 100
     concurrency: int = 10
     timeout_seconds: float = 15.0
     requests_per_second: float | None = None
@@ -88,6 +100,15 @@ class RunConfig:
     requested_country: str | None = None
     runner_location: str | None = None
     target_url: str | None = None
+    # 'count' stops at `requests`; 'unique_ratio' stops issuing new requests
+    # once successes > 2 * unique_ips, evaluated only from `min_sample`
+    # successes on, or after no success in the first 5,000 completions or
+    # 10 minutes (and still honours `requests` if set).
+    stop_rule: StopRule = "count"
+    min_sample: int = 1000
+    # 'unique_ratio' only: once a run has had a success, this long without
+    # another one means the network went down; the run stops as 'stalled'.
+    stall_seconds: float = 600
 
     def __post_init__(self) -> None:
         if self.target_url is not None:
@@ -114,23 +135,33 @@ class RunConfig:
                 raise ValueError(f"{name} label conflicts with provider configuration")
             if name in metadata:
                 object.__setattr__(self, name, effective)
-        for name in ("requests", "concurrency"):
+        if self.stop_rule not in ("count", "unique_ratio"):
+            raise ValueError("stop_rule must be 'count' or 'unique_ratio'")
+        if self.requests is None and self.stop_rule == "count":
+            raise ValueError("A count stop rule requires a request count")
+        for name in ("requests", "concurrency", "min_sample"):
             value = getattr(self, name)
+            if value is None and name == "requests":
+                continue
             if type(value) is not int or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
-        for name in ("timeout_seconds", "requests_per_second"):
+        for name in ("timeout_seconds", "requests_per_second", "stall_seconds"):
             value = getattr(self, name)
-            if value is None and name == "timeout_seconds":
-                raise ValueError("timeout_seconds must be finite and positive")
+            if value is None and name in ("timeout_seconds", "stall_seconds"):
+                raise ValueError(f"{name} must be finite and positive")
             if value is not None and (
                 type(value) not in (float, int) or not math.isfinite(value) or value <= 0
             ):
                 raise ValueError(f"{name} must be finite and positive")
 
     def public(self) -> dict[str, Any]:
+        # The stop-rule fields are omitted for count runs, so they keep the
+        # configuration (and storage scope hash) they had before stop rules.
         return {
             name: getattr(self, name)
-            for name in self.__dataclass_fields__ if name != "proxy"
+            for name in self.__dataclass_fields__
+            if name != "proxy"
+            and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
         } | self.proxy.public()
 
 
@@ -141,6 +172,20 @@ class Outcome:
     error: ErrorCode | None = None
     status: int | None = None
     response_body_bytes: int = 0
+    # None derives the verdict from the error code (outcome.from_error).
+    verdict: VerdictName | None = None
+    # Bytes on the wire to and from the gateway; exact only from Linux TCP_INFO.
+    bytes_up: int = 0
+    bytes_down: int = 0
+    bytes_exact: bool = False
+
+    def __post_init__(self) -> None:
+        verdict = from_error(self.error) if self.verdict is None else self.verdict
+        if verdict not in VERDICTS:
+            raise ValueError("Unknown verdict")
+        if (verdict == "ok") != (self.error is None):
+            raise ValueError("Only an error-free outcome has the ok verdict")
+        object.__setattr__(self, "verdict", str(verdict))
 
 
 @dataclass(slots=True)
@@ -154,7 +199,7 @@ class RunSummary:
     finished_at: str
     duration_seconds: float
     status: str
-    requested: int
+    requested: int | None
     started: int
     completed: int
     cancelled: int
@@ -171,7 +216,19 @@ class RunSummary:
     latency_histogram: dict[str, Any]
     response_body_bytes: int
     buckets: list[dict[str, Any]]
+    challenges: int = 0
+    blocks: int = 0
+    timeouts: int = 0
+    proxy_errors: int = 0
+    bytes_up: int = 0
+    bytes_down: int = 0
+    stop_reason: str | None = None
     artifacts: dict[str, Any] = field(default_factory=dict)
+    # Wall time of the last success before a 'stalled' stop; omitted otherwise.
+    outage_started_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        summary = asdict(self)
+        if summary["outage_started_at"] is None:
+            del summary["outage_started_at"]
+        return summary

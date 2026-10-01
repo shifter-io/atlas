@@ -8,7 +8,9 @@ import json
 
 from aiohttp import web
 
+from .. import detect, traffic
 from . import store
+from .aggregate import iso
 
 RESOURCES = {
     "products",
@@ -22,6 +24,11 @@ RESOURCES = {
     "runs",
 }
 DATABASE = web.AppKey("database", object)
+EVENT_PARAMETERS = {"product", "kind", "category", "since", "limit"}
+TRAFFIC_PARAMETERS = {"test", "provider", "country", "region", "from", "to"}
+CATEGORIES = {"census", "pulse", "incident", "audit"}
+MAX_EVENTS = 500
+LIVE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
 def project(payload, resource, query):
@@ -54,6 +61,12 @@ def project(payload, resource, query):
                 "readiness": p["windows"][window]["readiness"],
                 resource: p["windows"][window][key],
             }
+            # v2: success, latency and outcomes per country, region, city, ASN, country x ASN.
+            | (
+                {"dimensions": p["windows"][window]["breakdowns"]}
+                if resource == "breakdowns" and "breakdowns" in p["windows"][window]
+                else {}
+            )
             for p in products
         ]
     elif resource in ("fleet", "overlap"):
@@ -108,9 +121,75 @@ async def handle(request):
     return web.Response(body=body, content_type="application/json", headers=headers)
 
 
+def _live(database, query, *args, **kwargs):
+    """A read-only query over live history (events and traffic are not snapshot projections)."""
+    with store.connect(database) as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        return query(conn, *args, **kwargs)
+
+
+def _json(value):
+    body = json.dumps(value, separators=(",", ":"), allow_nan=False, default=iso).encode()
+    return web.Response(body=body, content_type="application/json", headers=LIVE)
+
+
+async def events(request):
+    """GET /v1/events?product=&kind=&category=&since=&limit= — newest first, {"events": [...]}.
+
+    product is a provider slug or "provider/product"; kind a comma-separated list; since an ISO
+    time (exclusive; empty means none); limit 1-500 (default 100).
+    """
+    query = request.query
+    try:
+        if set(query) - EVENT_PARAMETERS:
+            raise ValueError("Unknown query parameter")
+        limit = int(query.get("limit") or 100)
+        if not 1 <= limit <= MAX_EVENTS:
+            raise ValueError(f"limit must be between 1 and {MAX_EVENTS}")
+        category = query.get("category") or None
+        if category is not None and category not in CATEGORIES:
+            raise ValueError("category must be census, pulse, incident or audit")
+        filters = {
+            "product": query.get("product") or None,
+            "kinds": [k for k in query.get("kind", "").split(",") if k] or None,
+            "category": category,
+            "since": traffic.parse_time(query.get("since")),
+            "limit": limit,
+        }
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    rows = await asyncio.to_thread(_live, request.app[DATABASE], detect.list_events, **filters)
+    return _json({"events": rows})
+
+
+async def traffic_report(request):
+    """GET /v1/traffic?test=&provider=&country=&region=&from=&to= — see traffic.summary."""
+    query = request.query
+    try:
+        if set(query) - TRAFFIC_PARAMETERS:
+            raise ValueError("Unknown query parameter")
+        test = query.get("test") or None
+        if test is not None and test not in traffic.TESTS:
+            raise ValueError("test must be census or pulse")
+        filters = {
+            "test": test,
+            "provider": query.get("provider") or None,
+            "country": query.get("country") or None,
+            "region": query.get("region") or None,
+            "start": traffic.parse_time(query.get("from")),
+            "end": traffic.parse_time(query.get("to")),
+        }
+    except ValueError as exc:
+        raise web.HTTPBadRequest(text=str(exc)) from exc
+    report = await asyncio.to_thread(_live, request.app[DATABASE], traffic.summary, **filters)
+    return _json(report)
+
+
 def app(database):
     application = web.Application()
     application[DATABASE] = database
+    application.router.add_get("/v1/events", events)
+    application.router.add_get("/v1/traffic", traffic_report)
     application.router.add_get("/v1/snapshots/{snapshot}", handle)
     application.router.add_get("/v1/snapshots/{snapshot}/{resource}", handle)
     application.router.add_get("/v1/{resource}", handle)

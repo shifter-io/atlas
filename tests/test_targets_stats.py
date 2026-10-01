@@ -3,7 +3,8 @@ import math
 import pytest
 
 from milf_framework import ProxyConfig, RunConfig
-from milf_framework.stats import Histogram, bucket_of
+from milf_framework.models import Outcome
+from milf_framework.stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, Histogram, bucket_of
 from milf_framework.targets import EchoIpTarget, TargetRegistry, registry
 
 
@@ -68,3 +69,45 @@ def test_credentials_are_not_in_repr_or_public_config():
     assert "secret" not in str(exc.value)
     with pytest.raises(ValueError):
         ProxyConfig.from_url("http://localhost:0")
+
+
+@pytest.mark.parametrize("status,verdict", [
+    (201, "error"), (301, "error"), (403, "block"), (429, "block"), (500, "block"),
+    (502, "proxy_error"),
+])
+def test_status_verdict(status, verdict):
+    assert registry.get("generic_http").assess(status, b"8.8.8.8").verdict == verdict
+
+
+def test_counters_track_verdicts_and_bytes():
+    counters = Counters()
+    for outcome in (
+        Outcome(4.2, ip="8.8.8.8", status=200, bytes_up=100, bytes_down=300, bytes_exact=True),
+        Outcome(9, error="challenge", status=200, bytes_up=100, bytes_down=4000),
+        Outcome(9, error="http_status", status=403, verdict="block", bytes_up=90, bytes_down=50),
+        Outcome(15000, error="timeout"),
+        Outcome(3, error="proxy_connect"),
+        Outcome(3, error="invalid_body", status=200),
+    ):
+        counters.add(outcome)
+    exported = counters.export()
+    assert exported["completed"] == 6 and exported["successes"] == 1
+    assert {k: exported[k] for k in ("challenges", "blocks", "timeouts", "proxy_errors")} == {
+        "challenges": 1, "blocks": 1, "timeouts": 1, "proxy_errors": 1,
+    }
+    assert (exported["bytes_up"], exported["bytes_down"]) == (290, 4350)
+    assert exported["errors"] == {"challenge": 1, "http_status": 1, "timeout": 1,
+                                  "proxy_connect": 1, "invalid_body": 1}
+    # Only successes enter the latency histogram.
+    assert exported["latency_histogram"]["bins"] == [(5, 1)]
+    assert set(counters.export_geo()) == {
+        "completed", "successes", "challenges", "blocks", "timeouts", "bytes_up",
+        "bytes_down", "latency_histogram",
+    }
+
+
+def test_geo_fields_match_the_enrichment_lookup():
+    from milf_framework.storage import ENRICHMENT_FIELDS
+
+    assert set(LOCATION_FIELDS) | set(NETWORK_FIELDS) | {"matched"} == set(ENRICHMENT_FIELDS)
+    assert not set(LOCATION_FIELDS) & set(NETWORK_FIELDS)

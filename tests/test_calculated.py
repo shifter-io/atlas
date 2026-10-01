@@ -5,13 +5,15 @@ from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from test_storage import measurement
+from helpers import FakeTransport
+from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 
 from milf_framework.calculated import store
-from milf_framework.calculated.aggregate import metrics, target_score
+from milf_framework.calculated.aggregate import metrics, pool_lists, target_score
 from milf_framework.calculated.api import app
 from milf_framework.calculated.calculator import calculate, retain
 from milf_framework.calculated.policy import composite, digest, effective, load
+from milf_framework.models import Outcome
 from milf_framework.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
@@ -423,3 +425,256 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
         with connect(database) as conn:
             conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
             conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+BREAKDOWN_COUNTERS = (
+    "ips",
+    "observations",
+    "completed",
+    "successes",
+    "success_rate",
+    "challenges",
+    "blocks",
+    "p50",
+    "p90",
+    "p99",
+)
+VIEW_NAMES = {"city": "geography"}
+
+
+def payload_mismatches(database, build_id):
+    """Payload fragments that the typed calculated rows of a build do not rebuild exactly."""
+    canon = lambda value: json.dumps(value, sort_keys=True)  # noqa: E731
+    payload = store.read(database, str(build_id))
+    with connect(database) as conn:
+        windows = {
+            tuple(r[1:]): r[0]
+            for r in conn.execute(
+                "SELECT result_id,product_id,cohort,target,window_hours,readiness "
+                "FROM calculated_windows WHERE build_id=%s",
+                (build_id,),
+            )
+        }
+        scores = {
+            tuple(r[:2]): canon(r[2:])
+            for r in conn.execute(
+                "SELECT result_id,profile,components,reasons,weights FROM calculated_score_details"
+            )
+        }
+        breakdowns = {}
+        for r in conn.execute(
+            "SELECT result_id,dimension,label,ips,observations,completed,successes,success_rate,"
+            "challenges,blocks,p50,p90,p99 FROM calculated_breakdown_details "
+            "ORDER BY result_id,dimension,position"
+        ):
+            counters = dict(zip(BREAKDOWN_COUNTERS, r[3:], strict=True))
+            if payload["schema_version"] == 1:
+                counters = {k: counters[k] for k in ("ips", "observations")}
+            breakdowns.setdefault(r[:2], []).append(r[2] | counters)
+        criteria = dict(conn.execute("SELECT cohort,criteria FROM cohort_criteria"))
+    missing = []
+    for p in payload["products"]:
+        if canon(criteria[p["cohort"]]) != canon(p["criteria"]):
+            missing.append(("criteria", p["cohort"]))
+        for w in p["windows"].values():
+            key = (p["product_id"], p["cohort"], "", w["period"]["hours"], w["readiness"])
+            for target, profile, s in [("", k, v) for k, v in w["scores"].items()] + [
+                (t, "balanced", v["score"]) for t, v in w["targets"].items()
+            ]:
+                result = windows[key[:2] + (target,) + key[3:]]
+                if scores[(result, profile)] != canon(
+                    [s["components"], s["reasons"], s.get("weights")]
+                ):
+                    missing.append(("score", result, profile))
+            if payload["schema_version"] == 1:
+                expected = [
+                    ("geography", w["pool"]["geo"]),
+                    ("country", w["pool"]["countries_breakdown"]),
+                    ("asn", w["pool"]["asns_breakdown"]),
+                ]
+            else:
+                # v2: every breakdown row is typed; the v1 pool lists derive from them.
+                expected = [(VIEW_NAMES.get(n, n), rows) for n, rows in w["breakdowns"].items()]
+                if any(w["pool"][k] != v for k, v in pool_lists(w["breakdowns"]).items()):
+                    missing.append(("pool lists", windows[key]))
+            for dimension, rows in expected:
+                if canon(breakdowns.get((windows[key], dimension), [])) != canon(rows):
+                    missing.append((dimension, windows[key]))
+    return missing
+
+
+def test_score_reasons_split_around_derived_block():
+    from milf_framework.calculated.calculator import split_reasons
+
+    components = {
+        "reliability": {"state": "ready", "reason": None},
+        "uptime": {"state": "unavailable", "reason": "Needs uptime"},
+        "coverage": {"state": "incomplete", "reason": None},
+        "value": {"state": "unavailable", "reason": "Needs pricing"},
+    }
+    score = {
+        "components": components,
+        "weights": {"reliability": 1, "uptime": 1, "coverage": 2.5, "value": 0},
+        "reasons": ["Prefix a", "Prefix b", "Needs uptime", "coverage not ready", "Expired"],
+    }
+    assert split_reasons(score, True) == [(-2, "Prefix a"), (-1, "Prefix b"), (1, "Expired")]
+    # Target scores list no component reasons; everything is explicit.
+    assert split_reasons(score, False) == [(i, r) for i, r in enumerate(score["reasons"], 1)]
+    with pytest.raises(ValueError, match="rebuilt"):
+        split_reasons(score | {"reasons": ["coverage not ready"]}, True)
+    with pytest.raises(ValueError, match="differ"):
+        split_reasons(score | {"weights": {"reliability": 1}}, True)
+
+
+def lenient_policy(tmp_path):
+    policy = tmp_path / "methodology.toml"
+    policy.write_text(
+        POLICY.read_text()
+        .replace("minimum_requests = 4000", "minimum_requests = 1")
+        .replace("minimum_coverage = 0.90", "minimum_coverage = 0")
+    )
+    return policy
+
+
+class OtherIP(FakeTransport):
+    async def execute(self, target, *, context=None):
+        return Outcome(30.2, ip="9.9.9.9", status=200, response_body_bytes=8)
+
+
+async def benchmark_scenario(database, tmp_path):
+    """Two benchmarked providers with evidence: ready, ranked, then expired scores."""
+    store.initialize(database)
+    last = None
+    for provider in ("alpha", "beta"):
+        for target in ("generic_http", "generic_https"):
+            d = await measurement(
+                tmp_path,
+                provider=provider,
+                target=target,
+                requested_country="us",
+                transport_factory=OtherIP if provider == "beta" else FakeTransport,
+            )
+            if target == "generic_http":
+                attributes = ALL_ATTRIBUTES | ({"city": "San Jose"} if provider == "beta" else {})
+                enrichment(d, attributes=attributes)
+            ingest(d, database)
+            raw = json.loads((d / "summary.json").read_text())
+            store.assign_role(database, raw["run_id"], "benchmark")
+            last = max(last or raw["finished_at"], raw["finished_at"])
+    policy = lenient_policy(tmp_path)
+    last = datetime.fromisoformat(last)
+    first = calculate(database, policy, as_of=last + timedelta(minutes=5), publish=True)
+    with connect(database) as conn:
+        ids = [r[0] for r in conn.execute("SELECT product_id FROM products ORDER BY 1")]
+    for product_id in ids:
+        for metric, value in {
+            "uptime_pct": 99.5,
+            "claim_gap": 0.1,
+            "blacklist_hit_rate": 0.01,
+            "cost_per_1k_success": 0.004,
+        }.items():
+            store.evidence(
+                database,
+                {
+                    "product_id": product_id,
+                    "cohort": first["products"][0]["cohort"],
+                    "metric": metric,
+                    "value": value,
+                    "period_start": (last - timedelta(days=60)).isoformat(),
+                    "period_end": (last + timedelta(days=10)).isoformat(),
+                    "valid_until": (last + timedelta(days=20)).isoformat(),
+                    "source": "fixture",
+                },
+            )
+    return policy, last, first
+
+
+@pytest.mark.asyncio
+async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_path):
+    policy, last, first = await benchmark_scenario(database, tmp_path)
+    ready = calculate(database, policy, as_of=last + timedelta(minutes=10), publish=True)
+    later = calculate(database, policy, as_of=last + timedelta(days=2), publish=True)
+    scores = ready["products"][0]["windows"]["24h"]["scores"]
+    assert scores["balanced"]["state"] == "ready" and scores["balanced"]["rank"] == 1
+    week = later["products"][0]["windows"]["7d"]
+    assert week["targets"]["generic_http"]["score"]["reasons"] == [
+        "Required measurement freshness deadline expired"
+    ]
+    for build in (first, ready, later):
+        assert payload_mismatches(database, int(build["snapshot_id"])) == []
+    with connect(database) as conn:
+        positions = {
+            r[0] for r in conn.execute("SELECT sign(position) FROM calculated_score_reasons")
+        }
+        assert positions == {-1, 1}
+        assert conn.execute("SELECT count(*) FROM cohorts").fetchone()[0] == 1
+        # Labels are shared across builds instead of repeated per row: two cities, their
+        # (shared) region and country.
+        assert conn.execute("SELECT count(*) FROM places").fetchone()[0] == 4
+        assert conn.execute("SELECT count(*) FROM asn_labels").fetchone()[0] == 1
+        # Only referenced texts are stored; "coverage not ready" style reasons are derived.
+        assert not conn.execute(
+            "SELECT reason FROM score_reasons WHERE reason LIKE '% not ready' OR reason_id NOT IN "
+            "(SELECT reason_id FROM calculated_score_reasons UNION "
+            "SELECT reason_id FROM calculated_score_components WHERE reason_id IS NOT NULL)"
+        ).fetchall()
+
+
+def test_cohort_criteria_keep_unusual_values(database):
+    from psycopg.rows import dict_row
+
+    from milf_framework.calculated.calculator import cohort_for, store_cohort
+
+    store.initialize(database)
+    scope = {
+        "target": {"id": "generic_http", "url": "http://custom.example/", "version": "1"},
+        "config": {
+            "concurrency": 4,
+            "timeout_seconds": 7.5,
+            "requests_per_second": 2.0,
+            "provider_config": {"effective_ttl_seconds": "300", "parameters": {"asn": 1}},
+        },
+    }
+    cohort, criteria = cohort_for(scope, "residential")
+    with connect(database) as conn:
+        conn.row_factory = dict_row
+        store_cohort(conn, cohort, criteria | {"future": True})
+        row = conn.execute("SELECT * FROM cohorts").fetchone()
+        assert row["extra"] == {"ttl_seconds": "300", "future": True}
+        assert str(row["rate"]) == "2.0" and row["target_variant"]["url"] == scope["target"]["url"]
+        with pytest.raises(ValueError, match="losslessly"):
+            store_cohort(conn, "partial", {"kind": "residential"})
+
+
+@pytest.mark.asyncio
+async def test_unpublished_payloads_are_pruned(database, tmp_path):
+    store.initialize(database)
+    d = await measurement(tmp_path, requests=4)
+    ingest(d, database)
+    end = datetime.fromisoformat(json.loads((d / "summary.json").read_text())["finished_at"])
+    published = calculate(database, POLICY, as_of=end + timedelta(minutes=5), publish=True)
+    drafts = [
+        calculate(database, POLICY, as_of=end + timedelta(minutes=5 * i))["snapshot_id"]
+        for i in range(2, 6)
+    ]
+    kept = drafts[-store.KEEP_DRAFTS :]
+    with connect(database) as conn:
+        remaining = [str(r[0]) for r in conn.execute("SELECT build_id FROM calculated_snapshots")]
+        assert sorted(remaining) == sorted([published["snapshot_id"], *kept])
+        windows = conn.execute("SELECT count(DISTINCT build_id) FROM calculated_windows")
+        assert windows.fetchone()[0] == 5  # typed rows of pruned drafts remain
+    assert store.read(database, drafts[0]) is None and store.head(database, drafts[0]) is None
+    with pytest.raises(ValueError, match="Unknown snapshot"):
+        store.publish(database, drafts[1])
+    # A pruned draft is recalculated as a new build; publishing protects it from pruning.
+    restored = calculate(database, POLICY, as_of=end + timedelta(minutes=10))["snapshot_id"]
+    assert int(restored) > int(drafts[-1])
+    assert payload_mismatches(database, int(restored)) == []
+    with connect(database) as conn:
+        builds = conn.execute("SELECT count(*) FROM calculation_builds").fetchone()[0]
+        assert builds == 1 + len(drafts)
+    store.publish(database, restored)
+    calculate(database, POLICY, as_of=end + timedelta(minutes=35))
+    calculate(database, POLICY, as_of=end + timedelta(minutes=40))
+    assert store.read(database, restored)["snapshot_id"] == restored
+    assert store.read(database, published["snapshot_id"]) == published

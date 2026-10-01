@@ -340,3 +340,26 @@ async def test_dynamic_socks_sessions_close_on_cancellation(tmp_path, monkeypatc
         result = await task
     assert result.status == "cancelled" and result.cancelled == 3
     assert len(sessions) == 3 and all(session.closed for session in sessions)
+
+
+async def test_rotate_policy_never_sends_a_session_id(tmp_path):
+    # Census and pulse rely on the gateway rotating per connection: no sid,
+    # so no sticky session, on any request of any run.
+    provider = shifter(parameters={"country": "de"})
+    assert provider.session_policy == "rotate"
+    usernames = {provider.resolve(RequestContext(run, index, index % 7)).username
+                 for run in ("one", "two") for index in range(50)}
+    assert usernames == {"customer-fixture_33-country-de"}
+    with pytest.raises(ValueError):
+        shifter(parameters={"country": "de", "ttl": 60})
+    gateway = Gateway(auth=lambda username, password: True)
+    async with server(gateway) as port:
+        proxy = LoopbackProvider(provider, port)
+        result = await run(RunConfig("generic_http", proxy, requests=6, concurrency=3),
+                           JsonSink(tmp_path))
+    assert result.successes == 6
+    assert {username for username, _ in gateway.credentials} == {
+        "customer-fixture_33-country-de"
+    }
+    assert all("sid" not in username for username, _ in gateway.credentials)
+    assert result.config["provider_config"]["session_policy"] == "rotate"

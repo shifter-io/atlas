@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     if SCHEMA_VERSION != 3:
-        raise SystemExit("Historical v2/v3 tool; use scripts/rebuild_database.py for v4")
+        raise SystemExit("Historical v2/v3 tool; use scripts/migrate_database.py for v4 to v5")
     credentials = ROOT / ".secrets/database.toml"
     config = read_credentials(credentials, "postgres")
     if (config["host"], str(config["port"]), config["dbname"]) != (

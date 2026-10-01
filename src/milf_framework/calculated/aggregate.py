@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 
 from ..stats import Histogram
-from .policy import composite, curve_score, grade
+from .policy import composite, curve_score, grade, uptime_settings
 
+# Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
+# pulse batches, so they are no longer listed here; a None metric means nothing measured them.
 UNAVAILABLE = {
-    "uptime_pct": "Continuous availability measurements are required",
     "ttfb_p50": "TTFB is not recorded by this target version",
-    "captcha_rate": "Challenge classification is not recorded by this target version",
-    "block_rate": "HTTP statuses alone do not establish block-page classification",
     "stickiness_hold_rate": "Sticky-session survival measurements are required",
     "blacklist_hit_rate": "A timestamped reputation check is required",
     "leak_checks": "Leak measurements are required",
@@ -22,6 +22,13 @@ UNAVAILABLE = {
     "requests_per_ip": "Consecutive rotation behavior is not recorded",
     "ip_latency": "Per-IP timing is not recorded",
 }
+UPTIME_UNAVAILABLE = "No finished pulse batches in this window"
+UPTIME_INCOMPLETE = "Fewer finished pulse batches than the methodology requires"
+PLACE = ("country_code", "country", "region_code", "region", "city")
+NETWORK = ("asn", "name", "usage_type")
+# Payload breakdown name -> calculated_breakdowns dimension code.
+BREAKDOWNS = {"country": "c", "region": "r", "city": "g", "asn": "a", "country_asn": "x"}
+OUTCOMES = ("challenges", "blocks", "bytes_up", "bytes_down")
 EVIDENCE_RANGES = {
     "uptime_pct": (0, 100),
     "blacklist_hit_rate": (0, 1),
@@ -40,7 +47,9 @@ EVIDENCE_RANGES = {
 def metrics(rows, hours):
     histogram = Histogram(Counter())
     errors = Counter()
-    completed = successes = body = 0
+    outcomes = Counter()
+    completed = successes = body = classified = 0
+    measured = False
     for row in rows:
         b = row["counters"]
         completed += b["completed"]
@@ -48,6 +57,11 @@ def metrics(rows, hours):
         body += b["response_body_bytes"]
         errors.update(b["errors"])
         histogram.merge(Histogram(Counter(dict(b["latency_histogram"]["bins"]))))
+        # Only v6 buckets classify outcomes and count wire bytes; older ones stay out of the rates.
+        if row.get("outcome"):
+            measured = True
+            classified += b["completed"]
+            outcomes.update({k: b[k] for k in OUTCOMES})
     return {
         "completed": completed,
         "successes": successes,
@@ -56,23 +70,28 @@ def metrics(rows, hours):
         "body_bytes": body,
         "success_rate": successes / completed if completed else None,
         "timeout_rate": errors["timeout"] / completed if completed else None,
+        "challenge_rate": outcomes["challenges"] / classified if classified else None,
+        "block_rate": outcomes["blocks"] / classified if classified else None,
+        "uptime": None,
+        "bytes_up": outcomes["bytes_up"] if measured else None,
+        "bytes_down": outcomes["bytes_down"] if measured else None,
         "latency_ms": histogram.percentiles(),
         "coverage": len({r["bucket_start"] for r in rows}) / (hours * 12),
+        "coverage_basis": "5-minute buckets",
         "last_observed": max((r["last_observed"] for r in rows), default=None),
         "latency_basis": "successful requests",
         "units": {
             "latency_ms": "milliseconds",
             "success_rate": "fraction",
             "body_bytes": "response body bytes",
+            "uptime": "fraction of time (outages over countries tested)",
+            "bytes": "wire bytes",
         },
     }
 
 
 def pool(observations, since, hours):
     ips = {}
-    geo = {}
-    networks = {}
-    country = {}
     matched_observations = known_country = 0
     for o in observations:
         entry = ips.setdefault(
@@ -87,45 +106,19 @@ def pool(observations, since, hours):
             known_country += o["count"]
             if o["country_code"].lower() == (o["requested_country"] or "").lower():
                 matched_observations += o["count"]
+    countries, regions, cities, asns = set(), set(), set(), set()
     for entry in ips.values():
         o = entry["row"]
         cc = o.get("country_code")
         region = o.get("region_code") or o.get("region")
         if cc:
-            key = (cc, region, o.get("city"))
-            g = geo.setdefault(
-                key,
-                {
-                    "country_code": cc,
-                    "country": o.get("country"),
-                    "region": o.get("region"),
-                    "region_code": o.get("region_code"),
-                    "city": o.get("city"),
-                    "ips": 0,
-                    "observations": 0,
-                },
-            )
-            g["ips"] += 1
-            g["observations"] += entry["count"]
-            c = country.setdefault(
-                cc, {"country_code": cc, "country": o.get("country"), "ips": 0, "observations": 0}
-            )
-            c["ips"] += 1
-            c["observations"] += entry["count"]
+            countries.add(cc)
+            if region:
+                regions.add((cc, region))
+            if o.get("city"):
+                cities.add((cc, region, o["city"]))
         if o.get("asn") is not None:
-            key = (o["asn"], o.get("asn_organization"), o.get("usage_type"))
-            n = networks.setdefault(
-                key,
-                {
-                    "asn": o["asn"],
-                    "name": o.get("asn_organization"),
-                    "usage_type": o.get("usage_type"),
-                    "ips": 0,
-                    "observations": 0,
-                },
-            )
-            n["ips"] += 1
-            n["observations"] += entry["count"]
+            asns.add(o["asn"])
     size = len(ips)
     known = sum(bool(e["row"].get("usage_type")) for e in ips.values())
     host = sum(e["row"].get("usage_type") == "hosting" for e in ips.values())
@@ -137,10 +130,10 @@ def pool(observations, since, hours):
         "recurring_share": sum(len(e["days"]) >= 2 for e in ips.values()) / size
         if size and hours > 24
         else None,
-        "countries": len(country),
-        "regions": len({(k[0], k[1]) for k in geo if k[1]}),
-        "cities": len({k for k in geo if k[2]}),
-        "asns": len({k[0] for k in networks}),
+        "countries": len(countries),
+        "regions": len(regions),
+        "cities": len(cities),
+        "asns": len(asns),
         "datacenter_asn_share": host / known if known else None,
         "classification_coverage": known / size if size else None,
         "geo_accuracy": matched_observations / known_country
@@ -150,10 +143,242 @@ def pool(observations, since, hours):
         if size
         else None,
         "observations": sum(e["count"] for e in ips.values()),
-        "geo": sorted(geo.values(), key=lambda x: (-x["ips"], str(x))),
-        "countries_breakdown": sorted(country.values(), key=lambda x: -x["ips"]),
-        "asns_breakdown": sorted(networks.values(), key=lambda x: (-x["ips"], str(x))),
     }, ips
+
+
+def _memberships(place, network):
+    """(breakdown, key, label) for every breakdown row a location and network fall in."""
+    result = []
+    located = place is not None and place[0] is not None
+    if located:
+        cc, country, region_code, region, city = place
+        result.append(("country", cc, {"country_code": cc, "country": country}))
+        if region_code is not None or region is not None:
+            result.append(
+                (
+                    "region",
+                    place[:4],
+                    {
+                        "country_code": cc,
+                        "country": country,
+                        "region": region,
+                        "region_code": region_code,
+                    },
+                )
+            )
+        result.append(
+            (
+                "city",
+                place,
+                {
+                    "country_code": cc,
+                    "country": country,
+                    "region": region,
+                    "region_code": region_code,
+                    "city": city,
+                },
+            )
+        )
+    if network is not None and network[0] is not None:
+        asn = dict(zip(NETWORK, network, strict=True))
+        result.append(("asn", network, asn))
+        if located:
+            result.append(
+                ("country_asn", (place[0], network), {"country_code": cc, "country": country} | asn)
+            )
+    return result
+
+
+def breakdowns(ips, geo):
+    """Success, outcome, latency and IP counts per country, region, city, ASN and country x ASN.
+
+    ips are pool() entries (each IP once, labelled by its DB-IP enrichment); geo rows carry
+    run_geo_buckets counters per exit location and network. Requests without an exit address
+    have no location: they count only towards the country the run requested (fallback), so a
+    country's success rate includes its failures. Country rows are keyed by the country code;
+    when several names occur, the smallest is used.
+    """
+    rows = {name: {} for name in BREAKDOWNS}
+
+    def entry(name, key, label):
+        row = rows[name].get(key)
+        if row is None:
+            row = rows[name][key] = {
+                "label": label,
+                "ips": 0,
+                "observations": 0,
+                "completed": 0,
+                "successes": 0,
+                "challenges": 0,
+                "blocks": 0,
+                "histogram": Histogram(Counter()),
+            }
+        elif label.get("country") is not None and (
+            row["label"].get("country") is None or label["country"] < row["label"]["country"]
+        ):
+            row["label"] = row["label"] | {"country": label["country"]}
+        return row
+
+    for e in ips.values():
+        o = e["row"]
+        place = tuple(o.get(f) for f in PLACE)
+        network = (o.get("asn"), o.get("asn_organization"), o.get("usage_type"))
+        for name, key, label in _memberships(place, network):
+            row = entry(name, key, label)
+            row["ips"] += 1
+            row["observations"] += e["count"]
+
+    def add(row, g):
+        for k in ("completed", "successes", "challenges", "blocks"):
+            row[k] += g[k]
+        row["histogram"].merge(Histogram(Counter(dict(g["histogram"]))))
+
+    fallback = []
+    for g in geo:
+        memberships = _memberships(g["location"], g["network"])
+        if not any(name == "country" for name, _, _ in memberships) and g.get("fallback"):
+            fallback.append(g)
+        for name, key, label in memberships:
+            add(entry(name, key, label), g)
+    for g in fallback:
+        cc, country = g["fallback"]
+        row = rows["country"].get(cc) or entry(
+            "country", cc, {"country_code": cc, "country": country}
+        )
+        add(row, g)
+    result = {}
+    for name, members in rows.items():
+        out = []
+        for row in members.values():
+            latency = row.pop("histogram").percentiles()
+            label = row.pop("label")
+            out.append(
+                label
+                | row
+                | {
+                    "success_rate": row["successes"] / row["completed"]
+                    if row["completed"]
+                    else None,
+                    "p50": latency["p50"],
+                    "p90": latency["p90"],
+                    "p99": latency["p99"],
+                }
+            )
+        out.sort(
+            key=lambda r: (
+                -r["completed"],
+                -r["ips"],
+                json.dumps([r.get(f) for f in (*PLACE, *NETWORK)], default=str),
+            )
+        )
+        result[name] = out
+    return result
+
+
+def pool_lists(rows):
+    """The v1 pool lists (IP counts per geography, country and ASN), from the breakdowns."""
+
+    def pick(name, fields):
+        return sorted(
+            ({k: r[k] for k in (*fields, "ips", "observations")} for r in rows[name] if r["ips"]),
+            key=lambda x: (-x["ips"], str(x)),
+        )
+
+    return {
+        "geo": pick("city", ("country_code", "country", "region", "region_code", "city")),
+        "countries_breakdown": pick("country", ("country_code", "country")),
+        "asns_breakdown": pick("asn", NETWORK),
+    }
+
+
+def slot_coverage(m, slots, since, end):
+    """Set m's coverage to the share of pulse slots in [since, end) the product filled.
+
+    slots are the product's pulse batch runs that count (done, or failed for a reason of the
+    provider's); a slot is filled by a done run with at least one completed request.
+    """
+    due = [b for b in slots if since <= b["scheduled_for"] < end]
+    filled = sum(b["status"] == "done" and b["requests"] > 0 for b in due)
+    m["coverage"] = filled / len(due) if due else 0.0
+    m["coverage_basis"] = "pulse slots"
+    m["coverage_slots"] = {"due": len(due), "filled": filled}
+    return m
+
+
+def uptime(batches, since, end, min_successes):
+    """Share of done pulse batch runs in [since, end) with at least min_successes successes."""
+    rows = [b for b in batches if since <= b["scheduled_for"] < end and b["status"] == "done"]
+    up = sum(b["successes"] >= min_successes for b in rows)
+    return {"batches": len(rows), "up": up, "value": up / len(rows) if rows else None}
+
+
+def downtime(outages, countries, since, end):
+    """Seconds of [since, end) a product was down, summed over `countries`.
+
+    Per country, the union of its outage intervals clipped to the window (an open outage, or
+    one that ended after `end`, runs to `end`), so overlapping outages are counted once.
+    """
+    total = 0.0
+    for country in countries:
+        spans = sorted(
+            (max(o["started_at"], since), min(o["ended_at"] or end, end))
+            for o in outages
+            if o["country"] == country
+        )
+        start = stop = None
+        for a, b in spans:
+            if b <= a:
+                continue
+            if stop is None or a > stop:
+                if stop is not None:
+                    total += (stop - start).total_seconds()
+                start, stop = a, b
+            else:
+                stop = max(stop, b)
+        if stop is not None:
+            total += (stop - start).total_seconds()
+    return total
+
+
+def outage_uptime(outages, tested, since, end):
+    """Time-based uptime: 1 - downtime / (window seconds x countries tested in the window).
+
+    tested maps each country the product had a started batch run in to the end of its latest
+    one (or `end` while running); a country counts when that is within the window.
+    """
+    countries = sorted(c for c, last in tested.items() if last >= since)
+    down = downtime(outages, countries, since, end)
+    available = (end - since).total_seconds() * len(countries)
+    return {
+        "value": min(1.0, max(0.0, 1 - down / available)) if available else None,
+        "downtime_s": round(down, 3),
+        "countries": len(countries),
+        "basis": "outage time",
+    }
+
+
+def outage_list(outages, since, end, limit=50):
+    """The newest outages overlapping [since, end); one still open at `end` has ended_at None."""
+    rows = [
+        o
+        for o in outages
+        if o["started_at"] < end and (o["ended_at"] is None or o["ended_at"] > since)
+    ]
+    rows.sort(key=lambda o: (o["started_at"], o["outage_id"]), reverse=True)
+    result = []
+    for o in rows[:limit]:
+        ended = o["ended_at"] if o["ended_at"] is not None and o["ended_at"] <= end else None
+        result.append(
+            {
+                "country": o["country"],
+                "region": o["region"],
+                "source": o["source"],
+                "started_at": o["started_at"],
+                "ended_at": ended,
+                "duration_s": round(((ended or end) - o["started_at"]).total_seconds(), 3),
+            }
+        )
+    return result
 
 
 def series(rows, observations, start, end, hours):
@@ -231,7 +456,7 @@ def target_score(m, config, benchmark=True):
     }
 
 
-def product_scores(targets, p, evidence, config, kind):
+def product_scores(targets, p, evidence, config, kind, measured_uptime=None):
     curves = config["curves"]
     required = config["required_targets"]
     inputs = {}
@@ -252,10 +477,22 @@ def product_scores(targets, p, evidence, config, kind):
             "ready" if ready else "incomplete",
             None if ready else "Required benchmark targets are incomplete",
         )
-    inputs["uptime"] = component(
-        curve_score(curves["uptime"], evidence.get("uptime_pct")),
-        reason=None if "uptime_pct" in evidence else UNAVAILABLE["uptime_pct"],
-    )
+    # Measured uptime (outage time over the countries tested) wins once enough pulse batches
+    # finished; evidence is the fallback.
+    batches = (measured_uptime or {}).get("batches", 0)
+    value = (measured_uptime or {}).get("value")
+    pct = 100 * value if batches and value is not None else None
+    if pct is not None and batches >= uptime_settings(config)["min_batches"]:
+        inputs["uptime"] = component(curve_score(curves["uptime"], pct), inputs=pct)
+    elif "uptime_pct" in evidence:
+        inputs["uptime"] = component(curve_score(curves["uptime"], evidence["uptime_pct"]))
+    else:
+        inputs["uptime"] = component(
+            curve_score(curves["uptime"], pct),
+            "incomplete",
+            UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE,
+            inputs=pct,
+        )
     pool_ready = p["unique_ips"] > 0 and p["enrichment_coverage"] == 1
     inputs["coverage"] = component(
         curve_score(curves["coverage"], p["unique_ips"]) if p["unique_ips"] else None,

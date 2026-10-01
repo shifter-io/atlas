@@ -19,6 +19,27 @@ KEYS = (
     "authenticity",
     "value",
 )
+ROLES = ("exploratory", "pool_sampling", "benchmark", "monitor")
+# Uptime: a pulse batch counts as up when the product had at least min_successes successful
+# requests in it; the uptime component is ready from min_batches finished pulse batches.
+UPTIME = {"min_successes": 1, "min_batches": 1}
+# Live tape detection thresholds ([events] in the methodology file). They never change a
+# calculation, so load() keeps them out of the methodology id; detect.py reads them via events().
+EVENTS = {
+    "baseline_batches": 48,
+    "min_baseline_batches": 6,
+    "min_requests": 20,
+    "min_latency_samples": 10,
+    "success_drop_pp": 0.15,
+    "latency_spike_ratio": 2.0,
+    "block_spike_pp": 0.10,
+    "down_baseline": 0.5,
+    "pulse_change_pp": 0.05,
+    "pulse_latency_ratio": 1.5,
+    "hosting_usage_types": ["hosting", "datacenter"],
+    "settle_seconds": 120,
+    "initial_lookback_minutes": 60,
+}
 OVERRIDES = {
     "weights",
     "target_weights",
@@ -86,6 +107,8 @@ def validate(config):
         "targets",
         "kind",
         "display_name",
+        "scored_roles",
+        "uptime",
     }
     if set(config) - known:
         raise ValueError("Unknown methodology setting")
@@ -140,13 +163,54 @@ def validate(config):
         raise ValueError("Invalid grade thresholds")
     for values in config.get("profiles", {}).values():
         weights(values, KEYS)
+    roles = config.get("scored_roles", ["benchmark"])
+    if not roles or not set(roles) <= set(ROLES) or len(set(roles)) != len(roles):
+        raise ValueError("Scored roles must be distinct, known collection roles")
+    uptime = config.get("uptime", {})
+    if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
+        raise ValueError("Invalid uptime settings")
     return config
+
+
+def scored_roles(config):
+    """Collection roles whose buckets feed target scores (the benchmark metrics)."""
+    return set(config.get("scored_roles", ["benchmark"]))
+
+
+def uptime_settings(config):
+    return UPTIME | config.get("uptime", {})
+
+
+def events(path=None):
+    """Validated [events] thresholds of a methodology file, over the defaults."""
+    section = {}
+    if path is not None and Path(path).exists():
+        section = tomllib.loads(Path(path).read_text()).get("events", {})
+    if set(section) - set(EVENTS):
+        raise ValueError("Unknown event setting")
+    result = EVENTS | section
+    for key, value in result.items():
+        if key == "hosting_usage_types":
+            if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+                raise ValueError("Invalid hosting usage types")
+        elif (
+            type(value) not in (int, float)
+            or not math.isfinite(value)
+            or value < 0
+            or (type(EVENTS[key]) is int and type(value) is not int)
+        ):
+            raise ValueError(f"Invalid event setting {key}")
+    if result["latency_spike_ratio"] <= 1 or result["pulse_latency_ratio"] <= 1:
+        raise ValueError("Latency ratios must exceed one")
+    return result
 
 
 def load(path):
     config = tomllib.loads(Path(path).read_text())
     # JSON roundtrip rejects dates and nonfinite numbers in TOML configurations.
     config = json.loads(json.dumps(config, allow_nan=False))
+    # Detection thresholds are validated by events() and are not part of the methodology id.
+    config.pop("events", None)
     validate(config)
     for section in ("products", "targets"):
         for overrides in config.get(section, {}).values():

@@ -48,8 +48,12 @@ scale benchmark: `uv run --no-editable python scripts/benchmark.py`.
 All source changes are maintained locally; `scripts/test-remote.sh` uploads a
 dedicated copy to the Mac Mini and downloads evidence. See the HTML guide.
 
-Schema v4 stores each IP once and references it from product membership, history and
+Schema v5 stores each IP once and references it from product membership, history and
 versioned enrichment. Lifetime provider overlap is cached and deduplicated across products.
+Test profiles (`pool_stats`, `scope_stats`), bucket counters and latency histograms
+(`run_buckets`, as millisecond-gap/count arrays) are typed columns; only unknown fields use
+`extra`. The views `pool_details` and `scope_details` and the function `run_bucket_counters()`
+rebuild the original JSON, and every import verifies that the stored rows rebuild its summary.
 See `docs/index.html#database` for keys, readable views and rebuild/backup details.
 
 All 14 known enrichment fields use shared typed location/network records, including
@@ -58,9 +62,29 @@ Only unknown future fields use `extra_attributes`. Numeric internal run keys red
 storage; external UUIDs and portable artifacts stay unchanged. `storage.read_summary()`
 reconstructs full summaries without repeated bucket/histogram/configuration JSON.
 
-`db-init` verifies v4 and refuses older schemas. The local `scripts/rebuild_database.py`
-backs up, stages, verifies and swaps a rebuild from matching saved artifacts, retaining the
-previous database. See the HTML guide for its scope and prerequisites. Pool membership is
+Schema v6 adds the census/pulse tables: `runner_regions`, `countries` (daily UTC
+`census_time`), `targets` (per-target pulse interval, requests and concurrency), `nodes`,
+`test_batches`, `batch_runs` (live counters), `test_events`, `outages` (time a product was down
+in a country, from a stalled census or a pulse `down` until the next healthy run there),
+`job_runs`, `alerts` and `settings`. A census (`stop_rule` `unique_ratio`) that had successes and
+then none for `stall_seconds` (setting `census.stall_seconds`, default 600) stops as `stalled`;
+its summary carries `outage_started_at` (the last success) and its failures stay in the buckets. Runs gain typed outcome counters (`challenges`, `blocks`, `timeouts`,
+`proxy_errors`, `bytes_up`, `bytes_down`) per bucket and an optional `geo.jsonl.gz` breakdown
+stored in `run_geo_buckets` against the shared location/network ids. Artifacts without these
+keys still import and rebuild unchanged. `milf-framework db-seed --database-file
+.secrets/database.toml` upserts regions, countries and targets from `configs/regions.yaml`,
+`configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
+target schedules once set (`--reset-times` restores the staggered default census slots).
+
+`db-init` verifies v6 and refuses other schemas. `milf-framework db-migrate --database-file
+.secrets/database.toml` upgrades an unmodified v5 database, or an unmodified v4 database (and
+calculated v1 layer) through v5, in place, in one transaction that compares every rebuilt
+summary, scope, pool and bucket (and from v4 every cohort, breakdown and score) with its
+original JSON before committing. Locally, run
+`PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
+The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
+matching saved artifacts, retaining the previous database (it does not carry calculated builds).
+See the HTML guide for its scope and prerequisites. Pool membership is
 shared across performance settings; product lifetime summaries and detailed history remain
 separate. Measurements: `artifacts/storage-optimization.html`.
 
@@ -81,6 +105,29 @@ From the website root, `npm run build` exports the measured dataset and builds t
 `astro dev --background` serves it locally. `MEASUREMENTS_URL` defaults to `http://127.0.0.1:8081`.
 Refreshes use the same-origin `/api/measurements/v1/snapshots/current` endpoint.
 The development API helper is `python scripts/measurements_local.py start|status|stop`.
+Calculated schema v2 keeps cohorts, breakdown labels (`places`, `asn_labels`) and score
+components/reasons (`calculated_score_components`, `calculated_score_reasons`, `score_reasons`)
+as typed rows; `cohort_criteria`, `calculated_breakdown_details` and `calculated_score_details`
+rebuild the payload fragments. Snapshot payloads are kept for the current build, published builds
+and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
+Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
+success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
+city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
+wire bytes to every window. Census and pulse runs (those linked to a test batch) of a product
+form one `census_pulse` cohort; without a `run-role` they count as `pool_sampling` (census) and
+`monitor` (pulse). Uptime is outage time: 1 − downtime / (window × countries tested), with each
+country's outages merged and clipped to the window; `uptime.batches/up` keep the pulse-slot counts
+for reference (`[uptime]`). For these
+cohorts `minimum_coverage` (0.90) applies to pulse slots, not 5-minute buckets: the share of the
+product's pulse batches (excluding operator-skipped/killed batches and runs failed with
+`no_node`, `not_started` or `stale`) whose run finished `done` with at least one request.
+Snapshot payloads are `schema_version` 2: per product `census` (latest per country) and `outages`
+(latest 50 in 30 days), per window `breakdowns` and `uptime` (`value`, `downtime_s`, `countries`,
+`basis: "outage time"`, `batches`, `up`), plus top-level `events` (latest 200) and `traffic`.
+`detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
+methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
+and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
+`milf-framework report traffic --test census|pulse --database-file ...` prints GB per provider.
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
 alternative profiles use their own weights. No overall score is emitted for missing required inputs.
 The current run is explicitly a pool sample. Scoring thresholds and weights remain a draft.

@@ -39,10 +39,39 @@ def register(commands):
         elif name == "serve":
             p.add_argument("--host", default="127.0.0.1")
             p.add_argument("--port", type=int, default=8081)
+    report = commands.add_parser("report", help="Operator reports over census and pulse runs")
+    kinds = report.add_subparsers(dest="report", required=True)
+    traffic = kinds.add_parser("traffic", help="Wire GB per provider and test")
+    traffic.add_argument("--database-file", required=True)
+    traffic.add_argument("--test", choices=["census", "pulse"])
+    traffic.add_argument("--provider", help='"provider" or "provider/product"')
+    traffic.add_argument("--country", help="Two-letter country code")
+    traffic.add_argument("--region", help="Runner region slug, e.g. fra1")
+    traffic.add_argument("--from", dest="start", help="Batch slot from (ISO; UTC if no zone)")
+    traffic.add_argument("--to", dest="end", help="Batch slot until, exclusive")
+    traffic.add_argument("--json", action="store_true", help="Print JSON instead of a table")
 
 
 def dispatch(args):
     db = args.database_file
+    if args.command == "report":
+        from .. import traffic
+        from ..storage import connect
+        from .aggregate import iso
+
+        with connect(db) as conn:
+            conn.execute("SET TRANSACTION READ ONLY")
+            report = traffic.summary(
+                conn,
+                test=args.test,
+                provider=args.provider,
+                country=args.country,
+                region=args.region,
+                start=traffic.parse_time(args.start),
+                end=traffic.parse_time(args.end),
+            )
+        print(json.dumps(report, indent=2, default=iso) if args.json else traffic.table(report))
+        return 0
     if args.command == "calculate-init":
         result = store.initialize(db)
     elif args.command == "calculate":

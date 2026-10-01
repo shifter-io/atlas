@@ -1,4 +1,4 @@
-"""Logical invariants and read benchmarks for the controlled v3/v4 rebuild."""
+"""Logical invariants and read benchmarks for the controlled v3/v4/v5 rebuild."""
 
 import hashlib
 import json
@@ -23,7 +23,11 @@ def logical_snapshot(conn):
         f"FROM run_enrichments r JOIN test_runs t USING({key}) "
         "JOIN dbip_releases d USING(release_id) ORDER BY t.run_id,d.sha256",
         "releases": "SELECT sha256,metadata FROM dbip_releases ORDER BY sha256",
-        "scope_metrics": "SELECT p.provider,p.name,s.target,s.scope_hash,s.scope,s.metrics "
+        # v5 rebuilds the same scope and metrics JSON from typed columns.
+        "scope_metrics": "SELECT provider,product,target,scope_hash,scope,metrics "
+        "FROM scope_details ORDER BY provider,product,target,scope_hash"
+        if version >= 5
+        else "SELECT p.provider,p.name,s.target,s.scope_hash,s.scope,s.metrics "
         "FROM scope_stats s JOIN products p USING(product_id) "
         "ORDER BY p.provider,p.name,s.target,s.scope_hash",
         "overlap": "SELECT provider_a,provider_b,shared_ips FROM provider_overlap "

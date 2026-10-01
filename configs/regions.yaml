@@ -1,0 +1,9 @@
+mapping:
+  ".*syd1.*": [AU, NZ, AS, CK, FJ, FM, HM, KI, MH, NC, NF, NR, NU, PF, PG, PN, SB, TK, TO, TV, UM, VU, WF, WS, AQ, TF, BV]
+  ".*blr1.*": [AF, BD, BT, IN, LK, MV, NP, PK, AE, BH, IR, KW, OM, QA, SA, YE, KZ, KG, TJ, TM, UZ, IO, KM, MG, MU, RE, SC, SO, DJ, ER, ET, KE, TZ, UG, RW, BI, SD, SS, YT, MZ, MW]
+  ".*tor1.*": [CA, GL, PM]
+  ".*sgp1.*": [BN, CN, HK, ID, JP, KH, KP, KR, LA, MM, MO, MY, PH, SG, TH, TL, TW, VN, MN, GU, MP, PW, CC, CX]
+  ".*ams3.*": [NL, BE, LU, DK, NO, SE, FI, AX, EE, LV, LT, SJ]
+  ".*fra1.*": [DE, AT, CH, LI, CZ, SK, PL, HU, SI, HR, BA, RS, ME, MK, AL, BG, RO, MD, UA, BY, RU, IT, SM, VA, MC, MT, CY, GR, TR, AM, AZ, GE, IQ, IL, JO, LB, PS, SY, EG, LY, TN, DZ, AO, BW, CD, CF, CG, GA, GQ, LS, NA, SZ, ZA, ZM, ZW, TD, CM, ST]
+  ".*lon1.*": [GB, GG, IM, JE, IE, IS, FO, FR, AD, ES, GI, PT, MA, EH, MR, SN, GM, GW, GN, SL, LR, CI, GH, TG, BJ, BF, ML, NE, NG, CV, SH]
+  ".*nyc3.*": [US, MX, BM, BS, BB, BZ, CR, CU, CW, DM, DO, GD, GP, GT, HN, HT, JM, KN, KY, LC, MQ, MS, NI, PA, PR, SV, SX, TC, TT, VC, VG, VI, AW, BQ, AG, AI, AR, BO, BR, CL, CO, EC, FK, GF, GY, PE, PY, SR, UY, VE, BL, MF, GS]

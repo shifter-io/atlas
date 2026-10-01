@@ -9,6 +9,20 @@ from typing import Any
 
 from .models import Outcome
 
+# LocalEnricher.lookup() fields, split the way storage keys them:
+# enrichment_locations and enrichment_networks.
+LOCATION_FIELDS = (
+    "country_code", "country", "region_code", "region", "city", "latitude", "longitude",
+)
+NETWORK_FIELDS = (
+    "isp", "organization", "asn", "asn_organization", "connection_type", "usage_type",
+)
+# Verdict -> counter attribute, for the non-ok verdicts that have one.
+VERDICT_COUNTERS = {
+    "challenge": "challenges", "block": "blocks", "timeout": "timeouts",
+    "proxy_error": "proxy_errors",
+}
+
 
 def iso(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="microseconds")
@@ -55,23 +69,52 @@ class Counters:
     statuses: Counter[str] = field(default_factory=Counter)
     body_bytes: int = 0
     histogram: Histogram = field(default_factory=Histogram)
+    challenges: int = 0
+    blocks: int = 0
+    timeouts: int = 0
+    proxy_errors: int = 0
+    bytes_up: int = 0
+    bytes_down: int = 0
 
     def add(self, result: Outcome) -> None:
         self.completed += 1
         self.body_bytes += result.response_body_bytes
+        self.bytes_up += result.bytes_up
+        self.bytes_down += result.bytes_down
         if result.status is not None:
             self.statuses[str(result.status)] += 1
         if result.error:
             self.errors[result.error] += 1
+            counter = VERDICT_COUNTERS.get(result.verdict or "")
+            if counter:
+                setattr(self, counter, getattr(self, counter) + 1)
         else:
             self.successes += 1
             self.histogram.add(result.latency_ms)
+
+    def verdicts(self) -> dict[str, int]:
+        """The six typed counters shared by run totals, buckets and progress."""
+        return {
+            "challenges": self.challenges, "blocks": self.blocks, "timeouts": self.timeouts,
+            "proxy_errors": self.proxy_errors, "bytes_up": self.bytes_up,
+            "bytes_down": self.bytes_down,
+        }
 
     def export(self) -> dict[str, Any]:
         return {
             "completed": self.completed, "successes": self.successes,
             "errors": dict(self.errors), "status_codes": dict(self.statuses),
             "response_body_bytes": self.body_bytes,
+            "latency_histogram": self.histogram.export(),
+            **self.verdicts(),
+        }
+
+    def export_geo(self) -> dict[str, Any]:
+        """The run_geo_buckets columns (no proxy_errors: those never have an exit IP)."""
+        return {
+            "completed": self.completed, "successes": self.successes,
+            "challenges": self.challenges, "blocks": self.blocks, "timeouts": self.timeouts,
+            "bytes_up": self.bytes_up, "bytes_down": self.bytes_down,
             "latency_histogram": self.histogram.export(),
         }
 

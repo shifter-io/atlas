@@ -3,29 +3,62 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from itertools import combinations
 from pathlib import Path
 
-from psycopg.rows import dict_row
+from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
-from ..storage import connect
+from .. import detect, traffic
+from ..storage import column, connect
 from ..targets import registry
-from .aggregate import UNAVAILABLE, metrics, pool, product_scores, series, target_score
-from .policy import digest, effective, load
-from .store import jsonable, validate_payload
+from .aggregate import (
+    BREAKDOWNS,
+    NETWORK,
+    PLACE,
+    UNAVAILABLE,
+    breakdowns,
+    metrics,
+    outage_list,
+    outage_uptime,
+    pool,
+    pool_lists,
+    product_scores,
+    series,
+    slot_coverage,
+    target_score,
+    uptime,
+)
+from .policy import digest, effective, load, scored_roles, uptime_settings
+from .store import jsonable, prune, validate_payload
 
+SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()
         for name in ("calculator.py", "aggregate.py", "policy.py")
     )
+    + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic))
 ).hexdigest()
+# Census and pulse runs (linked to a test batch) of a product share one cohort, whatever the
+# country, target, node or concurrency: every provider runs them at the same moment, so they are
+# comparable as a whole, and the breakdowns, uptime and census summary span all countries.
+SCHEDULED = "census_pulse"
+# A run's role, when no calculation_roles row assigns one, follows its batch kind.
+BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor"}
+EVENTS_IN_SNAPSHOT = 200
+# batch_runs.error of runs the orchestrator failed for its own reasons (no node in the region,
+# never started, went silent); they do not count against a product's coverage.
+INFRA_ERRORS = ("no_node", "not_started", "stale")
 
 
-def cohort_for(scope, kind):
+def cohort_for(scope, kind, scheduled=False):
+    if scheduled:
+        criteria = dict.fromkeys(CRITERIA) | {"kind": kind, "schedule": SCHEDULED}
+        return digest(criteria)[:20], criteria
     c = scope["config"]
     adapter = c.get("provider_config") or {}
     # Exclude provider implementation credentials/gateways; include all semantic parameters.
@@ -97,17 +130,21 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         conn.execute("SELECT pg_advisory_xact_lock(817452902)")
         runs = conn.execute(
             "SELECT r.run_key,r.run_id::text,r.summary_sha256,r.summary,r.started_at,"
-            "r.finished_at,s.scope,p.product_id,p.provider,p.name,"
-            "coalesce(cr.role,'exploratory') AS role FROM test_runs r "
-            "JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id) "
+            "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
+            "b.kind AS test,coalesce(cr.role,CASE b.kind "
+            + " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in BATCH_ROLES.items())
+            + " END,'exploratory') AS role FROM test_runs r "
+            "JOIN scope_details s USING(scope_id) JOIN products p ON p.product_id=s.product_id "
+            "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
             "LEFT JOIN calculation_roles cr USING(run_key) ORDER BY r.run_key"
         ).fetchall()
         release = conn.execute(
             "SELECT release_id,sha256,metadata FROM dbip_releases ORDER BY release_id DESC LIMIT 1"
         ).fetchone()
         buckets = conn.execute(
-            "SELECT * FROM run_buckets WHERE bucket_start>=%s AND bucket_start<%s "
-            "ORDER BY bucket_start,run_key",
+            "SELECT bucket_start,run_key,run_bucket_counters(b) AS counters,"
+            "outcome_counters AS outcome FROM run_buckets b "
+            "WHERE bucket_start>=%s AND bucket_start<%s ORDER BY bucket_start,run_key",
             (start, as_of),
         ).fetchall()
         observations = conn.execute(
@@ -125,6 +162,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         evidence_rows = conn.execute(
             "SELECT * FROM metric_evidence ORDER BY evidence_id"
         ).fetchall()
+        scheduled = scheduled_inputs(conn, as_of)
         previous_row = conn.execute(
             "SELECT payload FROM calculated_snapshots JOIN current_calculation USING(build_id)"
         ).fetchone()
@@ -138,6 +176,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                     "evidence": evidence_rows,
                     "buckets": buckets,
                     "observations": observations,
+                    "scheduled": scheduled,
                     "implementation_id": IMPLEMENTATION_ID,
                 }
             )
@@ -151,12 +190,17 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             "WHERE methodology_id=%s AND as_of=%s AND input_hash=%s",
             (method_id, as_of, fingerprint),
         ).fetchone()
+        payload = None
         if existing:
-            payload = conn.execute(
+            row = conn.execute(
                 "SELECT payload FROM calculated_snapshots WHERE build_id=%s",
                 (existing["build_id"],),
-            ).fetchone()["payload"]
-        else:
+            ).fetchone()
+            payload = row and row["payload"]
+            if payload is None:
+                # A pruned draft is recalculated as a new, and therefore newest, build.
+                discard(conn, existing["build_id"])
+        if payload is None:
             build_id = conn.execute(
                 "INSERT INTO calculation_builds(methodology_id,as_of,input_hash) "
                 "VALUES (%s,%s,%s) RETURNING build_id",
@@ -173,6 +217,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 build_id,
                 release,
                 previous,
+                **scheduled,
             )
             payload = jsonable(payload)
             validate_payload(payload)
@@ -189,7 +234,167 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 "DO UPDATE SET build_id=excluded.build_id",
                 (int(payload["snapshot_id"]),),
             )
+            conn.execute(
+                "UPDATE calculation_builds SET published=true WHERE build_id=%s",
+                (int(payload["snapshot_id"]),),
+            )
+        prune(conn)
         return payload
+
+
+def scheduled_inputs(conn, as_of):
+    """The census/pulse history a v2 payload adds, read in the calculation's snapshot.
+
+    geo: run_geo_buckets of the 30-day window summed per product group (scope_id for runs
+    outside a batch, NULL for census/pulse runs), smallest window (hours), location, network and,
+    for requests without an exit location, the country the run requested. pulses: finished
+    pulse batch runs (uptime). census: the latest finished census per product and country.
+    outages: the outages overlapping the 30-day window, as known at the cutoff. tested: per
+    product and country, the end of its latest started batch run (uptime's denominator).
+    events: the newest test_events before the cutoff. traffic: wire bytes per test kind.
+    """
+    start = as_of - timedelta(hours=720)
+    bounds = {
+        "start": start,
+        "end": as_of,
+        "d1": as_of - timedelta(hours=24),
+        "d7": as_of - timedelta(hours=168),
+    }
+    keys = (
+        "CASE WHEN r.batch_id IS NULL THEN r.scope_id END AS scope_id,s.product_id,"
+        "CASE WHEN g.bucket_start>=%(d1)s THEN 24 WHEN g.bucket_start>=%(d7)s THEN 168 "
+        "ELSE 720 END AS hours,g.location_id,g.network_id,CASE WHEN l.country_code IS NULL "
+        "THEN coalesce(b.country_code,upper(ps.requested_country)) END AS fallback"
+    )
+    source = (
+        "FROM run_geo_buckets g JOIN test_runs r USING(run_key) "
+        "JOIN scope_stats s ON s.scope_id=r.scope_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
+        "JOIN enrichment_locations l ON l.location_id=g.location_id "
+        "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
+    )
+    window = "WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
+    totals = conn.execute(
+        f"SELECT {keys},sum(g.completed)::bigint AS completed,"
+        "sum(g.successes)::bigint AS successes,sum(g.challenges)::bigint AS challenges,"
+        f"sum(g.blocks)::bigint AS blocks {source}{window}"
+        "GROUP BY 1,2,3,4,5,6 ORDER BY 1,2,3,4,5,6",
+        bounds,
+    ).fetchall()
+    histograms = defaultdict(list)
+    for row in conn.execute(
+        f"SELECT {keys},h.ms,sum(h.n)::bigint AS n {source}CROSS JOIN LATERAL "
+        f"histogram(g.histogram_steps,g.histogram_counts::bigint[]) h {window}"
+        "GROUP BY 1,2,3,4,5,6,7 ORDER BY 1,2,3,4,5,6,7",
+        bounds,
+    ):
+        key = tuple(row[k] for k in ("scope_id", "product_id", "hours", "location_id"))
+        histograms[key + (row["network_id"], row["fallback"])].append([row["ms"], row["n"]])
+    locations = {
+        r["location_id"]: tuple(r[f] for f in PLACE)
+        for r in conn.execute(
+            "SELECT * FROM enrichment_locations WHERE location_id=ANY(%s)",
+            (sorted({t["location_id"] for t in totals}),),
+        )
+    }
+    networks = {
+        r["network_id"]: (r["asn"], r["asn_organization"], r["usage_type"])
+        for r in conn.execute(
+            "SELECT * FROM enrichment_networks WHERE network_id=ANY(%s)",
+            (sorted({t["network_id"] for t in totals}),),
+        )
+    }
+    names = {
+        r["country_code"]: r["name"]
+        for r in conn.execute("SELECT country_code,name FROM countries")
+    }
+    geo = []
+    for t in totals:
+        key = tuple(
+            t[k]
+            for k in ("scope_id", "product_id", "hours", "location_id", "network_id", "fallback")
+        )
+        code = t["fallback"]
+        geo.append(
+            {
+                "scope_id": t["scope_id"],
+                "product_id": t["product_id"],
+                "hours": t["hours"],
+                "location": locations[t["location_id"]],
+                "network": networks[t["network_id"]],
+                "fallback": (code, names.get(code))
+                if code and re.fullmatch("[A-Z]{2}", code)
+                else None,
+                **{k: t[k] for k in ("completed", "successes", "challenges", "blocks")},
+                "histogram": histograms[key],
+            }
+        )
+    # Pulse slots a product was due in and that ended before the cutoff: done runs, and runs
+    # that failed for a reason of the provider's. Operator-skipped or killed batches and runs
+    # our infrastructure lost (INFRA_ERRORS) are not slots the product could fill.
+    pulses = conn.execute(
+        "SELECT br.product_id,b.target_id,b.scheduled_for,br.status,br.requests,br.successes "
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "WHERE b.kind='pulse' AND b.status NOT IN ('skipped','killed') "
+        "AND b.scheduled_for>=%s AND b.scheduled_for<%s AND br.finished_at<%s "
+        "AND (br.status='done' OR (br.status='failed' AND coalesce(br.error,'')<>ALL(%s))) "
+        "ORDER BY 3,1,2",
+        (start, as_of, as_of, list(INFRA_ERRORS)),
+    ).fetchall()
+    census = []
+    for r in conn.execute(
+        "SELECT DISTINCT ON (br.product_id,b.country_code) br.product_id,"
+        "b.country_code AS country,rr.slug AS region,b.target_id AS target,br.started_at,"
+        "br.finished_at,br.requests,br.successes,br.unique_ips,br.stop_reason,"
+        "CASE WHEN br.run_key IS NOT NULL THEN (SELECT count(DISTINCT (l.country_code,"
+        "l.region_code,l.region,l.city)) FROM run_geo_buckets g JOIN enrichment_locations l "
+        "USING(location_id) WHERE g.run_key=br.run_key AND g.successes>0 AND l.city IS NOT NULL) "
+        "END AS cities,CASE WHEN br.run_key IS NOT NULL THEN (SELECT count(DISTINCT n.asn) "
+        "FROM run_geo_buckets g JOIN enrichment_networks n USING(network_id) "
+        "WHERE g.run_key=br.run_key AND g.successes>0) END AS asns "
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "JOIN runner_regions rr ON rr.region_id=b.region_id "
+        "WHERE b.kind='census' AND br.status='done' AND br.finished_at<%s "
+        "ORDER BY br.product_id,b.country_code,br.finished_at DESC,b.batch_id DESC",
+        (as_of,),
+    ):
+        started = r.pop("started_at")
+        r["duration_s"] = (
+            (r["finished_at"] - started).total_seconds() if started and r["finished_at"] else None
+        )
+        census.append(r)
+    # An outage closed after the cutoff was still open as of it.
+    outages = conn.execute(
+        "SELECT o.outage_id,o.product_id,o.country_code AS country,r.slug AS region,o.source,"
+        "o.started_at,CASE WHEN o.ended_at<=%(end)s THEN o.ended_at END AS ended_at "
+        "FROM outages o LEFT JOIN runner_regions r ON r.region_id=o.region_id "
+        "WHERE o.started_at<%(end)s AND (o.ended_at IS NULL OR o.ended_at>%(start)s) "
+        "ORDER BY o.product_id,o.started_at,o.outage_id",
+        {"start": start, "end": as_of},
+    ).fetchall()
+    tested = conn.execute(
+        "SELECT br.product_id,b.country_code AS country,"
+        "max(least(coalesce(br.finished_at,%(end)s),%(end)s)) AS last "
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "WHERE br.started_at IS NOT NULL AND br.started_at<%(end)s "
+        "AND coalesce(br.finished_at,%(end)s)>=%(start)s GROUP BY 1,2 ORDER BY 1,2",
+        {"start": start, "end": as_of},
+    ).fetchall()
+    report = traffic.summary(conn, start=start, end=as_of, finished_before=as_of)
+    return {
+        "geo": geo,
+        "pulses": pulses,
+        "census": census,
+        "outages": outages,
+        "tested": tested,
+        "events": detect.list_events(conn, before=as_of, limit=EVENTS_IN_SNAPSHOT),
+        "traffic": {
+            "period": {"start": start, "end": as_of},
+            "by_test": {
+                test: {k: t[k] for k in ("runs", "requests", "bytes_up", "bytes_down")}
+                for test, t in report["by_test"].items()
+            },
+        },
+    }
 
 
 def build(
@@ -203,17 +408,33 @@ def build(
     build_id,
     release,
     previous,
+    *,
+    geo=(),
+    pulses=(),
+    census=(),
+    outages=(),
+    tested=(),
+    events=(),
+    traffic=None,
 ):
     groups = {}
     run_map = {}
     bucket_groups = defaultdict(list)
     obs_groups = defaultdict(list)
+    geo_groups = defaultdict(list)
+    scheduled_groups = {}
+    scope_groups = {}
     for r in runs:
         cfg = effective(config, r["provider"], r["name"])
-        cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]))
+        linked = r.get("batch_id") is not None
+        cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
         r["group"] = key
         run_map[r["run_key"]] = r
+        if linked:
+            scheduled_groups[r["product_id"]] = key
+        elif "scope_id" in r:
+            scope_groups[r["scope_id"]] = key
         groups.setdefault(
             key,
             {
@@ -255,6 +476,28 @@ def build(
         obs_groups[r["group"]].append(
             o | {"requested_country": r["scope"]["config"].get("requested_country")}
         )
+    for g in geo:
+        key = (
+            scheduled_groups.get(g["product_id"])
+            if g["scope_id"] is None
+            else scope_groups.get(g["scope_id"])
+        )
+        if key:
+            geo_groups[key].append(g)
+    pulse_groups = defaultdict(list)
+    for b in pulses:
+        pulse_groups[b["product_id"]].append(b)
+    outage_groups = defaultdict(list)
+    for o in outages:
+        outage_groups[o["product_id"]].append(o)
+    tested_groups = defaultdict(dict)
+    for t in tested:
+        tested_groups[t["product_id"]][t["country"].strip()] = t["last"]
+    census_groups = defaultdict(list)
+    for c in census:
+        census_groups[c["product_id"]].append({k: v for k, v in c.items() if k != "product_id"})
+    roles = scored_roles(config)
+    threshold = uptime_settings(config)["min_successes"]
     prev_products = (
         {p["id"]: p for p in previous["products"]}
         if previous and datetime.fromisoformat(previous["as_of"]) <= as_of
@@ -273,15 +516,38 @@ def build(
         cfg = effective(config, p["provider"], p["product"])
         raw = bucket_groups[key]
         obs = obs_groups[key]
+        p["census"] = sorted(census_groups[p["product_id"]], key=lambda c: c["country"])
+        # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
+        scheduled = scheduled_groups.get(p["product_id"]) == key
+        batches = pulse_groups[p["product_id"]] if scheduled else []
+        down = (
+            [o | {"country": o["country"].strip()} for o in outage_groups[p["product_id"]]]
+            if scheduled
+            else []
+        )
+        p["outages"] = outage_list(down, as_of - timedelta(hours=720), as_of)
         for hours in config["windows"]:
             label = {24: "24h", 168: "7d", 720: "30d"}[hours]
             since = as_of - timedelta(hours=hours)
             rows = [r for r in raw if since <= r["bucket_start"] < as_of]
             seen = [o for o in obs if since <= o["bucket_start"] < as_of]
-            benchmarks = [r for r in rows if r["role"] == "benchmark"]
+            benchmarks = [r for r in rows if r["role"] in roles]
             m = metrics(rows, hours)
             bm = metrics(benchmarks, hours)
             ps, ips = pool(seen, since, hours)
+            # Pulse-slot counts stay for reference; the published value is outage time.
+            up = uptime(batches, since, as_of, threshold)
+            up |= outage_uptime(
+                down, tested_groups[p["product_id"]] if scheduled else {}, since, as_of
+            )
+            m["uptime"] = up["value"]
+            if scheduled:
+                # Census/pulse cohorts: coverage is the share of pulse slots filled, not of
+                # 5-minute buckets (pulses run every 30 minutes, all countries at one tick).
+                for target_metrics in (m, bm):
+                    slot_coverage(target_metrics, batches, since, as_of)
+            dimensions = breakdowns(ips, [g for g in geo_groups[key] if g["hours"] <= hours])
+            ps |= pool_lists(dimensions)
             old = prev_products.get(p["id"], {}).get("windows", {}).get(label, {})
             ev = [
                 e
@@ -297,7 +563,16 @@ def build(
             ids = set(cfg["required_targets"]) | {r["target"] for r in rows}
             for target in sorted(ids):
                 tm = metrics([r for r in rows if r["target"] == target], hours)
+                # Outages are per product and country, so a target keeps its pulse-slot share.
+                tm["uptime"] = uptime(
+                    [b for b in batches if b["target_id"] == target], since, as_of, threshold
+                )["value"]
+                tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
                 tb = metrics([r for r in benchmarks if r["target"] == target], hours)
+                if scheduled:
+                    slots = [b for b in batches if b["target_id"] == target]
+                    for target_metrics in (tm, tb):
+                        slot_coverage(target_metrics, slots, since, as_of)
                 tc = effective(config, p["provider"], p["product"], target)
                 score = target_score(tb, tc, benchmark=bool(tb["completed"]))
                 retain(
@@ -314,7 +589,7 @@ def build(
                     "score": score,
                     "readiness": "measured" if tm["completed"] else "unavailable",
                 }
-            scores = product_scores(targets, ps, values, cfg, p["kind"])
+            scores = product_scores(targets, ps, values, cfg, p["kind"], up)
             for profile, score in scores.items():
                 retain(
                     score,
@@ -337,6 +612,8 @@ def build(
                 r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since
             ]
             prev_m = metrics(previous_rows, hours)
+            if scheduled:
+                slot_coverage(prev_m, batches, since - timedelta(hours=hours), since)
             w = {
                 "period": {"start": since, "end": as_of, "hours": hours, "boundary": "[start,end)"},
                 "readiness": (
@@ -349,6 +626,8 @@ def build(
                 "metrics": m,
                 "benchmark": bm,
                 "pool": ps,
+                "uptime": up,
+                "breakdowns": dimensions,
                 "targets": targets,
                 "scores": scores,
                 "evidence": values,
@@ -453,7 +732,7 @@ def build(
                 ]
             )
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "implementation_id": IMPLEMENTATION_ID,
         "snapshot_id": str(build_id),
         "as_of": as_of,
@@ -487,6 +766,16 @@ def build(
             }
             for t in registry.all()
         ],
+        "events": list(events),
+        "traffic": traffic
+        or {
+            "period": {"start": as_of - timedelta(hours=720), "end": as_of},
+            "by_test": {
+                test: {"runs": 0, "requests": 0, "bytes_up": 0, "bytes_down": 0}
+                for test in ("census", "pulse")
+            },
+        },
+        # Census and pulse runs are summarized by census, uptime, events and traffic instead.
         "runs": [
             {
                 "run_id": r["run_id"],
@@ -503,6 +792,7 @@ def build(
                 },
             }
             for r in runs
+            if r.get("batch_id") is None
         ],
     }
 
@@ -518,8 +808,133 @@ def rank(scores):
         s["rank"] = 1 + sum(other["score"] > s["score"] for other in eligible)
 
 
+CRITERIA = {
+    "kind": "text",
+    "country": "text",
+    "runner_location": "text",
+    "concurrency": "integer",
+    "timeout_seconds": "number",
+    "rate": "number",
+    "proxy_protocol": "text",
+    "session_policy": "text",
+    "ttl_seconds": "integer",
+    "parameters": "json",
+    "flags": "json",
+    "target_variant": "json",
+}
+# Label fields of each breakdown: its place columns and whether it names an ASN.
+FIELDS = {
+    "country": (PLACE[:2], False),
+    "region": (PLACE[:4], False),
+    "city": (PLACE, False),
+    "asn": ((), True),
+    "country_asn": (PLACE[:2], True),
+}
+COUNTERS = ("ips", "observations", "completed", "successes", "success_rate", "challenges", "blocks")
+LATENCY = ("p50", "p90", "p99")
+LABELS = {
+    "places": ("place_id", PLACE, ("text",) * 5),
+    "asn_labels": ("asn_label_id", ("asn", "name", "usage_type"), ("bigint", "text", "text")),
+    "score_reasons": ("reason_id", ("reason",), ("text",)),
+}
+DERIVED_TABLES = (
+    "calculated_score_reasons",
+    "calculated_score_components",
+    "calculated_scores",
+    "calculated_breakdowns",
+    "calculated_series",
+)
+
+
+def discard(conn, build_id):
+    for table in DERIVED_TABLES:
+        conn.execute(
+            f"DELETE FROM {table} WHERE result_id IN "
+            "(SELECT result_id FROM calculated_windows WHERE build_id=%s)",
+            (build_id,),
+        )
+    for table in ("calculated_windows", "calculated_overlaps", "calculation_builds"):
+        conn.execute(f"DELETE FROM {table} WHERE build_id=%s", (build_id,))
+
+
+def labels(conn, table, wanted):
+    """Map label tuples to shared ids, inserting only the missing ones."""
+    key, columns, types = LABELS[table]
+    cur = conn.cursor(row_factory=tuple_row)
+    query = f"SELECT {key},{','.join(columns)} FROM {table} WHERE {columns[0]}=ANY(%s)"
+    firsts = sorted({w[0] for w in wanted})
+    found = {tuple(row[1:]): row[0] for row in cur.execute(query, (firsts,))}
+    missing = sorted(set(wanted) - set(found), key=str)
+    if missing:
+        cur.execute(
+            f"INSERT INTO {table}({','.join(columns)}) SELECT * FROM unnest("
+            + ",".join(f"%s::{t}[]" for t in types)
+            + ") ON CONFLICT DO NOTHING",
+            [list(values) for values in zip(*missing, strict=True)],
+        )
+        found = {tuple(row[1:]): row[0] for row in cur.execute(query, (firsts,))}
+    return found
+
+
+def store_cohort(conn, cohort, criteria):
+    extra = {k: v for k, v in criteria.items() if k not in CRITERIA}
+    values = []
+    for key, kind in CRITERIA.items():
+        try:
+            values.append(column(kind, criteria[key]))
+        except (KeyError, TypeError):
+            values.append(None)
+            if key in criteria:
+                extra[key] = criteria[key]
+    conn.execute(
+        "INSERT INTO cohorts(cohort,"
+        + ",".join(CRITERIA)
+        + ",extra) VALUES ("
+        + ",".join(["%s"] * (len(CRITERIA) + 2))
+        + ") ON CONFLICT DO NOTHING",
+        (cohort, *values, Jsonb(extra) if extra else None),
+    )
+    rebuilt = conn.execute(
+        "SELECT criteria FROM cohort_criteria WHERE cohort=%s", (cohort,)
+    ).fetchone()["criteria"]
+    if digest(rebuilt) != digest(criteria):
+        raise ValueError("Cohort criteria cannot be stored losslessly")
+
+
+def split_reasons(score, product):
+    """Reasons a product score derives from its weighted, not-ready components, plus the rest."""
+    if set(score["weights"]) != set(score["components"]):
+        raise ValueError("Score weights and components differ")
+    derived = [
+        c["reason"] or f"{k} not ready"
+        for k, c in score["components"].items()
+        if product and score["weights"][k] > 0 and c["state"] != "ready"
+    ]
+    reasons, size = score["reasons"], len(derived)
+    start = next(
+        (i for i in range(len(reasons) - size + 1) if reasons[i : i + size] == derived), None
+    )
+    if start is None:
+        raise ValueError("Score reasons cannot be rebuilt from their components")
+    return [(i - start, r) for i, r in enumerate(reasons[:start])] + [
+        (i, r) for i, r in enumerate(reasons[start + size :], 1)
+    ]
+
+
 def persist(conn, payload):
     build_id = int(payload["snapshot_id"])
+    for p in payload["products"]:
+        store_cohort(conn, p["cohort"], p["criteria"])
+    texts = set()  # derived reasons are rebuilt from components, never stored
+    for p in payload["products"]:
+        for w in p["windows"].values():
+            for target, score in [("", s) for s in w["scores"].values()] + [
+                (t, v["score"]) for t, v in w["targets"].items()
+            ]:
+                texts.update(c["reason"] for c in score["components"].values() if c["reason"])
+                texts.update(r for _, r in split_reasons(score, not target))
+    reason_ids = {k[0]: v for k, v in labels(conn, "score_reasons", {(t,) for t in texts}).items()}
+    breakdowns = []
     for p in payload["products"]:
         for w in p["windows"].values():
             for target, m, scores in [
@@ -532,8 +947,9 @@ def persist(conn, payload):
                     "completed,successes,errors,body_bytes,success_rate,timeout_rate,"
                     "p50,p90,p95,p99,unique_ips,new_ips,"
                     "recurring_share,countries,regions,cities,asns,"
-                    "coverage,last_observed,metadata) "
-                    "VALUES (" + ",".join(["%s"] * 25) + ") RETURNING result_id",
+                    "coverage,last_observed,readiness,challenge_rate,block_rate,uptime,"
+                    "bytes_up,bytes_down) "
+                    "VALUES (" + ",".join(["%s"] * 30) + ") RETURNING result_id",
                     (
                         build_id,
                         p["product_id"],
@@ -566,12 +982,25 @@ def persist(conn, payload):
                         ],
                         m["coverage"],
                         m["last_observed"],
-                        Jsonb({"criteria": p["criteria"], "readiness": w["readiness"]}),
+                        w["readiness"],
+                        *[
+                            m[k]
+                            for k in (
+                                "challenge_rate",
+                                "block_rate",
+                                "uptime",
+                                "bytes_up",
+                                "bytes_down",
+                            )
+                        ],
                     ),
                 ).fetchone()["result_id"]
                 for profile, s in scores.items():
+                    explicit = split_reasons(s, not target)
                     conn.execute(
-                        "INSERT INTO calculated_scores VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "INSERT INTO calculated_scores(result_id,profile,score,grade,rank,"
+                        "previous_rank,state,scored_at,valid_until) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (
                             result,
                             profile,
@@ -587,30 +1016,43 @@ def persist(conn, payload):
                                     "valid_until",
                                 )
                             ],
-                            Jsonb(s["components"]),
-                            Jsonb(s["reasons"]),
                         ),
                     )
+                    with conn.cursor() as cur:
+                        cur.executemany(
+                            "INSERT INTO calculated_score_components(result_id,profile,component,"
+                            "position,state,weight,value,inputs,reason_id) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            [
+                                (
+                                    result,
+                                    profile,
+                                    k,
+                                    i,
+                                    c["state"],
+                                    column("number", s["weights"][k]),
+                                    column("number", c["value"]),
+                                    column("json", c["inputs"]),
+                                    reason_ids.get(c["reason"]),
+                                )
+                                for i, (k, c) in enumerate(s["components"].items())
+                            ],
+                        )
+                        cur.executemany(
+                            "INSERT INTO calculated_score_reasons VALUES (%s,%s,%s,%s)",
+                            [(result, profile, i, reason_ids[r]) for i, r in explicit],
+                        )
                 if target:
                     continue
-                for dimension, rows in (
-                    ("geography", ps["geo"]),
-                    ("country", ps["countries_breakdown"]),
-                    ("asn", ps["asns_breakdown"]),
-                ):
-                    for row in rows:
-                        labels = {k: v for k, v in row.items() if k not in ("ips", "observations")}
-                        conn.execute(
-                            "INSERT INTO calculated_breakdowns VALUES (%s,%s,%s,%s,%s,%s)",
-                            (
-                                result,
-                                dimension,
-                                digest(labels),
-                                row["ips"],
-                                row["observations"],
-                                Jsonb(labels),
-                            ),
-                        )
+                for name, code in BREAKDOWNS.items():
+                    places, named = FIELDS[name]
+                    for position, row in enumerate(w["breakdowns"][name]):
+                        label = set(row) - set(COUNTERS) - set(LATENCY)
+                        if label != set(places) | (set(NETWORK) if named else set()):
+                            raise ValueError("Unexpected breakdown label")
+                        place = tuple(row.get(f) for f in PLACE) if places else None
+                        network = tuple(row[f] for f in NETWORK) if named else None
+                        breakdowns.append((result, code, position, place, network, row))
                 for row in w["series"]:
                     conn.execute(
                         "INSERT INTO calculated_series VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -623,6 +1065,24 @@ def persist(conn, payload):
                             row["unique_ips"],
                         ),
                     )
+    places = labels(conn, "places", {b[3] for b in breakdowns if b[3]})
+    networks = labels(conn, "asn_labels", {b[4] for b in breakdowns if b[4]})
+    with conn.cursor().copy(
+        "COPY calculated_breakdowns(result_id,dimension,position,place_id,asn_label_id,"
+        "ips,observations,completed,successes,challenges,blocks,p50,p90,p99) FROM STDIN"
+    ) as copy:
+        for result, code, position, place, network, row in breakdowns:
+            copy.write_row(
+                (
+                    result,
+                    code,
+                    position,
+                    places[place] if place else None,
+                    networks[network] if network else None,
+                    *[row[k] for k in ("ips", "observations", "completed", "successes")],
+                    *[row[k] for k in ("challenges", "blocks", *LATENCY)],
+                )
+            )
     for o in payload["overlap"]:
         a, b = o["product_a"], o["product_b"]
         na, nb = o["ips_a"], o["ips_b"]

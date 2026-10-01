@@ -6,9 +6,13 @@ import gzip
 import hashlib
 import ipaddress
 import json
+import math
 import re
+import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from itertools import accumulate
 from pathlib import Path
 
 import psycopg
@@ -18,7 +22,55 @@ from psycopg.types.json import Jsonb
 from .providers.credentials import read_credentials
 from .stats import Histogram
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
+# Only an unmodified v4 or v5 schema (these checksums) is migrated in place; see migrate().
+V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
+V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
+PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
+# Run-length settings stay out of the scope (and pool) definition; they are kept per run in
+# config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
+# and a pulse of the same product, target and country therefore share one pool.
+RUN_LENGTH = ("requests", "target_url", "stop_rule", "min_sample", "stall_seconds")
+BUCKET_KEYS = (
+    "bucket_start",
+    "completed",
+    "successes",
+    "response_body_bytes",
+    "errors",
+    "status_codes",
+    "latency_histogram",
+)
+# Request outcomes and wire bytes (v6 artifacts), per run, bucket and geography bucket.
+OUTCOME_KEYS = ("challenges", "blocks", "timeouts", "proxy_errors", "bytes_up", "bytes_down")
+GEO_COUNTERS = (
+    "completed",
+    "successes",
+    "challenges",
+    "blocks",
+    "timeouts",
+    "bytes_up",
+    "bytes_down",
+)
+GEO_KEYS = {"bucket_start", "location", "network", "latency_histogram", *GEO_COUNTERS}
+LOCATION_FIELDS = (
+    "country_code",
+    "country",
+    "region_code",
+    "region",
+    "city",
+    "latitude",
+    "longitude",
+)
+NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_type", "usage_type")
+ADAPTER = {
+    "adapter": ("adapter", "text"),
+    "version": ("adapter_version", "text"),
+    "pool": ("account_pool", "text"),
+    "parameters": ("parameters", "json"),
+    "session_policy": ("session_policy", "text"),
+    "effective_ttl_seconds": ("ttl_seconds", "integer"),
+    "extra_flags": ("extra_flags", "json"),
+}
 
 ENRICHMENT_FIELDS = {
     "matched": "boolean",
@@ -45,15 +97,21 @@ def connect(credentials_file):
     return psycopg.connect(**credentials, connect_timeout=5)
 
 
-def initialize(credentials_file):
+def _schema():
     schema = Path(__file__).with_name("schema.sql").read_text()
-    checksum = hashlib.sha256(schema.encode()).hexdigest()
+    return schema, hashlib.sha256(schema.encode()).hexdigest()
+
+
+def initialize(credentials_file):
+    schema, checksum = _schema()
     with connect(credentials_file) as conn:
         conn.execute("SELECT pg_advisory_xact_lock(817452901)")
         if conn.execute("SELECT to_regclass('public.schema_versions')").fetchone()[0]:
             versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
             if versions != [(SCHEMA_VERSION, checksum)]:
-                raise ValueError("Schema differs; rebuild into a new database before importing")
+                raise ValueError(
+                    "Schema differs; run db-migrate (v4, v5) or rebuild into a new database"
+                )
         conn.execute(schema)
         conn.execute(
             "INSERT INTO schema_versions(version,checksum) VALUES (%s,%s) ON CONFLICT DO NOTHING",
@@ -74,19 +132,132 @@ def _time(value):
     return result.astimezone(UTC)
 
 
+def _canonical(value):
+    return json.dumps(value, sort_keys=True)
+
+
 def _histogram(value):
     if value["format"] != "ceil_ms_v1":
         raise ValueError("Unsupported latency histogram")
     counts = Counter()
     for latency, count in value["bins"]:
-        if type(latency) is not int or latency < 0 or type(count) is not int or count < 1:
+        if (
+            type(latency) is not int
+            or not 0 <= latency < 2**31
+            or type(count) is not int
+            or not 0 < count < 2**31
+        ):
             raise ValueError("Invalid latency histogram")
         counts[latency] += count
     return Histogram(counts)
 
 
-def _partition(conn, table, bucket):
-    start = bucket.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+def column(kind, value):
+    """Return a column value that rebuilds exactly this JSON value, or raise TypeError."""
+    if kind == "json" or value is None:
+        return None if value is None else Jsonb(value)
+    if kind == "text" and type(value) is str:
+        return value
+    if kind == "integer" and type(value) is int and -(2**31) <= value < 2**31:
+        return value
+    # numeric keeps 15 and 15.0 apart; floats printed with a positive exponent would not survive.
+    if kind == "number" and type(value) in (int, float) and math.isfinite(value):
+        if type(value) is int or "e+" not in repr(value):
+            return value if type(value) is int else Decimal(repr(value))
+    raise TypeError(kind)
+
+
+def _take(source, key, kind, row, name):
+    try:
+        row[name] = column(kind, source[key])
+        del source[key]
+    except (KeyError, TypeError):
+        row[name] = None
+
+
+def _profile(definition, provider, product):
+    """Typed pool columns; anything they cannot reproduce stays verbatim in extra."""
+    target, config = dict(definition["target"]), dict(definition["config"])
+    row = {"target_id": target.pop("id")}
+    for key in ("url", "engine", "version"):
+        _take(target, key, "text", row, "target_" + key)
+    for key, value in (("provider", provider), ("product", product), ("target", row["target_id"])):
+        if key in config and config[key] == value:
+            del config[key]
+    for key in ("requested_country", "runner_location"):
+        _take(config, key, "text", row, key)
+    # NULL means absent here; an explicit null stays in extra.
+    row["proxy_protocol"] = (
+        config.pop("proxy_protocol") if type(config.get("proxy_protocol")) is str else None
+    )
+    adapter = config.get("provider_config")
+    typed = {}
+    try:
+        if set(adapter) != {*ADAPTER, "gateway"} or type(adapter["adapter"]) is not str:
+            raise TypeError
+        gateway = adapter["gateway"]
+        if set(gateway) != {"host", "port"}:
+            raise TypeError
+        typed["gateway_host"] = column("text", gateway["host"])
+        typed["gateway_port"] = column("integer", gateway["port"])
+        for key, (name, kind) in ADAPTER.items():
+            typed[name] = column(kind, adapter[key])
+        del config["provider_config"]
+    except (TypeError, AttributeError):
+        typed = dict.fromkeys(["gateway_host", "gateway_port", *(n for n, _ in ADAPTER.values())])
+    extra = {key: value for key, value in (("config", config), ("target", target)) if value}
+    return row | typed | {"extra": Jsonb(extra) if extra else None}
+
+
+def _count(value):
+    return type(value) is int and 0 <= value < 2**63
+
+
+def _bucket(bucket, counters):
+    """Typed column values in run_buckets order: the v5 columns and extra, then the outcomes.
+
+    The six outcome counters are typed only when all are present as counts; then
+    outcome_counters is true and run_bucket_counters() emits them. Otherwise any of them that
+    appear stay verbatim in extra, so pre-v6 buckets rebuild without them.
+    """
+    if set(BUCKET_KEYS) - set(counters) or any(
+        type(counters[k]) is not int or counters[k] < 0
+        for k in ("completed", "successes", "response_body_bytes")
+    ):
+        raise ValueError("Invalid bucket counters")
+    typed = all(_count(counters.get(k)) for k in OUTCOME_KEYS)
+    known = (*BUCKET_KEYS, *OUTCOME_KEYS) if typed else BUCKET_KEYS
+    extra = {k: v for k, v in counters.items() if k not in known}
+    if counters["bucket_start"] != bucket.isoformat(timespec="microseconds"):
+        extra["bucket_start"] = counters["bucket_start"]
+    histogram = counters["latency_histogram"]
+    if set(histogram) != {"format", "bins"}:
+        extra["latency_histogram"] = histogram
+    return (
+        counters["completed"],
+        counters["successes"],
+        counters["response_body_bytes"],
+        Jsonb(counters["errors"]),
+        Jsonb(counters["status_codes"]),
+        *_steps(histogram["bins"]),
+        Jsonb(extra) if extra else None,
+        typed,
+        *(counters[k] if typed else 0 for k in OUTCOME_KEYS),
+    )
+
+
+def _steps(bins):
+    """Millisecond gaps between consecutive bins (the first is absolute) and their counts."""
+    ms = [m for m, _ in bins]
+    return [b - a for a, b in zip([0, *ms], ms, strict=False)], [n for _, n in bins]
+
+
+def partition(conn, table, moment):
+    """Create the monthly partition of a range-partitioned table that holds this UTC moment.
+
+    Used for run_buckets, ip_observations, run_geo_buckets and test_events (by `at`).
+    """
+    start = moment.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     end = (start + timedelta(days=32)).replace(day=1)
     name = f"{table}_{start:%Y_%m}"
     conn.execute(
@@ -96,7 +267,136 @@ def _partition(conn, table, bucket):
     )
 
 
-def ingest(directory, credentials_file):
+_partition = partition
+
+
+def _dimension(value, fields):
+    """Typed column values for a location or network; null (no exit address) is all NULL."""
+    if value is None:
+        return (None,) * len(fields)
+    if not isinstance(value, dict) or set(value) - set(fields):
+        raise ValueError("Invalid geo dimension")
+    result = []
+    for field in fields:
+        item = value.get(field)
+        kind = ENRICHMENT_FIELDS[field]
+        if item is None:
+            result.append(None)
+        elif kind == "text" and type(item) is str:
+            result.append(item)
+        elif kind == "bigint" and type(item) is int and -(2**63) <= item < 2**63:
+            result.append(item)
+        elif kind == "double precision" and type(item) in (int, float) and math.isfinite(item):
+            result.append(float(item))
+        else:
+            raise ValueError("Invalid geo dimension")
+    return tuple(result)
+
+
+def _geo_rows(directory, summary, buckets, bucket_rows):
+    """Validated geo.jsonl.gz rows, reconciled with the bucket counters; [] when absent."""
+    manifest = summary.get("artifacts", {}).get("geo")
+    if manifest is None:
+        return []
+    name = manifest.get("file")
+    if not isinstance(name, str) or Path(name).name != name or not name:
+        raise ValueError("Invalid geo artifact")
+    path = directory / name
+    if _digest(path) != manifest["sha256"]:
+        raise ValueError("Geo artifact checksum mismatch")
+    rows, seen = [], set()
+    totals = {bucket: Counter() for bucket in buckets}
+    histograms = {bucket: Histogram(Counter()) for bucket in buckets}
+    with gzip.open(path, "rt") as stream:
+        for line in stream:
+            row = json.loads(line)
+            if not isinstance(row, dict) or set(row) != GEO_KEYS:
+                raise ValueError("Invalid geo row")
+            bucket = _time(row["bucket_start"])
+            location = _dimension(row["location"], LOCATION_FIELDS)
+            network = _dimension(row["network"], NETWORK_FIELDS)
+            counters = [row[k] for k in GEO_COUNTERS]
+            histogram = _histogram(row["latency_histogram"])
+            if (
+                bucket not in buckets
+                or not all(_count(n) for n in counters)
+                or row["successes"] > row["completed"]
+                or histogram.counts.total() != row["successes"]
+            ):
+                raise ValueError("Invalid geo row")
+            if (bucket, location, network) in seen:
+                raise ValueError("Duplicate geo bucket")
+            seen.add((bucket, location, network))
+            totals[bucket].update(dict(zip(GEO_COUNTERS, counters, strict=True)))
+            histograms[bucket].merge(histogram)
+            rows.append(
+                (bucket, *location, *network, *counters, *_steps(histogram.export()["bins"]))
+            )
+    if len(rows) != manifest["rows"]:
+        raise ValueError("Geo artifact row count mismatch")
+    for bucket, counters in buckets.items():
+        keys = ["completed", "successes"]
+        if bucket_rows[bucket][8]:
+            keys += [k for k in GEO_COUNTERS if k in OUTCOME_KEYS]
+        if any(totals[bucket][k] != counters[k] for k in keys) or (
+            histograms[bucket].export() != _histogram(counters["latency_histogram"]).export()
+        ):
+            raise ValueError("Geo buckets do not reconcile with run buckets")
+    return rows
+
+
+def _store_geo(conn, run_key, rows):
+    """Resolve each location and network to its enrichment id and add the geo buckets."""
+    if not rows:
+        return
+    types = ",".join(
+        f"{field} {ENRICHMENT_FIELDS[field]}" for field in (*LOCATION_FIELDS, *NETWORK_FIELDS)
+    )
+    conn.execute(
+        f"CREATE TEMP TABLE incoming_geo_buckets (bucket timestamptz, {types}, "
+        "completed bigint, successes bigint, challenges bigint, blocks bigint, timeouts bigint, "
+        "bytes_up bigint, bytes_down bigint, histogram_steps integer[], "
+        "histogram_counts integer[]) ON COMMIT DROP"
+    )
+    with conn.cursor().copy("COPY incoming_geo_buckets FROM STDIN") as copy:
+        for row in rows:
+            copy.write_row(row)
+    for bucket in {row[0] for row in rows}:
+        partition(conn, "run_geo_buckets", bucket)
+    joins = []
+    for table, identity, fields in (
+        ("enrichment_locations", "location_id", LOCATION_FIELDS),
+        ("enrichment_networks", "network_id", NETWORK_FIELDS),
+    ):
+        columns = ",".join(fields)
+        # The same upsert as _enrich: the all-NULL row is the unknown member.
+        conn.execute(
+            f"INSERT INTO {table} ({columns}) SELECT DISTINCT {columns} "
+            "FROM incoming_geo_buckets ON CONFLICT DO NOTHING"
+        )
+        dimension = "jsonb_build_array(" + ",".join(f"d.{f}" for f in fields) + ")"
+        incoming = "jsonb_build_array(" + ",".join(f"g.{f}" for f in fields) + ")"
+        joins.append(
+            f"JOIN LATERAL (SELECT {identity} FROM {table} d WHERE "
+            f"{dimension}={incoming}) {identity} ON true"
+        )
+    conn.execute(
+        "INSERT INTO run_geo_buckets(bucket_start,run_key,location_id,network_id,completed,"
+        "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
+        "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
+        "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
+        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g "
+        + " ".join(joins),
+        (run_key,),
+    )
+
+
+def ingest(directory, credentials_file, *, batch_id=None):
+    """Import one finished run directory; replaying the same artifacts is a no-op.
+
+    batch_id links the run to its test_batches row (census/pulse). A census summary may have
+    requested=null (unbounded); geo.jsonl.gz, when listed in artifacts, fills run_geo_buckets.
+    """
     directory = Path(directory)
     summary_path = directory / "summary.json"
     summary = json.loads(summary_path.read_text())
@@ -106,9 +406,11 @@ def ingest(directory, credentials_file):
     requested, started, completed, successes = (
         summary[name] for name in ("requested", "started", "completed", "successes")
     )
+    # A census is unbounded: it requests nothing up front and stops on the unique-IP ratio.
+    attempted = started + summary["not_started"] if requested is None else requested
     if (
-        not all(type(n) is int and n >= 0 for n in (requested, started, completed, successes))
-        or requested != started + summary["not_started"]
+        not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
+        or attempted != started + summary["not_started"]
         or started != completed + summary["cancelled"]
         or completed != successes + summary["total_errors"]
         or sum(summary["errors"].values()) != summary["total_errors"]
@@ -127,7 +429,7 @@ def ingest(directory, credentials_file):
     scope = {
         "target": summary["target"],
         "config": {
-            key: value for key, value in config.items() if key not in ("requests", "target_url")
+            key: value for key, value in config.items() if key not in RUN_LENGTH
         },
     }
     scope_hash = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
@@ -147,17 +449,42 @@ def ingest(directory, credentials_file):
         bucket_histogram.merge(part)
     if bucket_histogram.export() != histogram.export():
         raise ValueError("Bucket histograms differ from run histogram")
+    bucket_rows = {bucket: _bucket(bucket, counters) for bucket, counters in buckets.items()}
+    if any(key in summary for key in OUTCOME_KEYS):
+        if not all(_count(summary.get(key)) for key in OUTCOME_KEYS) or (
+            all(row[8] for row in bucket_rows.values())
+            and any(
+                sum(buckets[b][key] for b in buckets) != summary[key] for key in OUTCOME_KEYS
+            )
+        ):
+            raise ValueError("Outcome counters do not reconcile")
+    geo_rows = _geo_rows(directory, summary, buckets, bucket_rows)
+    try:
+        performance = [
+            column(kind, scope["config"][key])
+            for key, kind in zip(PERFORMANCE, ("integer", "number", "number"), strict=True)
+        ]
+        if None in performance[:2]:
+            raise TypeError
+    except (KeyError, TypeError):
+        raise ValueError("Unsupported concurrency, timeout or rate setting") from None
     with connect(credentials_file) as conn:
         # Serialize ingestion; measurements and website reads run independently.
         # The entire history/enrichment/cache update commits together.
         conn.execute("SELECT pg_advisory_xact_lock(817452901)")
         if conn.execute("SELECT max(version) FROM schema_versions").fetchone()[0] != SCHEMA_VERSION:
-            raise ValueError("Database schema requires rebuilding before import")
+            raise ValueError("Database schema requires db-migrate or a rebuild before import")
         existing = conn.execute(
-            "SELECT summary_sha256,run_key FROM test_runs WHERE run_id=%s", (run_id,)
+            "SELECT summary_sha256,run_key,batch_id FROM test_runs WHERE run_id=%s", (run_id,)
         ).fetchone()
         if existing and existing[0] != summary_hash:
             raise ValueError("Run ID already exists with different content")
+        if existing and batch_id is not None and existing[2] != batch_id:
+            if existing[2] is not None:
+                raise ValueError("Run already belongs to another batch")
+            conn.execute(
+                "UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (batch_id, existing[1])
+            )
         conn.execute(
             "CREATE TEMP TABLE incoming_ips (bucket timestamptz, ip inet, count bigint, "
             "first_seen timestamptz, last_seen timestamptz, PRIMARY KEY(bucket,ip)) "
@@ -205,19 +532,30 @@ def ingest(directory, credentials_file):
             ).fetchone()[0]
             pool_definition = {
                 "target": scope["target"],
-                "config": {
-                    k: v
-                    for k, v in scope["config"].items()
-                    if k not in ("concurrency", "timeout_seconds", "requests_per_second")
-                },
+                "config": {k: v for k, v in scope["config"].items() if k not in PERFORMANCE},
             }
             pool_hash = hashlib.sha256(
                 json.dumps(pool_definition, sort_keys=True).encode()
             ).hexdigest()
+            profile = _profile(pool_definition, provider, product)
+            # Pools and scopes reference targets; a target nobody seeded joins unscheduled.
+            target = summary["target"]
             conn.execute(
-                "INSERT INTO pool_stats(product_id,pool_hash,definition) VALUES (%s,%s,%s) "
-                "ON CONFLICT DO NOTHING",
-                (product_id, pool_hash, Jsonb(pool_definition)),
+                "INSERT INTO targets(target_id,url,engine,census,pulse_enabled) "
+                "VALUES (%s,%s,%s,false,false) ON CONFLICT DO NOTHING",
+                (
+                    profile["target_id"],
+                    target["url"] if type(target.get("url")) is str else "",
+                    target["engine"] if type(target.get("engine")) is str else "http",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO pool_stats(product_id,pool_hash,"
+                + ",".join(profile)
+                + ") VALUES ("
+                + ",".join(["%s"] * (len(profile) + 2))
+                + ") ON CONFLICT DO NOTHING",
+                (product_id, pool_hash, *profile.values()),
             )
             pool_id = conn.execute(
                 "SELECT pool_id FROM pool_stats WHERE product_id=%s AND pool_hash=%s",
@@ -225,12 +563,13 @@ def ingest(directory, credentials_file):
             ).fetchone()[0]
             scope_key = (product_id, summary["target"]["id"], scope_hash)
             conn.execute(
-                "INSERT INTO scope_stats(product_id,target,scope_hash,scope,pool_id) "
-                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                (*scope_key, Jsonb(scope), pool_id),
+                "INSERT INTO scope_stats(product_id,target,scope_hash,pool_id,"
+                + ",".join(PERFORMANCE)
+                + ") VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                (*scope_key, pool_id, *performance),
             )
-            scope_id, metrics = conn.execute(
-                "SELECT scope_id,metrics FROM scope_stats WHERE "
+            scope_id, metrics, histogram_steps, histogram_counts = conn.execute(
+                "SELECT scope_id,metrics,histogram_steps,histogram_counts FROM scope_stats WHERE "
                 "product_id=%s AND target=%s AND scope_hash=%s",
                 scope_key,
             ).fetchone()
@@ -242,27 +581,49 @@ def ingest(directory, credentials_file):
             compact["config_overrides"] = {
                 key: value for key, value in config.items() if key not in scope["config"]
             }
+            started_at, finished_at = _time(summary["started_at"]), _time(summary["finished_at"])
+            # Keys the columns reproduce exactly are not stored twice.
+            for key, value in (
+                ("run_id", str(uuid.UUID(run_id))),
+                ("status", summary["status"]),
+                ("started_at", started_at.isoformat(timespec="microseconds")),
+                ("finished_at", finished_at.isoformat(timespec="microseconds")),
+            ):
+                if compact[key] == value:
+                    del compact[key]
             run_key = conn.execute(
                 "INSERT INTO test_runs (run_id,scope_id,"
-                "started_at,finished_at,status,summary_sha256,summary) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING run_key",
+                "started_at,finished_at,status,summary_sha256,summary,batch_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING run_key",
                 (
                     run_id,
                     scope_id,
-                    _time(summary["started_at"]),
-                    _time(summary["finished_at"]),
+                    started_at,
+                    finished_at,
                     summary["status"],
                     summary_hash,
                     Jsonb(compact),
+                    batch_id,
                 ),
             )
             run_key = run_key.fetchone()[0]
-            for bucket, counters in buckets.items():
+            for bucket, values in bucket_rows.items():
                 _partition(conn, "run_buckets", bucket)
                 _partition(conn, "ip_observations", bucket)
                 conn.execute(
-                    "INSERT INTO run_buckets VALUES (%s,%s,%s)", (bucket, run_key, Jsonb(counters))
+                    "INSERT INTO run_buckets(bucket_start,run_key,completed,successes,"
+                    "response_body_bytes,errors,status_codes,histogram_steps,histogram_counts,"
+                    "extra,outcome_counters," + ",".join(OUTCOME_KEYS) + ") VALUES ("
+                    + ",".join(["%s"] * (len(values) + 2))
+                    + ")",
+                    (bucket, run_key, *values),
                 )
+            _store_geo(conn, run_key, geo_rows)
+            # The run histogram is stored only as bucket bins, exactly as in v4.
+            expected = summary | {"latency_histogram": histogram.export()}
+            stored = conn.execute("SELECT stored_run_summary(%s)", (run_key,)).fetchone()[0]
+            if _canonical(stored) != _canonical(expected):
+                raise ValueError("Run summary cannot be stored losslessly")
             conn.execute(
                 "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips "
                 "ON CONFLICT(ip) DO NOTHING"
@@ -303,7 +664,8 @@ def ingest(directory, credentials_file):
                 "response_body_bytes",
                 "duration_seconds",
             ):
-                metrics[name] = metrics.get(name, 0) + summary[name]
+                value = attempted if name == "requested" else summary[name]
+                metrics[name] = metrics.get(name, 0) + value
             metrics["runs"] = metrics.get("runs", 0) + 1
             metrics["unique_ips"] = (
                 metrics.get("unique_ips", 0) + new_ips if summary["pool_eligible"] else None
@@ -312,21 +674,22 @@ def ingest(directory, credentials_file):
                 counts = Counter(metrics.get(name, {}))
                 counts.update(summary[name])
                 metrics[name] = dict(counts)
-            if "latency_histogram" in metrics:
-                histogram.merge(_histogram(metrics["latency_histogram"]))
-            metrics["latency_histogram"] = histogram.export()
+            lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
+            histogram.merge(Histogram(Counter(dict(lifetime))))
             metrics["latency_ms"] = histogram.percentiles()
             metrics["success_rate"] = (
                 metrics["successes"] / metrics["completed"] if metrics["completed"] else None
             )
             conn.execute(
-                "UPDATE scope_stats SET metrics=%s,updated_at=now() WHERE scope_id=%s",
-                (Jsonb(metrics), scope_id),
+                "UPDATE scope_stats SET metrics=%s,histogram_steps=%s,histogram_counts=%s,"
+                "updated_at=now() WHERE scope_id=%s",
+                (Jsonb(metrics), *_steps(histogram.export()["bins"]), scope_id),
             )
         run_key = existing[1] if existing else run_key
         enriched = _enrich(conn, directory, run_id, run_key, rows)
     return {
         "run_id": run_id,
+        "run_key": run_key,
         "imported": not bool(existing),
         "observation_rows": rows,
         "enrichment_releases_added": enriched,
@@ -520,6 +883,7 @@ def status(credentials_file):
             "provider_overlap",
             "ip_observations",
             "run_buckets",
+            "run_geo_buckets",
             "dbip_releases",
             "ip_enrichment",
             "run_enrichments",
@@ -539,8 +903,8 @@ def status(credentials_file):
                     "metrics": row[4],
                 }
                 for row in conn.execute(
-                    "SELECT p.provider,p.name,s.target,s.scope_hash,s.metrics "
-                    "FROM scope_stats s JOIN products p USING(product_id)"
+                    "SELECT provider,product,target,scope_hash,metrics FROM scope_details "
+                    "ORDER BY scope_id"
                 )
             ],
             "cached_pools": [
@@ -569,3 +933,203 @@ def read_summary(run_id, credentials_file):
         if row is None:
             raise KeyError(run_id)
         return row[0]
+
+
+# Each check counts rows whose rebuilt JSON differs from the v4 copy kept by the migration.
+MIGRATION_CHECKS = {
+    "pool definitions": "SELECT count(*) FROM v4_pools o FULL JOIN pool_details n USING(pool_id) "
+    "WHERE o.definition::text IS DISTINCT FROM n.definition::text",
+    "scopes and metrics": "SELECT count(*) FROM v4_scopes o FULL JOIN scope_details n "
+    "USING(scope_id) WHERE (o.scope::text,o.metrics::text) "
+    "IS DISTINCT FROM (n.scope::text,n.metrics::text)",
+    "bucket counters": "SELECT count(*) FROM v4_buckets o FULL JOIN (SELECT run_key,bucket_start,"
+    "run_bucket_counters(b) AS counters FROM run_buckets b) n USING(run_key,bucket_start) "
+    "WHERE o.counters::text IS DISTINCT FROM n.counters::text",
+    "run summaries": "SELECT count(*) FROM v4_summaries o FULL JOIN test_runs t USING(run_key) "
+    "WHERE o.summary::text IS DISTINCT FROM stored_run_summary(t.run_key)::text",
+}
+# A v5 database is captured the same way before migrate_v5_v6.sql, then checked identically.
+V5_SNAPSHOT = (
+    "CREATE TEMP TABLE v5_before_pools ON COMMIT DROP AS "
+    "SELECT pool_id,definition FROM pool_details;"
+    "CREATE TEMP TABLE v5_before_scopes ON COMMIT DROP AS "
+    "SELECT scope_id,scope,metrics FROM scope_details;"
+    "CREATE TEMP TABLE v5_before_buckets ON COMMIT DROP AS "
+    "SELECT run_key,bucket_start,run_bucket_counters(b) AS counters FROM run_buckets b;"
+    "CREATE TEMP TABLE v5_before_summaries ON COMMIT DROP AS "
+    "SELECT run_key,stored_run_summary(run_key) AS summary FROM test_runs"
+)
+V5_CHECKS = {name: query.replace("v4_", "v5_before_") for name, query in MIGRATION_CHECKS.items()}
+
+
+def migrate(credentials_file):
+    """Migrate an unmodified v4 or v5 database, and its calculated layer, in one transaction.
+
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql; v5 runs only the
+    latter. A calculated layer then runs calculated/migrate_v2_v3.sql, which is also all that a
+    current (v6) database with a calculated v2 layer needs. Every rebuilt pool, scope, bucket and
+    run summary, and every calculated window, breakdown and score, must equal its original.
+    """
+    from .calculated import store
+
+    root = Path(__file__).parent
+    schema, checksum = _schema()
+    calculated, calculated_checksum = store.schema()
+    with connect(credentials_file) as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
+        conn.execute("SELECT pg_advisory_xact_lock(817452902)")
+        if not conn.execute("SELECT to_regclass('public.schema_versions')").fetchone()[0]:
+            raise ValueError("No schema to migrate; use db-init")
+        versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
+        layered = conn.execute("SELECT to_regclass('calculation_schema')").fetchone()[0]
+        layers = (
+            conn.execute("SELECT version,checksum FROM calculation_schema").fetchall()
+            if layered
+            else None
+        )
+        if versions == [(SCHEMA_VERSION, checksum)]:
+            if not layered or layers == [(store.SCHEMA_VERSION, calculated_checksum)]:
+                return {"schema_version": SCHEMA_VERSION, "migrated": False}
+            start = SCHEMA_VERSION
+        else:
+            start = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5}.get(
+                versions[0] if len(versions) == 1 else None
+            )
+            if start is None:
+                raise ValueError("Only an unmodified v4 or v5 schema can be migrated in place")
+        expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
+        if layered and layers != expected:
+            raise ValueError(
+                "Only an unmodified calculated v1 schema can be migrated in place"
+                if start == 4
+                else "The calculated schema differs from this release; only an unmodified "
+                "calculated v2 schema can be migrated in place"
+            )
+        checks = {}
+        if start == 4:
+            checks |= MIGRATION_CHECKS
+            conn.execute((root / "migrate_v4_v5.sql").read_text())
+            if layered:
+                conn.execute((root / "calculated/migrate_v1_v2.sql").read_text())
+                checks |= store.MIGRATION_CHECKS
+        elif start == 5:
+            checks |= V5_CHECKS
+            conn.execute(V5_SNAPSHOT)
+        if layered and start > 4:
+            checks |= store.V2_CHECKS
+            conn.execute(store.V2_SNAPSHOT)
+        if start < SCHEMA_VERSION:
+            conn.execute((root / "migrate_v5_v6.sql").read_text())
+        if layered:
+            conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
+        conn.execute(schema)
+        if layered:
+            conn.execute(calculated)
+        failed = {
+            name: count
+            for name, query in checks.items()
+            if (count := conn.execute(query).fetchone()[0])
+        }
+        if failed:
+            raise ValueError(f"Migrated rows do not rebuild their v{start} JSON: {failed}")
+        if start < SCHEMA_VERSION:
+            conn.execute("DELETE FROM schema_versions")
+            conn.execute(
+                "INSERT INTO schema_versions(version,checksum) VALUES (%s,%s)",
+                (SCHEMA_VERSION, checksum),
+            )
+        if layered:
+            conn.execute("DELETE FROM calculation_schema")
+            conn.execute(
+                "INSERT INTO calculation_schema VALUES (%s,%s)",
+                (store.SCHEMA_VERSION, calculated_checksum),
+            )
+    if start == 4:
+        # Dropped v4 columns keep their bytes until the rewritten tables are compacted. v5 → v6
+        # and calculated v2 → v3 only add nullable or constant-default columns: no rewrite.
+        with connect(credentials_file) as conn:
+            conn.autocommit = True
+            tables = ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
+            if layered:
+                tables += ["calculated_windows", "calculated_scores"]
+            conn.execute("VACUUM (FULL, ANALYZE) " + ",".join(tables))
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "from_schema_version": start,
+        "calculated_schema_version": store.SCHEMA_VERSION if layered else None,
+        "from_calculated_schema_version": layers[0][0] if layered else None,
+        "migrated": True,
+        "verified": list(checks),
+    }
+
+
+def seed(
+    credentials_file,
+    regions_path=None,
+    targets_path=None,
+    *,
+    countries_path=None,
+    reset_times=False,
+):
+    """Upsert runner_regions, countries and targets from configs/ (milf-framework db-seed).
+
+    Re-seeding moves countries between regions and refreshes names, patterns and target
+    definitions, but keeps each country's census_time and enabled flag and each target's schedule
+    as operators left them. reset_times puts every census_time back on the staggered default.
+    """
+    from .regions import load_regions, load_targets
+
+    regions = load_regions(regions_path, countries_path)
+    targets = load_targets(targets_path)
+    times = regions.census_times()
+    with connect(credentials_file) as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
+        if conn.execute("SELECT max(version) FROM schema_versions").fetchone()[0] != SCHEMA_VERSION:
+            raise ValueError("Database schema requires db-migrate or a rebuild before seeding")
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO runner_regions(region_id,slug,cloud,pattern) VALUES (%s,%s,%s,%s) "
+                "ON CONFLICT(region_id) DO UPDATE SET slug=excluded.slug,cloud=excluded.cloud,"
+                "pattern=excluded.pattern",
+                [(r.region_id, r.slug, "digitalocean", r.pattern) for r in regions.regions],
+            )
+            cursor.executemany(
+                "INSERT INTO countries(country_code,name,region_id,census_time) "
+                "VALUES (%s,%s,%s,%s) ON CONFLICT(country_code) DO UPDATE SET "
+                "name=excluded.name,region_id=excluded.region_id,census_time=CASE WHEN %s "
+                "THEN excluded.census_time ELSE countries.census_time END",
+                [
+                    (code, regions.names[code], region.region_id, times[code], reset_times)
+                    for region in regions.regions
+                    for code in region.countries
+                ],
+            )
+            definition = ("label", "url", "engine", "pass_condition", "timeout_ms", "sort_order")
+            schedule = (
+                "census",
+                "census_concurrency",
+                "pulse_enabled",
+                "pulse_interval_minutes",
+                "pulse_requests",
+                "pulse_concurrency",
+            )
+            columns = ("target_id", *definition, *schedule)
+            # Ingest-added targets have no label; their schedule comes from the seed once.
+            cursor.executemany(
+                "INSERT INTO targets(" + ",".join(columns) + ") VALUES ("
+                + ",".join(["%s"] * len(columns))
+                + ") ON CONFLICT(target_id) DO UPDATE SET "
+                + ",".join(f"{c}=excluded.{c}" for c in definition)
+                + ","
+                + ",".join(
+                    f"{c}=CASE WHEN targets.label IS NULL THEN excluded.{c} ELSE targets.{c} END"
+                    for c in schedule
+                ),
+                [tuple(row[c] for c in columns) for row in targets],
+            )
+    return {
+        "regions": len(regions.regions),
+        "countries": len(times),
+        "targets": [row["target_id"] for row in targets],
+        "census_times_reset": reset_times,
+    }

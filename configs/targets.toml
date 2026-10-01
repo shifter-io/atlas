@@ -1,0 +1,33 @@
+# Targets the orchestrator schedules (milf-framework db-seed). Pulse runs every row with
+# pulse_enabled = true at its own interval; census runs every row with census = true.
+# Re-seeding updates the definition (label, url, engine, pass condition, timeout, order) but
+# never the scheduling fields once a target exists, so edits made in /admin are kept.
+
+[[target]]
+id = "generic_http"
+label = "Generic HTTP"
+url = "http://checkip.amazonaws.com/"
+engine = "http"
+pass_condition = "Response body is the exit address the target saw, and it parses as an IP."
+timeout_ms = 15000
+census = true
+census_concurrency = 1000
+pulse_enabled = true
+pulse_interval_minutes = 30
+pulse_requests = 100
+pulse_concurrency = 25
+sort_order = 10
+
+[[target]]
+id = "generic_https"
+label = "Generic HTTPS"
+url = "https://checkip.amazonaws.com/"
+engine = "http"
+pass_condition = "CONNECT tunnel established, certificate validates, and the body parses as an IP."
+timeout_ms = 15000
+census = false
+pulse_enabled = true
+pulse_interval_minutes = 30
+pulse_requests = 100
+pulse_concurrency = 25
+sort_order = 20
