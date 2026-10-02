@@ -63,37 +63,25 @@ speed = 20
 generic_http = 1
 generic_https = 1
 
-[curves.reliability]
-kind = "linear"
-low = 0.6
-high = 1.0
-[curves.speed]
-kind = "log_inverse"
-low = 60
-high = 2000
-[curves.uptime]
-kind = "linear"
-low = 97
-high = 100
-[curves.coverage]
-kind = "log"
-low = 10000
-high = 2000000
-[curves.dcAsns]
-kind = "inverse"
-low = 0
-high = 0.25
-[curves.value]
-kind = "cost"
-anchor = 0.005
-penalty = 26
-[curves.authenticity]
+# Every component is a ratio to the leader: the best raw value among the products of the same kind
+# in the same window whose component is ready (state "ready", measured, not retained or expired).
+# Higher is better: 100 x yours / best; lower is better (speed p50, cost): 100 x best / yours.
+# Clamped to 0-100; a product alone in its kind scores 100. Leaders are found again on every
+# calculation. Raw values: reliability benchmark success rate, speed benchmark p50 (per target,
+# combined with target_weights, then benchmark_weights), uptime percent, coverage unique IPs per
+# day, dcAsns clean share (1 - datacenter ASN share; datacenter products keep 100), authenticity
+# (1 - claim gap) x 100 - blocklist hits x blocklist_penalty, value cost per 1,000 successes.
+# Pool counts (coverage, diversity) are averages of daily (24h) counts over the window's days with
+# observations, so a network measured for a few days compares fairly with one measured for 30.
+[peer.diversity]
+# Diversity mixes the ratios of the four pool dimensions with these weights (sum to one).
+countries = 0.30
+regions = 0.20
+cities = 0.25
+asns = 0.25
+
+[authenticity]
 blocklist_penalty = 120
-[curves.diversity]
-countries = [6, 50, 0.30]
-regions = [10, 100, 0.20]
-cities = [15, 120, 0.25]
-asns = [6, 40, 0.25]
 
 [grades]
 "A+" = 88
@@ -124,8 +112,10 @@ authenticity = 6
 value = 12
 
 # Optional overrides: [products."provider/product"] and [targets.target_id].
-# Override weights, target_weights, curves, required_targets or eligibility settings.
+# Override weights, target_weights, peer, required_targets or eligibility settings.
 # Product settings are applied first; target settings take precedence for target scores.
+# kind sets a product's peer group (residential, datacenter, isp, mobile, ...); without it the
+# product name is the kind, so "<provider>/residential" products compare with each other.
 [products."shifter/residential"]
 kind = "residential"
 display_name = "Shifter"

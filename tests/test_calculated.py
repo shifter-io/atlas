@@ -12,7 +12,7 @@ from milf_framework.calculated import store
 from milf_framework.calculated.aggregate import metrics, pool_lists, target_score
 from milf_framework.calculated.api import app
 from milf_framework.calculated.calculator import calculate, retain
-from milf_framework.calculated.policy import composite, digest, effective, load
+from milf_framework.calculated.policy import composite, digest, effective, load, ratio
 from milf_framework.models import Outcome
 from milf_framework.storage import connect, ingest
 
@@ -67,12 +67,17 @@ def test_policy_and_eligibility():
         "success_rate": 0.9994,
         "latency_ms": {"p50": 1113},
     }
-    assert target_score(m, c)["score"] is None
+    assert target_score(m, c)["state"] == "incomplete"
     m["coverage"] = 1
     s = target_score(m, c)
-    assert s["score"] == pytest.approx(
-        0.8 * s["components"]["reliability"]["value"] + 0.2 * s["components"]["speed"]["value"]
-    )
+    # Raw values; peer_scores() turns them into ratios to the leader.
+    assert s["state"] == "ready" and s["weights"] == c["target_weights"]
+    assert {k: v["value"] for k, v in s["components"].items()} == {
+        "reliability": 0.9994,
+        "speed": 1113,
+    }
+    assert [ratio(0.5, 0.8, True), ratio(0.8, 0.8, True), ratio(0.5, 0, True)] == [62.5, 100, 0]
+    assert [ratio(200, 100, False), ratio(0, 100, False), ratio(None, 1, True)] == [50, 100, None]
 
 
 def test_retained_score_expiry():
@@ -161,7 +166,7 @@ def test_saved_shifter_reconciliation(database):
     assert sum(c["ips"] for c in w["pool"]["countries_breakdown"]) == 4967
 
 
-def ready_inputs():
+def ready_inputs(products=(1, 2)):
     from milf_framework.calculated.calculator import cohort_for
 
     config, _ = load(POLICY)
@@ -172,7 +177,7 @@ def ready_inputs():
     buckets = []
     observations = []
     evidence = []
-    for product_id in (1, 2):
+    for product_id in products:
         for i, target in enumerate(("generic_http", "generic_https")):
             key = product_id * 10 + i
             scope = {

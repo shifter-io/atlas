@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 
 from ..stats import Histogram
-from .policy import composite, curve_score, grade, uptime_settings
+from .policy import DIMENSIONS, KEYS, composite, grade, ratio, uptime_settings
 
 # Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
 # pulse batches, so they are no longer listed here; a None metric means nothing measured them.
@@ -42,6 +42,20 @@ EVIDENCE_RANGES = {
     "cost_per_1k_success": (0, 1e12),
     "requests_per_ip": (0, 1e12),
 }
+# Whether a higher raw value is better, per component scored by ratio to the leader. Reliability
+# and speed are scored per target; diversity mixes the ratios of its pool dimensions.
+HIGHER = {
+    "reliability": True,
+    "speed": False,
+    "uptime": True,
+    "coverage": True,
+    "dcAsns": True,
+    "authenticity": True,
+    "value": False,
+}
+# Pool counts averaged over daily (24-hour) pools: coverage and diversity score from these.
+DAILY = ("unique_ips", *DIMENSIONS)
+DAY = timedelta(hours=24)
 
 
 def metrics(rows, hours):
@@ -144,6 +158,29 @@ def pool(observations, since, hours):
         else None,
         "observations": sum(e["count"] for e in ips.values()),
     }, ips
+
+
+def daily_pools(observations, as_of, days=30):
+    """Pool counts of each 24-hour day ending at as_of, newest first; None for a day without
+    observations. Every window reuses them (24h is the first day, 7d the first seven)."""
+    groups = defaultdict(list)
+    for o in observations:
+        day = -((o["bucket_start"] - as_of) // DAY) - 1
+        if 0 <= day < days:
+            groups[day].append(o)
+    result = []
+    for day in range(days):
+        counts = pool(groups[day], as_of - (day + 1) * DAY, 24)[0] if groups[day] else None
+        result.append({k: counts[k] for k in DAILY} if counts else None)
+    return result
+
+
+def daily_average(days, hours):
+    """Average daily counts over the window's days with observations (days: daily_pools())."""
+    seen = [d for d in days[: hours // 24] if d]
+    return {"days": len(seen)} | {
+        k: sum(d[k] for d in seen) / len(seen) if seen else None for k in DAILY
+    }
 
 
 def _memberships(place, network):
@@ -421,6 +458,10 @@ def component(value, state="ready", reason=None, inputs=None):
 
 
 def target_score(m, config, benchmark=True):
+    """Readiness and raw values of a target score; peer_scores() scores them against peers.
+
+    The raw components hold the benchmark success rate (reliability) and p50 latency (speed).
+    """
     reasons = []
     if not benchmark:
         reasons.append("Run is not assigned to the benchmark schedule")
@@ -429,103 +470,61 @@ def target_score(m, config, benchmark=True):
     if m["coverage"] < config["minimum_coverage"]:
         reasons.append("Insufficient time coverage")
     state = "ready" if not reasons else "incomplete"
-    components = {
-        "reliability": component(
-            curve_score(config["curves"]["reliability"], m["success_rate"]),
-            state,
-            inputs=m["success_rate"],
-        ),
-        "speed": component(
-            curve_score(config["curves"]["speed"], m["latency_ms"]["p50"]),
-            state,
-            inputs=m["latency_ms"]["p50"],
-        ),
-    }
-    score = composite(components, config["target_weights"])
     return {
-        "score": score,
-        "grade": grade(score, config) if score is not None else None,
-        "state": state if score is not None else "incomplete",
-        "components": components,
+        "state": state,
+        "components": {
+            "reliability": component(m["success_rate"], state),
+            "speed": component(m["latency_ms"]["p50"], state),
+        },
         "weights": config["target_weights"],
         "reasons": reasons,
-        "rank": None,
-        "previous_rank": None,
-        "scored_at": None,
-        "valid_until": None,
     }
 
 
-def product_scores(targets, p, evidence, config, kind, measured_uptime=None):
-    curves = config["curves"]
-    required = config["required_targets"]
+def product_inputs(p, evidence, config, kind, measured_uptime=None):
+    """Raw values and readiness of a product's components besides reliability and speed, which
+    peer_scores() derives from the target scores.
+
+    p is the window's pool() counts with "daily" (daily_average()): coverage and diversity use
+    the daily averages. A raw component's value is what is compared with peers; diversity's is
+    the four daily dimension counts (also kept in its inputs), None until local enrichment is
+    complete. "fixed" is a score that does not depend on peers (datacenter products keep 100 on
+    dcAsns).
+    """
+    daily = p["daily"]
     inputs = {}
-    for key in ("reliability", "speed"):
-        components = [targets[t]["score"]["components"][key] for t in required]
-        weights = config["benchmark_weights"]
-        value = (
-            sum(c["value"] * weights[t] for t, c in zip(required, components, strict=True))
-            / sum(weights.values())
-            if all(c["value"] is not None for c in components)
-            else None
-        )
-        ready = all(c["state"] == "ready" for c in components) and all(
-            targets[t]["score"]["state"] == "ready" for t in required
-        )
-        inputs[key] = component(
-            value,
-            "ready" if ready else "incomplete",
-            None if ready else "Required benchmark targets are incomplete",
-        )
     # Measured uptime (outage time over the countries tested) wins once enough pulse batches
     # finished; evidence is the fallback.
     batches = (measured_uptime or {}).get("batches", 0)
     value = (measured_uptime or {}).get("value")
     pct = 100 * value if batches and value is not None else None
     if pct is not None and batches >= uptime_settings(config)["min_batches"]:
-        inputs["uptime"] = component(curve_score(curves["uptime"], pct), inputs=pct)
+        inputs["uptime"] = component(pct)
     elif "uptime_pct" in evidence:
-        inputs["uptime"] = component(curve_score(curves["uptime"], evidence["uptime_pct"]))
+        inputs["uptime"] = component(evidence["uptime_pct"])
     else:
         inputs["uptime"] = component(
-            curve_score(curves["uptime"], pct),
-            "incomplete",
-            UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE,
-            inputs=pct,
+            pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE
         )
     pool_ready = p["unique_ips"] > 0 and p["enrichment_coverage"] == 1
-    inputs["coverage"] = component(
-        curve_score(curves["coverage"], p["unique_ips"]) if p["unique_ips"] else None,
-        inputs=p["unique_ips"],
-    )
-    diversity = (
-        100
-        * sum(
-            curve_score({"kind": "log", "low": v[0], "high": v[1]}, p[k]) / 100 * v[2]
-            for k, v in curves["diversity"].items()
-        )
-        if pool_ready
-        else None
-    )
+    inputs["coverage"] = component(daily["unique_ips"] if p["unique_ips"] else None)
+    counts = {k: daily[k] for k in DIMENSIONS}
     inputs["diversity"] = component(
-        diversity, reason=None if pool_ready else "Complete local enrichment required"
+        counts if pool_ready else None,
+        reason=None if pool_ready else "Complete local enrichment required",
+        inputs=counts,
     )
-    dc = (
-        100
-        if kind == "datacenter" and pool_ready
-        else curve_score(curves["dcAsns"], p["datacenter_asn_share"])
-    )
-    inputs["dcAsns"] = component(
-        dc,
-        "ready" if p["classification_coverage"] == 1 else "incomplete",
-        "DB-IP usage classification; unknown records remain unclassified",
-    )
+    share = p["datacenter_asn_share"]
+    state = "ready" if p["classification_coverage"] == 1 else "incomplete"
+    reason = "DB-IP usage classification; unknown records remain unclassified"
+    inputs["dcAsns"] = component(1 - share if share is not None else None, state, reason)
+    if kind == "datacenter" and pool_ready:
+        inputs["dcAsns"] |= {"state": state, "fixed": 100.0}
     claim = evidence.get("claim_gap")
     blacklist = evidence.get("blacklist_hit_rate")
+    penalty = config["authenticity"]["blocklist_penalty"]
     auth = (
-        max(
-            0, min(100, (1 - claim) * 100 - blacklist * curves["authenticity"]["blocklist_penalty"])
-        )
+        max(0, min(100, (1 - claim) * 100 - blacklist * penalty))
         if (claim is not None and blacklist is not None)
         else None
     )
@@ -536,36 +535,168 @@ def product_scores(targets, p, evidence, config, kind, measured_uptime=None):
         else "Verified product claim and reputation measurements required",
     )
     inputs["value"] = component(
-        curve_score(curves["value"], evidence.get("cost_per_1k_success")),
+        evidence.get("cost_per_1k_success"),
         reason=None if "cost_per_1k_success" in evidence else UNAVAILABLE["cost_per_1k_success"],
     )
-    result = {}
-    profiles = config.get("profiles", {}) | {"balanced": config["weights"]}
-    for name, weights in profiles.items():
-        value = composite(inputs, weights)
-        missing_targets = [t for t in required if targets[t]["score"]["state"] != "ready"]
-        if missing_targets:
-            value = None
-        result[name] = {
-            "score": value,
-            "grade": grade(value, config) if value is not None else None,
-            "state": "ready" if value is not None else "incomplete",
-            "components": inputs,
-            "weights": weights,
-            "reasons": (
-                [f"Required benchmark incomplete: {t}" for t in missing_targets]
+    return inputs
+
+
+def leader(raw, higher):
+    """The best value among eligible raw components and how many there are.
+
+    raw holds (component, fresh) pairs; a component is eligible when it is ready, measured and
+    its product's measurements are fresh enough for a new score.
+    """
+    values = [
+        c["value"] for c, fresh in raw if fresh and c["state"] == "ready" and c["value"] is not None
+    ]
+    return (max if higher else min)(values) if values else None, len(values)
+
+
+def versus(raw, best, peers, higher):
+    """A raw component scored against the leader (without a ready peer, against itself)."""
+    best = raw["value"] if best is None else best
+    return component(
+        raw.get("fixed", ratio(raw["value"], best, higher)),
+        raw["state"],
+        raw["reason"],
+        {"value": raw["value"], "best": best, "peers": peers},
+    )
+
+
+def score_entry(value, state, components, weights, reasons, config):
+    return {
+        "score": value,
+        "grade": grade(value, config) if value is not None else None,
+        "state": state if value is not None else "incomplete",
+        "components": components,
+        "weights": weights,
+        "reasons": reasons,
+        "rank": None,
+        "previous_rank": None,
+        "scored_at": None,
+        "valid_until": None,
+    }
+
+
+def peer_scores(members, config):
+    """Score one peer group, the products of one kind in one window, by ratio to the leader.
+
+    Each member has "config" (its effective methodology), "fresh" (its benchmark measurements
+    are recent enough for a new score), "inputs" (product_inputs()) and "targets", per target
+    target_score() with its own "fresh". Every component scores 100 x value / best (lower is
+    better: 100 x best / value) against the best ready, fresh value of the group, so retained,
+    expired and incomplete scores never set the best. Target scores combine their reliability
+    and speed ratios with target_weights; product reliability and speed are the
+    benchmark_weights mean of the required targets' ratios. Returns, per member,
+    {"targets": {target: score}, "scores": {profile: score}}.
+    """
+    results = [{"targets": {}, "scores": {}} for _ in members]
+    for target in sorted({t for m in members for t in m["targets"]}):
+        group = [
+            (m["targets"][target], r)
+            for m, r in zip(members, results, strict=True)
+            if target in m["targets"]
+        ]
+        for key, higher in (("reliability", True), ("speed", False)):
+            best, peers = leader([(t["components"][key], t["fresh"]) for t, _ in group], higher)
+            for t, r in group:
+                r["targets"].setdefault(target, {})[key] = versus(
+                    t["components"][key], best, peers, higher
+                )
+        for t, r in group:
+            components = r["targets"][target]
+            r["targets"][target] = score_entry(
+                composite(components, t["weights"]),
+                t["state"],
+                components,
+                t["weights"],
+                t["reasons"],
+                config,
+            )
+    raw = [dict(m["inputs"]) for m in members]
+    for m, r, inputs in zip(members, results, raw, strict=True):
+        required = m["config"]["required_targets"]
+        weights = m["config"]["benchmark_weights"]
+        ready = {
+            t: r["targets"][t]["score"] is not None and m["targets"][t]["fresh"] for t in required
+        }
+        for key in ("reliability", "speed"):
+            parts = [r["targets"][t]["components"][key] for t in required]
+            done = all(c["state"] == "ready" for c in parts) and all(ready.values())
+            inputs[key] = component(
+                sum(c["value"] * weights[t] for t, c in zip(required, parts, strict=True))
+                / sum(weights.values())
+                if all(c["value"] is not None for c in parts)
+                else None,
+                "ready" if done else "incomplete",
+                None if done else "Required benchmark targets are incomplete",
+                {
+                    "targets": {
+                        t: {k: c["inputs"][k] for k in ("value", "best")}
+                        for t, c in zip(required, parts, strict=True)
+                    }
+                },
+            )
+        r["missing"] = [t for t in required if not ready[t]]
+    for key in ("reliability", "speed"):
+        peers = sum(
+            m["fresh"] and inputs[key]["state"] == "ready"
+            for m, inputs in zip(members, raw, strict=True)
+        )
+        for inputs in raw:
+            inputs[key]["inputs"]["peers"] = peers
+    for key, higher in HIGHER.items():
+        if key in ("reliability", "speed"):
+            continue
+        best, peers = leader(
+            [(i[key], m["fresh"]) for m, i in zip(members, raw, strict=True)], higher
+        )
+        for inputs in raw:
+            inputs[key] = versus(inputs[key], best, peers, higher)
+    # Diversity: each pool dimension against its own leader, mixed with [peer.diversity].
+    eligible = [
+        i["diversity"]["value"]
+        for m, i in zip(members, raw, strict=True)
+        if m["fresh"] and i["diversity"]["state"] == "ready" and i["diversity"]["value"]
+    ]
+    for m, inputs in zip(members, raw, strict=True):
+        mix = m["config"]["peer"]["diversity"]
+        own = inputs["diversity"]
+        counts = own["inputs"]
+        best = {k: max(d[k] for d in eligible) if eligible else counts[k] for k in DIMENSIONS}
+        inputs["diversity"] = component(
+            sum(ratio(counts[k], best[k], True) * w for k, w in mix.items()) / sum(mix.values())
+            if own["value"]
+            else None,
+            own["state"],
+            own["reason"],
+            {k: {"value": counts[k], "best": best[k]} for k in DIMENSIONS}
+            | {"peers": len(eligible)},
+        )
+    for m, r, inputs in zip(members, results, raw, strict=True):
+        cfg = m["config"]
+        components = {k: inputs[k] for k in KEYS}
+        profiles = cfg.get("profiles", {}) | {"balanced": cfg["weights"]}
+        for name, weights in profiles.items():
+            value = composite(components, weights)
+            if r["missing"]:
+                value = None
+            r["scores"][name] = score_entry(
+                value,
+                "ready",
+                components,
+                weights,
+                [f"Required benchmark incomplete: {t}" for t in r["missing"]]
                 + [
                     c["reason"] or f"{k} not ready"
-                    for k, c in inputs.items()
+                    for k, c in components.items()
                     if weights[k] > 0 and c["state"] != "ready"
-                ]
-            ),
-            "rank": None,
-            "previous_rank": None,
-            "scored_at": None,
-            "valid_until": None,
-        }
-    return result
+                ],
+                config,
+            )
+        del r["missing"]
+    return results
 
 
 def iso(value):
