@@ -2,10 +2,13 @@
 
 A Go service that returns every piece of data the website needs from the
 `proxy_reviews` Postgres database. The site reads nothing else: `src/lib/site-api.ts`
-fetches `/v1/dataset` once per build (or dev process), and the browser reaches
-`/v1/events`, `/v1/snapshot` and `/v1/search-index` through the same-origin
-`/api/site/*` route. The former `src/data/*.json` imports are gone; the files now
-live in `fixtures/` as seed and test input only.
+fetches `/v1/dataset` once per static build (a dev server or the on-demand
+`/api/live` route revalidates it every few seconds with `If-None-Match`), and the
+browser reaches `/v1/version`, `/v1/events`, `/v1/snapshot` and `/v1/search-index`
+through the same-origin `/api/site/*` route. Open pages poll `/v1/version` to
+update in place when the data changes (see "Live updates" in AGENTS.md). The
+former `src/data/*.json` imports are gone; the files now live in `fixtures/` as
+seed and test input only.
 
 - Its main output is the site's `Dataset` type (`src/lib/types.ts`); `src/lib/data.ts`
   exports it unchanged (numeric nulls become the site's NaN sentinel, see `site-api.ts`).
