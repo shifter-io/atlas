@@ -306,6 +306,194 @@ def test_score_retention_and_methodology_change():
     assert expired["products"][0]["windows"]["24h"]["scores"]["balanced"]["state"] == "expired"
 
 
+def peer_inputs():
+    """Three residential products with known raw values (see test_peer_ratio_scores)."""
+    c, now, r, b, o, e = ready_inputs(products=(1, 2, 3))
+    evidence = {
+        1: {"uptime_pct": 100, "cost_per_1k_success": 0.005},
+        2: {"uptime_pct": 80, "cost_per_1k_success": 0.0025, "claim_gap": 0.2},
+        3: {"uptime_pct": 50, "cost_per_1k_success": 0.01, "blacklist_hit_rate": 0.1},
+    }
+    for v in e:
+        v["value"] = evidence[v["product_id"]].get(v["metric"], v["value"])
+    first = {v["run_key"]: v for v in o}
+    first[10]["usage_type"] = "hosting"  # product 1: all datacenter IPs
+    o.append(
+        first[20]
+        | {"ip_id": 2, "country_code": "DE", "region": "Bayern", "city": "Munich", "asn": 2}
+    )
+    o.append(first[30] | {"ip_id": 3, "asn": 3})
+    return c, now, r, b, o, e
+
+
+def test_peer_ratio_scores():
+    from milf_framework.calculated.calculator import build
+
+    c, now, r, b, o, e = peer_inputs()
+    result = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    p1, p2, p3 = (p["windows"]["24h"] for p in result["products"])
+    parts = [w["scores"]["balanced"]["components"] for w in (p1, p2, p3)]
+
+    def values(key):
+        return [pytest.approx(c[key]["value"]) for c in parts]
+
+    # Lower is better: p50 latency 100, 200 and 300 ms; cost per 1,000 successes.
+    assert values("speed") == [100, 50, 100 / 3]
+    assert parts[1]["speed"]["inputs"] == {
+        "targets": {
+            "generic_http": {"value": 200, "best": 100},
+            "generic_https": {"value": 200, "best": 100},
+        },
+        "peers": 3,
+    }
+    assert p2["targets"]["generic_http"]["score"]["components"]["speed"]["inputs"] == {
+        "value": 200,
+        "best": 100,
+        "peers": 3,
+    }
+    assert p2["targets"]["generic_http"]["score"]["score"] == pytest.approx(0.8 * 100 + 0.2 * 50)
+    assert values("value") == [50, 100, 25]
+    assert parts[0]["value"]["inputs"] == {"value": 0.005, "best": 0.0025, "peers": 3}
+    # Higher is better: uptime, authenticity, coverage (unique IPs per day), clean ASN share.
+    assert values("reliability") == [100, 100, 100]
+    assert values("uptime") == [100, 80, 50]
+    assert parts[2]["uptime"]["inputs"] == {"value": 50, "best": 100, "peers": 3}
+    assert values("authenticity") == [100, 80, 88]
+    assert values("coverage") == [50, 100, 100]
+    assert values("dcAsns") == [0, 100, 100]
+    # Diversity mixes the dimension ratios: p3 has one country, region and city but two ASNs.
+    assert values("diversity") == [50, 100, 0.3 * 50 + 0.2 * 50 + 0.25 * 50 + 0.25 * 100]
+    assert parts[2]["diversity"]["inputs"] == {
+        "countries": {"value": 1, "best": 2},
+        "regions": {"value": 1, "best": 2},
+        "cities": {"value": 1, "best": 2},
+        "asns": {"value": 2, "best": 2},
+        "peers": 3,
+    }
+    assert p3["pool"]["daily"] == {
+        "days": 1,
+        "unique_ips": 2,
+        "countries": 1,
+        "regions": 1,
+        "cities": 1,
+        "asns": 2,
+    }
+    weights = c["weights"]
+    for w, components in zip((p1, p2, p3), parts, strict=True):
+        score = w["scores"]["balanced"]
+        assert score["state"] == "ready" and score["score"] == pytest.approx(
+            sum(components[k]["value"] * weights[k] for k in weights) / sum(weights.values())
+        )
+    assert [w["scores"]["balanced"]["rank"] for w in (p1, p2, p3)] == [2, 1, 3]
+    # Datacenter products keep 100 on dcAsns whatever their datacenter share.
+    for i in (1, 2, 3):
+        c["products"][f"p{i}/residential"] = {"kind": "datacenter"}
+    datacenter = build(r, b, o, e, c, digest(c), now, 2, None, None)
+    dc = datacenter["products"][0]["windows"]["24h"]["scores"]["balanced"]["components"]["dcAsns"]
+    assert dc["value"] == 100 and dc["state"] == "ready" and dc["inputs"]["value"] == 0
+
+
+def test_peer_ratio_retained_scores_and_lone_products():
+    from milf_framework.calculated.calculator import build
+
+    c, now, r, b, o, e = peer_inputs()
+    c["minimum_requests"] = 2
+    for bucket in b:
+        bucket["counters"] |= {"completed": 2, "successes": 2}
+        bucket["counters"]["latency_histogram"]["bins"][0][1] = 2
+    previous = store.jsonable(build(r, b, o, e, c, digest(c), now, 1, None, None))
+    # Later, product 3 is the fastest but has too few requests: its score is retained and its
+    # latency does not become the best of the others.
+    later = now + timedelta(minutes=5)
+    for bucket in b:
+        if bucket["run_key"] // 10 == 3:
+            bucket["counters"] = bucket["counters"] | {
+                "completed": 1,
+                "successes": 1,
+                "latency_histogram": {"bins": [[50, 1]]},
+            }
+    result = build(r, b, o, e, c, digest(c), later, 2, None, previous)
+    p1, p2, p3 = (p["windows"]["24h"] for p in result["products"])
+    assert p3["scores"]["balanced"]["state"] == "retained"
+    assert p3["targets"]["generic_http"]["score"]["state"] == "retained"
+    speed = p1["scores"]["balanced"]["components"]["speed"]
+    assert speed["value"] == 100 and speed["inputs"]["peers"] == 2
+    assert speed["inputs"]["targets"]["generic_http"] == {"value": 100, "best": 100}
+    assert p2["scores"]["balanced"]["components"]["speed"]["value"] == 50
+    # Not ready, p3's own speed is still shown against the ready leader (clamped to 100).
+    own = p3["targets"]["generic_http"]["score"]["components"]["speed"]
+    assert own == {
+        "value": 100,
+        "state": "incomplete",
+        "reason": None,
+        "inputs": {"value": 50, "best": 100, "peers": 2},
+    }
+    # A product alone in its kind is its own leader: 100 on every ready component.
+    c, now, r, b, o, e = peer_inputs()
+    alone = build(
+        [x for x in r if x["product_id"] == 3],
+        [x for x in b if x["run_key"] // 10 == 3],
+        [x for x in o if x["run_key"] // 10 == 3],
+        [x for x in e if x["product_id"] == 3],
+        c,
+        digest(c),
+        now,
+        3,
+        None,
+        None,
+    )
+    score = alone["products"][0]["windows"]["24h"]["scores"]["balanced"]
+    assert score["score"] == 100 and score["grade"] == "A+" and score["rank"] is None
+    assert all(
+        v["value"] == 100 and v["inputs"]["peers"] == 1 for v in score["components"].values()
+    )
+    assert score["components"]["value"]["inputs"] == {"value": 0.01, "best": 0.01, "peers": 1}
+
+
+def test_daily_average_counts():
+    from milf_framework.calculated.aggregate import daily_average, daily_pools
+    from milf_framework.calculated.calculator import build
+    from milf_framework.calculated.policy import DIMENSIONS
+
+    c, now, r, b, o, e = ready_inputs()
+    template = o[0]
+    # Product 1 sees one new IP a day for 30 days; product 2 one IP on a single day.
+    o = [
+        template
+        | {
+            "ip_id": 100 + day,
+            "bucket_start": now - timedelta(days=day, minutes=5),
+            "first_seen": now - timedelta(days=day, minutes=4),
+            "last_seen": now - timedelta(days=day, minutes=3),
+        }
+        for day in range(30)
+    ] + [o[1]]
+    b += [b[0] | {"bucket_start": now - timedelta(days=day, minutes=5)} for day in range(1, 30)]
+    result = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    p1, p2 = result["products"]
+    month = p1["windows"]["30d"]["pool"]
+    assert month["unique_ips"] == 30
+    assert month["daily"] == {
+        "days": 30,
+        "unique_ips": 1,
+        "countries": 1,
+        "regions": 1,
+        "cities": 1,
+        "asns": 1,
+    }
+    assert p1["windows"]["7d"]["pool"]["daily"]["days"] == 7
+    assert p2["windows"]["30d"]["pool"]["daily"]["days"] == 1
+    # Compared per day, the 30-day network does not out-cover the one measured for a day.
+    for p in (p1, p2):
+        coverage = p["windows"]["30d"]["scores"]["balanced"]["components"]["coverage"]
+        assert coverage["value"] == 100
+        assert coverage["inputs"] == {"value": 1, "best": 1, "peers": 2}
+    # A day is [end - 24h, end): a bucket exactly 24 hours before the cutoff is the first day.
+    edge = [template | {"bucket_start": now - timedelta(hours=24), "requested_country": None}]
+    assert [d is not None for d in daily_pools(edge, now, 2)] == [True, False]
+    assert daily_average([None, {"unique_ips": 4, **dict.fromkeys(DIMENSIONS, 2)}], 24)["days"] == 0
+
+
 def test_cohorts_and_duplicate_overlap():
     from milf_framework.calculated.calculator import build, cohort_for
 
