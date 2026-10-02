@@ -21,12 +21,15 @@ from .aggregate import (
     PLACE,
     UNAVAILABLE,
     breakdowns,
+    daily_average,
+    daily_pools,
     metrics,
     outage_list,
     outage_uptime,
+    peer_scores,
     pool,
     pool_lists,
-    product_scores,
+    product_inputs,
     series,
     slot_coverage,
     target_score,
@@ -456,7 +459,8 @@ def build(
                         "minimum_requests",
                         "minimum_coverage",
                         "score_valid_hours",
-                        "curves",
+                        "peer",
+                        "authenticity",
                     )
                 },
             },
@@ -526,6 +530,8 @@ def build(
             else []
         )
         p["outages"] = outage_list(down, as_of - timedelta(hours=720), as_of)
+        # Daily pools of the last 30 days; every window averages its own days of them.
+        days = daily_pools(obs, as_of, max(config["windows"]) // 24)
         for hours in config["windows"]:
             label = {24: "24h", 168: "7d", 720: "30d"}[hours]
             since = as_of - timedelta(hours=hours)
@@ -535,6 +541,7 @@ def build(
             m = metrics(rows, hours)
             bm = metrics(benchmarks, hours)
             ps, ips = pool(seen, since, hours)
+            ps["daily"] = daily_average(days, hours)
             # Pulse-slot counts stay for reference; the published value is outage time.
             up = uptime(batches, since, as_of, threshold)
             up |= outage_uptime(
@@ -560,6 +567,14 @@ def build(
             ]
             values = {e["metric"]: e["value"] for e in ev}
             targets = {}
+            # Raw inputs of this window's scores; the peer pass below scores them.
+            member = {
+                "config": cfg,
+                "fresh": fresh(bm["last_observed"], as_of, cfg["score_valid_hours"]),
+                "targets": {},
+                "old": old,
+                "evidence": ev,
+            }
             ids = set(cfg["required_targets"]) | {r["target"] for r in rows}
             for target in sorted(ids):
                 tm = metrics([r for r in rows if r["target"] == target], hours)
@@ -574,40 +589,21 @@ def build(
                     for target_metrics in (tm, tb):
                         slot_coverage(target_metrics, slots, since, as_of)
                 tc = effective(config, p["provider"], p["product"], target)
-                score = target_score(tb, tc, benchmark=bool(tb["completed"]))
-                retain(
-                    score,
-                    old.get("targets", {}).get(target, {}).get("score"),
-                    as_of,
-                    tc["score_valid_hours"],
-                    tb["last_observed"],
-                    method_id,
-                )
+                member["targets"][target] = target_score(
+                    tb, tc, benchmark=bool(tb["completed"])
+                ) | {
+                    "fresh": fresh(tb["last_observed"], as_of, tc["score_valid_hours"]),
+                    "observed": tb["last_observed"],
+                    "valid_hours": tc["score_valid_hours"],
+                }
                 targets[target] = {
                     "metrics": tm,
                     "benchmark": tb,
-                    "score": score,
+                    "score": None,
                     "readiness": "measured" if tm["completed"] else "unavailable",
                 }
-            scores = product_scores(targets, ps, values, cfg, p["kind"], up)
-            for profile, score in scores.items():
-                retain(
-                    score,
-                    old.get("scores", {}).get(profile),
-                    as_of,
-                    cfg["score_valid_hours"],
-                    bm["last_observed"],
-                    method_id,
-                )
-                if score["state"] == "ready" and ev:
-                    score["valid_until"] = min(
-                        score["valid_until"], *(e["valid_until"] for e in ev)
-                    )
-                if score["state"] == "ready":
-                    target_expiries = [
-                        targets[t]["score"]["valid_until"] for t in cfg["required_targets"]
-                    ]
-                    score["valid_until"] = min(score["valid_until"], *target_expiries)
+            member["inputs"] = product_inputs(ps, values, cfg, p["kind"], up)
+            member["observed"] = bm["last_observed"]
             previous_rows = [
                 r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since
             ]
@@ -616,20 +612,14 @@ def build(
                 slot_coverage(prev_m, batches, since - timedelta(hours=hours), since)
             w = {
                 "period": {"start": since, "end": as_of, "hours": hours, "boundary": "[start,end)"},
-                "readiness": (
-                    "ready"
-                    if scores["balanced"]["state"] == "ready"
-                    else "partial"
-                    if m["completed"]
-                    else "unavailable"
-                ),
+                "readiness": None,  # once scored
                 "metrics": m,
                 "benchmark": bm,
                 "pool": ps,
                 "uptime": up,
                 "breakdowns": dimensions,
                 "targets": targets,
-                "scores": scores,
+                "scores": {},
                 "evidence": values,
                 "evidence_sources": [
                     {
@@ -672,12 +662,14 @@ def build(
             }
             p["windows"][label] = w
             sets[(key, label)] = set(ips)
-            fleet_groups[(p["cohort"], label)].append((p, rows, seen))
+            fleet_groups[(p["cohort"], label)].append((p, rows, seen, member))
     overlaps = []
     fleets = []
     for (cohort, label), members in fleet_groups.items():
-        all_rows = [r for _, rows, _ in members for r in rows]
-        all_seen = [o for _, _, obs in members for o in obs]
+        # A cohort holds one kind of product, so its members are each other's peers.
+        score_window(members, label, config, as_of, method_id)
+        all_rows = [r for _, rows, _, _ in members for r in rows]
+        all_seen = [o for _, _, obs, _ in members for o in obs]
         hours = members[0][0]["windows"][label]["period"]["hours"]
         fm = metrics(all_rows, hours)
         fleets.append(
@@ -685,16 +677,16 @@ def build(
                 "cohort": cohort,
                 "window": label,
                 "products": len(members),
-                "providers": len({p["provider"] for p, _, _ in members}),
+                "providers": len({p["provider"] for p, *_ in members}),
                 "metrics": fm,
                 "unique_ips": len({o["ip_id"] for o in all_seen}),
             }
         )
-        for p, _, _ in members:
+        for p, *_ in members:
             own = sets[((p["product_id"], cohort), label)]
             peers = [
                 q
-                for q, _, _ in members
+                for q, *_ in members
                 if q["provider"] != p["provider"] and sets[((q["product_id"], cohort), label)]
             ]
             shared = set().union(*(sets[((q["product_id"], cohort), label)] for q in peers)) & own
@@ -704,7 +696,7 @@ def build(
                     "shared_share": len(shared) / len(own),
                     "compared_products": len(peers),
                 }
-        for (a, _, _), (b, _, _) in combinations(members, 2):
+        for (a, *_), (b, *_) in combinations(members, 2):
             if a["provider"] == b["provider"]:
                 continue
             sa = sets[((a["product_id"], cohort), label)]
@@ -722,12 +714,12 @@ def build(
                     }
                 )
         for profile in config["profiles"]:
-            rank([p["windows"][label]["scores"][profile] for p, _, _ in members])
-        for target in {t for p, _, _ in members for t in p["windows"][label]["targets"]}:
+            rank([p["windows"][label]["scores"][profile] for p, *_ in members])
+        for target in {t for p, *_ in members for t in p["windows"][label]["targets"]}:
             rank(
                 [
                     p["windows"][label]["targets"][target]["score"]
-                    for p, _, _ in members
+                    for p, *_ in members
                     if target in p["windows"][label]["targets"]
                 ]
             )
@@ -795,6 +787,62 @@ def build(
             if r.get("batch_id") is None
         ],
     }
+
+
+def fresh(observed, as_of, valid_hours):
+    """Whether measurements last observed then are recent enough for a new score (retain())."""
+    return (observed or as_of) + timedelta(hours=valid_hours) > as_of
+
+
+def score_window(members, label, config, as_of, method_id):
+    """Score one window of a peer group by ratio to the leader, then retain and cap validity.
+
+    members are (product, rows, observations, member) of one cohort; member holds the raw inputs
+    peer_scores() needs and what retain() needs: the previous window ("old"), the evidence used
+    and the observation times.
+    """
+    results = peer_scores([m for *_, m in members], config)
+    for (p, *_, member), result in zip(members, results, strict=True):
+        w = p["windows"][label]
+        old = member["old"]
+        for target, score in result["targets"].items():
+            raw = member["targets"][target]
+            retain(
+                score,
+                old.get("targets", {}).get(target, {}).get("score"),
+                as_of,
+                raw["valid_hours"],
+                raw["observed"],
+                method_id,
+            )
+            w["targets"][target]["score"] = score
+        cfg = member["config"]
+        for profile, score in result["scores"].items():
+            retain(
+                score,
+                old.get("scores", {}).get(profile),
+                as_of,
+                cfg["score_valid_hours"],
+                member["observed"],
+                method_id,
+            )
+            if score["state"] == "ready" and member["evidence"]:
+                score["valid_until"] = min(
+                    score["valid_until"], *(e["valid_until"] for e in member["evidence"])
+                )
+            if score["state"] == "ready":
+                target_expiries = [
+                    w["targets"][t]["score"]["valid_until"] for t in cfg["required_targets"]
+                ]
+                score["valid_until"] = min(score["valid_until"], *target_expiries)
+        w["scores"] = result["scores"]
+        w["readiness"] = (
+            "ready"
+            if w["scores"]["balanced"]["state"] == "ready"
+            else "partial"
+            if w["metrics"]["completed"]
+            else "unavailable"
+        )
 
 
 def rank(scores):
