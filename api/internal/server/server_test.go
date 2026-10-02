@@ -403,3 +403,61 @@ func BenchmarkCachedDataset(b *testing.B) {
 		h.ServeHTTP(rec, req)
 	}
 }
+
+func TestVersionNamesTheDatasetAndAnswersConditionally(t *testing.T) {
+	src := &fakeSource{rev: 1}
+	s := newTestServer(t, src)
+	h := s.Handler()
+	readVersion := func() (VersionInfo, *httptest.ResponseRecorder) {
+		rec := get(h, "/v1/version")
+		var v VersionInfo
+		if rec.Code != 200 {
+			t.Fatalf("version status %d", rec.Code)
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v, rec
+	}
+	v1, rec := readVersion()
+	if cc := rec.Header().Get("Cache-Control"); cc != CacheVersion {
+		t.Fatalf("cache-control %q", cc)
+	}
+	// The revision is the dataset's own ETag, so a client holding either can compare.
+	if etag := get(h, "/v1/dataset").Header().Get("ETag"); `"`+v1.Revision+`"` != etag || len(v1.Revision) != 64 {
+		t.Fatalf("revision %q does not name the dataset %s", v1.Revision, etag)
+	}
+	if v1.BuiltAt.IsZero() {
+		t.Fatal("no builtAt")
+	}
+	etag := rec.Header().Get("ETag")
+	if again := get(h, "/v1/version", "If-None-Match", etag); again.Code != http.StatusNotModified || again.Body.Len() != 0 {
+		t.Fatalf("unchanged version: %d %q", again.Code, again.Body.String())
+	}
+	// An unchanged fingerprint keeps answering 304 to the same tag.
+	if _, err := s.Refresh(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if again := get(h, "/v1/version", "If-None-Match", etag); again.Code != http.StatusNotModified {
+		t.Fatalf("version changed without a rebuild: %d", again.Code)
+	}
+	src.set(2, nil)
+	if _, err := s.Refresh(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	changed := get(h, "/v1/version", "If-None-Match", etag)
+	if changed.Code != 200 {
+		t.Fatalf("changed data still 304: %d", changed.Code)
+	}
+	v2, _ := readVersion()
+	if v2.Revision == v1.Revision {
+		t.Fatal("revision did not change with the data")
+	}
+	// A rebuild whose dataset bytes are identical keeps the revision.
+	if _, err := s.Refresh(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if v3, _ := readVersion(); v3.Revision != v2.Revision {
+		t.Fatal("identical data produced a new revision")
+	}
+}

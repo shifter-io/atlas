@@ -70,6 +70,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex`: networks, guides, network reviews, pages, targets, actions, plus a new `Countries` group) and the palette's constants. |
 | `/v1/coverage` | The N/A report: summary counts, dataset-level gaps, per-provider gaps grouped by section with a reason for each, per-target/scope/profile gaps, record counts, and a per-field index of which providers lack it. |
 | `/v1/snapshot` | The current published framework snapshot payload, unchanged (what `src/lib/measured.ts` imports). Gives 404 `{"error":"no published snapshot","available":false}` when nothing is published. |
+| `/v1/version` | `{revision, builtAt}`: what open pages poll (through `/api/site/v1/version`) to learn that the data changed. `revision` is the hex SHA-256 of the `/v1/dataset` body, i.e. its ETag without quotes, so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
 | `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes. |
 
 `source` is `"demo"` or `"measured"` on providers, tape rows, changelog, reviews and
@@ -90,8 +91,9 @@ fixture-only targets, and `"catalog"` for editorial ones.
   `X-Content-Type-Options: nosniff`, and `X-Site-Version`. `If-None-Match` uses the
   weak comparison and matches any coding's tag (or `*`), returning `304` with no
   body. Every `/v1/*` response is
-  `Cache-Control: public, max-age=60, stale-while-revalidate=600`. The exception
-  is `/v1/events`, which is `public, max-age=15, stale-while-revalidate=60`.
+  `Cache-Control: public, max-age=60, stale-while-revalidate=600`. The exceptions
+  are `/v1/events`, which is `public, max-age=15, stale-while-revalidate=60`, and
+  `/v1/version`, which is `public, max-age=5`.
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id`
   - `max(test_events.event_id)`

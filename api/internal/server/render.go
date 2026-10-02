@@ -18,7 +18,9 @@ import (
 const (
 	CacheStatic = "public, max-age=60, stale-while-revalidate=600"
 	CacheEvents = "public, max-age=15, stale-while-revalidate=60"
-	CacheNone   = "no-store"
+	// CacheVersion is short: /v1/version is how open pages notice new data.
+	CacheVersion = "public, max-age=5"
+	CacheNone    = "no-store"
 )
 
 // Rendered is one immutable response body with its precompressed variants.

@@ -230,6 +230,16 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	if err := <-errs; err != nil {
 		return nil, err
 	}
+	// What a browser polls to learn that the data changed. The revision is the
+	// dataset body's own hash (its ETag without quotes), so it changes exactly
+	// when the published data does, and a site built from a `siteapi dump` file
+	// can compute it from the bytes. No extra database work: it is rendered once
+	// per Version, like everything else.
+	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: res.BuiltAt.UTC()}, CacheVersion, LevelFast)
+	if err != nil {
+		return nil, err
+	}
+	v.Static["/v1/version"] = ver
 	// The default events query (what the live tape polls first) is rendered up front.
 	// (When the in-memory window cannot prove the answer, the first request asks the database.)
 	if def, err := eventsBody(res, store.EventFilter{Limit: 100}); err == nil {
@@ -240,6 +250,22 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 		v.events.Add(eventsKey(store.EventFilter{Limit: 100}), r)
 	}
 	return v, nil
+}
+
+// VersionInfo is /v1/version.
+type VersionInfo struct {
+	Revision string    `json:"revision"`
+	BuiltAt  time.Time `json:"builtAt"`
+}
+
+// Revision identifies the published data of a Version: the hex SHA-256 of the
+// /v1/dataset body, which is also that body's ETag.
+func Revision(v *Version) string {
+	d := v.Static["/v1/dataset"]
+	if d == nil {
+		return ""
+	}
+	return strings.Trim(d.ETag, `"`)
 }
 
 // Run polls for changes until the context ends.
@@ -264,7 +290,7 @@ func (s *Server) Handler() http.Handler {
 	static := func(path string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, path) }
 	}
-	for _, p := range []string{"/v1/dataset", "/v1/overview", "/v1/providers", "/v1/search-index", "/v1/coverage", "/v1/snapshot"} {
+	for _, p := range []string{"/v1/dataset", "/v1/overview", "/v1/providers", "/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
 	mux.HandleFunc("GET /v1/providers/{slug}", func(w http.ResponseWriter, r *http.Request) {
