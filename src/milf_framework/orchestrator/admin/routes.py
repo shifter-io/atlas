@@ -348,6 +348,19 @@ async def set_target(request: web.Request) -> web.Response:
     return _json(row)
 
 
+async def set_scheduler(request: web.Request) -> web.Response:
+    """Switch the census and/or pulse planner: {"census": bool?, "pulse": bool?}."""
+    body = await _body(request)
+    unknown = set(body) - set(views.SCHEDULER_SWITCHES)
+    if unknown:
+        raise _error(web.HTTPBadRequest, f"unknown fields: {', '.join(sorted(unknown))}")
+    if not body:
+        raise _error(web.HTTPBadRequest, "send census and/or pulse")
+    values = {key: _bool(value, key) for key, value in body.items()}
+    async with request.app[DB_KEY].connection() as conn:
+        return _json(await views.set_scheduler(conn, values))
+
+
 def setup(
     app: web.Application,
     *,
@@ -375,3 +388,4 @@ def setup(
     add.add_post("/admin/api/jobs/run", run_job)
     add.add_post("/admin/api/schedule/country", set_country)
     add.add_post("/admin/api/schedule/target", set_target)
+    add.add_post("/admin/api/schedule/scheduler", set_scheduler)

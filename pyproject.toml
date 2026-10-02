@@ -32,6 +32,7 @@ packages = ["src/milf_framework"]
 "configs/countries.json" = "milf_framework/configs/countries.json"
 "configs/targets.toml" = "milf_framework/configs/targets.toml"
 "configs/methodology.toml" = "milf_framework/configs/methodology.toml"
+"configs/staging.toml" = "milf_framework/configs/staging.toml"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "scripts", "docs", "configs", "credentials.toml.example", "database.toml.example", "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".github", "db-ip/README.html"]

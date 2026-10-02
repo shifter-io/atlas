@@ -255,7 +255,8 @@ async def test_batches_list_filters_and_detail(database, db, admin):
 async def test_schedule_reader_and_country_edits(database, db, admin):
     prepare(database, ("DE", "FR"))
     body = await get(admin, "/schedule")
-    assert set(body) == {"now", "regions", "countries", "targets"}
+    assert set(body) == {"now", "regions", "countries", "targets", "scheduler"}
+    assert body["scheduler"] == {"census": True, "pulse": True, "census_every_minutes": None}
     de = next(c for c in body["countries"] if c["country_code"] == "DE")
     assert de["region"] == "fra1" and de["enabled"] and len(de["census_time"]) == 5
     assert sum(c["enabled"] for c in body["countries"]) == 2
@@ -541,3 +542,18 @@ async def test_acknowledge_alert(database, admin):
     assert (await post(admin, f"/alerts/{alert_id}/ack"))["already"] is True
     assert (await get(admin, "/dashboard"))["alerts"] == []
     await post(admin, "/alerts/999999/ack", expect=404)
+
+
+async def test_scheduler_switch_action(database, db, admin):
+    prepare(database, ("DE",))
+    issue_token(database, provider="alpha", product="res", region="fra1")
+    assert await post(admin, "/schedule/scheduler", {"pulse": False}) == {
+        "census": True, "pulse": False, "census_every_minutes": None,
+    }
+    assert (await get(admin, "/schedule"))["scheduler"]["pulse"] is False
+    assert (await batches.pulse_plan(db))["skipped"] == "pulse scheduler is off"
+    assert query(database, "SELECT count(*) FROM test_batches") == [(0,)]
+    both = await post(admin, "/schedule/scheduler", {"census": False, "pulse": True})
+    assert (both["census"], both["pulse"]) == (False, True)
+    for bad in ({}, {"census": "off"}, {"pulse": 1}, {"both": True}):
+        await post(admin, "/schedule/scheduler", bad, 400)

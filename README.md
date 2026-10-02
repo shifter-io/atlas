@@ -131,3 +131,42 @@ and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
 alternative profiles use their own weights. No overall score is emitted for missing required inputs.
 The current run is explicitly a pool sample. Scoring thresholds and weights remain a draft.
+
+## Staging
+
+`configs/staging.toml` is a small, fast profile for trying the census/pulse loop end to end:
+RO and BG only, a census every 4 minutes (setting `census.every_minutes`, epoch-aligned slots;
+unset means the daily `countries.census_time`), pulses every 2 minutes, HTML reports in
+`reports/staging/`, and a token for the Shifter Residential node in fra1.
+
+```sh
+milf-framework staging init --config configs/staging.toml          # --clean drops and recreates
+milf-framework orchestrator --dev --database-file .secrets/staging-database.toml
+milf-framework node --orchestrator http://127.0.0.1:8080 \
+  --token-file .secrets/staging-tokens/shifter-residential-fra1.token \
+  --provider shifter --product residential --region fra1 \
+  --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml
+```
+
+`staging init` takes host, port, user and password from `.secrets/database.toml` and creates the
+database (owned by that user) with `.secrets/postgres-admin.toml`; it refuses a name equal to
+`database.toml`'s dbname or `proxy_reviews`. It writes `.secrets/staging-database.toml` and the
+node tokens (mode 600), runs db-init and db-seed, disables every country outside `[scope]`, and
+prints a JSON summary with the exact orchestrator and node commands (`--secrets-dir` points it
+elsewhere). Re-running it rotates the node tokens.
+
+The planners can be switched off without a restart (both when neither flag is given; also
+`POST /admin/api/schedule/scheduler {"census": false}`); a planner that is off records its job
+as `skipped`:
+
+```sh
+milf-framework scheduler off|on|status [--census|--pulse] --database-file .secrets/staging-database.toml
+```
+
+With the `reports.dir` setting, the orchestrator writes `batch-<id>.html` whenever a batch
+closes and regenerates `index.html` (refreshes every 30 s); its `reports` job also rewrites the
+index and a live page for every running batch every 30 s, from the counters nodes post (marked
+"live counters", with elapsed time and the distance to the census stop rule). The same pages on demand:
+`milf-framework report html --database-file F --out DIR [--batch ID]`. They are single
+self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
+challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.

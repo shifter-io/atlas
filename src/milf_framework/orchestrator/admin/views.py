@@ -18,8 +18,8 @@ from typing import Any
 
 import psycopg
 
-from ..batches import run_finished
-from ..db import Database, setting
+from ..batches import census_every, next_slot, run_finished
+from ..db import Database, mark_closed, put_setting, setting
 from ..events import emit
 
 GB = 10**9
@@ -237,20 +237,32 @@ async def job_health(conn: psycopg.AsyncConnection, now: datetime | None = None)
 async def upcoming_census(
     conn: psycopg.AsyncConnection, now: datetime | None = None, limit: int = 12
 ) -> list[dict[str, Any]]:
-    """The next census slots of enabled countries, soonest first."""
+    """The next census slots of enabled countries, soonest first (census.every_minutes, when
+    set, puts every country on the same next slot)."""
     now = _now(now)
-    rows = await _rows(
-        conn,
-        "SELECT c.country_code,c.name,r.slug AS region,c.census_time,"
-        "CASE WHEN ((%(now)s AT TIME ZONE 'UTC')::date+c.census_time) AT TIME ZONE 'UTC'"
-        " >= %(now)s THEN ((%(now)s AT TIME ZONE 'UTC')::date+c.census_time) AT TIME ZONE 'UTC'"
-        " ELSE ((%(now)s AT TIME ZONE 'UTC')::date+1+c.census_time) AT TIME ZONE 'UTC' END"
-        " AS next_at "
-        "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
-        "WHERE c.enabled AND EXISTS (SELECT 1 FROM targets t WHERE t.census) "
-        "ORDER BY next_at,c.country_code LIMIT %(limit)s",
-        {"now": now, "limit": limit},
-    )
+    every = census_every(await setting(conn, "census.every_minutes"))
+    if every is not None:
+        rows = await _rows(
+            conn,
+            "SELECT c.country_code,c.name,r.slug AS region,NULL::time AS census_time,"
+            "%(next)s::timestamptz AS next_at FROM countries c JOIN runner_regions r "
+            "ON r.region_id=c.region_id AND r.enabled WHERE c.enabled AND EXISTS "
+            "(SELECT 1 FROM targets t WHERE t.census) ORDER BY c.country_code LIMIT %(limit)s",
+            {"next": next_slot(every, now), "limit": limit},
+        )
+    else:
+        rows = await _rows(
+            conn,
+            "SELECT c.country_code,c.name,r.slug AS region,c.census_time,"
+            "CASE WHEN ((%(now)s AT TIME ZONE 'UTC')::date+c.census_time) AT TIME ZONE 'UTC'"
+            " >= %(now)s THEN ((%(now)s AT TIME ZONE 'UTC')::date+c.census_time) AT TIME ZONE"
+            " 'UTC' ELSE ((%(now)s AT TIME ZONE 'UTC')::date+1+c.census_time) AT TIME ZONE 'UTC'"
+            " END AS next_at "
+            "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
+            "WHERE c.enabled AND EXISTS (SELECT 1 FROM targets t WHERE t.census) "
+            "ORDER BY next_at,c.country_code LIMIT %(limit)s",
+            {"now": now, "limit": limit},
+        )
     for row in rows:
         row["census_time"] = _hhmm(row["census_time"])
         row["in_s"] = int((row["next_at"] - now).total_seconds())
@@ -404,7 +416,34 @@ async def schedule(conn: psycopg.AsyncConnection, now: datetime | None = None) -
         "FROM runner_regions r LEFT JOIN countries c ON c.region_id=r.region_id "
         "GROUP BY r.region_id ORDER BY r.region_id",
     )
-    return {"now": now, "regions": regions, "countries": countries, "targets": targets}
+    return {
+        "now": now,
+        "regions": regions,
+        "countries": countries,
+        "targets": targets,
+        "scheduler": await scheduler_state(conn),
+    }
+
+
+SCHEDULER_SWITCHES = {"census": "scheduler.census_enabled", "pulse": "scheduler.pulse_enabled"}
+
+
+async def scheduler_state(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+    """Whether each planner is on, and the census interval (None: the daily slot)."""
+    return {
+        **{kind: bool(await setting(conn, key)) for kind, key in SCHEDULER_SWITCHES.items()},
+        "census_every_minutes": await setting(conn, "census.every_minutes"),
+    }
+
+
+async def set_scheduler(conn: psycopg.AsyncConnection, values: dict[str, bool]) -> dict:
+    """Switch the census and/or pulse planner on or off (keys 'census', 'pulse')."""
+    unknown = set(values) - set(SCHEDULER_SWITCHES)
+    if unknown or not values:
+        raise ValueError("unknown or missing scheduler switches")
+    for kind, enabled in values.items():
+        await put_setting(conn, SCHEDULER_SWITCHES[kind], bool(enabled))
+    return await scheduler_state(conn)
 
 
 async def node_grid(conn: psycopg.AsyncConnection, now: datetime | None = None) -> dict:
@@ -620,6 +659,7 @@ async def stop_batch(
             "UPDATE test_batches SET status=%s,finished_at=%s WHERE batch_id=%s",
             (status, now, batch_id),
         )
+        mark_closed(conn, batch_id)
         for run in killed:
             await run_finished(conn, batch_id, run["product_id"], now)
         if batch["kind"] == "pulse" or status == "skipped":
