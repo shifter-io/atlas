@@ -195,12 +195,13 @@ async def test_changed_run_and_corrupt_artifact_are_rejected(database, tmp_path)
     assert status(database)["counts"]["test_runs"] == 1
 
 
-async def test_https_has_no_ip_rows(database, tmp_path):
+async def test_https_saves_ip_rows(database, tmp_path):
     directory = await measurement(tmp_path, target="generic_https")
     ingest(directory, database)
     saved = status(database)
-    assert saved["counts"]["ip_addresses"] == saved["counts"]["ip_observations"] == 0
-    assert saved["cached_scopes"][0]["metrics"]["unique_ips"] is None
+    assert saved["counts"]["ip_addresses"] > 0
+    assert saved["counts"]["ip_observations"] > 0
+    assert saved["cached_scopes"][0]["metrics"]["unique_ips"] > 0
 
 
 async def test_unreconciled_ip_counts_roll_back(database, tmp_path):

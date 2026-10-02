@@ -34,7 +34,7 @@ def test_registry_extension():
     with pytest.raises(ValueError):
         targets.get("missing")
     assert registry.get("generic_http").pool_eligible
-    assert not registry.get("generic_https").pool_eligible
+    assert registry.get("generic_https").pool_eligible
 
 
 def test_histogram_merge_and_nulls():
