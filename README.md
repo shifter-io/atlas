@@ -130,7 +130,43 @@ and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
 `milf-framework report traffic --test census|pulse --database-file ...` prints GB per provider.
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
 alternative profiles use their own weights. No overall score is emitted for missing required inputs.
-The current run is explicitly a pool sample. Scoring thresholds and weights remain a draft.
+The current run is explicitly a pool sample. Scoring weights remain a draft.
+
+### Scores: ratio to the leader
+
+Every sub-score compares a network with the best network of the same kind (`kind` in
+`configs/methodology.toml`; without one, the product name, e.g. `residential`) in the same
+window (24h, 7d or 30d). Higher-is-better values score `100 × yours ÷ best`; lower-is-better
+values (speed p50 latency, cost) are flipped to `100 × best ÷ yours`. Scores are clamped to 0–100,
+so the leader of each component scores 100. Leaders are found again on every calculation; nothing
+is stored between calculations. A network alone in its kind is its own leader and scores 100 on
+every ready component. Only ready, freshly measured components set the best: incomplete, retained,
+expired or historical scores never do.
+
+| Component | Raw value | Better |
+| --- | --- | --- |
+| reliability | benchmark success rate, per target | higher |
+| speed | benchmark p50 latency, per target | lower |
+| uptime | outage-time uptime % (evidence as fallback) | higher |
+| coverage | unique IPs per day | higher |
+| diversity | countries, regions, cities, ASNs per day, mixed 0.30/0.20/0.25/0.25 (`[peer.diversity]`) | higher |
+| dcAsns | clean share, 1 − datacenter ASN share (datacenter products keep 100) | higher |
+| authenticity | (1 − claim gap) × 100 − blocklist hits × 120 (`[authenticity]`) | higher |
+| value | cost per 1,000 successful requests | lower |
+
+Reliability and speed are scored per target against that target's leader, combined per target
+80/20 (`[target_weights]`), and averaged over the required targets (`[benchmark_weights]`).
+Pool counts are the average of daily (24-hour) counts over the window's days with observations,
+so a network measured for three days compares fairly with one measured for all 30; the window
+totals stay in `pool` for display and the averages are in `pool.daily` (`days`, `unique_ips`,
+`countries`, `regions`, `cities`, `asns`). The composite is the weighted mean of the eight
+ratios with the profile's weights (balanced 22/14/10/12/8/10/10/14) and maps to a grade.
+
+Each component's `inputs` makes its score reproducible: `{"value", "best", "peers"}` (the raw
+value, the leader's raw value and the number of ready peers including itself); diversity has
+`{"countries": {"value", "best"}, "regions": …, "cities": …, "asns": …, "peers"}`; product
+reliability and speed have `{"targets": {"<target>": {"value", "best"}}, "peers"}`. A component
+without a ready peer is compared with itself.
 
 ## Staging
 
