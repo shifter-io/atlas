@@ -50,10 +50,25 @@ def register(commands):
     traffic.add_argument("--from", dest="start", help="Batch slot from (ISO; UTC if no zone)")
     traffic.add_argument("--to", dest="end", help="Batch slot until, exclusive")
     traffic.add_argument("--json", action="store_true", help="Print JSON instead of a table")
+    pages = kinds.add_parser(
+        "html", help="Self-contained HTML batch reports and an auto-refreshing index"
+    )
+    pages.add_argument("--database-file", required=True)
+    pages.add_argument("--out", required=True, help="Output directory")
+    pages.add_argument(
+        "--batch", type=int, action="append", help="Only this batch (repeatable); default all"
+    )
+    pages.add_argument("--limit", type=int, default=500, help="Batches listed in the index")
 
 
 def dispatch(args):
     db = args.database_file
+    if args.command == "report" and args.report == "html":
+        from .. import report_html
+
+        result = report_html.write(db, args.out, args.batch, limit=args.limit)
+        print(json.dumps(result, indent=2))
+        return 0
     if args.command == "report":
         from .. import traffic
         from ..storage import connect

@@ -40,7 +40,8 @@ class Target(Protocol):
 class EchoIpTarget:
     id: str
     url: str
-    pool_eligible: bool = False
+    # Every request costs money and returns the exit IP, so every echo target records it.
+    pool_eligible: bool = True
     version: str = "1"
     engine: str = "http"
 
@@ -86,5 +87,5 @@ class TargetRegistry:
 
 
 registry = TargetRegistry()
-registry.register(EchoIpTarget("generic_http", "http://checkip.amazonaws.com/", True))
+registry.register(EchoIpTarget("generic_http", "http://checkip.amazonaws.com/"))
 registry.register(EchoIpTarget("generic_https", "https://checkip.amazonaws.com/"))

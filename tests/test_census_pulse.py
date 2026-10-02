@@ -362,8 +362,9 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
     assert scheduled["windows"]["7d"]["uptime"]["value"] == pytest.approx(1 - 6 / 168)
     assert w["targets"]["generic_http"]["metrics"]["uptime"] == 0.5
     uptime_component = w["scores"]["balanced"]["components"]["uptime"]
-    assert uptime_component["inputs"] == 75 and uptime_component["state"] == "ready"
-    assert uptime_component["value"] == 0
+    # alpha is the only product of its kind with ready uptime: the leader, at 100.
+    assert uptime_component["inputs"] == {"value": 75, "best": 75, "peers": 1}
+    assert uptime_component["state"] == "ready" and uptime_component["value"] == 100
     assert scheduled["outages"] == [
         {
             "country": "DE",
@@ -475,7 +476,8 @@ async def test_measured_uptime_needs_enough_batches_and_evidence_falls_back(data
     payload = calculate(database, lenient_policy(tmp_path), as_of=as_of)
     scheduled = next(p for p in payload["products"] if p["cohort"] == scheduled["cohort"])
     component = scheduled["windows"]["24h"]["scores"]["balanced"]["components"]["uptime"]
-    assert component["state"] == "ready" and component["value"] == pytest.approx(100 * 2 / 3)
+    assert component["state"] == "ready" and component["value"] == 100
+    assert component["inputs"] == {"value": 99.0, "best": 99.0, "peers": 1}
 
 
 # --- detection ---------------------------------------------------------------------------------

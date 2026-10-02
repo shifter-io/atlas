@@ -130,4 +130,79 @@ and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
 `milf-framework report traffic --test census|pulse --database-file ...` prints GB per provider.
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
 alternative profiles use their own weights. No overall score is emitted for missing required inputs.
-The current run is explicitly a pool sample. Scoring thresholds and weights remain a draft.
+The current run is explicitly a pool sample. Scoring weights remain a draft.
+
+### Scores: ratio to the leader
+
+Every sub-score compares a network with the best network of the same kind (`kind` in
+`configs/methodology.toml`; without one, the product name, e.g. `residential`) in the same
+window (24h, 7d or 30d). Higher-is-better values score `100 × yours ÷ best`; lower-is-better
+values (speed p50 latency, cost) are flipped to `100 × best ÷ yours`. Scores are clamped to 0–100,
+so the leader of each component scores 100. Leaders are found again on every calculation; nothing
+is stored between calculations. A network alone in its kind is its own leader and scores 100 on
+every ready component. Only ready, freshly measured components set the best: incomplete, retained,
+expired or historical scores never do.
+
+| Component | Raw value | Better |
+| --- | --- | --- |
+| reliability | benchmark success rate, per target | higher |
+| speed | benchmark p50 latency, per target | lower |
+| uptime | outage-time uptime % (evidence as fallback) | higher |
+| coverage | unique IPs per day | higher |
+| diversity | countries, regions, cities, ASNs per day, mixed 0.30/0.20/0.25/0.25 (`[peer.diversity]`) | higher |
+| dcAsns | clean share, 1 − datacenter ASN share (datacenter products keep 100) | higher |
+| authenticity | (1 − claim gap) × 100 − blocklist hits × 120 (`[authenticity]`) | higher |
+| value | cost per 1,000 successful requests | lower |
+
+Reliability and speed are scored per target against that target's leader, combined per target
+80/20 (`[target_weights]`), and averaged over the required targets (`[benchmark_weights]`).
+Pool counts are the average of daily (24-hour) counts over the window's days with observations,
+so a network measured for three days compares fairly with one measured for all 30; the window
+totals stay in `pool` for display and the averages are in `pool.daily` (`days`, `unique_ips`,
+`countries`, `regions`, `cities`, `asns`). The composite is the weighted mean of the eight
+ratios with the profile's weights (balanced 22/14/10/12/8/10/10/14) and maps to a grade.
+
+Each component's `inputs` makes its score reproducible: `{"value", "best", "peers"}` (the raw
+value, the leader's raw value and the number of ready peers including itself); diversity has
+`{"countries": {"value", "best"}, "regions": …, "cities": …, "asns": …, "peers"}`; product
+reliability and speed have `{"targets": {"<target>": {"value", "best"}}, "peers"}`. A component
+without a ready peer is compared with itself.
+
+## Staging
+
+`configs/staging.toml` is a small, fast profile for trying the census/pulse loop end to end:
+RO and BG only, a census every 4 minutes (setting `census.every_minutes`, epoch-aligned slots;
+unset means the daily `countries.census_time`), pulses every 2 minutes, HTML reports in
+`reports/staging/`, and a token for the Shifter Residential node in fra1.
+
+```sh
+milf-framework staging init --config configs/staging.toml          # --clean drops and recreates
+milf-framework orchestrator --dev --database-file .secrets/staging-database.toml
+milf-framework node --orchestrator http://127.0.0.1:8080 \
+  --token-file .secrets/staging-tokens/shifter-residential-fra1.token \
+  --provider shifter --product residential --region fra1 \
+  --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml
+```
+
+`staging init` takes host, port, user and password from `.secrets/database.toml` and creates the
+database (owned by that user) with `.secrets/postgres-admin.toml`; it refuses a name equal to
+`database.toml`'s dbname or `proxy_reviews`. It writes `.secrets/staging-database.toml` and the
+node tokens (mode 600), runs db-init and db-seed, disables every country outside `[scope]`, and
+prints a JSON summary with the exact orchestrator and node commands (`--secrets-dir` points it
+elsewhere). Re-running it rotates the node tokens.
+
+The planners can be switched off without a restart (both when neither flag is given; also
+`POST /admin/api/schedule/scheduler {"census": false}`); a planner that is off records its job
+as `skipped`:
+
+```sh
+milf-framework scheduler off|on|status [--census|--pulse] --database-file .secrets/staging-database.toml
+```
+
+With the `reports.dir` setting, the orchestrator writes `batch-<id>.html` whenever a batch
+closes and regenerates `index.html` (refreshes every 30 s); its `reports` job also rewrites the
+index and a live page for every running batch every 30 s, from the counters nodes post (marked
+"live counters", with elapsed time and the distance to the census stop rule). The same pages on demand:
+`milf-framework report html --database-file F --out DIR [--batch ID]`. They are single
+self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
+challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.

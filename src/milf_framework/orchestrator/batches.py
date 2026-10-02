@@ -10,6 +10,10 @@ tape event when that alert opens).
 Lock order, everywhere: test_batches row (FOR UPDATE) first, then its batch_runs rows. The
 barrier (`close_batch`) runs under the batch lock: a batch is 'done' once every run is terminal
 and at least one finished, 'failed' when none did.
+
+The settings `scheduler.census_enabled` / `scheduler.pulse_enabled` switch the planners off: a
+planner that is off plans nothing and its job records 'skipped'. `census.every_minutes` replaces
+the daily census slot with one every N minutes, aligned to the epoch, for every enabled country.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from typing import Any
 
 import psycopg
 
-from .db import Database, setting
+from .db import Database, mark_closed, setting
 from .events import emit, raise_alert
 
 log = logging.getLogger(__name__)
@@ -39,11 +43,15 @@ COUNTERS = (
     "bytes_up",
     "bytes_down",
 )
-# Census slots are matched in [now - CENSUS_GRACE, now + CENSUS_HORIZON). The minute-aligned
-# planner covers every slot twice, so a late or missed tick (restart) still plans it; the
-# UNIQUE(kind, country, target, scheduled_for) key keeps that idempotent.
+# Census slots are matched in [now - census.lead_seconds - CENSUS_GRACE, now + CENSUS_HORIZON):
+# from a minute before the slot until two minutes past its start_at. A slot whose previous
+# census is still open is deferred until start_at, so the window keeps at least two ticks at or
+# after start_at: a late or missed tick (restart) still decides it. The UNIQUE(kind, country,
+# target, scheduled_for) key keeps all of that idempotent.
 CENSUS_HORIZON = timedelta(seconds=60)
-CENSUS_GRACE = timedelta(seconds=60)
+CENSUS_GRACE = timedelta(seconds=120)
+# A census planned after its start_at (a deferred slot, a restart) starts this long after now.
+LATE_START = timedelta(seconds=5)
 # Nodes are handed runs this far ahead of start_at so they can wait on the wall clock.
 ASSIGN_AHEAD = timedelta(minutes=5)
 PLAN_LOCK = 817452902
@@ -142,42 +150,102 @@ async def _report_no_node(conn: psycopg.AsyncConnection, gaps: list[dict], now: 
     return events
 
 
-async def census_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
-    """Create the census batches for every enabled country whose daily slot is due.
+def census_every(value: Any) -> timedelta | None:
+    """The census.every_minutes setting as an interval; None (unset) means the daily slot."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 1:
+        raise ValueError("census.every_minutes must be a positive number of minutes or null")
+    return timedelta(minutes=value)
 
-    One batch per census target, start_at = slot + census.lead_seconds. A country whose
-    previous census (same target) is still scheduled or running gets its new batch 'skipped'
-    and a 'census_skipped' event instead.
+
+def interval_slots(every: timedelta, lo: datetime, hi: datetime) -> list[datetime]:
+    """The slots aligned to multiples of `every` since the epoch in [lo, hi)."""
+    step = every.total_seconds()
+    k = -(-lo.timestamp() // step)  # ceil
+    slots = []
+    while k * step < hi.timestamp():
+        slots.append(datetime.fromtimestamp(k * step, UTC))
+        k += 1
+    return slots
+
+
+def next_slot(every: timedelta, now: datetime) -> datetime:
+    """The first aligned slot after `now`."""
+    step = every.total_seconds()
+    return datetime.fromtimestamp((now.timestamp() // step + 1) * step, UTC)
+
+
+async def census_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
+    """Create the census batches for every enabled country whose slot is due.
+
+    The slot is the country's daily census_time, or with census.every_minutes = N every
+    N-minute boundary since the epoch for every enabled country. Either way a slot is planned
+    in [now - CENSUS_GRACE, now + CENSUS_HORIZON), so the minute-aligned planner sees it twice.
+    One batch per census target, start_at = slot + census.lead_seconds (now + LATE_START when
+    planned after that). Overlap is decided at start time: while the country's previous census
+    (same target, earlier slot) is still scheduled or running, the slot is deferred (nothing is
+    written) until start_at; a previous census that finished by then lets it plan normally, one
+    still open at or after start_at turns the new batch 'skipped' with a 'census_skipped' event.
     """
     now = _now(now)
     await db.ensure_partition("test_events", now)
     async with db.transaction() as conn:
+        if not await setting(conn, "scheduler.census_enabled"):
+            return {"created": 0, "skipped": "census scheduler is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "census.lead_seconds")))
+        every = census_every(await setting(conn, "census.every_minutes"))
         products = await participants(conn)
         if not products:
             return {"created": 0, "skipped": 0, "reason": "no registered nodes"}
-        # Slots on the previous, current and next UTC day cover a window across midnight.
-        due = await _rows(
-            conn,
-            "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
-            "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
-            "CROSS JOIN targets t CROSS JOIN generate_series(-1,1) d "
-            "CROSS JOIN LATERAL (SELECT (((%(now)s AT TIME ZONE 'UTC')::date + d)"
-            " + c.census_time) AT TIME ZONE 'UTC' AS slot) s "
-            "WHERE c.enabled AND t.census AND s.slot >= %(lo)s AND s.slot < %(hi)s "
-            "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
-            {"now": now, "lo": now - CENSUS_GRACE, "hi": now + CENSUS_HORIZON},
-        )
-        created, skipped = [], 0
+        window = {"now": now, "lo": now - lead - CENSUS_GRACE, "hi": now + CENSUS_HORIZON}
+        if every is None:
+            # Slots on the previous, current and next UTC day cover a window across midnight.
+            due = await _rows(
+                conn,
+                "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
+                "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
+                "CROSS JOIN targets t CROSS JOIN generate_series(-1,1) d "
+                "CROSS JOIN LATERAL (SELECT (((%(now)s AT TIME ZONE 'UTC')::date + d)"
+                " + c.census_time) AT TIME ZONE 'UTC' AS slot) s "
+                "WHERE c.enabled AND t.census AND s.slot >= %(lo)s AND s.slot < %(hi)s "
+                "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
+                window,
+            )
+        else:
+            # Every enabled country on the same aligned slots: floor(epoch / every) * every.
+            due = await _rows(
+                conn,
+                "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
+                "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
+                "CROSS JOIN targets t CROSS JOIN unnest(%(slots)s::timestamptz[]) s(slot) "
+                "WHERE c.enabled AND t.census "
+                "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
+                {"slots": interval_slots(every, window["lo"], window["hi"])},
+            )
+        created, skipped, deferred = [], 0, 0
         for slot in due:
+            key = (slot["country_code"], slot["target_id"], slot["slot"])
+            if await _row(
+                conn,
+                "SELECT 1 FROM test_batches WHERE kind='census' AND country_code=%s "
+                "AND target_id=%s AND scheduled_for=%s",
+                key,
+            ):
+                continue
             previous = await _row(
                 conn,
                 "SELECT batch_id,status,scheduled_for FROM test_batches WHERE kind='census' "
                 "AND country_code=%s AND target_id=%s AND status IN ('scheduled','running') "
-                "AND scheduled_for<>%s ORDER BY scheduled_for DESC LIMIT 1",
-                (slot["country_code"], slot["target_id"], slot["slot"]),
+                "AND scheduled_for<%s ORDER BY scheduled_for DESC LIMIT 1",
+                key,
             )
+            start_at = slot["slot"] + lead
+            if previous and now < start_at:
+                # It may still finish in time: the next tick decides.
+                deferred += 1
+                continue
             status = "skipped" if previous else "scheduled"
             inserted = await _row(
                 conn,
@@ -189,7 +257,7 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
                     slot["region_id"],
                     slot["target_id"],
                     slot["slot"],
-                    slot["slot"] + lead,
+                    start_at if previous else max(start_at, now + LATE_START),
                     status,
                     now if previous else None,
                 ),
@@ -198,6 +266,7 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
                 continue
             if previous:
                 skipped += 1
+                mark_closed(conn, inserted["batch_id"])
                 await emit(
                     conn,
                     "census_skipped",
@@ -220,7 +289,12 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
         await _report_no_node(conn, gaps, now)
         for batch_id in created:
             await close_batch(conn, batch_id, now)
-    return {"created": len(created), "skipped": skipped, "no_node": len(gaps)}
+    return {
+        "created": len(created),
+        "skipped": skipped,
+        "deferred": deferred,
+        "no_node": len(gaps),
+    }
 
 
 async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
@@ -233,6 +307,8 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
     now = _now(now)
     await db.ensure_partition("test_events", now)
     async with db.transaction() as conn:
+        if not await setting(conn, "scheduler.pulse_enabled"):
+            return {"targets": [], "created": 0, "skipped": "pulse scheduler is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
         if not await participants(conn):
@@ -299,6 +375,7 @@ async def close_batch(conn: psycopg.AsyncConnection, batch_id: int, now: datetim
         "UPDATE test_batches SET status=%s,finished_at=%s WHERE batch_id=%s",
         (status, now, batch_id),
     )
+    mark_closed(conn, batch_id)
     return status
 
 

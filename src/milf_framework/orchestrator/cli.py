@@ -1,11 +1,12 @@
-"""CLI commands: orchestrator, node and node-token (registered into milf-framework)."""
+"""CLI commands: orchestrator, node, node-token, scheduler and staging (registered into
+milf-framework)."""
 
 from __future__ import annotations
 
 import json
 import os
 
-COMMANDS = ("orchestrator", "node", "node-token")
+COMMANDS = ("orchestrator", "node", "node-token", "scheduler", "staging")
 
 
 def register(commands) -> None:
@@ -45,6 +46,34 @@ def register(commands) -> None:
     token.add_argument("--region", required=True, help="Region slug or host name")
     token.add_argument("--host-name")
 
+    switch = commands.add_parser(
+        "scheduler", help="Switch the census and/or pulse planner on or off, or show them"
+    )
+    switch.add_argument("action", choices=["on", "off", "status"])
+    which = switch.add_mutually_exclusive_group()
+    which.add_argument("--census", action="store_true", help="Only the census planner")
+    which.add_argument("--pulse", action="store_true", help="Only the pulse planner")
+    switch.add_argument("--database-file", required=True)
+
+    staging = commands.add_parser("staging", help="A staging database for the census/pulse loop")
+    steps = staging.add_subparsers(dest="staging", required=True)
+    init = steps.add_parser(
+        "init", help="Create (or with --clean recreate) the staging database from a profile"
+    )
+    init.add_argument("--config", help="Staging profile TOML (default configs/staging.toml)")
+    init.add_argument("--clean", action="store_true", help="Drop and recreate the database")
+    init.add_argument(
+        "--secrets-dir",
+        default=".secrets",
+        help="Holds database.toml and postgres-admin.toml; receives staging-database.toml "
+        "and staging-tokens/ (default .secrets)",
+    )
+    init.add_argument(
+        "--orchestrator-url",
+        default="http://127.0.0.1:8080",
+        help="Orchestrator URL used in the printed node commands",
+    )
+
 
 def dispatch(args) -> int:
     if args.command == "orchestrator":
@@ -59,6 +88,23 @@ def dispatch(args) -> int:
             dev=args.dev,
             methodology=args.methodology,
         )
+        return 0
+    if args.command == "scheduler":
+        from .control import scheduler
+
+        kinds = ["census"] if args.census else ["pulse"] if args.pulse else None
+        print(json.dumps(scheduler(args.database_file, args.action, kinds), indent=2))
+        return 0
+    if args.command == "staging":
+        from .staging import init
+
+        result = init(
+            args.config,
+            secrets_dir=args.secrets_dir,
+            clean=args.clean,
+            orchestrator_url=args.orchestrator_url,
+        )
+        print(json.dumps(result, indent=2))
         return 0
     if args.command == "node-token":
         from .nodes import issue_token

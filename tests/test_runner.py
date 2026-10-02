@@ -10,6 +10,7 @@ from helpers import FakeTransport
 from milf_framework import JsonSink, ProxyConfig, RunConfig, run
 from milf_framework.models import Outcome
 from milf_framework.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from milf_framework.targets import EchoIpTarget, TargetRegistry
 
 
 def config(**kwargs):
@@ -465,10 +466,12 @@ def test_stop_rule_validation():
 
 
 async def test_unique_ratio_requires_a_pool_target(tmp_path):
-    cfg = RunConfig("generic_https", ProxyConfig("http", "localhost", 8080), requests=None,
+    targets = TargetRegistry()
+    targets.register(EchoIpTarget("no_ips", "http://example.test/", pool_eligible=False))
+    cfg = RunConfig("no_ips", ProxyConfig("http", "localhost", 8080), requests=None,
                     stop_rule="unique_ratio")
     with pytest.raises(ValueError, match="pool-eligible"):
-        await run(cfg, JsonSink(tmp_path), transport_factory=FakeTransport)
+        await run(cfg, JsonSink(tmp_path), targets=targets, transport_factory=FakeTransport)
 
 
 async def test_operator_stop_reason(tmp_path):

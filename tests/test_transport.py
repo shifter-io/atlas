@@ -94,8 +94,9 @@ async def test_tls_tunnel_and_verification(tmp_path, scheme, trusted):
             transport_factory=partial(HttpTransport, ssl_context=tls_client),
         )
     assert result.errors == ({} if trusted else {"tls": 2})
-    assert result.unique_ips is None
-    assert result.artifacts["ips"]["rows"] == 0
+    # HTTPS records the exit IP like every echo target: one stub address, or none on TLS failure.
+    assert result.unique_ips == (1 if trusted else 0)
+    assert result.artifacts["ips"]["rows"] == (1 if trusted else 0)
     assert all(b"Proxy-Authorization" not in r and b"secret" not in r for r in origin_requests)
     if scheme == "socks5":
         assert gateway.domains == ["localhost", "localhost"]

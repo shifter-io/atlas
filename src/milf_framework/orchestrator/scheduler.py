@@ -5,7 +5,7 @@ run is recorded in `job_runs`, and a job that raises is logged and alerted rathe
 the process down. A job still running when it is due again is skipped (and recorded so).
 
 A job may return {"skipped": "<reason>"} to record a fire that decided there was nothing to do
-(the debounced calculate) as 'skipped' instead of 'ok'.
+(the debounced calculate, a planner switched off) as 'skipped' instead of 'ok'.
 """
 
 from __future__ import annotations
@@ -140,7 +140,10 @@ class Scheduler:
                     )
                 task.last = {"status": "failed", "error": error}
                 return None
-            skipped = isinstance(stats, dict) and stats.get("skipped")
+            # Only a reason string marks a skip: census_plan also reports a count of skipped
+            # batches under the same key, and a tick that skipped one overlap still ran.
+            reason = stats.get("skipped") if isinstance(stats, dict) else None
+            skipped = reason if isinstance(reason, str) and reason else None
             await self._record(
                 "UPDATE job_runs SET finished_at=now(),status=%s,error=%s,duration_ms=%s "
                 "WHERE id=%s RETURNING id",

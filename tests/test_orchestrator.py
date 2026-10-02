@@ -80,7 +80,7 @@ async def test_census_plan_due_slots_region_routing_and_no_node(database, db):
     assert beta["region"] == "lon1"
 
     result = await batches.census_plan(db, NOW)
-    assert result == {"created": 2, "skipped": 0, "no_node": 2}
+    assert result == {"created": 2, "skipped": 0, "deferred": 0, "no_node": 2}
     rows = query(
         database,
         "SELECT batch_id,country_code,region_id,target_id,scheduled_for,start_at,status "
@@ -149,8 +149,14 @@ async def test_census_overlap_is_skipped(database, db):
     # The operator moves the slot while the first census is still open.
     with connect(database) as conn:
         conn.execute("UPDATE countries SET census_time='12:10' WHERE country_code='DE'")
+    # Before the new start_at (12:10:30) the first census may still finish: deferred.
     assert await batches.census_plan(db, NOW + timedelta(minutes=10)) == {
-        "created": 0, "skipped": 1, "no_node": 0,
+        "created": 0, "skipped": 0, "deferred": 1, "no_node": 0,
+    }
+    assert len(query(database, "SELECT 1 FROM test_batches")) == 1
+    # Still open at start_at: skipped.
+    assert await batches.census_plan(db, NOW + timedelta(minutes=11)) == {
+        "created": 0, "skipped": 1, "deferred": 0, "no_node": 0,
     }
     rows = query(database, "SELECT status,finished_at IS NOT NULL FROM test_batches ORDER BY 1")
     assert rows == [("scheduled", False), ("skipped", True)]

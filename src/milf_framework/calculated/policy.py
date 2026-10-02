@@ -40,10 +40,12 @@ EVENTS = {
     "settle_seconds": 120,
     "initial_lookback_minutes": 60,
 }
+# Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
+DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
     "weights",
     "target_weights",
-    "curves",
+    "peer",
     "required_targets",
     "minimum_requests",
     "minimum_coverage",
@@ -100,7 +102,8 @@ def validate(config):
         "weights",
         "target_weights",
         "benchmark_weights",
-        "curves",
+        "peer",
+        "authenticity",
         "grades",
         "profiles",
         "products",
@@ -128,30 +131,19 @@ def validate(config):
     ):
         raise ValueError("Required targets must be distinct and nonempty")
     weights(config["benchmark_weights"], config["required_targets"])
-    if set(config["curves"]) != set(KEYS):
-        raise ValueError("Unknown scoring curve")
-    for key, curve in config["curves"].items():
-        if key == "diversity":
-            if set(curve) != {"countries", "regions", "cities", "asns"}:
-                raise ValueError("Invalid diversity dimensions")
-            for low, high, weight in curve.values():
-                if not 0 < low < high or weight < 0:
-                    raise ValueError("Invalid diversity curve")
-            if abs(sum(v[2] for v in curve.values()) - 1) > 1e-9:
-                raise ValueError("Diversity weights must sum to one")
-        elif key == "authenticity":
-            if curve["blocklist_penalty"] < 0:
-                raise ValueError("Invalid authenticity penalty")
-        elif curve.get("kind") == "cost":
-            if curve["anchor"] <= 0 or curve["penalty"] <= 0:
-                raise ValueError("Invalid cost curve")
-        elif curve.get("kind") in ("linear", "inverse", "log", "log_inverse"):
-            if not curve["low"] < curve["high"] or (
-                curve["kind"].startswith("log") and curve["low"] <= 0
-            ):
-                raise ValueError("Invalid curve bounds")
-        else:
-            raise ValueError("Unknown curve kind")
+    if set(config["peer"]) != {"diversity"}:
+        raise ValueError("Unknown peer setting")
+    weights(config["peer"]["diversity"], DIMENSIONS)
+    if abs(sum(config["peer"]["diversity"].values()) - 1) > 1e-9:
+        raise ValueError("Diversity weights must sum to one")
+    penalty = config["authenticity"]
+    if (
+        set(penalty) != {"blocklist_penalty"}
+        or type(penalty["blocklist_penalty"]) not in (int, float)
+        or not math.isfinite(penalty["blocklist_penalty"])
+        or penalty["blocklist_penalty"] < 0
+    ):
+        raise ValueError("Invalid authenticity penalty")
     if set(config["grades"]) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
         raise ValueError("Invalid grade labels")
     grades = [config["grades"][g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
@@ -227,20 +219,18 @@ def effective(config, provider, product, target=None):
     return validate(result)
 
 
-def curve_score(curve, value):
-    if value is None:
+def ratio(value, best, higher):
+    """A raw value's score against the best raw value among its peers, from 0 to 100.
+
+    Higher-is-better values score 100 x value / best (0 when the best is not positive);
+    lower-is-better values score 100 x best / value (100 when the value is not positive).
+    """
+    if value is None or best is None:
         return None
-    kind = curve["kind"]
-    if kind == "cost":
-        value = 100 - curve["penalty"] * math.log10(max(value, 1e-4) / curve["anchor"])
+    if higher:
+        value = 100 * value / best if best > 0 else 0.0
     else:
-        lo, hi = curve["low"], curve["high"]
-        ratio = (
-            math.log(max(value, lo) / lo) / math.log(hi / lo)
-            if kind.startswith("log")
-            else (value - lo) / (hi - lo)
-        )
-        value = 100 * (1 - ratio if kind in ("inverse", "log_inverse") else ratio)
+        value = 100 * best / value if value > 0 else 100.0
     return min(100.0, max(0.0, value))
 
 

@@ -3,13 +3,19 @@
 The framework has no pool dependency; the orchestrator's traffic (a heartbeat every ten seconds
 and a progress post every thirty per node, plus the jobs) needs only a handful of connections.
 Connections are autocommit; writes that must agree run inside `transaction()`.
+
+A transaction that closes a test batch (`mark_closed`) hands the batch ids to the `on_close`
+hooks once it has committed (the HTML reports); a hook never runs for a rolled-back close and
+never delays or fails the transaction that closed the batch.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+import logging
+import weakref
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +27,14 @@ from psycopg.types.json import Jsonb
 from .. import storage
 from ..providers.credentials import read_credentials
 
+log = logging.getLogger(__name__)
+
+CloseHook = Callable[[list[int]], Awaitable[None]]
+# Batch ids closed inside a connection's open transaction, keyed weakly by the connection.
+_CLOSED: weakref.WeakKeyDictionary[psycopg.AsyncConnection, list[int]] = (
+    weakref.WeakKeyDictionary()
+)
+
 DEFAULTS: dict[str, Any] = {
     # Seconds between a census slot and the synchronized start every node waits for.
     "census.lead_seconds": 30,
@@ -28,6 +42,9 @@ DEFAULTS: dict[str, Any] = {
     "census.min_sample": 1000,
     # A census that had successes and then none for this long stops as 'stalled' (an outage).
     "census.stall_seconds": 600,
+    # Minutes between census slots for every enabled country, aligned to the epoch; None keeps
+    # the daily countries.census_time slot.
+    "census.every_minutes": None,
     # Seconds between a pulse slot opening and its synchronized start.
     "pulse.lead_seconds": 15,
     # A queued run whose start_at passed this long ago without the node starting it fails.
@@ -41,7 +58,17 @@ DEFAULTS: dict[str, Any] = {
     # Upload limits for /v1/results.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,
+    # The planner switches: when off, census_plan / pulse_plan record 'skipped' and plan nothing.
+    "scheduler.census_enabled": True,
+    "scheduler.pulse_enabled": True,
+    # Directory for the HTML batch reports written when a batch closes; None writes none.
+    "reports.dir": None,
 }
+
+
+def mark_closed(conn: psycopg.AsyncConnection, batch_id: int) -> None:
+    """Record that this connection's transaction closed a batch (see Database.on_close)."""
+    _CLOSED.setdefault(conn, []).append(batch_id)
 
 
 class Database:
@@ -56,6 +83,10 @@ class Database:
         self._idle: list[psycopg.AsyncConnection] = []
         self._slots = asyncio.Semaphore(size)
         self._partitions: set[str] = set()
+        # Called with the batch ids a committed transaction closed; keyed so a hook is
+        # installed once however many apps share this pool.
+        self.on_close: dict[str, CloseHook] = {}
+        self._hooks: set[asyncio.Task[None]] = set()
 
     async def _open(self) -> psycopg.AsyncConnection:
         return await psycopg.AsyncConnection.connect(
@@ -83,10 +114,37 @@ class Database:
 
     @contextlib.asynccontextmanager
     async def transaction(self) -> AsyncIterator[psycopg.AsyncConnection]:
-        async with self.connection() as conn, conn.transaction():
-            yield conn
+        async with self.connection() as conn:
+            _CLOSED.pop(conn, None)
+            try:
+                async with conn.transaction():
+                    yield conn
+            finally:
+                closed = _CLOSED.pop(conn, None)
+            # Reached only once the transaction committed.
+            if closed:
+                self._notify(closed)
+
+    def _notify(self, batch_ids: list[int]) -> None:
+        for name, hook in self.on_close.items():
+            task = asyncio.create_task(self._run_hook(name, hook, list(batch_ids)))
+            self._hooks.add(task)
+            task.add_done_callback(self._hooks.discard)
+
+    @staticmethod
+    async def _run_hook(name: str, hook: CloseHook, batch_ids: list[int]) -> None:
+        try:
+            await hook(batch_ids)
+        except Exception:  # noqa: BLE001 - a report must never fail the barrier
+            log.exception("batch close hook %s failed for batches %s", name, batch_ids)
+
+    async def drain(self) -> None:
+        """Wait for the close hooks already started (tests, shutdown)."""
+        while self._hooks:
+            await asyncio.gather(*list(self._hooks), return_exceptions=True)
 
     async def close(self) -> None:
+        await self.drain()
         idle, self._idle = self._idle, []
         for conn in idle:
             await conn.close()
