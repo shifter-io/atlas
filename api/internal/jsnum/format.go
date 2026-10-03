@@ -50,3 +50,36 @@ func Duration(minutes float64) string {
 	}
 	return ToFixed(h, 0) + "h"
 }
+
+// Money is format.ts money (places from the value unless dp >= 0).
+func Money(x float64, dp int) string {
+	if Missing(x) {
+		return NA
+	}
+	if dp < 0 {
+		switch {
+		case x < 0.01:
+			dp = 4
+		case x < 1:
+			dp = 3
+		default:
+			dp = 2
+		}
+	}
+	return "$" + ToFixed(x, dp)
+}
+
+// PriceRange is format.ts priceRange: the list rates of a pool per GB, lowest
+// first, e.g. "$0.75–$1.00/GB", one rate when only one is known or both are
+// equal, N/A with neither.
+func PriceRange(lowest, entry float64) string {
+	switch {
+	case Missing(lowest) && Missing(entry):
+		return NA
+	case Missing(entry) || entry == lowest:
+		return Money(lowest, 2) + "/GB"
+	case Missing(lowest):
+		return Money(entry, 2) + "/GB"
+	}
+	return Money(lowest, 2) + "–" + Money(entry, 2) + "/GB"
+}

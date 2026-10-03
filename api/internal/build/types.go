@@ -49,12 +49,17 @@ type IncidentBand struct {
 
 // WindowStats is window.ts WindowStats.
 type WindowStats struct {
-	Range            RangeMeta            `json:"range"`
-	SuccessRate      Num                  `json:"successRate"`
-	SuccessDeltaPts  Num                  `json:"successDeltaPts"`
-	LatencyP50       Num                  `json:"latencyP50"`
-	LatencyP90       Num                  `json:"latencyP90"`
-	LatencyP99       Num                  `json:"latencyP99"`
+	Range           RangeMeta `json:"range"`
+	SuccessRate     Num       `json:"successRate"`
+	SuccessDeltaPts Num       `json:"successDeltaPts"`
+	LatencyP50      Num       `json:"latencyP50"`
+	LatencyP90      Num       `json:"latencyP90"`
+	LatencyP99      Num       `json:"latencyP99"`
+	// Light-load latency (pulses only) of an every-request snapshot, shown next
+	// to the headline latency under load; NaN otherwise (demo, older snapshots).
+	LightLatencyP50  Num                  `json:"lightLatencyP50"`
+	LightLatencyP90  Num                  `json:"lightLatencyP90"`
+	LightLatencyP99  Num                  `json:"lightLatencyP99"`
 	LatencyDeltaPct  Num                  `json:"latencyDeltaPct"`
 	UniqueIps        Num                  `json:"uniqueIps"`
 	ChurnRate        Num                  `json:"churnRate"`

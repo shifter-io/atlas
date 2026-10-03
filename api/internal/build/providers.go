@@ -364,7 +364,8 @@ func realProvider(id string, row *store.ProviderRow, slug, name string, products
 		if row != nil && k == primary && row.MeasuredProduct != nil && model.ProductCategory[*row.MeasuredProduct] == k {
 			pm.Product = *row.MeasuredProduct
 		}
-		mergeCatalog(slug, k, &pm.Measured, c)
+		w30 := sp.Window("30d").Metrics
+		mergeCatalog(slug, k, &pm.Measured, c, &w30)
 		p.ProductMeasurements.Set(k, pm)
 		e.Snap[k] = sp
 		if k == primary {
@@ -384,7 +385,7 @@ func realProvider(id string, row *store.ProviderRow, slug, name string, products
 		p.Measurement = json.RawMessage(byKind[primary].Raw)
 	} else {
 		p.Measured = model.EmptyMeasured()
-		mergeCatalog(slug, primary, &p.Measured, c)
+		mergeCatalog(slug, primary, &p.Measured, c, nil)
 		p.MeasuredProduct = model.DefaultProduct[primary]
 		p.Score = model.ScoreView{Composite: nan, Rank: nan, PreviousRank: nan, Breakdown: model.NewBreakdown()}
 		e.Declared = append(e.Declared, "productMeasurements", "strengths", "weaknesses")
@@ -395,7 +396,12 @@ func realProvider(id string, row *store.ProviderRow, slug, name string, products
 	}
 	p.Products = []model.ProviderProduct{}
 	for _, k := range ordered {
-		p.Products = append(p.Products, model.ProviderProduct{Kind: p.ProductMeasurements.Get(k).Product, Name: model.S(model.KindLabels[k]), Measured: true})
+		pp := model.ProviderProduct{Kind: p.ProductMeasurements.Get(k).Product, Name: model.S(model.KindLabels[k]), Measured: true}
+		// The tested pool's list rates, lowest first (format.ts priceRange).
+		if pr := p.ProductMeasurements.Get(k).Pricing; pr.PricePerGb.OK() || pr.PricePerGbAtScale.OK() {
+			pp.PriceLabel = model.S(jsnum.PriceRange(pr.PricePerGbAtScale.F(), pr.PricePerGb.F()))
+		}
+		p.Products = append(p.Products, pp)
 	}
 	for _, n := range frameworkProducts {
 		if model.IsProxyKind(n) && byKind[n] == nil {
@@ -449,9 +455,27 @@ func remove(list []string, v string) []string {
 }
 
 // mergeCatalog fills catalog pricing and trust into a measured block. Measured
-// values win; catalog values fill what the snapshot does not measure.
-func mergeCatalog(slug, kind string, m *model.Measured, c *catalog) {
+// values win (the snapshot's list prices, wire-byte cost and authenticity);
+// catalog values fill what the snapshot does not measure. w30 is the 30d
+// snapshot metrics the cost per 1,000 successes is derived from (nil without
+// a snapshot product).
+func mergeCatalog(slug, kind string, m *model.Measured, c *catalog, w30 *snap.Metrics) {
 	pr := pricingFrom(c.pricing[[2]string{slug, kind}], c.plans)
+	measured := m.Pricing
+	if measured.PricePerGb.OK() || measured.PricePerGbAtScale.OK() {
+		pr.PricePerGb, pr.PricePerGbAtScale = measured.PricePerGb, measured.PricePerGbAtScale
+		if pr.Model == nil {
+			pr.Model = measured.Model
+		}
+	}
+	if !pr.CostPer1kSuccess.OK() && w30 != nil {
+		if cost := wireCostPer1k(listRate(pr), *w30); cost.OK() {
+			pr.CostPer1kSuccess = cost
+			if pr.CostBasis == nil {
+				pr.CostBasis = model.S(costBasisText(listRate(pr), *w30))
+			}
+		}
+	}
 	if !pr.CostPer1kSuccess.OK() {
 		if cost, basis := costPer1k(pr.PricePerGb, pr.AvgPayloadKb, m.Performance.SuccessRate); cost.OK() {
 			pr.CostPer1kSuccess = cost
@@ -470,6 +494,9 @@ func mergeCatalog(slug, kind string, m *model.Measured, c *catalog) {
 		}
 		if m.Trust.ClaimGap.OK() {
 			t.ClaimGap = m.Trust.ClaimGap
+		}
+		if m.Trust.ResidentialAuthenticity.OK() {
+			t.ResidentialAuthenticity = m.Trust.ResidentialAuthenticity
 		}
 		m.Trust = t
 	}

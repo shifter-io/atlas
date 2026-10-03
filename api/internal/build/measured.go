@@ -113,9 +113,10 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	if m.Uptime.OK() {
 		uptime = m.Uptime * 100
 	}
+	head := headlineLatency(m)
 	meas.Performance = model.PerformanceStats{
 		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan, LatencyDelta24h: nan,
-		LatencyP50: m.LatencyMs.P50, LatencyP90: m.LatencyMs.P90, LatencyP99: m.LatencyMs.P99, TtfbP50: nan,
+		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
 		CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, TimeoutRate: m.TimeoutRate,
 		UptimePct: uptime, DowntimeMinutes24h: nan, Requests24h: day.Metrics.Completed, BandwidthMb24h: nan,
 	}
@@ -123,9 +124,26 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	// site.trust_signals) merged in by the caller; the snapshot has none of them.
 	meas.Pricing = model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, Plans: []model.PricingPlan{},
 		CostPer1kSuccess: nan, AvgPayloadKb: nan, HeadlinePriceRank: nan, ValueRank: nan}
+	// Every-request snapshots publish the product's list prices: the entry rate
+	// (smallest plan) is pricePerGb and the lowest rate pricePerGbAtScale, the
+	// site's `$ / GB` (listRate).
+	if pr := p.Pricing; pr != nil && (pr.LowestPerGb.OK() || pr.EntryPerGb.OK()) {
+		meas.Pricing.PricePerGb, meas.Pricing.PricePerGbAtScale = pr.EntryPerGb, pr.LowestPerGb
+		meas.Pricing.Model = model.S("per_gb")
+	}
+	meas.Pricing.CostPer1kSuccess = wireCostPer1k(listRate(meas.Pricing), m)
+	if meas.Pricing.CostPer1kSuccess.OK() {
+		meas.Pricing.CostBasis = model.S(costBasisText(listRate(meas.Pricing), m))
+	}
+	// Every-request snapshots (shares_basis): authenticity is the share of exit
+	// IPs in the requested country, the datacenter share is per IP, and there
+	// is no claim gap. Older snapshots keep the claim gap = datacenter share.
 	meas.Trust = model.TrustSignals{
 		ResidentialAuthenticity: nan, DatacenterAsnShare: w.Pool.DatacenterAsnShare, ClaimGap: w.Pool.DatacenterAsnShare,
 		BlacklistHitRate: nan, StickinessHoldRate: nan, LeakChecks: []model.LeakCheck{},
+	}
+	if w.Pool.SharesBasis != nil {
+		meas.Trust.ResidentialAuthenticity, meas.Trust.ClaimGap = w.Pool.GeoAccuracy, nan
 	}
 	meas.Targets = make([]model.TargetBenchmark, 0, len(targets))
 	for _, t := range targets {
@@ -134,7 +152,8 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		if has {
 			r := tr.Metrics
 			b.SuccessRate, b.CaptchaRate, b.BlockRate = r.SuccessRate, r.ChallengeRate, r.BlockRate
-			b.LatencyP50, b.LatencyP90, b.Requests = r.LatencyMs.P50, r.LatencyMs.P90, r.Completed
+			lat := headlineLatency(r)
+			b.LatencyP50, b.LatencyP90, b.Requests = lat.P50, lat.P90, r.Completed
 		}
 		meas.Targets = append(meas.Targets, b)
 	}
@@ -294,6 +313,66 @@ func weightedDowntimeMinutes(up *snap.Uptime) Num {
 		return nan
 	}
 	return Num(jsnum.FixedNum(up.DowntimeS.F()/up.Countries.F()/60, 1))
+}
+
+var naLatency = snap.Latency{P50: nan, P90: nan, P95: nan, P99: nan}
+
+// headlineLatency ports presentation.ts headlineLatency: the latency the site
+// leads with. Every-request snapshots: latency under load (N/A without a load
+// test in the window). Older snapshots: latency_ms, their only latency.
+func headlineLatency(m snap.Metrics) snap.Latency {
+	if !m.EveryRequest() {
+		return m.LatencyMs
+	}
+	if m.LatencyUnderLoadMs == nil {
+		return naLatency
+	}
+	return *m.LatencyUnderLoadMs
+}
+
+// lightLatency is an every-request snapshot's light-load latency (pulses
+// only), shown next to the headline; N/A for older snapshots.
+func lightLatency(m snap.Metrics) snap.Latency {
+	if !m.EveryRequest() {
+		return naLatency
+	}
+	return m.LatencyMs
+}
+
+// listRate ports format.ts listRate: the `$ / GB` the site shows, the lowest
+// list rate of the tested pool (pricePerGbAtScale), else the entry rate.
+func listRate(p model.Pricing) Num {
+	if p.PricePerGbAtScale.OK() {
+		return p.PricePerGbAtScale
+	}
+	return p.PricePerGb
+}
+
+// wireCostPer1k ports window.ts wireCostPer1k: dollars per 1,000 successful
+// requests at `price` per GB from a window's wire bytes (up + down) per request
+// and its request success rate (successes ÷ requests; success_rate in older
+// snapshots), rounded to 4 dp. NaN without a price, wire bytes or successes.
+func wireCostPer1k(price Num, m snap.Metrics) Num {
+	rate := m.RequestSuccessRate
+	if !rate.OK() {
+		rate = m.SuccessRate
+	}
+	bytes := m.BytesUp + m.BytesDown
+	if !price.OK() || !bytes.OK() || !m.Completed.OK() || m.Completed <= 0 || !rate.OK() || rate <= 0 {
+		return nan
+	}
+	gb := float64(bytes.F() / m.Completed.F() * 1000 / 1073741824)
+	return Num(math.Round(float64(gb*price.F()/rate.F())*10000) / 10000)
+}
+
+func costBasisText(price Num, m snap.Metrics) string {
+	rate := m.RequestSuccessRate
+	if !rate.OK() {
+		rate = m.SuccessRate
+	}
+	gb := (m.BytesUp + m.BytesDown).F() / m.Completed.F() * 1000 / 1073741824
+	return fmt.Sprintf("%s GB of wire traffic per 1,000 requests at $%s/GB (lowest list rate), divided by a %s request success rate.",
+		jsnum.ToFixed(gb, 3), jsnum.ToFixed(price.F(), 2), jsnum.Pct(rate.F(), 1))
 }
 
 // overlapPeers maps the snapshot's 30d pair rows for one product into PoolOverlap entries.

@@ -140,25 +140,28 @@ rows.
 | `pool.churnRate`, `recurringShare` | `w.pool.churn_rate`, `recurring_share` | data | ✱ |
 | `pool.countries`, `regions`, `cities`, `asns` | `w.pool.*` | data | |
 | `pool.requestsPerIp` | none | always | ✱ |
-| `performance.successRate` | `w.metrics.success_rate` | data | ✱ |
+| `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, stays in `measurement`) | data | ✱ |
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/providers/{slug}` `windows[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
-| `performance.latencyP50`/`P90`/`P99` | `w.metrics.latency_ms.p50/p90/p99` | data | ✱ |
+| `performance.latencyP50`/`P90`/`P99` | the headline latency (`headlineLatency`): every-request snapshots (metrics with `time_slots`) `w.metrics.latency_under_load_ms.p50/p90/p99`, null without a load test; older snapshots `w.metrics.latency_ms` | data | ✱ |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
 | `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime: uptime = 1 − minutes / window minutes) | data (always for a v1 snapshot) | ✱ |
 | `performance.bandwidthMb24h` | not mapped (the snapshot has `metrics.bytes_down`) | always | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
-| `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis` | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
-| `pricing.pricePerGb`, `pricePerGbAtScale`, `minCommit`, `avgPayloadKb`, `headlinePriceRank`, `valueRank` | `site.pricing.*` | catalog | ✱ |
-| `pricing.costPer1kSuccess` | `site.pricing.cost_per_1k_success`, else derived as `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (rounded to 4 dp), with a generated `costBasis` | catalog (needs $/GB and payload) | ✱ |
+| `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis`; `model` is `"per_gb"` and `costBasis` a generated sentence when the snapshot publishes prices | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
+| `pricing.pricePerGb` (entry rate, smallest plan), `pricePerGbAtScale` (lowest list rate) | the snapshot's `products[].pricing.entry_per_gb` / `lowest_per_gb` (every-request snapshots); they win over `site.pricing.price_per_gb` / `price_per_gb_at_scale` | catalog / snapshot | ✱ |
+| `pricing.minCommit`, `avgPayloadKb`, `headlinePriceRank`, `valueRank` | `site.pricing.*` | catalog | ✱ |
+| `pricing.costPer1kSuccess` | `site.pricing.cost_per_1k_success`; else `wireCostPer1k(listRate, w.metrics)`: (bytes_up + bytes_down) / completed × 1000 / 1024³ GB × the lowest list rate (`pricePerGbAtScale`, else `pricePerGb`) / `request_success_rate` (`success_rate` in older snapshots), 4 dp; else `avg_payload_kb × 1000 / 1024² GB × price_per_gb / successRate` (4 dp). A generated `costBasis` names the inputs | catalog / data (needs a list rate and wire bytes or a payload) | ✱ |
 | `pricing.plans[]` | `site.pricing_plans` | catalog (`na: pricing.plans` while empty) | |
-| `trust.datacenterAsnShare`, `claimGap` | `w.pool.datacenter_asn_share` (both, as presentation.ts), else `site.trust_signals` | data | ✱ |
-| `trust.residentialAuthenticity`, `blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | catalog / always (not measured by the framework) | ✱ |
+| `trust.datacenterAsnShare` | `w.pool.datacenter_asn_share` (every-request snapshots: share of exit IPs whose DB-IP usage type is a hosting type, unknowns excluded), else `site.trust_signals` | data | ✱ |
+| `trust.claimGap` | older snapshots: `w.pool.datacenter_asn_share` (as presentation.ts); every-request snapshots (`pool.shares_basis` set) publish no claim gap: null unless `site.trust_signals.claim_gap` | data / catalog | ✱ |
+| `trust.residentialAuthenticity` | every-request snapshots: `w.pool.geo_accuracy`, the share of exit IPs whose DB-IP country is the requested one (the authenticity raw value); else `site.trust_signals` | data / catalog | ✱ |
+| `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | catalog / always (not measured by the framework) | ✱ |
 | `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | always (not run by the framework) | |
-| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `latencyP50`, `latencyP90`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured) | data (every unmeasured target is listed) | ✱ |
+| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are its headline latency (under load in every-request snapshots) | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 | data | ✱ |
@@ -172,10 +175,34 @@ rows.
 | `overlap.overlaps[]` | snapshot `overlap[]` rows for the product's cohort and 30d: `sharedIps`, `shareOfOurs = shared/ips_ours`, `shareOfTheirs`; `requestsBothSides` null | data / always for `requestsBothSides` | |
 | `overlap.likelyUpstream` | none (reseller detection is not computed) | always | |
 
+### Every-request snapshots
+
+The framework's every-request scoring (milf `score-from-all-requests`) keeps
+`schema_version` 2 and adds fields; the API reads both shapes. A window's
+`metrics` with `time_slots` is every-request: `success_rate` is time-weighted
+(mean of slot rates), `request_success_rate` is successes ÷ requests,
+`latency_ms` is light load (pulses only), `latency_under_load_ms` the latency
+under load (null with `under_load.reason`). `pool.shares_basis` marks per-IP
+shares (`geo_accuracy`, `datacenter_asn_share`); products carry `pricing`
+(`lowest_per_gb`, `entry_per_gb`, `effective_from`, `valid_until`, `sources`).
+The window `latency` block (load reference, factors, per-country light and
+under-load latency), `tests` (requests per test kind), `time_slots`,
+`coverage_slots.down` and the light-load breakdown percentiles are passed
+through unchanged in `measurement` for the network page. Products' `priceLabel`
+is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
+`$0.75–$1.00/GB`. Test input: `fixtures/measured/snapshot-every-request.json`
+(`scripts/every-request-fixture.mjs`).
+
 ### Window statistics of a measured provider
 
 `windowStats` (`/v1/overview` leaderboard `windows`, `/v1/providers/{slug}`
-`windows`) reads the snapshot window: `uptimePct = metrics.uptime × 100` and
+`windows`) reads the snapshot window: `successRate = metrics.success_rate`,
+`latencyP50/P90/P99` the headline latency (under load in every-request
+snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` the light-load
+`latency_ms` of every-request snapshots (null otherwise, and always for demo
+networks), `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
+(so a priced measured network enters `costBoards` and the fleet bills),
+`uptimePct = metrics.uptime × 100` and
 `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that window.
 With outages published (v2), `bands` and `incidentCount` come from `incidents`
 exactly as for a demo network (each outage's overlap with the window, as a

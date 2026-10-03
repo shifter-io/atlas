@@ -220,11 +220,13 @@ touched. The suite covers:
     `fixtures/measured/snapshot.json`), so TypeScript is still compared with Go. The test
     compares `presentationDataset`, `windowStats` (every provider and range),
     `fleetWindows`, `costBoards`, `fleetViews` and `tapeFromEvents` with the Go
-    port. It only allows the deviations listed in FIELDS.md. It runs twice: over
-    the committed v1 fixture, and over that fixture as v2 with outages and
-    time-based uptime (`REFERENCE_SNAPSHOT` points the TypeScript at the same
-    file), which also checks how a 2-hour outage lands in incidents, bands and
-    downtime. Skipped without node and `node_modules`.
+    port. It only allows the deviations listed in FIELDS.md. It runs three times:
+    over the committed v1 fixture, over that fixture as v2 with outages and
+    time-based uptime, and over `fixtures/measured/snapshot-every-request.json`
+    (the framework's every-request shape: latency under load, list prices,
+    per-IP shares). `REFERENCE_SNAPSHOT` points the TypeScript at the same file.
+    It also checks how a 2-hour outage lands in incidents, bands and downtime,
+    and that a priced measured network enters the cost boards. Skipped without node and `node_modules`.
 - `server`:
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes

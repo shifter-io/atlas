@@ -169,10 +169,12 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		if m.Uptime.OK() {
 			uptime = m.Uptime * 100
 		}
+		head, light := headlineLatency(m), lightLatency(m)
 		ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: w.SuccessDelta,
-			LatencyP50: m.LatencyMs.P50, LatencyP90: m.LatencyMs.P90, LatencyP99: m.LatencyMs.P99, LatencyDeltaPct: nan,
+			LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
+			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyDeltaPct: nan,
 			UniqueIps: w.Pool.UniqueIps, ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
-			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: nan, UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
+			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
 		// Outages (snapshot v2) shade the charts and count as incidents; uptime
 		// and downtime stay the framework's own time-based figures.
@@ -192,6 +194,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 	if rangeID == "24h" {
 		return &WindowStats{Range: meta, SuccessRate: p.Performance.SuccessRate, SuccessDeltaPts: p.Performance.SuccessRateDelta24h,
 			LatencyP50: p.Performance.LatencyP50, LatencyP90: p.Performance.LatencyP90, LatencyP99: p.Performance.LatencyP99,
+			LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
 			LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
 			RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
 			CostPer1kSuccess: p.Pricing.CostPer1kSuccess, UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
@@ -225,6 +228,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 	}
 	return &WindowStats{Range: meta, SuccessRate: Num(successRate), SuccessDeltaPts: Num(delta),
 		LatencyP50: Num(jsnum.Round(p50)), LatencyP90: Num(jsnum.Round(p50 * spread90)), LatencyP99: Num(jsnum.Round(p50 * spread99)),
+		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
 		LatencyDeltaPct: Num(jsnum.FixedNum(trendPct(latencyDaily), 2)), UniqueIps: Num(uniqueIps),
 		ChurnRate:      Num(math.Min(1, p.Pool.ChurnRate.F()*math.Pow(float64(days), curve.exponent-1))),
 		RecurringShare: recurringShareAt(p.Pool.RecurringShare.F(), days),

@@ -41,6 +41,46 @@ type Metrics struct {
 	BytesUp       Num     `json:"bytes_up"`
 	BytesDown     Num     `json:"bytes_down"`
 	LatencyMs     Latency `json:"latency_ms"`
+	// Every-request snapshots (framework score-from-all-requests): SuccessRate is
+	// the mean of the time-slot success rates and RequestSuccessRate successes ÷
+	// requests; LatencyMs is light-load latency (pulses only) and
+	// LatencyUnderLoadMs the latency under load (nil when null: no load test).
+	RequestSuccessRate Num        `json:"request_success_rate"`
+	LatencyUnderLoadMs *Latency   `json:"latency_under_load_ms"`
+	UnderLoad          *UnderLoad `json:"under_load"`
+	// TimeSlots is present exactly in every-request snapshots (see EveryRequest).
+	TimeSlots *TimeSlots `json:"time_slots"`
+}
+
+// EveryRequest reports whether metrics come from the framework's every-request
+// scoring (time-weighted success, light-load latency_ms, latency under load).
+// Older snapshots have no time_slots.
+func (m Metrics) EveryRequest() bool { return m.TimeSlots != nil }
+
+type UnderLoad struct {
+	Slots         Num     `json:"slots"`
+	OwnFactor     Num     `json:"own_factor"`
+	CarriedFactor Num     `json:"carried_factor"`
+	WithoutFactor Num     `json:"without_factor"`
+	Reason        *string `json:"reason"`
+}
+
+func (v *UnderLoad) UnmarshalJSON(d []byte) error {
+	type plain UnderLoad
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+type TimeSlots struct {
+	Minutes             Num `json:"minutes"`
+	Success             Num `json:"success"`
+	Down                Num `json:"down"`
+	Latency             Num `json:"latency"`
+	MinLatencySuccesses Num `json:"min_latency_successes"`
+}
+
+func (v *TimeSlots) UnmarshalJSON(d []byte) error {
+	type plain TimeSlots
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *Metrics) UnmarshalJSON(d []byte) error {
@@ -72,14 +112,18 @@ func (v *AsnIPs) UnmarshalJSON(d []byte) error {
 }
 
 type Pool struct {
-	UniqueIps          Num          `json:"unique_ips"`
-	ChurnRate          Num          `json:"churn_rate"`
-	RecurringShare     Num          `json:"recurring_share"`
-	Countries          Num          `json:"countries"`
-	Regions            Num          `json:"regions"`
-	Cities             Num          `json:"cities"`
-	Asns               Num          `json:"asns"`
-	DatacenterAsnShare Num          `json:"datacenter_asn_share"`
+	UniqueIps          Num `json:"unique_ips"`
+	ChurnRate          Num `json:"churn_rate"`
+	RecurringShare     Num `json:"recurring_share"`
+	Countries          Num `json:"countries"`
+	Regions            Num `json:"regions"`
+	Cities             Num `json:"cities"`
+	Asns               Num `json:"asns"`
+	DatacenterAsnShare Num `json:"datacenter_asn_share"`
+	// GeoAccuracy is, in every-request snapshots (SharesBasis set), the share of
+	// exit IPs located in the requested country: the authenticity raw value.
+	GeoAccuracy        Num          `json:"geo_accuracy"`
+	SharesBasis        *string      `json:"shares_basis"`
 	CountriesBreakdown []CountryIPs `json:"countries_breakdown"`
 	AsnsBreakdown      []AsnIPs     `json:"asns_breakdown"`
 }
@@ -254,6 +298,23 @@ func (v *Outage) UnmarshalJSON(d []byte) error {
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
+// Pricing is a product's effective list prices, USD per GB of the tested pool:
+// LowestPerGb is the cheapest plan's rate (it scores value), EntryPerGb the
+// smallest plan's.
+type Pricing struct {
+	Currency      *string  `json:"currency"`
+	LowestPerGb   Num      `json:"lowest_per_gb"`
+	EntryPerGb    Num      `json:"entry_per_gb"`
+	EffectiveFrom *string  `json:"effective_from"`
+	ValidUntil    *string  `json:"valid_until"`
+	Sources       []string `json:"sources"`
+}
+
+func (v *Pricing) UnmarshalJSON(d []byte) error {
+	type plain Pricing
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
 type Product struct {
 	ID        string            `json:"id"`
 	ProductID Num               `json:"product_id"`
@@ -264,6 +325,8 @@ type Product struct {
 	Cohort    string            `json:"cohort"`
 	Windows   map[string]Window `json:"windows"`
 	Census    []Census          `json:"census"`
+	// Pricing is the every-request snapshot's list prices in effect (nil before).
+	Pricing *Pricing `json:"pricing"`
 	// Outages is nil for a snapshot that does not publish them (v1), and empty
 	// when it does and the product had none.
 	Outages []Outage        `json:"outages"`

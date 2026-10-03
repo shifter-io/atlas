@@ -105,6 +105,37 @@ func TestPortMatchesTheSiteTypeScriptWithOutages(t *testing.T) {
 	}
 }
 
+// The framework's every-request snapshot shape (fixtures/measured/
+// snapshot-every-request.json, scripts/every-request-fixture.mjs): latency
+// under load, time-weighted success, per-IP shares and list prices.
+func TestPortMatchesTheSiteTypeScriptForEveryRequestSnapshots(t *testing.T) {
+	file := repoFile(t, "fixtures", "measured", "snapshot-every-request.json")
+	snapshot, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := comparePort(t, snapshot, file)
+	p := res.Details["shifter"].Provider
+	w := res.Details["shifter"].Windows["residential"]["24h"]
+	if !w.LightLatencyP50.OK() || !(w.LatencyP50 > w.LightLatencyP50) {
+		t.Errorf("headline %v should be the latency under load, above light load %v", w.LatencyP50, w.LightLatencyP50)
+	}
+	if p.Pricing.PricePerGbAtScale != 0.75 || p.Pricing.PricePerGb != 1 || model.SV(p.Products[0].PriceLabel) != "$0.75–$1.00/GB" {
+		t.Errorf("pricing %+v, label %v", p.Pricing, model.SV(p.Products[0].PriceLabel))
+	}
+	if !p.Pricing.CostPer1kSuccess.OK() || !w.CostPer1kSuccess.OK() {
+		t.Errorf("a priced measured network needs a cost: %v / %v", p.Pricing.CostPer1kSuccess, w.CostPer1kSuccess)
+	}
+	if p.Trust.ResidentialAuthenticity != 0.987 || p.Trust.ClaimGap.OK() {
+		t.Errorf("trust %+v", p.Trust)
+	}
+	for _, b := range res.Overview.CostBoards {
+		if b.Ranks["shifter"] == 0 {
+			t.Errorf("%s cost board leaves the priced measured network out: %+v", b.Range, b.Ranks)
+		}
+	}
+}
+
 // fixtureOutages: a 2-hour pulse outage in the US that ended 4h25m before
 // as_of, one still open in DE for the last 30 minutes, and a 2-hour one ten
 // days back (only in the 30d window). Two countries are tested.
