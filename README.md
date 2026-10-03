@@ -76,11 +76,14 @@ keys still import and rebuild unchanged. `milf-framework db-seed --database-file
 `configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
 target schedules once set (`--reset-times` restores the staggered default census slots).
 
-`db-init` verifies v6 and refuses other schemas. `milf-framework db-migrate --database-file
-.secrets/database.toml` upgrades an unmodified v5 database, or an unmodified v4 database (and
-calculated v1 layer) through v5, in place, in one transaction that compares every rebuilt
-summary, scope, pool and bucket (and from v4 every cohort, breakdown and score) with its
-original JSON before committing. Locally, run
+Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
+below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
+replaces). `db-init` verifies v7 and refuses other schemas. `milf-framework db-migrate
+--database-file .secrets/database.toml` upgrades an unmodified v6 or v5 database, or an
+unmodified v4 database (and calculated v1 layer) through v5 and v6, in place, in one transaction
+that compares every rebuilt summary, scope, pool and bucket (from v6 every test batch, and from
+v4 every cohort, breakdown and score) with its original before committing. Run it on every
+database (production and staging) before starting the new orchestrator. Locally, run
 `PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
 The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
 matching saved artifacts, retaining the previous database (it does not carry calculated builds).
@@ -113,17 +116,53 @@ and the two newest unpublished drafts; older draft payloads are pruned on calcul
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
-wire bytes to every window. Census and pulse runs (those linked to a test batch) of a product
-form one `census_pulse` cohort; without a `run-role` they count as `pool_sampling` (census) and
-`monitor` (pulse). Uptime is outage time: 1 − downtime / (window × countries tested), with each
-country's outages merged and clipped to the window; `uptime.batches/up` keep the pulse-slot counts
-for reference (`[uptime]`). For these
-cohorts `minimum_coverage` (0.90) applies to pulse slots, not 5-minute buckets: the share of the
-product's pulse batches (excluding operator-skipped/killed batches and runs failed with
-`no_node`, `not_started` or `stale`) whose run finished `done` with at least one request.
-Snapshot payloads are `schema_version` 2: per product `census` (latest per country) and `outages`
-(latest 50 in 30 days), per window `breakdowns` and `uptime` (`value`, `downtime_s`, `countries`,
-`basis: "outage time"`, `batches`, `up`), plus top-level `events` (latest 200) and `traffic`.
+wire bytes to every window. Census, pulse and load runs (those linked to a test batch) of a
+product form one `census_pulse` cohort. **Every request counts for every metric**: census, pulse
+and load runs alike feed success, blocks, timeouts, exit IPs, the geography/ASN breakdowns and
+bytes; run roles (`run-role`, default `pool_sampling` for census, `monitor` for pulse, `benchmark`
+for load) are display labels only, and `minimum_requests` counts every request of a required
+target. Uptime is outage time: 1 − downtime / (window × countries tested), with each country's
+outages merged and clipped to the window; `uptime.batches/up` keep the pulse-slot counts for
+reference (`[uptime]`). For these cohorts `minimum_coverage` (0.90) applies to pulse slots, not
+5-minute buckets: the share of the product's pulse batches (excluding operator-skipped/killed
+batches and runs failed with `no_node`, `not_started`, `stale` or `node_shutdown`) that a `done`
+run with at least one request, or a run the provider failed, filled. **A provider that is down is
+data, not a gap**: its slot is filled and down, lowers uptime (and the pulse-slot counts), opens
+an outage on the tape, and never makes the score N/A through coverage. A census that ended
+because the provider was down (`no_success`, `stalled`, or failed for a provider reason without a
+success) is rerun for that product alone, once per UTC day per country and target, as soon as
+one of its pulses there gets through (`census_retry` on the tape, `test_batches.retry_of`).
+
+**Time-weighted metrics.** A window is split into time slots as long as the cohort's pulse
+interval (the shortest `pulse_interval_minutes` of the pulse-enabled targets: 30 minutes in
+production, 2 in staging). Every slot with requests weighs the same: `metrics.success_rate` is
+the mean of the slot success rates (`request_success_rate` keeps successes ÷ requests).
+Light-load latency (`metrics.latency_ms`, pulses only: census and load runs run at census
+concurrency) merges each slot's latency histogram after normalising it to weight 1 and reads
+p50/p90/p99 from the merged distribution; a slot with fewer than `[slots]
+min_latency_successes` (30) successes does not vote. Percentiles are never averaged. Breakdown
+latency is light-load latency too.
+
+**Latency under load.** In every pulse slot of the census target, each product also runs one
+wave of `census_concurrency` requests at census concurrency in the reference country (setting
+`load.reference_country`, default `US`; staging `RO`): a batch of kind `load` with the pulse's
+`scheduled_for`. It sends only the country, like every scheduled test. Per percentile, factor(t)
+= load latency(t) ÷ reference-country pulse latency(t) (same target and slot), and every
+country's under-load latency(C, t) = its pulse latency(C, t) × factor(t). A slot without a usable
+load run (both need `min_latency_successes`) uses the newest earlier factor in the window;
+without one the slot has no value. The window value is the mean of its slot values. Example: US
+pulse 600 ms, US load 900 ms → ×1.5; a Romanian pulse of 800 ms → 1,200 ms under load. Census
+latency never makes a factor. The speed score uses the under-load p50; light-load latency is
+published next to it. Load runs count for every request metric but not for light-load latency,
+slot coverage or uptime.
+Snapshot payloads are `schema_version` 2: per product `census` (latest per country), `outages`
+(latest 50 in 30 days) and `pricing`, per window `breakdowns`, `uptime` (`value`, `downtime_s`,
+`countries`, `basis: "outage time"`, `batches`, `up`) and `latency` (the reference load test, its
+factors and per requested country light-load and under-load latency), plus top-level `events`
+(latest 200) and `traffic` (`by_test` census, pulse and load). Window and target `metrics` carry
+`success_rate` (time-weighted), `request_success_rate`, `latency_ms` (light load),
+`latency_under_load_ms`, `under_load` (slot counts and the reason when there is no value) and
+`time_slots`; `benchmark` is kept as a copy of `metrics` for older readers.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
@@ -137,7 +176,7 @@ The current run is explicitly a pool sample. Scoring weights remain a draft.
 Every sub-score compares a network with the best network of the same kind (`kind` in
 `configs/methodology.toml`; without one, the product name, e.g. `residential`) in the same
 window (24h, 7d or 30d). Higher-is-better values score `100 × yours ÷ best`; lower-is-better
-values (speed p50 latency, cost) are flipped to `100 × best ÷ yours`. Scores are clamped to 0–100,
+values (speed: p50 latency under load; value: price per GB) are flipped to `100 × best ÷ yours`. Scores are clamped to 0–100,
 so the leader of each component scores 100. Leaders are found again on every calculation; nothing
 is stored between calculations. A network alone in its kind is its own leader and scores 100 on
 every ready component. Only ready, freshly measured components set the best: incomplete, retained,
@@ -145,17 +184,32 @@ expired or historical scores never do.
 
 | Component | Raw value | Better |
 | --- | --- | --- |
-| reliability | benchmark success rate, per target | higher |
-| speed | benchmark p50 latency, per target | lower |
+| reliability | time-weighted success rate of every request, per target (blocks, challenges, timeouts are failures inside it) | higher |
+| speed | p50 latency under load, per target | lower |
 | uptime | outage-time uptime % (evidence as fallback) | higher |
 | coverage | unique IPs per day | higher |
 | diversity | countries, regions, cities, ASNs per day, mixed 0.30/0.20/0.25/0.25 (`[peer.diversity]`) | higher |
-| dcAsns | clean share, 1 − datacenter ASN share (datacenter products keep 100) | higher |
-| authenticity | (1 − claim gap) × 100 − blocklist hits × 120 (`[authenticity]`) | higher |
-| value | cost per 1,000 successful requests | lower |
+| dcAsns | clean share: 1 − share of exit IPs whose DB-IP usage type is in `hosting_usage_types` (datacenter products keep 100) | higher |
+| authenticity | 100 × share of exit IPs whose DB-IP country is the country the requests asked for (`pool.geo_accuracy`) | higher |
+| value | lowest list price per GB of the pool tested (`price_per_gb_lowest`) | lower |
+
+Shares are per unique exit IP over every request in the window, and IPs without the DB-IP field
+(country or usage type) are left out of numerator and denominator, so incomplete enrichment never
+blocks a component (`pool.enrichment_coverage` and `classification_coverage` stay published).
+Value is 100 × cheapest of the kind ÷ yours. List prices are effective-dated `metric_evidence`
+(`price_per_gb_lowest` scores; `price_per_gb_entry` is the smallest plan's rate, published in
+`pricing`) for the pool actually tested, naming the product by provider and product, with cohort
+`"*"` (every cohort of the product). The Shifter Residential price list (Full Geo pool, observed
+2026-10-03: $0.75/GB lowest, $1.00/GB entry) is in `configs/pricing/shifter-residential.json`;
+load it with `milf-framework metric-evidence configs/pricing/shifter-residential.json
+--database-file .secrets/database.toml` once the product exists. There is no blocklist term and
+no claim-gap input; a block is the target refusing us (403, 429, 451, a block page), proxy-side
+failures are proxy errors.
 
 Reliability and speed are scored per target against that target's leader, combined per target
 80/20 (`[target_weights]`), and averaged over the required targets (`[benchmark_weights]`).
+Without a load test in the window, speed (and so the composite) has no value; the component's
+reason says why.
 Pool counts are the average of daily (24-hour) counts over the window's days with observations,
 so a network measured for three days compares fairly with one measured for all 30; the window
 totals stay in `pool` for display and the averages are in `pool.daily` (`days`, `unique_ips`,
@@ -172,12 +226,20 @@ without a ready peer is compared with itself.
 
 `configs/staging.toml` is a small, fast profile for trying the census/pulse loop end to end:
 RO and BG only, a census every 4 minutes (setting `census.every_minutes`, epoch-aligned slots;
-unset means the daily `countries.census_time`), pulses every 2 minutes, HTML reports in
-`reports/staging/`, and a token for the Shifter Residential node in fra1.
+unset means the daily `countries.census_time`), pulses every 2 minutes with the load wave in RO
+(`[load] reference_country`, setting `load.reference_country`), HTML reports in
+`reports/staging/`, a token for the Shifter Residential node in fra1, and the staging
+methodology `configs/staging-methodology.toml`: it `extends` `methodology.toml` and only sets
+`minimum_requests = 1000` per target (production stays 4,000). A methodology file's `extends`
+loads the named file (relative to it) first and merges its own settings over it.
 
 ```sh
 milf-framework staging init --config configs/staging.toml          # --clean drops and recreates
-milf-framework orchestrator --dev --database-file .secrets/staging-database.toml
+milf-framework db-migrate --database-file .secrets/staging-database.toml   # an existing v6 one
+milf-framework orchestrator --dev --database-file .secrets/staging-database.toml \
+  --methodology configs/staging-methodology.toml
+milf-framework calculate --database-file .secrets/staging-database.toml \
+  --methodology configs/staging-methodology.toml                     # no --publish: a draft
 milf-framework node --orchestrator http://127.0.0.1:8080 \
   --token-file .secrets/staging-tokens/shifter-residential-fra1.token \
   --provider shifter --product residential --region fra1 \
@@ -188,8 +250,8 @@ milf-framework node --orchestrator http://127.0.0.1:8080 \
 database (owned by that user) with `.secrets/postgres-admin.toml`; it refuses a name equal to
 `database.toml`'s dbname or `proxy_reviews`. It writes `.secrets/staging-database.toml` and the
 node tokens (mode 600), runs db-init and db-seed, disables every country outside `[scope]`, and
-prints a JSON summary with the exact orchestrator and node commands (`--secrets-dir` points it
-elsewhere). Re-running it rotates the node tokens.
+prints a JSON summary with the exact orchestrator (with `--methodology`), calculate and node
+commands (`--secrets-dir` points it elsewhere). Re-running it rotates the node tokens.
 
 The planners can be switched off without a restart (both when neither flag is given; also
 `POST /admin/api/schedule/scheduler {"census": false}`); a planner that is off records its job
