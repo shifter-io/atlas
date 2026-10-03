@@ -1,5 +1,5 @@
--- Schema v6: one canonical address, product membership, shared enrichment, typed test profiles,
--- and the census/pulse scheduling, live progress, geography buckets and event tape.
+-- Schema v7: one canonical address, product membership, shared enrichment, typed test profiles,
+-- and the census/pulse/load scheduling, live progress, geography buckets and event tape.
 CREATE TABLE IF NOT EXISTS schema_versions (
  version integer PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz DEFAULT now()
 );
@@ -43,10 +43,12 @@ CREATE TABLE IF NOT EXISTS nodes (
  last_heartbeat timestamptz, version text, open_conns integer, req_per_s double precision,
  rss_mb integer, UNIQUE(region_id,provider,product)
 );
--- A batch is one synchronized slot: every provider in the region starts it at start_at.
+-- A batch is one synchronized slot: every provider in the region starts it at start_at. A 'load'
+-- batch is the latency-under-load wave a pulse slot adds in the reference country (same
+-- scheduled_for). retry_of names the census a provider-outage rerun replaces (one product).
 CREATE TABLE IF NOT EXISTS test_batches (
  batch_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- kind text NOT NULL CHECK(kind IN ('census','pulse')),
+ kind text NOT NULL CHECK(kind IN ('census','pulse','load')),
  country_code char(2) NOT NULL REFERENCES countries(country_code),
  region_id smallint NOT NULL REFERENCES runner_regions(region_id),
  target_id text NOT NULL REFERENCES targets(target_id),
@@ -54,7 +56,8 @@ CREATE TABLE IF NOT EXISTS test_batches (
  started_at timestamptz, finished_at timestamptz,
  status text NOT NULL DEFAULT 'scheduled'
   CHECK(status IN ('scheduled','running','done','failed','skipped','killed')),
- UNIQUE(kind,country_code,target_id,scheduled_for)
+ UNIQUE(kind,country_code,target_id,scheduled_for),
+ retry_of bigint REFERENCES test_batches(batch_id)
 );
 CREATE INDEX IF NOT EXISTS test_batches_open ON test_batches(status)
  WHERE status IN ('scheduled','running');
