@@ -403,19 +403,19 @@ def blend(histograms):
 def time_slots(rows, pulses=()):
     """Bucket rows (each with its time "slot") grouped per slot.
 
-    A slot holds every request in it (completed, successes) and the merged histogram of its
-    light-load successes. pulses are the product's pulse runs that count as slots ({"slot",
-    "down", "requests", "successes", "counted"}): a run the provider failed (down) makes its
-    slot filled-and-down; the counters of a run whose artifact was never ingested (counted
-    False) are added to the slot, a failed run's requests as failures.
+    A slot holds every request observed in it (completed, successes) and, per target, the
+    merged histogram of its light-load successes ("light": {target: Counter}, "light_successes":
+    {target: n}). pulses are the product's done pulse runs ({"slot", "requests", "successes",
+    "counted"}): the live counters of a run whose artifact was never ingested (counted False)
+    are added to its slot as observed; nothing is invented for requests nobody observed.
     """
     slots = {}
 
     def slot(key):
         return slots.setdefault(
             key,
-            {"completed": 0, "successes": 0, "light": Counter(), "light_successes": 0,
-             "down": False},
+            {"completed": 0, "successes": 0, "light": defaultdict(Counter),
+             "light_successes": Counter()},
         )
 
     for r in rows:
@@ -424,49 +424,58 @@ def time_slots(rows, pulses=()):
         s["completed"] += c["completed"]
         s["successes"] += c["successes"]
         if r.get("light", True):
+            target = r.get("target")
             for ms, n in c["latency_histogram"]["bins"]:
-                s["light"][ms] += n
-            s["light_successes"] += c["successes"]
+                s["light"][target][ms] += n
+            s["light_successes"][target] += c["successes"]
     for d in pulses:
-        s = slot(d["slot"])
-        s["down"] = s["down"] or d["down"]
         if not d["counted"]:
+            s = slot(d["slot"])
             s["completed"] += d["requests"]
-            s["successes"] += 0 if d["down"] else d["successes"]
+            s["successes"] += d["successes"]
     return slots
+
+
+def light_votes(slots, minimum):
+    """(slot, target, histogram) of every slot and target with `minimum` light-load successes:
+    each votes with equal weight, so a target or a slot never outweighs another by volume."""
+    return [
+        (key, target, s["light"][target])
+        for key, s in sorted(slots.items())
+        for target in sorted(s["light"], key=str)
+        if s["light_successes"][target] >= minimum
+    ]
 
 
 def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
     """metrics(rows) with the time-weighted success rate and light-load latency.
 
-    The window is split into time slots (the cohort's pulse interval). Every slot with requests
-    (or a provider-failed pulse) weighs the same: success_rate is the mean of the slot success
-    rates (a down slot without requests counts as 0; pulses as in time_slots()),
-    request_success_rate stays successes / completed. Light-load latency merges the slots'
-    light-load histograms after normalising each to weight 1; a slot with fewer than `minimum`
-    light-load successes does not vote.
+    The window is split into time slots. Every slot with observed requests weighs the same:
+    success_rate is the mean of the slot success rates (successes ÷ requests observed in the
+    slot; pulses as in time_slots()), request_success_rate stays successes ÷ completed. A slot
+    whose requests all failed (the provider was down) votes 0. Light-load latency merges the
+    light-load histograms of every slot and target after normalising each to weight 1; one
+    with fewer than `minimum` successes does not vote. Over several targets that is an
+    equal-weight mixture of them; targets[...] carry each target's own latency.
     """
     m = metrics(rows, hours)
     slots = time_slots(rows, pulses)
-    rates = [
-        s["successes"] / s["completed"] if s["completed"] else 0.0
-        for s in slots.values()
-        if s["completed"] or s["down"]
-    ]
-    voting = [s["light"] for s in slots.values() if s["light_successes"] >= minimum]
+    rates = [s["successes"] / s["completed"] for s in slots.values() if s["completed"]]
+    voting = light_votes(slots, minimum)
     m["request_success_rate"] = m["success_rate"]
     m["success_rate"] = sum(rates) / len(rates) if rates else None
-    m["latency_ms"] = blend(voting)
+    m["latency_ms"] = blend(h for *_, h in voting)
     m["time_slots"] = {
         "minutes": slot_minutes,
         "success": len(rates),
-        "down": sum(s["down"] for s in slots.values()),
-        "latency": len(voting),
+        "down": sum(s["completed"] > 0 and not s["successes"] for s in slots.values()),
+        "latency": len({key for key, *_ in voting}),
+        "latency_targets": sorted({t for _, t, _ in voting}, key=str),
         "min_latency_successes": minimum,
     }
-    m["success_basis"] = "mean of time-slot success rates, every request"
+    m["success_basis"] = "mean of time-slot success rates, every observed request"
     m["latency_basis"] = (
-        "light-load successes (pulses), slots normalised to equal weight and merged"
+        "light-load successes (pulses), each slot and target normalised to equal weight"
     )
     return m
 
@@ -508,19 +517,16 @@ def load_factors(rows, minimum):
 
 
 def under_load(rows, factors, minimum):
-    """Latency under load: per time slot, the light-load percentile × that slot's reference
-    factor (load_factors()), or the newest earlier factor in the window when the slot has none;
-    the window value is the mean of the slot values (equal weight per slot).
+    """Latency under load: per time slot and target, the light-load percentile × that slot's
+    reference factor (load_factors()), or the newest earlier factor in the window when the slot
+    has none; the window value is the mean of the slot values (equal weight per slot and
+    target). Counts are of those slot values.
     """
-    slots = time_slots(rows)
     known = sorted(factors)
     values = {p: [] for p in LATENCY}
-    own = carried = missing = light = 0
-    for key in sorted(slots):
-        s = slots[key]
-        if s["light_successes"] < minimum:
-            continue
-        light += 1
+    own = carried = missing = 0
+    voting = light_votes(time_slots(rows), minimum)
+    for key, _, histogram in voting:
         if key in factors:
             factor, own = factors[key], own + 1
         else:
@@ -529,13 +535,15 @@ def under_load(rows, factors, minimum):
                 missing += 1
                 continue
             factor, carried = factors[known[i - 1]], carried + 1
-        percentiles = Histogram(s["light"]).percentiles()
+        percentiles = Histogram(histogram).percentiles()
         for p in LATENCY:
             values[p].append(percentiles[p] * factor[p])
     n = own + carried
     reason = None
     if not n:
-        reason = UNDER_LOAD_LIGHT if not light else UNDER_LOAD_LATE if known else UNDER_LOAD_NONE
+        reason = (
+            UNDER_LOAD_LIGHT if not voting else UNDER_LOAD_LATE if known else UNDER_LOAD_NONE
+        )
     return {
         "ms": {p: round(sum(v) / n, 3) if n else None for p, v in values.items()},
         "slots": n,
@@ -556,23 +564,21 @@ def with_under_load(m, rows, factors, minimum):
 
 def latency_detail(rows, factors, reference, minimum):
     """The window's latency block: the reference (load) test, its factors, and per requested
-    country the light-load and under-load latency of its pulses."""
+    country and target the light-load and under-load latency of its pulses."""
     latest = max(factors) if factors else None
     pulses = defaultdict(list)
     for r in rows:
         if r.get("test") == "pulse":
-            pulses[r["country"]].append(r)
+            pulses[(r["country"] or "", r["target"])].append(r)
     countries = []
-    for country in sorted(pulses, key=lambda c: c or ""):
-        own = pulses[country]
-        slots = time_slots(own)
+    for country, target in sorted(pulses):
+        own = pulses[(country, target)]
         result = under_load(own, factors, minimum)
         countries.append(
             {
-                "country": country,
-                "latency_ms": blend(
-                    s["light"] for s in slots.values() if s["light_successes"] >= minimum
-                ),
+                "country": country or None,
+                "target": target,
+                "latency_ms": blend(h for *_, h in light_votes(time_slots(own), minimum)),
                 "latency_under_load_ms": result.pop("ms"),
                 **result,
             }
@@ -591,7 +597,8 @@ def latency_detail(rows, factors, reference, minimum):
             else None,
         },
         "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) "
-        "of the same slot, else the newest earlier slot's factor; mean of slot values",
+        "of the same slot, else the newest earlier slot's factor; mean of slot values; per "
+        "country and target",
         "countries": countries,
     }
 
@@ -599,27 +606,28 @@ def latency_detail(rows, factors, reference, minimum):
 def slot_coverage(m, slots, since, end):
     """Set m's coverage to the share of pulse slots in [since, end) the product filled.
 
-    slots are the product's pulse batch runs that count (done, or failed for a reason of the
-    provider's); a slot is filled by a done run with at least one completed request or by a run
-    the provider failed: a provider that is down is data (filled and down), not a gap.
+    slots are the product's done pulse batch runs: a run is only ever 'failed' by our side (no
+    node, never started, went silent, node shut down or erred, upload rejected), so those are
+    not slots. A slot is filled by a run with at least one request, also when every request
+    failed: a provider that is down is data (filled and down), not a gap.
     """
     due = [b for b in slots if since <= b["scheduled_for"] < end]
-    filled = sum(b["status"] == "failed" or b["requests"] > 0 for b in due)
-    m["coverage"] = filled / len(due) if due else 0.0
+    filled = [b for b in due if b["requests"] > 0]
+    m["coverage"] = len(filled) / len(due) if due else 0.0
     m["coverage_basis"] = "pulse slots"
     m["coverage_slots"] = {
         "due": len(due),
-        "filled": filled,
-        "down": sum(b["status"] == "failed" for b in due),
+        "filled": len(filled),
+        "down": sum(not b["successes"] for b in filled),
     }
     return m
 
 
 def uptime(batches, since, end, min_successes):
-    """Share of the pulse batch runs in [since, end) (done, or failed by the provider) with at
-    least min_successes successes; a provider-failed run is a slot that was down."""
+    """Share of the done pulse batch runs in [since, end) with at least min_successes
+    successes."""
     rows = [b for b in batches if since <= b["scheduled_for"] < end]
-    up = sum(b["status"] == "done" and b["successes"] >= min_successes for b in rows)
+    up = sum(b["successes"] >= min_successes for b in rows)
     return {"batches": len(rows), "up": up, "value": up / len(rows) if rows else None}
 
 

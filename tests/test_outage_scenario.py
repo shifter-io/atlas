@@ -1,8 +1,9 @@
 """A provider that is down for two hours is data, not a gap.
 
 24-hour window, 30-minute pulses on both targets in DE, a load wave in the last slot. The
-provider is down for the pulses of 18:00, 18:30 and 19:00 (one of them a run that failed), and a
-census during the outage gets no success. The score stays computed, uptime is about 91.7% (the
+provider is down for the pulses of 18:00, 18:30 and 19:00 (done runs whose requests all failed),
+our node shuts down during one of them (a failed run: ours, it never counts), and a census
+during the outage gets no success. The score stays computed, uptime is about 91.7% (the
 outage runs from the last healthy pulse to the first healthy one, two hours), the outage is
 recorded, and the census is rerun once, at the first pulse that gets through.
 """
@@ -92,10 +93,11 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
                 batch_run(conn, b, alpha, at + timedelta(minutes=1),
                           successes=0 if i in DOWN else 100)
                 if i == 41 and target == "generic_https":
-                    # The provider broke the run outright: a failed run is down too.
+                    # Our node shut down mid-run: not the provider's, so not a slot at all,
+                    # and the requests it had counted are not invented as failures.
                     conn.execute(
-                        "UPDATE batch_runs SET status='failed',error='run failed' "
-                        "WHERE batch_id=%s",
+                        "UPDATE batch_runs SET status='failed',error='node_shutdown',"
+                        "successes=0 WHERE batch_id=%s",
                         (b,),
                     )
         census = batch(conn, "census", census_at, minutes=15)
@@ -169,13 +171,15 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     assert w["uptime"]["downtime_s"] == 7140
     # Down slots are filled, never gaps: coverage stays at 100%.
     http = w["targets"]["generic_http"]["metrics"]
-    assert http["coverage_slots"] == {"due": 48, "filled": 48, "down": 0}
+    assert http["coverage_slots"] == {"due": 48, "filled": 48, "down": 3}
     assert w["targets"]["generic_https"]["metrics"]["coverage_slots"] == {
-        "due": 48, "filled": 48, "down": 1,
+        "due": 47, "filled": 47, "down": 2,
     }
     assert http["uptime"] == pytest.approx(45 / 48)
     # Time-weighted success: 45 of 48 slots succeeded, the 3 down slots vote 0.
     assert w["metrics"]["success_rate"] == pytest.approx(45 / 48)
+    assert w["metrics"]["time_slots"]["minutes"] == 30
+    assert w["targets"]["generic_https"]["metrics"]["success_rate"] == pytest.approx(45 / 47)
     score = w["scores"]["balanced"]
     assert score["state"] == "ready" and score["score"] is not None
     assert all(c["state"] == "ready" for c in score["components"].values())
@@ -185,5 +189,6 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     assert alpha_product["pricing"]["lowest_per_gb"] == 0.75
     assert alpha_product["pricing"]["entry_per_gb"] == 1.0
     assert w["latency"]["reference"]["country"] == "DE"
-    assert w["metrics"]["under_load"]["own_factor"] == 1
+    # The load slot gives both targets' light-load latency its own factor.
+    assert w["metrics"]["under_load"]["own_factor"] == 2
     assert json.dumps(payload)

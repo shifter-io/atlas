@@ -18,9 +18,11 @@ The settings `scheduler.census_enabled` / `scheduler.pulse_enabled` switch the p
 planner that is off plans nothing and its job records 'skipped'. `census.every_minutes` replaces
 the daily census slot with one every N minutes, aligned to the epoch, for every enabled country.
 
-A census the provider spoiled (no success, stalled, or failed for a reason of the provider's) is
-run again for that product alone, once per UTC day per country and target, as soon as one of its
-pulses in the country gets through (`census_retry`); the rerun's retry_of names the census.
+A census the provider spoiled (it never got a success, or lost its network mid-run) is run again
+for that product alone, once per UTC day per country and target, as soon as one of its pulses
+in the country gets through (`census_retry`); the rerun's retry_of names the census. A 'failed'
+run is always our side's (no node, never started, went silent, node shut down or erred, upload
+rejected) and is never rerun this way.
 """
 
 from __future__ import annotations
@@ -32,7 +34,6 @@ from typing import Any
 
 import psycopg
 
-from ..detect import INFRA_ERRORS
 from .db import Database, mark_closed, setting
 from .events import emit, raise_alert
 
@@ -321,7 +322,8 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
     target gets one batch per enabled country, all with the same start_at. Targets added to
     the table are picked up on the next tick. A census target's slot also gets a 'load' batch
     in the reference country (load.reference_country, when it is enabled) with the same
-    scheduled_for and start_at: the latency-under-load wave.
+    scheduled_for, starting load.delay_seconds after the pulses: the latency-under-load wave,
+    kept apart from the reference pulse so that pulse stays a light-load measurement.
     """
     now = _now(now)
     await db.ensure_partition("test_events", now)
@@ -331,6 +333,7 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
         reference = reference_country(await setting(conn, "load.reference_country"))
+        delay = timedelta(seconds=float(await setting(conn, "load.delay_seconds")))
         if not await participants(conn):
             return {"targets": 0, "created": 0, "reason": "no registered nodes"}
         targets = await _rows(
@@ -370,7 +373,7 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
                     "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id "
                     "AND r.enabled WHERE c.enabled AND c.country_code=%s "
                     "ON CONFLICT DO NOTHING RETURNING batch_id",
-                    (target["target_id"], slot, max(slot, now) + lead, reference),
+                    (target["target_id"], slot, max(slot, now) + lead + delay, reference),
                 )
                 if load:
                     created.append(load["batch_id"])
@@ -595,16 +598,9 @@ async def census_down(
 
 
 def _spoiled(run: dict) -> bool:
-    """Whether a census run ended because the provider was down: it never got a success
-    (no_success), lost its network mid-run (stalled), or failed for a reason of the provider's
-    without a success. Runs our infrastructure lost (INFRA_ERRORS) are not."""
-    if run["stop_reason"] in ("no_success", "stalled"):
-        return True
-    return (
-        run["status"] == "failed"
-        and not run["successes"]
-        and (run["error"] or "") not in INFRA_ERRORS
-    )
+    """Whether a census run ended because the provider was down: a done run that never got a
+    success (no_success) or lost its network mid-run (stalled). A failed run is our side's."""
+    return run["status"] == "done" and run["stop_reason"] in ("no_success", "stalled")
 
 
 async def census_retry(

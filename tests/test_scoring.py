@@ -66,19 +66,37 @@ def test_success_rate_is_the_mean_of_time_slots():
         row(T + HALF_HOUR, 100, n=100, successes=50),  # a pulse slot at half
         row(T + 2 * HALF_HOUR, 100, n=10, successes=5, test="census"),
     ]
-    # A pulse the provider failed without an artifact: a filled-and-down slot voting 0.
-    down = [{"slot": T + 3 * HALF_HOUR, "down": True, "requests": 0, "successes": 0,
-             "counted": False}]
-    m = timed(rows, 24, 30, down, 30)
+    # A done pulse whose artifact never arrived: its observed live counters (100 requests, all
+    # failed: the provider was down) vote 0. One that observed nothing does not vote at all.
+    pulses = [
+        {"slot": T + 3 * HALF_HOUR, "requests": 100, "successes": 0, "counted": False},
+        {"slot": T + 4 * HALF_HOUR, "requests": 0, "successes": 0, "counted": False},
+    ]
+    m = timed(rows, 24, 30, pulses, 30)
     assert m["success_rate"] == pytest.approx((1 + 0.5 + 0.5 + 0) / 4)
     assert m["request_success_rate"] == pytest.approx(1055 / 1110)
     assert m["time_slots"] == {
-        "minutes": 30, "success": 4, "down": 1, "latency": 2, "min_latency_successes": 30,
+        "minutes": 30, "success": 4, "down": 1, "latency": 2,
+        "latency_targets": ["generic_http"], "min_latency_successes": 30,
     }
     # Light-load latency: pulses only; the census slot (and slots under 30 successes) do not vote.
     assert m["latency_ms"]["p50"] == 100
     light = timed([row(T, 100), row(T + HALF_HOUR, 800, n=29)], 24, 30)
     assert light["latency_ms"]["p50"] == 100 and light["time_slots"]["latency"] == 1
+
+
+def test_light_load_latency_is_per_target_and_equal_weight():
+    """http and https are different round trips: each target's light-load latency stands on
+    its own, and a window over both is their equal-weight mixture, whatever their volumes."""
+    rows = [
+        row(T, 800, n=100),
+        row(T, 1600, n=40, target="generic_https"),
+    ]
+    both = timed(rows, 24, 30)
+    assert both["time_slots"]["latency_targets"] == ["generic_http", "generic_https"]
+    assert both["latency_ms"]["p50"] == 800 and both["latency_ms"]["p90"] == 1600
+    assert timed(rows[:1], 24, 30)["latency_ms"]["p50"] == 800
+    assert timed(rows[1:], 24, 30)["latency_ms"]["p50"] == 1600
 
 
 def test_latency_under_load_worked_example():
@@ -94,6 +112,9 @@ def test_latency_under_load_worked_example():
     assert reference == {"country": "US", "target": "generic_http", "concurrency": 1000}
     assert factors == {T: {"p50": 1.5, "p90": 1.5, "p95": 1.5, "p99": 1.5}}
     detail = latency_detail(rows, factors, reference, 30)
+    assert {(c["country"], c["target"]) for c in detail["countries"]} == {
+        ("RO", "generic_http"), ("US", "generic_http"),
+    }
     countries = {c["country"]: c for c in detail["countries"]}
     assert countries["RO"]["latency_ms"]["p50"] == 800
     assert countries["RO"]["latency_under_load_ms"]["p50"] == 1200

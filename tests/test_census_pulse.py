@@ -188,9 +188,9 @@ def test_uptime_share_of_pulse_batches():
     batches = [
         {"scheduled_for": t + timedelta(minutes=30 * i), "successes": n, "status": "done"}
         for i, n in enumerate([5, 0, 1, 2])
-    ] + [{"scheduled_for": t, "successes": 7, "status": "failed"}]  # provider failed: down
-    assert uptime(batches, t, t + timedelta(hours=2), 1) == {"batches": 5, "up": 3, "value": 0.6}
-    assert uptime(batches, t, t + timedelta(hours=2), 2)["value"] == 0.4
+    ]
+    assert uptime(batches, t, t + timedelta(hours=2), 1) == {"batches": 4, "up": 3, "value": 0.75}
+    assert uptime(batches, t, t + timedelta(hours=2), 2)["value"] == 0.5
     assert uptime(batches, t + timedelta(hours=1), t + timedelta(hours=2), 1)["batches"] == 2
     assert uptime([], t, t, 1) == {"batches": 0, "up": 0, "value": None}
 
@@ -878,9 +878,10 @@ def coverage_policy(tmp_path):
 
 
 async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path):
-    """Operator skips/kills and runs lost by our infrastructure are not slots. A run the provider
-    failed fills its slot (filled and down): it lowers the slot's uptime, never coverage. 40 of
-    48 slots filled (8 done without a request) is below minimum_coverage 0.90."""
+    """Operator skips/kills and failed runs (a run is only ever failed by our side) are not
+    slots and never count against the provider. A provider that is down (a done run whose
+    requests all failed) fills its slot: it lowers success and uptime, never coverage. 40 of 48
+    slots filled (8 done without a request) is below minimum_coverage 0.90."""
     store.initialize(database)
     seed(database)
     directory, summary = await census(tmp_path, provider="alpha")
@@ -894,14 +895,12 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
         batch_run(conn, first, alpha, slot[0] + timedelta(minutes=1), run_key=linked, requests=4)
         for moment in slot[1:47]:
             batch_run(conn, batch(conn, "pulse", moment), alpha, moment + timedelta(minutes=1))
-        failed = batch(conn, "pulse", slot[47])
-        batch_run(conn, failed, alpha, slot[47] + timedelta(minutes=1), requests=0, successes=0)
-        conn.execute(
-            "UPDATE batch_runs SET status='failed',error='proxy refused' WHERE batch_id=%s",
-            (failed,),
-        )
-        # Not slots: infrastructure failures and an operator-killed batch.
+        # The provider is down: every request of the slot's run failed.
+        down = batch(conn, "pulse", slot[47])
+        batch_run(conn, down, alpha, slot[47] + timedelta(minutes=1), requests=100, successes=0)
+        # Not slots: runs our side failed (whatever they counted) and an operator-killed batch.
         for minute, error in (
+            (3, "node error (OSError)"),
             (4, "node_shutdown"),
             (5, "no_node"),
             (6, "not_started"),
@@ -931,15 +930,15 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
     assert w["metrics"]["coverage"] == 1
     assert target["metrics"]["uptime"] == pytest.approx(47 / 48)
     # Every slot weighs the same: the ingested run (3 of 4), 46 healthy pulses and the down
-    # slot, which votes 0.
+    # slot, which votes 0. Failed runs add nothing, even the requests they counted.
     assert target["metrics"]["success_rate"] == pytest.approx((0.75 + 46) / 48)
-    assert target["metrics"]["request_success_rate"] == 0.75
     assert target["metrics"]["time_slots"]["down"] == 1
+    assert target["metrics"]["time_slots"]["success"] == 48
     assert "Insufficient time coverage" not in target["score"]["reasons"]
-    # Seven more slots the provider failed: still covered, but down.
+    # Seven more slots with the provider down: still covered, but down.
     with connect(database) as conn:
         conn.execute(
-            "UPDATE batch_runs SET status='failed',error='timeout' WHERE batch_id IN "
+            "UPDATE batch_runs SET successes=0 WHERE batch_id IN "
             "(SELECT batch_id FROM test_batches WHERE scheduled_for=ANY(%s))",
             (slot[1:8],),
         )

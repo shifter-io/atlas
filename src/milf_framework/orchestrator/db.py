@@ -51,6 +51,9 @@ DEFAULTS: dict[str, Any] = {
     # country, one wave of census_concurrency requests per product at census concurrency. It
     # must be an enabled country; None switches the load test off.
     "load.reference_country": "US",
+    # The load wave starts this long after its slot's pulses, so the reference pulse it is
+    # compared with is measured at light load (a pulse of 100 at 25 takes at most 4 x 15 s).
+    "load.delay_seconds": 60,
     # A queued run whose start_at passed this long ago without the node starting it fails.
     "batch.start_grace_seconds": 180,
     # A running or uploading run silent for this long fails; nodes post progress every 30 s.

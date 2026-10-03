@@ -217,8 +217,9 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
 
 async def test_pulse_slots_of_a_census_target_add_a_load_wave(database, db, client):
     """Every pulse slot of the census target opens a 'load' batch in the reference country with
-    the same scheduled_for and start_at; its runs fire census_concurrency requests at census
-    concurrency, counted like a pulse, and send only the country (the node's proxy factory)."""
+    the same scheduled_for, load.delay_seconds after the pulses; its runs fire
+    census_concurrency requests at census concurrency, counted like a pulse, and send only the
+    country (the node's proxy factory)."""
     prepare(database, ("DE", "AT"))
     a = issue_token(database, provider="alpha", product="res", region="fra1")
     await set_setting(db, "load.reference_country", "de")
@@ -227,11 +228,12 @@ async def test_pulse_slots_of_a_census_target_add_a_load_wave(database, db, clie
     assert (result["created"], result["load"]) == (4, 1)
     loads = query(
         database,
-        "SELECT l.country_code,l.target_id,l.scheduled_for=p.scheduled_for,l.start_at=p.start_at "
+        "SELECT l.country_code,l.target_id,l.scheduled_for=p.scheduled_for,l.start_at-p.start_at "
         "FROM test_batches l JOIN test_batches p ON p.kind='pulse' AND p.country_code='DE' "
         "AND p.target_id=l.target_id WHERE l.kind='load'",
     )
-    assert loads == [("DE", "generic_http", True, True)]
+    # Same slot; it starts a minute after the pulses so the reference pulse stays light.
+    assert loads == [("DE", "generic_http", True, timedelta(seconds=60))]
     assert (await batches.pulse_plan(db, at))["load"] == 0  # idempotent
     work = await (await client.get("/v1/work", headers=bearer(a["token"]))).json()
     (load,) = [w for w in work["assignments"] if w["kind"] == "load"]
@@ -260,7 +262,8 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
     database, db, spoiled
 ):
     """A census that ended because the provider was down is rerun for that product alone at the
-    first pulse that sees it up again in the country, once per UTC day."""
+    first pulse that sees it up again in the country, once per UTC day. A census our side
+    failed (here the runner failed) is not the provider's and is not rerun."""
     prepare(database, ("DE",))
     a = issue_token(database, provider="alpha", product="res", region="fra1")
     b = issue_token(database, provider="beta", product="res", region="fra1")
@@ -304,6 +307,11 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
     ]
     up = day + timedelta(hours=1, minutes=31)
     await finish_pulse(db, node, pulses[1], 97, up)
+    if spoiled == "failed":
+        assert query(
+            database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL"
+        ) == [(0,)]
+        return
     retries = query(
         database,
         "SELECT b.batch_id,b.retry_of,b.country_code,b.target_id,b.start_at-b.scheduled_for,"

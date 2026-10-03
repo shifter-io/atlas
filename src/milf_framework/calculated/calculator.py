@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -67,11 +68,8 @@ SCHEDULED = "census_pulse"
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"}
 EVENTS_IN_SNAPSHOT = 200
-# batch_runs.error of runs the orchestrator failed for its own reasons (no node in the region,
-# never started, went silent, node shut down); they do not count against a product's coverage.
-INFRA_ERRORS = detect.INFRA_ERRORS
-# Time slots without a pulse interval to follow (no pulse target, no pulse batch): the
-# resolution of the stored buckets.
+# The resolution of stored buckets: a time slot is a whole number of them (and of the pulse
+# interval), so no stored request is ever placed in the wrong slot.
 BUCKET_MINUTES = 5
 
 
@@ -273,9 +271,9 @@ def scheduled_inputs(conn, as_of):
     outages: the outages overlapping the 30-day window, as known at the cutoff. tested: per
     product and country, the end of its latest started census or pulse run (uptime's
     denominator). events: the newest test_events before the cutoff. traffic: wire bytes per test
-    kind. slot_minutes: the length of a time slot, the shortest pulse interval of the
-    pulse-enabled targets (else the shortest gap between pulse slots in the window, else the
-    5-minute bucket).
+    kind. pulse_minutes: the cohort's pulse interval, the shortest pulse_interval_minutes of
+    the pulse-enabled targets (else the shortest gap between pulse slots in the window, else
+    None); slot_length() turns it into the time slot.
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -355,19 +353,19 @@ def scheduled_inputs(conn, as_of):
                 "histogram": histograms[key],
             }
         )
-    # Pulse slots a product was due in and that ended before the cutoff: done runs, and runs
-    # that failed for a reason of the provider's (filled and down). Operator-skipped or killed
-    # batches and runs our infrastructure lost (INFRA_ERRORS) are not slots the product could
-    # fill. Load batches are never pulse slots.
+    # Pulse slots a product was due in and that ended before the cutoff: its done runs. A run
+    # is only ever 'failed' by our side (no node, never started, went silent, the node shut
+    # down or erred, the upload was rejected), so those never count against the provider; a
+    # provider that is down shows as a done run whose requests failed. Operator-skipped or
+    # killed batches are not slots either, and load batches never are.
     pulses = conn.execute(
         "SELECT br.product_id,b.target_id,b.scheduled_for,trim(b.country_code) AS country,"
         "br.status,br.requests,br.successes,br.run_key "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "WHERE b.kind='pulse' AND b.status NOT IN ('skipped','killed') "
         "AND b.scheduled_for>=%s AND b.scheduled_for<%s AND br.finished_at<%s "
-        "AND (br.status='done' OR (br.status='failed' AND coalesce(br.error,'')<>ALL(%s))) "
-        "ORDER BY 3,1,2",
-        (start, as_of, as_of, list(INFRA_ERRORS)),
+        "AND br.status='done' ORDER BY 3,1,2",
+        (start, as_of, as_of),
     ).fetchall()
     census = []
     for r in conn.execute(
@@ -408,17 +406,17 @@ def scheduled_inputs(conn, as_of):
         "AND coalesce(br.finished_at,%(end)s)>=%(start)s GROUP BY 1,2 ORDER BY 1,2",
         {"start": start, "end": as_of},
     ).fetchall()
-    slot_minutes = conn.execute(
+    pulse_minutes = conn.execute(
         "SELECT coalesce((SELECT min(pulse_interval_minutes) FROM targets WHERE pulse_enabled),"
         "(SELECT min(extract(epoch FROM d))/60 FROM (SELECT scheduled_for-lag(scheduled_for) "
         "OVER (ORDER BY scheduled_for) AS d FROM (SELECT DISTINCT scheduled_for FROM "
         "test_batches WHERE kind='pulse' AND scheduled_for>=%s AND scheduled_for<%s) s) g "
-        "WHERE d>interval '0'),%s) AS minutes",
-        (start, as_of, BUCKET_MINUTES),
+        "WHERE d>interval '0')) AS minutes",
+        (start, as_of),
     ).fetchone()["minutes"]
     report = traffic.summary(conn, start=start, end=as_of, finished_before=as_of)
     return {
-        "slot_minutes": float(slot_minutes),
+        "pulse_minutes": float(pulse_minutes) if pulse_minutes is not None else None,
         "geo": geo,
         "pulses": pulses,
         "census": census,
@@ -447,7 +445,7 @@ def build(
     release,
     previous,
     *,
-    slot_minutes=None,
+    pulse_minutes=None,
     geo=(),
     pulses=(),
     census=(),
@@ -456,8 +454,8 @@ def build(
     events=(),
     traffic=None,
 ):
-    slot_minutes = slot_minutes or BUCKET_MINUTES
-    slot_seconds = round(slot_minutes * 60)
+    slot_minutes = slot_length(pulse_minutes)
+    slot_seconds = slot_minutes * 60
     minimum = slot_settings(config)["min_latency_successes"]
     groups = {}
     run_map = {}
@@ -503,7 +501,8 @@ def build(
                 }
                 | {
                     "hosting_usage_types": hosting_usage_types(cfg),
-                    "slots": slot_settings(cfg) | {"minutes": slot_minutes},
+                    "slots": slot_settings(cfg)
+                    | {"minutes": slot_minutes, "pulse_interval_minutes": pulse_minutes},
                 },
             },
         )
@@ -575,13 +574,13 @@ def build(
         # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
         scheduled = scheduled_groups.get(p["product_id"]) == key
         batches = pulse_groups[p["product_id"]] if scheduled else []
-        # Pulse runs as time slots: a run the provider failed is a filled-and-down slot.
+        # Done pulse runs in their time slots (time_slots() adds the observed live counters of
+        # one whose artifact was never ingested).
         slot_runs = [
             {
                 "slot": floor_time(b["scheduled_for"], slot_seconds),
                 "scheduled_for": b["scheduled_for"],
                 "target": b["target_id"],
-                "down": b["status"] == "failed",
                 "requests": b["requests"],
                 "successes": b["successes"],
                 "counted": b.get("run_key") is not None,
@@ -879,6 +878,16 @@ def build(
             if r.get("batch_id") is None
         ],
     }
+
+
+def slot_length(pulse_minutes):
+    """Minutes in a time slot: the pulse interval, made a whole multiple of the 5-minute stored
+    bucket (the least common multiple: 30 stays 30; staging's 2 becomes 10), so a slot always
+    holds whole pulse intervals and whole buckets and a census request is never placed in a
+    slot it did not run in. Without a pulse interval, the 5-minute bucket."""
+    if not pulse_minutes:
+        return BUCKET_MINUTES
+    return math.lcm(max(1, round(pulse_minutes)), BUCKET_MINUTES)
 
 
 def pricing(evidence_rows, product_id, cohort, as_of):

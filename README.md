@@ -124,33 +124,39 @@ for load) are display labels only, and `minimum_requests` counts every request o
 target. Uptime is outage time: 1 − downtime / (window × countries tested), with each country's
 outages merged and clipped to the window; `uptime.batches/up` keep the pulse-slot counts for
 reference (`[uptime]`). For these cohorts `minimum_coverage` (0.90) applies to pulse slots, not
-5-minute buckets: the share of the product's pulse batches (excluding operator-skipped/killed
-batches and runs failed with `no_node`, `not_started`, `stale` or `node_shutdown`) that a `done`
-run with at least one request, or a run the provider failed, filled. **A provider that is down is
-data, not a gap**: its slot is filled and down, lowers uptime (and the pulse-slot counts), opens
-an outage on the tape, and never makes the score N/A through coverage. A census that ended
-because the provider was down (`no_success`, `stalled`, or failed for a provider reason without a
-success) is rerun for that product alone, once per UTC day per country and target, as soon as
-one of its pulses there gets through (`census_retry` on the tape, `test_batches.retry_of`).
+5-minute buckets: the share of the product's `done` pulse runs with at least one request. A run
+is only ever `failed` by our side (no node, never started, went silent, node shut down or erred,
+upload rejected), so failed runs and operator-skipped/killed batches are not slots and never
+count against the provider. **A provider that is down is data, not a gap**: a done pulse whose
+requests all failed fills its slot, votes 0 on success, lowers uptime (and the pulse-slot
+counts), opens an outage on the tape, and never makes the score N/A through coverage. A census
+that ended because the provider was down (`no_success` or `stalled`) is rerun for that product
+alone, once per UTC day per country and target, as soon as one of its pulses there gets through
+(`census_retry` on the tape, `test_batches.retry_of`); a census our side failed is not.
 
-**Time-weighted metrics.** A window is split into time slots as long as the cohort's pulse
-interval (the shortest `pulse_interval_minutes` of the pulse-enabled targets: 30 minutes in
-production, 2 in staging). Every slot with requests weighs the same: `metrics.success_rate` is
-the mean of the slot success rates (`request_success_rate` keeps successes ÷ requests).
-Light-load latency (`metrics.latency_ms`, pulses only: census and load runs run at census
-concurrency) merges each slot's latency histogram after normalising it to weight 1 and reads
-p50/p90/p99 from the merged distribution; a slot with fewer than `[slots]
-min_latency_successes` (30) successes does not vote. Percentiles are never averaged. Breakdown
-latency is light-load latency too.
+**Time-weighted metrics.** A window is split into time slots: the cohort's pulse interval (the
+shortest `pulse_interval_minutes` of the pulse-enabled targets) made a whole multiple of the
+5-minute stored bucket, lcm(interval, 5): 30 minutes in production, 10 in staging, so no census
+request is placed in a slot it did not run in. Every slot with observed requests weighs the
+same: `metrics.success_rate` is the mean of the slot success rates, successes ÷ requests observed
+in the slot (`request_success_rate` keeps successes ÷ requests). Light-load latency
+(`metrics.latency_ms`, pulses only: census and load runs run at census concurrency) merges the
+histogram of every slot and target after normalising each to weight 1 and reads p50/p90/p99
+from the merged distribution; one with fewer than `[slots] min_latency_successes` (30)
+successes does not vote. Percentiles are never averaged. Across targets that is an equal-weight
+mixture of plain HTTP and CONNECT + TLS round trips; show each target's own
+`targets.<id>.metrics.latency_ms`. Breakdown latency is light-load latency too.
 
 **Latency under load.** In every pulse slot of the census target, each product also runs one
 wave of `census_concurrency` requests at census concurrency in the reference country (setting
 `load.reference_country`, default `US`; staging `RO`): a batch of kind `load` with the pulse's
-`scheduled_for`. It sends only the country, like every scheduled test. Per percentile, factor(t)
+`scheduled_for`, started `load.delay_seconds` (60) after the pulses so the reference pulse is
+not measured under its own load wave. It sends only the country, like every scheduled test. Per percentile, factor(t)
 = load latency(t) ÷ reference-country pulse latency(t) (same target and slot), and every
 country's under-load latency(C, t) = its pulse latency(C, t) × factor(t). A slot without a usable
 load run (both need `min_latency_successes`) uses the newest earlier factor in the window;
-without one the slot has no value. The window value is the mean of its slot values. Example: US
+without one the slot has no value. The window value is the mean of its slot values (per slot
+and target). Example: US
 pulse 600 ms, US load 900 ms → ×1.5; a Romanian pulse of 800 ms → 1,200 ms under load. Census
 latency never makes a factor. The speed score uses the under-load p50; light-load latency is
 published next to it. Load runs count for every request metric but not for light-load latency,
@@ -158,7 +164,8 @@ slot coverage or uptime.
 Snapshot payloads are `schema_version` 2: per product `census` (latest per country), `outages`
 (latest 50 in 30 days) and `pricing`, per window `breakdowns`, `uptime` (`value`, `downtime_s`,
 `countries`, `basis: "outage time"`, `batches`, `up`) and `latency` (the reference load test, its
-factors and per requested country light-load and under-load latency), plus top-level `events`
+factors and per requested country and target light-load and under-load latency), plus top-level
+`events`
 (latest 200) and `traffic` (`by_test` census, pulse and load). Window and target `metrics` carry
 `success_rate` (time-weighted), `request_success_rate`, `latency_ms` (light load),
 `latency_under_load_ms`, `under_load` (slot counts and the reason when there is no value) and
