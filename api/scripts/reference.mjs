@@ -26,7 +26,8 @@ import { windowStats, fleetWindows, costBoards, RANGES } from ${JSON.stringify(j
 import { fleetViews } from ${JSON.stringify(join(root, "src/lib/overview.ts"))};
 import { tapeFromEvents } from ${JSON.stringify(join(root, "src/lib/tape.ts"))};
 export { tapeFromEvents };
-const ref = (p) => ({ slug: p.slug, name: p.name, source: p.source });
+const ref = (p) => (p ? { slug: p.slug, name: p.name, source: p.source } : null);
+const bill = (b) => (b ? { provider: ref(b.provider), bill: b.bill } : null);
 export const out = {
   dataset,
   windows: Object.fromEntries(providers.map((p) => [p.slug, Object.fromEntries(RANGES.map((r) => [r.id, windowStats(p, r.id)]))])),
@@ -40,8 +41,8 @@ export const out = {
     dearest: { provider: ref(v.dearest.provider), cost: v.dearest.cost },
     bills: {
       all: v.bills.all.map((b) => ({ provider: ref(b.provider), bill: b.bill })),
-      best: { provider: ref(v.bills.best.provider), bill: v.bills.best.bill },
-      worst: { provider: ref(v.bills.worst.provider), bill: v.bills.worst.bill },
+      best: bill(v.bills.best),
+      worst: bill(v.bills.worst),
       spreadX: v.bills.spreadX,
     },
   })),
