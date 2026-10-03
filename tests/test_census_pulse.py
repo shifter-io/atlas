@@ -188,9 +188,9 @@ def test_uptime_share_of_pulse_batches():
     batches = [
         {"scheduled_for": t + timedelta(minutes=30 * i), "successes": n, "status": "done"}
         for i, n in enumerate([5, 0, 1, 2])
-    ] + [{"scheduled_for": t, "successes": 0, "status": "failed"}]  # failed runs: coverage only
-    assert uptime(batches, t, t + timedelta(hours=2), 1) == {"batches": 4, "up": 3, "value": 0.75}
-    assert uptime(batches, t, t + timedelta(hours=2), 2)["value"] == 0.5
+    ] + [{"scheduled_for": t, "successes": 7, "status": "failed"}]  # provider failed: down
+    assert uptime(batches, t, t + timedelta(hours=2), 1) == {"batches": 5, "up": 3, "value": 0.6}
+    assert uptime(batches, t, t + timedelta(hours=2), 2)["value"] == 0.4
     assert uptime(batches, t + timedelta(hours=1), t + timedelta(hours=2), 1)["batches"] == 2
     assert uptime([], t, t, 1) == {"batches": 0, "up": 0, "value": None}
 
@@ -391,7 +391,10 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
     assert b["country"][0]["ips"] == 1 and b["country"][0]["success_rate"] == 0.75
     assert {r["region"]: r["completed"] for r in b["region"]} == {"Berlin": 3, "Bavaria": 3}
     assert {r["asn"]: r["usage_type"] for r in b["asn"]} == {3320: "residential", 24940: "hosting"}
-    assert len(b["country_asn"]) == 2 and b["city"][0]["p50"] == 11
+    # Breakdown latency is light-load latency: the pulse's city has one, the census's none.
+    cities = {r["city"]: r for r in b["city"]}
+    assert len(b["country_asn"]) == 2 and cities["Munich"]["p50"] == 11
+    assert cities["Berlin"]["completed"] == 3 and cities["Berlin"]["p50"] is None
     # Both alpha runs saw the same address (FakeTransport): one IP, six observations.
     assert w["pool"]["countries_breakdown"] == [
         {"country_code": "DE", "country": "Germany", "ips": 1, "observations": 6}
@@ -875,8 +878,9 @@ def coverage_policy(tmp_path):
 
 
 async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path):
-    """47 of 48 pulse slots filled passes minimum_coverage 0.90; 40 of 48 does not. Operator
-    skips/kills and runs lost by our infrastructure are not slots; provider failures are."""
+    """Operator skips/kills and runs lost by our infrastructure are not slots. A run the provider
+    failed fills its slot (filled and down): it lowers the slot's uptime, never coverage. 40 of
+    48 slots filled (8 done without a request) is below minimum_coverage 0.90."""
     store.initialize(database)
     seed(database)
     directory, summary = await census(tmp_path, provider="alpha")
@@ -897,7 +901,12 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
             (failed,),
         )
         # Not slots: infrastructure failures and an operator-killed batch.
-        for minute, error in ((5, "no_node"), (6, "not_started"), (7, "stale")):
+        for minute, error in (
+            (4, "node_shutdown"),
+            (5, "no_node"),
+            (6, "not_started"),
+            (7, "stale"),
+        ):
             b = batch(conn, "pulse", slot[10] + timedelta(minutes=minute))
             batch_run(conn, b, alpha, slot[10] + timedelta(minutes=minute + 1))
             conn.execute(
@@ -916,12 +925,18 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
 
     w = window(as_of)
     target = w["targets"]["generic_http"]
-    assert target["benchmark"]["coverage_slots"] == {"due": 48, "filled": 47}
-    assert target["benchmark"]["coverage"] == pytest.approx(47 / 48)
+    assert target["metrics"]["coverage_slots"] == {"due": 48, "filled": 48, "down": 1}
+    assert target["metrics"]["coverage"] == 1
     assert w["metrics"]["coverage_basis"] == "pulse slots"
-    assert w["metrics"]["coverage"] == pytest.approx(47 / 48)
+    assert w["metrics"]["coverage"] == 1
+    assert target["metrics"]["uptime"] == pytest.approx(47 / 48)
+    # Every slot weighs the same: the ingested run (3 of 4), 46 healthy pulses and the down
+    # slot, which votes 0.
+    assert target["metrics"]["success_rate"] == pytest.approx((0.75 + 46) / 48)
+    assert target["metrics"]["request_success_rate"] == 0.75
+    assert target["metrics"]["time_slots"]["down"] == 1
     assert "Insufficient time coverage" not in target["score"]["reasons"]
-    assert target["score"]["state"] == "ready"
+    # Seven more slots the provider failed: still covered, but down.
     with connect(database) as conn:
         conn.execute(
             "UPDATE batch_runs SET status='failed',error='timeout' WHERE batch_id IN "
@@ -929,6 +944,17 @@ async def test_scheduled_coverage_is_the_share_of_pulse_slots(database, tmp_path
             (slot[1:8],),
         )
     target = window(as_of)["targets"]["generic_http"]  # new inputs, new build
-    assert target["benchmark"]["coverage_slots"] == {"due": 48, "filled": 40}
+    assert target["metrics"]["coverage_slots"] == {"due": 48, "filled": 48, "down": 8}
+    assert "Insufficient time coverage" not in target["score"]["reasons"]
+    assert target["metrics"]["uptime"] == pytest.approx(40 / 48)
+    # Eight slots done without a single request are gaps.
+    with connect(database) as conn:
+        conn.execute(
+            "UPDATE batch_runs SET status='done',error=NULL,requests=0 WHERE batch_id IN "
+            "(SELECT batch_id FROM test_batches WHERE scheduled_for=ANY(%s))",
+            (slot[1:9],),
+        )
+    target = window(as_of)["targets"]["generic_http"]
+    assert target["metrics"]["coverage_slots"] == {"due": 48, "filled": 40, "down": 1}
     assert "Insufficient time coverage" in target["score"]["reasons"]
     assert target["score"]["state"] == "incomplete"

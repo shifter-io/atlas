@@ -19,6 +19,8 @@ V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.
 KEEP_DRAFTS = 2
+# Test kinds of the snapshot's traffic.by_test (load since the latency-under-load test).
+TESTS = {"census", "pulse", "load"}
 MIGRATION_CHECKS = {
     "cohorts and readiness": "SELECT count(*) FROM v1_windows o JOIN calculated_windows w "
     "USING(result_id) LEFT JOIN cohort_criteria c ON c.cohort=w.cohort WHERE "
@@ -116,8 +118,23 @@ def assign_role(database, run_id, role):
 
 
 def evidence(database, record):
+    """Store one metric evidence record (or a list of them, in one transaction).
+
+    A record names its product by product_id, or portably by provider and product (resolved
+    here, so the product must exist). cohort "*" applies to every cohort of the product
+    (product-wide facts such as list prices). Replays of the same content are ignored.
+    """
+    if isinstance(record, list):
+        if not record:
+            raise ValueError("No evidence records")
+        with connect(database) as conn:
+            return [_evidence(conn, item) for item in record]
+    with connect(database) as conn:
+        return _evidence(conn, record)
+
+
+def _evidence(conn, record):
     expected = {
-        "product_id",
         "cohort",
         "metric",
         "value",
@@ -126,7 +143,12 @@ def evidence(database, record):
         "valid_until",
         "source",
     }
-    if set(record) != expected or record["metric"] not in EVIDENCE_RANGES:
+    if not isinstance(record, dict):
+        raise ValueError("Evidence requires a known metric and the documented fields")
+    names = set(record) - expected
+    if names not in ({"product_id"}, {"provider", "product"}) or record.get("metric") not in (
+        EVIDENCE_RANGES
+    ):
         raise ValueError("Evidence requires a known metric and the documented fields")
     lo, hi = EVIDENCE_RANGES[record["metric"]]
     value = record["value"]
@@ -139,18 +161,27 @@ def evidence(database, record):
     ]
     if any(t.tzinfo is None for t in times) or not times[0] < times[1] <= times[2]:
         raise ValueError("Invalid evidence interval")
-    with connect(database) as conn:
-        conn.execute(
-            "INSERT INTO metric_evidence(product_id,cohort,metric,value,period_start,"
-            "period_end,valid_until,source,content_hash) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT(content_hash) DO NOTHING",
-            (
-                *[record[k] for k in ("product_id", "cohort", "metric", "value")],
-                *times,
-                record["source"],
-                digest(record),
-            ),
-        )
+    if "product_id" not in record:
+        row = conn.execute(
+            "SELECT product_id FROM products WHERE provider=%s AND name=%s",
+            (record["provider"], record["product"]),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Unknown provider product")
+        record = {k: v for k, v in record.items() if k not in ("provider", "product")} | {
+            "product_id": row[0]
+        }
+    conn.execute(
+        "INSERT INTO metric_evidence(product_id,cohort,metric,value,period_start,"
+        "period_end,valid_until,source,content_hash) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT(content_hash) DO NOTHING",
+        (
+            *[record[k] for k in ("product_id", "cohort", "metric", "value")],
+            *times,
+            record["source"],
+            digest(record),
+        ),
+    )
     return {"content_hash": digest(record)}
 
 
@@ -194,7 +225,7 @@ def validate_payload(payload):
         raise ValueError("Invalid snapshot contract")
     if version == 2 and (
         not isinstance(payload["events"], list)
-        or set(payload["traffic"]["by_test"]) != {"census", "pulse"}
+        or not {"census", "pulse"} <= set(payload["traffic"]["by_test"]) <= TESTS
     ):
         raise ValueError("Invalid snapshot contract")
     for product in payload["products"]:

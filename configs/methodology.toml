@@ -1,26 +1,55 @@
-name = "Measured draft v1"
+name = "Measured draft v2"
 status = "draft"
 windows = [24, 168, 720]
 refresh_seconds = 60
 required_targets = ["generic_http", "generic_https"]
+# Every request counts for every metric: census, pulse and load runs (and runs outside a batch)
+# all feed success, blocks, timeouts, exit IPs, geography/ASN breakdowns and bytes. Run roles
+# (calculation_roles) are display labels only. minimum_requests counts every request of a
+# required target in the window.
 minimum_requests = 4000
 minimum_coverage = 0.90
 score_valid_hours = 24
 # minimum_coverage: for unbatched runs, the share of 5-minute buckets with data. For census/pulse
 # (batch-linked) cohorts it is the share of the product's pulse slots in the window that it filled:
 # slots are pulse batches with a batch_runs row for the product, except operator-skipped or killed
-# batches and runs our infrastructure lost (error no_node, not_started, stale); a slot is filled
-# by a 'done' run with at least one completed request. 47 of 48 slots (0.979) passes; 40 does not.
+# batches and runs our infrastructure lost (error no_node, not_started, stale, node_shutdown); a
+# slot is filled by a 'done' run with at least one completed request, or by a run the provider
+# failed: a provider that is down is data (filled and down, it lowers uptime), not a gap.
 sample_limit = 50
-# Collection roles whose buckets feed target scores. Census runs are pool_sampling and pulse runs
-# monitor unless a calculation_roles row says otherwise; pulses are the comparable benchmark.
-scored_roles = ["benchmark", "monitor"]
+# DB-IP usage types that mark an exit IP as a datacenter/hosting address: dcAsns, and the
+# new_hosting_asn tape event. Exit IPs without a usage type are left out of every share.
+hosting_usage_types = ["hosting", "datacenter"]
+
+# Time-weighted window metrics. A window is split into time slots as long as the cohort's pulse
+# interval (the shortest pulse_interval_minutes of the pulse-enabled targets: 30 minutes in
+# production, 2 in staging); pulse and load requests belong to their batch's slot, census and
+# unbatched requests to the slot they ran in. Every slot with requests weighs the same:
+# success rate = mean of the slot success rates (every request in the slot; a slot whose pulse
+# the provider failed without requests counts as 0). Light-load latency (pulses only; census and
+# load runs run at census concurrency) merges the slots' latency histograms after normalising
+# each slot to weight 1, then reads p50/p90/p99 from the merged distribution; a slot with fewer
+# than min_latency_successes light-load successes does not vote. Percentiles are never averaged.
+#
+# Latency under load (the speed score): in every pulse slot each product also runs one wave at
+# the census target's census_concurrency in the reference country (orchestrator setting
+# load.reference_country, default US): a batch of kind 'load'. Per percentile,
+#   factor(t) = load-run latency(t) / reference-country pulse latency(t), same target and slot,
+#   under-load latency(C, t) = pulse latency(C, t) x factor(t), for every country C.
+# Both runs need min_latency_successes successes. A slot without a usable load run uses the
+# newest earlier factor of the product in the window; with none, the slot has no under-load
+# value. The window's under-load latency is the mean of its slot values (equal weight per slot).
+# Census latency never makes a factor. Example: US pulse 600 ms, US load 900 ms -> x1.5; a
+# Romanian pulse of 800 ms in that slot -> 1,200 ms under load.
+[slots]
+min_latency_successes = 30
 
 # Uptime is outage time: 1 - downtime / (window length x countries the product was tested in during
 # the window), where downtime sums, per country, the union of its outages clipped to the window (one
-# still open runs to the cutoff). Outages open when a pulse reports a product down (from its last
-# healthy pulse there) or a census stalls (no success for census.stall_seconds after it had some;
-# from its last success), and close with the next healthy pulse or census in the country.
+# still open runs to the cutoff). Outages open when a pulse reports a product down (no success, or
+# the run failed for a provider reason, from its last healthy pulse there) or a census stalls (no
+# success for census.stall_seconds after it had some; from its last success), and close with the
+# next healthy pulse or census in the country. Load runs never count for uptime.
 # min_successes still defines an "up" pulse batch for the reference counts (uptime.batches/up).
 # Uptime feeds the uptime score component once min_batches pulse batches finished in the window;
 # until then uptime_pct evidence, if any, is used instead.
@@ -41,7 +70,6 @@ block_spike_pp = 0.10         # challenge + block share above baseline + 10 pp
 down_baseline = 0.5           # no success at all while the baseline was above 50%
 pulse_change_pp = 0.05        # pulse_finished only when success moved 5 pp from the last pulse,
 pulse_latency_ratio = 1.5     # the median latency moved 1.5x, or challenges/blocks appeared/went
-hosting_usage_types = ["hosting", "datacenter"]
 settle_seconds = 120          # batches finished this recently wait for the next run
 initial_lookback_minutes = 60 # first run without a watermark
 
@@ -65,12 +93,22 @@ generic_https = 1
 
 # Every component is a ratio to the leader: the best raw value among the products of the same kind
 # in the same window whose component is ready (state "ready", measured, not retained or expired).
-# Higher is better: 100 x yours / best; lower is better (speed p50, cost): 100 x best / yours.
+# Higher is better: 100 x yours / best; lower is better (speed, value): 100 x best / yours.
 # Clamped to 0-100; a product alone in its kind scores 100. Leaders are found again on every
-# calculation. Raw values: reliability benchmark success rate, speed benchmark p50 (per target,
-# combined with target_weights, then benchmark_weights), uptime percent, coverage unique IPs per
-# day, dcAsns clean share (1 - datacenter ASN share; datacenter products keep 100), authenticity
-# (1 - claim gap) x 100 - blocklist hits x blocklist_penalty, value cost per 1,000 successes.
+# calculation. Raw values:
+#   reliability   time-weighted success rate of every request (per target, combined with
+#                 target_weights, then benchmark_weights); blocks, challenges and timeouts are
+#                 failures inside it (block rate is published, not a separate component)
+#   speed         p50 latency under load (per target, as reliability)
+#   uptime        outage-time uptime percent
+#   coverage      unique exit IPs per day
+#   diversity     countries, regions, cities, ASNs per day ([peer.diversity])
+#   dcAsns        clean share: 1 - share of exit IPs with a DB-IP usage type whose type is in
+#                 hosting_usage_types (unknowns excluded; datacenter products keep 100)
+#   authenticity  100 x share of exit IPs whose DB-IP country is the country the requests asked
+#                 for (pool geo_accuracy, per unique IP, IPs without a DB-IP country excluded)
+#   value         lowest list price per GB of the pool tested (effective-dated price evidence,
+#                 price_per_gb_lowest), so value = 100 x cheapest of the kind / yours
 # Pool counts (coverage, diversity) are averages of daily (24h) counts over the window's days with
 # observations, so a network measured for a few days compares fairly with one measured for 30.
 [peer.diversity]
@@ -79,9 +117,6 @@ countries = 0.30
 regions = 0.20
 cities = 0.25
 asns = 0.25
-
-[authenticity]
-blocklist_penalty = 120
 
 [grades]
 "A+" = 88

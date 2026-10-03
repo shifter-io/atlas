@@ -1,0 +1,24 @@
+[
+  {
+    "provider": "shifter",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_lowest",
+    "value": 0.75,
+    "period_start": "2026-10-03T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://shifter.io/services/residential-proxies observed 2026-10-03: Residential, Full Geo pool (the pool we test). Lowest rate $0.75/GB: Growth 400 GB $299/mo; Business 200 GB $149/mo is also $0.75/GB."
+  },
+  {
+    "provider": "shifter",
+    "product": "residential",
+    "cohort": "*",
+    "metric": "price_per_gb_entry",
+    "value": 1.0,
+    "period_start": "2026-10-03T00:00:00Z",
+    "period_end": "2027-01-01T00:00:00Z",
+    "valid_until": "2027-01-01T00:00:00Z",
+    "source": "https://shifter.io/services/residential-proxies observed 2026-10-03: Residential, Full Geo pool (the pool we test). Entry rate $1.00/GB: Starter 50 GB $50/mo; Basic 100 GB $100/mo."
+  }
+]

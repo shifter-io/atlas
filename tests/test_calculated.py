@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from helpers import FakeTransport
+from psycopg.rows import dict_row
 from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 
 from milf_framework.calculated import store
@@ -66,16 +67,23 @@ def test_policy_and_eligibility():
         "coverage": 1 / 288,
         "success_rate": 0.9994,
         "latency_ms": {"p50": 1113},
+        "latency_under_load_ms": {"p50": 1670},
     }
     assert target_score(m, c)["state"] == "incomplete"
     m["coverage"] = 1
     s = target_score(m, c)
-    # Raw values; peer_scores() turns them into ratios to the leader.
+    # Raw values; peer_scores() turns them into ratios to the leader. Speed is the p50 under
+    # load, not the light-load p50.
     assert s["state"] == "ready" and s["weights"] == c["target_weights"]
     assert {k: v["value"] for k, v in s["components"].items()} == {
         "reliability": 0.9994,
-        "speed": 1113,
+        "speed": 1670,
     }
+    # Without a load test there is no speed value, and the reason says why.
+    m["latency_under_load_ms"] = {"p50": None}
+    m["under_load"] = {"reason": "No load test in this window"}
+    speed = target_score(m, c)["components"]["speed"]
+    assert speed["value"] is None and speed["reason"] == "No load test in this window"
     assert [ratio(0.5, 0.8, True), ratio(0.8, 0.8, True), ratio(0.5, 0, True)] == [62.5, 100, 0]
     assert [ratio(200, 100, False), ratio(0, 100, False), ratio(None, 1, True)] == [50, 100, None]
 
@@ -160,34 +168,42 @@ def test_saved_shifter_reconciliation(database):
     assert w["metrics"]["successes"] == 4997
     assert w["pool"]["unique_ips"] == 4967
     assert w["metrics"]["latency_ms"] == {"p50": 1113, "p90": 1395, "p95": 1644, "p99": 3292}
-    assert w["benchmark"]["completed"] == 0
+    # Every request counts whatever the run's role: the benchmark is every request.
+    assert w["benchmark"]["completed"] == 5000 and w["roles"]["pool_sampling"] == 5000
+    assert w["tests"] == {"census": 0, "pulse": 0, "load": 0, "unscheduled": 5000}
     assert w["pool"]["observations"] == 4997
     assert w["targets"]["generic_https"]["metrics"]["success_rate"] is None
     assert sum(c["ips"] for c in w["pool"]["countries_breakdown"]) == 4967
 
 
 def ready_inputs(products=(1, 2)):
-    from milf_framework.calculated.calculator import cohort_for
-
+    """Per product one pulse run per target (US, one time slot) and a load run on generic_http
+    in the same slot with the same latency (factor 1: latency under load = light-load latency),
+    plus product-wide ("*") uptime and price evidence."""
     config, _ = load(POLICY)
     config["minimum_requests"] = 1
     config["minimum_coverage"] = 0
+    config["slots"] = {"min_latency_successes": 1}
     now = datetime(2026, 9, 25, 12, tzinfo=UTC)
+    slot = now - timedelta(minutes=5)
     runs = []
     buckets = []
     observations = []
     evidence = []
     for product_id in products:
-        for i, target in enumerate(("generic_http", "generic_https")):
+        for i, (target, test) in enumerate(
+            (("generic_http", "pulse"), ("generic_https", "pulse"), ("generic_http", "load"))
+        ):
             key = product_id * 10 + i
+            scheme = "https" if target == "generic_https" else "http"
             scope = {
                 "target": {
                     "id": target,
-                    "url": ("http" if i == 0 else "https") + "://checkip.amazonaws.com/",
+                    "url": scheme + "://checkip.amazonaws.com/",
                     "version": "1",
                 },
                 "config": {
-                    "concurrency": 100,
+                    "concurrency": 1000 if test == "load" else 100,
                     "timeout_seconds": 15,
                     "requested_country": "us",
                     "runner_location": "test",
@@ -199,7 +215,11 @@ def ready_inputs(products=(1, 2)):
                 "product_id": product_id,
                 "provider": f"p{product_id}",
                 "name": "residential",
-                "role": "benchmark",
+                "role": "monitor",
+                "batch_id": key,
+                "test": test,
+                "slot_at": slot,
+                "batch_country": "US",
                 "scope": scope,
                 "started_at": now - timedelta(minutes=2),
                 "finished_at": now - timedelta(minutes=1),
@@ -238,17 +258,11 @@ def ready_inputs(products=(1, 2)):
                         "region": "Test",
                     }
                 )
-        cohort, _ = cohort_for(scope, "residential")
-        for metric, value in {
-            "uptime_pct": 100,
-            "claim_gap": 0,
-            "blacklist_hit_rate": 0,
-            "cost_per_1k_success": 0.005,
-        }.items():
+        for metric, value in {"uptime_pct": 100, "price_per_gb_lowest": 5.0}.items():
             evidence.append(
                 {
                     "product_id": product_id,
-                    "cohort": cohort,
+                    "cohort": "*",
                     "metric": metric,
                     "value": value,
                     "period_start": now - timedelta(days=40),
@@ -273,11 +287,28 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     changed = build(r, b, o, e, c, digest(c), now, 2, None, None)
     score = changed["products"][0]["windows"]["24h"]["scores"]["balanced"]
     assert score["score"] == score["components"]["speed"]["value"]
-    # Missing reputation cannot silently redistribute authenticity's positive weight.
+    # Missing pricing cannot silently redistribute value's positive weight.
     c, now, r, b, o, e = ready_inputs()
-    e = [v for v in e if v["metric"] != "blacklist_hit_rate"]
+    e = [v for v in e if v["metric"] != "price_per_gb_lowest"]
     incomplete = build(r, b, o, e, c, digest(c), now, 3, None, None)
-    assert incomplete["products"][0]["windows"]["24h"]["scores"]["balanced"]["score"] is None
+    score = incomplete["products"][0]["windows"]["24h"]["scores"]["balanced"]
+    assert score["score"] is None
+    assert score["components"]["value"]["reason"] == (
+        "Verified effective-dated pricing (lowest $/GB) is required"
+    )
+    # Without a load test, speed has no value: no score either.
+    c, now, r, b, o, e = ready_inputs()
+    loads = {x["run_key"] for x in r if x["test"] == "load"}
+    unloaded = build(
+        [x for x in r if x["run_key"] not in loads],
+        [x for x in b if x["run_key"] not in loads],
+        o, e, c, digest(c), now, 5, None, None,
+    )
+    window = unloaded["products"][0]["windows"]["24h"]
+    assert window["scores"]["balanced"]["score"] is None
+    assert window["metrics"]["latency_under_load_ms"]["p50"] is None
+    assert window["metrics"]["under_load"]["reason"] == "No load test in this window"
+    assert window["latency"]["reference"] is None
     # A product cannot receive a new score from an expired required target.
     later = now + timedelta(days=2)
     for v in e:
@@ -310,14 +341,15 @@ def peer_inputs():
     """Three residential products with known raw values (see test_peer_ratio_scores)."""
     c, now, r, b, o, e = ready_inputs(products=(1, 2, 3))
     evidence = {
-        1: {"uptime_pct": 100, "cost_per_1k_success": 0.005},
-        2: {"uptime_pct": 80, "cost_per_1k_success": 0.0025, "claim_gap": 0.2},
-        3: {"uptime_pct": 50, "cost_per_1k_success": 0.01, "blacklist_hit_rate": 0.1},
+        1: {"uptime_pct": 100, "price_per_gb_lowest": 5.0},
+        2: {"uptime_pct": 80, "price_per_gb_lowest": 2.5},
+        3: {"uptime_pct": 50, "price_per_gb_lowest": 10.0},
     }
     for v in e:
         v["value"] = evidence[v["product_id"]].get(v["metric"], v["value"])
     first = {v["run_key"]: v for v in o}
     first[10]["usage_type"] = "hosting"  # product 1: all datacenter IPs
+    # product 2: a second IP in Germany although the US was asked for (geo accuracy 1/2)
     o.append(
         first[20]
         | {"ip_id": 2, "country_code": "DE", "region": "Bayern", "city": "Munich", "asn": 2}
@@ -337,7 +369,7 @@ def test_peer_ratio_scores():
     def values(key):
         return [pytest.approx(c[key]["value"]) for c in parts]
 
-    # Lower is better: p50 latency 100, 200 and 300 ms; cost per 1,000 successes.
+    # Lower is better: p50 latency under load 100, 200 and 300 ms; lowest price per GB.
     assert values("speed") == [100, 50, 100 / 3]
     assert parts[1]["speed"]["inputs"] == {
         "targets": {
@@ -353,12 +385,23 @@ def test_peer_ratio_scores():
     }
     assert p2["targets"]["generic_http"]["score"]["score"] == pytest.approx(0.8 * 100 + 0.2 * 50)
     assert values("value") == [50, 100, 25]
-    assert parts[0]["value"]["inputs"] == {"value": 0.005, "best": 0.0025, "peers": 3}
+    assert parts[0]["value"]["inputs"] == {"value": 5.0, "best": 2.5, "peers": 3}
+    assert result["products"][0]["pricing"] == {
+        "currency": "USD",
+        "lowest_per_gb": 5.0,
+        "entry_per_gb": None,
+        "effective_from": now - timedelta(days=40),
+        "valid_until": now + timedelta(hours=12),
+        "sources": ["fixture"],
+    }
     # Higher is better: uptime, authenticity, coverage (unique IPs per day), clean ASN share.
     assert values("reliability") == [100, 100, 100]
     assert values("uptime") == [100, 80, 50]
     assert parts[2]["uptime"]["inputs"] == {"value": 50, "best": 100, "peers": 3}
-    assert values("authenticity") == [100, 80, 88]
+    # Authenticity: 100 x share of exit IPs in the country asked for (p2: one of two).
+    assert values("authenticity") == [100, 50, 100]
+    assert parts[1]["authenticity"]["inputs"] == {"value": 50, "best": 100, "peers": 3}
+    assert p2["pool"]["geo_accuracy"] == 0.5
     assert values("coverage") == [50, 100, 100]
     assert values("dcAsns") == [0, 100, 100]
     # Diversity mixes the dimension ratios: p3 has one country, region and city but two ASNs.
@@ -398,6 +441,8 @@ def test_peer_ratio_retained_scores_and_lone_products():
 
     c, now, r, b, o, e = peer_inputs()
     c["minimum_requests"] = 2
+    # generic_http also carries the load run: 2 pulse + 2 load requests.
+    c["targets"] = {"generic_http": {"minimum_requests": 4}}
     for bucket in b:
         bucket["counters"] |= {"completed": 2, "successes": 2}
         bucket["counters"]["latency_histogram"]["bins"][0][1] = 2
@@ -447,7 +492,7 @@ def test_peer_ratio_retained_scores_and_lone_products():
     assert all(
         v["value"] == 100 and v["inputs"]["peers"] == 1 for v in score["components"].values()
     )
-    assert score["components"]["value"]["inputs"] == {"value": 0.01, "best": 0.01, "peers": 1}
+    assert score["components"]["value"]["inputs"] == {"value": 10.0, "best": 10.0, "peers": 1}
 
 
 def test_daily_average_counts():
@@ -542,12 +587,37 @@ def test_evidence_contract(database):
         assert conn.execute("SELECT count(*) FROM metric_evidence").fetchone()[0] == 1
     for invalid in (
         record | {"metric": "invented"},
+        record | {"metric": "claim_gap", "value": 0.1},  # no longer evidence: measured
+        record | {"metric": "blacklist_hit_rate", "value": 0},  # no blocklists anywhere
         record | {"value": float("nan")},
         record | {"value": 101},
         record | {"source": ""},
+        {k: v for k, v in record.items() if k != "product_id"} | {"provider": "fixture"},
+        {k: v for k, v in record.items() if k != "product_id"}
+        | {"provider": "nobody", "product": "residential"},
     ):
         with pytest.raises(ValueError):
             store.evidence(database, invalid)
+    # The shipped price list names its product portably and applies to every cohort ("*").
+    from milf_framework.calculated.calculator import pricing
+
+    prices = json.loads(Path("configs/pricing/shifter-residential.json").read_text())
+    with connect(database) as conn:
+        conn.execute("INSERT INTO providers VALUES ('shifter')")
+        shifter = conn.execute(
+            "INSERT INTO products(provider,name) VALUES ('shifter','residential') "
+            "RETURNING product_id"
+        ).fetchone()[0]
+    hashes = store.evidence(database, prices)
+    assert len(hashes) == 2 and store.evidence(database, prices) == hashes
+    with connect(database) as conn:
+        conn.row_factory = dict_row
+        rows = conn.execute("SELECT * FROM metric_evidence ORDER BY evidence_id").fetchall()
+    published, used = pricing(rows, shifter, "any-cohort", datetime(2026, 10, 4, tzinfo=UTC))
+    assert (published["lowest_per_gb"], published["entry_per_gb"]) == (0.75, 1.0)
+    assert len(used) == 2 and published["currency"] == "USD"
+    before = pricing(rows, shifter, "c", datetime(2026, 10, 2, tzinfo=UTC))[0]
+    assert before["lowest_per_gb"] is None
 
 
 @pytest.mark.asyncio
@@ -725,6 +795,7 @@ def lenient_policy(tmp_path):
         POLICY.read_text()
         .replace("minimum_requests = 4000", "minimum_requests = 1")
         .replace("minimum_coverage = 0.90", "minimum_coverage = 0")
+        .replace("min_latency_successes = 30", "min_latency_successes = 1")
     )
     return policy
 
@@ -735,24 +806,43 @@ class OtherIP(FakeTransport):
 
 
 async def benchmark_scenario(database, tmp_path):
-    """Two benchmarked providers with evidence: ready, ranked, then expired scores."""
+    """Two providers with pulses on both targets and a load run in the same US slot, and
+    evidence: ready, ranked, then expired scores."""
+    from milf_framework.storage import seed
+
     store.initialize(database)
+    seed(database)
+    slot = datetime.fromtimestamp(datetime.now(UTC).timestamp() // 1800 * 1800, UTC)
+    with connect(database) as conn:
+        batches = {
+            (kind, target): conn.execute(
+                "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+                "start_at,status) SELECT %s,'US',region_id,%s,%s,%s,'done' FROM countries "
+                "WHERE country_code='US' RETURNING batch_id",
+                (kind, target, slot, slot),
+            ).fetchone()[0]
+            for kind, target in (
+                ("pulse", "generic_http"),
+                ("pulse", "generic_https"),
+                ("load", "generic_http"),
+            )
+        }
     last = None
     for provider in ("alpha", "beta"):
-        for target in ("generic_http", "generic_https"):
+        for (kind, target), batch_id in batches.items():
             d = await measurement(
                 tmp_path,
                 provider=provider,
                 target=target,
                 requested_country="us",
+                concurrency=1000 if kind == "load" else 100,
                 transport_factory=OtherIP if provider == "beta" else FakeTransport,
             )
             if target == "generic_http":
                 attributes = ALL_ATTRIBUTES | ({"city": "San Jose"} if provider == "beta" else {})
                 enrichment(d, attributes=attributes)
-            ingest(d, database)
+            ingest(d, database, batch_id=batch_id)
             raw = json.loads((d / "summary.json").read_text())
-            store.assign_role(database, raw["run_id"], "benchmark")
             last = max(last or raw["finished_at"], raw["finished_at"])
     policy = lenient_policy(tmp_path)
     last = datetime.fromisoformat(last)
@@ -762,9 +852,7 @@ async def benchmark_scenario(database, tmp_path):
     for product_id in ids:
         for metric, value in {
             "uptime_pct": 99.5,
-            "claim_gap": 0.1,
-            "blacklist_hit_rate": 0.01,
-            "cost_per_1k_success": 0.004,
+            "price_per_gb_lowest": 4.0,
         }.items():
             store.evidence(
                 database,

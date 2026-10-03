@@ -19,10 +19,14 @@ from .aggregate import (
     BREAKDOWNS,
     NETWORK,
     PLACE,
+    PRICES,
     UNAVAILABLE,
     breakdowns,
     daily_average,
     daily_pools,
+    floor_time,
+    latency_detail,
+    load_factors,
     metrics,
     outage_list,
     outage_uptime,
@@ -33,9 +37,18 @@ from .aggregate import (
     series,
     slot_coverage,
     target_score,
+    timed,
     uptime,
+    with_under_load,
 )
-from .policy import digest, effective, load, scored_roles, uptime_settings
+from .policy import (
+    digest,
+    effective,
+    hosting_usage_types,
+    load,
+    slot_settings,
+    uptime_settings,
+)
 from .store import jsonable, prune, validate_payload
 
 SCHEMA_VERSION = 2
@@ -50,12 +63,16 @@ IMPLEMENTATION_ID = hashlib.sha256(
 # country, target, node or concurrency: every provider runs them at the same moment, so they are
 # comparable as a whole, and the breakdowns, uptime and census summary span all countries.
 SCHEDULED = "census_pulse"
-# A run's role, when no calculation_roles row assigns one, follows its batch kind.
-BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor"}
+# A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
+# are display labels: every request counts for every metric whatever its role.
+BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"}
 EVENTS_IN_SNAPSHOT = 200
 # batch_runs.error of runs the orchestrator failed for its own reasons (no node in the region,
-# never started, went silent); they do not count against a product's coverage.
-INFRA_ERRORS = ("no_node", "not_started", "stale")
+# never started, went silent, node shut down); they do not count against a product's coverage.
+INFRA_ERRORS = detect.INFRA_ERRORS
+# Time slots without a pulse interval to follow (no pulse target, no pulse batch): the
+# resolution of the stored buckets.
+BUCKET_MINUTES = 5
 
 
 def cohort_for(scope, kind, scheduled=False):
@@ -134,7 +151,8 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         runs = conn.execute(
             "SELECT r.run_key,r.run_id::text,r.summary_sha256,r.summary,r.started_at,"
             "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
-            "b.kind AS test,coalesce(cr.role,CASE b.kind "
+            "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
+            "coalesce(cr.role,CASE b.kind "
             + " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in BATCH_ROLES.items())
             + " END,'exploratory') AS role FROM test_runs r "
             "JOIN scope_details s USING(scope_id) JOIN products p ON p.product_id=s.product_id "
@@ -253,8 +271,11 @@ def scheduled_inputs(conn, as_of):
     for requests without an exit location, the country the run requested. pulses: finished
     pulse batch runs (uptime). census: the latest finished census per product and country.
     outages: the outages overlapping the 30-day window, as known at the cutoff. tested: per
-    product and country, the end of its latest started batch run (uptime's denominator).
-    events: the newest test_events before the cutoff. traffic: wire bytes per test kind.
+    product and country, the end of its latest started census or pulse run (uptime's
+    denominator). events: the newest test_events before the cutoff. traffic: wire bytes per test
+    kind. slot_minutes: the length of a time slot, the shortest pulse interval of the
+    pulse-enabled targets (else the shortest gap between pulse slots in the window, else the
+    5-minute bucket).
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -276,6 +297,9 @@ def scheduled_inputs(conn, as_of):
         "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     )
     window = "WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
+    # Breakdown latency is light-load latency: pulses and runs outside a batch, never census or
+    # load runs (census concurrency). Counters keep every request.
+    light = "AND (b.kind IS NULL OR b.kind='pulse') "
     totals = conn.execute(
         f"SELECT {keys},sum(g.completed)::bigint AS completed,"
         "sum(g.successes)::bigint AS successes,sum(g.challenges)::bigint AS challenges,"
@@ -286,7 +310,7 @@ def scheduled_inputs(conn, as_of):
     histograms = defaultdict(list)
     for row in conn.execute(
         f"SELECT {keys},h.ms,sum(h.n)::bigint AS n {source}CROSS JOIN LATERAL "
-        f"histogram(g.histogram_steps,g.histogram_counts::bigint[]) h {window}"
+        f"histogram(g.histogram_steps,g.histogram_counts::bigint[]) h {window}{light}"
         "GROUP BY 1,2,3,4,5,6,7 ORDER BY 1,2,3,4,5,6,7",
         bounds,
     ):
@@ -332,10 +356,12 @@ def scheduled_inputs(conn, as_of):
             }
         )
     # Pulse slots a product was due in and that ended before the cutoff: done runs, and runs
-    # that failed for a reason of the provider's. Operator-skipped or killed batches and runs
-    # our infrastructure lost (INFRA_ERRORS) are not slots the product could fill.
+    # that failed for a reason of the provider's (filled and down). Operator-skipped or killed
+    # batches and runs our infrastructure lost (INFRA_ERRORS) are not slots the product could
+    # fill. Load batches are never pulse slots.
     pulses = conn.execute(
-        "SELECT br.product_id,b.target_id,b.scheduled_for,br.status,br.requests,br.successes "
+        "SELECT br.product_id,b.target_id,b.scheduled_for,trim(b.country_code) AS country,"
+        "br.status,br.requests,br.successes,br.run_key "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "WHERE b.kind='pulse' AND b.status NOT IN ('skipped','killed') "
         "AND b.scheduled_for>=%s AND b.scheduled_for<%s AND br.finished_at<%s "
@@ -378,12 +404,21 @@ def scheduled_inputs(conn, as_of):
         "SELECT br.product_id,b.country_code AS country,"
         "max(least(coalesce(br.finished_at,%(end)s),%(end)s)) AS last "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "WHERE br.started_at IS NOT NULL AND br.started_at<%(end)s "
+        "WHERE b.kind<>'load' AND br.started_at IS NOT NULL AND br.started_at<%(end)s "
         "AND coalesce(br.finished_at,%(end)s)>=%(start)s GROUP BY 1,2 ORDER BY 1,2",
         {"start": start, "end": as_of},
     ).fetchall()
+    slot_minutes = conn.execute(
+        "SELECT coalesce((SELECT min(pulse_interval_minutes) FROM targets WHERE pulse_enabled),"
+        "(SELECT min(extract(epoch FROM d))/60 FROM (SELECT scheduled_for-lag(scheduled_for) "
+        "OVER (ORDER BY scheduled_for) AS d FROM (SELECT DISTINCT scheduled_for FROM "
+        "test_batches WHERE kind='pulse' AND scheduled_for>=%s AND scheduled_for<%s) s) g "
+        "WHERE d>interval '0'),%s) AS minutes",
+        (start, as_of, BUCKET_MINUTES),
+    ).fetchone()["minutes"]
     report = traffic.summary(conn, start=start, end=as_of, finished_before=as_of)
     return {
+        "slot_minutes": float(slot_minutes),
         "geo": geo,
         "pulses": pulses,
         "census": census,
@@ -412,6 +447,7 @@ def build(
     release,
     previous,
     *,
+    slot_minutes=None,
     geo=(),
     pulses=(),
     census=(),
@@ -420,6 +456,9 @@ def build(
     events=(),
     traffic=None,
 ):
+    slot_minutes = slot_minutes or BUCKET_MINUTES
+    slot_seconds = round(slot_minutes * 60)
+    minimum = slot_settings(config)["min_latency_successes"]
     groups = {}
     run_map = {}
     bucket_groups = defaultdict(list)
@@ -460,18 +499,31 @@ def build(
                         "minimum_coverage",
                         "score_valid_hours",
                         "peer",
-                        "authenticity",
                     )
+                }
+                | {
+                    "hosting_usage_types": hosting_usage_types(cfg),
+                    "slots": slot_settings(cfg) | {"minutes": slot_minutes},
                 },
             },
         )
     for b in buckets:
         r = run_map[b["run_key"]]
+        test = r.get("test")
+        # Pulse and load requests belong to their batch's slot; census and unbatched requests
+        # to the slot their bucket starts in.
+        at = r.get("slot_at") if test in ("pulse", "load") and r.get("slot_at") else None
+        country = r.get("batch_country") or r["scope"]["config"].get("requested_country")
         bucket_groups[r["group"]].append(
             b
             | {
                 "target": r["scope"]["target"]["id"],
                 "role": r["role"],
+                "test": test,
+                "light": test in (None, "pulse"),
+                "slot": floor_time(at or b["bucket_start"], slot_seconds),
+                "country": country.strip().upper() if country else None,
+                "concurrency": r["scope"]["config"].get("concurrency"),
                 "last_observed": min(r["finished_at"], b["bucket_start"] + timedelta(minutes=5)),
             }
         )
@@ -500,7 +552,6 @@ def build(
     census_groups = defaultdict(list)
     for c in census:
         census_groups[c["product_id"]].append({k: v for k, v in c.items() if k != "product_id"})
-    roles = scored_roles(config)
     threshold = uptime_settings(config)["min_successes"]
     prev_products = (
         {p["id"]: p for p in previous["products"]}
@@ -524,6 +575,20 @@ def build(
         # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
         scheduled = scheduled_groups.get(p["product_id"]) == key
         batches = pulse_groups[p["product_id"]] if scheduled else []
+        # Pulse runs as time slots: a run the provider failed is a filled-and-down slot.
+        slot_runs = [
+            {
+                "slot": floor_time(b["scheduled_for"], slot_seconds),
+                "scheduled_for": b["scheduled_for"],
+                "target": b["target_id"],
+                "down": b["status"] == "failed",
+                "requests": b["requests"],
+                "successes": b["successes"],
+                "counted": b.get("run_key") is not None,
+            }
+            for b in batches
+        ]
+        p["pricing"], price_rows = pricing(evidence_rows, p["product_id"], p["cohort"], as_of)
         down = (
             [o | {"country": o["country"].strip()} for o in outage_groups[p["product_id"]]]
             if scheduled
@@ -537,10 +602,12 @@ def build(
             since = as_of - timedelta(hours=hours)
             rows = [r for r in raw if since <= r["bucket_start"] < as_of]
             seen = [o for o in obs if since <= o["bucket_start"] < as_of]
-            benchmarks = [r for r in rows if r["role"] in roles]
-            m = metrics(rows, hours)
-            bm = metrics(benchmarks, hours)
-            ps, ips = pool(seen, since, hours)
+            slots_now = [d for d in slot_runs if since <= d["scheduled_for"] < as_of]
+            # Every request counts (census, pulse and load alike); success is time-weighted.
+            m = timed(rows, hours, minimum, slots_now, slot_minutes)
+            factors, reference = load_factors(rows, minimum)
+            with_under_load(m, rows, factors, minimum)
+            ps, ips = pool(seen, since, hours, hosting_usage_types(cfg))
             ps["daily"] = daily_average(days, hours)
             # Pulse-slot counts stay for reference; the published value is outage time.
             up = uptime(batches, since, as_of, threshold)
@@ -551,8 +618,7 @@ def build(
             if scheduled:
                 # Census/pulse cohorts: coverage is the share of pulse slots filled, not of
                 # 5-minute buckets (pulses run every 30 minutes, all countries at one tick).
-                for target_metrics in (m, bm):
-                    slot_coverage(target_metrics, batches, since, as_of)
+                slot_coverage(m, batches, since, as_of)
             dimensions = breakdowns(ips, [g for g in geo_groups[key] if g["hours"] <= hours])
             ps |= pool_lists(dimensions)
             old = prev_products.get(p["id"], {}).get("windows", {}).get(label, {})
@@ -560,7 +626,8 @@ def build(
                 e
                 for e in evidence_rows
                 if e["product_id"] == p["product_id"]
-                and e["cohort"] == p["cohort"]
+                and e["cohort"] in (p["cohort"], "*")
+                and e["metric"] not in PRICES
                 and e["period_start"] <= since
                 and e["period_end"] >= as_of
                 and e["valid_until"] > as_of
@@ -570,51 +637,67 @@ def build(
             # Raw inputs of this window's scores; the peer pass below scores them.
             member = {
                 "config": cfg,
-                "fresh": fresh(bm["last_observed"], as_of, cfg["score_valid_hours"]),
+                "fresh": fresh(m["last_observed"], as_of, cfg["score_valid_hours"]),
                 "targets": {},
                 "old": old,
-                "evidence": ev,
+                "evidence": ev + price_rows,
             }
             ids = set(cfg["required_targets"]) | {r["target"] for r in rows}
             for target in sorted(ids):
-                tm = metrics([r for r in rows if r["target"] == target], hours)
+                own = [r for r in rows if r["target"] == target]
+                tm = timed(
+                    own, hours, minimum, [d for d in slots_now if d["target"] == target],
+                    slot_minutes,
+                )
+                # The factor comes from the census target's load run; every target's light-load
+                # latency is scaled by it.
+                with_under_load(tm, own, factors, minimum)
                 # Outages are per product and country, so a target keeps its pulse-slot share.
                 tm["uptime"] = uptime(
                     [b for b in batches if b["target_id"] == target], since, as_of, threshold
                 )["value"]
                 tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
-                tb = metrics([r for r in benchmarks if r["target"] == target], hours)
                 if scheduled:
-                    slots = [b for b in batches if b["target_id"] == target]
-                    for target_metrics in (tm, tb):
-                        slot_coverage(target_metrics, slots, since, as_of)
+                    slot_coverage(
+                        tm, [b for b in batches if b["target_id"] == target], since, as_of
+                    )
                 tc = effective(config, p["provider"], p["product"], target)
-                member["targets"][target] = target_score(
-                    tb, tc, benchmark=bool(tb["completed"])
-                ) | {
-                    "fresh": fresh(tb["last_observed"], as_of, tc["score_valid_hours"]),
-                    "observed": tb["last_observed"],
+                member["targets"][target] = target_score(tm, tc) | {
+                    "fresh": fresh(tm["last_observed"], as_of, tc["score_valid_hours"]),
+                    "observed": tm["last_observed"],
                     "valid_hours": tc["score_valid_hours"],
                 }
                 targets[target] = {
+                    # benchmark is kept for older readers: every request is the benchmark now.
                     "metrics": tm,
-                    "benchmark": tb,
+                    "benchmark": tm,
                     "score": None,
                     "readiness": "measured" if tm["completed"] else "unavailable",
                 }
-            member["inputs"] = product_inputs(ps, values, cfg, p["kind"], up)
-            member["observed"] = bm["last_observed"]
+            member["inputs"] = product_inputs(
+                ps, p["pricing"], cfg, p["kind"], up, values
+            )
+            member["observed"] = m["last_observed"]
             previous_rows = [
                 r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since
             ]
-            prev_m = metrics(previous_rows, hours)
+            before = since - timedelta(hours=hours)
+            prev_m = timed(
+                previous_rows,
+                hours,
+                minimum,
+                [d for d in slot_runs if before <= d["scheduled_for"] < since],
+                slot_minutes,
+            )
             if scheduled:
                 slot_coverage(prev_m, batches, since - timedelta(hours=hours), since)
             w = {
                 "period": {"start": since, "end": as_of, "hours": hours, "boundary": "[start,end)"},
                 "readiness": None,  # once scored
                 "metrics": m,
-                "benchmark": bm,
+                # Kept for older readers; identical to metrics (every request counts).
+                "benchmark": m,
+                "latency": latency_detail(rows, factors, reference, minimum),
                 "pool": ps,
                 "uptime": up,
                 "breakdowns": dimensions,
@@ -626,7 +709,7 @@ def build(
                         k: e[k]
                         for k in ("metric", "source", "period_start", "period_end", "valid_until")
                     }
-                    for e in ev
+                    for e in ev + price_rows
                 ],
                 "unavailable": {k: v for k, v in UNAVAILABLE.items() if k not in values},
                 "series": series(rows, seen, since, as_of, hours),
@@ -659,6 +742,15 @@ def build(
                     role: metrics([r for r in rows if r["role"] == role], hours)["completed"]
                     for role in ("exploratory", "pool_sampling", "benchmark", "monitor")
                 },
+                # Completed requests per test; all of them count for every metric.
+                "tests": {
+                    name: sum(
+                        r["counters"]["completed"]
+                        for r in rows
+                        if (r["test"] or "unscheduled") == name
+                    )
+                    for name in ("census", "pulse", "load", "unscheduled")
+                },
             }
             p["windows"][label] = w
             sets[(key, label)] = set(ips)
@@ -671,7 +763,7 @@ def build(
         all_rows = [r for _, rows, _, _ in members for r in rows]
         all_seen = [o for _, _, obs, _ in members for o in obs]
         hours = members[0][0]["windows"][label]["period"]["hours"]
-        fm = metrics(all_rows, hours)
+        fm = timed(all_rows, hours, minimum, slot_minutes=slot_minutes)
         fleets.append(
             {
                 "cohort": cohort,
@@ -764,7 +856,7 @@ def build(
             "period": {"start": as_of - timedelta(hours=720), "end": as_of},
             "by_test": {
                 test: {"runs": 0, "requests": 0, "bytes_up": 0, "bytes_down": 0}
-                for test in ("census", "pulse")
+                for test in ("census", "pulse", "load")
             },
         },
         # Census and pulse runs are summarized by census, uptime, events and traffic instead.
@@ -787,6 +879,37 @@ def build(
             if r.get("batch_id") is None
         ],
     }
+
+
+def pricing(evidence_rows, product_id, cohort, as_of):
+    """The product's list prices in effect at as_of (USD per GB of the pool that is tested).
+
+    Prices are effective-dated metric_evidence (price_per_gb_lowest, price_per_gb_entry): per
+    metric the newest record for the product (its cohort or "*") that started by as_of and is
+    still valid. lowest_per_gb scores value; entry_per_gb is the smallest plan's rate.
+    Returns (the published pricing, the evidence rows it used).
+    """
+    chosen = {}
+    for e in sorted(
+        evidence_rows, key=lambda e: (e["period_start"], e["valid_until"], e.get("evidence_id", 0))
+    ):
+        if (
+            e["metric"] in PRICES
+            and e["product_id"] == product_id
+            and e["cohort"] in (cohort, "*")
+            and e["period_start"] <= as_of < e["valid_until"]
+        ):
+            chosen[e["metric"]] = e
+    return {
+        "currency": "USD",
+        **{
+            name: chosen[metric]["value"] if metric in chosen else None
+            for metric, name in PRICES.items()
+        },
+        "effective_from": max((e["period_start"] for e in chosen.values()), default=None),
+        "valid_until": min((e["valid_until"] for e in chosen.values()), default=None),
+        "sources": sorted({e["source"] for e in chosen.values()}),
+    }, [chosen[m] for m in PRICES if m in chosen]
 
 
 def fresh(observed, as_of, valid_hours):

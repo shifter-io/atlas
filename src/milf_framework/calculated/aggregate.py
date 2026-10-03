@@ -1,29 +1,46 @@
-"""Pure window aggregation. No estimates, percentile averaging or inferred measurements."""
+"""Pure window aggregation. No estimates or inferred measurements, and light-load latency is
+never an average of percentiles: slot histograms are normalised and merged."""
 
 from __future__ import annotations
 
 import json
+from bisect import bisect_left
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 
 from ..stats import Histogram
-from .policy import DIMENSIONS, KEYS, composite, grade, ratio, uptime_settings
+from .policy import (
+    DIMENSIONS,
+    HOSTING_USAGE_TYPES,
+    KEYS,
+    composite,
+    grade,
+    ratio,
+    uptime_settings,
+)
 
 # Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
 # pulse batches, so they are no longer listed here; a None metric means nothing measured them.
 UNAVAILABLE = {
     "ttfb_p50": "TTFB is not recorded by this target version",
     "stickiness_hold_rate": "Sticky-session survival measurements are required",
-    "blacklist_hit_rate": "A timestamped reputation check is required",
     "leak_checks": "Leak measurements are required",
     "billed_bytes": "Response body size is not billed wire traffic",
-    "cost_per_1k_success": "Verified pricing and billed usage are required",
-    "price_per_gb": "Verified effective-dated pricing is required",
+    "cost_per_1k_success": "Billed usage is required",
     "requests_per_ip": "Consecutive rotation behavior is not recorded",
     "ip_latency": "Per-IP timing is not recorded",
 }
 UPTIME_UNAVAILABLE = "No finished pulse batches in this window"
 UPTIME_INCOMPLETE = "Fewer finished pulse batches than the methodology requires"
+# Effective-dated list prices (metric_evidence), USD per GB of the pool that is tested: the
+# lowest rate (the largest plan; scored by value) and the entry rate (the smallest plan).
+PRICES = {"price_per_gb_lowest": "lowest_per_gb", "price_per_gb_entry": "entry_per_gb"}
+PRICE_MISSING = "Verified effective-dated pricing (lowest $/GB) is required"
+UNDER_LOAD_NONE = "No load test in this window"
+UNDER_LOAD_LATE = "No load test before this window's light-load slots"
+UNDER_LOAD_LIGHT = "No light-load slot with enough successes in this window"
+LATENCY = ("p50", "p90", "p95", "p99")
+FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
 PLACE = ("country_code", "country", "region_code", "region", "city")
 NETWORK = ("asn", "name", "usage_type")
 # Payload breakdown name -> calculated_breakdowns dimension code.
@@ -31,14 +48,13 @@ BREAKDOWNS = {"country": "c", "region": "r", "city": "g", "asn": "a", "country_a
 OUTCOMES = ("challenges", "blocks", "bytes_up", "bytes_down")
 EVIDENCE_RANGES = {
     "uptime_pct": (0, 100),
-    "blacklist_hit_rate": (0, 1),
-    "claim_gap": (0, 1),
     "stickiness_hold_rate": (0, 1),
     "captcha_rate": (0, 1),
     "block_rate": (0, 1),
     "ttfb_p50": (0, 1e9),
     "billed_bytes": (0, 1e18),
-    "price_per_gb": (0, 1e9),
+    "price_per_gb_lowest": (0, 1e9),
+    "price_per_gb_entry": (0, 1e9),
     "cost_per_1k_success": (0, 1e12),
     "requests_per_ip": (0, 1e12),
 }
@@ -59,6 +75,12 @@ DAY = timedelta(hours=24)
 
 
 def metrics(rows, hours):
+    """Request-weighted counters and rates of bucket rows; timed() adds the time weighting.
+
+    Every request counts, whatever the run's role or test. Latency merges the histograms of
+    light-load rows only (a row's "light" flag: pulses and runs outside a batch; census and
+    load runs run at census concurrency).
+    """
     histogram = Histogram(Counter())
     errors = Counter()
     outcomes = Counter()
@@ -70,7 +92,8 @@ def metrics(rows, hours):
         successes += b["successes"]
         body += b["response_body_bytes"]
         errors.update(b["errors"])
-        histogram.merge(Histogram(Counter(dict(b["latency_histogram"]["bins"]))))
+        if row.get("light", True):
+            histogram.merge(Histogram(Counter(dict(b["latency_histogram"]["bins"]))))
         # Only v6 buckets classify outcomes and count wire bytes; older ones stay out of the rates.
         if row.get("outcome"):
             measured = True
@@ -93,7 +116,7 @@ def metrics(rows, hours):
         "coverage": len({r["bucket_start"] for r in rows}) / (hours * 12),
         "coverage_basis": "5-minute buckets",
         "last_observed": max((r["last_observed"] for r in rows), default=None),
-        "latency_basis": "successful requests",
+        "latency_basis": "successful light-load requests",
         "units": {
             "latency_ms": "milliseconds",
             "success_rate": "fraction",
@@ -104,22 +127,35 @@ def metrics(rows, hours):
     }
 
 
-def pool(observations, since, hours):
+def pool(observations, since, hours, hosting=HOSTING_USAGE_TYPES):
+    """Window pool counts and shares, per unique exit IP (each labelled by its DB-IP record).
+
+    Shares leave IPs without the DB-IP field out of numerator and denominator: geo_accuracy is
+    the share of IPs with a DB-IP country whose country is the one every request that returned
+    them asked for (IPs only seen without a requested country are left out too);
+    datacenter_asn_share the share of IPs with a DB-IP usage type that is a hosting usage type.
+    """
     ips = {}
-    matched_observations = known_country = 0
     for o in observations:
         entry = ips.setdefault(
             o["ip_id"],
-            {"first": o["first_seen"], "last": o["last_seen"], "days": set(), "count": 0, "row": o},
+            {
+                "first": o["first_seen"],
+                "last": o["last_seen"],
+                "days": set(),
+                "count": 0,
+                "row": o,
+                "asked": set(),
+            },
         )
         entry["days"].add(o["bucket_start"].date())
         entry["count"] += o["count"]
         entry["first"] = min(entry["first"], o["first_seen"])
         entry["last"] = max(entry["last"], o["last_seen"])
-        if o.get("country_code"):
-            known_country += o["count"]
-            if o["country_code"].lower() == (o["requested_country"] or "").lower():
-                matched_observations += o["count"]
+        if o.get("requested_country"):
+            entry["asked"].add(o["requested_country"].lower())
+    located = [e for e in ips.values() if e["row"].get("country_code") and e["asked"]]
+    matched = sum(e["asked"] == {e["row"]["country_code"].lower()} for e in located)
     countries, regions, cities, asns = set(), set(), set(), set()
     for entry in ips.values():
         o = entry["row"]
@@ -135,7 +171,7 @@ def pool(observations, since, hours):
             asns.add(o["asn"])
     size = len(ips)
     known = sum(bool(e["row"].get("usage_type")) for e in ips.values())
-    host = sum(e["row"].get("usage_type") == "hosting" for e in ips.values())
+    host = sum(e["row"].get("usage_type") in hosting for e in ips.values())
     new = sum(e["row"]["product_first_seen"] >= since for e in ips.values())
     return {
         "unique_ips": size,
@@ -150,13 +186,12 @@ def pool(observations, since, hours):
         "asns": len(asns),
         "datacenter_asn_share": host / known if known else None,
         "classification_coverage": known / size if size else None,
-        "geo_accuracy": matched_observations / known_country
-        if known_country and any(o["requested_country"] for o in observations)
-        else None,
+        "geo_accuracy": matched / len(located) if located else None,
         "enrichment_coverage": sum(bool(e["row"].get("matched")) for e in ips.values()) / size
         if size
         else None,
         "observations": sum(e["count"] for e in ips.values()),
+        "shares_basis": "unique exit IPs with the DB-IP field (unknowns excluded)",
     }, ips
 
 
@@ -328,24 +363,259 @@ def pool_lists(rows):
     }
 
 
+def floor_time(moment, seconds):
+    """The start of the epoch-aligned slot of `seconds` that holds moment."""
+    return datetime.fromtimestamp(moment.timestamp() // seconds * seconds, UTC)
+
+
+def blend(histograms):
+    """Percentiles of an equal-weight mix of histograms (Counters of ms -> count).
+
+    Each histogram is normalised to weight 1 and the weights are merged; the percentile is the
+    nearest rank of the merged distribution (for one histogram, exactly Histogram.percentiles).
+    Percentiles are never averaged.
+    """
+    result = dict.fromkeys(LATENCY)
+    weights = Counter()
+    used = 0
+    for h in histograms:
+        total = sum(h.values())
+        if not total:
+            continue
+        used += 1
+        for ms, n in h.items():
+            weights[ms] += n / total
+    if not used:
+        return result
+    ordered = sorted(weights.items())
+    for label, fraction in FRACTIONS.items():
+        rank, seen = fraction * used - 1e-9 * used, 0.0
+        for ms, weight in ordered:
+            seen += weight
+            if seen >= rank:
+                result[label] = ms
+                break
+        else:
+            result[label] = ordered[-1][0]
+    return result
+
+
+def time_slots(rows, pulses=()):
+    """Bucket rows (each with its time "slot") grouped per slot.
+
+    A slot holds every request in it (completed, successes) and the merged histogram of its
+    light-load successes. pulses are the product's pulse runs that count as slots ({"slot",
+    "down", "requests", "successes", "counted"}): a run the provider failed (down) makes its
+    slot filled-and-down; the counters of a run whose artifact was never ingested (counted
+    False) are added to the slot, a failed run's requests as failures.
+    """
+    slots = {}
+
+    def slot(key):
+        return slots.setdefault(
+            key,
+            {"completed": 0, "successes": 0, "light": Counter(), "light_successes": 0,
+             "down": False},
+        )
+
+    for r in rows:
+        c = r["counters"]
+        s = slot(r["slot"])
+        s["completed"] += c["completed"]
+        s["successes"] += c["successes"]
+        if r.get("light", True):
+            for ms, n in c["latency_histogram"]["bins"]:
+                s["light"][ms] += n
+            s["light_successes"] += c["successes"]
+    for d in pulses:
+        s = slot(d["slot"])
+        s["down"] = s["down"] or d["down"]
+        if not d["counted"]:
+            s["completed"] += d["requests"]
+            s["successes"] += 0 if d["down"] else d["successes"]
+    return slots
+
+
+def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
+    """metrics(rows) with the time-weighted success rate and light-load latency.
+
+    The window is split into time slots (the cohort's pulse interval). Every slot with requests
+    (or a provider-failed pulse) weighs the same: success_rate is the mean of the slot success
+    rates (a down slot without requests counts as 0; pulses as in time_slots()),
+    request_success_rate stays successes / completed. Light-load latency merges the slots'
+    light-load histograms after normalising each to weight 1; a slot with fewer than `minimum`
+    light-load successes does not vote.
+    """
+    m = metrics(rows, hours)
+    slots = time_slots(rows, pulses)
+    rates = [
+        s["successes"] / s["completed"] if s["completed"] else 0.0
+        for s in slots.values()
+        if s["completed"] or s["down"]
+    ]
+    voting = [s["light"] for s in slots.values() if s["light_successes"] >= minimum]
+    m["request_success_rate"] = m["success_rate"]
+    m["success_rate"] = sum(rates) / len(rates) if rates else None
+    m["latency_ms"] = blend(voting)
+    m["time_slots"] = {
+        "minutes": slot_minutes,
+        "success": len(rates),
+        "down": sum(s["down"] for s in slots.values()),
+        "latency": len(voting),
+        "min_latency_successes": minimum,
+    }
+    m["success_basis"] = "mean of time-slot success rates, every request"
+    m["latency_basis"] = (
+        "light-load successes (pulses), slots normalised to equal weight and merged"
+    )
+    return m
+
+
+def load_factors(rows, minimum):
+    """Per time slot, the reference factor of each percentile: the latency of the product's load
+    run (census concurrency) ÷ the latency of its pulse in the same country, on the same target,
+    in the same slot. Both need `minimum` successes. Census runs never make a factor.
+
+    Returns (factors {slot: {percentile: factor}}, reference {"country", "target",
+    "concurrency"} of the newest load run, or None without one).
+    """
+    loads, pulses = {}, {}
+    reference = None
+    for r in sorted(rows, key=lambda r: (r["slot"], r["target"])):
+        if r.get("test") == "load":
+            key = (r["slot"], r["country"], r["target"])
+            loads.setdefault(key, [Counter(), 0])
+            reference = {"country": r["country"], "target": r["target"],
+                         "concurrency": r.get("concurrency")}
+            into = loads[key]
+        elif r.get("test") == "pulse":
+            into = pulses.setdefault((r["slot"], r["country"], r["target"]), [Counter(), 0])
+        else:
+            continue
+        for ms, n in r["counters"]["latency_histogram"]["bins"]:
+            into[0][ms] += n
+        into[1] += r["counters"]["successes"]
+    factors = {}
+    for key in sorted(loads):
+        load, base = loads[key], pulses.get(key)
+        if key[0] in factors or base is None or min(load[1], base[1]) < minimum:
+            continue
+        high = Histogram(load[0]).percentiles()
+        low = Histogram(base[0]).percentiles()
+        if all(high[p] and low[p] for p in LATENCY):
+            factors[key[0]] = {p: high[p] / low[p] for p in LATENCY}
+    return factors, reference
+
+
+def under_load(rows, factors, minimum):
+    """Latency under load: per time slot, the light-load percentile × that slot's reference
+    factor (load_factors()), or the newest earlier factor in the window when the slot has none;
+    the window value is the mean of the slot values (equal weight per slot).
+    """
+    slots = time_slots(rows)
+    known = sorted(factors)
+    values = {p: [] for p in LATENCY}
+    own = carried = missing = light = 0
+    for key in sorted(slots):
+        s = slots[key]
+        if s["light_successes"] < minimum:
+            continue
+        light += 1
+        if key in factors:
+            factor, own = factors[key], own + 1
+        else:
+            i = bisect_left(known, key)
+            if not i:
+                missing += 1
+                continue
+            factor, carried = factors[known[i - 1]], carried + 1
+        percentiles = Histogram(s["light"]).percentiles()
+        for p in LATENCY:
+            values[p].append(percentiles[p] * factor[p])
+    n = own + carried
+    reason = None
+    if not n:
+        reason = UNDER_LOAD_LIGHT if not light else UNDER_LOAD_LATE if known else UNDER_LOAD_NONE
+    return {
+        "ms": {p: round(sum(v) / n, 3) if n else None for p, v in values.items()},
+        "slots": n,
+        "own_factor": own,
+        "carried_factor": carried,
+        "without_factor": missing,
+        "reason": reason,
+    }
+
+
+def with_under_load(m, rows, factors, minimum):
+    """Add latency_under_load_ms and its slot counts and reason to timed() metrics."""
+    result = under_load(rows, factors, minimum)
+    m["latency_under_load_ms"] = result.pop("ms")
+    m["under_load"] = result
+    return m
+
+
+def latency_detail(rows, factors, reference, minimum):
+    """The window's latency block: the reference (load) test, its factors, and per requested
+    country the light-load and under-load latency of its pulses."""
+    latest = max(factors) if factors else None
+    countries = []
+    for country in sorted({r["country"] for r in rows if r.get("test") == "pulse"}):
+        own = [r for r in rows if r.get("test") == "pulse" and r["country"] == country]
+        slots = time_slots(own)
+        result = under_load(own, factors, minimum)
+        countries.append(
+            {
+                "country": country,
+                "latency_ms": blend(
+                    s["light"] for s in slots.values() if s["light_successes"] >= minimum
+                ),
+                "latency_under_load_ms": result.pop("ms"),
+                **result,
+            }
+        )
+    return {
+        "reference": reference,
+        "factors": {
+            "slots": len(factors),
+            "mean": {
+                p: round(sum(f[p] for f in factors.values()) / len(factors), 6) for p in LATENCY
+            }
+            if factors
+            else None,
+            "latest": {"at": latest} | {p: round(factors[latest][p], 6) for p in LATENCY}
+            if latest
+            else None,
+        },
+        "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) "
+        "of the same slot, else the newest earlier slot's factor; mean of slot values",
+        "countries": countries,
+    }
+
+
 def slot_coverage(m, slots, since, end):
     """Set m's coverage to the share of pulse slots in [since, end) the product filled.
 
     slots are the product's pulse batch runs that count (done, or failed for a reason of the
-    provider's); a slot is filled by a done run with at least one completed request.
+    provider's); a slot is filled by a done run with at least one completed request or by a run
+    the provider failed: a provider that is down is data (filled and down), not a gap.
     """
     due = [b for b in slots if since <= b["scheduled_for"] < end]
-    filled = sum(b["status"] == "done" and b["requests"] > 0 for b in due)
+    filled = sum(b["status"] == "failed" or b["requests"] > 0 for b in due)
     m["coverage"] = filled / len(due) if due else 0.0
     m["coverage_basis"] = "pulse slots"
-    m["coverage_slots"] = {"due": len(due), "filled": filled}
+    m["coverage_slots"] = {
+        "due": len(due),
+        "filled": filled,
+        "down": sum(b["status"] == "failed" for b in due),
+    }
     return m
 
 
 def uptime(batches, since, end, min_successes):
-    """Share of done pulse batch runs in [since, end) with at least min_successes successes."""
-    rows = [b for b in batches if since <= b["scheduled_for"] < end and b["status"] == "done"]
-    up = sum(b["successes"] >= min_successes for b in rows)
+    """Share of the pulse batch runs in [since, end) (done, or failed by the provider) with at
+    least min_successes successes; a provider-failed run is a slot that was down."""
+    rows = [b for b in batches if since <= b["scheduled_for"] < end]
+    up = sum(b["status"] == "done" and b["successes"] >= min_successes for b in rows)
     return {"batches": len(rows), "up": up, "value": up / len(rows) if rows else None}
 
 
@@ -457,40 +727,48 @@ def component(value, state="ready", reason=None, inputs=None):
     }
 
 
-def target_score(m, config, benchmark=True):
+def target_score(m, config):
     """Readiness and raw values of a target score; peer_scores() scores them against peers.
 
-    The raw components hold the benchmark success rate (reliability) and p50 latency (speed).
+    The raw components hold the time-weighted success rate of every request (reliability) and
+    the p50 latency under load (speed). Readiness counts every request of the target.
     """
     reasons = []
-    if not benchmark:
-        reasons.append("Run is not assigned to the benchmark schedule")
     if m["completed"] < config["minimum_requests"]:
         reasons.append("Insufficient requests")
     if m["coverage"] < config["minimum_coverage"]:
         reasons.append("Insufficient time coverage")
     state = "ready" if not reasons else "incomplete"
+    speed = m.get("latency_under_load_ms", {}).get("p50")
     return {
         "state": state,
         "components": {
             "reliability": component(m["success_rate"], state),
-            "speed": component(m["latency_ms"]["p50"], state),
+            "speed": component(
+                speed,
+                state,
+                None if speed is not None else m.get("under_load", {}).get("reason")
+                or UNDER_LOAD_NONE,
+            ),
         },
         "weights": config["target_weights"],
         "reasons": reasons,
     }
 
 
-def product_inputs(p, evidence, config, kind, measured_uptime=None):
+def product_inputs(p, prices, config, kind, measured_uptime=None, evidence=None):
     """Raw values and readiness of a product's components besides reliability and speed, which
     peer_scores() derives from the target scores.
 
     p is the window's pool() counts with "daily" (daily_average()): coverage and diversity use
-    the daily averages. A raw component's value is what is compared with peers; diversity's is
-    the four daily dimension counts (also kept in its inputs), None until local enrichment is
-    complete. "fixed" is a score that does not depend on peers (datacenter products keep 100 on
-    dcAsns).
+    the daily averages. prices is the product's effective pricing (price_per_gb_lowest scores
+    value); evidence is the window's metric evidence (uptime_pct is the uptime fallback). A raw
+    component's value is what is compared with peers; diversity's is the four daily dimension
+    counts (also kept in its inputs). IPs without a DB-IP field never block a component: shares
+    leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
+    100 on dcAsns).
     """
+    evidence = evidence or {}
     daily = p["daily"]
     inputs = {}
     # Measured uptime (outage time over the countries tested) wins once enough pulse batches
@@ -506,38 +784,31 @@ def product_inputs(p, evidence, config, kind, measured_uptime=None):
         inputs["uptime"] = component(
             pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE
         )
-    pool_ready = p["unique_ips"] > 0 and p["enrichment_coverage"] == 1
-    inputs["coverage"] = component(daily["unique_ips"] if p["unique_ips"] else None)
+    seen = p["unique_ips"] > 0
+    inputs["coverage"] = component(daily["unique_ips"] if seen else None)
     counts = {k: daily[k] for k in DIMENSIONS}
     inputs["diversity"] = component(
-        counts if pool_ready else None,
-        reason=None if pool_ready else "Complete local enrichment required",
+        counts if seen else None,
+        reason=None if seen else "No exit IPs in this window",
         inputs=counts,
     )
     share = p["datacenter_asn_share"]
-    state = "ready" if p["classification_coverage"] == 1 else "incomplete"
-    reason = "DB-IP usage classification; unknown records remain unclassified"
-    inputs["dcAsns"] = component(1 - share if share is not None else None, state, reason)
-    if kind == "datacenter" and pool_ready:
-        inputs["dcAsns"] |= {"state": state, "fixed": 100.0}
-    claim = evidence.get("claim_gap")
-    blacklist = evidence.get("blacklist_hit_rate")
-    penalty = config["authenticity"]["blocklist_penalty"]
-    auth = (
-        max(0, min(100, (1 - claim) * 100 - blacklist * penalty))
-        if (claim is not None and blacklist is not None)
-        else None
+    clean = 1 - share if share is not None else None
+    inputs["dcAsns"] = component(
+        clean, reason=None if clean is not None else "No exit IP has a DB-IP usage type"
     )
+    if kind == "datacenter" and seen:
+        inputs["dcAsns"] = {"value": clean, "state": "ready", "reason": None, "inputs": None,
+                            "fixed": 100.0}
+    accuracy = p["geo_accuracy"]
     inputs["authenticity"] = component(
-        auth,
+        100 * accuracy if accuracy is not None else None,
         reason=None
-        if auth is not None
-        else "Verified product claim and reputation measurements required",
+        if accuracy is not None
+        else "No exit IP with a DB-IP country for a requested country",
     )
-    inputs["value"] = component(
-        evidence.get("cost_per_1k_success"),
-        reason=None if "cost_per_1k_success" in evidence else UNAVAILABLE["cost_per_1k_success"],
-    )
+    lowest = (prices or {}).get("lowest_per_gb")
+    inputs["value"] = component(lowest, reason=None if lowest is not None else PRICE_MISSING)
     return inputs
 
 

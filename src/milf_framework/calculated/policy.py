@@ -19,10 +19,18 @@ KEYS = (
     "authenticity",
     "value",
 )
+# Collection role labels (calculation_roles). They are display labels only: every request of a
+# run counts for every metric whatever its role.
 ROLES = ("exploratory", "pool_sampling", "benchmark", "monitor")
 # Uptime: a pulse batch counts as up when the product had at least min_successes successful
 # requests in it; the uptime component is ready from min_batches finished pulse batches.
 UPTIME = {"min_successes": 1, "min_batches": 1}
+# Time-weighted window metrics ([slots]): a time slot (the cohort's pulse interval) votes on
+# latency only with at least min_latency_successes successful requests.
+SLOTS = {"min_latency_successes": 30}
+# DB-IP usage types that mark an exit address as a datacenter/hosting address (dcAsns, and the
+# new_hosting_asn tape event). A top-level methodology setting, so it is part of the id.
+HOSTING_USAGE_TYPES = ["hosting", "datacenter"]
 # Live tape detection thresholds ([events] in the methodology file). They never change a
 # calculation, so load() keeps them out of the methodology id; detect.py reads them via events().
 EVENTS = {
@@ -36,7 +44,6 @@ EVENTS = {
     "down_baseline": 0.5,
     "pulse_change_pp": 0.05,
     "pulse_latency_ratio": 1.5,
-    "hosting_usage_types": ["hosting", "datacenter"],
     "settle_seconds": 120,
     "initial_lookback_minutes": 60,
 }
@@ -103,15 +110,15 @@ def validate(config):
         "target_weights",
         "benchmark_weights",
         "peer",
-        "authenticity",
         "grades",
         "profiles",
         "products",
         "targets",
         "kind",
         "display_name",
-        "scored_roles",
         "uptime",
+        "slots",
+        "hosting_usage_types",
     }
     if set(config) - known:
         raise ValueError("Unknown methodology setting")
@@ -136,14 +143,6 @@ def validate(config):
     weights(config["peer"]["diversity"], DIMENSIONS)
     if abs(sum(config["peer"]["diversity"].values()) - 1) > 1e-9:
         raise ValueError("Diversity weights must sum to one")
-    penalty = config["authenticity"]
-    if (
-        set(penalty) != {"blocklist_penalty"}
-        or type(penalty["blocklist_penalty"]) not in (int, float)
-        or not math.isfinite(penalty["blocklist_penalty"])
-        or penalty["blocklist_penalty"] < 0
-    ):
-        raise ValueError("Invalid authenticity penalty")
     if set(config["grades"]) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
         raise ValueError("Invalid grade labels")
     grades = [config["grades"][g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
@@ -155,37 +154,65 @@ def validate(config):
         raise ValueError("Invalid grade thresholds")
     for values in config.get("profiles", {}).values():
         weights(values, KEYS)
-    roles = config.get("scored_roles", ["benchmark"])
-    if not roles or not set(roles) <= set(ROLES) or len(set(roles)) != len(roles):
-        raise ValueError("Scored roles must be distinct, known collection roles")
     uptime = config.get("uptime", {})
     if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
         raise ValueError("Invalid uptime settings")
+    slots = config.get("slots", {})
+    if set(slots) - set(SLOTS) or any(type(v) is not int or v < 1 for v in slots.values()):
+        raise ValueError("Invalid slot settings")
+    _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
     return config
 
 
-def scored_roles(config):
-    """Collection roles whose buckets feed target scores (the benchmark metrics)."""
-    return set(config.get("scored_roles", ["benchmark"]))
+def _usage_types(value):
+    if not isinstance(value, list) or not value or not all(isinstance(v, str) and v for v in value):
+        raise ValueError("Invalid hosting usage types")
+    return value
 
 
 def uptime_settings(config):
     return UPTIME | config.get("uptime", {})
 
 
+def slot_settings(config):
+    return SLOTS | config.get("slots", {})
+
+
+def hosting_usage_types(config):
+    return list(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
+
+
+def read(path, _seen=()):
+    """A methodology file as data, with `extends` resolved.
+
+    `extends = "other.toml"` (relative to this file) loads that methodology first and merges
+    this file's settings over it (tables merge key by key, other values replace), so a variant
+    such as configs/staging-methodology.toml states only what differs.
+    """
+    path = Path(path).resolve()
+    if path in _seen:
+        raise ValueError("Methodology files extend each other in a cycle")
+    data = tomllib.loads(path.read_text())
+    parent = data.pop("extends", None)
+    if parent is None:
+        return data
+    if not isinstance(parent, str) or not parent:
+        raise ValueError("extends must name a methodology file")
+    return merge(read(path.parent / parent, (*_seen, path)), data)
+
+
 def events(path=None):
-    """Validated [events] thresholds of a methodology file, over the defaults."""
-    section = {}
-    if path is not None and Path(path).exists():
-        section = tomllib.loads(Path(path).read_text()).get("events", {})
+    """Validated [events] thresholds of a methodology file, over the defaults, plus the
+    top-level hosting_usage_types (detect.py's new_hosting_asn)."""
+    data = read(path) if path is not None and Path(path).exists() else {}
+    section = dict(data.get("events", {}))
+    # Older files kept hosting_usage_types under [events]; the top-level setting wins.
+    usage = data.get("hosting_usage_types", section.pop("hosting_usage_types", None))
     if set(section) - set(EVENTS):
         raise ValueError("Unknown event setting")
     result = EVENTS | section
     for key, value in result.items():
-        if key == "hosting_usage_types":
-            if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
-                raise ValueError("Invalid hosting usage types")
-        elif (
+        if (
             type(value) not in (int, float)
             or not math.isfinite(value)
             or value < 0
@@ -194,11 +221,14 @@ def events(path=None):
             raise ValueError(f"Invalid event setting {key}")
     if result["latency_spike_ratio"] <= 1 or result["pulse_latency_ratio"] <= 1:
         raise ValueError("Latency ratios must exceed one")
+    result["hosting_usage_types"] = _usage_types(
+        HOSTING_USAGE_TYPES if usage is None else usage
+    )
     return result
 
 
 def load(path):
-    config = tomllib.loads(Path(path).read_text())
+    config = read(path)
     # JSON roundtrip rejects dates and nonfinite numbers in TOML configurations.
     config = json.loads(json.dumps(config, allow_nan=False))
     # Detection thresholds are validated by events() and are not part of the methodology id.
