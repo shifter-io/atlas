@@ -278,7 +278,7 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
         )
     async with db.connection() as conn:
         for key, value in (("census.lead_seconds", 1), ("pulse.lead_seconds", 1),
-                           ("census.min_sample", 30)):
+                           ("census.min_sample", 30), ("load.delay_seconds", 1)):
             await put_setting(conn, key, value)
     tokens = [
         issue_token(database, provider="fixture", product=product, region="fra1")
@@ -301,7 +301,8 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
             await asyncio.gather(*tasks)
 
     batches_ = query(database, "SELECT kind,status,start_at FROM test_batches ORDER BY kind")
-    assert [b[:2] for b in batches_] == [("census", "done"), ("pulse", "done")]
+    # The pulse slot of the census target adds the load wave in fra1's reference country (DE).
+    assert [b[:2] for b in batches_] == [("census", "done"), ("load", "done"), ("pulse", "done")]
     runs = query(
         database,
         "SELECT b.kind,p.name,r.status,r.stop_reason,r.requests,r.successes,r.unique_ips,"
@@ -310,6 +311,11 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
     )
     census = [run for run in runs if run[0] == "census"]
     pulse = [run for run in runs if run[0] == "pulse"]
+    load = [run for run in runs if run[0] == "load"]
+    # census_concurrency requests at once, counted like a pulse.
+    assert [(r[1], r[2], r[3], r[4]) for r in load] == [
+        ("alpha", "done", "requests", 4), ("beta", "done", "requests", 4),
+    ]
     assert [(r[1], r[2], r[3], r[6], r[7]) for r in census] == [
         ("alpha", "done", "unique_ratio", 10, True), ("beta", "done", "unique_ratio", 10, True),
     ]
@@ -329,7 +335,7 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
     assert [(row[0], row[2], row[3]) for row in geo] == [(k, "Berlin", 3320) for k in census_keys]
     assert [row[1] for row in geo] == [r[4] for r in sorted(census, key=lambda r: r[8])]
     linked = query(database, "SELECT count(*) FROM test_runs WHERE batch_id IS NOT NULL")
-    assert linked == [(4,)]
+    assert linked == [(6,)]
     # Both products started the same census at the same scheduled instant.
     started = query(database, "SELECT r.started_at FROM batch_runs r JOIN test_batches b "
                               "USING(batch_id) WHERE b.kind='census'")

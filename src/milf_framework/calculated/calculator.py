@@ -155,11 +155,13 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             "SELECT r.run_key,r.run_id::text,r.summary_sha256,r.summary,r.started_at,"
             "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
             "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
+            "rr.slug AS batch_region,"
             "coalesce(cr.role,CASE b.kind "
             + " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in BATCH_ROLES.items())
             + " END,'exploratory') AS role FROM test_runs r "
             "JOIN scope_details s USING(scope_id) JOIN products p ON p.product_id=s.product_id "
             "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
+            "LEFT JOIN runner_regions rr ON rr.region_id=b.region_id "
             "LEFT JOIN calculation_roles cr USING(run_key) ORDER BY r.run_key"
         ).fetchall()
         release = conn.execute(
@@ -451,6 +453,14 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     return {
         "pulse_minutes": float(pulse_minutes) if pulse_minutes is not None else None,
         "overlaps": overlaps,
+        # The daily reference country of every runner region (the load waves' choice basis).
+        "references": conn.execute(
+            "SELECT l.day::text AS day,r.slug AS region,trim(l.country_code) AS country,l.basis,"
+            "l.p50_ms,"
+            "l.successes,l.candidates FROM load_references l JOIN runner_regions r "
+            "USING(region_id) WHERE l.day>=%s AND l.day<=%s ORDER BY 1,2",
+            (start.date(), as_of.date()),
+        ).fetchall(),
         "geo": geo,
         "pulses": pulses,
         "census": census,
@@ -481,6 +491,7 @@ def build(
     *,
     pulse_minutes=None,
     overlaps=(),
+    references=(),
     geo=(),
     pulses=(),
     census=(),
@@ -568,6 +579,7 @@ def build(
                 and r["scope"]["target"]["id"] == timed_target,
                 "slot": floor_time(at or b["bucket_start"], slot_seconds),
                 "country": country.strip().upper() if country else None,
+                "region": r.get("batch_region"),
                 "concurrency": r["scope"]["config"].get("concurrency"),
                 "last_observed": min(r["finished_at"], b["bucket_start"] + timedelta(minutes=5)),
             }
@@ -749,7 +761,18 @@ def build(
                 "metrics": m,
                 # Kept for older readers; identical to metrics (every request counts).
                 "benchmark": m,
-                "latency": latency_detail(timed_rows, factors, reference, minimum, excluded)
+                "latency": latency_detail(
+                    timed_rows,
+                    factors,
+                    reference,
+                    minimum,
+                    excluded,
+                    [
+                        c
+                        for c in references
+                        if since.date().isoformat() <= c["day"] <= as_of.date().isoformat()
+                    ],
+                )
                 | {"target": timed_target},
                 # Pulses (and load waves) that ran during a census, and the clean ones.
                 "census_overlap": census_split(

@@ -17,7 +17,7 @@ from test_orchestrator import prepare, query
 from milf_framework import report_html
 from milf_framework.cli import main
 from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.db import Database, put_setting
+from milf_framework.orchestrator.db import DEFAULTS, Database, put_setting
 from milf_framework.orchestrator.jobs import install_reports, register_jobs
 from milf_framework.orchestrator.nodes import issue_token, token_hash
 from milf_framework.orchestrator.scheduler import Scheduler
@@ -76,7 +76,10 @@ async def test_scheduler_switches_skip_planning(database, db, capsys):
     await scheduler.run_now("pulse_plan")
     assert jobs(database, "census_plan")[-1] == ("skipped", "census scheduler is off")
     assert jobs(database, "pulse_plan")[-1] == ("ok", None)
-    assert query(database, "SELECT DISTINCT kind FROM test_batches") == [("pulse",)]
+    # Pulses, and the load wave the census target's pulse slot adds; no census.
+    assert query(database, "SELECT DISTINCT kind FROM test_batches ORDER BY 1") == [
+        ("load",), ("pulse",)
+    ]
 
     assert main(["scheduler", "on", "--census", "--database-file", str(database)]) == 0
     capsys.readouterr()
@@ -275,14 +278,14 @@ def test_staging_profile_is_packaged_and_valid():
     assert loaded["countries"] == ["BG", "RO"]
     assert (loaded["census_every_minutes"], loaded["pulse_interval_minutes"]) == (4, 2)
     assert loaded["nodes"] == [{"provider": "shifter", "product": "residential", "region": "fra1"}]
-    assert loaded["reference_country"] == "RO"
+    assert loaded["reference_defaults"] == {"fra1": "RO"}
     assert loaded["methodology"] == "configs/staging-methodology.toml"
 
 
 def test_staging_load_country_must_be_in_scope(tmp_path):
     text = (CONFIGS / "staging.toml").read_text()
     for bad, message in (
-        (text.replace('reference_country = "RO"', 'reference_country = "US"'), "reference_country"),
+        (text.replace('fra1 = "RO"', 'fra1 = "US"'), "reference_defaults"),
         (text.replace('"configs/staging-methodology.toml"', '""'), "methodology"),
     ):
         path = tmp_path / "staging.toml"
@@ -345,7 +348,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
             f"milf-framework calculate --database-file {staging_file} --methodology {methodology}"
         )
         assert summary["load"] == {
-            "reference_country": "RO",
+            "reference_defaults": {"fra1": "RO"},
             "concurrency": 100,
             "targets": ["generic_http"],
         }
@@ -361,7 +364,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
                 "census.min_sample": 1000,
                 "scheduler.census_enabled": True,
                 "scheduler.pulse_enabled": True,
-                "load.reference_country": "RO",
+                "load.reference_defaults": DEFAULTS["load.reference_defaults"] | {"fra1": "RO"},
                 "reports.dir": summary["reports_dir"],
             }
             targets = conn.execute(

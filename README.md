@@ -78,11 +78,12 @@ target schedules once set (`--reset-times` restores the staggered default census
 
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
-replaces). `db-init` verifies v7 and refuses other schemas. `milf-framework db-migrate
---database-file .secrets/database.toml` upgrades an unmodified v6 or v5 database, or an
-unmodified v4 database (and calculated v1 layer) through v5 and v6, in place, in one transaction
-that compares every rebuilt summary, scope, pool and bucket (from v6 every test batch, and from
-v4 every cohort, breakdown and score) with its original before committing. Run it on every
+replaces); schema v8 (`migrate_v7_v8.sql`) adds `load_references`, the daily reference country of
+each runner region. `db-init` verifies v8 and refuses other schemas. `milf-framework db-migrate
+--database-file .secrets/database.toml` upgrades an unmodified v7, v6 or v5 database, or an
+unmodified v4 database (and calculated v1 layer) through v5, v6 and v7, in place, in one
+transaction that compares every rebuilt summary, scope, pool and bucket (from v6 every test
+batch, and from v4 every cohort, breakdown and score) with its original before committing. Run it on every
 database (production and staging) before starting the new orchestrator. Locally, run
 `PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
 The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
@@ -156,32 +157,42 @@ for uptime, outages, down slots and every request metric, but it is left out of 
 latency (breakdowns included), of the time-slot success (a slot votes with its other requests;
 one left with only such pulses votes 0 if every request in it failed, else does not vote:
 `time_slots.skipped_during_census`), and of the load factor (it needs a clean load run and a
-clean reference pulse; otherwise the newest earlier factor carries forward:
-`latency.factors.excluded_during_census`). Each window publishes `census_overlap`: `pulses` and
+clean reference pulse; otherwise the region's newest earlier factor carries forward:
+`latency.regions[].factors.excluded_during_census`). Each window publishes `census_overlap`: `pulses` and
 `targets.<id>` with `clean` and `during_census` (`runs`, `requests`, `successes`,
 `request_success_rate`, `success_rate`, `latency_ms`), `load` (clean and during-census load
 runs), `census_batches` and `basis`; `metrics.latency_reason` says why light-load latency is
 missing.
 
 **Latency under load.** In every pulse slot of the census target, each product also runs one
-wave of `census_concurrency` requests at census concurrency in the reference country (setting
-`load.reference_country`, default `US`; staging `RO`): a batch of kind `load` with the pulse's
-`scheduled_for`, started `load.delay_seconds` (60) after the pulses so the reference pulse is
-not measured under its own load wave. It sends only the country, like every scheduled test. Per percentile, factor(t)
-= load latency(t) ÷ reference-country pulse latency(t) (same target and slot), and every
-country's under-load latency(C, t) = its pulse latency(C, t) × factor(t). A slot without a usable
-load run (both need `min_latency_successes`) uses the newest earlier factor in the window;
-without one the slot has no value. The window value is the mean of its slot values (per slot
-and target). Example: US
-pulse 600 ms, US load 900 ms → ×1.5; a Romanian pulse of 800 ms → 1,200 ms under load. Census
-latency never makes a factor. The speed score uses the under-load p50; light-load latency is
+wave of `census_concurrency` requests at census concurrency in **every runner region's
+reference country**: a batch of kind `load` with the pulse's `scheduled_for`, started
+`load.delay_seconds` (60) after the pulses so the reference pulse is not measured under its own
+load wave. It sends only the country, like every scheduled test. The orchestrator picks each
+region's reference once per UTC day, with the day's first pulse plan, and stores it in
+`load_references` (schema v8): the fastest enabled country tested from the region over the
+trailing `load.reference_days` (7) — lowest light-load p50 of its census-target pulses that did
+not run during a census, every product weighing the same, at least
+`load.reference_min_successes` (300) successes, ties by country code (`fastest`); an override
+(`load.reference_overrides`, `override`); without enough history the region's default
+(`load.reference_defaults`: nyc3 US, fra1 DE, lon1 GB, ams3 NL, tor1 CA, sgp1 SG, blr1 IN, syd1
+AU; staging fra1 RO; `default`); else its first enabled country (`first_enabled`).
+`load.enabled` switches the wave off. Per percentile, factor(R, t) = load latency ÷ pulse
+latency of region R's reference country in slot t, and every country's under-load latency(C, t)
+= its pulse latency(C, t) × factor(region of C, t). A slot without a usable load run (both need
+`min_latency_successes`) uses the region's newest earlier factor in the window; without one that
+country's slot has no value. The window value is the mean over slots and countries. Example:
+fra1's reference RO, RO pulse 600 ms, RO load 900 ms → ×1.5; a Bulgarian pulse (tested from
+fra1) of 800 ms → 1,200 ms under load. Census latency never makes a factor. The speed score uses the under-load p50; light-load latency is
 published next to it. Load runs count for every request metric but not for light-load latency,
 slot coverage or uptime.
 Snapshot payloads are `schema_version` 2: per product `census` (latest per country), `outages`
 (latest 50 in 30 days) and `pricing`, per window `breakdowns`, `uptime` (`value`, `downtime_s`,
-`countries`, `basis: "outage time"`, `batches`, `up`) and `latency` (the reference load test, its
-factors and per requested country and target light-load and under-load latency), plus top-level
-`events`
+`countries`, `basis: "outage time"`, `batches`, `up`) and `latency` (`target`, `regions[]`:
+`region`, `reference` of its newest load run, `chosen` (the daily `load_references` rows in the
+window: `day`, `country`, `basis`, `p50_ms`, `successes`, `candidates`) and `factors` (`slots`,
+`excluded_during_census`, `mean`, `latest`); `countries[]`: per requested country its `region`,
+light-load and under-load latency), plus top-level `events`
 (latest 200) and `traffic` (`by_test` census, pulse and load). Window and target `metrics` carry
 `success_rate` (time-weighted), `request_success_rate`, `latency_ms` (light load),
 `latency_under_load_ms`, `under_load` (slot counts and the reason when there is no value) and
@@ -250,8 +261,9 @@ without a ready peer is compared with itself.
 
 `configs/staging.toml` is a small, fast profile for trying the census/pulse loop end to end:
 RO and BG only, a census every 4 minutes (setting `census.every_minutes`, epoch-aligned slots;
-unset means the daily `countries.census_time`), pulses every 2 minutes with the load wave in RO
-(`[load] reference_country`, setting `load.reference_country`), HTML reports in
+unset means the daily `countries.census_time`), pulses every 2 minutes with the load wave in
+fra1's reference country (default RO until a week of history picks the fastest; `[load]
+reference_defaults`, setting `load.reference_defaults`), HTML reports in
 `reports/staging/`, a token for the Shifter Residential node in fra1, and the staging
 methodology `configs/staging-methodology.toml`: it `extends` `methodology.toml` and only sets
 `minimum_requests = 1000` per target (production stays 4,000). A methodology file's `extends`

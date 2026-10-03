@@ -47,10 +47,28 @@ DEFAULTS: dict[str, Any] = {
     "census.every_minutes": None,
     # Seconds between a pulse slot opening and its synchronized start.
     "pulse.lead_seconds": 15,
-    # Latency under load: every pulse slot of a census target adds a 'load' batch in this
-    # country, one wave of census_concurrency requests per product at census concurrency. It
-    # must be an enabled country; None switches the load test off.
-    "load.reference_country": "US",
+    # Latency under load: every pulse slot of a census target adds one 'load' batch per runner
+    # region, in the region's reference country (load_references), where every product fires
+    # census_concurrency requests at census concurrency. The reference is chosen once per UTC
+    # day: an override when one is set for the region; else the fastest enabled country tested
+    # from the region over the trailing load.reference_days (lowest light-load p50 of its census
+    # target pulses that did not run during a census, with at least
+    # load.reference_min_successes successes); else the region's default; else its first
+    # enabled country. Keys are region slugs. load.enabled switches the wave off.
+    "load.enabled": True,
+    "load.reference_overrides": {},
+    "load.reference_defaults": {
+        "ams3": "NL",
+        "blr1": "IN",
+        "fra1": "DE",
+        "lon1": "GB",
+        "nyc3": "US",
+        "sgp1": "SG",
+        "syd1": "AU",
+        "tor1": "CA",
+    },
+    "load.reference_days": 7,
+    "load.reference_min_successes": 300,
     # The load wave starts this long after its slot's pulses, so the reference pulse it is
     # compared with is measured at light load (a pulse of 100 at 25 takes at most 4 x 15 s).
     "load.delay_seconds": 60,

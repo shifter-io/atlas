@@ -1,7 +1,7 @@
 """A staging database for trying the census/pulse loop end to end (milf-framework staging init).
 
 `configs/staging.toml` names the database and the profile: a few countries, a census every few
-minutes, frequent pulses, the load test's reference country, the staging methodology, HTML
+minutes, frequent pulses, the load test's default reference countries, the staging methodology, HTML
 reports and the nodes to issue tokens for. `init` reads the app
 connection from <secrets>/database.toml and the admin connection from
 <secrets>/postgres-admin.toml, creates the staging database owned by the app user (or with
@@ -28,6 +28,7 @@ from .. import storage
 from ..providers.credentials import read_credentials
 from ..regions import CONFIGS, resolve_region
 from .control import write_settings
+from .db import DEFAULTS
 from .nodes import issue_token
 
 PRODUCTION = "proxy_reviews"
@@ -59,11 +60,15 @@ def load_profile(path: str | Path) -> dict[str, Any]:
     ):
         raise ValueError("[scope] countries must list two-letter country codes")
     census, pulse = data.get("census", {}), data.get("pulse", {})
-    reference = data.get("load", {}).get("reference_country")
-    if reference is not None and (
-        not isinstance(reference, str) or reference.upper() not in {c.upper() for c in countries}
+    defaults = data.get("load", {}).get("reference_defaults", {})
+    scope = {c.upper() for c in countries}
+    if not isinstance(defaults, dict) or not all(
+        isinstance(region, str) and isinstance(code, str) and code.upper() in scope
+        for region, code in defaults.items()
     ):
-        raise ValueError("[load] reference_country must be one of the [scope] countries")
+        raise ValueError("[load] reference_defaults must map regions to [scope] countries")
+    for region in defaults:
+        resolve_region(region)
     methodology = data.get("calculate", {}).get("methodology")
     if methodology is not None:
         if not isinstance(methodology, str) or not methodology:
@@ -97,7 +102,7 @@ def load_profile(path: str | Path) -> dict[str, Any]:
         "pulse_interval_minutes": _positive(pulse, "interval_minutes", "pulse"),
         "pulse_requests": _positive(pulse, "requests", "pulse"),
         "scheduler": {key: switches.get(key, True) for key in ("census", "pulse")},
-        "reference_country": reference.upper() if reference else None,
+        "reference_defaults": {region: code.upper() for region, code in defaults.items()},
         "methodology": methodology,
         "reports_dir": reports,
         "nodes": [{key: node[key] for key in ("provider", "product", "region")} for node in nodes],
@@ -220,7 +225,8 @@ def init(
                 "census.min_sample": profile["census_min_sample"],
                 "scheduler.census_enabled": profile["scheduler"]["census"],
                 "scheduler.pulse_enabled": profile["scheduler"]["pulse"],
-                "load.reference_country": profile["reference_country"],
+                "load.reference_defaults": DEFAULTS["load.reference_defaults"]
+                | profile["reference_defaults"],
                 "reports.dir": reports_dir,
             },
         )
@@ -279,7 +285,7 @@ def init(
         },
         "scheduler": profile["scheduler"],
         "load": {
-            "reference_country": profile["reference_country"],
+            "reference_defaults": profile["reference_defaults"],
             "concurrency": profile["census_concurrency"],
             "targets": census_targets,
         },

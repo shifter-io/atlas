@@ -24,9 +24,10 @@ requests = 100
 
 [load]
 # Latency under load: every pulse slot of the census target also runs one wave of
-# census.concurrency requests per product in this country (setting load.reference_country,
-# production default US). It must be one of the [scope] countries.
-reference_country = "RO"
+# census.concurrency requests per product in each runner region's reference country, the
+# fastest country tested from the region over the trailing week. Until there is enough history,
+# the region's default (setting load.reference_defaults); these must be [scope] countries.
+reference_defaults = { fra1 = "RO" }
 
 [calculate]
 # Methodology for the orchestrator's calculate job and manual calculations (relative to the

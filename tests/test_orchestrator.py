@@ -8,6 +8,7 @@ from datetime import UTC, datetime, time, timedelta
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from helpers import FakeTransport
 from test_storage import measurement
 
 from milf_framework.orchestrator import batches
@@ -18,7 +19,7 @@ from milf_framework.orchestrator.jobs import calculate, detect, retention
 from milf_framework.orchestrator.nodes import issue_token
 from milf_framework.orchestrator.scheduler import Scheduler, Task
 from milf_framework.regions import REGION_IDS
-from milf_framework.storage import connect, seed
+from milf_framework.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -183,11 +184,11 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
 
     at = datetime(2026, 10, 1, 12, 31, tzinfo=UTC)
     first = await batches.pulse_plan(db, at)
-    # The load test's reference country (US by default) is not enabled here: no load batch.
+    # One load wave, in fra1's reference country (its default, DE: no history yet).
     assert first == {
         "targets": ["generic_http", "generic_https"],
         "created": 4,
-        "load": 0,
+        "load": 1,
         "no_node": 0,
     }
     lead = timedelta(seconds=15)
@@ -215,40 +216,120 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
     assert runs == [("queued",)]
 
 
-async def test_pulse_slots_of_a_census_target_add_a_load_wave(database, db, client):
-    """Every pulse slot of the census target opens a 'load' batch in the reference country with
-    the same scheduled_for, load.delay_seconds after the pulses; its runs fire
-    census_concurrency requests at census concurrency, counted like a pulse, and send only the
-    country (the node's proxy factory)."""
-    prepare(database, ("DE", "AT"))
+async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
+    """Every pulse slot of the census target opens one 'load' batch per runner region, in the
+    region's reference country of the day (here the defaults: no history yet), with the same
+    scheduled_for, load.delay_seconds after the pulses; its runs fire census_concurrency
+    requests at census concurrency, counted like a pulse, and send only the country (the
+    node's proxy factory)."""
+    prepare(database, ("DE", "AT", "GB"))
     a = issue_token(database, provider="alpha", product="res", region="fra1")
-    await set_setting(db, "load.reference_country", "de")
     at = datetime.now(UTC)
     result = await batches.pulse_plan(db, at)
-    assert (result["created"], result["load"]) == (4, 1)
+    assert (result["created"], result["load"]) == (6, 2)
+    assert query(
+        database,
+        "SELECT r.slug,l.country_code,l.basis,l.p50_ms,l.candidates FROM load_references l "
+        "JOIN runner_regions r USING(region_id) ORDER BY 1",
+    ) == [("fra1", "DE", "default", None, 0), ("lon1", "GB", "default", None, 0)]
     loads = query(
         database,
         "SELECT l.country_code,l.target_id,l.scheduled_for=p.scheduled_for,l.start_at-p.start_at "
-        "FROM test_batches l JOIN test_batches p ON p.kind='pulse' AND p.country_code='DE' "
-        "AND p.target_id=l.target_id WHERE l.kind='load'",
+        "FROM test_batches l JOIN test_batches p ON p.kind='pulse' "
+        "AND p.country_code=l.country_code AND p.target_id=l.target_id WHERE l.kind='load' "
+        "ORDER BY 1",
     )
-    # Same slot; it starts a minute after the pulses so the reference pulse stays light.
-    assert loads == [("DE", "generic_http", True, timedelta(seconds=60))]
+    # Same slot; they start a minute after the pulses so the reference pulses stay light.
+    assert loads == [
+        ("DE", "generic_http", True, timedelta(seconds=60)),
+        ("GB", "generic_http", True, timedelta(seconds=60)),
+    ]
     assert (await batches.pulse_plan(db, at))["load"] == 0  # idempotent
     work = await (await client.get("/v1/work", headers=bearer(a["token"]))).json()
-    (load,) = [w for w in work["assignments"] if w["kind"] == "load"]
+    (load,) = [w for w in work["assignments"] if w["kind"] == "load"]  # GB: no node in lon1
     assert (load["country_code"], load["target_id"]) == ("DE", "generic_http")
     assert (load["concurrency"], load["requests"], load["stop_rule"]) == (1000, 1000, "count")
     assert load["min_sample"] is None and load["stall_seconds"] is None
     pulse = next(w for w in work["assignments"] if w["kind"] == "pulse")
     assert (pulse["concurrency"], pulse["requests"]) == (25, 100)
-    # A reference country outside the scope, or null, switches the wave off.
-    for value in ("US", None):
-        await set_setting(db, "load.reference_country", value)
-        later = await batches.pulse_plan(db, at + timedelta(hours=1))
-        assert later["load"] == 0 and later["created"] in (0, 4)
+    # load.enabled switches the wave off.
+    await set_setting(db, "load.enabled", False)
+    later = await batches.pulse_plan(db, at + timedelta(hours=1))
+    assert later["load"] == 0 and later["created"] in (0, 6)
     with pytest.raises(ValueError, match="two-letter"):
-        batches.reference_country("Germany")
+        batches._countries({"fra1": "Germany"}, "load.reference_defaults")
+
+
+class SlowTransport(FakeTransport):
+    async def execute(self, target, *, context=None):
+        from milf_framework.models import Outcome
+
+        return Outcome(30.2, ip="8.8.4.4", status=200, response_body_bytes=8)
+
+
+async def pulse_history(database, tmp_path, country, at, transport):
+    """An ingested census-target pulse of alpha/res in `country`, scheduled at `at`."""
+    directory = await measurement(
+        tmp_path, provider="alpha", product="res", requested_country=country.lower(),
+        transport_factory=transport,
+    )
+    with connect(database) as conn:
+        batch_id = conn.execute(
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at,status) SELECT 'pulse',%s,region_id,'generic_http',%s,%s,'done' "
+            "FROM countries WHERE country_code=%s RETURNING batch_id",
+            (country, at, at, country),
+        ).fetchone()[0]
+    key = ingest(directory, database, batch_id=batch_id)["run_key"]
+    with connect(database) as conn:
+        conn.execute(
+            "INSERT INTO batch_runs(batch_id,product_id,status,started_at,finished_at,run_key,"
+            "requests,successes) SELECT %s,product_id,'done',%s,%s,%s,3,3 FROM products "
+            "WHERE provider='alpha' AND name='res'",
+            (batch_id, at, at + timedelta(minutes=1), key),
+        )
+    return key
+
+
+async def test_the_reference_is_the_fastest_clean_country_of_the_region(database, db, tmp_path):
+    prepare(database, ("DE", "AT"))
+    issue_token(database, provider="alpha", product="res", region="fra1")
+    await set_setting(db, "load.reference_min_successes", 1)
+    yesterday = datetime.now(UTC) - timedelta(days=1)
+    await pulse_history(database, tmp_path, "DE", yesterday, SlowTransport)
+    fast = await pulse_history(database, tmp_path, "AT", yesterday, FakeTransport)
+    # The runs ran just now (scheduled yesterday): choose for tomorrow, whose trailing week
+    # holds them all.
+    today = datetime.now(UTC) + timedelta(days=1)
+    async with db.transaction() as conn:
+        (choice,) = await batches.load_references(conn, today)
+    assert (choice["country_code"], choice["basis"], choice["p50_ms"]) == ("AT", "fastest", 11)
+    assert (choice["successes"], choice["candidates"]) == (3, 2)
+    # Chosen once a day: a new override waits for tomorrow.
+    await set_setting(db, "load.reference_overrides", {"fra1": "de"})
+    async with db.transaction() as conn:
+        assert (await batches.load_references(conn, today))[0]["country_code"] == "AT"
+        tomorrow = await batches.load_references(conn, today + timedelta(days=1))
+    assert (tomorrow[0]["country_code"], tomorrow[0]["basis"]) == ("DE", "override")
+    # A pulse that ran during a census of the same product (another country) never counts.
+    (run,) = query(database, "SELECT started_at,finished_at FROM test_runs WHERE run_key=%s",
+                   (fast,))
+    with connect(database) as conn:
+        census = conn.execute(
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at,status) SELECT 'census','GB',region_id,'generic_http',%s,%s,'done' "
+            "FROM countries WHERE country_code='GB' RETURNING batch_id",
+            (yesterday, yesterday),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO batch_runs(batch_id,product_id,status,started_at,finished_at) "
+            "SELECT %s,product_id,'done',%s,%s FROM products WHERE provider='alpha'",
+            (census, run[0], run[1]),
+        )
+    day_start = today.replace(hour=0, minute=0, second=0, microsecond=0)
+    async with db.connection() as conn:
+        stats = await batches._reference_latency(conn, day_start, 7)
+    assert stats == {"DE": {"p50": 31, "successes": 3}}
 
 
 async def finish_pulse(db, node, batch_id, successes, now):

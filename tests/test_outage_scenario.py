@@ -173,6 +173,12 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
             for metric, value in (("price_per_gb_lowest", 0.75), ("price_per_gb_entry", 1.0))
         ],
     )
+    with connect(database) as conn:
+        conn.execute(
+            "INSERT INTO load_references(day,region_id,country_code,basis) SELECT %s,region_id,"
+            "'DE','default' FROM countries WHERE country_code='DE'",
+            (slots[47].date(),),
+        )
     payload = calculate(database, policy_file(tmp_path), as_of=end)
     (alpha_product,) = [p for p in payload["products"] if p["provider"] == "alpha"]
     w = alpha_product["windows"]["24h"]
@@ -211,7 +217,14 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     )
     assert alpha_product["pricing"]["lowest_per_gb"] == 0.75
     assert alpha_product["pricing"]["entry_per_gb"] == 1.0
-    assert w["latency"]["reference"]["country"] == "DE"
+    # fra1's reference country, as the day's choice recorded it.
+    (region,) = w["latency"]["regions"]
+    assert region["region"] == "fra1" and region["reference"]["country"] == "DE"
+    assert region["chosen"] == [
+        {"day": slots[47].date().isoformat(), "country": "DE", "basis": "default",
+         "p50_ms": None, "successes": None, "candidates": 0}
+    ]
+    assert region["factors"]["slots"] == 1
     # Latency is generic_http's alone: the load slot gives its light-load latency its own
     # factor, and generic_https has no latency at all.
     assert w["metrics"]["under_load"]["own_factor"] == 1

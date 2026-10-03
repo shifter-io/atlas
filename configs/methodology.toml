@@ -50,16 +50,21 @@ hosting_usage_types = ["hosting", "datacenter"]
 # earlier factor carries forward). Snapshot: census_overlap per window.
 #
 # Latency under load (the speed score): in every pulse slot each product also runs one wave at
-# the census target's census_concurrency in the reference country (orchestrator setting
-# load.reference_country, default US): a batch of kind 'load', started load.delay_seconds (60)
-# after the pulses so the reference pulse stays a light-load measurement. Per percentile,
-#   factor(t) = load-run latency(t) / reference-country pulse latency(t), same target and slot,
-#   under-load latency(C, t) = pulse latency(C, t) x factor(t), for every country C.
+# the census target's census_concurrency in every runner region's reference country: a batch of
+# kind 'load', started load.delay_seconds (60) after the pulses so the reference pulse stays a
+# light-load measurement. The orchestrator picks each region's reference once per UTC day and
+# stores it (load_references): the fastest country tested from the region over the trailing
+# load.reference_days (lowest light-load p50 of its clean census-target pulses, at least
+# load.reference_min_successes successes, ties by country code), an override
+# (load.reference_overrides), else the region's default without history
+# (load.reference_defaults; staging fra1: RO), else its first enabled country. Per percentile,
+#   factor(R, t) = load-run latency(R, t) / pulse latency of R's reference country(t),
+#   under-load latency(C, t) = pulse latency(C, t) x factor(region of C, t).
 # Both runs need min_latency_successes successes. A slot without a usable load run uses the
-# newest earlier factor of the product in the window; with none, the slot has no under-load
-# value. The window's under-load latency is the mean of its slot values.
-# Census latency never makes a factor. Example: US pulse 600 ms, US load 900 ms -> x1.5; a
-# Romanian pulse of 800 ms in that slot -> 1,200 ms under load.
+# region's newest earlier factor in the window; with none, that country's slot has no
+# under-load value. The window's under-load latency is the mean over slots and countries.
+# Census latency never makes a factor. Example: fra1's reference RO, RO pulse 600 ms, RO load
+# 900 ms -> x1.5; a Bulgarian pulse (BG is tested from fra1) of 800 ms -> 1,200 ms under load.
 [slots]
 min_latency_successes = 30
 

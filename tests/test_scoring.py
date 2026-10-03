@@ -32,7 +32,7 @@ HALF_HOUR = timedelta(minutes=30)
 
 def row(
     slot, ms, *, n=100, successes=None, test="pulse", country="US", target="generic_http",
-    census=(), run_key=None,
+    census=(), run_key=None, region=None,
 ):
     """One bucket row: n requests in a time slot, every success at `ms` milliseconds; census
     names the census batches the run overlapped (a pulse or load wave during a census)."""
@@ -47,6 +47,7 @@ def row(
         "census_batches": list(census),
         "light": test in (None, "pulse") and not census,
         "country": country,
+        "region": region,
         "target": target,
         "concurrency": 1000 if test == "load" else 25,
         "counters": {
@@ -111,28 +112,52 @@ def test_light_load_latency_is_per_target_and_equal_weight():
 
 
 def test_latency_under_load_worked_example():
-    """US pulse 600 ms, US load wave 900 ms: factor 1.5. A Romanian pulse of 800 ms in the same
-    slot is 1,200 ms under load. Census latency never makes a factor."""
+    """fra1's reference country RO: RO pulse 600 ms, RO load wave 900 ms, a factor of 1.5. A
+    Bulgarian pulse of 800 ms in the same slot (BG is tested from fra1) is 1,200 ms under load.
+    nyc3 has its own reference: US pulse 500 ms, load 1,000 ms, x2; Mexico's 700 ms pulse is
+    1,400 ms. Census latency never makes a factor."""
     rows = [
-        row(T, 600, country="US"),
-        row(T, 900, n=1000, test="load", country="US"),
-        row(T, 800, country="RO"),
-        row(T, 5000, n=1000, test="census", country="RO"),
+        row(T, 600, country="RO", region="fra1"),
+        row(T, 900, n=1000, test="load", country="RO", region="fra1"),
+        row(T, 800, country="BG", region="fra1"),
+        row(T, 5000, n=1000, test="census", country="BG", region="fra1"),
+        row(T, 500, country="US", region="nyc3"),
+        row(T, 1000, n=1000, test="load", country="US", region="nyc3"),
+        row(T, 700, country="MX", region="nyc3"),
     ]
-    factors, reference, excluded = load_factors(rows, 30)
-    assert reference == {"country": "US", "target": "generic_http", "concurrency": 1000}
-    assert excluded == 0
-    assert factors == {T: {"p50": 1.5, "p90": 1.5, "p95": 1.5, "p99": 1.5}}
-    detail = latency_detail(rows, factors, reference, 30)
-    assert {(c["country"], c["target"]) for c in detail["countries"]} == {
-        ("RO", "generic_http"), ("US", "generic_http"),
+    factors, references, excluded = load_factors(rows, 30)
+    assert references == {
+        "fra1": {"country": "RO", "target": "generic_http", "concurrency": 1000},
+        "nyc3": {"country": "US", "target": "generic_http", "concurrency": 1000},
     }
+    assert excluded == {}
+    assert factors == {
+        "fra1": {T: dict.fromkeys(("p50", "p90", "p95", "p99"), 1.5)},
+        "nyc3": {T: dict.fromkeys(("p50", "p90", "p95", "p99"), 2.0)},
+    }
+    choices = [{"day": "2026-10-03", "region": "fra1", "country": "RO", "basis": "fastest",
+                "p50_ms": 610, "successes": 4000, "candidates": 2}]
+    detail = latency_detail(rows, factors, references, 30, excluded, choices)
     countries = {c["country"]: c for c in detail["countries"]}
-    assert countries["RO"]["latency_ms"]["p50"] == 800
-    assert countries["RO"]["latency_under_load_ms"]["p50"] == 1200
-    assert countries["US"]["latency_under_load_ms"]["p50"] == 900
-    assert detail["factors"]["latest"] == {"at": T, "p50": 1.5, "p90": 1.5, "p95": 1.5,
-                                           "p99": 1.5}
+    assert countries["BG"]["region"] == "fra1"
+    assert countries["BG"]["latency_ms"]["p50"] == 800
+    assert countries["BG"]["latency_under_load_ms"]["p50"] == 1200
+    assert countries["RO"]["latency_under_load_ms"]["p50"] == 900
+    assert countries["MX"]["latency_under_load_ms"]["p50"] == 1400
+    regions = {r["region"]: r for r in detail["regions"]}
+    assert regions["fra1"]["reference"]["country"] == "RO"
+    assert regions["fra1"]["chosen"] == [
+        {"day": "2026-10-03", "country": "RO", "basis": "fastest", "p50_ms": 610,
+         "successes": 4000, "candidates": 2}
+    ]
+    assert regions["nyc3"]["chosen"] == []
+    assert regions["fra1"]["factors"]["latest"] == {"at": T} | dict.fromkeys(
+        ("p50", "p90", "p95", "p99"), 1.5
+    )
+    # The product's under-load latency: the mean over slots and countries.
+    result = under_load(rows, factors, 30, excluded)
+    assert result["ms"]["p50"] == pytest.approx((1200 + 900 + 1000 + 1400) / 4)
+    assert result["own_factor"] == 4
 
 
 def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():
@@ -144,7 +169,7 @@ def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():
         row(T + HALF_HOUR, 1000, country="RO"),
     ]
     factors, *_ = load_factors(rows, 30)
-    assert list(factors) == [T]
+    assert list(factors[""]) == [T]
     romania = [r for r in rows if r["country"] == "RO"]
     result = under_load(romania, factors, 30)
     assert result["ms"]["p50"] == pytest.approx((800 * 1.5 + 1000 * 1.5) / 2)
@@ -320,16 +345,15 @@ def test_no_load_factor_from_a_census_slot():
         row(T + 2 * HALF_HOUR, 1000, country="RO"),
     ]
     factors, _, excluded = load_factors(rows, 30)
-    assert list(factors) == [T] and excluded == 2
+    assert list(factors[""]) == [T] and excluded == {"": 2}
     romania = [r for r in rows if r["country"] == "RO"]
     result = under_load(romania, factors, 30, excluded)
     assert (result["own_factor"], result["carried_factor"]) == (1, 2)
     assert result["ms"]["p50"] == pytest.approx((800 + 1000 + 1000) * 1.5 / 3)
-    assert latency_detail(rows, factors, None, 30, excluded)["factors"][
-        "excluded_during_census"
-    ] == 2
+    (region,) = latency_detail(rows, factors, {}, 30, excluded)["regions"]
+    assert region["factors"]["excluded_during_census"] == 2
     # Every load wave during a census: no factor at all, and the reason says so.
     only = [r for r in rows if r["slot"] != T]
     factors, _, excluded = load_factors(only, 30)
-    assert factors == {} and excluded == 2
+    assert factors == {} and excluded == {"": 2}
     assert under_load(only, factors, 30, excluded)["reason"] == UNDER_LOAD_CENSUS

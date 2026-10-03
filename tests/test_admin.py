@@ -217,7 +217,10 @@ async def test_batches_list_filters_and_detail(database, db, admin):
     await batches.pulse_plan(db, datetime.now(UTC))
     body = await get(admin, "/batches")
     assert body["filters"] == {"kind": None, "status": None, "country": None, "limit": 100}
-    assert len(body["batches"]) == 3
+    # The census, two pulses and the load wave in fra1's reference country (DE).
+    assert len(body["batches"]) == 4
+    load = (await get(admin, "/batches", kind="load"))["batches"]
+    assert [(r["kind"], r["country_code"]) for r in load] == [("load", "DE")]
     census_rows = (await get(admin, "/batches", kind="census"))["batches"]
     assert [r["batch_id"] for r in census_rows] == [batch_id]
     row = census_rows[0]
