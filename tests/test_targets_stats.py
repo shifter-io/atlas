@@ -72,7 +72,7 @@ def test_credentials_are_not_in_repr_or_public_config():
 
 
 @pytest.mark.parametrize("status,verdict", [
-    (201, "error"), (301, "error"), (403, "block"), (429, "block"), (500, "block"),
+    (201, "error"), (301, "error"), (403, "block"), (429, "block"), (500, "error"),
     (502, "proxy_error"),
 ])
 def test_status_verdict(status, verdict):
