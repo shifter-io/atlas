@@ -144,9 +144,24 @@ func TestPortMatchesTheSiteTypeScriptForEveryRequestSnapshots(t *testing.T) {
 			t.Errorf("%s shows a latency; only generic_http may", b.Target)
 		}
 	}
+	// Snapshot 69 on, the window's latency is the latency target's alone, so the
+	// series is charted.
+	charted := false
 	for _, pt := range w.Latency {
-		if pt.P50.OK() {
-			t.Fatalf("a series point shows the window's mixed latency: %+v", pt)
+		charted = charted || pt.P50.OK()
+	}
+	if !charted {
+		t.Errorf("the HTTP-only window latency series should be charted")
+	}
+	if !strings.Contains(model.SV(p.Verdict), "alone in its kind") || !strings.Contains(model.SV(p.Tagline), "census, pulse and load") {
+		t.Errorf("copy does not follow the data: %q / %q", model.SV(p.Verdict), model.SV(p.Tagline))
+	}
+	if got := p.Score.KindStanding(); got != "#1 of 1 in its kind" {
+		t.Errorf("a ready score alone in its kind reads %q", got)
+	}
+	for _, x := range p.Weaknesses {
+		if strings.Contains(x, "Pricing") {
+			t.Errorf("a priced network says pricing is missing: %q", x)
 		}
 	}
 	if p.Pricing.PricePerGbAtScale != 0.75 || p.Pricing.PricePerGb != 1 || model.SV(p.Products[0].PriceLabel) != "$0.75–$1.00/GB" {

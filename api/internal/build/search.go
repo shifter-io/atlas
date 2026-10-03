@@ -175,10 +175,9 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 		if i < 5 {
 			idx.TopNetworkIDs = append(idx.TopNetworkIDs, "network:"+p.Slug)
 		}
-		rank := "Unranked"
-		if p.Score.Rank.OK() {
-			rank = "#" + jsnum.ToFixed(p.Score.Rank.F(), 0)
-		}
+		// The network's standing (every-request.ts kindStanding): a measured
+		// network alone in its kind with a ready score is "#1 of 1 in its kind".
+		rank := p.Score.KindStanding()
 		composite := jsnum.NA // format.ts fixed()
 		if p.Score.Composite.OK() {
 			composite = jsnum.ToFixed(p.Score.Composite.F(), 1)

@@ -248,6 +248,28 @@ type ScoreView struct {
 	PreviousRank Num       `json:"previousRank"`
 	Breakdown    Breakdown `json:"breakdown"`
 	Grade        Str       `json:"grade"`
+	// Peers is the ready networks of the kind the score was set against
+	// (measured networks; 0 when unknown). Not published as a field: the
+	// snapshot's components carry it, and labels are derived from it.
+	Peers Num `json:"-"`
+}
+
+// KindStanding is every-request.ts kindStanding's label: "#1 of 1 in its kind"
+// for a measured network with a ready score alone in its kind (the framework
+// leaves it unranked), "#r of N in its kind" with a rank and peers, "#r", or
+// "Unranked".
+func (s ScoreView) KindStanding() string {
+	rank := s.Rank
+	if !rank.OK() && s.Composite.OK() && s.Peers == 1 {
+		rank = 1
+	}
+	switch {
+	case !rank.OK():
+		return "Unranked"
+	case s.Peers >= 1:
+		return "#" + jsnum.ToFixed(rank.F(), 0) + " of " + jsnum.Locale(s.Peers.F()) + " in its kind"
+	}
+	return "#" + jsnum.ToFixed(rank.F(), 0)
 }
 
 type PoolStats struct {

@@ -139,6 +139,32 @@ func (v *Pool) UnmarshalJSON(d []byte) error {
 type Component struct {
 	Value Num    `json:"value"`
 	State string `json:"state"`
+	// Inputs is kept raw: an object with "peers" (ready networks of the kind,
+	// itself included) in current payloads, a bare number in older ones.
+	Inputs json.RawMessage `json:"inputs"`
+}
+
+// Peers is the component's inputs.peers, NaN when it has none.
+func (c Component) Peers() Num {
+	var in struct {
+		Peers *float64 `json:"peers"`
+	}
+	if len(c.Inputs) == 0 || json.Unmarshal(c.Inputs, &in) != nil || in.Peers == nil {
+		return jsnum.NaN
+	}
+	return Num(*in.Peers)
+}
+
+// Peers is the most ready networks of the kind any component was scored
+// against (itself included); 1 means the network is alone in its kind.
+func (s Score) Peers() Num {
+	best := jsnum.NaN
+	for _, c := range s.Components {
+		if p := c.Peers(); p.OK() && (!best.OK() || p > best) {
+			best = p
+		}
+	}
+	return best
 }
 
 func (v *Component) UnmarshalJSON(d []byte) error {

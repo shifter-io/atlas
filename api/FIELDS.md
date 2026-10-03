@@ -193,8 +193,24 @@ through unchanged in `measurement` for the network page. `latency.countries[]`
 has one entry per requested country and target (`target`); the page shows the
 `generic_http` ones. Time slots are lcm(pulse interval, 5 min): 30 minutes in
 production, 10 in staging. The slow-down factor's references are read by
-`every-request.ts loadReferences`, which accepts today's single
-`latency.reference` and the coming per-runner-region list. Products' `priceLabel`
+`every-request.ts loadReferences`: `latency.regions[]` (snapshot 69 on: per
+runner region its `reference`, the daily `chosen[]` picks and `factors` with
+`excluded_during_census`), and the older single `latency.reference` /
+`latency.factors` as one row. `latency.countries[]` carries `region` (older
+payloads: `target`, filtered to `generic_http`). `census_overlap` (pulses and
+load waves clean vs during a census of the same network), `metrics.latency_reason`
+and `time_slots.skipped_during_census` pass through for the network page.
+
+Measured copy follows the data (Go `measuredProvider`, TS `measuredProvider`):
+the tagline names the schedule ("measured on a census, pulse and load
+schedule" for every-request snapshots, "census and pulse" for scheduled older
+ones, else "measured HTTP pool sample"); the verdict ends with the MILF Score
+and grade once ready, adding "alone in its kind so far" when every component
+was scored against one ready peer (`inputs.peers` = 1, Go `snap.Score.Peers`);
+the weaknesses say "Billed usage not collected (list prices only)" when the
+snapshot publishes list prices, else "Pricing and billed usage not collected".
+The network page shows such a score as "#1 of 1 in its kind" with the note
+(`every-request.ts kindStanding`); the framework itself leaves it unranked. Products' `priceLabel`
 is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 `$0.75–$1.00/GB`. Test input: `fixtures/measured/snapshot-every-request.json`
 (`scripts/every-request-fixture.mjs`).

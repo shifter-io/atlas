@@ -458,18 +458,10 @@
      "scores": {
       "balanced": {
        "rank": null,
-       "grade": null,
-       "score": null,
-       "state": "incomplete",
-       "reasons": [
-        "Required benchmark incomplete: generic_http",
-        "Required benchmark incomplete: generic_https",
-        "Required benchmark targets are incomplete",
-        "Required benchmark targets are incomplete",
-        "Continuous availability measurements are required",
-        "Verified product claim and reputation measurements required",
-        "Verified pricing and billed usage are required"
-       ],
+       "grade": "A+",
+       "score": 100,
+       "state": "ready",
+       "reasons": [],
        "weights": {
         "speed": 14,
         "value": 14,
@@ -483,22 +475,18 @@
        "scored_at": null,
        "components": {
         "speed": {
-         "state": "unavailable",
-         "value": null,
+         "state": "ready",
+         "value": 100,
          "inputs": {
           "peers": 1,
           "targets": {
            "generic_http": {
             "value": 1454.08,
             "best": 1454.08
-           },
-           "generic_https": {
-            "value": 3053,
-            "best": 3053
            }
           }
          },
-         "reason": "Required benchmark targets are incomplete"
+         "reason": null
         },
         "value": {
          "value": 100,
@@ -518,13 +506,17 @@
           "best": 0.9921481779746326,
           "peers": 1
          },
-         "reason": "DB-IP usage classification; unknown records remain unclassified"
+         "reason": null
         },
         "uptime": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Continuous availability measurements are required"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "coverage": {
          "state": "ready",
@@ -561,10 +553,14 @@
          "reason": null
         },
         "reliability": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Required benchmark targets are incomplete"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "authenticity": {
          "value": 100,
@@ -583,18 +579,10 @@
       },
       "latency_first": {
        "rank": null,
-       "grade": null,
-       "score": null,
-       "state": "incomplete",
-       "reasons": [
-        "Required benchmark incomplete: generic_http",
-        "Required benchmark incomplete: generic_https",
-        "Required benchmark targets are incomplete",
-        "Required benchmark targets are incomplete",
-        "Continuous availability measurements are required",
-        "Verified product claim and reputation measurements required",
-        "Verified pricing and billed usage are required"
-       ],
+       "grade": "A+",
+       "score": 100,
+       "state": "ready",
+       "reasons": [],
        "weights": {
         "speed": 38,
         "value": 12,
@@ -608,22 +596,18 @@
        "scored_at": null,
        "components": {
         "speed": {
-         "state": "unavailable",
-         "value": null,
+         "state": "ready",
+         "value": 100,
          "inputs": {
           "peers": 1,
           "targets": {
            "generic_http": {
             "value": 1454.08,
             "best": 1454.08
-           },
-           "generic_https": {
-            "value": 3053,
-            "best": 3053
            }
           }
          },
-         "reason": "Required benchmark targets are incomplete"
+         "reason": null
         },
         "value": {
          "value": 100,
@@ -643,13 +627,17 @@
           "best": 0.9921481779746326,
           "peers": 1
          },
-         "reason": "DB-IP usage classification; unknown records remain unclassified"
+         "reason": null
         },
         "uptime": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Continuous availability measurements are required"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "coverage": {
          "state": "ready",
@@ -686,10 +674,14 @@
          "reason": null
         },
         "reliability": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Required benchmark targets are incomplete"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "authenticity": {
          "value": 100,
@@ -812,15 +804,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1587,
-       "p90": 1989,
-       "p95": 2344,
-       "p99": 4695
+       "p50": 1024,
+       "p90": 1283,
+       "p95": 1512,
+       "p99": 3029
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+      "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -828,15 +820,16 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 2253.54,
-       "p90": 2744.82,
-       "p95": 3164.4,
-       "p99": 6150.45
+       "p50": 1454.08,
+       "p90": 1770.54,
+       "p95": 2041.2,
+       "p99": 3967.99
       },
+      "latency_reason": null,
       "under_load": {
-       "slots": 664,
-       "own_factor": 660,
-       "carried_factor": 4,
+       "slots": 332,
+       "own_factor": 330,
+       "carried_factor": 2,
        "without_factor": 0,
        "reason": null
       },
@@ -844,12 +837,12 @@
        "minutes": 30,
        "success": 336,
        "down": 4,
-       "latency": 332,
+       "latency": 326,
        "latency_targets": [
-        "generic_http",
-        "generic_https"
+        "generic_http"
        ],
-       "min_latency_successes": 30
+       "min_latency_successes": 30,
+       "skipped_during_census": 6
       },
       "coverage_slots": {
        "due": 336,
@@ -923,7 +916,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -936,6 +929,7 @@
          "p95": 2041.2,
          "p99": 3967.99
         },
+        "latency_reason": null,
         "under_load": {
          "slots": 332,
          "own_factor": 330,
@@ -947,11 +941,12 @@
          "minutes": 30,
          "success": 336,
          "down": 4,
-         "latency": 332,
+         "latency": 326,
          "latency_targets": [
           "generic_http"
          ],
-         "min_latency_successes": 30
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 336,
@@ -984,7 +979,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -997,6 +992,7 @@
          "p95": 2041.2,
          "p99": 3967.99
         },
+        "latency_reason": null,
         "under_load": {
          "slots": 332,
          "own_factor": 330,
@@ -1008,11 +1004,12 @@
          "minutes": 30,
          "success": 336,
          "down": 4,
-         "latency": 332,
+         "latency": 326,
          "latency_targets": [
           "generic_http"
          ],
-         "min_latency_successes": 30
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 336,
@@ -1039,16 +1036,20 @@
          "Insufficient time coverage"
         ],
         "weights": {
-         "speed": 20,
+         "speed": 0,
          "reliability": 80
         },
         "scored_at": null,
         "components": {
          "speed": {
-          "state": "unavailable",
           "value": null,
-          "inputs": null,
-          "reason": null
+          "state": "unavailable",
+          "reason": "Latency is measured on the latency target only",
+          "inputs": {
+           "value": null,
+           "best": null,
+           "peers": 0
+          }
          },
          "reliability": {
           "state": "unavailable",
@@ -1073,42 +1074,42 @@
         "successes": 998,
         "body_bytes": 14000,
         "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
         "success_rate": 0.9976,
         "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "tls": 1
         },
         "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
+        "latency_reason": "Latency is measured on the latency target only",
         "under_load": {
-         "slots": 332,
-         "own_factor": 330,
-         "carried_factor": 2,
+         "slots": 0,
+         "own_factor": 0,
+         "carried_factor": 0,
          "without_factor": 0,
-         "reason": null
+         "reason": "Latency is measured on the latency target only"
         },
         "time_slots": {
          "minutes": 30,
          "success": 336,
          "down": 4,
-         "latency": 332,
-         "latency_targets": [
-          "generic_https"
-         ],
-         "min_latency_successes": 30
+         "latency": 0,
+         "latency_targets": [],
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 336,
@@ -1133,42 +1134,42 @@
         "successes": 998,
         "body_bytes": 14000,
         "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
         "success_rate": 0.9976,
         "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "tls": 1
         },
         "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
+        "latency_reason": "Latency is measured on the latency target only",
         "under_load": {
-         "slots": 332,
-         "own_factor": 330,
-         "carried_factor": 2,
+         "slots": 0,
+         "own_factor": 0,
+         "carried_factor": 0,
          "without_factor": 0,
-         "reason": null
+         "reason": "Latency is measured on the latency target only"
         },
         "time_slots": {
          "minutes": 30,
          "success": 336,
          "down": 4,
-         "latency": 332,
-         "latency_targets": [
-          "generic_https"
-         ],
-         "min_latency_successes": 30
+         "latency": 0,
+         "latency_targets": [],
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 336,
@@ -1197,15 +1198,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1587,
-       "p90": 1989,
-       "p95": 2344,
-       "p99": 4695
+       "p50": 1024,
+       "p90": 1283,
+       "p95": 1512,
+       "p99": 3029
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+      "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -1213,15 +1214,16 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 2253.54,
-       "p90": 2744.82,
-       "p95": 3164.4,
-       "p99": 6150.45
+       "p50": 1454.08,
+       "p90": 1770.54,
+       "p95": 2041.2,
+       "p99": 3967.99
       },
+      "latency_reason": null,
       "under_load": {
-       "slots": 664,
-       "own_factor": 660,
-       "carried_factor": 4,
+       "slots": 332,
+       "own_factor": 330,
+       "carried_factor": 2,
        "without_factor": 0,
        "reason": null
       },
@@ -1229,12 +1231,12 @@
        "minutes": 30,
        "success": 336,
        "down": 4,
-       "latency": 332,
+       "latency": 326,
        "latency_targets": [
-        "generic_http",
-        "generic_https"
+        "generic_http"
        ],
-       "min_latency_successes": 30
+       "min_latency_successes": 30,
+       "skipped_during_census": 6
       },
       "coverage_slots": {
        "due": 336,
@@ -1304,32 +1306,84 @@
       "unscheduled": 0
      },
      "latency": {
-      "reference": {
-       "country": "US",
-       "target": "generic_http",
-       "concurrency": 1000
-      },
-      "factors": {
-       "slots": 330,
-       "mean": {
-        "p50": 1.42,
-        "p90": 1.38,
-        "p95": 1.35,
-        "p99": 1.31
+      "target": "generic_http",
+      "regions": [
+       {
+        "region": "fra1",
+        "reference": {
+         "country": "DE",
+         "target": "generic_http",
+         "concurrency": 1000
+        },
+        "chosen": [
+         {
+          "day": "2026-09-26",
+          "country": "DE",
+          "basis": "fastest light-load p50 of the previous day",
+          "p50_ms": 1126,
+          "successes": 1200,
+          "candidates": 2
+         }
+        ],
+        "factors": {
+         "slots": 324,
+         "excluded_during_census": 6,
+         "mean": {
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         },
+         "latest": {
+          "at": "2026-09-26T14:00:00+00:00",
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         }
+        }
        },
-       "latest": {
-        "at": "2026-09-26T14:00:00+00:00",
-        "p50": 1.42,
-        "p90": 1.38,
-        "p95": 1.35,
-        "p99": 1.31
+       {
+        "region": "nyc1",
+        "reference": {
+         "country": "US",
+         "target": "generic_http",
+         "concurrency": 1000
+        },
+        "chosen": [
+         {
+          "day": "2026-09-26",
+          "country": "US",
+          "basis": "fastest light-load p50 of the previous day",
+          "p50_ms": 1024,
+          "successes": 1200,
+          "candidates": 2
+         }
+        ],
+        "factors": {
+         "slots": 324,
+         "excluded_during_census": 6,
+         "mean": {
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         },
+         "latest": {
+          "at": "2026-09-26T14:00:00+00:00",
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         }
+        }
        }
-      },
-      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
+      ],
+      "basis": "under load = light-load (pulse) latency x (load run ÷ pulse in the region's reference country) of the same slot, else the region's newest earlier factor; mean of slot and country values",
       "countries": [
        {
         "country": "DE",
-        "target": "generic_http",
+        "region": "fra1",
         "latency_ms": {
          "p50": 1126,
          "p90": 1411,
@@ -1349,29 +1403,8 @@
         "reason": null
        },
        {
-        "country": "DE",
-        "target": "generic_https",
-        "latency_ms": {
-         "p50": 2365,
-         "p90": 2963,
-         "p95": 3493,
-         "p99": 6997
-        },
-        "latency_under_load_ms": {
-         "p50": 3358.3,
-         "p90": 4088.94,
-         "p95": 4715.55,
-         "p99": 9166.07
-        },
-        "slots": 332,
-        "own_factor": 330,
-        "carried_factor": 2,
-        "without_factor": 0,
-        "reason": null
-       },
-       {
         "country": "US",
-        "target": "generic_http",
+        "region": "nyc1",
         "latency_ms": {
          "p50": 1024,
          "p90": 1283,
@@ -1389,29 +1422,105 @@
         "carried_factor": 2,
         "without_factor": 0,
         "reason": null
-       },
-       {
-        "country": "US",
-        "target": "generic_https",
-        "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
-        },
-        "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
-        },
-        "slots": 332,
-        "own_factor": 330,
-        "carried_factor": 2,
-        "without_factor": 0,
-        "reason": null
        }
       ]
+     },
+     "census_overlap": {
+      "pulses": {
+       "clean": {
+        "runs": 84,
+        "requests": 9000,
+        "successes": 8990,
+        "request_success_rate": 0.9988888888888889,
+        "success_rate": 0.997889,
+        "latency_ms": {
+         "p50": 1024,
+         "p90": 1283,
+         "p95": 1512,
+         "p99": 3029
+        }
+       },
+       "during_census": {
+        "runs": 12,
+        "requests": 1200,
+        "successes": 1110,
+        "request_success_rate": 0.925,
+        "success_rate": 0.924,
+        "latency_ms": {
+         "p50": 1331,
+         "p90": 1668,
+         "p95": 1966,
+         "p99": 3938
+        }
+       }
+      },
+      "targets": {
+       "generic_http": {
+        "clean": {
+         "runs": 42,
+         "requests": 4500,
+         "successes": 4496,
+         "request_success_rate": 0.9991111111111111,
+         "success_rate": 0.998111,
+         "latency_ms": {
+          "p50": 1024,
+          "p90": 1283,
+          "p95": 1512,
+          "p99": 3029
+         }
+        },
+        "during_census": {
+         "runs": 6,
+         "requests": 600,
+         "successes": 556,
+         "request_success_rate": 0.9266666666666666,
+         "success_rate": 0.925667,
+         "latency_ms": {
+          "p50": 1331,
+          "p90": 1668,
+          "p95": 1966,
+          "p99": 3938
+         }
+        }
+       },
+       "generic_https": {
+        "clean": {
+         "runs": 42,
+         "requests": 4500,
+         "successes": 4494,
+         "request_success_rate": 0.9986666666666667,
+         "success_rate": 0.997667,
+         "latency_ms": {
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null
+         }
+        },
+        "during_census": {
+         "runs": 6,
+         "requests": 600,
+         "successes": 554,
+         "request_success_rate": 0.9233333333333333,
+         "success_rate": 0.922333,
+         "latency_ms": {
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null
+         }
+        }
+       }
+      },
+      "load": {
+       "clean": 330,
+       "during_census": 6
+      },
+      "census_batches": [
+       101,
+       102
+      ],
+      "basis": "pulse and load runs that overlapped a running census of the same product (any country), from stored run start and finish times; left out of light-load latency, time-slot success and the load factor, still counted as requests, uptime and slots"
      },
      "breakdowns": {
       "country": [
@@ -1694,18 +1803,10 @@
      "scores": {
       "balanced": {
        "rank": null,
-       "grade": null,
-       "score": null,
-       "state": "incomplete",
-       "reasons": [
-        "Required benchmark incomplete: generic_http",
-        "Required benchmark incomplete: generic_https",
-        "Required benchmark targets are incomplete",
-        "Required benchmark targets are incomplete",
-        "Continuous availability measurements are required",
-        "Verified product claim and reputation measurements required",
-        "Verified pricing and billed usage are required"
-       ],
+       "grade": "A+",
+       "score": 100,
+       "state": "ready",
+       "reasons": [],
        "weights": {
         "speed": 14,
         "value": 14,
@@ -1719,22 +1820,18 @@
        "scored_at": null,
        "components": {
         "speed": {
-         "state": "unavailable",
-         "value": null,
+         "state": "ready",
+         "value": 100,
          "inputs": {
           "peers": 1,
           "targets": {
            "generic_http": {
             "value": 1454.08,
             "best": 1454.08
-           },
-           "generic_https": {
-            "value": 3053,
-            "best": 3053
            }
           }
          },
-         "reason": "Required benchmark targets are incomplete"
+         "reason": null
         },
         "value": {
          "value": 100,
@@ -1754,13 +1851,17 @@
           "best": 0.9921481779746326,
           "peers": 1
          },
-         "reason": "DB-IP usage classification; unknown records remain unclassified"
+         "reason": null
         },
         "uptime": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Continuous availability measurements are required"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "coverage": {
          "state": "ready",
@@ -1797,10 +1898,14 @@
          "reason": null
         },
         "reliability": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Required benchmark targets are incomplete"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "authenticity": {
          "value": 100,
@@ -1819,18 +1924,10 @@
       },
       "latency_first": {
        "rank": null,
-       "grade": null,
-       "score": null,
-       "state": "incomplete",
-       "reasons": [
-        "Required benchmark incomplete: generic_http",
-        "Required benchmark incomplete: generic_https",
-        "Required benchmark targets are incomplete",
-        "Required benchmark targets are incomplete",
-        "Continuous availability measurements are required",
-        "Verified product claim and reputation measurements required",
-        "Verified pricing and billed usage are required"
-       ],
+       "grade": "A+",
+       "score": 100,
+       "state": "ready",
+       "reasons": [],
        "weights": {
         "speed": 38,
         "value": 12,
@@ -1844,22 +1941,18 @@
        "scored_at": null,
        "components": {
         "speed": {
-         "state": "unavailable",
-         "value": null,
+         "state": "ready",
+         "value": 100,
          "inputs": {
           "peers": 1,
           "targets": {
            "generic_http": {
             "value": 1454.08,
             "best": 1454.08
-           },
-           "generic_https": {
-            "value": 3053,
-            "best": 3053
            }
           }
          },
-         "reason": "Required benchmark targets are incomplete"
+         "reason": null
         },
         "value": {
          "value": 100,
@@ -1879,13 +1972,17 @@
           "best": 0.9921481779746326,
           "peers": 1
          },
-         "reason": "DB-IP usage classification; unknown records remain unclassified"
+         "reason": null
         },
         "uptime": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Continuous availability measurements are required"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "coverage": {
          "state": "ready",
@@ -1922,10 +2019,14 @@
          "reason": null
         },
         "reliability": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Required benchmark targets are incomplete"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "authenticity": {
          "value": 100,
@@ -5701,15 +5802,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1587,
-       "p90": 1989,
-       "p95": 2344,
-       "p99": 4695
+       "p50": 1024,
+       "p90": 1283,
+       "p95": 1512,
+       "p99": 3029
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+      "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -5717,15 +5818,16 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 2253.54,
-       "p90": 2744.82,
-       "p95": 3164.4,
-       "p99": 6150.45
+       "p50": 1454.08,
+       "p90": 1770.54,
+       "p95": 2041.2,
+       "p99": 3967.99
       },
+      "latency_reason": null,
       "under_load": {
-       "slots": 88,
-       "own_factor": 84,
-       "carried_factor": 4,
+       "slots": 44,
+       "own_factor": 42,
+       "carried_factor": 2,
        "without_factor": 0,
        "reason": null
       },
@@ -5733,12 +5835,12 @@
        "minutes": 30,
        "success": 48,
        "down": 4,
-       "latency": 44,
+       "latency": 38,
        "latency_targets": [
-        "generic_http",
-        "generic_https"
+        "generic_http"
        ],
-       "min_latency_successes": 30
+       "min_latency_successes": 30,
+       "skipped_during_census": 6
       },
       "coverage_slots": {
        "due": 48,
@@ -5812,7 +5914,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -5825,6 +5927,7 @@
          "p95": 2041.2,
          "p99": 3967.99
         },
+        "latency_reason": null,
         "under_load": {
          "slots": 44,
          "own_factor": 42,
@@ -5836,11 +5939,12 @@
          "minutes": 30,
          "success": 48,
          "down": 4,
-         "latency": 44,
+         "latency": 38,
          "latency_targets": [
           "generic_http"
          ],
-         "min_latency_successes": 30
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 48,
@@ -5873,7 +5977,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -5886,6 +5990,7 @@
          "p95": 2041.2,
          "p99": 3967.99
         },
+        "latency_reason": null,
         "under_load": {
          "slots": 44,
          "own_factor": 42,
@@ -5897,11 +6002,12 @@
          "minutes": 30,
          "success": 48,
          "down": 4,
-         "latency": 44,
+         "latency": 38,
          "latency_targets": [
           "generic_http"
          ],
-         "min_latency_successes": 30
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 48,
@@ -5928,16 +6034,20 @@
          "Insufficient time coverage"
         ],
         "weights": {
-         "speed": 20,
+         "speed": 0,
          "reliability": 80
         },
         "scored_at": null,
         "components": {
          "speed": {
-          "state": "unavailable",
           "value": null,
-          "inputs": null,
-          "reason": null
+          "state": "unavailable",
+          "reason": "Latency is measured on the latency target only",
+          "inputs": {
+           "value": null,
+           "best": null,
+           "peers": 0
+          }
          },
          "reliability": {
           "state": "unavailable",
@@ -5962,42 +6072,42 @@
         "successes": 998,
         "body_bytes": 14000,
         "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
         "success_rate": 0.9976,
         "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "tls": 1
         },
         "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
+        "latency_reason": "Latency is measured on the latency target only",
         "under_load": {
-         "slots": 44,
-         "own_factor": 42,
-         "carried_factor": 2,
+         "slots": 0,
+         "own_factor": 0,
+         "carried_factor": 0,
          "without_factor": 0,
-         "reason": null
+         "reason": "Latency is measured on the latency target only"
         },
         "time_slots": {
          "minutes": 30,
          "success": 48,
          "down": 4,
-         "latency": 44,
-         "latency_targets": [
-          "generic_https"
-         ],
-         "min_latency_successes": 30
+         "latency": 0,
+         "latency_targets": [],
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 48,
@@ -6022,42 +6132,42 @@
         "successes": 998,
         "body_bytes": 14000,
         "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
         "success_rate": 0.9976,
         "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "tls": 1
         },
         "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
+        "latency_reason": "Latency is measured on the latency target only",
         "under_load": {
-         "slots": 44,
-         "own_factor": 42,
-         "carried_factor": 2,
+         "slots": 0,
+         "own_factor": 0,
+         "carried_factor": 0,
          "without_factor": 0,
-         "reason": null
+         "reason": "Latency is measured on the latency target only"
         },
         "time_slots": {
          "minutes": 30,
          "success": 48,
          "down": 4,
-         "latency": 44,
-         "latency_targets": [
-          "generic_https"
-         ],
-         "min_latency_successes": 30
+         "latency": 0,
+         "latency_targets": [],
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 48,
@@ -6086,15 +6196,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1587,
-       "p90": 1989,
-       "p95": 2344,
-       "p99": 4695
+       "p50": 1024,
+       "p90": 1283,
+       "p95": 1512,
+       "p99": 3029
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+      "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -6102,15 +6212,16 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 2253.54,
-       "p90": 2744.82,
-       "p95": 3164.4,
-       "p99": 6150.45
+       "p50": 1454.08,
+       "p90": 1770.54,
+       "p95": 2041.2,
+       "p99": 3967.99
       },
+      "latency_reason": null,
       "under_load": {
-       "slots": 88,
-       "own_factor": 84,
-       "carried_factor": 4,
+       "slots": 44,
+       "own_factor": 42,
+       "carried_factor": 2,
        "without_factor": 0,
        "reason": null
       },
@@ -6118,12 +6229,12 @@
        "minutes": 30,
        "success": 48,
        "down": 4,
-       "latency": 44,
+       "latency": 38,
        "latency_targets": [
-        "generic_http",
-        "generic_https"
+        "generic_http"
        ],
-       "min_latency_successes": 30
+       "min_latency_successes": 30,
+       "skipped_during_census": 6
       },
       "coverage_slots": {
        "due": 48,
@@ -6193,32 +6304,84 @@
       "unscheduled": 0
      },
      "latency": {
-      "reference": {
-       "country": "US",
-       "target": "generic_http",
-       "concurrency": 1000
-      },
-      "factors": {
-       "slots": 42,
-       "mean": {
-        "p50": 1.42,
-        "p90": 1.38,
-        "p95": 1.35,
-        "p99": 1.31
+      "target": "generic_http",
+      "regions": [
+       {
+        "region": "fra1",
+        "reference": {
+         "country": "DE",
+         "target": "generic_http",
+         "concurrency": 1000
+        },
+        "chosen": [
+         {
+          "day": "2026-09-26",
+          "country": "DE",
+          "basis": "fastest light-load p50 of the previous day",
+          "p50_ms": 1126,
+          "successes": 1200,
+          "candidates": 2
+         }
+        ],
+        "factors": {
+         "slots": 36,
+         "excluded_during_census": 6,
+         "mean": {
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         },
+         "latest": {
+          "at": "2026-09-26T14:00:00+00:00",
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         }
+        }
        },
-       "latest": {
-        "at": "2026-09-26T14:00:00+00:00",
-        "p50": 1.42,
-        "p90": 1.38,
-        "p95": 1.35,
-        "p99": 1.31
+       {
+        "region": "nyc1",
+        "reference": {
+         "country": "US",
+         "target": "generic_http",
+         "concurrency": 1000
+        },
+        "chosen": [
+         {
+          "day": "2026-09-26",
+          "country": "US",
+          "basis": "fastest light-load p50 of the previous day",
+          "p50_ms": 1024,
+          "successes": 1200,
+          "candidates": 2
+         }
+        ],
+        "factors": {
+         "slots": 36,
+         "excluded_during_census": 6,
+         "mean": {
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         },
+         "latest": {
+          "at": "2026-09-26T14:00:00+00:00",
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         }
+        }
        }
-      },
-      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
+      ],
+      "basis": "under load = light-load (pulse) latency x (load run ÷ pulse in the region's reference country) of the same slot, else the region's newest earlier factor; mean of slot and country values",
       "countries": [
        {
         "country": "DE",
-        "target": "generic_http",
+        "region": "fra1",
         "latency_ms": {
          "p50": 1126,
          "p90": 1411,
@@ -6238,29 +6401,8 @@
         "reason": null
        },
        {
-        "country": "DE",
-        "target": "generic_https",
-        "latency_ms": {
-         "p50": 2365,
-         "p90": 2963,
-         "p95": 3493,
-         "p99": 6997
-        },
-        "latency_under_load_ms": {
-         "p50": 3358.3,
-         "p90": 4088.94,
-         "p95": 4715.55,
-         "p99": 9166.07
-        },
-        "slots": 44,
-        "own_factor": 42,
-        "carried_factor": 2,
-        "without_factor": 0,
-        "reason": null
-       },
-       {
         "country": "US",
-        "target": "generic_http",
+        "region": "nyc1",
         "latency_ms": {
          "p50": 1024,
          "p90": 1283,
@@ -6278,29 +6420,105 @@
         "carried_factor": 2,
         "without_factor": 0,
         "reason": null
-       },
-       {
-        "country": "US",
-        "target": "generic_https",
-        "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
-        },
-        "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
-        },
-        "slots": 44,
-        "own_factor": 42,
-        "carried_factor": 2,
-        "without_factor": 0,
-        "reason": null
        }
       ]
+     },
+     "census_overlap": {
+      "pulses": {
+       "clean": {
+        "runs": 84,
+        "requests": 9000,
+        "successes": 8990,
+        "request_success_rate": 0.9988888888888889,
+        "success_rate": 0.997889,
+        "latency_ms": {
+         "p50": 1024,
+         "p90": 1283,
+         "p95": 1512,
+         "p99": 3029
+        }
+       },
+       "during_census": {
+        "runs": 12,
+        "requests": 1200,
+        "successes": 1110,
+        "request_success_rate": 0.925,
+        "success_rate": 0.924,
+        "latency_ms": {
+         "p50": 1331,
+         "p90": 1668,
+         "p95": 1966,
+         "p99": 3938
+        }
+       }
+      },
+      "targets": {
+       "generic_http": {
+        "clean": {
+         "runs": 42,
+         "requests": 4500,
+         "successes": 4496,
+         "request_success_rate": 0.9991111111111111,
+         "success_rate": 0.998111,
+         "latency_ms": {
+          "p50": 1024,
+          "p90": 1283,
+          "p95": 1512,
+          "p99": 3029
+         }
+        },
+        "during_census": {
+         "runs": 6,
+         "requests": 600,
+         "successes": 556,
+         "request_success_rate": 0.9266666666666666,
+         "success_rate": 0.925667,
+         "latency_ms": {
+          "p50": 1331,
+          "p90": 1668,
+          "p95": 1966,
+          "p99": 3938
+         }
+        }
+       },
+       "generic_https": {
+        "clean": {
+         "runs": 42,
+         "requests": 4500,
+         "successes": 4494,
+         "request_success_rate": 0.9986666666666667,
+         "success_rate": 0.997667,
+         "latency_ms": {
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null
+         }
+        },
+        "during_census": {
+         "runs": 6,
+         "requests": 600,
+         "successes": 554,
+         "request_success_rate": 0.9233333333333333,
+         "success_rate": 0.922333,
+         "latency_ms": {
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null
+         }
+        }
+       }
+      },
+      "load": {
+       "clean": 42,
+       "during_census": 6
+      },
+      "census_batches": [
+       101,
+       102
+      ],
+      "basis": "pulse and load runs that overlapped a running census of the same product (any country), from stored run start and finish times; left out of light-load latency, time-slot success and the load factor, still counted as requests, uptime and slots"
      },
      "breakdowns": {
       "country": [
@@ -6583,18 +6801,10 @@
      "scores": {
       "balanced": {
        "rank": null,
-       "grade": null,
-       "score": null,
-       "state": "incomplete",
-       "reasons": [
-        "Required benchmark incomplete: generic_http",
-        "Required benchmark incomplete: generic_https",
-        "Required benchmark targets are incomplete",
-        "Required benchmark targets are incomplete",
-        "Continuous availability measurements are required",
-        "Verified product claim and reputation measurements required",
-        "Verified pricing and billed usage are required"
-       ],
+       "grade": "A+",
+       "score": 100,
+       "state": "ready",
+       "reasons": [],
        "weights": {
         "speed": 14,
         "value": 14,
@@ -6608,22 +6818,18 @@
        "scored_at": null,
        "components": {
         "speed": {
-         "state": "unavailable",
-         "value": null,
+         "state": "ready",
+         "value": 100,
          "inputs": {
           "peers": 1,
           "targets": {
            "generic_http": {
             "value": 1454.08,
             "best": 1454.08
-           },
-           "generic_https": {
-            "value": 3053,
-            "best": 3053
            }
           }
          },
-         "reason": "Required benchmark targets are incomplete"
+         "reason": null
         },
         "value": {
          "value": 100,
@@ -6643,13 +6849,17 @@
           "best": 0.9921481779746326,
           "peers": 1
          },
-         "reason": "DB-IP usage classification; unknown records remain unclassified"
+         "reason": null
         },
         "uptime": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Continuous availability measurements are required"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "coverage": {
          "state": "ready",
@@ -6686,10 +6896,14 @@
          "reason": null
         },
         "reliability": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Required benchmark targets are incomplete"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "authenticity": {
          "value": 100,
@@ -6708,18 +6922,10 @@
       },
       "latency_first": {
        "rank": null,
-       "grade": null,
-       "score": null,
-       "state": "incomplete",
-       "reasons": [
-        "Required benchmark incomplete: generic_http",
-        "Required benchmark incomplete: generic_https",
-        "Required benchmark targets are incomplete",
-        "Required benchmark targets are incomplete",
-        "Continuous availability measurements are required",
-        "Verified product claim and reputation measurements required",
-        "Verified pricing and billed usage are required"
-       ],
+       "grade": "A+",
+       "score": 100,
+       "state": "ready",
+       "reasons": [],
        "weights": {
         "speed": 38,
         "value": 12,
@@ -6733,22 +6939,18 @@
        "scored_at": null,
        "components": {
         "speed": {
-         "state": "unavailable",
-         "value": null,
+         "state": "ready",
+         "value": 100,
          "inputs": {
           "peers": 1,
           "targets": {
            "generic_http": {
             "value": 1454.08,
             "best": 1454.08
-           },
-           "generic_https": {
-            "value": 3053,
-            "best": 3053
            }
           }
          },
-         "reason": "Required benchmark targets are incomplete"
+         "reason": null
         },
         "value": {
          "value": 100,
@@ -6768,13 +6970,17 @@
           "best": 0.9921481779746326,
           "peers": 1
          },
-         "reason": "DB-IP usage classification; unknown records remain unclassified"
+         "reason": null
         },
         "uptime": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Continuous availability measurements are required"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "coverage": {
          "state": "ready",
@@ -6811,10 +7017,14 @@
          "reason": null
         },
         "reliability": {
-         "state": "unavailable",
-         "value": null,
-         "inputs": null,
-         "reason": "Required benchmark targets are incomplete"
+         "state": "ready",
+         "value": 100,
+         "inputs": {
+          "value": null,
+          "best": null,
+          "peers": 1
+         },
+         "reason": null
         },
         "authenticity": {
          "value": 100,
@@ -7236,15 +7446,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1587,
-       "p90": 1989,
-       "p95": 2344,
-       "p99": 4695
+       "p50": 1024,
+       "p90": 1283,
+       "p95": 1512,
+       "p99": 3029
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+      "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -7252,15 +7462,16 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 2253.54,
-       "p90": 2744.82,
-       "p95": 3164.4,
-       "p99": 6150.45
+       "p50": 1454.08,
+       "p90": 1770.54,
+       "p95": 2041.2,
+       "p99": 3967.99
       },
+      "latency_reason": null,
       "under_load": {
-       "slots": 2872,
-       "own_factor": 2868,
-       "carried_factor": 4,
+       "slots": 1436,
+       "own_factor": 1434,
+       "carried_factor": 2,
        "without_factor": 0,
        "reason": null
       },
@@ -7268,12 +7479,12 @@
        "minutes": 30,
        "success": 1440,
        "down": 4,
-       "latency": 1436,
+       "latency": 1430,
        "latency_targets": [
-        "generic_http",
-        "generic_https"
+        "generic_http"
        ],
-       "min_latency_successes": 30
+       "min_latency_successes": 30,
+       "skipped_during_census": 6
       },
       "coverage_slots": {
        "due": 1440,
@@ -7347,7 +7558,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -7360,6 +7571,7 @@
          "p95": 2041.2,
          "p99": 3967.99
         },
+        "latency_reason": null,
         "under_load": {
          "slots": 1436,
          "own_factor": 1434,
@@ -7371,11 +7583,12 @@
          "minutes": 30,
          "success": 1440,
          "down": 4,
-         "latency": 1436,
+         "latency": 1430,
          "latency_targets": [
           "generic_http"
          ],
-         "min_latency_successes": 30
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 1440,
@@ -7408,7 +7621,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -7421,6 +7634,7 @@
          "p95": 2041.2,
          "p99": 3967.99
         },
+        "latency_reason": null,
         "under_load": {
          "slots": 1436,
          "own_factor": 1434,
@@ -7432,11 +7646,12 @@
          "minutes": 30,
          "success": 1440,
          "down": 4,
-         "latency": 1436,
+         "latency": 1430,
          "latency_targets": [
           "generic_http"
          ],
-         "min_latency_successes": 30
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 1440,
@@ -7463,16 +7678,20 @@
          "Insufficient time coverage"
         ],
         "weights": {
-         "speed": 20,
+         "speed": 0,
          "reliability": 80
         },
         "scored_at": null,
         "components": {
          "speed": {
-          "state": "unavailable",
           "value": null,
-          "inputs": null,
-          "reason": null
+          "state": "unavailable",
+          "reason": "Latency is measured on the latency target only",
+          "inputs": {
+           "value": null,
+           "best": null,
+           "peers": 0
+          }
          },
          "reliability": {
           "state": "unavailable",
@@ -7497,42 +7716,42 @@
         "successes": 998,
         "body_bytes": 14000,
         "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
         "success_rate": 0.9976,
         "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "tls": 1
         },
         "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
+        "latency_reason": "Latency is measured on the latency target only",
         "under_load": {
-         "slots": 1436,
-         "own_factor": 1434,
-         "carried_factor": 2,
+         "slots": 0,
+         "own_factor": 0,
+         "carried_factor": 0,
          "without_factor": 0,
-         "reason": null
+         "reason": "Latency is measured on the latency target only"
         },
         "time_slots": {
          "minutes": 30,
          "success": 1440,
          "down": 4,
-         "latency": 1436,
-         "latency_targets": [
-          "generic_https"
-         ],
-         "min_latency_successes": 30
+         "latency": 0,
+         "latency_targets": [],
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 1440,
@@ -7557,42 +7776,42 @@
         "successes": 998,
         "body_bytes": 14000,
         "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
         "success_rate": 0.9976,
         "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "tls": 1
         },
         "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
+         "p50": null,
+         "p90": null,
+         "p95": null,
+         "p99": null
         },
+        "latency_reason": "Latency is measured on the latency target only",
         "under_load": {
-         "slots": 1436,
-         "own_factor": 1434,
-         "carried_factor": 2,
+         "slots": 0,
+         "own_factor": 0,
+         "carried_factor": 0,
          "without_factor": 0,
-         "reason": null
+         "reason": "Latency is measured on the latency target only"
         },
         "time_slots": {
          "minutes": 30,
          "success": 1440,
          "down": 4,
-         "latency": 1436,
-         "latency_targets": [
-          "generic_https"
-         ],
-         "min_latency_successes": 30
+         "latency": 0,
+         "latency_targets": [],
+         "min_latency_successes": 30,
+         "skipped_during_census": 6
         },
         "coverage_slots": {
          "due": 1440,
@@ -7621,15 +7840,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1587,
-       "p90": 1989,
-       "p95": 2344,
-       "p99": 4695
+       "p50": 1024,
+       "p90": 1283,
+       "p95": 1512,
+       "p99": 3029
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+      "latency_basis": "light-load successes (pulses) on the latency target, each slot normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -7637,15 +7856,16 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 2253.54,
-       "p90": 2744.82,
-       "p95": 3164.4,
-       "p99": 6150.45
+       "p50": 1454.08,
+       "p90": 1770.54,
+       "p95": 2041.2,
+       "p99": 3967.99
       },
+      "latency_reason": null,
       "under_load": {
-       "slots": 2872,
-       "own_factor": 2868,
-       "carried_factor": 4,
+       "slots": 1436,
+       "own_factor": 1434,
+       "carried_factor": 2,
        "without_factor": 0,
        "reason": null
       },
@@ -7653,12 +7873,12 @@
        "minutes": 30,
        "success": 1440,
        "down": 4,
-       "latency": 1436,
+       "latency": 1430,
        "latency_targets": [
-        "generic_http",
-        "generic_https"
+        "generic_http"
        ],
-       "min_latency_successes": 30
+       "min_latency_successes": 30,
+       "skipped_during_census": 6
       },
       "coverage_slots": {
        "due": 1440,
@@ -7728,32 +7948,84 @@
       "unscheduled": 0
      },
      "latency": {
-      "reference": {
-       "country": "US",
-       "target": "generic_http",
-       "concurrency": 1000
-      },
-      "factors": {
-       "slots": 1434,
-       "mean": {
-        "p50": 1.42,
-        "p90": 1.38,
-        "p95": 1.35,
-        "p99": 1.31
+      "target": "generic_http",
+      "regions": [
+       {
+        "region": "fra1",
+        "reference": {
+         "country": "DE",
+         "target": "generic_http",
+         "concurrency": 1000
+        },
+        "chosen": [
+         {
+          "day": "2026-09-26",
+          "country": "DE",
+          "basis": "fastest light-load p50 of the previous day",
+          "p50_ms": 1126,
+          "successes": 1200,
+          "candidates": 2
+         }
+        ],
+        "factors": {
+         "slots": 1428,
+         "excluded_during_census": 6,
+         "mean": {
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         },
+         "latest": {
+          "at": "2026-09-26T14:00:00+00:00",
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         }
+        }
        },
-       "latest": {
-        "at": "2026-09-26T14:00:00+00:00",
-        "p50": 1.42,
-        "p90": 1.38,
-        "p95": 1.35,
-        "p99": 1.31
+       {
+        "region": "nyc1",
+        "reference": {
+         "country": "US",
+         "target": "generic_http",
+         "concurrency": 1000
+        },
+        "chosen": [
+         {
+          "day": "2026-09-26",
+          "country": "US",
+          "basis": "fastest light-load p50 of the previous day",
+          "p50_ms": 1024,
+          "successes": 1200,
+          "candidates": 2
+         }
+        ],
+        "factors": {
+         "slots": 1428,
+         "excluded_during_census": 6,
+         "mean": {
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         },
+         "latest": {
+          "at": "2026-09-26T14:00:00+00:00",
+          "p50": 1.42,
+          "p90": 1.38,
+          "p95": 1.35,
+          "p99": 1.31
+         }
+        }
        }
-      },
-      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
+      ],
+      "basis": "under load = light-load (pulse) latency x (load run ÷ pulse in the region's reference country) of the same slot, else the region's newest earlier factor; mean of slot and country values",
       "countries": [
        {
         "country": "DE",
-        "target": "generic_http",
+        "region": "fra1",
         "latency_ms": {
          "p50": 1126,
          "p90": 1411,
@@ -7773,29 +8045,8 @@
         "reason": null
        },
        {
-        "country": "DE",
-        "target": "generic_https",
-        "latency_ms": {
-         "p50": 2365,
-         "p90": 2963,
-         "p95": 3493,
-         "p99": 6997
-        },
-        "latency_under_load_ms": {
-         "p50": 3358.3,
-         "p90": 4088.94,
-         "p95": 4715.55,
-         "p99": 9166.07
-        },
-        "slots": 1436,
-        "own_factor": 1434,
-        "carried_factor": 2,
-        "without_factor": 0,
-        "reason": null
-       },
-       {
         "country": "US",
-        "target": "generic_http",
+        "region": "nyc1",
         "latency_ms": {
          "p50": 1024,
          "p90": 1283,
@@ -7813,29 +8064,105 @@
         "carried_factor": 2,
         "without_factor": 0,
         "reason": null
-       },
-       {
-        "country": "US",
-        "target": "generic_https",
-        "latency_ms": {
-         "p50": 2150,
-         "p90": 2694,
-         "p95": 3175,
-         "p99": 6361
-        },
-        "latency_under_load_ms": {
-         "p50": 3053,
-         "p90": 3717.72,
-         "p95": 4286.25,
-         "p99": 8332.91
-        },
-        "slots": 1436,
-        "own_factor": 1434,
-        "carried_factor": 2,
-        "without_factor": 0,
-        "reason": null
        }
       ]
+     },
+     "census_overlap": {
+      "pulses": {
+       "clean": {
+        "runs": 84,
+        "requests": 9000,
+        "successes": 8990,
+        "request_success_rate": 0.9988888888888889,
+        "success_rate": 0.997889,
+        "latency_ms": {
+         "p50": 1024,
+         "p90": 1283,
+         "p95": 1512,
+         "p99": 3029
+        }
+       },
+       "during_census": {
+        "runs": 12,
+        "requests": 1200,
+        "successes": 1110,
+        "request_success_rate": 0.925,
+        "success_rate": 0.924,
+        "latency_ms": {
+         "p50": 1331,
+         "p90": 1668,
+         "p95": 1966,
+         "p99": 3938
+        }
+       }
+      },
+      "targets": {
+       "generic_http": {
+        "clean": {
+         "runs": 42,
+         "requests": 4500,
+         "successes": 4496,
+         "request_success_rate": 0.9991111111111111,
+         "success_rate": 0.998111,
+         "latency_ms": {
+          "p50": 1024,
+          "p90": 1283,
+          "p95": 1512,
+          "p99": 3029
+         }
+        },
+        "during_census": {
+         "runs": 6,
+         "requests": 600,
+         "successes": 556,
+         "request_success_rate": 0.9266666666666666,
+         "success_rate": 0.925667,
+         "latency_ms": {
+          "p50": 1331,
+          "p90": 1668,
+          "p95": 1966,
+          "p99": 3938
+         }
+        }
+       },
+       "generic_https": {
+        "clean": {
+         "runs": 42,
+         "requests": 4500,
+         "successes": 4494,
+         "request_success_rate": 0.9986666666666667,
+         "success_rate": 0.997667,
+         "latency_ms": {
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null
+         }
+        },
+        "during_census": {
+         "runs": 6,
+         "requests": 600,
+         "successes": 554,
+         "request_success_rate": 0.9233333333333333,
+         "success_rate": 0.922333,
+         "latency_ms": {
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null
+         }
+        }
+       }
+      },
+      "load": {
+       "clean": 1434,
+       "during_census": 6
+      },
+      "census_batches": [
+       101,
+       102
+      ],
+      "basis": "pulse and load runs that overlapped a running census of the same product (any country), from stored run start and finish times; left out of light-load latency, time-slot success and the load factor, still counted as requests, uptime and slots"
      },
      "breakdowns": {
       "country": [

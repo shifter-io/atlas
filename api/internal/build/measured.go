@@ -254,19 +254,34 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	}
 	totals := fmt.Sprintf("%s completed requests, %s successes and %s unique IPs.",
 		jsnum.Locale(m.Completed.F()), jsnum.Locale(m.Successes.F()), jsnum.Locale(w.Pool.UniqueIps.F()))
+	// The copy follows the data: the schedule the network is measured on, its
+	// score once there is one, and only what is really still missing.
+	scheduled := census != nil || pulses > 0
+	priced := p.Pricing != nil && (p.Pricing.LowestPerGb.OK() || p.Pricing.EntryPerGb.OK())
 	if census != nil {
-		tail := ""
-		if !score.Score.OK() {
-			tail = " An overall score is not available yet."
+		tail := " An overall score is not available yet."
+		if score.Score.OK() {
+			tail = " MILF Score " + jsnum.ToFixed(score.Score.F(), 1)
+			if score.Grade != nil {
+				tail += " (" + *score.Grade + ")"
+			}
+			if score.Peers() == 1 {
+				tail += ", alone in its kind so far: every part is scored against itself"
+			}
+			tail += "."
 		}
 		mv.Verdict = fmt.Sprintf("%s The latest census covers %s: %s unique IPs from %s requests.%s",
 			totals, plural(census.Countries, "country", "countries"), jsnum.Locale(census.UniqueIps), jsnum.Locale(census.Requests), tail)
 	} else {
 		mv.Verdict = totals + " This is one pool sample; a complete performance benchmark and overall score are not available yet."
 	}
+	success := " HTTP sampling success"
+	if m.EveryRequest() {
+		success = " time-weighted success over every request"
+	}
 	mv.Strengths = []string{
 		jsnum.Locale(w.Pool.UniqueIps.F()) + " distinct exit IPs observed",
-		jsnum.Pct(m.SuccessRate.F(), 2) + " HTTP sampling success",
+		jsnum.Pct(m.SuccessRate.F(), 2) + success,
 	}
 	if census != nil {
 		mv.Strengths = append(mv.Strengths, fmt.Sprintf("%s unique IPs in the latest census across %s", jsnum.Locale(census.UniqueIps), plural(census.Countries, "country", "countries")))
@@ -276,10 +291,25 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	if pulses == 0 {
 		mv.Weaknesses = append(mv.Weaknesses, "One short run; continuous coverage unavailable")
 	}
-	mv.Weaknesses = append(mv.Weaknesses, untestedText+" not tested", "Pricing and billed usage not collected")
-	mv.Tagline = model.KindLabels[kind] + " proxies · measured HTTP pool sample"
+	mv.Weaknesses = append(mv.Weaknesses, strings.ToUpper(untestedText[:1])+untestedText[1:]+" not tested")
+	if priced {
+		mv.Weaknesses = append(mv.Weaknesses, "Billed usage not collected (list prices only)")
+	} else {
+		mv.Weaknesses = append(mv.Weaknesses, "Pricing and billed usage not collected")
+	}
+	switch {
+	case m.EveryRequest():
+		mv.Tagline = model.KindLabels[kind] + " proxies · measured on a census, pulse and load schedule"
+	case scheduled:
+		mv.Tagline = model.KindLabels[kind] + " proxies · measured on a census and pulse schedule"
+	default:
+		mv.Tagline = model.KindLabels[kind] + " proxies · measured HTTP pool sample"
+	}
 
 	mv.Score = model.ScoreView{Composite: score.Score, Rank: score.Rank, PreviousRank: score.PreviousRank, Breakdown: model.NewBreakdown(), Grade: score.Grade}
+	if peers := score.Peers(); peers.OK() {
+		mv.Score.Peers = peers
+	}
 	for k, c := range score.Components {
 		mv.Score.Breakdown.Set(k, c.Value)
 	}
