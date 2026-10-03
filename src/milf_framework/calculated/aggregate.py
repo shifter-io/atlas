@@ -901,7 +901,13 @@ def peer_scores(members, config):
                 if all(c["value"] is not None for c in parts)
                 else None,
                 "ready" if done else "incomplete",
-                None if done else "Required benchmark targets are incomplete",
+                # A target's own reason (no load test, say) says more than the generic one.
+                None
+                if done
+                else next(
+                    (c["reason"] for c in parts if c["reason"]),
+                    "Required benchmark targets are incomplete",
+                ),
                 {
                     "targets": {
                         t: {k: c["inputs"][k] for k in ("value", "best")}

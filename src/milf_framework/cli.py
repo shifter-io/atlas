@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     ingest_parser.add_argument("--database-file", required=True)
     for name, help_text in (
         ("db-init", "Apply the PostgreSQL schema"),
-        ("db-migrate", "Upgrade a v4 or v5 database in place to the current schema"),
+        ("db-migrate", "Upgrade a v4, v5 or v6 database in place to the current schema"),
         ("db-status", "Inspect stored runs and cached totals"),
     ):
         command = commands.add_parser(name, help=help_text)

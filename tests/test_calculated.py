@@ -309,6 +309,9 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     assert window["metrics"]["latency_under_load_ms"]["p50"] is None
     assert window["metrics"]["under_load"]["reason"] == "No load test in this window"
     assert window["latency"]["reference"] is None
+    # The product's speed says why, not just that its targets are incomplete.
+    speed = window["scores"]["balanced"]["components"]["speed"]
+    assert speed["reason"] == "No load test in this window" and speed["value"] is None
     # A product cannot receive a new score from an expired required target.
     later = now + timedelta(days=2)
     for v in e:
