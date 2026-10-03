@@ -81,7 +81,8 @@ func fleetViews(fleet []*entry, stats map[string]map[string]*WindowStats, totals
 		byCost := append([]ps{}, all...)
 		sort.SliceStable(byCost, func(i, j int) bool { return byCost[i].s.CostPer1kSuccess-byCost[j].s.CostPer1kSuccess < 0 })
 		byGb := append([]ps{}, all...)
-		sort.SliceStable(byGb, func(i, j int) bool { return byGb[i].p.Pricing.PricePerGb-byGb[j].p.Pricing.PricePerGb < 0 })
+		// By the `$ / GB` shown (the lowest list rate), unpriced networks last.
+		sort.SliceStable(byGb, func(i, j int) bool { return missingLast(listRate(byGb[i].p.Pricing), listRate(byGb[j].p.Pricing)) < 0 })
 		bills := Bills{All: []Bill{}, SpreadX: nan}
 		for _, x := range byCost {
 			if x.p.PrimaryKind == "residential" {
@@ -110,11 +111,27 @@ func fleetViews(fleet []*entry, stats map[string]map[string]*WindowStats, totals
 			sort.SliceStable(rel, func(i, j int) bool { return rel[j].s.SuccessRate-rel[i].s.SuccessRate < 0 })
 			v.Fastest = StatPick{Provider: ref(fast[0].p), Stats: fast[0].s}
 			v.MostReliable = StatPick{Provider: ref(rel[0].p), Stats: rel[0].s}
-			v.Cheapest = CostPick{Provider: ref(byGb[0].p), Cost: byGb[0].p.Pricing.PricePerGb}
+			v.Cheapest = CostPick{Provider: ref(byGb[0].p), Cost: listRate(byGb[0].p.Pricing)}
 			last := byGb[len(byGb)-1]
-			v.Dearest = CostPick{Provider: ref(last.p), Cost: last.p.Pricing.PricePerGb}
+			v.Dearest = CostPick{Provider: ref(last.p), Cost: listRate(last.p.Pricing)}
 		}
 		out = append(out, v)
 	}
 	return out
+}
+
+// missingLast is format.ts missingLast (ascending): missing values after every
+// real one.
+func missingLast(a, b Num) float64 {
+	am, bm := !a.OK(), !b.OK()
+	if am || bm {
+		switch {
+		case am == bm:
+			return 0
+		case am:
+			return 1
+		}
+		return -1
+	}
+	return a.F() - b.F()
 }

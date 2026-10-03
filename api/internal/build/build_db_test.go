@@ -509,3 +509,23 @@ func TestMeasuredOnlyDatasetHasNoDemoFigures(t *testing.T) {
 		}
 	}
 }
+
+// Staging once the framework publishes every-request snapshots: a priced
+// measured network is the whole fleet, so it fills the cost boards and bills.
+func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
+	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := measuredOnly(t, snapshot)
+	for _, b := range res.Overview.CostBoards {
+		if b.Ranks["shifter"] != 1 || !b.Best.OK() {
+			t.Errorf("%s cost board %+v", b.Range, b)
+		}
+	}
+	for _, v := range res.Overview.FleetViews {
+		if v.Cheapest.Cost != 0.75 || v.Bills.Best == nil || !v.Bills.Best.Bill.OK() {
+			t.Errorf("%s fleet view: cheapest %v, bills %+v", v.Range.ID, v.Cheapest.Cost, v.Bills.Best)
+		}
+	}
+}
