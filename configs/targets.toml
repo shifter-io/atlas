@@ -1,5 +1,9 @@
 # Targets the orchestrator schedules (milf-framework db-seed). Pulse runs every row with
-# pulse_enabled = true at its own interval; census runs every row with census = true.
+# pulse_enabled = true at its own interval; census runs every row with census = true. Every pulse
+# slot of a census target also runs the load wave (latency under load): census_concurrency
+# requests at census_concurrency per product in the reference country (setting
+# load.reference_country, default US). The shortest pulse interval is the length of the time
+# slots that weight the window metrics.
 # Re-seeding updates the definition (label, url, engine, pass condition, timeout, order) but
 # never the scheduling fields once a target exists, so edits made in /admin are kept.
 

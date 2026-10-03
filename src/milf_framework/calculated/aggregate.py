@@ -558,9 +558,13 @@ def latency_detail(rows, factors, reference, minimum):
     """The window's latency block: the reference (load) test, its factors, and per requested
     country the light-load and under-load latency of its pulses."""
     latest = max(factors) if factors else None
+    pulses = defaultdict(list)
+    for r in rows:
+        if r.get("test") == "pulse":
+            pulses[r["country"]].append(r)
     countries = []
-    for country in sorted({r["country"] for r in rows if r.get("test") == "pulse"}):
-        own = [r for r in rows if r.get("test") == "pulse" and r["country"] == country]
+    for country in sorted(pulses, key=lambda c: c or ""):
+        own = pulses[country]
         slots = time_slots(own)
         result = under_load(own, factors, minimum)
         countries.append(
