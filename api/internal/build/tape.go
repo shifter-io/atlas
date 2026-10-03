@@ -102,6 +102,13 @@ func describe(e *store.EventJSON, d map[string]any) tapeText {
 			value = jsnum.Count(ips) + " IPs"
 		}
 		return tapeText{"Census done" + inWhere, join(parts...), value}
+	case "census_retry":
+		// A census the provider spoiled (no success, stalled), run again once a pulse got through.
+		detail := ""
+		if reason, _ := strOf(d["reason"]); reason != "" {
+			detail = "after " + strings.ReplaceAll(reason, "_", " ")
+		}
+		return tapeText{"Census rerun" + inWhere, detail, "Rerun"}
 	case "census_skipped":
 		reason, _ := strOf(d["reason"])
 		return tapeText{"Census skipped" + inWhere, reason, "Skipped"}

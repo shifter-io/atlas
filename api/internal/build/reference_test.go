@@ -290,10 +290,12 @@ func tapeCases() tapeCaseSet {
 		`{"reason": "no node"}`, `{"requests": 100, "success_rate": 0.974, "p50": 412, "challenges": 1, "blocks": 3}`, `{"requests": 100}`,
 		`{"success_rate": 0.42, "baseline": 0.95}`, `{"value": 0.5}`, `{}`, `{"p50": 1840, "baseline": 400}`, `{"value": 2500}`, `{}`,
 		`{"blocks": 12, "baseline": 0.02}`, `{}`, `{"source": "census"}`, `{"source": "pulse"}`, `{}`, `{"name": "Hetzner"}`, `{"value": 0.31}`, `{}`, `{}`, `{}`, `{"region": "ams3"}`,
+		`{"region": "fra1", "retry_of": 41, "reason": "no_success", "pulse_batch_id": 77}`, `{}`,
 	}
 	kinds := []string{"census_finished", "census_finished", "census_finished", "census_skipped", "pulse_finished", "pulse_finished",
 		"success_drop", "success_drop", "success_drop", "latency_spike", "latency_spike", "latency_spike",
-		"block_spike", "block_spike", "down", "down", "recovered", "new_hosting_asn", "ip_overlap", "ip_overlap", "node_offline", "something_new", "no_node"}
+		"block_spike", "block_spike", "down", "down", "recovered", "new_hosting_asn", "ip_overlap", "ip_overlap", "node_offline", "something_new", "no_node",
+		"census_retry", "census_retry"}
 	set := tapeCaseSet{generatedAt: "2026-10-01T12:00:05.123456+00:00", products: []build.TapeProduct{
 		{Provider: "acme", Name: "Acme", Kind: "residential"}, {Provider: "zeta", Name: "Zeta", Kind: "mobile"}, {Provider: "acme", Name: "Acme Two", Kind: "isp"}}}
 	set.events = append(set.events, store.EventJSON{ID: 100, At: "2026-10-01T11:00:00.000000+00:00", Kind: "census_started", Category: "census",
