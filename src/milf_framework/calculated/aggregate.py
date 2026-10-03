@@ -561,11 +561,12 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
 
 def load_factors(rows, minimum):
     """Per runner region and time slot, the factor of each percentile: the latency of the
-    product's load run (census concurrency) in the region's reference country ÷ the latency of
-    its pulse in that country, on the same target, in the same slot. Both need `minimum`
-    successes. Census runs never make a factor, and neither does a load run or reference pulse
-    that ran during a census of the product (the slot then carries the region's newest earlier
-    factor forward, under_load()). Rows carry "region" (the batch's runner region slug).
+    product's load runs (census concurrency) in the region's reference country ÷ the latency of
+    its pulses in that country, on the same target, in the same slot. Both need `minimum`
+    successes. Census runs never make a factor, and neither do load runs or reference pulses that
+    ran during a census of the product: they are left out, and a slot left without a usable
+    clean pair carries the region's newest earlier factor forward (under_load()). Rows carry
+    "region" (the batch's runner region slug).
 
     Returns (factors {region: {slot: {percentile: factor}}}, references {region: {"country",
     "target", "concurrency"} of its newest load run}, excluded {region: load slots left without
@@ -604,10 +605,11 @@ def load_factors(rows, minimum):
     for key in sorted(loads):
         region, slot = key[0], key[1]
         load, base = loads[key], pulses.get(key)
-        if key in tainted:
-            excluded[region].add(slot)
+        if slot in factors[region]:
             continue
-        if slot in factors[region] or base is None or min(load[1], base[1]) < minimum:
+        if base is None or min(load[1], base[1]) < minimum:
+            if key in tainted:
+                excluded[region].add(slot)
             continue
         high = Histogram(load[0]).percentiles()
         low = Histogram(base[0]).percentiles()
@@ -782,7 +784,7 @@ def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
             "request_success_rate": successes / requests if requests else None,
             "success_rate": m["success_rate"],
             "latency_ms": m["latency_ms"]
-            if timed_target in (None, target)
+            if target in (None, timed_target) or timed_target is None
             else dict.fromkeys(LATENCY),
         }
 

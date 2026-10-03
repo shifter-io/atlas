@@ -315,6 +315,12 @@ def test_pulses_during_a_census_count_as_requests_but_not_light_load():
     # Only pulses during a census: no light-load latency, and the reason says why.
     only = timed(rows[1:], 24, 30)
     assert only["latency_ms"]["p50"] is None and only["latency_reason"] == LIGHT_CENSUS
+    # Over every target, latency is the latency target's (generic_http) alone.
+    https = [r | {"target": "generic_https", "run_key": 9} for r in rows[:1]]
+    timed_split = census_split(rows + https, [], 30, 30, "generic_http")
+    assert timed_split["pulses"]["clean"]["latency_ms"]["p50"] == 600
+    assert timed_split["targets"]["generic_https"]["clean"]["latency_ms"]["p50"] is None
+    assert timed_split["targets"]["generic_http"]["clean"]["latency_ms"]["p50"] == 600
     split = census_split(rows, [], 30, 30)
     assert split["pulses"]["clean"] | {"latency_ms": None} == {
         "runs": 0, "requests": 100, "successes": 99, "request_success_rate": 0.99,
@@ -352,6 +358,14 @@ def test_no_load_factor_from_a_census_slot():
     assert result["ms"]["p50"] == pytest.approx((800 + 1000 + 1000) * 1.5 / 3)
     (region,) = latency_detail(rows, factors, {}, 30, excluded)["regions"]
     assert region["factors"]["excluded_during_census"] == 2
+    # A slot holding a clean pair and a pair during a census makes its factor from the clean one.
+    mixed = [
+        row(T, 600, run_key=1), row(T, 900, n=1000, test="load", run_key=2),
+        row(T, 3000, census=[7], run_key=3), row(T, 9000, n=1000, test="load", census=[7],
+                                                  run_key=4),
+    ]
+    factors, _, excluded = load_factors(mixed, 30)
+    assert factors[""][T]["p50"] == 1.5 and excluded == {}
     # Every load wave during a census: no factor at all, and the reason says so.
     only = [r for r in rows if r["slot"] != T]
     factors, _, excluded = load_factors(only, 30)
