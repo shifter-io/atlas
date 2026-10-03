@@ -120,6 +120,35 @@ func TestPortMatchesTheSiteTypeScriptForEveryRequestSnapshots(t *testing.T) {
 	if !w.LightLatencyP50.OK() || !(w.LatencyP50 > w.LightLatencyP50) {
 		t.Errorf("headline %v should be the latency under load, above light load %v", w.LatencyP50, w.LightLatencyP50)
 	}
+	// Latency is the HTTP target's only, never the window's HTTP + HTTPS mixture.
+	var snapshotDoc struct {
+		Products []struct {
+			Windows map[string]struct {
+				Targets map[string]struct {
+					Metrics struct {
+						LatencyMs map[string]float64 `json:"latency_ms"`
+					} `json:"metrics"`
+				} `json:"targets"`
+			} `json:"windows"`
+		} `json:"products"`
+	}
+	if err := json.Unmarshal(snapshot, &snapshotDoc); err != nil {
+		t.Fatal(err)
+	}
+	httpLight := snapshotDoc.Products[0].Windows["24h"].Targets["generic_http"].Metrics.LatencyMs["p50"]
+	if w.LatencyTarget == nil || *w.LatencyTarget != "generic_http" || w.LightLatencyP50.F() != httpLight {
+		t.Errorf("latency target %v, light p50 %v, want generic_http %v", w.LatencyTarget, w.LightLatencyP50, httpLight)
+	}
+	for _, b := range p.Targets {
+		if b.Target != "generic_http" && b.LatencyP50.OK() {
+			t.Errorf("%s shows a latency; only generic_http may", b.Target)
+		}
+	}
+	for _, pt := range w.Latency {
+		if pt.P50.OK() {
+			t.Fatalf("a series point shows the window's mixed latency: %+v", pt)
+		}
+	}
 	if p.Pricing.PricePerGbAtScale != 0.75 || p.Pricing.PricePerGb != 1 || model.SV(p.Products[0].PriceLabel) != "$0.75–$1.00/GB" {
 		t.Errorf("pricing %+v, label %v", p.Pricing, model.SV(p.Products[0].PriceLabel))
 	}

@@ -169,10 +169,11 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		if m.Uptime.OK() {
 			uptime = m.Uptime * 100
 		}
-		head, light := headlineLatency(m), lightLatency(m)
+		lm, target := latencyMetrics(w)
+		head, light := headlineLatency(lm), lightLatency(lm)
 		ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: w.SuccessDelta,
 			LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
-			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyDeltaPct: nan,
+			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: nan,
 			UniqueIps: w.Pool.UniqueIps, ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
@@ -185,7 +186,8 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		for _, s := range w.Series {
 			t := age(s.At)
 			ws.Success = append(ws.Success, model.SeriesPoint{T: t, V: s.SuccessRate})
-			ws.Latency = append(ws.Latency, model.LatencyPoint{T: t, P50: s.LatencyMs.P50, P90: s.LatencyMs.P90, P99: s.LatencyMs.P99})
+			l := seriesLatency(w, s)
+			ws.Latency = append(ws.Latency, model.LatencyPoint{T: t, P50: l.P50, P90: l.P90, P99: l.P99})
 			ws.Pool = append(ws.Pool, model.SeriesPoint{T: t, V: s.UniqueIps})
 		}
 		return ws
@@ -326,4 +328,11 @@ func fleetWindow(fleet []*entry, stats map[string]map[string]*WindowStats, total
 	}
 	fw.BandwidthGb = Num(jsnum.Round(totals.BandwidthGb24h.F() * float64(meta.Days)))
 	return fw
+}
+
+func strOrNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

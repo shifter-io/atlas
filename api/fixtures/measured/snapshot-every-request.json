@@ -493,8 +493,8 @@
             "best": 1454.08
            },
            "generic_https": {
-            "value": null,
-            "best": null
+            "value": 3053,
+            "best": 3053
            }
           }
          },
@@ -618,8 +618,8 @@
             "best": 1454.08
            },
            "generic_https": {
-            "value": null,
-            "best": null
+            "value": 3053,
+            "best": 3053
            }
           }
          },
@@ -812,15 +812,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1024,
-       "p90": 1283,
-       "p95": 1512,
-       "p99": 3029
+       "p50": 1587,
+       "p90": 1989,
+       "p95": 2344,
+       "p99": 4695
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -828,15 +828,15 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 1454.08,
-       "p90": 1770.54,
-       "p95": 2041.2,
-       "p99": 3967.99
+       "p50": 2253.54,
+       "p90": 2744.82,
+       "p95": 3164.4,
+       "p99": 6150.45
       },
       "under_load": {
-       "slots": 332,
-       "own_factor": 330,
-       "carried_factor": 2,
+       "slots": 664,
+       "own_factor": 660,
+       "carried_factor": 4,
        "without_factor": 0,
        "reason": null
       },
@@ -845,6 +845,10 @@
        "success": 336,
        "down": 4,
        "latency": 332,
+       "latency_targets": [
+        "generic_http",
+        "generic_https"
+       ],
        "min_latency_successes": 30
       },
       "coverage_slots": {
@@ -856,7 +860,7 @@
       "block_rate": 0.002,
       "bytes_up": 500000,
       "bytes_down": 3500000,
-      "success_basis": "mean of time-slot success rates, every request",
+      "success_basis": "mean of time-slot success rates, every observed request",
       "uptime": 0.9940476190476191
      },
      "overlap": {
@@ -919,7 +923,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -944,6 +948,9 @@
          "success": 336,
          "down": 4,
          "latency": 332,
+         "latency_targets": [
+          "generic_http"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -955,7 +962,7 @@
         "block_rate": 0.002,
         "bytes_up": 500000,
         "bytes_down": 3500000,
-        "success_basis": "mean of time-slot success rates, every request"
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "benchmark": {
         "units": {
@@ -977,7 +984,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -1002,6 +1009,9 @@
          "success": 336,
          "down": 4,
          "latency": 332,
+         "latency_targets": [
+          "generic_http"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -1013,7 +1023,7 @@
         "block_rate": 0.002,
         "bytes_up": 500000,
         "bytes_down": 3500000,
-        "success_basis": "mean of time-slot success rates, every request"
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "readiness": "measured"
       },
@@ -1057,28 +1067,31 @@
          "latency_ms": "milliseconds",
          "success_rate": "fraction"
         },
-        "errors": 0,
+        "errors": 2,
         "coverage": 0,
-        "completed": 0,
-        "successes": 0,
-        "body_bytes": 0,
+        "completed": 1000,
+        "successes": 998,
+        "body_bytes": 14000,
         "latency_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
         },
-        "success_rate": null,
-        "timeout_rate": null,
+        "success_rate": 0.9976,
+        "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
-        "error_categories": {},
-        "request_success_rate": null,
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "error_categories": {
+         "timeout": 1,
+         "tls": 1
+        },
+        "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "under_load": {
          "slots": 332,
@@ -1092,6 +1105,9 @@
          "success": 336,
          "down": 4,
          "latency": 332,
+         "latency_targets": [
+          "generic_https"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -1101,9 +1117,9 @@
         },
         "challenge_rate": 0.004,
         "block_rate": 0.002,
-        "bytes_up": 0,
-        "bytes_down": 0,
-        "success_basis": "mean of time-slot success rates, every request"
+        "bytes_up": 100000,
+        "bytes_down": 700000,
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "benchmark": {
         "units": {
@@ -1111,28 +1127,31 @@
          "latency_ms": "milliseconds",
          "success_rate": "fraction"
         },
-        "errors": 0,
+        "errors": 2,
         "coverage": 0,
-        "completed": 0,
-        "successes": 0,
-        "body_bytes": 0,
+        "completed": 1000,
+        "successes": 998,
+        "body_bytes": 14000,
         "latency_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
         },
-        "success_rate": null,
-        "timeout_rate": null,
+        "success_rate": 0.9976,
+        "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
-        "error_categories": {},
-        "request_success_rate": null,
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "error_categories": {
+         "timeout": 1,
+         "tls": 1
+        },
+        "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "under_load": {
          "slots": 332,
@@ -1146,6 +1165,9 @@
          "success": 336,
          "down": 4,
          "latency": 332,
+         "latency_targets": [
+          "generic_https"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -1155,9 +1177,9 @@
         },
         "challenge_rate": 0.004,
         "block_rate": 0.002,
-        "bytes_up": 0,
-        "bytes_down": 0,
-        "success_basis": "mean of time-slot success rates, every request"
+        "bytes_up": 100000,
+        "bytes_down": 700000,
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "readiness": "unavailable"
       }
@@ -1175,15 +1197,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1024,
-       "p90": 1283,
-       "p95": 1512,
-       "p99": 3029
+       "p50": 1587,
+       "p90": 1989,
+       "p95": 2344,
+       "p99": 4695
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -1191,15 +1213,15 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 1454.08,
-       "p90": 1770.54,
-       "p95": 2041.2,
-       "p99": 3967.99
+       "p50": 2253.54,
+       "p90": 2744.82,
+       "p95": 3164.4,
+       "p99": 6150.45
       },
       "under_load": {
-       "slots": 332,
-       "own_factor": 330,
-       "carried_factor": 2,
+       "slots": 664,
+       "own_factor": 660,
+       "carried_factor": 4,
        "without_factor": 0,
        "reason": null
       },
@@ -1208,6 +1230,10 @@
        "success": 336,
        "down": 4,
        "latency": 332,
+       "latency_targets": [
+        "generic_http",
+        "generic_https"
+       ],
        "min_latency_successes": 30
       },
       "coverage_slots": {
@@ -1219,7 +1245,7 @@
       "block_rate": 0.002,
       "bytes_up": 500000,
       "bytes_down": 3500000,
-      "success_basis": "mean of time-slot success rates, every request",
+      "success_basis": "mean of time-slot success rates, every observed request",
       "uptime": 0.9940476190476191
      },
      "readiness": "partial",
@@ -1299,10 +1325,11 @@
         "p99": 1.31
        }
       },
-      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values",
+      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
       "countries": [
        {
         "country": "DE",
+        "target": "generic_http",
         "latency_ms": {
          "p50": 1126,
          "p90": 1411,
@@ -1322,7 +1349,29 @@
         "reason": null
        },
        {
+        "country": "DE",
+        "target": "generic_https",
+        "latency_ms": {
+         "p50": 2365,
+         "p90": 2963,
+         "p95": 3493,
+         "p99": 6997
+        },
+        "latency_under_load_ms": {
+         "p50": 3358.3,
+         "p90": 4088.94,
+         "p95": 4715.55,
+         "p99": 9166.07
+        },
+        "slots": 332,
+        "own_factor": 330,
+        "carried_factor": 2,
+        "without_factor": 0,
+        "reason": null
+       },
+       {
         "country": "US",
+        "target": "generic_http",
         "latency_ms": {
          "p50": 1024,
          "p90": 1283,
@@ -1334,6 +1383,27 @@
          "p90": 1770.54,
          "p95": 2041.2,
          "p99": 3967.99
+        },
+        "slots": 332,
+        "own_factor": 330,
+        "carried_factor": 2,
+        "without_factor": 0,
+        "reason": null
+       },
+       {
+        "country": "US",
+        "target": "generic_https",
+        "latency_ms": {
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
+        },
+        "latency_under_load_ms": {
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "slots": 332,
         "own_factor": 330,
@@ -1659,8 +1729,8 @@
             "best": 1454.08
            },
            "generic_https": {
-            "value": null,
-            "best": null
+            "value": 3053,
+            "best": 3053
            }
           }
          },
@@ -1784,8 +1854,8 @@
             "best": 1454.08
            },
            "generic_https": {
-            "value": null,
-            "best": null
+            "value": 3053,
+            "best": 3053
            }
           }
          },
@@ -5631,15 +5701,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1024,
-       "p90": 1283,
-       "p95": 1512,
-       "p99": 3029
+       "p50": 1587,
+       "p90": 1989,
+       "p95": 2344,
+       "p99": 4695
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -5647,15 +5717,15 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 1454.08,
-       "p90": 1770.54,
-       "p95": 2041.2,
-       "p99": 3967.99
+       "p50": 2253.54,
+       "p90": 2744.82,
+       "p95": 3164.4,
+       "p99": 6150.45
       },
       "under_load": {
-       "slots": 44,
-       "own_factor": 42,
-       "carried_factor": 2,
+       "slots": 88,
+       "own_factor": 84,
+       "carried_factor": 4,
        "without_factor": 0,
        "reason": null
       },
@@ -5664,6 +5734,10 @@
        "success": 48,
        "down": 4,
        "latency": 44,
+       "latency_targets": [
+        "generic_http",
+        "generic_https"
+       ],
        "min_latency_successes": 30
       },
       "coverage_slots": {
@@ -5675,7 +5749,7 @@
       "block_rate": 0.002,
       "bytes_up": 500000,
       "bytes_down": 3500000,
-      "success_basis": "mean of time-slot success rates, every request",
+      "success_basis": "mean of time-slot success rates, every observed request",
       "uptime": 0.9583333333333334
      },
      "overlap": {
@@ -5738,7 +5812,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -5763,6 +5837,9 @@
          "success": 48,
          "down": 4,
          "latency": 44,
+         "latency_targets": [
+          "generic_http"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -5774,7 +5851,7 @@
         "block_rate": 0.002,
         "bytes_up": 500000,
         "bytes_down": 3500000,
-        "success_basis": "mean of time-slot success rates, every request"
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "benchmark": {
         "units": {
@@ -5796,7 +5873,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -5821,6 +5898,9 @@
          "success": 48,
          "down": 4,
          "latency": 44,
+         "latency_targets": [
+          "generic_http"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -5832,7 +5912,7 @@
         "block_rate": 0.002,
         "bytes_up": 500000,
         "bytes_down": 3500000,
-        "success_basis": "mean of time-slot success rates, every request"
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "readiness": "measured"
       },
@@ -5876,28 +5956,31 @@
          "latency_ms": "milliseconds",
          "success_rate": "fraction"
         },
-        "errors": 0,
+        "errors": 2,
         "coverage": 0,
-        "completed": 0,
-        "successes": 0,
-        "body_bytes": 0,
+        "completed": 1000,
+        "successes": 998,
+        "body_bytes": 14000,
         "latency_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
         },
-        "success_rate": null,
-        "timeout_rate": null,
+        "success_rate": 0.9976,
+        "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
-        "error_categories": {},
-        "request_success_rate": null,
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "error_categories": {
+         "timeout": 1,
+         "tls": 1
+        },
+        "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "under_load": {
          "slots": 44,
@@ -5911,6 +5994,9 @@
          "success": 48,
          "down": 4,
          "latency": 44,
+         "latency_targets": [
+          "generic_https"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -5920,9 +6006,9 @@
         },
         "challenge_rate": 0.004,
         "block_rate": 0.002,
-        "bytes_up": 0,
-        "bytes_down": 0,
-        "success_basis": "mean of time-slot success rates, every request"
+        "bytes_up": 100000,
+        "bytes_down": 700000,
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "benchmark": {
         "units": {
@@ -5930,28 +6016,31 @@
          "latency_ms": "milliseconds",
          "success_rate": "fraction"
         },
-        "errors": 0,
+        "errors": 2,
         "coverage": 0,
-        "completed": 0,
-        "successes": 0,
-        "body_bytes": 0,
+        "completed": 1000,
+        "successes": 998,
+        "body_bytes": 14000,
         "latency_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
         },
-        "success_rate": null,
-        "timeout_rate": null,
+        "success_rate": 0.9976,
+        "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
-        "error_categories": {},
-        "request_success_rate": null,
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "error_categories": {
+         "timeout": 1,
+         "tls": 1
+        },
+        "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "under_load": {
          "slots": 44,
@@ -5965,6 +6054,9 @@
          "success": 48,
          "down": 4,
          "latency": 44,
+         "latency_targets": [
+          "generic_https"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -5974,9 +6066,9 @@
         },
         "challenge_rate": 0.004,
         "block_rate": 0.002,
-        "bytes_up": 0,
-        "bytes_down": 0,
-        "success_basis": "mean of time-slot success rates, every request"
+        "bytes_up": 100000,
+        "bytes_down": 700000,
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "readiness": "unavailable"
       }
@@ -5994,15 +6086,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1024,
-       "p90": 1283,
-       "p95": 1512,
-       "p99": 3029
+       "p50": 1587,
+       "p90": 1989,
+       "p95": 2344,
+       "p99": 4695
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -6010,15 +6102,15 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 1454.08,
-       "p90": 1770.54,
-       "p95": 2041.2,
-       "p99": 3967.99
+       "p50": 2253.54,
+       "p90": 2744.82,
+       "p95": 3164.4,
+       "p99": 6150.45
       },
       "under_load": {
-       "slots": 44,
-       "own_factor": 42,
-       "carried_factor": 2,
+       "slots": 88,
+       "own_factor": 84,
+       "carried_factor": 4,
        "without_factor": 0,
        "reason": null
       },
@@ -6027,6 +6119,10 @@
        "success": 48,
        "down": 4,
        "latency": 44,
+       "latency_targets": [
+        "generic_http",
+        "generic_https"
+       ],
        "min_latency_successes": 30
       },
       "coverage_slots": {
@@ -6038,7 +6134,7 @@
       "block_rate": 0.002,
       "bytes_up": 500000,
       "bytes_down": 3500000,
-      "success_basis": "mean of time-slot success rates, every request",
+      "success_basis": "mean of time-slot success rates, every observed request",
       "uptime": 0.9583333333333334
      },
      "readiness": "partial",
@@ -6118,10 +6214,11 @@
         "p99": 1.31
        }
       },
-      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values",
+      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
       "countries": [
        {
         "country": "DE",
+        "target": "generic_http",
         "latency_ms": {
          "p50": 1126,
          "p90": 1411,
@@ -6141,7 +6238,29 @@
         "reason": null
        },
        {
+        "country": "DE",
+        "target": "generic_https",
+        "latency_ms": {
+         "p50": 2365,
+         "p90": 2963,
+         "p95": 3493,
+         "p99": 6997
+        },
+        "latency_under_load_ms": {
+         "p50": 3358.3,
+         "p90": 4088.94,
+         "p95": 4715.55,
+         "p99": 9166.07
+        },
+        "slots": 44,
+        "own_factor": 42,
+        "carried_factor": 2,
+        "without_factor": 0,
+        "reason": null
+       },
+       {
         "country": "US",
+        "target": "generic_http",
         "latency_ms": {
          "p50": 1024,
          "p90": 1283,
@@ -6153,6 +6272,27 @@
          "p90": 1770.54,
          "p95": 2041.2,
          "p99": 3967.99
+        },
+        "slots": 44,
+        "own_factor": 42,
+        "carried_factor": 2,
+        "without_factor": 0,
+        "reason": null
+       },
+       {
+        "country": "US",
+        "target": "generic_https",
+        "latency_ms": {
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
+        },
+        "latency_under_load_ms": {
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "slots": 44,
         "own_factor": 42,
@@ -6478,8 +6618,8 @@
             "best": 1454.08
            },
            "generic_https": {
-            "value": null,
-            "best": null
+            "value": 3053,
+            "best": 3053
            }
           }
          },
@@ -6603,8 +6743,8 @@
             "best": 1454.08
            },
            "generic_https": {
-            "value": null,
-            "best": null
+            "value": 3053,
+            "best": 3053
            }
           }
          },
@@ -7096,15 +7236,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1024,
-       "p90": 1283,
-       "p95": 1512,
-       "p99": 3029
+       "p50": 1587,
+       "p90": 1989,
+       "p95": 2344,
+       "p99": 4695
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -7112,15 +7252,15 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 1454.08,
-       "p90": 1770.54,
-       "p95": 2041.2,
-       "p99": 3967.99
+       "p50": 2253.54,
+       "p90": 2744.82,
+       "p95": 3164.4,
+       "p99": 6150.45
       },
       "under_load": {
-       "slots": 1436,
-       "own_factor": 1434,
-       "carried_factor": 2,
+       "slots": 2872,
+       "own_factor": 2868,
+       "carried_factor": 4,
        "without_factor": 0,
        "reason": null
       },
@@ -7129,6 +7269,10 @@
        "success": 1440,
        "down": 4,
        "latency": 1436,
+       "latency_targets": [
+        "generic_http",
+        "generic_https"
+       ],
        "min_latency_successes": 30
       },
       "coverage_slots": {
@@ -7140,7 +7284,7 @@
       "block_rate": 0.002,
       "bytes_up": 500000,
       "bytes_down": 3500000,
-      "success_basis": "mean of time-slot success rates, every request",
+      "success_basis": "mean of time-slot success rates, every observed request",
       "uptime": 0.9986111111111111
      },
      "overlap": {
@@ -7203,7 +7347,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -7228,6 +7372,9 @@
          "success": 1440,
          "down": 4,
          "latency": 1436,
+         "latency_targets": [
+          "generic_http"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -7239,7 +7386,7 @@
         "block_rate": 0.002,
         "bytes_up": 500000,
         "bytes_down": 3500000,
-        "success_basis": "mean of time-slot success rates, every request"
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "benchmark": {
         "units": {
@@ -7261,7 +7408,7 @@
         "success_rate": 0.999,
         "timeout_rate": 0.0002,
         "last_observed": "2026-09-25T15:21:28.011333+00:00",
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
         "error_categories": {
          "timeout": 1,
          "http_status": 1,
@@ -7286,6 +7433,9 @@
          "success": 1440,
          "down": 4,
          "latency": 1436,
+         "latency_targets": [
+          "generic_http"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -7297,7 +7447,7 @@
         "block_rate": 0.002,
         "bytes_up": 500000,
         "bytes_down": 3500000,
-        "success_basis": "mean of time-slot success rates, every request"
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "readiness": "measured"
       },
@@ -7341,28 +7491,31 @@
          "latency_ms": "milliseconds",
          "success_rate": "fraction"
         },
-        "errors": 0,
+        "errors": 2,
         "coverage": 0,
-        "completed": 0,
-        "successes": 0,
-        "body_bytes": 0,
+        "completed": 1000,
+        "successes": 998,
+        "body_bytes": 14000,
         "latency_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
         },
-        "success_rate": null,
-        "timeout_rate": null,
+        "success_rate": 0.9976,
+        "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
-        "error_categories": {},
-        "request_success_rate": null,
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "error_categories": {
+         "timeout": 1,
+         "tls": 1
+        },
+        "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "under_load": {
          "slots": 1436,
@@ -7376,6 +7529,9 @@
          "success": 1440,
          "down": 4,
          "latency": 1436,
+         "latency_targets": [
+          "generic_https"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -7385,9 +7541,9 @@
         },
         "challenge_rate": 0.004,
         "block_rate": 0.002,
-        "bytes_up": 0,
-        "bytes_down": 0,
-        "success_basis": "mean of time-slot success rates, every request"
+        "bytes_up": 100000,
+        "bytes_down": 700000,
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "benchmark": {
         "units": {
@@ -7395,28 +7551,31 @@
          "latency_ms": "milliseconds",
          "success_rate": "fraction"
         },
-        "errors": 0,
+        "errors": 2,
         "coverage": 0,
-        "completed": 0,
-        "successes": 0,
-        "body_bytes": 0,
+        "completed": 1000,
+        "successes": 998,
+        "body_bytes": 14000,
         "latency_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
         },
-        "success_rate": null,
-        "timeout_rate": null,
+        "success_rate": 0.9976,
+        "timeout_rate": 0.001,
         "last_observed": null,
-        "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
-        "error_categories": {},
-        "request_success_rate": null,
+        "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
+        "error_categories": {
+         "timeout": 1,
+         "tls": 1
+        },
+        "request_success_rate": 0.998,
         "latency_under_load_ms": {
-         "p50": null,
-         "p90": null,
-         "p95": null,
-         "p99": null
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "under_load": {
          "slots": 1436,
@@ -7430,6 +7589,9 @@
          "success": 1440,
          "down": 4,
          "latency": 1436,
+         "latency_targets": [
+          "generic_https"
+         ],
          "min_latency_successes": 30
         },
         "coverage_slots": {
@@ -7439,9 +7601,9 @@
         },
         "challenge_rate": 0.004,
         "block_rate": 0.002,
-        "bytes_up": 0,
-        "bytes_down": 0,
-        "success_basis": "mean of time-slot success rates, every request"
+        "bytes_up": 100000,
+        "bytes_down": 700000,
+        "success_basis": "mean of time-slot success rates, every observed request"
        },
        "readiness": "unavailable"
       }
@@ -7459,15 +7621,15 @@
       "successes": 4997,
       "body_bytes": 69793,
       "latency_ms": {
-       "p50": 1024,
-       "p90": 1283,
-       "p95": 1512,
-       "p99": 3029
+       "p50": 1587,
+       "p90": 1989,
+       "p95": 2344,
+       "p99": 4695
       },
       "success_rate": 0.999,
       "timeout_rate": 0.0002,
       "last_observed": "2026-09-25T15:21:28.011333+00:00",
-      "latency_basis": "light-load successes (pulses), slots normalised to equal weight and merged",
+      "latency_basis": "light-load successes (pulses), each slot and target normalised to equal weight",
       "error_categories": {
        "timeout": 1,
        "http_status": 1,
@@ -7475,15 +7637,15 @@
       },
       "request_success_rate": 0.9994,
       "latency_under_load_ms": {
-       "p50": 1454.08,
-       "p90": 1770.54,
-       "p95": 2041.2,
-       "p99": 3967.99
+       "p50": 2253.54,
+       "p90": 2744.82,
+       "p95": 3164.4,
+       "p99": 6150.45
       },
       "under_load": {
-       "slots": 1436,
-       "own_factor": 1434,
-       "carried_factor": 2,
+       "slots": 2872,
+       "own_factor": 2868,
+       "carried_factor": 4,
        "without_factor": 0,
        "reason": null
       },
@@ -7492,6 +7654,10 @@
        "success": 1440,
        "down": 4,
        "latency": 1436,
+       "latency_targets": [
+        "generic_http",
+        "generic_https"
+       ],
        "min_latency_successes": 30
       },
       "coverage_slots": {
@@ -7503,7 +7669,7 @@
       "block_rate": 0.002,
       "bytes_up": 500000,
       "bytes_down": 3500000,
-      "success_basis": "mean of time-slot success rates, every request",
+      "success_basis": "mean of time-slot success rates, every observed request",
       "uptime": 0.9986111111111111
      },
      "readiness": "partial",
@@ -7583,10 +7749,11 @@
         "p99": 1.31
        }
       },
-      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values",
+      "basis": "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
       "countries": [
        {
         "country": "DE",
+        "target": "generic_http",
         "latency_ms": {
          "p50": 1126,
          "p90": 1411,
@@ -7606,7 +7773,29 @@
         "reason": null
        },
        {
+        "country": "DE",
+        "target": "generic_https",
+        "latency_ms": {
+         "p50": 2365,
+         "p90": 2963,
+         "p95": 3493,
+         "p99": 6997
+        },
+        "latency_under_load_ms": {
+         "p50": 3358.3,
+         "p90": 4088.94,
+         "p95": 4715.55,
+         "p99": 9166.07
+        },
+        "slots": 1436,
+        "own_factor": 1434,
+        "carried_factor": 2,
+        "without_factor": 0,
+        "reason": null
+       },
+       {
         "country": "US",
+        "target": "generic_http",
         "latency_ms": {
          "p50": 1024,
          "p90": 1283,
@@ -7618,6 +7807,27 @@
          "p90": 1770.54,
          "p95": 2041.2,
          "p99": 3967.99
+        },
+        "slots": 1436,
+        "own_factor": 1434,
+        "carried_factor": 2,
+        "without_factor": 0,
+        "reason": null
+       },
+       {
+        "country": "US",
+        "target": "generic_https",
+        "latency_ms": {
+         "p50": 2150,
+         "p90": 2694,
+         "p95": 3175,
+         "p99": 6361
+        },
+        "latency_under_load_ms": {
+         "p50": 3053,
+         "p90": 3717.72,
+         "p95": 4286.25,
+         "p99": 8332.91
         },
         "slots": 1436,
         "own_factor": 1434,

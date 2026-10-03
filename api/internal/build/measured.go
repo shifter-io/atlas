@@ -113,7 +113,8 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	if m.Uptime.OK() {
 		uptime = m.Uptime * 100
 	}
-	head := headlineLatency(m)
+	lm, _ := latencyMetrics(w)
+	head := headlineLatency(lm)
 	meas.Performance = model.PerformanceStats{
 		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan, LatencyDelta24h: nan,
 		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
@@ -152,14 +153,19 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		if has {
 			r := tr.Metrics
 			b.SuccessRate, b.CaptchaRate, b.BlockRate = r.SuccessRate, r.ChallengeRate, r.BlockRate
-			lat := headlineLatency(r)
-			b.LatencyP50, b.LatencyP90, b.Requests = lat.P50, lat.P90, r.Completed
+			b.Requests = r.Completed
+			// Latency is shown for the latency target only.
+			if t.ID == latencyTarget {
+				lat := headlineLatency(r)
+				b.LatencyP50, b.LatencyP90 = lat.P50, lat.P90
+			}
 		}
 		meas.Targets = append(meas.Targets, b)
 	}
 	lat24 := []model.LatencyPoint{}
 	for _, r := range points(day) {
-		lat24 = append(lat24, model.LatencyPoint{T: minutesAgo(ref, r.At), P50: r.LatencyMs.P50, P90: r.LatencyMs.P90, P99: r.LatencyMs.P99})
+		l := seriesLatency(day, r)
+		lat24 = append(lat24, model.LatencyPoint{T: minutesAgo(ref, r.At), P50: l.P50, P90: l.P90, P99: l.P99})
 	}
 	pointsV := func(win snap.Window, v func(snap.SeriesRow) Num) []model.SeriesPoint {
 		out := []model.SeriesPoint{}
@@ -170,7 +176,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	}
 	meas.Series = model.ProviderSeries{
 		Success24h: successes(day), Success30d: successes(w), Latency24h: lat24,
-		Latency30d:    pointsV(w, func(r snap.SeriesRow) Num { return r.LatencyMs.P50 }),
+		Latency30d:    pointsV(w, func(r snap.SeriesRow) Num { return seriesLatency(w, r).P50 }),
 		UniqueIps24h:  pointsV(day, func(r snap.SeriesRow) Num { return r.UniqueIps }),
 		UniqueIps30d:  pointsV(w, func(r snap.SeriesRow) Num { return r.UniqueIps }),
 		PricePerGb90d: []model.SeriesPoint{},
@@ -316,6 +322,52 @@ func weightedDowntimeMinutes(up *snap.Uptime) Num {
 }
 
 var naLatency = snap.Latency{P50: nan, P90: nan, P95: nan, P99: nan}
+
+// latencyTarget is the only target whose latency the site shows (product
+// rule): plain HTTP. HTTPS adds CONNECT + TLS round trips, about twice as
+// slow, so mixing them would make "latency" depend on the target mix.
+const latencyTarget = "generic_http"
+
+// latencyMetrics ports every-request.ts latencyMetrics: the latency target's
+// metrics and its id, or N/A latency and "" when the window has no such target
+// (the window's own latency mixes targets and is never used instead).
+func latencyMetrics(w snap.Window) (snap.Metrics, string) {
+	if t, ok := w.Targets[latencyTarget]; ok {
+		return t.Metrics, latencyTarget
+	}
+	return snap.Metrics{LatencyMs: naLatency}, ""
+}
+
+// windowLatencyIsHTTP ports every-request.ts windowLatencyIsHttp: whether a
+// window's own latency (its series and breakdowns) is the latency target's
+// alone, so charts may show it. Every-request snapshots say which targets
+// voted (time_slots.latency_targets); otherwise no other target may have
+// requests in the window.
+func windowLatencyIsHTTP(w snap.Window) bool {
+	if ts := w.Metrics.TimeSlots; ts != nil && ts.LatencyTargets != nil {
+		for _, t := range ts.LatencyTargets {
+			if t != latencyTarget {
+				return false
+			}
+		}
+		return true
+	}
+	for id, t := range w.Targets {
+		if id != latencyTarget && t.Metrics.Completed > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// seriesLatency is a series row's latency where the window's latency is the
+// latency target's, else N/A.
+func seriesLatency(w snap.Window, r snap.SeriesRow) snap.Latency {
+	if windowLatencyIsHTTP(w) {
+		return r.LatencyMs
+	}
+	return naLatency
+}
 
 // headlineLatency ports presentation.ts headlineLatency: the latency the site
 // leads with. Every-request snapshots: latency under load (N/A without a load

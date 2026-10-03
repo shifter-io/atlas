@@ -55,8 +55,12 @@ if (p.scoring) {
   p.scoring.slots = { min_latency_successes: 30, minutes: 30 };
 }
 
-function everyRequest(m, slots, down) {
-  const light = scale(m.latency_ms, 0.92);
+// HTTPS pays for CONNECT + TLS, so its light-load latency is about twice HTTP's.
+const HTTPS = 2.1;
+const mix = (a, b) => Object.fromEntries(P.map((p) => [p, a[p] == null || b[p] == null ? a[p] ?? b[p] : Math.round((a[p] + b[p]) / 2)]));
+const targetsOf = { generic_http: 1, generic_https: HTTPS };
+
+function everyRequest(m, slots, down, light, targets) {
   const requestRate = m.success_rate;
   return {
     ...m,
@@ -64,15 +68,16 @@ function everyRequest(m, slots, down) {
     success_rate: requestRate == null ? null : Math.round((requestRate - 0.0004) * 1e6) / 1e6,
     latency_ms: light,
     latency_under_load_ms: under(light),
-    under_load: { slots: slots - down, own_factor: slots - down - 2, carried_factor: 2, without_factor: 0, reason: null },
-    time_slots: { minutes: 30, success: slots, down, latency: slots - down, min_latency_successes: 30 },
+    under_load: { slots: (slots - down) * targets.length, own_factor: (slots - down - 2) * targets.length, carried_factor: 2 * targets.length, without_factor: 0, reason: null },
+    // Slots are lcm(pulse interval, 5 min): 30 minutes in production.
+    time_slots: { minutes: 30, success: slots, down, latency: slots - down, latency_targets: targets, min_latency_successes: 30 },
     coverage_slots: { due: slots, filled: slots, down },
     challenge_rate: 0.004,
     block_rate: 0.002,
     bytes_up: m.completed * 100,
     bytes_down: m.completed * 700,
-    success_basis: "mean of time-slot success rates, every request",
-    latency_basis: "light-load successes (pulses), slots normalised to equal weight and merged",
+    success_basis: "mean of time-slot success rates, every observed request",
+    latency_basis: "light-load successes (pulses), each slot and target normalised to equal weight",
   };
 }
 
@@ -82,27 +87,36 @@ for (const [label, w] of Object.entries(p.windows)) {
   const down = 4;
   const downtime = 7200;
   const value = 1 - downtime / (w.period.hours * 3600 * 2);
-  w.metrics = { ...everyRequest(w.metrics, slots, down), uptime: value };
-  w.benchmark = w.metrics;
-  for (const t of Object.values(w.targets)) {
-    t.metrics = everyRequest(t.metrics, slots, down);
+  const http = scale(w.targets.generic_http.metrics.latency_ms, 0.92);
+  const lightOf = { generic_http: http, generic_https: scale(http, HTTPS) };
+  // The v1 fixture never measured HTTPS; this one does, with 1,000 requests.
+  const https = w.targets.generic_https.metrics;
+  Object.assign(https, { completed: 1000, successes: 998, errors: 2, body_bytes: 14000, success_rate: 0.998, timeout_rate: 0.001, error_categories: { timeout: 1, tls: 1 } });
+  for (const [id, t] of Object.entries(w.targets)) {
+    t.metrics = everyRequest(t.metrics, slots, down, lightOf[id], [id]);
     t.benchmark = t.metrics;
   }
+  // The window mixes both targets at equal weight: never "the" latency.
+  w.metrics = { ...everyRequest(w.metrics, slots, down, mix(lightOf.generic_http, lightOf.generic_https), Object.keys(targetsOf)), uptime: value };
+  w.benchmark = w.metrics;
   w.uptime = { batches: slots, up: slots - down, value, downtime_s: downtime, basis: "outage time", countries: 2 };
   w.tests = { census: 3000, pulse: 1600, load: 400, unscheduled: 0 };
-  const light = w.metrics.latency_ms;
+  const light = lightOf.generic_http;
+  const row = (country, target, f) => ({
+    country, target,
+    latency_ms: scale(lightOf[target], f), latency_under_load_ms: under(scale(lightOf[target], f)),
+    slots: slots - down, own_factor: slots - down - 2, carried_factor: 2, without_factor: 0, reason: null,
+  });
   w.latency = {
+    // The census target's load wave, started 60 s after the slot's pulses.
     reference: { country: "US", target: "generic_http", concurrency: 1000 },
     factors: {
       slots: slots - down - 2,
       mean: FACTOR,
       latest: { at: "2026-09-26T14:00:00+00:00", ...FACTOR },
     },
-    basis: "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values",
-    countries: [
-      { country: "DE", latency_ms: scale(light, 1.1), latency_under_load_ms: under(scale(light, 1.1)), slots: slots - down, own_factor: slots - down - 2, carried_factor: 2, without_factor: 0, reason: null },
-      { country: "US", latency_ms: light, latency_under_load_ms: under(light), slots: slots - down, own_factor: slots - down - 2, carried_factor: 2, without_factor: 0, reason: null },
-    ],
+    basis: "under load = light-load (pulse) latency x (load run ÷ reference-country pulse) of the same slot, else the newest earlier slot's factor; mean of slot values; per country and target",
+    countries: [row("DE", "generic_http", 1.1), row("DE", "generic_https", 1.1), row("US", "generic_http", 1), row("US", "generic_https", 1)],
   };
   // Per unique exit IP; IPs without the DB-IP field are left out of each share.
   w.pool.geo_accuracy = 0.987;

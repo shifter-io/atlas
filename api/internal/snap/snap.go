@@ -71,11 +71,14 @@ func (v *UnderLoad) UnmarshalJSON(d []byte) error {
 }
 
 type TimeSlots struct {
-	Minutes             Num `json:"minutes"`
-	Success             Num `json:"success"`
-	Down                Num `json:"down"`
-	Latency             Num `json:"latency"`
-	MinLatencySuccesses Num `json:"min_latency_successes"`
+	Minutes Num `json:"minutes"`
+	Success Num `json:"success"`
+	Down    Num `json:"down"`
+	Latency Num `json:"latency"`
+	// LatencyTargets lists the targets whose light-load latency voted in
+	// this window (nil in payloads that do not say).
+	LatencyTargets      []string `json:"latency_targets"`
+	MinLatencySuccesses Num      `json:"min_latency_successes"`
 }
 
 func (v *TimeSlots) UnmarshalJSON(d []byte) error {

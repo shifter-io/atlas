@@ -57,9 +57,13 @@ type WindowStats struct {
 	LatencyP99      Num       `json:"latencyP99"`
 	// Light-load latency (pulses only) of an every-request snapshot, shown next
 	// to the headline latency under load; NaN otherwise (demo, older snapshots).
-	LightLatencyP50  Num                  `json:"lightLatencyP50"`
-	LightLatencyP90  Num                  `json:"lightLatencyP90"`
-	LightLatencyP99  Num                  `json:"lightLatencyP99"`
+	LightLatencyP50 Num `json:"lightLatencyP50"`
+	LightLatencyP90 Num `json:"lightLatencyP90"`
+	LightLatencyP99 Num `json:"lightLatencyP99"`
+	// LatencyTarget names the target the latency fields are for (measured
+	// networks: generic_http, the only target with a latency, see
+	// latencyMetrics); null for demo networks.
+	LatencyTarget    *string              `json:"latencyTarget"`
 	LatencyDeltaPct  Num                  `json:"latencyDeltaPct"`
 	UniqueIps        Num                  `json:"uniqueIps"`
 	ChurnRate        Num                  `json:"churnRate"`

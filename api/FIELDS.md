@@ -144,7 +144,7 @@ rows.
 | `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, stays in `measurement`) | data | ✱ |
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/providers/{slug}` `windows[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
-| `performance.latencyP50`/`P90`/`P99` | the headline latency (`headlineLatency`): every-request snapshots (metrics with `time_slots`) `w.metrics.latency_under_load_ms.p50/p90/p99`, null without a load test; older snapshots `w.metrics.latency_ms` | data | ✱ |
+| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`, null without a load test; older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
@@ -162,11 +162,11 @@ rows.
 | `trust.blacklistHitRate`, `stickinessHoldRate` | `site.trust_signals.*` | catalog / always (not measured by the framework) | ✱ |
 | `trust.stickinessAdvertised`, `kycVerified`, `consentDisclosed` | `site.trust_signals.*` | catalog (TS used `"Not tested"`, `false`, `false`) | |
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | always (not run by the framework) | |
-| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are its headline latency (under load in every-request snapshots) | data (every unmeasured target is listed) | ✱ |
+| `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are set for `generic_http` only (its headline latency, under load in every-request snapshots) and null for every other target | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
-| `series.latency24h` | `day.series` p50/p90/p99 | data | ✱ |
-| `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` / `unique_ips` | data | ✱ |
+| `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
+| `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
 | `series.pricePerGb90d` | none | always | |
 | `ipSamples[]` | not published for measured providers (presentation.ts leaves it empty) | always | |
 | `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `scope` the country code, `summary` "Down in US, detected by pulse." (", still ongoing" while open), `impact = 1 / w.uptime.countries`, `troughSuccessRate` null | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
@@ -189,7 +189,12 @@ shares (`geo_accuracy`, `datacenter_asn_share`); products carry `pricing`
 The window `latency` block (load reference, factors, per-country light and
 under-load latency), `tests` (requests per test kind), `time_slots`,
 `coverage_slots.down` and the light-load breakdown percentiles are passed
-through unchanged in `measurement` for the network page. Products' `priceLabel`
+through unchanged in `measurement` for the network page. `latency.countries[]`
+has one entry per requested country and target (`target`); the page shows the
+`generic_http` ones. Time slots are lcm(pulse interval, 5 min): 30 minutes in
+production, 10 in staging. The slow-down factor's references are read by
+`every-request.ts loadReferences`, which accepts today's single
+`latency.reference` and the coming per-runner-region list. Products' `priceLabel`
 is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 `$0.75–$1.00/GB`. Test input: `fixtures/measured/snapshot-every-request.json`
 (`scripts/every-request-fixture.mjs`).
@@ -198,10 +203,11 @@ is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 
 `windowStats` (`/v1/overview` leaderboard `windows`, `/v1/providers/{slug}`
 `windows`) reads the snapshot window: `successRate = metrics.success_rate`,
-`latencyP50/P90/P99` the headline latency (under load in every-request
-snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` the light-load
-`latency_ms` of every-request snapshots (null otherwise, and always for demo
-networks), `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
+`latencyP50/P90/P99` the `generic_http` target's headline latency (under load
+in every-request snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` its
+light-load `latency_ms` in every-request snapshots (null otherwise, and always
+for demo networks), `latencyTarget` `"generic_http"` (null for demo networks),
+the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (so a priced measured network enters `costBoards` and the fleet bills),
 `uptimePct = metrics.uptime × 100` and
 `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that window.
