@@ -374,13 +374,17 @@ def test_peer_ratio_scores():
 
     # Lower is better: p50 latency under load 100, 200 and 300 ms; lowest price per GB.
     assert values("speed") == [100, 50, 100 / 3]
+    # Speed is the latency target's (generic_http) alone; generic_https has no latency.
     assert parts[1]["speed"]["inputs"] == {
-        "targets": {
-            "generic_http": {"value": 200, "best": 100},
-            "generic_https": {"value": 200, "best": 100},
-        },
+        "targets": {"generic_http": {"value": 200, "best": 100}},
         "peers": 3,
     }
+    https = p2["targets"]["generic_https"]
+    assert https["metrics"]["latency_ms"]["p50"] is None
+    assert https["metrics"]["latency_under_load_ms"]["p50"] is None
+    assert https["score"]["components"]["speed"]["value"] is None
+    assert https["score"]["weights"]["speed"] == 0
+    assert https["score"]["score"] == https["score"]["components"]["reliability"]["value"]
     assert p2["targets"]["generic_http"]["score"]["components"]["speed"]["inputs"] == {
         "value": 200,
         "best": 100,

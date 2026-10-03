@@ -212,6 +212,10 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     assert alpha_product["pricing"]["lowest_per_gb"] == 0.75
     assert alpha_product["pricing"]["entry_per_gb"] == 1.0
     assert w["latency"]["reference"]["country"] == "DE"
-    # The load slot gives both targets' light-load latency its own factor.
-    assert w["metrics"]["under_load"]["own_factor"] == 2
+    # Latency is generic_http's alone: the load slot gives its light-load latency its own
+    # factor, and generic_https has no latency at all.
+    assert w["metrics"]["under_load"]["own_factor"] == 1
+    assert w["latency"]["target"] == "generic_http"
+    https = w["targets"]["generic_https"]["metrics"]
+    assert https["latency_ms"]["p50"] is None and https["latency_under_load_ms"]["p50"] is None
     assert json.dumps(payload)

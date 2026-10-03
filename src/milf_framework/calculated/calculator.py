@@ -19,6 +19,7 @@ from ..targets import registry
 from .aggregate import (
     BREAKDOWNS,
     NETWORK,
+    NOT_LATENCY_TARGET,
     PLACE,
     PRICES,
     UNAVAILABLE,
@@ -44,10 +45,12 @@ from .aggregate import (
     uptime,
     with_under_load,
 )
+from .aggregate import LATENCY as PERCENTILES
 from .policy import (
     digest,
     effective,
     hosting_usage_types,
+    latency_target,
     load,
     slot_settings,
     uptime_settings,
@@ -183,7 +186,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         evidence_rows = conn.execute(
             "SELECT * FROM metric_evidence ORDER BY evidence_id"
         ).fetchall()
-        scheduled = scheduled_inputs(conn, as_of)
+        scheduled = scheduled_inputs(conn, as_of, latency_target(config))
         previous_row = conn.execute(
             "SELECT payload FROM calculated_snapshots JOIN current_calculation USING(build_id)"
         ).fetchone()
@@ -263,7 +266,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         return payload
 
 
-def scheduled_inputs(conn, as_of):
+def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     """The census/pulse history a v2 payload adds, read in the calculation's snapshot.
 
     geo: run_geo_buckets of the 30-day window summed per product group (scope_id for runs
@@ -278,7 +281,7 @@ def scheduled_inputs(conn, as_of):
     None); slot_length() turns it into the time slot. overlaps: the pulse and load runs that ran
     while a census of the same product was running (census_overlaps()), from stored run start
     and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
-    the breakdowns' (light-load) latency.
+    the breakdowns' (light-load) latency, which is the latency target's (timed_target) only.
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -320,10 +323,14 @@ def scheduled_inputs(conn, as_of):
     ).fetchall()
     overlaps = census_overlaps(census_runs, tested_runs)
     bounds["flagged"] = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
-    # Breakdown latency is light-load latency: pulses and runs outside a batch, never census or
-    # load runs (census concurrency), nor pulses that ran during a census. Counters keep every
-    # request.
-    light = "AND (b.kind IS NULL OR b.kind='pulse') AND NOT g.run_key=ANY(%(flagged)s) "
+    # Breakdown latency is light-load latency of the latency target: its pulses and runs outside
+    # a batch, never census or load runs (census concurrency), nor pulses that ran during a
+    # census. Counters keep every request of every target.
+    bounds["latency_target"] = timed_target
+    light = (
+        "AND (b.kind IS NULL OR b.kind='pulse') AND NOT g.run_key=ANY(%(flagged)s) "
+        "AND s.target=%(latency_target)s "
+    )
     totals = conn.execute(
         f"SELECT {keys},sum(g.completed)::bigint AS completed,"
         "sum(g.successes)::bigint AS successes,sum(g.challenges)::bigint AS challenges,"
@@ -488,6 +495,8 @@ def build(
     flagged_runs = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
     flagged_batches = {(o["batch_id"], o["product_id"]): o["census"] for o in overlaps}
     minimum = slot_settings(config)["min_latency_successes"]
+    # Every latency figure comes from this one target.
+    timed_target = latency_target(config)
     groups = {}
     run_map = {}
     bucket_groups = defaultdict(list)
@@ -554,7 +563,9 @@ def build(
                 "test": test,
                 "during_census": bool(overlapped),
                 "census_batches": overlapped,
-                "light": test in (None, "pulse") and not overlapped,
+                "light": test in (None, "pulse")
+                and not overlapped
+                and r["scope"]["target"]["id"] == timed_target,
                 "slot": floor_time(at or b["bucket_start"], slot_seconds),
                 "country": country.strip().upper() if country else None,
                 "concurrency": r["scope"]["config"].get("concurrency"),
@@ -641,7 +652,8 @@ def build(
             slots_now = [d for d in slot_runs if since <= d["scheduled_for"] < as_of]
             # Every request counts (census, pulse and load alike); success is time-weighted.
             m = timed(rows, hours, minimum, slots_now, slot_minutes)
-            factors, reference, excluded = load_factors(rows, minimum)
+            timed_rows = [r for r in rows if r["target"] == timed_target]
+            factors, reference, excluded = load_factors(timed_rows, minimum)
             with_under_load(m, rows, factors, minimum, excluded)
             ps, ips = pool(seen, since, hours, hosting_usage_types(cfg))
             ps["daily"] = daily_average(days, hours)
@@ -685,9 +697,13 @@ def build(
                     own, hours, minimum, [d for d in slots_now if d["target"] == target],
                     slot_minutes,
                 )
-                # The factor comes from the census target's load run; every target's light-load
-                # latency is scaled by it.
+                # Latency is the latency target's alone; every other target has none.
                 with_under_load(tm, own, factors, minimum, excluded)
+                if target != timed_target:
+                    tm["latency_ms"] = dict.fromkeys(PERCENTILES)
+                    tm["latency_under_load_ms"] = dict.fromkeys(PERCENTILES)
+                    tm["latency_reason"] = NOT_LATENCY_TARGET
+                    tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
                 # Outages are per product and country, so a target keeps its pulse-slot share.
                 tm["uptime"] = uptime(
                     [b for b in batches if b["target_id"] == target], since, as_of, threshold
@@ -698,7 +714,7 @@ def build(
                         tm, [b for b in batches if b["target_id"] == target], since, as_of
                     )
                 tc = effective(config, p["provider"], p["product"], target)
-                member["targets"][target] = target_score(tm, tc) | {
+                member["targets"][target] = target_score(tm, tc, target) | {
                     "fresh": fresh(tm["last_observed"], as_of, tc["score_valid_hours"]),
                     "observed": tm["last_observed"],
                     "valid_hours": tc["score_valid_hours"],
@@ -733,9 +749,12 @@ def build(
                 "metrics": m,
                 # Kept for older readers; identical to metrics (every request counts).
                 "benchmark": m,
-                "latency": latency_detail(rows, factors, reference, minimum, excluded),
+                "latency": latency_detail(timed_rows, factors, reference, minimum, excluded)
+                | {"target": timed_target},
                 # Pulses (and load waves) that ran during a census, and the clean ones.
-                "census_overlap": census_split(rows, slots_now, minimum, slot_minutes),
+                "census_overlap": census_split(
+                    rows, slots_now, minimum, slot_minutes, timed_target
+                ),
                 "pool": ps,
                 "uptime": up,
                 "breakdowns": dimensions,

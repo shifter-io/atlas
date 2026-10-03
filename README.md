@@ -139,13 +139,15 @@ shortest `pulse_interval_minutes` of the pulse-enabled targets) made a whole mul
 5-minute stored bucket, lcm(interval, 5): 30 minutes in production, 10 in staging, so no census
 request is placed in a slot it did not run in. Every slot with observed requests weighs the
 same: `metrics.success_rate` is the mean of the slot success rates, successes ÷ requests observed
-in the slot (`request_success_rate` keeps successes ÷ requests). Light-load latency
-(`metrics.latency_ms`, pulses only: census and load runs run at census concurrency) merges the
-histogram of every slot and target after normalising each to weight 1 and reads p50/p90/p99
-from the merged distribution; one with fewer than `[slots] min_latency_successes` (30)
-successes does not vote. Percentiles are never averaged. Across targets that is an equal-weight
-mixture of plain HTTP and CONNECT + TLS round trips; show each target's own
-`targets.<id>.metrics.latency_ms`. Breakdown latency is light-load latency too.
+in the slot (`request_success_rate` keeps successes ÷ requests). **Latency is measured on one
+target only**, `latency_target` (default `generic_http`, the census target): light-load and
+under-load latency, the speed score, breakdown latency and the load factor all come from it.
+Other targets count for success, blocks, timeouts, IPs, authenticity, DC ASNs, bytes and uptime;
+their `targets.<id>.metrics.latency_ms` and `latency_under_load_ms` hold nulls, with
+`latency_reason`. Light-load latency (`metrics.latency_ms`, pulses only: census and load runs run
+at census concurrency) merges the slots' histograms after normalising each to weight 1 and reads
+p50/p90/p99 from the merged distribution; a slot with fewer than `[slots]
+min_latency_successes` (30) successes does not vote. Percentiles are never averaged.
 
 **Census overlap.** A pulse or load run of a product that ran while a census of the same product
 was running (any country: account and node are shared) is marked `during_census`, derived at
@@ -206,7 +208,7 @@ expired or historical scores never do.
 | Component | Raw value | Better |
 | --- | --- | --- |
 | reliability | time-weighted success rate of every request, per target (blocks, challenges, timeouts are failures inside it) | higher |
-| speed | p50 latency under load, per target | lower |
+| speed | p50 latency under load of the latency target (`generic_http`) | lower |
 | uptime | outage-time uptime % (evidence as fallback) | higher |
 | coverage | unique IPs per day | higher |
 | diversity | countries, regions, cities, ASNs per day, mixed 0.30/0.20/0.25/0.25 (`[peer.diversity]`) | higher |
@@ -227,8 +229,9 @@ load it with `milf-framework metric-evidence configs/pricing/shifter-residential
 no claim-gap input; a block is the target refusing us (403, 429, 451, a block page), proxy-side
 failures are proxy errors.
 
-Reliability and speed are scored per target against that target's leader, combined per target
-80/20 (`[target_weights]`), and averaged over the required targets (`[benchmark_weights]`).
+Reliability is scored per target against that target's leader and averaged over the required
+targets (`[benchmark_weights]`); speed is the latency target's alone. A target score combines
+its ratios 80/20 (`[target_weights]`); a target without latency scores on reliability.
 Without a load test in the window, speed (and so the composite) has no value; the component's
 reason says why.
 Pool counts are the average of daily (24-hour) counts over the window's days with observations,

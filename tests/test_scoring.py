@@ -227,6 +227,16 @@ def test_staging_methodology_extends_production(tmp_path):
         load(tmp_path / "a.toml")
 
 
+def test_latency_target_is_a_required_target(tmp_path):
+    config, _ = load("configs/methodology.toml")
+    assert config["latency_target"] == "generic_http"
+    text = Path("configs/methodology.toml").read_text()
+    policy = tmp_path / "methodology.toml"
+    policy.write_text(text.replace('latency_target = "generic_http"', 'latency_target = "other"'))
+    with pytest.raises(ValueError, match="latency target"):
+        load(policy)
+
+
 def test_removed_settings_are_refused(tmp_path):
     text = Path("configs/methodology.toml").read_text()
     for extra in ('scored_roles = ["benchmark"]\n', "[authenticity]\nblocklist_penalty = 120\n"):

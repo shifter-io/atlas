@@ -31,6 +31,9 @@ SLOTS = {"min_latency_successes": 30}
 # DB-IP usage types that mark an exit address as a datacenter/hosting address (dcAsns, and the
 # new_hosting_asn tape event). A top-level methodology setting, so it is part of the id.
 HOSTING_USAGE_TYPES = ["hosting", "datacenter"]
+# The one target every latency figure comes from (light load, under load, speed, breakdowns, the
+# load factor): the census target. Other targets count for everything but latency.
+LATENCY_TARGET = "generic_http"
 # Live tape detection thresholds ([events] in the methodology file). They never change a
 # calculation, so load() keeps them out of the methodology id; detect.py reads them via events().
 EVENTS = {
@@ -119,6 +122,7 @@ def validate(config):
         "uptime",
         "slots",
         "hosting_usage_types",
+        "latency_target",
     }
     if set(config) - known:
         raise ValueError("Unknown methodology setting")
@@ -161,7 +165,17 @@ def validate(config):
     if set(slots) - set(SLOTS) or any(type(v) is not int or v < 1 for v in slots.values()):
         raise ValueError("Invalid slot settings")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
+    if latency_target(config) not in config["required_targets"]:
+        raise ValueError("The latency target must be a required target")
     return config
+
+
+def latency_target(config):
+    """The target every latency figure is measured on (methodology latency_target)."""
+    target = config.get("latency_target", LATENCY_TARGET)
+    if not isinstance(target, str) or not target:
+        raise ValueError("Invalid latency target")
+    return target
 
 
 def _usage_types(value):

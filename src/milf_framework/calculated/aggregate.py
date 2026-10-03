@@ -15,6 +15,7 @@ from .policy import (
     KEYS,
     composite,
     grade,
+    latency_target,
     ratio,
     uptime_settings,
 )
@@ -44,6 +45,7 @@ UNDER_LOAD_CENSUS = (
 )
 LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
 LIGHT_NONE = "No pulse with enough successes in this window"
+NOT_LATENCY_TARGET = "Latency is measured on the latency target only"
 LATENCY = ("p50", "p90", "p95", "p99")
 FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
 PLACE = ("country_code", "country", "region_code", "region", "city")
@@ -703,19 +705,20 @@ def latency_detail(rows, factors, reference, minimum, excluded=0):
     }
 
 
-def census_split(rows, pulses, minimum, slot_minutes=None):
+def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
     """Pulse runs that ran during a census of the product against clean ones, and load waves.
 
     rows are the window's bucket rows, pulses its done pulse runs (as for timed()). For each
     group: runs, requests, successes, request_success_rate, the time-weighted success_rate and
-    the light-load style latency of its own requests (latency_ms), overall and per target, so
-    the numbers measured during a census stay visible next to the clean ones they are left out
-    of. census_batches lists the censuses they overlapped.
+    the light-load style latency of its own requests (latency_ms; the latency target's only:
+    timed_target, None for every target), overall and per target, so the numbers measured
+    during a census stay visible next to the clean ones they are left out of. census_batches
+    lists the censuses they overlapped.
     """
 
     def group(during, target=None):
         own = [
-            r | {"light": True, "during_census": False}
+            r | {"light": timed_target in (None, r["target"]), "during_census": False}
             for r in rows
             if r.get("test") == "pulse"
             and bool(r.get("during_census")) == during
@@ -735,7 +738,9 @@ def census_split(rows, pulses, minimum, slot_minutes=None):
             "successes": successes,
             "request_success_rate": successes / requests if requests else None,
             "success_rate": m["success_rate"],
-            "latency_ms": m["latency_ms"],
+            "latency_ms": m["latency_ms"]
+            if timed_target in (None, target)
+            else dict.fromkeys(LATENCY),
         }
 
     loads = {}
@@ -900,11 +905,12 @@ def component(value, state="ready", reason=None, inputs=None):
     }
 
 
-def target_score(m, config):
+def target_score(m, config, target=None):
     """Readiness and raw values of a target score; peer_scores() scores them against peers.
 
     The raw components hold the time-weighted success rate of every request (reliability) and
-    the p50 latency under load (speed). Readiness counts every request of the target.
+    the p50 latency under load (speed). Readiness counts every request of the target. Only the
+    latency target has a speed: any other target scores on reliability alone (speed weight 0).
     """
     reasons = []
     if m["completed"] < config["minimum_requests"]:
@@ -912,7 +918,8 @@ def target_score(m, config):
     if m["coverage"] < config["minimum_coverage"]:
         reasons.append("Insufficient time coverage")
     state = "ready" if not reasons else "incomplete"
-    speed = m.get("latency_under_load_ms", {}).get("p50")
+    timed_target = target in (None, latency_target(config))
+    speed = (m.get("latency_under_load_ms") or {}).get("p50") if timed_target else None
     return {
         "state": state,
         "components": {
@@ -920,11 +927,16 @@ def target_score(m, config):
             "speed": component(
                 speed,
                 state,
-                None if speed is not None else m.get("under_load", {}).get("reason")
-                or UNDER_LOAD_NONE,
+                None
+                if speed is not None
+                else (m.get("under_load") or {}).get("reason") or UNDER_LOAD_NONE
+                if timed_target
+                else NOT_LATENCY_TARGET,
             ),
         },
-        "weights": config["target_weights"],
+        "weights": config["target_weights"]
+        if timed_target
+        else config["target_weights"] | {"speed": 0},
         "reasons": reasons,
     }
 
@@ -1061,15 +1073,20 @@ def peer_scores(members, config):
     raw = [dict(m["inputs"]) for m in members]
     for m, r, inputs in zip(members, results, raw, strict=True):
         required = m["config"]["required_targets"]
-        weights = m["config"]["benchmark_weights"]
         ready = {
             t: r["targets"][t]["score"] is not None and m["targets"][t]["fresh"] for t in required
         }
-        for key in ("reliability", "speed"):
-            parts = [r["targets"][t]["components"][key] for t in required]
+        # Reliability averages the required targets (benchmark_weights); speed is the latency
+        # target's alone.
+        timed_target = latency_target(m["config"])
+        for key, targets, weights in (
+            ("reliability", required, m["config"]["benchmark_weights"]),
+            ("speed", [timed_target], {timed_target: 1}),
+        ):
+            parts = [r["targets"][t]["components"][key] for t in targets]
             done = all(c["state"] == "ready" for c in parts) and all(ready.values())
             inputs[key] = component(
-                sum(c["value"] * weights[t] for t, c in zip(required, parts, strict=True))
+                sum(c["value"] * weights[t] for t, c in zip(targets, parts, strict=True))
                 / sum(weights.values())
                 if all(c["value"] is not None for c in parts)
                 else None,
@@ -1084,7 +1101,7 @@ def peer_scores(members, config):
                 {
                     "targets": {
                         t: {k: c["inputs"][k] for k in ("value", "best")}
-                        for t, c in zip(required, parts, strict=True)
+                        for t, c in zip(targets, parts, strict=True)
                     }
                 },
             )
