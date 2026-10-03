@@ -525,6 +525,9 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		if err != nil {
 			return nil, err
 		}
+		if measured {
+			e.P.NA = withoutPublishedEmpties(e)
+		}
 	}
 	for i := range ds.Targets {
 		if ds.Targets[i].NA, err = naOf(ds.Targets[i], nil, false); err != nil {

@@ -190,9 +190,18 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		meas.Overlap.Overlaps = []model.PoolOverlap{}
 	}
 	meas.IPSamples = []model.IPSample{}
-	meas.Incidents = []model.Incident{}
+	countries := nan
+	if w.Uptime != nil {
+		countries = w.Uptime.Countries
+	}
+	meas.Incidents = outageIncidents(p, ref, countries)
+	meas.Performance.DowntimeMinutes24h = weightedDowntimeMinutes(day.Uptime)
 	mv.Measured = meas
-	mv.Declared = []string{"pricing.plans", "series.pricePerGb90d", "ipSamples", "incidents", "trust.leakChecks", "overlap.likelyUpstream"}
+	mv.Declared = []string{"pricing.plans", "series.pricePerGb90d", "ipSamples", "trust.leakChecks", "overlap.likelyUpstream"}
+	if p.Outages == nil {
+		// A v1 snapshot publishes no outages: unknown, not zero.
+		mv.Declared = append(mv.Declared, "incidents")
+	}
 	if len(peers) == 0 {
 		mv.Declared = append(mv.Declared, "overlap.overlaps")
 	}
@@ -250,6 +259,41 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		mv.Score.Breakdown.Set(k, c.Value)
 	}
 	return mv
+}
+
+// outageIncidents ports presentation.ts outageIncidents: each outage the
+// snapshot publishes (v2 `outages`) as an Incident, aged against as_of. An
+// outage takes one of the `countries` the product was tested in over 30 days
+// out, so its impact is 1/countries, the weight the framework's time-based
+// uptime gives it. A trough success rate is not published (N/A).
+func outageIncidents(p *snap.Product, refMs float64, countries Num) []model.Incident {
+	out := []model.Incident{}
+	impact := nan
+	if countries.OK() && countries > 0 {
+		impact = 1 / countries
+	}
+	for _, o := range p.Outages {
+		summary := "Down in " + o.Country + ", detected by " + o.Source
+		if o.EndedAt == nil {
+			summary += ", still ongoing"
+		}
+		out = append(out, model.Incident{ID: "outage:" + p.ID + ":" + o.Country + ":" + o.StartedAt,
+			StartedAgoSeconds: Num((refMs - snap.Ms(o.StartedAt)) / 1000), DurationMinutes: o.DurationS / 60,
+			Severity: model.S("major"), Scope: model.S(o.Country), Summary: model.S(summary + "."),
+			TroughSuccessRate: nan, Impact: impact})
+	}
+	return out
+}
+
+// weightedDowntimeMinutes ports window.ts weightedDowntimeMinutes: the
+// framework's outage time over the countries tested, in minutes (1 dp), so
+// that uptime = 1 - minutes / window minutes, like the capacity-weighted
+// downtime of the demo networks. NaN without time-based uptime.
+func weightedDowntimeMinutes(up *snap.Uptime) Num {
+	if up == nil || up.Basis == nil || *up.Basis != "outage time" || !up.DowntimeS.OK() || !up.Countries.OK() || up.Countries <= 0 {
+		return nan
+	}
+	return Num(jsnum.FixedNum(up.DowntimeS.F()/up.Countries.F()/60, 1))
 }
 
 // overlapPeers maps the snapshot's 30d pair rows for one product into PoolOverlap entries.

@@ -157,6 +157,28 @@ func naOf(entity any, declared []string, emptyIsNA bool, skip ...string) ([]stri
 	return out, nil
 }
 
+// withoutPublishedEmpties drops the N/A mark naOf gives a measured provider's
+// empty incident list when its snapshot product publishes outages (v2): there
+// an empty list means no outage, a real zero, not "not collected".
+func withoutPublishedEmpties(e *entry) []string {
+	published := map[string]bool{}
+	for k, sp := range e.Snap {
+		if sp != nil && sp.Outages != nil {
+			published["productMeasurements."+k+".incidents"] = true
+			if k == e.P.PrimaryKind {
+				published["incidents"] = true
+			}
+		}
+	}
+	out := e.P.NA[:0]
+	for _, p := range e.P.NA {
+		if !published[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // reasons explains known gaps; keys are patterns (see pattern()).
 var reasons = map[string]string{
 	"tagline":                              "Editorial field: no site.providers.tagline",
@@ -179,7 +201,7 @@ var reasons = map[string]string{
 	"performance.successRateDelta30d":      "Not mapped: the snapshot's success_delta is per window (see /v1/providers/{slug} windows)",
 	"performance.latencyDelta24h":          "Not published by the framework snapshot",
 	"performance.ttfbP50":                  "TTFB is not measured by the framework",
-	"performance.downtimeMinutes24h":       "Not mapped: outage time is in measurement.windows.*.uptime.downtime_s",
+	"performance.downtimeMinutes24h":       "No time-based uptime in the snapshot's 24h window (no outage-time basis or no country tested)",
 	"performance.bandwidthMb24h":           "Not mapped: wire bytes are in measurement.windows.*.metrics.bytes_down",
 	"performance.uptimePct":                "Snapshot metrics.uptime is null (no finished pulse batches, or a v1 snapshot)",
 	"performance.captchaRate":              "Snapshot metrics.challenge_rate is null (no outcome-classified requests, or a v1 snapshot)",
@@ -218,7 +240,9 @@ var reasons = map[string]string{
 	"series.success30d":                    "No completed buckets in the 30d window",
 	"series.uniqueIps30d":                  "No completed buckets in the 30d window",
 	"ipSamples":                            "Exit-IP samples are not published for measured providers",
-	"incidents":                            "Not mapped: outages are published in measurement.outages",
+	"incidents":                            "The snapshot publishes no outages (v1 snapshot)",
+	"incidents[].troughSuccessRate":        "Outages do not publish a trough success rate",
+	"incidents[].impact":                   "No countries tested in the snapshot's 30d uptime, so an outage has no capacity weight",
 	"geo":                                  "No country breakdown in the published snapshot",
 	"geo[].latencyP50":                     "No per-country breakdown (snapshot v1 or no country rows)",
 	"geo[].successRate":                    "No per-country breakdown (snapshot v1 or no country rows)",

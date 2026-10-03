@@ -172,8 +172,14 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: w.SuccessDelta,
 			LatencyP50: m.LatencyMs.P50, LatencyP90: m.LatencyMs.P90, LatencyP99: m.LatencyMs.P99, LatencyDeltaPct: nan,
 			UniqueIps: w.Pool.UniqueIps, ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
-			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: nan, UptimePct: uptime, DowntimeMinutes: nan,
+			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: nan, UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
+		// Outages (snapshot v2) shade the charts and count as incidents; uptime
+		// and downtime stay the framework's own time-based figures.
+		if sp.Outages != nil {
+			av := availabilityAt(p.Incidents, meta.Days)
+			ws.Bands, ws.IncidentCount = av.bands, Num(av.incidentCount)
+		}
 		for _, s := range w.Series {
 			t := age(s.At)
 			ws.Success = append(ws.Success, model.SeriesPoint{T: t, V: s.SuccessRate})

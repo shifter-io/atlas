@@ -237,6 +237,23 @@ func (v *Census) UnmarshalJSON(d []byte) error {
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
+// Outage is one span a product was down in one country (snapshot v2
+// `outages`, the newest 50 overlapping the 30d window). EndedAt is nil while
+// it is still open; DurationS then runs to the snapshot's as_of.
+type Outage struct {
+	Country   string  `json:"country"`
+	Region    *string `json:"region"`
+	Source    string  `json:"source"`
+	StartedAt string  `json:"started_at"`
+	EndedAt   *string `json:"ended_at"`
+	DurationS Num     `json:"duration_s"`
+}
+
+func (v *Outage) UnmarshalJSON(d []byte) error {
+	type plain Outage
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
 type Product struct {
 	ID        string            `json:"id"`
 	ProductID Num               `json:"product_id"`
@@ -247,7 +264,10 @@ type Product struct {
 	Cohort    string            `json:"cohort"`
 	Windows   map[string]Window `json:"windows"`
 	Census    []Census          `json:"census"`
-	Raw       json.RawMessage   `json:"-"`
+	// Outages is nil for a snapshot that does not publish them (v1), and empty
+	// when it does and the product had none.
+	Outages []Outage        `json:"outages"`
+	Raw     json.RawMessage `json:"-"`
 }
 
 func (v *Product) UnmarshalJSON(d []byte) error {

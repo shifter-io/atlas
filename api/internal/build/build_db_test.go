@@ -313,7 +313,7 @@ INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_
 		"performance.ttfbP50", "performance.captchaRate", "pool.requestsPerIp", "pricing.plans", "pricing.trial",
 		"pricing.minCommit", "trust.blacklistHitRate", "trust.leakChecks", "trust.consentDisclosed",
 		"targets[generic_https].successRate", "targets[google_search].latencyP50", "targets[generic_http].delta24h",
-		"geo[].latencyP50", "ipSamples", "incidents", "series.pricePerGb90d", "overlap.overlaps", "overlap.exclusiveShare",
+		"geo[].latencyP50", "ipSamples", "series.pricePerGb90d", "overlap.overlaps", "overlap.exclusiveShare",
 		"overlap.likelyUpstream", "reviews.mean", "productMeasurements.residential.pricing.plans",
 	}
 	for _, x := range mustNA {
@@ -323,7 +323,10 @@ INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_
 	}
 	mustHave := []string{"hq", "website", "tagline", "verdict", "strengths", "pricing.pricePerGb", "pricing.costPer1kSuccess",
 		"pricing.costBasis", "pricing.model", "trust.kycVerified", "pool.claimedPoolSize", "performance.successRate",
-		"performance.uptimePct", "trust.datacenterAsnShare", "score.breakdown.reliability", "targets[generic_http].successRate"}
+		"performance.uptimePct", "trust.datacenterAsnShare", "score.breakdown.reliability", "targets[generic_http].successRate",
+		// A v2 snapshot publishes outages: an empty list is zero outages, and the
+		// 24h outage time gives the weighted downtime.
+		"incidents", "productMeasurements.residential.incidents", "performance.downtimeMinutes24h"}
 	for _, x := range mustHave {
 		if na[x] {
 			t.Errorf("%s has a value but is listed as N/A", x)
@@ -480,12 +483,12 @@ func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
 }
 
 func TestMeasuredOnlyDatasetHasNoDemoFigures(t *testing.T) {
-	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	res := measuredOnly(t, snapshot)
+	// The fixture as v2 with outages, so the dump also shows real outage bands.
+	res := measuredOnly(t, withOutages(t))
 	ds := res.Dataset
+	if ds.Totals.Incidents24h != 2 {
+		t.Errorf("incidents24h over the measured fleet: %v", ds.Totals.Incidents24h)
+	}
 	if len(ds.Providers) != 1 || ds.Providers[0].Source != "measured" || ds.Simulated {
 		t.Fatalf("providers %d, simulated %v", len(ds.Providers), ds.Simulated)
 	}

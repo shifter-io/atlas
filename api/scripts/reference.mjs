@@ -10,6 +10,8 @@
 //
 // tape-cases.json, when given, is {events, products, generatedAt}; the output
 // then carries tapeFromEvents(events, products, generatedAt) as `tape`.
+// REFERENCE_SNAPSHOT=<file> replaces fixtures/measured/snapshot.json, so the
+// comparison can cover snapshot features the committed fixture lacks (outages).
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -55,6 +57,9 @@ try {
     name: "site-api-fixture",
     setup(b) {
       b.onResolve({ filter: /\/site-api(\.ts)?$/ }, () => ({ path: join(root, "src/lib/site-api.fixture.ts") }));
+      if (process.env.REFERENCE_SNAPSHOT) {
+        b.onResolve({ filter: /fixtures\/measured\/snapshot\.json$/ }, () => ({ path: resolve(process.env.REFERENCE_SNAPSHOT) }));
+      }
     },
   };
   await build({ entryPoints: [entry], bundle: true, format: "esm", platform: "node", outfile, logLevel: "error", plugins: [fixtureLoader] });

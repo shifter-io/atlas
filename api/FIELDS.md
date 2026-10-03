@@ -29,8 +29,10 @@ only N/A paths are each fixture's `website` and the dataset's `snapshot.*` block
 General rules:
 
 - Every field is always present. Missing → `null`. Lists are never `null`; an empty
-  list a measured provider never collected (plans, IP samples, incidents, leak checks,
-  price history, best-for...) is listed in `na`.
+  list a measured provider never collected (plans, IP samples, leak checks, price
+  history, best-for...) is listed in `na`. `incidents` is the exception once the
+  snapshot publishes outages (v2): an empty list there means no outage, so it is
+  not N/A.
 - `na` paths: dots for object keys, `[]` for array elements, `targets[<id>]` and
   `products[<kind>]` for keyed lists, `productMeasurements.<category>.…`.
 - Null by contract (never in `na`):
@@ -73,7 +75,12 @@ General rules:
 Computed at build time with the formulas of `scripts/prepare-design-demo.mjs`. They
 run over the **fleet basis**: the fixtures while any exist, matching the site, which
 never mixes simulated and measured numbers in a fleet figure (`window.ts
-fleetWindow`). Otherwise they run over the measured providers. The demo round-trip
+fleetWindow`). Otherwise they run over the measured providers. The site uses the
+same basis (`data.ts fleetProviders`/`fleetBasis`, `FleetWindow.basis`) for the
+fleet windows, the Overview's fleet views and insight cards, the Pricing page
+and the Targets page. With an empty fleet, `fleetViews[].fastest`/`mostReliable`
+are `{provider: null, stats: null}`, `cheapest`/`dearest` have a null provider and
+a null cost, and `bills.best`/`worst` are null. The demo round-trip
 test proves the computed values equal the fixture's stored ones.
 
 | Field | Formula (fleet basis) |
@@ -140,7 +147,8 @@ rows.
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
-| `performance.downtimeMinutes24h`, `bandwidthMb24h` | not mapped (the snapshot has `uptime.downtime_s` and `metrics.bytes_down`) | always | ✱ |
+| `performance.downtimeMinutes24h` | `day.uptime.downtime_s / day.uptime.countries / 60`, 1 dp, when `basis` is `"outage time"` (the capacity-weighted downtime: uptime = 1 − minutes / window minutes) | data (always for a v1 snapshot) | ✱ |
+| `performance.bandwidthMb24h` | not mapped (the snapshot has `metrics.bytes_down`) | always | ✱ |
 | `performance.requests24h` | `day.metrics.completed` | data | |
 | `pricing.model`, `trial`, `costBasis` | `site.pricing.model`, `trial`, `cost_basis` | catalog (TS used `"per_gb"`, `"Not collected"` and a sentence) | |
 | `pricing.pricePerGb`, `pricePerGbAtScale`, `minCommit`, `avgPayloadKb`, `headlinePriceRank`, `valueRank` | `site.pricing.*` | catalog | ✱ |
@@ -157,12 +165,23 @@ rows.
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` / `unique_ips` | data | ✱ |
 | `series.pricePerGb90d` | none | always | |
 | `ipSamples[]` | not published for measured providers (presentation.ts leaves it empty) | always | |
-| `incidents[]` | not mapped (outages are in `measurement.outages`) | always | |
+| `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `scope` the country code, `summary` "Down in US, detected by pulse." (", still ongoing" while open), `impact = 1 / w.uptime.countries`, `troughSuccessRate` null | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
 | `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50/success rate (v2) | `latencyP50`/`successRate` data (always for v1) | ✱ |
 | `asns[]` | `w.pool.asns_breakdown`, with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
 | `overlap.exclusiveShare`, `sharedShare` | `w.overlap.exclusive_share`, `shared_share` | data (needs a peer in the cohort) | ✱ |
 | `overlap.overlaps[]` | snapshot `overlap[]` rows for the product's cohort and 30d: `sharedIps`, `shareOfOurs = shared/ips_ours`, `shareOfTheirs`; `requestsBothSides` null | data / always for `requestsBothSides` | |
 | `overlap.likelyUpstream` | none (reseller detection is not computed) | always | |
+
+### Window statistics of a measured provider
+
+`windowStats` (`/v1/overview` leaderboard `windows`, `/v1/providers/{slug}`
+`windows`) reads the snapshot window: `uptimePct = metrics.uptime × 100` and
+`downtimeMinutes` as `performance.downtimeMinutes24h` above, for that window.
+With outages published (v2), `bands` and `incidentCount` come from `incidents`
+exactly as for a demo network (each outage's overlap with the window, as a
+fraction of it, labelled `major · <country>`), so the charts shade real outages.
+For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
+empty.
 
 ## Records
 

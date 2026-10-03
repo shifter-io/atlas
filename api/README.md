@@ -209,6 +209,10 @@ touched. The suite covers:
     is published, with catalog rows and events. Every listed path is really
     null/empty, every null is listed, and the expected gaps and values are present.
   - unseed leaves an honest empty dataset
+  - **measured only**: a database with the published snapshot and nothing else
+    (staging before demo seeding) gives a measured fleet basis, empty cost boards
+    and N/A price picks. `SITEAPI_TEST_DUMP=<file>` writes that `/v1/dataset`
+    body, for an offline `SITE_API_DATASET_FILE` build of every page over it.
   - **parity with the site's TypeScript**: `scripts/reference.mjs` bundles
     `src/lib/{data,window,overview,tape}.ts` with the site's esbuild, with the
     site's API loader swapped for `src/lib/site-api.fixture.ts`
@@ -216,8 +220,11 @@ touched. The suite covers:
     `fixtures/measured/snapshot.json`), so TypeScript is still compared with Go. The test
     compares `presentationDataset`, `windowStats` (every provider and range),
     `fleetWindows`, `costBoards`, `fleetViews` and `tapeFromEvents` with the Go
-    port. It only allows the deviations listed in FIELDS.md. Skipped without node
-    and `node_modules`.
+    port. It only allows the deviations listed in FIELDS.md. It runs twice: over
+    the committed v1 fixture, and over that fixture as v2 with outages and
+    time-based uptime (`REFERENCE_SNAPSHOT` points the TypeScript at the same
+    file), which also checks how a 2-hour outage lands in incidents, bands and
+    downtime. Skipped without node and `node_modules`.
 - `server`:
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes

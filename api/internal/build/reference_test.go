@@ -14,6 +14,8 @@ import (
 
 	"github.com/ice-zeus/milf-website/api/internal/build"
 	"github.com/ice-zeus/milf-website/api/internal/config"
+	"github.com/ice-zeus/milf-website/api/internal/jsnum"
+	"github.com/ice-zeus/milf-website/api/internal/model"
 	"github.com/ice-zeus/milf-website/api/internal/store"
 )
 
@@ -59,6 +61,94 @@ func closeEnough(d string) bool {
 var providerPath = regexp.MustCompile(`^\.providers\[(\d+)\](\.productMeasurements\.\w+)?(\..*)$`)
 
 func TestPortMatchesTheSiteTypeScript(t *testing.T) {
+	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comparePort(t, snapshot, "")
+}
+
+// The committed fixture is a v1 snapshot without outages; this runs the same
+// comparison over it turned into v2 with outages and time-based uptime.
+func TestPortMatchesTheSiteTypeScriptWithOutages(t *testing.T) {
+	snapshot := withOutages(t)
+	file := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := os.WriteFile(file, snapshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := comparePort(t, snapshot, file)
+	p := res.Details["shifter"].Provider
+	if len(p.Incidents) != len(fixtureOutages) {
+		t.Fatalf("incidents %d, want %d", len(p.Incidents), len(fixtureOutages))
+	}
+	us := p.Incidents[1]
+	if us.StartedAgoSeconds != 6*3600+25*60 || us.DurationMinutes != 120 || model.SV(us.Scope) != "US" || us.Impact != 0.5 {
+		t.Errorf("2-hour US outage mapped as %+v", us)
+	}
+	if p.Performance.DowntimeMinutes24h != 75 { // 9000 s over 2 countries
+		t.Errorf("downtimeMinutes24h %v", p.Performance.DowntimeMinutes24h)
+	}
+	for _, c := range []struct {
+		rangeID  string
+		count    int
+		downtime float64
+	}{{"24h", 2, 75}, {"7d", 2, 75}, {"30d", 3, 135}} {
+		w := res.Details["shifter"].Windows["residential"][c.rangeID]
+		if len(w.Bands) != c.count || w.IncidentCount != Num(c.count) || w.DowntimeMinutes != Num(c.downtime) {
+			t.Errorf("%s: %d bands, count %v, downtime %v", c.rangeID, len(w.Bands), w.IncidentCount, w.DowntimeMinutes)
+		}
+	}
+	// The US outage sits 6h25m to 4h25m before the end of the 24h window.
+	b := res.Details["shifter"].Windows["residential"]["24h"].Bands[1]
+	if math.Abs(b.From.F()-(1-385.0/1440)) > 1e-12 || math.Abs(b.To.F()-(1-265.0/1440)) > 1e-12 || b.Label != "major · US" {
+		t.Errorf("24h band %+v", b)
+	}
+}
+
+// fixtureOutages: a 2-hour pulse outage in the US that ended 4h25m before
+// as_of, one still open in DE for the last 30 minutes, and a 2-hour one ten
+// days back (only in the 30d window). Two countries are tested.
+var fixtureOutages = []map[string]any{
+	{"country": "DE", "region": nil, "source": "census", "started_at": "2026-09-26T13:55:00+00:00", "ended_at": nil, "duration_s": 1800.0},
+	{"country": "US", "region": "nyc1", "source": "pulse", "started_at": "2026-09-26T08:00:00+00:00", "ended_at": "2026-09-26T10:00:00+00:00", "duration_s": 7200.0},
+	{"country": "DE", "region": "fra1", "source": "pulse", "started_at": "2026-09-16T12:00:00+00:00", "ended_at": "2026-09-16T14:00:00+00:00", "duration_s": 7200.0},
+}
+
+// withOutages is the committed fixture snapshot as v2 with fixtureOutages and
+// the matching time-based uptime per window.
+func withOutages(t *testing.T) []byte {
+	t.Helper()
+	body, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(body, &s); err != nil {
+		t.Fatal(err)
+	}
+	s["schema_version"] = 2
+	product := s["products"].([]any)[0].(map[string]any)
+	product["outages"] = fixtureOutages
+	downtime := map[string]float64{"24h": 9000, "7d": 9000, "30d": 16200}
+	for label, w := range product["windows"].(map[string]any) {
+		w := w.(map[string]any)
+		hours := w["period"].(map[string]any)["hours"].(float64)
+		value := 1 - downtime[label]/(hours*3600*2)
+		w["metrics"].(map[string]any)["uptime"] = value
+		w["uptime"] = map[string]any{"batches": 48, "up": 47, "value": value, "downtime_s": downtime[label], "basis": "outage time", "countries": 2}
+	}
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// comparePort publishes snapshot over the seeded demo data and compares the
+// build with what the site's TypeScript computes from the same inputs
+// (snapshotFile, when set, replaces the committed fixture for the TypeScript).
+func comparePort(t *testing.T, snapshot []byte, snapshotFile string) *build.Result {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	script := config.FindUp(filepath.Join("api", "scripts", "reference.mjs"))
 	esbuild := config.FindUp(filepath.Join("node_modules", "esbuild", "lib", "main.js"))
@@ -66,10 +156,6 @@ func TestPortMatchesTheSiteTypeScript(t *testing.T) {
 		t.Skip("needs node and the site's node_modules (esbuild) to run the TypeScript reference")
 	}
 	db := seeded(t)
-	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	db.Publish(t, snapshot)
 	res := buildFrom(t, db)
 
@@ -83,7 +169,11 @@ func TestPortMatchesTheSiteTypeScript(t *testing.T) {
 	if err := os.WriteFile(casesFile, caseBody, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := exec.Command(node, script, casesFile).Output()
+	cmd := exec.Command(node, script, casesFile)
+	if snapshotFile != "" {
+		cmd.Env = append(os.Environ(), "REFERENCE_SNAPSHOT="+snapshotFile)
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("reference script: %v", err)
 	}
@@ -145,7 +235,10 @@ func TestPortMatchesTheSiteTypeScript(t *testing.T) {
 	if !bytes.Contains(ref["dataset"], []byte(`"shifter"`)) || measuredIndex < 0 {
 		t.Fatal("reference has no measured provider; the comparison would be vacuous")
 	}
+	return res
 }
+
+type Num = jsnum.Num
 
 func itoa(n int) string {
 	b, _ := json.Marshal(n)
