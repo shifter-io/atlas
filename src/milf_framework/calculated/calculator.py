@@ -23,6 +23,8 @@ from .aggregate import (
     PRICES,
     UNAVAILABLE,
     breakdowns,
+    census_overlaps,
+    census_split,
     daily_average,
     daily_pools,
     floor_time,
@@ -273,7 +275,10 @@ def scheduled_inputs(conn, as_of):
     denominator). events: the newest test_events before the cutoff. traffic: wire bytes per test
     kind. pulse_minutes: the cohort's pulse interval, the shortest pulse_interval_minutes of
     the pulse-enabled targets (else the shortest gap between pulse slots in the window, else
-    None); slot_length() turns it into the time slot.
+    None); slot_length() turns it into the time slot. overlaps: the pulse and load runs that ran
+    while a census of the same product was running (census_overlaps()), from stored run start
+    and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
+    the breakdowns' (light-load) latency.
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -295,9 +300,30 @@ def scheduled_inputs(conn, as_of):
         "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     )
     window = "WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
+    # Census runs of every product (a census still running at the cutoff ends there), and the
+    # pulse and load runs they may overlap; a day of margin covers runs that began earlier.
+    times = (
+        "coalesce(r.started_at,br.started_at) AS started_at,"
+        "least(coalesce(r.finished_at,br.finished_at,%(end)s),%(end)s) AS finished_at "
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "LEFT JOIN test_runs r ON r.run_key=br.run_key WHERE br.started_at IS NOT NULL "
+        "AND br.started_at<%(end)s AND coalesce(br.finished_at,%(end)s)>=%(margin)s "
+    )
+    bounds["margin"] = start - timedelta(days=1)
+    census_runs = conn.execute(
+        f"SELECT br.product_id,br.batch_id,{times}AND b.kind='census' ORDER BY 1,2", bounds
+    ).fetchall()
+    tested_runs = conn.execute(
+        f"SELECT br.product_id,br.batch_id,br.run_key,{times}AND b.kind IN ('pulse','load') "
+        "ORDER BY 1,2",
+        bounds,
+    ).fetchall()
+    overlaps = census_overlaps(census_runs, tested_runs)
+    bounds["flagged"] = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
     # Breakdown latency is light-load latency: pulses and runs outside a batch, never census or
-    # load runs (census concurrency). Counters keep every request.
-    light = "AND (b.kind IS NULL OR b.kind='pulse') "
+    # load runs (census concurrency), nor pulses that ran during a census. Counters keep every
+    # request.
+    light = "AND (b.kind IS NULL OR b.kind='pulse') AND NOT g.run_key=ANY(%(flagged)s) "
     totals = conn.execute(
         f"SELECT {keys},sum(g.completed)::bigint AS completed,"
         "sum(g.successes)::bigint AS successes,sum(g.challenges)::bigint AS challenges,"
@@ -359,8 +385,8 @@ def scheduled_inputs(conn, as_of):
     # provider that is down shows as a done run whose requests failed. Operator-skipped or
     # killed batches are not slots either, and load batches never are.
     pulses = conn.execute(
-        "SELECT br.product_id,b.target_id,b.scheduled_for,trim(b.country_code) AS country,"
-        "br.status,br.requests,br.successes,br.run_key "
+        "SELECT br.product_id,br.batch_id,b.target_id,b.scheduled_for,"
+        "trim(b.country_code) AS country,br.status,br.requests,br.successes,br.run_key "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "WHERE b.kind='pulse' AND b.status NOT IN ('skipped','killed') "
         "AND b.scheduled_for>=%s AND b.scheduled_for<%s AND br.finished_at<%s "
@@ -417,6 +443,7 @@ def scheduled_inputs(conn, as_of):
     report = traffic.summary(conn, start=start, end=as_of, finished_before=as_of)
     return {
         "pulse_minutes": float(pulse_minutes) if pulse_minutes is not None else None,
+        "overlaps": overlaps,
         "geo": geo,
         "pulses": pulses,
         "census": census,
@@ -446,6 +473,7 @@ def build(
     previous,
     *,
     pulse_minutes=None,
+    overlaps=(),
     geo=(),
     pulses=(),
     census=(),
@@ -456,6 +484,9 @@ def build(
 ):
     slot_minutes = slot_length(pulse_minutes)
     slot_seconds = slot_minutes * 60
+    # Pulse and load runs that ran during a census of the same product: the census batch ids.
+    flagged_runs = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
+    flagged_batches = {(o["batch_id"], o["product_id"]): o["census"] for o in overlaps}
     minimum = slot_settings(config)["min_latency_successes"]
     groups = {}
     run_map = {}
@@ -513,13 +544,17 @@ def build(
         # to the slot their bucket starts in.
         at = r.get("slot_at") if test in ("pulse", "load") and r.get("slot_at") else None
         country = r.get("batch_country") or r["scope"]["config"].get("requested_country")
+        # Pulses and load waves that ran during a census of the product: requests, not light.
+        overlapped = flagged_runs.get(b["run_key"], [])
         bucket_groups[r["group"]].append(
             b
             | {
                 "target": r["scope"]["target"]["id"],
                 "role": r["role"],
                 "test": test,
-                "light": test in (None, "pulse"),
+                "during_census": bool(overlapped),
+                "census_batches": overlapped,
+                "light": test in (None, "pulse") and not overlapped,
                 "slot": floor_time(at or b["bucket_start"], slot_seconds),
                 "country": country.strip().upper() if country else None,
                 "concurrency": r["scope"]["config"].get("concurrency"),
@@ -584,6 +619,8 @@ def build(
                 "requests": b["requests"],
                 "successes": b["successes"],
                 "counted": b.get("run_key") is not None,
+                "during_census": bool(flagged_batches.get((b.get("batch_id"), b["product_id"]))),
+                "census_batches": flagged_batches.get((b.get("batch_id"), b["product_id"]), []),
             }
             for b in batches
         ]
@@ -604,8 +641,8 @@ def build(
             slots_now = [d for d in slot_runs if since <= d["scheduled_for"] < as_of]
             # Every request counts (census, pulse and load alike); success is time-weighted.
             m = timed(rows, hours, minimum, slots_now, slot_minutes)
-            factors, reference = load_factors(rows, minimum)
-            with_under_load(m, rows, factors, minimum)
+            factors, reference, excluded = load_factors(rows, minimum)
+            with_under_load(m, rows, factors, minimum, excluded)
             ps, ips = pool(seen, since, hours, hosting_usage_types(cfg))
             ps["daily"] = daily_average(days, hours)
             # Pulse-slot counts stay for reference; the published value is outage time.
@@ -650,7 +687,7 @@ def build(
                 )
                 # The factor comes from the census target's load run; every target's light-load
                 # latency is scaled by it.
-                with_under_load(tm, own, factors, minimum)
+                with_under_load(tm, own, factors, minimum, excluded)
                 # Outages are per product and country, so a target keeps its pulse-slot share.
                 tm["uptime"] = uptime(
                     [b for b in batches if b["target_id"] == target], since, as_of, threshold
@@ -696,7 +733,9 @@ def build(
                 "metrics": m,
                 # Kept for older readers; identical to metrics (every request counts).
                 "benchmark": m,
-                "latency": latency_detail(rows, factors, reference, minimum),
+                "latency": latency_detail(rows, factors, reference, minimum, excluded),
+                # Pulses (and load waves) that ran during a census, and the clean ones.
+                "census_overlap": census_split(rows, slots_now, minimum, slot_minutes),
                 "pool": ps,
                 "uptime": up,
                 "breakdowns": dimensions,

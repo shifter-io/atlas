@@ -35,6 +35,16 @@ hosting_usage_types = ["hosting", "datacenter"]
 # successes does not vote. Percentiles are never averaged. Over several targets that is an
 # equal-weight mixture (http and https are different round trips): read each target's own value.
 #
+# Census overlap: a pulse or load run of a product that ran while a census of the same product was
+# running (any country: the account and the node are shared) is marked during_census, derived at
+# calculation time from stored run start and finish times (the ingested run's, else the
+# orchestrator's). It still runs, fills its slot, counts for uptime, outages and down slots, and
+# its requests count for every request metric. It is left out of light-load latency (also in the
+# breakdowns), of the time-slot success (a slot votes with its other requests; one left with
+# only such pulses votes 0 if every request in it failed and does not vote otherwise), and of the
+# load factor (a factor needs a clean load run and a clean reference pulse; otherwise the newest
+# earlier factor carries forward). Snapshot: census_overlap per window.
+#
 # Latency under load (the speed score): in every pulse slot each product also runs one wave at
 # the census target's census_concurrency in the reference country (orchestrator setting
 # load.reference_country, default US): a batch of kind 'load', started load.delay_seconds (60)

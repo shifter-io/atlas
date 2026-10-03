@@ -3,7 +3,9 @@
 24-hour window, 30-minute pulses on both targets in DE, a load wave in the last slot. The
 provider is down for the pulses of 18:00, 18:30 and 19:00 (done runs whose requests all failed),
 our node shuts down during one of them (a failed run: ours, it never counts), and a census
-during the outage gets no success. The score stays computed, uptime is about 91.7% (the
+during the outage gets no success; it is still running at 19:00. Another census overlaps the
+pulses of 05:00: those pulses still count for uptime and as requests, but not for time-slot
+success or light-load latency. The score stays computed, uptime is about 91.7% (the
 outage runs from the last healthy pulse to the first healthy one, two hours), the outage is
 recorded, and the census is rerun once, at the first pulse that gets through.
 """
@@ -103,6 +105,15 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
         census = batch(conn, "census", census_at, minutes=15)
         batch_run(conn, census, alpha, census_at + timedelta(minutes=15), requests=5000,
                   successes=0, stop_reason="no_success")
+        # It ran from 18:35 to 19:02, over the (down) pulses of 19:00.
+        conn.execute(
+            "UPDATE batch_runs SET started_at=%s,finished_at=%s WHERE batch_id=%s",
+            (census_at, slots[42] + timedelta(minutes=2), census),
+        )
+        # A healthy census over the pulses of slot 10.
+        healthy = batch(conn, "census", slots[10] - timedelta(minutes=5))
+        batch_run(conn, healthy, alpha, slots[10] + timedelta(seconds=90), requests=5000,
+                  successes=4900, stop_reason="unique_ratio")
         # The two pulses the orchestrator still has running on alpha's node.
         running = {}
         for i in (43, 44):
@@ -175,11 +186,23 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     assert w["targets"]["generic_https"]["metrics"]["coverage_slots"] == {
         "due": 47, "filled": 47, "down": 2,
     }
+    # Pulses during a census still count for uptime and slots.
     assert http["uptime"] == pytest.approx(45 / 48)
-    # Time-weighted success: 45 of 48 slots succeeded, the 3 down slots vote 0.
-    assert w["metrics"]["success_rate"] == pytest.approx(45 / 48)
+    # Time-weighted success: slot 10 had only pulses during a census and does not vote; the 3
+    # down slots vote 0 (19:00 too, although a census was running): 44 of 47.
+    assert w["metrics"]["success_rate"] == pytest.approx(44 / 47)
     assert w["metrics"]["time_slots"]["minutes"] == 30
-    assert w["targets"]["generic_https"]["metrics"]["success_rate"] == pytest.approx(45 / 47)
+    assert w["metrics"]["time_slots"]["skipped_during_census"] == 1
+    assert w["metrics"]["time_slots"]["down"] == 3
+    assert w["targets"]["generic_https"]["metrics"]["success_rate"] == pytest.approx(44 / 46)
+    overlap = w["census_overlap"]
+    assert overlap["census_batches"] == sorted([healthy, census])
+    assert overlap["pulses"]["during_census"]["runs"] == 4
+    assert overlap["pulses"]["during_census"]["requests"] == 400
+    assert overlap["pulses"]["during_census"]["successes"] == 200
+    assert overlap["pulses"]["clean"]["runs"] == 91
+    assert overlap["targets"]["generic_https"]["during_census"]["runs"] == 2
+    assert overlap["load"] == {"clean": 1, "during_census": 0}
     score = w["scores"]["balanced"]
     assert score["state"] == "ready" and score["score"] is not None
     assert all(c["state"] == "ready" for c in score["components"].values())

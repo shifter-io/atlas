@@ -39,6 +39,11 @@ PRICE_MISSING = "Verified effective-dated pricing (lowest $/GB) is required"
 UNDER_LOAD_NONE = "No load test in this window"
 UNDER_LOAD_LATE = "No load test before this window's light-load slots"
 UNDER_LOAD_LIGHT = "No light-load slot with enough successes in this window"
+UNDER_LOAD_CENSUS = (
+    "Every load test in this window ran during a census (or its reference pulse did)"
+)
+LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
+LIGHT_NONE = "No pulse with enough successes in this window"
 LATENCY = ("p50", "p90", "p95", "p99")
 FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
 PLACE = ("country_code", "country", "region_code", "region", "city")
@@ -400,29 +405,76 @@ def blend(histograms):
     return result
 
 
+def census_overlaps(census, runs):
+    """Pulse and load runs that ran while a census of the same product was running.
+
+    census: the product's census runs ({"product_id", "batch_id", "started_at",
+    "finished_at"}; a census still running at the cutoff ends at the cutoff), in any country:
+    the account and the node are shared. runs: pulse and load runs ({"product_id", "batch_id",
+    "run_key", "started_at", "finished_at"}). Two runs overlap when each starts before the other
+    ends. Returns, per overlapping run, {"batch_id", "product_id", "run_key", "census": [census
+    batch ids]}. Everything comes from stored start and finish times, so a calculation
+    reproduces it.
+    """
+    by_product = defaultdict(list)
+    for c in census:
+        by_product[c["product_id"]].append(c)
+    index = {}
+    for product, rows in by_product.items():
+        rows.sort(key=lambda c: (c["started_at"], c["batch_id"]))
+        longest = max(c["finished_at"] - c["started_at"] for c in rows)
+        index[product] = ([c["started_at"] for c in rows], rows, longest)
+    result = []
+    for run in runs:
+        if run["product_id"] not in index:
+            continue
+        starts, rows, longest = index[run["product_id"]]
+        hits = []
+        i = bisect_left(starts, run["finished_at"]) - 1
+        while i >= 0 and starts[i] >= run["started_at"] - longest:
+            if rows[i]["finished_at"] > run["started_at"]:
+                hits.append(rows[i]["batch_id"])
+            i -= 1
+        if hits:
+            result.append(
+                {k: run[k] for k in ("batch_id", "product_id", "run_key")}
+                | {"census": sorted(set(hits))}
+            )
+    return result
+
+
 def time_slots(rows, pulses=()):
     """Bucket rows (each with its time "slot") grouped per slot.
 
-    A slot holds every request observed in it (completed, successes) and, per target, the
-    merged histogram of its light-load successes ("light": {target: Counter}, "light_successes":
-    {target: n}). pulses are the product's done pulse runs ({"slot", "requests", "successes",
-    "counted"}): the live counters of a run whose artifact was never ingested (counted False)
-    are added to its slot as observed; nothing is invented for requests nobody observed.
+    A slot holds every request observed in it: "completed"/"successes" count the requests that
+    vote on its success, "all_completed"/"all_successes" every request, including pulses and
+    load waves that ran during a census of the product (rows with "during_census"). Per target
+    it merges the histogram of its light-load successes ("light": {target: Counter},
+    "light_successes": {target: n}; rows without the "light" flag stay out). pulses are the
+    product's done pulse runs ({"slot", "requests", "successes", "counted", "during_census"}):
+    the live counters of a run whose artifact was never ingested (counted False) are added to
+    its slot as observed; nothing is invented for requests nobody observed.
     """
     slots = {}
 
     def slot(key):
         return slots.setdefault(
             key,
-            {"completed": 0, "successes": 0, "light": defaultdict(Counter),
-             "light_successes": Counter()},
+            {"completed": 0, "successes": 0, "all_completed": 0, "all_successes": 0,
+             "light": defaultdict(Counter), "light_successes": Counter()},
         )
+
+    def add(s, completed, successes, clean):
+        s["all_completed"] += completed
+        s["all_successes"] += successes
+        if clean:
+            s["completed"] += completed
+            s["successes"] += successes
 
     for r in rows:
         c = r["counters"]
         s = slot(r["slot"])
-        s["completed"] += c["completed"]
-        s["successes"] += c["successes"]
+        add(s, c["completed"], c["successes"], not r.get("during_census"))
         if r.get("light", True):
             target = r.get("target")
             for ms, n in c["latency_histogram"]["bins"]:
@@ -430,10 +482,19 @@ def time_slots(rows, pulses=()):
             s["light_successes"][target] += c["successes"]
     for d in pulses:
         if not d["counted"]:
-            s = slot(d["slot"])
-            s["completed"] += d["requests"]
-            s["successes"] += d["successes"]
+            add(slot(d["slot"]), d["requests"], d["successes"], not d.get("during_census"))
     return slots
+
+
+def slot_rate(s):
+    """A slot's success vote: successes ÷ its voting requests (every request except pulses and
+    load waves that ran during a census). A slot left with only such requests votes 0 when all
+    of them failed too (the provider was down) and does not vote otherwise. None: no vote."""
+    if s["completed"]:
+        return s["successes"] / s["completed"]
+    if s["all_completed"] and not s["all_successes"]:
+        return 0.0
+    return None
 
 
 def light_votes(slots, minimum):
@@ -460,22 +521,38 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
     """
     m = metrics(rows, hours)
     slots = time_slots(rows, pulses)
-    rates = [s["successes"] / s["completed"] for s in slots.values() if s["completed"]]
+    votes = {key: slot_rate(s) for key, s in slots.items()}
+    rates = [v for v in votes.values() if v is not None]
     voting = light_votes(slots, minimum)
     m["request_success_rate"] = m["success_rate"]
     m["success_rate"] = sum(rates) / len(rates) if rates else None
     m["latency_ms"] = blend(h for *_, h in voting)
+    m["latency_reason"] = None
+    if not voting:
+        flagged = any(r.get("during_census") for r in rows) or any(
+            d.get("during_census") for d in pulses
+        )
+        m["latency_reason"] = LIGHT_CENSUS if flagged else LIGHT_NONE
     m["time_slots"] = {
         "minutes": slot_minutes,
         "success": len(rates),
-        "down": sum(s["completed"] > 0 and not s["successes"] for s in slots.values()),
+        "down": sum(v == 0 for v in rates),
+        "skipped_during_census": sum(
+            v is None and s["all_completed"] > 0 for v, s in zip(
+                votes.values(), slots.values(), strict=True
+            )
+        ),
         "latency": len({key for key, *_ in voting}),
         "latency_targets": sorted({t for _, t, _ in voting}, key=str),
         "min_latency_successes": minimum,
     }
-    m["success_basis"] = "mean of time-slot success rates, every observed request"
+    m["success_basis"] = (
+        "mean of time-slot success rates, every observed request except pulses and load waves "
+        "that ran during a census"
+    )
     m["latency_basis"] = (
-        "light-load successes (pulses), each slot and target normalised to equal weight"
+        "light-load successes (pulses that did not run during a census), each slot and target "
+        "normalised to equal weight"
     )
     return m
 
@@ -485,12 +562,22 @@ def load_factors(rows, minimum):
     run (census concurrency) ÷ the latency of its pulse in the same country, on the same target,
     in the same slot. Both need `minimum` successes. Census runs never make a factor.
 
+    A load run or reference pulse that ran during a census of the product makes no factor (the
+    slot then carries the newest earlier factor forward, under_load()).
+
     Returns (factors {slot: {percentile: factor}}, reference {"country", "target",
-    "concurrency"} of the newest load run, or None without one).
+    "concurrency"} of the newest load run, or None without one, and the number of load slots
+    left without a factor because the load run or its reference pulse ran during a census).
     """
     loads, pulses = {}, {}
     reference = None
+    tainted = set()
     for r in sorted(rows, key=lambda r: (r["slot"], r["target"])):
+        if r.get("test") in ("load", "pulse") and r.get("during_census"):
+            tainted.add((r["slot"], r["country"], r["target"]))
+            if r.get("test") == "load":
+                loads.setdefault((r["slot"], r["country"], r["target"]), [Counter(), 0])
+            continue
         if r.get("test") == "load":
             key = (r["slot"], r["country"], r["target"])
             loads.setdefault(key, [Counter(), 0])
@@ -505,22 +592,27 @@ def load_factors(rows, minimum):
             into[0][ms] += n
         into[1] += r["counters"]["successes"]
     factors = {}
+    excluded = set()
     for key in sorted(loads):
         load, base = loads[key], pulses.get(key)
+        if key in tainted:
+            excluded.add(key[0])
+            continue
         if key[0] in factors or base is None or min(load[1], base[1]) < minimum:
             continue
         high = Histogram(load[0]).percentiles()
         low = Histogram(base[0]).percentiles()
         if all(high[p] and low[p] for p in LATENCY):
             factors[key[0]] = {p: high[p] / low[p] for p in LATENCY}
-    return factors, reference
+    return factors, reference, len(excluded - set(factors))
 
 
-def under_load(rows, factors, minimum):
+def under_load(rows, factors, minimum, excluded=0):
     """Latency under load: per time slot and target, the light-load percentile × that slot's
     reference factor (load_factors()), or the newest earlier factor in the window when the slot
     has none; the window value is the mean of the slot values (equal weight per slot and
-    target). Counts are of those slot values.
+    target). Counts are of those slot values. excluded: load slots load_factors() left without
+    a factor because of a census (for the reason).
     """
     known = sorted(factors)
     values = {p: [] for p in LATENCY}
@@ -542,7 +634,13 @@ def under_load(rows, factors, minimum):
     reason = None
     if not n:
         reason = (
-            UNDER_LOAD_LIGHT if not voting else UNDER_LOAD_LATE if known else UNDER_LOAD_NONE
+            UNDER_LOAD_LIGHT
+            if not voting
+            else UNDER_LOAD_LATE
+            if known
+            else UNDER_LOAD_CENSUS
+            if excluded
+            else UNDER_LOAD_NONE
         )
     return {
         "ms": {p: round(sum(v) / n, 3) if n else None for p, v in values.items()},
@@ -554,17 +652,18 @@ def under_load(rows, factors, minimum):
     }
 
 
-def with_under_load(m, rows, factors, minimum):
+def with_under_load(m, rows, factors, minimum, excluded=0):
     """Add latency_under_load_ms and its slot counts and reason to timed() metrics."""
-    result = under_load(rows, factors, minimum)
+    result = under_load(rows, factors, minimum, excluded)
     m["latency_under_load_ms"] = result.pop("ms")
     m["under_load"] = result
     return m
 
 
-def latency_detail(rows, factors, reference, minimum):
-    """The window's latency block: the reference (load) test, its factors, and per requested
-    country and target the light-load and under-load latency of its pulses."""
+def latency_detail(rows, factors, reference, minimum, excluded=0):
+    """The window's latency block: the reference (load) test, its factors (excluded_during_census:
+    load slots without one because the load run or its reference pulse ran during a census), and
+    per requested country and target the light-load and under-load latency of its pulses."""
     latest = max(factors) if factors else None
     pulses = defaultdict(list)
     for r in rows:
@@ -573,7 +672,7 @@ def latency_detail(rows, factors, reference, minimum):
     countries = []
     for country, target in sorted(pulses):
         own = pulses[(country, target)]
-        result = under_load(own, factors, minimum)
+        result = under_load(own, factors, minimum, excluded)
         countries.append(
             {
                 "country": country or None,
@@ -587,6 +686,7 @@ def latency_detail(rows, factors, reference, minimum):
         "reference": reference,
         "factors": {
             "slots": len(factors),
+            "excluded_during_census": excluded,
             "mean": {
                 p: round(sum(f[p] for f in factors.values()) / len(factors), 6) for p in LATENCY
             }
@@ -600,6 +700,67 @@ def latency_detail(rows, factors, reference, minimum):
         "of the same slot, else the newest earlier slot's factor; mean of slot values; per "
         "country and target",
         "countries": countries,
+    }
+
+
+def census_split(rows, pulses, minimum, slot_minutes=None):
+    """Pulse runs that ran during a census of the product against clean ones, and load waves.
+
+    rows are the window's bucket rows, pulses its done pulse runs (as for timed()). For each
+    group: runs, requests, successes, request_success_rate, the time-weighted success_rate and
+    the light-load style latency of its own requests (latency_ms), overall and per target, so
+    the numbers measured during a census stay visible next to the clean ones they are left out
+    of. census_batches lists the censuses they overlapped.
+    """
+
+    def group(during, target=None):
+        own = [
+            r | {"light": True, "during_census": False}
+            for r in rows
+            if r.get("test") == "pulse"
+            and bool(r.get("during_census")) == during
+            and target in (None, r["target"])
+        ]
+        runs = [
+            d | {"during_census": False}
+            for d in pulses
+            if bool(d.get("during_census")) == during and target in (None, d["target"])
+        ]
+        m = timed(own, 24, minimum, runs, slot_minutes)
+        requests = m["completed"] + sum(d["requests"] for d in runs if not d["counted"])
+        successes = m["successes"] + sum(d["successes"] for d in runs if not d["counted"])
+        return {
+            "runs": len(runs),
+            "requests": requests,
+            "successes": successes,
+            "request_success_rate": successes / requests if requests else None,
+            "success_rate": m["success_rate"],
+            "latency_ms": m["latency_ms"],
+        }
+
+    loads = {}
+    for r in rows:
+        if r.get("test") == "load":
+            loads[r["run_key"]] = bool(r.get("during_census"))
+    targets = sorted(
+        {d["target"] for d in pulses} | {r["target"] for r in rows if r.get("test") == "pulse"}
+    )
+    return {
+        "basis": "pulse and load runs that overlapped a running census of the same product (any "
+        "country), from stored run start and finish times; left out of light-load latency, "
+        "time-slot success and the load factor, still counted as requests, uptime and slots",
+        "pulses": {"clean": group(False), "during_census": group(True)},
+        "targets": {
+            t: {"clean": group(False, t), "during_census": group(True, t)} for t in targets
+        },
+        "load": {
+            "clean": sum(not v for v in loads.values()),
+            "during_census": sum(loads.values()),
+        },
+        "census_batches": sorted(
+            {c for r in rows for c in r.get("census_batches", ())}
+            | {c for d in pulses for c in d.get("census_batches", ())}
+        ),
     }
 
 

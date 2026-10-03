@@ -147,6 +147,20 @@ successes does not vote. Percentiles are never averaged. Across targets that is 
 mixture of plain HTTP and CONNECT + TLS round trips; show each target's own
 `targets.<id>.metrics.latency_ms`. Breakdown latency is light-load latency too.
 
+**Census overlap.** A pulse or load run of a product that ran while a census of the same product
+was running (any country: account and node are shared) is marked `during_census`, derived at
+calculation time from the stored run start and finish times. It still fills its slot and counts
+for uptime, outages, down slots and every request metric, but it is left out of light-load
+latency (breakdowns included), of the time-slot success (a slot votes with its other requests;
+one left with only such pulses votes 0 if every request in it failed, else does not vote:
+`time_slots.skipped_during_census`), and of the load factor (it needs a clean load run and a
+clean reference pulse; otherwise the newest earlier factor carries forward:
+`latency.factors.excluded_during_census`). Each window publishes `census_overlap`: `pulses` and
+`targets.<id>` with `clean` and `during_census` (`runs`, `requests`, `successes`,
+`request_success_rate`, `success_rate`, `latency_ms`), `load` (clean and during-census load
+runs), `census_batches` and `basis`; `metrics.latency_reason` says why light-load latency is
+missing.
+
 **Latency under load.** In every pulse slot of the census target, each product also runs one
 wave of `census_concurrency` requests at census concurrency in the reference country (setting
 `load.reference_country`, default `US`; staging `RO`): a batch of kind `load` with the pulse's

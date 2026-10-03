@@ -8,10 +8,14 @@ from pathlib import Path
 import pytest
 
 from milf_framework.calculated.aggregate import (
+    LIGHT_CENSUS,
+    UNDER_LOAD_CENSUS,
     UNDER_LOAD_LATE,
     UNDER_LOAD_LIGHT,
     UNDER_LOAD_NONE,
     blend,
+    census_overlaps,
+    census_split,
     latency_detail,
     load_factors,
     pool,
@@ -26,15 +30,22 @@ T = datetime(2026, 10, 3, 18, tzinfo=UTC)
 HALF_HOUR = timedelta(minutes=30)
 
 
-def row(slot, ms, *, n=100, successes=None, test="pulse", country="US", target="generic_http"):
-    """One bucket row: n requests in a time slot, every success at `ms` milliseconds."""
+def row(
+    slot, ms, *, n=100, successes=None, test="pulse", country="US", target="generic_http",
+    census=(), run_key=None,
+):
+    """One bucket row: n requests in a time slot, every success at `ms` milliseconds; census
+    names the census batches the run overlapped (a pulse or load wave during a census)."""
     successes = n if successes is None else successes
     return {
         "bucket_start": slot,
         "last_observed": slot,
         "slot": slot,
+        "run_key": run_key,
         "test": test,
-        "light": test in (None, "pulse"),
+        "during_census": bool(census),
+        "census_batches": list(census),
+        "light": test in (None, "pulse") and not census,
         "country": country,
         "target": target,
         "concurrency": 1000 if test == "load" else 25,
@@ -76,7 +87,7 @@ def test_success_rate_is_the_mean_of_time_slots():
     assert m["success_rate"] == pytest.approx((1 + 0.5 + 0.5 + 0) / 4)
     assert m["request_success_rate"] == pytest.approx(1055 / 1110)
     assert m["time_slots"] == {
-        "minutes": 30, "success": 4, "down": 1, "latency": 2,
+        "minutes": 30, "success": 4, "down": 1, "skipped_during_census": 0, "latency": 2,
         "latency_targets": ["generic_http"], "min_latency_successes": 30,
     }
     # Light-load latency: pulses only; the census slot (and slots under 30 successes) do not vote.
@@ -108,8 +119,9 @@ def test_latency_under_load_worked_example():
         row(T, 800, country="RO"),
         row(T, 5000, n=1000, test="census", country="RO"),
     ]
-    factors, reference = load_factors(rows, 30)
+    factors, reference, excluded = load_factors(rows, 30)
     assert reference == {"country": "US", "target": "generic_http", "concurrency": 1000}
+    assert excluded == 0
     assert factors == {T: {"p50": 1.5, "p90": 1.5, "p95": 1.5, "p99": 1.5}}
     detail = latency_detail(rows, factors, reference, 30)
     assert {(c["country"], c["target"]) for c in detail["countries"]} == {
@@ -131,7 +143,7 @@ def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():
         row(T + HALF_HOUR, 400), row(T + HALF_HOUR, 4000, n=1000, successes=10, test="load"),
         row(T + HALF_HOUR, 1000, country="RO"),
     ]
-    factors, _ = load_factors(rows, 30)
+    factors, *_ = load_factors(rows, 30)
     assert list(factors) == [T]
     romania = [r for r in rows if r["country"] == "RO"]
     result = under_load(romania, factors, 30)
@@ -222,3 +234,92 @@ def test_removed_settings_are_refused(tmp_path):
         policy.write_text(extra + text if extra.startswith("scored") else text + extra)
         with pytest.raises(ValueError, match="Unknown methodology setting"):
             load(policy)
+
+
+def census_run(batch_id, start, minutes, product=1):
+    return {"product_id": product, "batch_id": batch_id, "started_at": start,
+            "finished_at": start + timedelta(minutes=minutes)}
+
+
+def test_census_overlap_detection_any_country_same_product():
+    pulse = {"product_id": 1, "batch_id": 50, "run_key": 7, "started_at": T,
+             "finished_at": T + timedelta(minutes=1)}
+    census = [
+        census_run(1, T - timedelta(minutes=10), 10),  # ends as the pulse starts: no overlap
+        census_run(2, T - timedelta(minutes=10), 10.5),  # still running at its start
+        census_run(3, T + timedelta(seconds=59), 20),  # starts before it ends (another country)
+        census_run(4, T + timedelta(minutes=1), 20),  # starts as it ends: no overlap
+        census_run(5, T - timedelta(hours=3), 300),  # a long one still running
+        census_run(6, T, 5, product=2),  # another product's census never counts
+    ]
+    assert census_overlaps(census, [pulse]) == [
+        {"batch_id": 50, "product_id": 1, "run_key": 7, "census": [2, 3, 5]}
+    ]
+    assert census_overlaps(census[:1] + census[3:4], [pulse]) == []
+    assert census_overlaps([], [pulse]) == []
+
+
+def test_pulses_during_a_census_count_as_requests_but_not_light_load():
+    clean, during = 1, 2
+    rows = [
+        # Slot T: a clean pulse at 600 ms (99%) and one during a census at 3,000 ms (50%).
+        row(T, 600, successes=99, run_key=clean),
+        row(T, 3000, successes=50, census=[9], run_key=during),
+        # Slot T+30: only a pulse during a census: no success vote, no latency vote.
+        row(T + HALF_HOUR, 2500, successes=60, census=[9], run_key=3),
+        # Slot T+60: only a pulse during a census, every request failed: down, votes 0.
+        row(T + 2 * HALF_HOUR, 0, successes=0, census=[10], run_key=4),
+    ]
+    m = timed(rows, 24, 30, slot_minutes=30)
+    assert m["success_rate"] == pytest.approx((0.99 + 0) / 2)
+    assert m["time_slots"]["success"] == 2 and m["time_slots"]["down"] == 1
+    assert m["time_slots"]["skipped_during_census"] == 1
+    assert m["latency_ms"]["p50"] == 600 and m["time_slots"]["latency"] == 1
+    # Every request still counts.
+    assert m["completed"] == 400 and m["request_success_rate"] == pytest.approx(209 / 400)
+    # Only pulses during a census: no light-load latency, and the reason says why.
+    only = timed(rows[1:], 24, 30)
+    assert only["latency_ms"]["p50"] is None and only["latency_reason"] == LIGHT_CENSUS
+    split = census_split(rows, [], 30, 30)
+    assert split["pulses"]["clean"] | {"latency_ms": None} == {
+        "runs": 0, "requests": 100, "successes": 99, "request_success_rate": 0.99,
+        "success_rate": 0.99, "latency_ms": None,
+    }
+    assert split["pulses"]["clean"]["latency_ms"]["p50"] == 600
+    during_census = split["pulses"]["during_census"]
+    assert (during_census["requests"], during_census["successes"]) == (300, 110)
+    assert during_census["success_rate"] == pytest.approx((0.5 + 0.6 + 0) / 3)
+    assert during_census["latency_ms"]["p50"] == 2500
+    assert split["census_batches"] == [9, 10]
+    assert split["targets"]["generic_http"]["during_census"]["requests"] == 300
+    # Done runs without an artifact count by their own flag.
+    runs = [{"slot": T + 3 * HALF_HOUR, "target": "generic_http", "requests": 100,
+             "successes": 100, "counted": False, "during_census": True, "census_batches": [11]}]
+    assert census_split(rows, runs, 30, 30)["pulses"]["during_census"]["runs"] == 1
+    assert timed(rows, 24, 30, runs)["time_slots"]["skipped_during_census"] == 2
+
+
+def test_no_load_factor_from_a_census_slot():
+    rows = [
+        row(T, 600), row(T, 900, n=1000, test="load"), row(T, 800, country="RO"),
+        # Next slot: the load wave ran during a census; T's factor carries forward.
+        row(T + HALF_HOUR, 600), row(T + HALF_HOUR, 6000, n=1000, test="load", census=[5]),
+        row(T + HALF_HOUR, 1000, country="RO"),
+        # Then the reference pulse ran during a census: no factor either.
+        row(T + 2 * HALF_HOUR, 600, census=[6]), row(T + 2 * HALF_HOUR, 900, n=1000, test="load"),
+        row(T + 2 * HALF_HOUR, 1000, country="RO"),
+    ]
+    factors, _, excluded = load_factors(rows, 30)
+    assert list(factors) == [T] and excluded == 2
+    romania = [r for r in rows if r["country"] == "RO"]
+    result = under_load(romania, factors, 30, excluded)
+    assert (result["own_factor"], result["carried_factor"]) == (1, 2)
+    assert result["ms"]["p50"] == pytest.approx((800 + 1000 + 1000) * 1.5 / 3)
+    assert latency_detail(rows, factors, None, 30, excluded)["factors"][
+        "excluded_during_census"
+    ] == 2
+    # Every load wave during a census: no factor at all, and the reason says so.
+    only = [r for r in rows if r["slot"] != T]
+    factors, _, excluded = load_factors(only, 30)
+    assert factors == {} and excluded == 2
+    assert under_load(only, factors, 30, excluded)["reason"] == UNDER_LOAD_CENSUS
