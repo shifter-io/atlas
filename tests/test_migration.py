@@ -1,5 +1,5 @@
-"""In-place v4 → v5 → v6 → v7, v5 → v6 → v7 and v6 → v7 migrations against a pg_dump of a v4
-database.
+"""In-place v4 → … → v8, v5 → … → v8, v6 → v7 → v8 and v7 → v8 migrations against a pg_dump of
+a v4 database.
 
 fixtures/database_v4.sql.gz was produced by milf-framework 0.8.0 (schema v4, calculated v1): two
 benchmarked providers with enrichment and evidence, a third with a Shifter-style provider_config,
@@ -7,8 +7,8 @@ float timeout, rate, custom URL, an unknown config key and a non-canonical bucke
 builds (ready and ranked, then expired and retained scores, then an unpublished draft).
 fixtures/schema_v5.sql is the exact v5 schema (storage.V5_CHECKSUM) and fixtures/calculated_v2.sql
 the exact calculated v2 schema (store.V2_CHECKSUM); load_v5 builds a v5 database from the same dump
-the way the v5 release migrated it; fixtures/schema_v6.sql is the exact v6 schema
-(storage.V6_CHECKSUM). Every path ends at schema v7 with calculated v3.
+the way the v5 release migrated it; fixtures/schema_v6.sql and schema_v7.sql are the exact v6 and
+v7 schemas (storage.V6_CHECKSUM, V7_CHECKSUM). Every path ends at schema v8 with calculated v3.
 """
 
 import gzip
@@ -29,6 +29,7 @@ from milf_framework.storage import (
     V5_CHECKSUM,
     V6_CHECKS,
     V6_CHECKSUM,
+    V7_CHECKSUM,
     connect,
     ingest,
     initialize,
@@ -43,6 +44,7 @@ pytest_plugins = ["test_storage"]
 FIXTURE = Path(__file__).parent / "fixtures/database_v4.sql.gz"
 SCHEMA_V5 = Path(__file__).parent / "fixtures/schema_v5.sql"
 SCHEMA_V6 = Path(__file__).parent / "fixtures/schema_v6.sql"
+SCHEMA_V7 = Path(__file__).parent / "fixtures/schema_v7.sql"
 CALCULATED_V2 = Path(__file__).parent / "fixtures/calculated_v2.sql"
 SOURCE = Path(store.__file__).parents[1]
 POLICY = Path("configs/methodology.toml")
@@ -140,7 +142,7 @@ async def test_v4_database_migrates_in_place(databases, tmp_path):
     api_before = await api_bodies(database, builds)
     result = migrate(database)
     assert result["migrated"] and result["calculated_schema_version"] == 3
-    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 7
+    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 8
     assert result["from_calculated_schema_version"] == 1
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -258,7 +260,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     builds = sorted(before["payloads"])
     api_before = await api_bodies(database, builds)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (5, 7)
+    assert (result["from_schema_version"], result["schema_version"]) == (5, 8)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (2, 3)
     assert set(store.V2_CHECKS) <= set(result["verified"])
     assert migrate(database)["migrated"] is False
@@ -289,7 +291,7 @@ def test_modified_v5_is_refused(databases):
         migrate(database)
     with connect(database) as conn:
         conn.execute("UPDATE schema_versions SET checksum='edited'")
-    with pytest.raises(ValueError, match="unmodified v4, v5 or v6"):
+    with pytest.raises(ValueError, match="unmodified v4, v5, v6 or v7"):
         migrate(database)
     with connect(database) as conn:
         assert conn.execute("SELECT to_regclass('targets')").fetchone() == (None,)
@@ -355,14 +357,14 @@ def batches(database):
         ).fetchall()
 
 
-def test_v6_database_migrates_to_v7(databases):
+def test_v6_database_migrates_through_v7(databases):
     database = databases()
     load_v6(database)
     with pytest.raises(ValueError, match="db-migrate"):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (6, 7)
+    assert (result["from_schema_version"], result["schema_version"]) == (6, 8)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (3, 3)
     assert result["verified"] == list(V6_CHECKS)
     assert migrate(database)["migrated"] is False
@@ -380,6 +382,41 @@ def test_v6_database_migrates_to_v7(databases):
             "start_at,batch_id FROM test_batches WHERE kind='census' RETURNING retry_of"
         ).fetchone()
         assert retried == (before[0][0],)
+
+
+def load_v7(database):
+    """The v7 release's database: v6 plus migrate_v6_v7.sql and the exact v7 schema."""
+    load_v6(database)
+    schema = SCHEMA_V7.read_text()
+    assert hashlib.sha256(schema.encode()).hexdigest() == V7_CHECKSUM
+    with connect(database) as conn:
+        conn.execute((SOURCE / "migrate_v6_v7.sql").read_text())
+        conn.execute(schema)
+        conn.execute("DELETE FROM schema_versions")
+        conn.execute("INSERT INTO schema_versions(version,checksum) VALUES (7,%s)", (V7_CHECKSUM,))
+
+
+def test_v7_database_migrates_to_v8(databases):
+    database = databases()
+    load_v7(database)
+    with pytest.raises(ValueError, match="db-migrate"):
+        initialize(database)
+    before = batches(database)
+    result = migrate(database)
+    assert (result["from_schema_version"], result["schema_version"]) == (7, 8)
+    assert result["verified"] == []
+    assert migrate(database)["migrated"] is False
+    initialize(database)
+    store.initialize(database)
+    assert batches(database) == before
+    reference = databases()
+    store.initialize(reference)
+    assert catalog(database) == catalog(reference)
+    with connect(database) as conn:
+        conn.execute(
+            "INSERT INTO load_references(day,region_id,country_code,basis) "
+            "VALUES ('2026-10-03',1,'DE','default')"
+        )
 
 
 def test_failed_v6_check_rolls_back(databases, monkeypatch):

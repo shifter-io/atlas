@@ -1,4 +1,4 @@
--- Schema v7: one canonical address, product membership, shared enrichment, typed test profiles,
+-- Schema v8: one canonical address, product membership, shared enrichment, typed test profiles,
 -- and the census/pulse/load scheduling, live progress, geography buckets and event tape.
 CREATE TABLE IF NOT EXISTS schema_versions (
  version integer PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz DEFAULT now()
@@ -320,6 +320,17 @@ CREATE TABLE IF NOT EXISTS outages (
  started_at timestamptz NOT NULL, ended_at timestamptz, CHECK(ended_at >= started_at)
 );
 CREATE INDEX IF NOT EXISTS outages_product ON outages(product_id,started_at);
+-- The latency-under-load reference country of each runner region for one UTC day, chosen by the
+-- day's first pulse plan: the fastest country tested from the region over the trailing days
+-- ('fastest'), an operator override, the configured default without enough history, or the
+-- region's first enabled country. The load batches of the day run there.
+CREATE TABLE IF NOT EXISTS load_references (
+ day date NOT NULL, region_id smallint NOT NULL REFERENCES runner_regions(region_id),
+ country_code char(2) NOT NULL REFERENCES countries(country_code),
+ basis text NOT NULL CHECK(basis IN ('fastest','override','default','first_enabled')),
+ p50_ms integer, successes bigint, candidates integer NOT NULL DEFAULT 0,
+ chosen_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY(day,region_id)
+);
 CREATE INDEX IF NOT EXISTS outages_open ON outages(product_id,country_code) WHERE ended_at IS NULL;
 CREATE TABLE IF NOT EXISTS job_runs (
  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, job text NOT NULL,

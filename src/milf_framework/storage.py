@@ -22,11 +22,12 @@ from psycopg.types.json import Jsonb
 from .providers.credentials import read_credentials
 from .stats import Histogram
 
-SCHEMA_VERSION = 7
-# Only an unmodified v4, v5 or v6 schema (these checksums) is migrated in place; see migrate().
+SCHEMA_VERSION = 8
+# Only an unmodified v4, v5, v6 or v7 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
+V7_CHECKSUM = "75eb7782f9700e6b57b42d59ef8ffd1f46976d9178432689131c0add5ae5f0a5"
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
@@ -111,7 +112,7 @@ def initialize(credentials_file):
             versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
             if versions != [(SCHEMA_VERSION, checksum)]:
                 raise ValueError(
-                    "Schema differs; run db-migrate (v4, v5, v6) or rebuild into a new database"
+                    "Schema differs; run db-migrate (v4 to v7) or rebuild into a new database"
                 )
         conn.execute(schema)
         conn.execute(
@@ -973,13 +974,14 @@ V6_CHECKS = {
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4, v5 or v6 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v7 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql, then
-    migrate_v6_v7.sql; v5 starts at the second, v6 at the last. A calculated v2 layer then runs
-    calculated/migrate_v2_v3.sql, which is also all that a current (v7) database with a
-    calculated v2 layer needs. Every rebuilt pool, scope, bucket and run summary, every test
-    batch, and every calculated window, breakdown and score, must equal its original.
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql,
+    migrate_v6_v7.sql and migrate_v7_v8.sql; v5, v6 and v7 start at the step for their version
+    (v7 only adds a table). A calculated v2 layer then runs calculated/migrate_v2_v3.sql, which is
+    also all that a current (v8) database with a calculated v2 layer needs. Every rebuilt pool,
+    scope, bucket and run summary, every test batch, and every calculated window, breakdown and
+    score, must equal its original.
     """
     from .calculated import store
 
@@ -1004,15 +1006,18 @@ def migrate(credentials_file):
                 return {"schema_version": SCHEMA_VERSION, "migrated": False}
             start = SCHEMA_VERSION
         else:
-            start = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6}.get(
-                versions[0] if len(versions) == 1 else None
-            )
+            start = {
+                (4, V4_CHECKSUM): 4,
+                (5, V5_CHECKSUM): 5,
+                (6, V6_CHECKSUM): 6,
+                (7, V7_CHECKSUM): 7,
+            }.get(versions[0] if len(versions) == 1 else None)
             if start is None:
                 raise ValueError(
-                    "Only an unmodified v4, v5 or v6 schema can be migrated in place"
+                    "Only an unmodified v4, v5, v6 or v7 schema can be migrated in place"
                 )
-        # A v6 database may already carry the current calculated layer.
-        upgraded = layered and start == 6 and layers == current_layer
+        # A v6 or v7 database may already carry the current calculated layer.
+        upgraded = layered and start in (6, 7) and layers == current_layer
         expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
         if layered and not upgraded and layers != expected:
             raise ValueError(
@@ -1039,8 +1044,10 @@ def migrate(credentials_file):
             conn.execute(V6_SNAPSHOT)
         if start < 6:
             conn.execute((root / "migrate_v5_v6.sql").read_text())
-        if start < SCHEMA_VERSION:
+        if start < 7:
             conn.execute((root / "migrate_v6_v7.sql").read_text())
+        if start < SCHEMA_VERSION:
+            conn.execute((root / "migrate_v7_v8.sql").read_text())
         if layered and not upgraded:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
         conn.execute(schema)
@@ -1067,8 +1074,8 @@ def migrate(credentials_file):
             )
     if start == 4:
         # Dropped v4 columns keep their bytes until the rewritten tables are compacted. v5 → v6,
-        # v6 → v7 and calculated v2 → v3 only add nullable or constant-default columns (and swap
-        # a check constraint): no rewrite.
+        # v6 → v7, v7 → v8 and calculated v2 → v3 only add tables and nullable or
+        # constant-default columns (and swap a check constraint): no rewrite.
         with connect(credentials_file) as conn:
             conn.autocommit = True
             tables = ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
