@@ -50,6 +50,8 @@ async def test_no_hidden_retry(tmp_path):
         result = await run(config(port, requests=3), JsonSink(tmp_path))
     assert gateway.connections == 3
     assert result.errors == {"connection": 3}
+    # A gateway that drops the connection is the proxy side failing, never a block.
+    assert (result.proxy_errors, result.blocks) == (3, 0)
 
 
 async def test_timeout(tmp_path):

@@ -27,10 +27,15 @@ BLOCKED = b"<html><body><h1>Access Denied</h1>You don't have permission.</body><
 
 
 @pytest.mark.parametrize("status,verdict", [
-    (200, Verdict.OK), (204, Verdict.OK), (301, Verdict.OK), (403, Verdict.BLOCK),
-    (429, Verdict.BLOCK), (451, Verdict.BLOCK), (500, Verdict.BLOCK), (503, Verdict.BLOCK),
-    (407, Verdict.PROXY_ERROR), (502, Verdict.PROXY_ERROR), (509, Verdict.PROXY_ERROR),
-    (100, Verdict.BLOCK),
+    (200, Verdict.OK), (204, Verdict.OK), (301, Verdict.OK),
+    # A block is the target refusing us.
+    (403, Verdict.BLOCK), (429, Verdict.BLOCK), (451, Verdict.BLOCK),
+    # The proxy side failing is never a block.
+    (407, Verdict.PROXY_ERROR), (502, Verdict.PROXY_ERROR), (503, Verdict.PROXY_ERROR),
+    (504, Verdict.PROXY_ERROR), (509, Verdict.PROXY_ERROR),
+    # A target that is broken, or answers something else, did not refuse us either.
+    (500, Verdict.ERROR), (404, Verdict.ERROR), (401, Verdict.ERROR), (418, Verdict.ERROR),
+    (100, Verdict.ERROR),
 ])
 def test_classify_status(status, verdict):
     assert classify_status(status) is verdict
@@ -56,6 +61,8 @@ def test_every_challenge_marker_is_lower_case():
     (403, b"nope", Verdict.BLOCK), (200, BLOCKED, Verdict.BLOCK),
     (200, b"garbage", Verdict.ERROR), (201, b"8.8.8.8", Verdict.ERROR),
     (302, b"", Verdict.ERROR), (502, CLOUDFLARE, Verdict.PROXY_ERROR),
+    (503, b"", Verdict.PROXY_ERROR), (504, b"Gateway Timeout", Verdict.PROXY_ERROR),
+    (503, BLOCKED, Verdict.BLOCK), (500, b"oops", Verdict.ERROR), (404, b"", Verdict.ERROR),
 ])
 def test_failed_response(status, body, verdict):
     assert failed_response(status, body) is verdict
@@ -64,7 +71,8 @@ def test_failed_response(status, body, verdict):
 @pytest.mark.parametrize("error,verdict", [
     (None, "ok"), ("timeout", "timeout"), ("proxy_auth", "proxy_error"),
     ("proxy_connect", "proxy_error"), ("challenge", "challenge"), ("blocked", "block"),
-    ("tls", "error"), ("dns", "error"), ("connection", "error"), ("http_status", "error"),
+    ("tls", "error"), ("dns", "proxy_error"), ("connection", "proxy_error"),
+    ("http_status", "error"),
 ])
 def test_default_verdict_from_error_code(error, verdict):
     assert from_error(error) == verdict
@@ -99,6 +107,8 @@ def test_gateway_code():
     (403, CLOUDFLARE, "http_status", "challenge"),
     (407, b"", "proxy_auth", "proxy_error"),
     (502, b"", "http_status", "proxy_error"),
+    (503, b"", "http_status", "proxy_error"),
+    (500, b"", "http_status", "error"),
     (301, b"", "http_status", "error"),
 ])
 def test_echo_target_requires_a_bare_ip(status, body, error, verdict):
@@ -120,6 +130,7 @@ def config(port, **kwargs):
     (429, b"x" * 1000, "body_too_large", "blocks"),
     (407, b"auth", "proxy_auth", "proxy_errors"),
     (502, b"", "http_status", "proxy_errors"),
+    (504, b"", "http_status", "proxy_errors"),
 ])
 async def test_transport_verdicts_reach_the_summary(tmp_path, status, body, error, counter):
     gateway = Gateway(status=status, body=body)

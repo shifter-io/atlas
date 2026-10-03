@@ -186,7 +186,8 @@ class HttpTransport:
         except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLError):
             error, verdict = "tls", Verdict.ERROR
         except aiohttp.ClientConnectorDNSError:
-            error, verdict = "dns", Verdict.ERROR
+            # The gateway's name did not resolve: the proxy side failed.
+            error, verdict = "dns", Verdict.PROXY_ERROR
         except (aiohttp.ClientProxyConnectionError, ProxyConnectionError):
             error, verdict = "proxy_connect", Verdict.PROXY_ERROR
         except ProxyError as exc:
@@ -197,11 +198,12 @@ class HttpTransport:
         except (aiohttp.ClientConnectionError, OSError) as exc:
             # aiohttp wraps raw SOCKS TLS failures in ClientOSError. Classify
             # by the exception chain, without retaining/publishing its text.
+            # A reset or dropped connection to the gateway is a proxy error.
             cause = exc
-            error, verdict = "connection", Verdict.ERROR
+            error, verdict = "connection", Verdict.PROXY_ERROR
             while cause is not None:
                 if isinstance(cause, ssl.SSLError):
-                    error = "tls"
+                    error, verdict = "tls", Verdict.ERROR
                     break
                 cause = cause.__cause__
         except aiohttp.ClientError:

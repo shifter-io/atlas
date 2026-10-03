@@ -10,6 +10,13 @@ Gateway-level codes are separated from target-level ones, because they mean
 something entirely different: a 407 on one country and not another is a
 statement about the network's coverage, not about the target.
 
+A block is the target refusing us: 403, 429, 451, or a block page. Everything
+the proxy side does wrong (407, 502/503/504 from the gateway, a failed
+CONNECT, a reset connection, an unresolvable gateway) is a proxy error or a
+timeout, never a block. A target that answers with any other error status
+(404, 500, ...) is an error: it did not refuse us, it is broken or the request
+was wrong.
+
 Ported from collector/src/milf/engine/outcome.py. The framework adds ERROR, the
 verdict for everything that is neither the target's nor the gateway's answer
 (TLS, DNS, a dropped connection, a malformed body).
@@ -27,13 +34,14 @@ class Verdict(StrEnum):
     OK = "ok"
     # A CAPTCHA or interstitial arrived instead of the page. Counted as failure.
     CHALLENGE = "challenge"
-    # Refused outright: 403, 429, a block page.
+    # The target refused us: 403, 429, 451, a block page.
     BLOCK = "block"
     # No usable response inside the target's budget.
     TIMEOUT = "timeout"
-    # The gateway itself failed: auth, no inventory, exhausted plan, tunnel error.
+    # The proxy side failed: auth, no inventory, exhausted plan, a 502/503/504 from the
+    # gateway, tunnel (CONNECT) errors, a reset connection, an unresolvable gateway.
     PROXY_ERROR = "proxy_error"
-    # Anything else: TLS, DNS, a dropped connection, an unusable body.
+    # Anything else: TLS, an unusable body, a target error status that is not a refusal.
     ERROR = "error"
 
 
@@ -58,6 +66,10 @@ GATEWAY_STATUSES: dict[int, GatewayCode] = {
     502: GatewayCode.NO_INVENTORY,
     509: GatewayCode.BANDWIDTH_EXHAUSTED,
 }
+# What a forward proxy answers when the exit or the upstream did not answer it in time:
+# proxy errors, unless the body is a challenge or block page (a CDN interstitial is a 503 as
+# often as a 200, and that is the target talking).
+UPSTREAM_STATUSES = frozenset({503, 504})
 
 # Markers that identify a challenge even under a 200. Lower-cased comparison
 # against the first few KB of the body.
@@ -86,27 +98,28 @@ BLOCK_MARKERS = (
     "rate limit",
 )
 
-BLOCK_STATUSES = frozenset({401, 403, 404, 405, 410, 418, 429, 451})
+# The target refused us. Other 4xx and 5xx statuses are errors, not refusals.
+BLOCK_STATUSES = frozenset({403, 429, 451})
 
-# Error codes whose verdict follows from the code alone.
+# Error codes whose verdict follows from the code alone. Through a proxy every connection
+# goes to the gateway, so a reset connection or a gateway name that does not resolve is the
+# proxy side's failure.
 TIMEOUT_CODES = frozenset({"timeout"})
-PROXY_ERROR_CODES = frozenset({"proxy_auth", "proxy_connect"})
+PROXY_ERROR_CODES = frozenset({"proxy_auth", "proxy_connect", "connection", "dns"})
 # Fine-grained error codes for a 200 whose body is a challenge or block page.
 BODY_CODES = {"challenge": "challenge", "block": "blocked"}
 
 
 def classify_status(status: int) -> Verdict:
     """Verdict implied by a status code alone, before the body is inspected."""
-    if status in GATEWAY_STATUSES:
+    if status in GATEWAY_STATUSES or status in UPSTREAM_STATUSES:
         return Verdict.PROXY_ERROR
     if status in BLOCK_STATUSES:
         return Verdict.BLOCK
-    if 500 <= status < 600:
-        # The target is broken rather than refusing us. Still not a success.
-        return Verdict.BLOCK
     if 200 <= status < 400:
         return Verdict.OK
-    return Verdict.BLOCK
+    # Anything else (404, 500, a 1xx): the target did not refuse us. Still not a success.
+    return Verdict.ERROR
 
 
 def sniff_body(body: str | bytes) -> Verdict | None:
@@ -139,8 +152,9 @@ def failed_response(status: int, body: bytes) -> Verdict:
 
     The body is sniffed first: a Cloudflare interstitial arrives as a 403 or a
     503 as often as a 200. A gateway status stays a proxy error whatever the
-    body says. A status that is not itself a refusal (a 201, a redirect, a 200
-    with a malformed body) is a plain error.
+    body says; a 503 or 504 without a challenge or block page is a proxy error
+    too. A status that is not itself a refusal (a 201, a redirect, a 200 with a
+    malformed body, a 404, a 500) is a plain error.
     """
     if status in GATEWAY_STATUSES:
         return Verdict.PROXY_ERROR
