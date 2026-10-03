@@ -79,7 +79,8 @@ fleetWindow`). Otherwise they run over the measured providers. The site uses the
 same basis (`data.ts fleetProviders`/`fleetBasis`, `FleetWindow.basis`) for the
 fleet windows, the Overview's fleet views and insight cards, the Pricing page
 and the Targets page. With an empty fleet, `fleetViews[].fastest`/`mostReliable`
-are `{provider: null, stats: null}`, `cheapest`/`dearest` have a null provider and
+are `{provider: null, stats: null}`, `cheapest`/`dearest` (picked by the lowest list
+rate, `listRate`: `pricePerGbAtScale`, else `pricePerGb`; unpriced networks last) have a null provider and
 a null cost, and `bills.best`/`worst` are null. The demo round-trip
 test proves the computed values equal the fixture's stored ones.
 
