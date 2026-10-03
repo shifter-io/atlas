@@ -456,3 +456,53 @@ func collectNulls(v any, path string, out map[string]bool) {
 
 // Keep the pgxpool import used by helpers in other test files of this package.
 var _ *pgxpool.Pool
+
+// measuredOnly builds from a database the way staging looks before any demo
+// seeding: the framework's published snapshot and nothing else (no demo
+// networks, no catalog scopes, profiles or pricing). With
+// SITEAPI_TEST_DUMP=<file> it also writes the /v1/dataset body there, for an
+// offline `SITE_API_DATASET_FILE` site build over measured-only data.
+func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
+	t.Helper()
+	db := testdb.New(t)
+	db.Publish(t, snapshot)
+	res := buildFrom(t, db)
+	if out := os.Getenv("SITEAPI_TEST_DUMP"); out != "" {
+		body, err := server.Marshal(res.Dataset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(out, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return res
+}
+
+func TestMeasuredOnlyDatasetHasNoDemoFigures(t *testing.T) {
+	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := measuredOnly(t, snapshot)
+	ds := res.Dataset
+	if len(ds.Providers) != 1 || ds.Providers[0].Source != "measured" || ds.Simulated {
+		t.Fatalf("providers %d, simulated %v", len(ds.Providers), ds.Simulated)
+	}
+	for _, b := range res.Overview.CostBoards {
+		if len(b.Ranks) != 0 || b.Best.OK() || b.Dearest.OK() {
+			t.Errorf("cost board %s with no prices: %+v", b.Range, b)
+		}
+	}
+	for _, v := range res.Overview.FleetViews {
+		if v.Fleet.Basis != "measured" {
+			t.Errorf("%s fleet basis %q", v.Range.ID, v.Fleet.Basis)
+		}
+		if v.Cheapest.Cost.OK() || v.Dearest.Cost.OK() {
+			t.Errorf("%s has a price pick without prices: %+v / %+v", v.Range.ID, v.Cheapest, v.Dearest)
+		}
+		if v.Bills.Best != nil && v.Bills.Best.Bill.OK() {
+			t.Errorf("%s has a bill without prices: %+v", v.Range.ID, v.Bills.Best)
+		}
+	}
+}
