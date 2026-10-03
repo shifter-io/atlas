@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import stat
 import uuid
 from datetime import UTC, datetime, time, timedelta
@@ -274,6 +275,20 @@ def test_staging_profile_is_packaged_and_valid():
     assert loaded["countries"] == ["BG", "RO"]
     assert (loaded["census_every_minutes"], loaded["pulse_interval_minutes"]) == (4, 2)
     assert loaded["nodes"] == [{"provider": "shifter", "product": "residential", "region": "fra1"}]
+    assert loaded["reference_country"] == "RO"
+    assert loaded["methodology"] == "configs/staging-methodology.toml"
+
+
+def test_staging_load_country_must_be_in_scope(tmp_path):
+    text = (CONFIGS / "staging.toml").read_text()
+    for bad, message in (
+        (text.replace('reference_country = "RO"', 'reference_country = "US"'), "reference_country"),
+        (text.replace('"configs/staging-methodology.toml"', '""'), "methodology"),
+    ):
+        path = tmp_path / "staging.toml"
+        path.write_text(bad)
+        with pytest.raises(ValueError, match=message):
+            load_profile(path)
 
 
 @pytest.mark.parametrize("name", ["proxy_reviews", "proxy_live_main", "postgres"])
@@ -322,7 +337,18 @@ def test_staging_init_end_to_end(tmp_path, capsys):
         assert mode(token_file) == 0o600
         assert f"--token-file {token_file}" in node["command"]
         assert "--region fra1" in node["command"]
-        assert summary["commands"]["orchestrator"].endswith(f"--database-file {staging_file}")
+        methodology = shlex.quote(str(Path("configs/staging-methodology.toml").resolve()))
+        assert summary["commands"]["orchestrator"].endswith(
+            f"--database-file {staging_file} --methodology {methodology}"
+        )
+        assert summary["commands"]["calculate"] == (
+            f"milf-framework calculate --database-file {staging_file} --methodology {methodology}"
+        )
+        assert summary["load"] == {
+            "reference_country": "RO",
+            "concurrency": 100,
+            "targets": ["generic_http"],
+        }
 
         with connect(staging_file) as conn:
             enabled = conn.execute(
@@ -335,6 +361,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
                 "census.min_sample": 1000,
                 "scheduler.census_enabled": True,
                 "scheduler.pulse_enabled": True,
+                "load.reference_country": "RO",
                 "reports.dir": summary["reports_dir"],
             }
             targets = conn.execute(

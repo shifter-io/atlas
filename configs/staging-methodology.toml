@@ -1,0 +1,7 @@
+# Staging methodology: configs/methodology.toml with a smaller sample per target, so the short
+# staging loop (configs/staging.toml: RO and BG, pulses every 2 minutes) can produce scores.
+# `extends` loads that file first (relative to this one) and merges these settings over it;
+# state only what differs. Its methodology id differs from production's.
+extends = "methodology.toml"
+name = "Measured draft v2 (staging)"
+minimum_requests = 1000

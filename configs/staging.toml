@@ -22,6 +22,17 @@ min_sample = 1000
 interval_minutes = 2
 requests = 100
 
+[load]
+# Latency under load: every pulse slot of the census target also runs one wave of
+# census.concurrency requests per product in this country (setting load.reference_country,
+# production default US). It must be one of the [scope] countries.
+reference_country = "RO"
+
+[calculate]
+# Methodology for the orchestrator's calculate job and manual calculations (relative to the
+# working directory): methodology.toml with minimum_requests = 1000 per target.
+methodology = "configs/staging-methodology.toml"
+
 [scheduler]
 census = true
 pulse = true

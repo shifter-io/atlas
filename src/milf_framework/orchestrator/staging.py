@@ -1,7 +1,8 @@
 """A staging database for trying the census/pulse loop end to end (milf-framework staging init).
 
 `configs/staging.toml` names the database and the profile: a few countries, a census every few
-minutes, frequent pulses, HTML reports and the nodes to issue tokens for. `init` reads the app
+minutes, frequent pulses, the load test's reference country, the staging methodology, HTML
+reports and the nodes to issue tokens for. `init` reads the app
 connection from <secrets>/database.toml and the admin connection from
 <secrets>/postgres-admin.toml, creates the staging database owned by the app user (or with
 `clean` drops and recreates it), writes <secrets>/staging-database.toml pointing at it, applies
@@ -58,6 +59,18 @@ def load_profile(path: str | Path) -> dict[str, Any]:
     ):
         raise ValueError("[scope] countries must list two-letter country codes")
     census, pulse = data.get("census", {}), data.get("pulse", {})
+    reference = data.get("load", {}).get("reference_country")
+    if reference is not None and (
+        not isinstance(reference, str) or reference.upper() not in {c.upper() for c in countries}
+    ):
+        raise ValueError("[load] reference_country must be one of the [scope] countries")
+    methodology = data.get("calculate", {}).get("methodology")
+    if methodology is not None:
+        if not isinstance(methodology, str) or not methodology:
+            raise ValueError("[calculate] methodology must be a path")
+        from ..calculated.policy import load as load_methodology
+
+        load_methodology(Path(methodology).expanduser())
     switches = data.get("scheduler", {})
     for key in ("census", "pulse"):
         if type(switches.get(key, True)) is not bool:
@@ -84,6 +97,8 @@ def load_profile(path: str | Path) -> dict[str, Any]:
         "pulse_interval_minutes": _positive(pulse, "interval_minutes", "pulse"),
         "pulse_requests": _positive(pulse, "requests", "pulse"),
         "scheduler": {key: switches.get(key, True) for key in ("census", "pulse")},
+        "reference_country": reference.upper() if reference else None,
+        "methodology": methodology,
         "reports_dir": reports,
         "nodes": [{key: node[key] for key in ("provider", "product", "region")} for node in nodes],
     }
@@ -164,6 +179,11 @@ def init(
         if profile["reports_dir"]
         else None
     )
+    methodology = (
+        str(Path(profile["methodology"]).expanduser().resolve())
+        if profile["methodology"]
+        else None
+    )
     with storage.connect(staging_file) as conn:
         known = {
             row[0]
@@ -200,6 +220,7 @@ def init(
                 "census.min_sample": profile["census_min_sample"],
                 "scheduler.census_enabled": profile["scheduler"]["census"],
                 "scheduler.pulse_enabled": profile["scheduler"]["pulse"],
+                "load.reference_country": profile["reference_country"],
                 "reports.dir": reports_dir,
             },
         )
@@ -257,11 +278,22 @@ def init(
             "targets": pulse_targets,
         },
         "scheduler": profile["scheduler"],
+        "load": {
+            "reference_country": profile["reference_country"],
+            "concurrency": profile["census_concurrency"],
+            "targets": census_targets,
+        },
+        "methodology": methodology,
         "reports_dir": reports_dir,
         "nodes": tokens,
         "commands": {
             "orchestrator": (
                 f"milf-framework orchestrator --dev --database-file {_quote(staging_file)}"
+                + (f" --methodology {_quote(methodology)}" if methodology else "")
+            ),
+            "calculate": (
+                f"milf-framework calculate --database-file {_quote(staging_file)}"
+                + (f" --methodology {_quote(methodology)}" if methodology else "")
             ),
             "nodes": [token["command"] for token in tokens],
             "report": (
