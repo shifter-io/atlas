@@ -28,7 +28,7 @@ HEATMAP_SLOTS = 48
 OPEN_BATCHES = ("scheduled", "running")
 OPEN_RUNS = ("queued", "running", "uploading")
 BATCH_STATUSES = ("scheduled", "running", "done", "failed", "skipped", "killed")
-KINDS = ("census", "pulse")
+KINDS = ("census", "pulse", "load")
 # Editable per-target schedule fields and their inclusive bounds.
 TARGET_FIELDS: dict[str, tuple[int, int] | None] = {
     "pulse_enabled": None,
@@ -662,7 +662,8 @@ async def stop_batch(
         mark_closed(conn, batch_id)
         for run in killed:
             await run_finished(conn, batch_id, run["product_id"], now)
-        if batch["kind"] == "pulse" or status == "skipped":
+        # Load batches (latency under load) have no tape event of their own.
+        if batch["kind"] != "load" and (batch["kind"] == "pulse" or status == "skipped"):
             totals = await _row(
                 conn,
                 "SELECT coalesce(sum(requests),0)::bigint AS requests,"

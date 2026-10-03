@@ -183,7 +183,13 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
 
     at = datetime(2026, 10, 1, 12, 31, tzinfo=UTC)
     first = await batches.pulse_plan(db, at)
-    assert first == {"targets": ["generic_http", "generic_https"], "created": 4, "no_node": 0}
+    # The load test's reference country (US by default) is not enabled here: no load batch.
+    assert first == {
+        "targets": ["generic_http", "generic_https"],
+        "created": 4,
+        "load": 0,
+        "no_node": 0,
+    }
     lead = timedelta(seconds=15)
     assert slots() == [
         ("generic_https", datetime(2026, 10, 1, 12, tzinfo=UTC), 2, at + lead, at + lead),
@@ -207,6 +213,121 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
     assert len(slots()) == 7
     runs = query(database, "SELECT DISTINCT status FROM batch_runs")
     assert runs == [("queued",)]
+
+
+async def test_pulse_slots_of_a_census_target_add_a_load_wave(database, db, client):
+    """Every pulse slot of the census target opens a 'load' batch in the reference country with
+    the same scheduled_for and start_at; its runs fire census_concurrency requests at census
+    concurrency, counted like a pulse, and send only the country (the node's proxy factory)."""
+    prepare(database, ("DE", "AT"))
+    a = issue_token(database, provider="alpha", product="res", region="fra1")
+    await set_setting(db, "load.reference_country", "de")
+    at = datetime.now(UTC)
+    result = await batches.pulse_plan(db, at)
+    assert (result["created"], result["load"]) == (4, 1)
+    loads = query(
+        database,
+        "SELECT l.country_code,l.target_id,l.scheduled_for=p.scheduled_for,l.start_at=p.start_at "
+        "FROM test_batches l JOIN test_batches p ON p.kind='pulse' AND p.country_code='DE' "
+        "AND p.target_id=l.target_id WHERE l.kind='load'",
+    )
+    assert loads == [("DE", "generic_http", True, True)]
+    assert (await batches.pulse_plan(db, at))["load"] == 0  # idempotent
+    work = await (await client.get("/v1/work", headers=bearer(a["token"]))).json()
+    (load,) = [w for w in work["assignments"] if w["kind"] == "load"]
+    assert (load["country_code"], load["target_id"]) == ("DE", "generic_http")
+    assert (load["concurrency"], load["requests"], load["stop_rule"]) == (1000, 1000, "count")
+    assert load["min_sample"] is None and load["stall_seconds"] is None
+    pulse = next(w for w in work["assignments"] if w["kind"] == "pulse")
+    assert (pulse["concurrency"], pulse["requests"]) == (25, 100)
+    # A reference country outside the scope, or null, switches the wave off.
+    for value in ("US", None):
+        await set_setting(db, "load.reference_country", value)
+        later = await batches.pulse_plan(db, at + timedelta(hours=1))
+        assert later["load"] == 0 and later["created"] in (0, 4)
+    with pytest.raises(ValueError, match="two-letter"):
+        batches.reference_country("Germany")
+
+
+async def finish_pulse(db, node, batch_id, successes, now):
+    summary = {"status": "completed", "completed": 100, "successes": successes,
+               "stop_reason": "requests"}
+    return await batches.finish_run(db, node, batch_id, summary, None, now)
+
+
+@pytest.mark.parametrize("spoiled", ["no_success", "stalled", "failed"])
+async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
+    database, db, spoiled
+):
+    """A census that ended because the provider was down is rerun for that product alone at the
+    first pulse that sees it up again in the country, once per UTC day."""
+    prepare(database, ("DE",))
+    a = issue_token(database, provider="alpha", product="res", region="fra1")
+    b = issue_token(database, provider="beta", product="res", region="fra1")
+    node = {"node_id": a["node_id"]}
+    alpha, beta = product_id(database, "alpha"), product_id(database, "beta")
+    day = datetime.now(UTC).replace(hour=3, minute=0, second=0, microsecond=0)
+    with connect(database) as conn:
+        census = conn.execute(
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at,status,finished_at) VALUES ('census','DE',%s,'generic_http',%s,%s,'done',%s) "
+            "RETURNING batch_id",
+            (FRA1, day, day, day + timedelta(minutes=20)),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO batch_runs(batch_id,product_id,node_id,status,stop_reason,error,"
+            "successes,finished_at) VALUES (%s,%s,%s,%s,%s,%s,0,%s)",
+            (census, alpha, a["node_id"], "failed" if spoiled == "failed" else "done",
+             None if spoiled == "failed" else spoiled,
+             "run failed" if spoiled == "failed" else None, day + timedelta(minutes=20)),
+        )
+        conn.execute(
+            "INSERT INTO batch_runs(batch_id,product_id,node_id,status,stop_reason,successes,"
+            "finished_at) VALUES (%s,%s,%s,'done','unique_ratio',900,%s)",
+            (census, beta, b["node_id"], day + timedelta(minutes=20)),
+        )
+    pulses = []
+    for i in range(3):
+        at = day + timedelta(hours=1, minutes=30 * i)
+        await batches.pulse_plan(db, at)
+        pulses.append(query(
+            database,
+            "SELECT batch_id FROM test_batches WHERE kind='pulse' AND target_id='generic_http' "
+            "AND scheduled_for<=%s ORDER BY scheduled_for DESC LIMIT 1",
+            (at,),
+        )[0][0])
+        await batches.assignments(db, node, at + timedelta(minutes=1))
+    # Still down: no rerun. Then up: one rerun for alpha alone. Up again: nothing more.
+    await finish_pulse(db, node, pulses[0], 0, day + timedelta(hours=1, minutes=1))
+    assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [
+        (0,)
+    ]
+    up = day + timedelta(hours=1, minutes=31)
+    await finish_pulse(db, node, pulses[1], 97, up)
+    retries = query(
+        database,
+        "SELECT b.batch_id,b.retry_of,b.country_code,b.target_id,b.start_at-b.scheduled_for,"
+        "array_agg(br.product_id),array_agg(br.status) FROM test_batches b JOIN batch_runs br "
+        "USING(batch_id) WHERE b.retry_of IS NOT NULL GROUP BY 1",
+    )
+    assert [r[1:] for r in retries] == [
+        (census, "DE", "generic_http", timedelta(seconds=5), [alpha], ["queued"])
+    ]
+    events = query(database, "SELECT kind,product_id,data FROM test_events WHERE "
+                             "kind='census_retry'")
+    assert [(e[0], e[1], e[2]["retry_of"]) for e in events] == [("census_retry", alpha, census)]
+    # The rerun is spoiled too; another pulse gets through the same day: still only one rerun.
+    with connect(database) as conn:
+        conn.execute(
+            "UPDATE batch_runs SET status='done',stop_reason='no_success',finished_at=%s "
+            "WHERE batch_id=%s",
+            (up + timedelta(minutes=12), retries[0][0]),
+        )
+        conn.execute("UPDATE test_batches SET status='done' WHERE batch_id=%s", (retries[0][0],))
+    await finish_pulse(db, node, pulses[2], 100, day + timedelta(hours=2, minutes=1))
+    assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [
+        (1,)
+    ]
 
 
 # --- barrier --------------------------------------------------------------------------------

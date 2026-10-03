@@ -170,7 +170,7 @@ async def traffic_report(request):
             raise ValueError("Unknown query parameter")
         test = query.get("test") or None
         if test is not None and test not in traffic.TESTS:
-            raise ValueError("test must be census or pulse")
+            raise ValueError("test must be census, pulse or load")
         filters = {
             "test": test,
             "provider": query.get("provider") or None,

@@ -11,9 +11,11 @@ data.batch_finished_at.
 
 Outages (the `outages` table) are the time a product was down in a country. A pulse 'down'
 opens one (from its last healthy pulse there) and the pulse 'recovered' that ends the incident
-closes it (at the start of that healthy batch). A census that stalled opens one in the
-orchestrator (orchestrator.batches.census_down); any later healthy pulse in the country closes
-it here, with a 'recovered' event of source 'census'.
+closes it (at the start of that healthy batch). A pulse run that failed for a reason of the
+provider's (any error but INFRA_ERRORS) is down like one without a success: a provider that is
+down is data, not a gap. Load batches (latency under load) never open or close an outage.
+A census that stalled opens one in the orchestrator (orchestrator.batches.census_down); any
+later healthy pulse in the country closes it here, with a 'recovered' event of source 'census'.
 """
 
 from __future__ import annotations
@@ -30,6 +32,9 @@ from .storage import partition
 
 METHODOLOGY_FILE = CONFIGS / "methodology.toml"
 LOCK = 817452903
+# batch_runs.error of runs our infrastructure lost (no node in the region, never started, went
+# silent, the node shut down): never the provider's fault, so never down and never a slot.
+INFRA_ERRORS = ("no_node", "not_started", "stale", "node_shutdown")
 WATERMARK = "detect_watermark"
 # Incidents that stay open until a later pulse of the same series is healthy again.
 INCIDENTS = ("down", "success_drop")
@@ -271,10 +276,16 @@ def _pulse(cur, cfg, batch, runs, emit):
     common = {"region": batch["region"], "batch_finished_at": timestamp(batch["finished_at"])}
     for run in runs:
         product, requests = run["product_id"], run["requests"]
-        if not requests or _had(cur, batch["batch_id"], product, PULSE_KINDS, batch["finished_at"]):
+        # A run the provider failed is down whatever it managed to count.
+        failed = run["status"] == "failed"
+        if (not requests and not failed) or _had(
+            cur, batch["batch_id"], product, PULSE_KINDS, batch["finished_at"]
+        ):
             continue
-        successes, blocked = run["successes"], run["challenges"] + run["blocks"]
-        rate, block_share = successes / requests, blocked / requests
+        successes = 0 if failed else run["successes"]
+        blocked = 0 if failed else run["challenges"] + run["blocks"]
+        rate = successes / requests if requests else 0.0
+        block_share = blocked / requests if requests else 0.0
         history = cur.execute(
             "SELECT br.batch_id,b.finished_at,br.requests,br.successes,br.challenges,br.blocks,"
             "br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
@@ -295,7 +306,9 @@ def _pulse(cur, cfg, batch, runs, emit):
         base_blocked = _rate(sum(h["challenges"] + h["blocks"] for h in history), base_requests)
         latencies = [past[h["run_key"]] for h in history if past.get(h["run_key"]) is not None]
         base_p50 = statistics.median_low(latencies) if latencies else None
-        enough = len(history) >= cfg["min_baseline_batches"] and requests >= cfg["min_requests"]
+        enough = len(history) >= cfg["min_baseline_batches"] and (
+            failed or requests >= cfg["min_requests"]
+        )
         latency = p50.get(run["run_key"])
         data = common | {
             "requests": requests,
@@ -305,6 +318,8 @@ def _pulse(cur, cfg, batch, runs, emit):
             "challenges": run["challenges"],
             "blocks": run["blocks"],
         }
+        if failed:
+            data["error"] = run["error"]
         # The series state as of this batch: events of earlier batches only, so judging a batch
         # again (after a watermark reset) reaches the same verdict.
         incident = cur.execute(
@@ -406,6 +421,9 @@ def _pulse(cur, cfg, batch, runs, emit):
                     "incident": open_kind,
                 },
             )
+        if failed:
+            # Down or not, a failed run says nothing about blocks, latency or change.
+            continue
         if (
             enough
             and base_blocked is not None
@@ -598,14 +616,17 @@ def detect(conn, now, *, config=None):
         runs = cur.execute(
             "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
             "FROM batch_runs br LEFT JOIN test_runs r ON r.run_key=br.run_key "
-            "WHERE br.batch_id=%s AND br.status='done' ORDER BY br.product_id",
-            (batch["batch_id"],),
+            "WHERE br.batch_id=%s AND (br.status='done' OR (br.status='failed' "
+            "AND coalesce(br.error,'')<>ALL(%s))) ORDER BY br.product_id",
+            (batch["batch_id"], list(INFRA_ERRORS)),
         ).fetchall()
+        done = [r for r in runs if r["status"] == "done"]
         if batch["kind"] == "pulse":
             _pulse(cur, cfg, batch, runs, emit)
-        else:
-            _overlap(cur, batch, runs, emit)
-        _hosting(cur, cfg, batch, runs, emit, seen)
+        elif batch["kind"] == "census":
+            _overlap(cur, batch, done, emit)
+        # Load runs (latency under load) only feed the hosting-ASN audit.
+        _hosting(cur, cfg, batch, done, emit, seen)
     cur.execute(
         "INSERT INTO settings(key,value,updated_at) VALUES (%s,%s,%s) ON CONFLICT(key) "
         "DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",

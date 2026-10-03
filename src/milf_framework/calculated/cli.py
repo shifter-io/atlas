@@ -43,7 +43,7 @@ def register(commands):
     kinds = report.add_subparsers(dest="report", required=True)
     traffic = kinds.add_parser("traffic", help="Wire GB per provider and test")
     traffic.add_argument("--database-file", required=True)
-    traffic.add_argument("--test", choices=["census", "pulse"])
+    traffic.add_argument("--test", choices=["census", "pulse", "load"])
     traffic.add_argument("--provider", help='"provider" or "provider/product"')
     traffic.add_argument("--country", help="Two-letter country code")
     traffic.add_argument("--region", help="Runner region slug, e.g. fra1")

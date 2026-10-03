@@ -47,6 +47,10 @@ DEFAULTS: dict[str, Any] = {
     "census.every_minutes": None,
     # Seconds between a pulse slot opening and its synchronized start.
     "pulse.lead_seconds": 15,
+    # Latency under load: every pulse slot of a census target adds a 'load' batch in this
+    # country, one wave of census_concurrency requests per product at census concurrency. It
+    # must be an enabled country; None switches the load test off.
+    "load.reference_country": "US",
     # A queued run whose start_at passed this long ago without the node starting it fails.
     "batch.start_grace_seconds": 180,
     # A running or uploading run silent for this long fails; nodes post progress every 30 s.

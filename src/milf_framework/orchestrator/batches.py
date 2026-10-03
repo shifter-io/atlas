@@ -1,8 +1,11 @@
-"""Census and pulse batches: planning, the per-provider runs, the barrier and the reaper.
+"""Census, pulse and load batches: planning, the per-provider runs, the barrier and the reaper.
 
 A test_batches row is one synchronized slot (kind x country x target x scheduled_for) that every
 participating product runs from its node in the country's region, starting at the same
-`start_at`. Each product's part is a batch_runs row. A product participates when it has at
+`start_at`. Each product's part is a batch_runs row. A 'load' batch is the latency-under-load
+test: every pulse slot of a census target also opens one in the reference country (setting
+`load.reference_country`), where each product runs one wave of census_concurrency requests at
+census concurrency, next to that country's pulse. A product participates when it has at
 least one registered node anywhere; a participating product without a node in the batch's
 region gets a 'failed' run with stop_reason/error 'no_node' (plus an alert, and a 'no_node'
 tape event when that alert opens).
@@ -14,6 +17,10 @@ and at least one finished, 'failed' when none did.
 The settings `scheduler.census_enabled` / `scheduler.pulse_enabled` switch the planners off: a
 planner that is off plans nothing and its job records 'skipped'. `census.every_minutes` replaces
 the daily census slot with one every N minutes, aligned to the epoch, for every enabled country.
+
+A census the provider spoiled (no success, stalled, or failed for a reason of the provider's) is
+run again for that product alone, once per UTC day per country and target, as soon as one of its
+pulses in the country gets through (`census_retry`); the rerun's retry_of names the census.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from typing import Any
 
 import psycopg
 
+from ..detect import INFRA_ERRORS
 from .db import Database, mark_closed, setting
 from .events import emit, raise_alert
 
@@ -297,12 +305,23 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
     }
 
 
+def reference_country(value: Any) -> str | None:
+    """The load.reference_country setting as a country code; None (or "") switches it off."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str) or len(value) != 2 or not value.isalpha():
+        raise ValueError("load.reference_country must be a two-letter country code or null")
+    return value.upper()
+
+
 async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
     """Open the current slot of every pulse-enabled target that has no batch for it yet.
 
     Slots are aligned to the target's interval since the epoch (floor(now / interval)); a due
     target gets one batch per enabled country, all with the same start_at. Targets added to
-    the table are picked up on the next tick.
+    the table are picked up on the next tick. A census target's slot also gets a 'load' batch
+    in the reference country (load.reference_country, when it is enabled) with the same
+    scheduled_for and start_at: the latency-under-load wave.
     """
     now = _now(now)
     await db.ensure_partition("test_events", now)
@@ -311,15 +330,17 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
             return {"targets": [], "created": 0, "skipped": "pulse scheduler is off"}
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
+        reference = reference_country(await setting(conn, "load.reference_country"))
         if not await participants(conn):
             return {"targets": 0, "created": 0, "reason": "no registered nodes"}
         targets = await _rows(
             conn,
-            "SELECT target_id,pulse_interval_minutes FROM targets WHERE pulse_enabled "
+            "SELECT target_id,pulse_interval_minutes,census FROM targets WHERE pulse_enabled "
             "ORDER BY sort_order,target_id",
         )
         created: list[int] = []
         opened = []
+        loads = 0
         for target in targets:
             every = target["pulse_interval_minutes"] * 60
             slot = datetime.fromtimestamp(now.timestamp() // every * every, UTC)
@@ -340,6 +361,20 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
             )
             created.extend(row["batch_id"] for row in rows)
             opened.append(target["target_id"])
+            if target["census"] and reference:
+                # Only in an enabled country: the reference pulse runs next to it.
+                load = await _row(
+                    conn,
+                    "INSERT INTO test_batches(kind,country_code,region_id,target_id,"
+                    "scheduled_for,start_at) SELECT 'load',c.country_code,c.region_id,%s,%s,%s "
+                    "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id "
+                    "AND r.enabled WHERE c.enabled AND c.country_code=%s "
+                    "ON CONFLICT DO NOTHING RETURNING batch_id",
+                    (target["target_id"], slot, max(slot, now) + lead, reference),
+                )
+                if load:
+                    created.append(load["batch_id"])
+                    loads += 1
         gaps = await _create_runs(conn, created, now)
         await _report_no_node(conn, gaps, now)
         # Batches whose every run failed (no node in the region) close at once.
@@ -350,7 +385,12 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
             (created,),
         ):
             await close_batch(conn, row["batch_id"], now)
-    return {"targets": opened, "created": len(created), "no_node": len(gaps)}
+    return {
+        "targets": opened,
+        "created": len(created) - loads,
+        "load": loads,
+        "no_node": len(gaps),
+    }
 
 
 # --- barrier -----------------------------------------------------------------------------
@@ -554,6 +594,99 @@ async def census_down(
     return True
 
 
+def _spoiled(run: dict) -> bool:
+    """Whether a census run ended because the provider was down: it never got a success
+    (no_success), lost its network mid-run (stalled), or failed for a reason of the provider's
+    without a success. Runs our infrastructure lost (INFRA_ERRORS) are not."""
+    if run["stop_reason"] in ("no_success", "stalled"):
+        return True
+    return (
+        run["status"] == "failed"
+        and not run["successes"]
+        and (run["error"] or "") not in INFRA_ERRORS
+    )
+
+
+async def census_retry(
+    conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime
+) -> list[int]:
+    """Rerun the census a provider outage spoiled, at the first pulse that sees it up again.
+
+    Called when a run finished. For a pulse with successes, every census target whose latest
+    census run of this product in the country was spoiled (_spoiled) gets a census batch for
+    this product alone, starting now (retry_of = that census), unless one was already rerun
+    there today (UTC) or a census for the country and target is still open. A census_retry
+    event goes on the tape. Returns the new batch ids.
+    """
+    run = await _run_event(conn, batch_id, product_id)
+    if run is None or run["kind"] != "pulse" or run["status"] != "done" or not run["successes"]:
+        return []
+    country = run["country_code"]
+    day = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    latest = await _rows(
+        conn,
+        "SELECT DISTINCT ON (b.target_id) b.batch_id,b.target_id,b.region_id,br.status,"
+        "br.stop_reason,br.successes,br.error FROM batch_runs br JOIN test_batches b "
+        "USING(batch_id) JOIN targets t ON t.target_id=b.target_id "
+        "WHERE b.kind='census' AND t.census AND br.product_id=%s AND b.country_code=%s "
+        "AND br.status IN ('done','failed') "
+        "ORDER BY b.target_id,b.scheduled_for DESC,b.batch_id DESC",
+        (product_id, country),
+    )
+    created = []
+    for census in latest:
+        if not _spoiled(census):
+            continue
+        key = {"country": country, "target": census["target_id"], "product": product_id}
+        if await _row(
+            conn,
+            "SELECT 1 FROM test_batches b JOIN batch_runs br USING(batch_id) "
+            "WHERE b.kind='census' AND b.retry_of IS NOT NULL AND b.country_code=%(country)s "
+            "AND b.target_id=%(target)s AND br.product_id=%(product)s AND b.scheduled_for>=%(day)s",
+            key | {"day": day},
+        ) or await _row(
+            conn,
+            "SELECT 1 FROM test_batches WHERE kind='census' AND country_code=%(country)s "
+            "AND target_id=%(target)s AND status IN ('scheduled','running')",
+            key,
+        ):
+            continue
+        retry = await _row(
+            conn,
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+            "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT DO NOTHING RETURNING batch_id",
+            (country, run["region_id"], census["target_id"], now, now + LATE_START,
+             census["batch_id"]),
+        )
+        if retry is None:
+            continue
+        # The pulse's node is the product's node in the region.
+        await conn.execute(
+            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) "
+            "VALUES (%s,%s,%s,'queued')",
+            (retry["batch_id"], product_id, run["node_id"]),
+        )
+        await emit(
+            conn,
+            "census_retry",
+            now,
+            batch_id=retry["batch_id"],
+            product_id=product_id,
+            country_code=country,
+            target_id=census["target_id"],
+            region_id=run["region_id"],
+            data={
+                "region": run["region"],
+                "retry_of": census["batch_id"],
+                "reason": census["stop_reason"] or census["error"],
+                "pulse_batch_id": batch_id,
+            },
+        )
+        created.append(retry["batch_id"])
+    return created
+
+
 async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime):
     """First sign of life from a run: the run starts (census_started for its product), and
     the batch with its first run."""
@@ -628,6 +761,8 @@ async def assignments(db: Database, node: dict, now: datetime | None = None) -> 
     work = []
     for row in rows:
         census = row["kind"] == "census"
+        # The load wave: census concurrency, one request per connection, counted like a pulse.
+        load = row["kind"] == "load"
         work.append(
             {
                 "batch_id": row["batch_id"],
@@ -640,9 +775,15 @@ async def assignments(db: Database, node: dict, now: datetime | None = None) -> 
                 "target_id": row["target_id"],
                 "target_url": row["url"] or None,
                 "timeout_ms": row["timeout_ms"],
-                "concurrency": row["census_concurrency"] if census else row["pulse_concurrency"],
+                "concurrency": row["census_concurrency"]
+                if census or load
+                else row["pulse_concurrency"],
                 "stop_rule": "unique_ratio" if census else "count",
-                "requests": None if census else row["pulse_requests"],
+                "requests": None
+                if census
+                else row["census_concurrency"]
+                if load
+                else row["pulse_requests"],
                 "min_sample": min_sample if census else None,
                 "stall_seconds": stall_seconds if census else None,
                 "start_at": row["start_at"].astimezone(UTC).isoformat(),
@@ -762,6 +903,7 @@ async def finish_run(
         await run_finished(conn, batch_id, product_id, now)
         await census_down(conn, batch_id, product_id, summary, now)
         await close_batch(conn, batch_id, now)
+        await census_retry(conn, batch_id, product_id, now)
         return updated["status"]
 
 

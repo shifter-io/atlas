@@ -1,4 +1,5 @@
-"""Wire traffic of the census and pulse tests (milf-framework report traffic, GET /v1/traffic).
+"""Wire traffic of the census, pulse and load tests (milf-framework report traffic,
+GET /v1/traffic).
 
 Each provider's run in a batch counts once. A run whose artifact was ingested uses its stored
 run_buckets (requests = completed, exact wire bytes) when every bucket carries the v6 outcome
@@ -14,7 +15,7 @@ from datetime import UTC, datetime
 from psycopg.rows import dict_row
 
 GB = 10**9
-TESTS = ("census", "pulse")
+TESTS = ("census", "pulse", "load")
 TERMINAL = ("done", "failed", "skipped", "killed")
 
 
@@ -63,7 +64,7 @@ def summary(
     clauses, params = ["br.status<>'queued'"], []
     if test:
         if test not in TESTS:
-            raise ValueError("test must be census or pulse")
+            raise ValueError("test must be census, pulse or load")
         clauses.append("b.kind=%s")
         params.append(test)
     if provider:

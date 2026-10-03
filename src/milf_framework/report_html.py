@@ -44,7 +44,11 @@ OPEN = ("scheduled", "running")
 OPEN_RUNS = ("queued", "running", "uploading")
 # The census stops once successes >= min_sample and successes > 2 x unique IPs.
 STOP_SHARE = 0.5
-KIND_LABELS = {"census": "Test #1 · Census", "pulse": "Test #2 · Pulse"}
+KIND_LABELS = {
+    "census": "Test #1 · Census",
+    "pulse": "Test #2 · Pulse",
+    "load": "Test #2 · Load (latency under load)",
+}
 STOP_REASONS = {
     "unique_ratio": "Stopped on the unique-IP rule: after the minimum sample, successes passed "
     "twice the unique IPs, so the pool had started repeating addresses.",
