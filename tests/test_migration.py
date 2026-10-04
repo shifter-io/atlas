@@ -25,7 +25,6 @@ from milf_framework.calculated import store
 from milf_framework.calculated.api import app
 from milf_framework.calculated.calculator import calculate
 from milf_framework.storage import (
-    _schema as storage_schema,
     SCHEMA_VERSION,
     V5_CHECKSUM,
     V6_CHECKS,
@@ -38,6 +37,9 @@ from milf_framework.storage import (
     read_summary,
     seed,
     status,
+)
+from milf_framework.storage import (
+    _schema as storage_schema,
 )
 
 pytest_plugins = ["test_storage"]
@@ -431,7 +433,9 @@ async def test_calculated_v4_preserves_published_history_and_enables_city_networ
         conn.execute((SOURCE / "migrate_v7_v8.sql").read_text())
         conn.execute((SOURCE / "schema.sql").read_text())
         conn.execute("DELETE FROM schema_versions")
-        conn.execute("INSERT INTO schema_versions VALUES (%s,%s)", (SCHEMA_VERSION, storage_schema()[1]))
+        conn.execute(
+            "INSERT INTO schema_versions VALUES (%s,%s)", (SCHEMA_VERSION, storage_schema()[1])
+        )
         conn.execute((SOURCE / "calculated/migrate_v3_v4.sql").read_text())
         conn.execute(CALCULATED_V4.read_text())
         conn.execute("DELETE FROM calculation_schema")

@@ -228,8 +228,12 @@ def test_breakdowns_per_dimension_from_geo_buckets():
 
 def test_city_network_evidence_retains_unclassified_exits_and_does_not_copy_city_latency():
     ips = {
-        1: {"count": 3, "row": BERLIN | {"asn": 3320, "asn_organization": "Telekom", "usage_type": "residential"}},
-        2: {"count": 2, "row": BERLIN | {"asn": None, "asn_organization": None, "usage_type": None}},
+        1: {"count": 3, "row": BERLIN | {
+            "asn": 3320, "asn_organization": "Telekom", "usage_type": "residential",
+        }},
+        2: {"count": 2, "row": BERLIN | {
+            "asn": None, "asn_organization": None, "usage_type": None,
+        }},
     }
     rows = [geo_row(BERLIN, NETWORK, 3, 3, [[50, 3]])]
     result = breakdowns(ips, rows)["city_asn"]
@@ -522,7 +526,9 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
             "AND extra->>'schedule'='census_pulse' AND product_id=%s",
             (ids["alpha"],),
         ).fetchone()
-    assert {r[0] for r in rows} == {"asn", "country", "country_asn", "geography", "region", "city_asn"}
+    assert {r[0] for r in rows} == {
+        "asn", "country", "country_asn", "geography", "region", "city_asn",
+    }
     assert all(r[2] for r in rows) and windows == (0.75, 600, 0.0)
     # The API projects v2 dimensions next to the v1 pool, and lists products with census.
     async with TestClient(TestServer(app(database))) as client:

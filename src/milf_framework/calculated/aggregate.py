@@ -51,7 +51,9 @@ FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
 PLACE = ("country_code", "country", "region_code", "region", "city")
 NETWORK = ("asn", "name", "usage_type")
 # Payload breakdown name -> calculated_breakdowns dimension code.
-BREAKDOWNS = {"country": "c", "region": "r", "city": "g", "asn": "a", "country_asn": "x", "city_asn": "y"}
+BREAKDOWNS = {
+    "country": "c", "region": "r", "city": "g", "asn": "a", "country_asn": "x", "city_asn": "y",
+}
 OUTCOMES = ("challenges", "blocks", "bytes_up", "bytes_down")
 EVIDENCE_RANGES = {
     "uptime_pct": (0, 100),
@@ -271,7 +273,9 @@ def _memberships(place, network):
         # labels remain explicit nulls so no observed IPs disappear.
         label = dict(zip(PLACE, place, strict=True))
         identity = network if network is not None else (None, None, None)
-        result.append(("city_asn", (place, identity), label | dict(zip(NETWORK, identity, strict=True))))
+        result.append(
+            ("city_asn", (place, identity), label | dict(zip(NETWORK, identity, strict=True)))
+        )
     return result
 
 

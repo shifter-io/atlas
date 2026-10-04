@@ -1142,7 +1142,10 @@ def labels(conn, table, wanted):
     """Map label tuples to shared ids, inserting only the missing ones."""
     key, columns, types = LABELS[table]
     cur = conn.cursor(row_factory=tuple_row)
-    query = f"SELECT {key},{','.join(columns)} FROM {table} WHERE {columns[0]}=ANY(%s) OR {columns[0]} IS NULL"
+    query = (
+        f"SELECT {key},{','.join(columns)} FROM {table} "
+        f"WHERE {columns[0]}=ANY(%s) OR {columns[0]} IS NULL"
+    )
     firsts = sorted({w[0] for w in wanted if w[0] is not None})
     found = {tuple(row[1:]): row[0] for row in cur.execute(query, (firsts,))}
     missing = sorted(set(wanted) - set(found), key=str)

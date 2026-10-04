@@ -979,8 +979,9 @@ def migrate(credentials_file):
     v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql,
     migrate_v6_v7.sql and migrate_v7_v8.sql; v5, v6 and v7 start at the step for their version
     (v7 only adds a table). A calculated v2 layer then runs calculated/migrate_v2_v3.sql, which is
-    followed by calculated v3 → v4 (availability) and v4 → v5 (city/network evidence). A current (v8) database
-    with an older calculated layer runs just those calculated migrations. Every rebuilt pool,
+    followed by calculated v3 → v4 (availability) and v4 → v5 (city/network evidence).
+    A current (v8) database with an older calculated layer runs just those calculated migrations.
+    Every rebuilt pool,
     scope, bucket and run summary, every test batch, and every calculated window, breakdown and
     score, must equal its original.
     """
