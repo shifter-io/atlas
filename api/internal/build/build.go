@@ -502,6 +502,13 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		fleet, basis = entries, "measured"
 	}
 	ds.Totals = fleetTotals(entries, fleet, ds.Reviews, ds.CommunityRuns)
+	measuredEntries := []*entry{}
+	for _, e := range entries {
+		if e.P.Source == model.SourceMeasured {
+			measuredEntries = append(measuredEntries, e)
+		}
+	}
+	ds.MeasuredTotals = fleetTotals(measuredEntries, measuredEntries, nil, nil)
 
 	// Window statistics for every provider (headline) and every category.
 	stats := map[string]map[string]*WindowStats{}
@@ -596,8 +603,9 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		WindowHours      Num                `json:"windowHours"`
 		Weights          model.Breakdown    `json:"weights"`
 		Totals           model.FleetTotals  `json:"totals"`
+		MeasuredTotals   model.FleetTotals  `json:"measuredTotals"`
 		Snapshot         model.SnapshotMeta `json:"snapshot"`
-	}{ds.SchemaVersion, ds.GeneratedAt, ds.Seed, ds.RunID, ds.CollectorVersion, ds.WindowHours, ds.Weights, ds.Totals, ds.Snapshot}
+	}{ds.SchemaVersion, ds.GeneratedAt, ds.Seed, ds.RunID, ds.CollectorVersion, ds.WindowHours, ds.Weights, ds.Totals, ds.MeasuredTotals, ds.Snapshot}
 	declaredMeta := []string{}
 	if !ds.Simulated {
 		// A measured-only dataset has no seed by design.

@@ -274,6 +274,10 @@ func comparePort(t *testing.T, snapshot []byte, snapshotFile string) *build.Resu
 		}
 	}
 	allowed := func(path string) bool {
+		// Measured-only insight totals are an API addition, checked separately.
+		if path == ".measuredTotals" {
+			return true
+		}
 		m := providerPath.FindStringSubmatch(path)
 		if m == nil || m[1] != itoa(measuredIndex) {
 			return false
@@ -300,6 +304,13 @@ func comparePort(t *testing.T, snapshot []byte, snapshotFile string) *build.Resu
 		}
 	}
 	check("dataset", ref["dataset"], res.Dataset)
+	if res.Dataset.MeasuredTotals.Providers != 1 {
+		t.Errorf("insight totals include demo providers: %+v", res.Dataset.MeasuredTotals)
+	}
+	measured := res.Dataset.Providers[measuredIndex]
+	if res.Dataset.MeasuredTotals.MisclassifiedShare != measured.Trust.DatacenterAsnShare {
+		t.Errorf("insight misclassification %v, measured provider %v", res.Dataset.MeasuredTotals.MisclassifiedShare, measured.Trust.DatacenterAsnShare)
+	}
 
 	var windows map[string]map[string]json.RawMessage
 	if err := json.Unmarshal(ref["windows"], &windows); err != nil {

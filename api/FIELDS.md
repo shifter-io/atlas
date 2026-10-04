@@ -310,3 +310,7 @@ differences:
    rows. `source` tells the two apart.
 9. **Search.** The meta of an unscored network is `"Unranked · N/A"`, and there is
    a new `Countries` group.
+
+`measuredTotals` uses the same fields as `totals`, aggregated by the API over
+`source = "measured"` providers only. Overview insight descriptions read these
+totals even while demo providers remain in the database.

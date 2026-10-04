@@ -144,7 +144,7 @@ func lenOf(v any) any {
 
 // The API's additions to the fixture shape (documented in FIELDS.md).
 var allowedExtras = map[string]bool{
-	".snapshot": true, ".na": true,
+	".snapshot": true, ".na": true, ".measuredTotals": true,
 	".targets[].source": true, ".targets[].na": true, ".scopes[].na": true, ".profiles[].na": true,
 	".providers[].na": true, ".providers[].measurement": true, ".providers[].framework": true, ".providers[].website": true,
 	".tape[].source": true, ".tape[].na": true, ".tape[].at": true,
@@ -162,6 +162,9 @@ func TestDemoRoundTripReproducesTheFixture(t *testing.T) {
 	}
 	expected := generic(t, body)
 	actual := generic(t, res.Dataset)
+	if res.Dataset.MeasuredTotals.Providers != 0 || res.Dataset.MeasuredTotals.MisclassifiedShare.OK() {
+		t.Fatalf("demo-only data supplied measured insight figures: %+v", res.Dataset.MeasuredTotals)
+	}
 	var diffs []string
 	extras := map[string]bool{}
 	diff(expected, actual, "", &diffs, extras)
@@ -191,7 +194,7 @@ func TestDemoRoundTripReproducesTheFixture(t *testing.T) {
 		t.Logf("dataset na: %v", res.Dataset.NA)
 	}
 	for _, na := range res.Dataset.NA {
-		if !strings.HasPrefix(na, "snapshot.") {
+		if !strings.HasPrefix(na, "snapshot.") && !strings.HasPrefix(na, "measuredTotals.") {
 			t.Errorf("unexpected dataset-level N/A %s", na)
 		}
 	}

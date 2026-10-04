@@ -719,6 +719,7 @@ type Dataset struct {
 	Weights          Breakdown        `json:"weights"`
 	Profiles         []RankingProfile `json:"profiles"`
 	Totals           FleetTotals      `json:"totals"`
+	MeasuredTotals   FleetTotals      `json:"measuredTotals"`
 	Providers        []*Provider      `json:"providers"`
 	Tape             []TapeEvent      `json:"tape"`
 	Changelog        []ChangeEvent    `json:"changelog"`
