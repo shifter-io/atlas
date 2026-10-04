@@ -556,3 +556,42 @@ func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
 		t.Error("restoring the product link changed unrelated provider fields")
 	}
 }
+
+func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T) {
+	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	rows := []any{map[string]any{
+		"country_code": "DE", "country": "Germany", "region_code": "BE", "region": "Berlin", "city": "Berlin",
+		"asn": 3320, "name": "Deutsche Telekom", "usage_type": "residential", "ips": 12, "observations": 20,
+		"completed": 20, "successes": 20, "challenges": 0, "blocks": 0, "success_rate": 1,
+		"p50": 50, "p90": 100, "p99": 200,
+	}}
+	for _, entry := range snapshot["products"].([]any) {
+		product := entry.(map[string]any)
+		for _, entry := range product["windows"].(map[string]any) {
+			window := entry.(map[string]any)
+			window["breakdowns"].(map[string]any)["city_asn"] = rows
+		}
+	}
+	changed, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := measuredOnly(t, changed)
+	provider := res.Details["shifter"].Provider
+	measured := generic(t, provider.Measurement).(map[string]any)
+	expected, _ := json.Marshal(rows)
+	for rangeID, entry := range measured["windows"].(map[string]any) {
+		window := entry.(map[string]any)
+		received, _ := json.Marshal(window["breakdowns"].(map[string]any)["city_asn"])
+		if !bytes.Equal(expected, received) {
+			t.Errorf("%s lost coverage network evidence: %s", rangeID, received)
+		}
+	}
+}

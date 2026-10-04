@@ -539,6 +539,14 @@ type ProductMeasurement struct {
 	Measured
 }
 
+// CountryLatencyRank compares observed-country p50 within one measured product
+// category, cohort and reporting period. Ties share a competition rank.
+type CountryLatencyRank struct {
+	P50   Num `json:"p50"`
+	Rank  Num `json:"rank"`
+	Peers int `json:"peers"`
+}
+
 type ReviewSummary struct {
 	Count         Num    `json:"count"`
 	VerifiedCount Num    `json:"verifiedCount"`
@@ -570,7 +578,8 @@ type Provider struct {
 	Reviews ReviewSummary `json:"reviews"`
 	// Measurement is the raw snapshot ProductResult of the headline product
 	// (measured providers only; null for demo fixtures).
-	Measurement any `json:"measurement"`
+	Measurement         any                                                 `json:"measurement"`
+	CountryLatencyRanks map[string]map[string]map[string]CountryLatencyRank `json:"countryLatencyRanks,omitempty"`
 	// Framework identity, null for demo fixtures and unlinked catalog rows.
 	Framework *FrameworkLink `json:"framework"`
 	NA        []string       `json:"na"`

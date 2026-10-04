@@ -178,6 +178,23 @@ rows.
 
 ### Every-request snapshots
 
+The shared review Coverage evidence table reads `measurement.windows[range].breakdowns.city_asn`.
+Each row is one observed location/network intersection: `name`/`asn` fill ASN / ISP,
+`usage_type` supplies the observed network type, and `p50` is light-load median latency.
+Distinct IPs are that intersection's `ips`, not the city total repeated for every ASN.
+The snapshot field passes through the site API unchanged. Older snapshots keep their
+location counts and matching `breakdowns.city` latency, with unknown ASN/type rendered N/A.
+
+`countryLatencyRanks[kind][range][country_code]` is calculated by the site API from
+the selected snapshot product's `breakdowns.country` p50, with one vote per measured
+provider and proxy category. Peers must have the same cohort, reporting period and
+country; demo data and missing/invalid latency or zero-success rows are excluded.
+`rank` is 1 plus the number of peers with a strictly lower p50 (ties share a rank),
+`peers` counts valid comparisons including self, and `p50` preserves the country
+percentile. Missing values are null and listed in `na`. Coverage evidence shows
+this country rank beneath each available local latency; its tooltip gives the
+country p50 and peer count. City/ASN percentiles are never averaged for ranking.
+
 The framework's every-request scoring (milf `score-from-all-requests`) keeps
 `schema_version` 2 and adds fields; the API reads both shapes. A window's
 `metrics` with `time_slots` is every-request: `success_rate` is time-weighted
