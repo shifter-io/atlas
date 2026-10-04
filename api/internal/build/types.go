@@ -76,6 +76,7 @@ type WindowStats struct {
 	IncidentCount    Num                  `json:"incidentCount"`
 	Bands            []IncidentBand       `json:"bands"`
 	Success          []model.SeriesPoint  `json:"success"`
+	Availability     []model.SeriesPoint  `json:"availability"`
 	Latency          []model.LatencyPoint `json:"latency"`
 	Pool             []model.SeriesPoint  `json:"pool"`
 }

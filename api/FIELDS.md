@@ -233,6 +233,15 @@ fraction of it, labelled `major · <country>`), so the charts shade real outages
 For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
 empty.
 
+`availability` is the per-bucket fractional availability history, mapped from
+`measurement.windows.<range>.series[].uptime` without interpolation. Buckets
+are five minutes for 24h and one day for 7d/30d. The calculator unions and clips
+recorded outages per country, using countries with a started census/pulse run
+or an active outage in that bucket. Buckets without monitoring evidence, and
+older snapshots without this field, remain null. Demo histories use the same
+weighted incident intervals as their totals. The shared Availability metric
+card displays this series for every tested product category.
+
 ## Records
 
 | Entity | Fields | Source |

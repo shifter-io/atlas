@@ -94,6 +94,9 @@ func TestPortMatchesTheSiteTypeScriptWithOutages(t *testing.T) {
 		downtime float64
 	}{{"24h", 2, 75}, {"7d", 2, 75}, {"30d", 3, 135}} {
 		w := res.Details["shifter"].Windows["residential"][c.rangeID]
+		if len(w.Availability) != len(w.Success) || w.Availability[len(w.Availability)-1].V != 0.9995 || w.Availability[0].V.OK() {
+			t.Errorf("%s: availability history lost measured fractions or null gaps", c.rangeID)
+		}
 		if len(w.Bands) != c.count || w.IncidentCount != Num(c.count) || w.DowntimeMinutes != Num(c.downtime) {
 			t.Errorf("%s: %d bands, count %v, downtime %v", c.rangeID, len(w.Bands), w.IncidentCount, w.DowntimeMinutes)
 		}
@@ -211,6 +214,14 @@ func withOutages(t *testing.T) []byte {
 		value := 1 - downtime[label]/(hours*3600*2)
 		w["metrics"].(map[string]any)["uptime"] = value
 		w["uptime"] = map[string]any{"batches": 48, "up": 47, "value": value, "downtime_s": downtime[label], "basis": "outage time", "countries": 2}
+		points := w["series"].([]any)
+		for i, point := range points {
+			point := point.(map[string]any)
+			point["uptime"] = nil
+			if i == len(points)-1 {
+				point["uptime"] = 0.9995
+			}
+		}
 	}
 	out, err := json.Marshal(s)
 	if err != nil {

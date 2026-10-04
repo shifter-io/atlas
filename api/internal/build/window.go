@@ -176,7 +176,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: nan,
 			UniqueIps: w.Pool.UniqueIps, ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
-			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
+			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
 		// Outages (snapshot v2) shade the charts and count as incidents; uptime
 		// and downtime stay the framework's own time-based figures.
 		if sp.Outages != nil {
@@ -186,6 +186,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		for _, s := range w.Series {
 			t := age(s.At)
 			ws.Success = append(ws.Success, model.SeriesPoint{T: t, V: s.SuccessRate})
+			ws.Availability = append(ws.Availability, model.SeriesPoint{T: t, V: s.Uptime})
 			l := seriesLatency(w, s)
 			ws.Latency = append(ws.Latency, model.LatencyPoint{T: t, P50: l.P50, P90: l.P90, P99: l.P99})
 			ws.Pool = append(ws.Pool, model.SeriesPoint{T: t, V: s.UniqueIps})
@@ -200,7 +201,7 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 			LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
 			RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
 			CostPer1kSuccess: p.Pricing.CostPer1kSuccess, UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
-			IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(p.Series.Success24h),
+			IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(p.Series.Success24h), Availability: incidentAvailabilitySeries(p.Incidents, meta.Days),
 			Latency: nonNilLatency(p.Series.Latency24h), Pool: nonNilSeries(p.Series.UniqueIps24h)}
 	}
 	days := meta.Days
@@ -236,7 +237,27 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		RecurringShare: recurringShareAt(p.Pool.RecurringShare.F(), days),
 		Requests:       p.Performance.Requests24h * Num(days), BandwidthMb: Num(jsnum.FixedNum(p.Performance.BandwidthMb24h.F()*float64(days), 1)),
 		CostPer1kSuccess: Num(cost), UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
-		IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(success), Latency: lat, Pool: nonNilSeries(pool)}
+		IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(success), Availability: incidentAvailabilitySeries(p.Incidents, meta.Days), Latency: lat, Pool: nonNilSeries(pool)}
+}
+
+func incidentAvailabilitySeries(incidents []model.Incident, days int) []model.SeriesPoint {
+	step := dayMinutes
+	if days == 1 {
+		step = 5
+	}
+	points := []model.SeriesPoint{}
+	for older := float64(days) * dayMinutes; older > 0; older -= step {
+		younger := math.Max(0, older-step)
+		down := 0.0
+		for _, inc := range incidents {
+			start := inc.StartedAgoSeconds.F() / 60
+			end := start - inc.DurationMinutes.F()
+			down += float64(math.Max(0, math.Min(start, older)-math.Max(end, younger)) * inc.Impact.F())
+		}
+		v := math.Max(0, math.Min(1, 1-down/(older-younger)))
+		points = append(points, model.SeriesPoint{T: Num(older), V: Num(jsnum.FixedNum(v, 6))})
+	}
+	return points
 }
 
 func nonNilSeries(s []model.SeriesPoint) []model.SeriesPoint {

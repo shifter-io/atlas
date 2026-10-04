@@ -204,12 +204,13 @@ func (v *TargetResult) UnmarshalJSON(d []byte) error {
 }
 
 type SeriesRow struct {
-	At          string  `json:"at"`
-	Completed   Num     `json:"completed"`
-	Successes   Num     `json:"successes"`
-	SuccessRate Num     `json:"success_rate"`
-	LatencyMs   Latency `json:"latency_ms"`
-	UniqueIps   Num     `json:"unique_ips"`
+	At                 string   `json:"at"`
+	Completed          Num      `json:"completed"`
+	Successes          Num      `json:"successes"`
+	SuccessRate        Num      `json:"success_rate"`
+	LatencyMs          Latency  `json:"latency_ms"`
+	UniqueIps          Num      `json:"unique_ips"`
+	Uptime             Num      `json:"uptime"`
 }
 
 func (v *SeriesRow) UnmarshalJSON(d []byte) error {
