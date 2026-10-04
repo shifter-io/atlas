@@ -14,6 +14,7 @@ import (
 
 	"github.com/ice-zeus/milf-website/api/internal/build"
 	"github.com/ice-zeus/milf-website/api/internal/config"
+	"github.com/ice-zeus/milf-website/api/internal/model"
 	"github.com/ice-zeus/milf-website/api/internal/server"
 	"github.com/ice-zeus/milf-website/api/internal/store"
 	"github.com/ice-zeus/milf-website/api/internal/testdb"
@@ -527,5 +528,31 @@ func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
 		if v.Cheapest.Cost != 0.75 || v.Bills.Best == nil || !v.Bills.Best.Bill.OK() {
 			t.Errorf("%s fleet view: cheapest %v, bills %+v", v.Range.ID, v.Cheapest.Cost, v.Bills.Best)
 		}
+	}
+}
+
+func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
+	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := seeded(t)
+	db.Publish(t, snapshot)
+	before := buildFrom(t, db).Details["shifter"].Provider
+	catalog, err := os.ReadFile(repoFile(t, "api", "scripts", "catalog-shifter.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Exec(t, string(catalog))
+	db.Exec(t, string(catalog)) // Reapplying the catalog correction is safe.
+	after := buildFrom(t, db).Details["shifter"].Provider
+	if len(after.Products) != len(before.Products) || model.SV(after.Products[0].URL) != "https://shifter.io/services/residential-proxies" {
+		t.Fatalf("catalog did not restore the existing product's link: %+v", after.Products)
+	}
+	if model.SV(after.Products[0].PriceLabel) != model.SV(before.Products[0].PriceLabel) {
+		t.Errorf("adding a link discarded the measured price: %v → %v", before.Products[0].PriceLabel, after.Products[0].PriceLabel)
+	}
+	if after.Website != nil || after.Performance.SuccessRate != before.Performance.SuccessRate || after.Pricing.PricePerGbAtScale != before.Pricing.PricePerGbAtScale {
+		t.Error("restoring the product link changed unrelated provider fields")
 	}
 }

@@ -434,6 +434,17 @@ func realProvider(id string, row *store.ProviderRow, slug, name string, products
 			p.BestFor = row.BestFor
 		}
 		if prods := c.products(row.Slug); len(prods) > 0 {
+			// A catalog link must not discard a measured product's current list-rate label.
+			for i := range prods {
+				if prods[i].PriceLabel == nil {
+					for _, measured := range p.Products {
+						if measured.Kind == prods[i].Kind {
+							prods[i].PriceLabel = measured.PriceLabel
+							break
+						}
+					}
+				}
+			}
 			p.Products = prods
 		}
 	}
