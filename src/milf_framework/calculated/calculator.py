@@ -804,6 +804,10 @@ def build(
                     hours,
                     outages=down,
                     tested=monitored_groups[p["product_id"]] if scheduled else (),
+                    latency_target=timed_target,
+                    minimum=minimum,
+                    factors=factors,
+                    excluded=excluded,
                 ),
                 "previous_period": prev_m,
                 "success_delta": m["success_rate"] - prev_m["success_rate"]

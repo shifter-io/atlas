@@ -911,7 +911,10 @@ def outage_list(outages, since, end, limit=50):
     return result
 
 
-def series(rows, observations, start, end, hours, *, outages=(), tested=()):
+def series(
+    rows, observations, start, end, hours, *, outages=(), tested=(),
+    latency_target=None, minimum=1, factors=None, excluded=None,
+):
     """Request history plus outage-time availability at the same bucket resolution.
 
     A country contributes only in buckets intersecting a started census/pulse run
@@ -933,6 +936,8 @@ def series(rows, observations, start, end, hours, *, outages=(), tested=()):
     t = start
     while t < end:
         m = metrics(buckets[t], step.total_seconds() / 3600)
+        latency_rows = [r for r in buckets[t] if r["target"] == latency_target]
+        timing = timed(latency_rows, step.total_seconds() / 3600, minimum) if latency_target else m
         stop = min(t + step, end)
         countries = {r["country"] for r in tested if r["started_at"] < stop and r["last"] > t} | {
             o["country"] for o in outages if o["started_at"] < stop and (o["ended_at"] or end) > t
@@ -944,7 +949,10 @@ def series(rows, observations, start, end, hours, *, outages=(), tested=()):
                 "completed": m["completed"],
                 "successes": m["successes"],
                 "success_rate": m["success_rate"],
-                "latency_ms": m["latency_ms"],
+                "latency_ms": timing["latency_ms"],
+                **({"latency_under_load_ms": under_load(
+                    latency_rows, factors or {}, minimum, excluded
+                )["ms"]} if latency_target else {}),
                 "unique_ips": len(seen[t]) if buckets[t] else None,
                 "uptime": availability["value"],
             }
