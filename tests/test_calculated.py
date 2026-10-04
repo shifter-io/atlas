@@ -116,7 +116,9 @@ async def test_calculation_publication_and_api(database, tmp_path):
     assert first["products"][0]["windows"]["24h"]["metrics"]["completed"] == 10
     assert first["products"][0]["windows"]["24h"]["pool"]["unique_ips"] <= 10
     assert first["products"][0]["windows"]["24h"]["scores"]["balanced"]["score"] is None
-    assert first["products"][0]["windows"]["24h"]["overlap"]["exclusive_share"] is None
+    assert first["products"][0]["windows"]["24h"]["overlap"] == {
+        "exclusive_share": 1, "shared_share": 0, "compared_products": 0,
+    }
     assert calculate(database, POLICY, as_of=end)["snapshot_id"] == first["snapshot_id"]
     # A late imported second provider revises the same cutoff, including overlap.
     second_dir = await measurement(tmp_path, requests=10, provider="second")
@@ -134,6 +136,9 @@ async def test_calculation_publication_and_api(database, tmp_path):
     assert store.read(database)["snapshot_id"] == second["snapshot_id"]
     empty = calculate(database, POLICY, as_of=end + timedelta(days=31))
     assert empty["products"][0]["windows"]["30d"]["metrics"]["completed"] == 0
+    assert empty["products"][0]["windows"]["30d"]["overlap"] == {
+        "exclusive_share": None, "shared_share": None, "compared_products": 0,
+    }
     # API still serves after removing access to raw facts from the read path.
     async with TestClient(TestServer(app(database))) as client:
         response = await client.get("/v1/snapshots/current")
@@ -545,6 +550,35 @@ def test_daily_average_counts():
     edge = [template | {"bucket_start": now - timedelta(hours=24), "requested_country": None}]
     assert [d is not None for d in daily_pools(edge, now, 2)] == [True, False]
     assert daily_average([None, {"unique_ips": 4, **dict.fromkeys(DIMENSIONS, 2)}], 24)["days"] == 0
+
+
+def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
+    from milf_framework.calculated.calculator import build
+
+    c, now, r, b, o, e = ready_inputs(products=(1,))
+    alone = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    for window in alone["products"][0]["windows"].values():
+        assert window["pool"]["unique_ips"] == 1
+        assert window["overlap"] == {
+            "exclusive_share": 1, "shared_share": 0, "compared_products": 0,
+        }
+
+    c, now, r, b, o, e = ready_inputs()
+    # A second product with requests but no observed IPs is not a measured peer.
+    first_observations = [obs for obs in o if obs["run_key"] == 10]
+    partial = build(r, b, first_observations, e, c, digest(c), now, 2, None, None)
+    first, second = partial["products"]
+    assert first["windows"]["30d"]["overlap"] == {
+        "exclusive_share": 1, "shared_share": 0, "compared_products": 0,
+    }
+    assert second["windows"]["30d"]["overlap"]["exclusive_share"] is None
+
+    # Once both pools are observed, their shared IP changes the same calculation.
+    compared = build(r, b, o, e, c, digest(c), now, 3, None, None)
+    for product in compared["products"]:
+        assert product["windows"]["30d"]["overlap"] == {
+            "exclusive_share": 0, "shared_share": 1, "compared_products": 1,
+        }
 
 
 def test_cohorts_and_duplicate_overlap():

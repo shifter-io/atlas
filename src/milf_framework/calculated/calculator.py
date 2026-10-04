@@ -878,7 +878,10 @@ def build(
                 if q["provider"] != p["provider"] and sets[((q["product_id"], cohort), label)]
             ]
             shared = set().union(*(sets[((q["product_id"], cohort), label)] for q in peers)) & own
-            if own and peers:
+            # Uniqueness is relative to the measured cohort. With an observed
+            # pool and no peers, the empty peer union shares none of our IPs.
+            # An empty own pool still has no denominator and remains unavailable.
+            if own:
                 p["windows"][label]["overlap"] = {
                     "exclusive_share": 1 - len(shared) / len(own),
                     "shared_share": len(shared) / len(own),
