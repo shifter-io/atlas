@@ -209,6 +209,7 @@ type SeriesRow struct {
 	Successes          Num      `json:"successes"`
 	SuccessRate        Num      `json:"success_rate"`
 	LatencyMs          Latency  `json:"latency_ms"`
+	LatencyUnderLoadMs *Latency `json:"latency_under_load_ms,omitempty"`
 	UniqueIps          Num      `json:"unique_ips"`
 	Uptime             Num      `json:"uptime"`
 }
