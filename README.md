@@ -202,6 +202,11 @@ for 24h and daily resolution for 7d/30d. Countries count in buckets intersecting
 census/pulse run or recorded outage; overlapping outages are unioned and clipped per country.
 Buckets without monitoring evidence are null. Calculated schema v4 persists this fraction in
 `calculated_series.uptime`; `db-migrate` adds the nullable column while preserving older history.
+Coverage evidence uses `breakdowns.city_asn`: actual location/network intersections with
+distinct IP counts, ASN name/number, DB-IP usage type and light-load p50/p90/p99. Unclassified
+exits remain in the intersection with null network fields; no country-ASN join or advertised
+product type fills a gap. Calculated schema v5 stores these as dimension `y`, with nullable
+ASN labels; `db-migrate` preserves existing calculated rows and published snapshots.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

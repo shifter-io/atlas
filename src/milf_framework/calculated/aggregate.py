@@ -51,7 +51,7 @@ FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
 PLACE = ("country_code", "country", "region_code", "region", "city")
 NETWORK = ("asn", "name", "usage_type")
 # Payload breakdown name -> calculated_breakdowns dimension code.
-BREAKDOWNS = {"country": "c", "region": "r", "city": "g", "asn": "a", "country_asn": "x"}
+BREAKDOWNS = {"country": "c", "region": "r", "city": "g", "asn": "a", "country_asn": "x", "city_asn": "y"}
 OUTCOMES = ("challenges", "blocks", "bytes_up", "bytes_down")
 EVIDENCE_RANGES = {
     "uptime_pct": (0, 100),
@@ -265,11 +265,18 @@ def _memberships(place, network):
             result.append(
                 ("country_asn", (place[0], network), {"country_code": cc, "country": country} | asn)
             )
+    if located:
+        # Coverage evidence needs the actual location/network intersection,
+        # never a join of independent country or city totals. Unknown network
+        # labels remain explicit nulls so no observed IPs disappear.
+        label = dict(zip(PLACE, place, strict=True))
+        identity = network if network is not None else (None, None, None)
+        result.append(("city_asn", (place, identity), label | dict(zip(NETWORK, identity, strict=True))))
     return result
 
 
 def breakdowns(ips, geo):
-    """Success, outcome, latency and IP counts per country, region, city, ASN and country x ASN.
+    """Success, outcome, latency and IP counts per place, ASN and their intersections.
 
     ips are pool() entries (each IP once, labelled by its DB-IP enrichment); geo rows carry
     run_geo_buckets counters per exit location and network. Requests without an exit address

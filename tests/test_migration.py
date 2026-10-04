@@ -8,7 +8,7 @@ builds (ready and ranked, then expired and retained scores, then an unpublished 
 fixtures/schema_v5.sql is the exact v5 schema (storage.V5_CHECKSUM) and fixtures/calculated_v2.sql
 the exact calculated v2 schema (store.V2_CHECKSUM); load_v5 builds a v5 database from the same dump
 the way the v5 release migrated it; fixtures/schema_v6.sql and schema_v7.sql are the exact v6 and
-v7 schemas (storage.V6_CHECKSUM, V7_CHECKSUM). Every path ends at schema v8 with calculated v4.
+v7 schemas (storage.V6_CHECKSUM, V7_CHECKSUM). Every path ends at schema v8 with calculated v5.
 """
 
 import gzip
@@ -25,6 +25,7 @@ from milf_framework.calculated import store
 from milf_framework.calculated.api import app
 from milf_framework.calculated.calculator import calculate
 from milf_framework.storage import (
+    _schema as storage_schema,
     SCHEMA_VERSION,
     V5_CHECKSUM,
     V6_CHECKS,
@@ -47,6 +48,7 @@ SCHEMA_V6 = Path(__file__).parent / "fixtures/schema_v6.sql"
 SCHEMA_V7 = Path(__file__).parent / "fixtures/schema_v7.sql"
 CALCULATED_V2 = Path(__file__).parent / "fixtures/calculated_v2.sql"
 CALCULATED_V3 = Path(__file__).parent / "fixtures/calculated_v3.sql"
+CALCULATED_V4 = Path(__file__).parent / "fixtures/calculated_v4.sql"
 SOURCE = Path(store.__file__).parents[1]
 POLICY = Path("configs/methodology.toml")
 RESOURCES = ("products", "scores", "series", "breakdowns", "overlap", "fleet", "runs")
@@ -142,7 +144,7 @@ async def test_v4_database_migrates_in_place(databases, tmp_path):
     builds = sorted(before["payloads"])
     api_before = await api_bodies(database, builds)
     result = migrate(database)
-    assert result["migrated"] and result["calculated_schema_version"] == 4
+    assert result["migrated"] and result["calculated_schema_version"] == 5
     assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 8
     assert result["from_calculated_schema_version"] == 1
     assert migrate(database)["migrated"] is False
@@ -262,7 +264,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     api_before = await api_bodies(database, builds)
     result = migrate(database)
     assert (result["from_schema_version"], result["schema_version"]) == (5, 8)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (2, 4)
+    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (2, 5)
     assert set(store.V2_CHECKS) <= set(result["verified"])
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -366,8 +368,8 @@ def test_v6_database_migrates_through_v7(databases):
     before = batches(database)
     result = migrate(database)
     assert (result["from_schema_version"], result["schema_version"]) == (6, 8)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (3, 4)
-    assert result["verified"] == [*V6_CHECKS, *store.V3_CHECKS]
+    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (3, 5)
+    assert result["verified"] == [*V6_CHECKS, *store.V3_CHECKS, *store.V4_CHECKS]
     assert migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
@@ -405,7 +407,7 @@ def test_v7_database_migrates_to_v8(databases):
     before = batches(database)
     result = migrate(database)
     assert (result["from_schema_version"], result["schema_version"]) == (7, 8)
-    assert result["verified"] == [*store.V3_CHECKS]
+    assert result["verified"] == [*store.V3_CHECKS, *store.V4_CHECKS]
     assert migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
@@ -418,6 +420,35 @@ def test_v7_database_migrates_to_v8(databases):
             "INSERT INTO load_references(day,region_id,country_code,basis) "
             "VALUES ('2026-10-03',1,'DE','default')"
         )
+
+
+@pytest.mark.asyncio
+async def test_calculated_v4_preserves_published_history_and_enables_city_network_rows(databases):
+    database = databases()
+    load_v7(database)
+    assert hashlib.sha256(CALCULATED_V4.read_bytes()).hexdigest() == store.V4_CHECKSUM
+    with connect(database) as conn:
+        conn.execute((SOURCE / "migrate_v7_v8.sql").read_text())
+        conn.execute((SOURCE / "schema.sql").read_text())
+        conn.execute("DELETE FROM schema_versions")
+        conn.execute("INSERT INTO schema_versions VALUES (%s,%s)", (SCHEMA_VERSION, storage_schema()[1]))
+        conn.execute((SOURCE / "calculated/migrate_v3_v4.sql").read_text())
+        conn.execute(CALCULATED_V4.read_text())
+        conn.execute("DELETE FROM calculation_schema")
+        conn.execute("INSERT INTO calculation_schema VALUES (4,%s)", (store.V4_CHECKSUM,))
+    before = v5_state(database)
+    bodies = await api_bodies(database, sorted(before["payloads"]))
+    result = migrate(database)
+    assert result["from_calculated_schema_version"] == 4
+    assert result["calculated_schema_version"] == 5
+    assert result["verified"] == list(store.V4_CHECKS)
+    assert canonical(v5_state(database)) == canonical(before)
+    assert await api_bodies(database, sorted(before["payloads"])) == bodies
+    assert migrate(database)["migrated"] is False
+    store.initialize(database)
+    reference = databases()
+    store.initialize(reference)
+    assert catalog(database) == catalog(reference)
 
 
 def test_failed_v6_check_rolls_back(databases, monkeypatch):
@@ -451,7 +482,7 @@ async def test_calculated_v2_on_v6_migrates_in_place(databases, tmp_path):
         ).fetchall()
     result = migrate(database)
     assert result["from_schema_version"] == 6 and result["from_calculated_schema_version"] == 2
-    assert result["verified"] == [*store.V2_CHECKS, *V6_CHECKS, *store.V3_CHECKS]
+    assert result["verified"] == [*store.V2_CHECKS, *V6_CHECKS, *store.V3_CHECKS, *store.V4_CHECKS]
     assert migrate(database)["migrated"] is False
     store.initialize(database)
     assert canonical(v5_state(database)) == canonical(before)

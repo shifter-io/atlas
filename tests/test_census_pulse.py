@@ -178,7 +178,7 @@ def test_breakdowns_per_dimension_from_geo_buckets():
         },
     }
     result = breakdowns(ips, rows)
-    assert list(result) == ["country", "region", "city", "asn", "country_asn"]
+    assert list(result) == ["country", "region", "city", "asn", "country_asn", "city_asn"]
     de, fr = result["country"]
     # The DB-IP name wins over the requested-country fallback name.
     assert (de["country_code"], de["country"], fr["country"]) == ("DE", "Germany", "France")
@@ -213,6 +213,10 @@ def test_breakdowns_per_dimension_from_geo_buckets():
         ("DE", 3320),
         ("DE", 24940),
     }
+    pairs = {(r["city"], r["asn"]): r for r in result["city_asn"]}
+    assert set(pairs) == {("Berlin", 3320), ("Munich", 3320), ("Munich", 24940)}
+    assert (pairs["Munich", 3320]["p50"], pairs["Munich", 24940]["p50"]) == (50, 1000)
+    assert pairs["Berlin", 3320]["ips"] == 1
     # The v1 pool lists keep only rows with addresses.
     lists = pool_lists(result)
     assert lists["countries_breakdown"] == [
@@ -220,6 +224,20 @@ def test_breakdowns_per_dimension_from_geo_buckets():
     ]
     assert [g["city"] for g in lists["geo"]] == ["Berlin"]
     assert lists["asns_breakdown"][0]["asn"] == 3320
+
+
+def test_city_network_evidence_retains_unclassified_exits_and_does_not_copy_city_latency():
+    ips = {
+        1: {"count": 3, "row": BERLIN | {"asn": 3320, "asn_organization": "Telekom", "usage_type": "residential"}},
+        2: {"count": 2, "row": BERLIN | {"asn": None, "asn_organization": None, "usage_type": None}},
+    }
+    rows = [geo_row(BERLIN, NETWORK, 3, 3, [[50, 3]])]
+    result = breakdowns(ips, rows)["city_asn"]
+    unknown = next(r for r in result if r["asn"] is None)
+    assert (unknown["ips"], unknown["observations"]) == (1, 2)
+    assert unknown["name"] is None and unknown["usage_type"] is None
+    assert unknown["p50"] is None
+    assert sum(r["ips"] for r in result) == 2
 
 
 def test_uptime_share_of_pulse_batches():
@@ -504,7 +522,7 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
             "AND extra->>'schedule'='census_pulse' AND product_id=%s",
             (ids["alpha"],),
         ).fetchone()
-    assert {r[0] for r in rows} == {"asn", "country", "country_asn", "geography", "region"}
+    assert {r[0] for r in rows} == {"asn", "country", "country_asn", "geography", "region", "city_asn"}
     assert all(r[2] for r in rows) and windows == (0.75, 600, 0.0)
     # The API projects v2 dimensions next to the v1 pool, and lists products with census.
     async with TestClient(TestServer(app(database))) as client:

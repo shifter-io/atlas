@@ -55,17 +55,17 @@ CREATE TABLE IF NOT EXISTS places (
 );
 CREATE TABLE IF NOT EXISTS asn_labels (
  asn_label_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- asn bigint NOT NULL, name text, usage_type text, UNIQUE NULLS NOT DISTINCT(asn,name,usage_type)
+ asn bigint, name text, usage_type text, UNIQUE NULLS NOT DISTINCT(asn,name,usage_type)
 );
 -- dimension: g city (geography), r state/region and c country reference places; a asn references
--- asn_labels; x country x ASN references both (a country-level place). position is the payload
+-- asn_labels; x country x ASN and y city x ASN reference both. position is the payload
 -- order within the dimension. Request counters and percentiles come from run_geo_buckets; they
 -- are NULL on rows calculated before v3, which held IP counts only.
 CREATE TABLE IF NOT EXISTS calculated_breakdowns (
  result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
  ips bigint NOT NULL, observations bigint NOT NULL,
  place_id integer REFERENCES places(place_id), asn_label_id integer REFERENCES asn_labels(asn_label_id),
- position integer NOT NULL, dimension "char" NOT NULL CHECK(dimension IN ('g','c','a','r','x')),
+ position integer NOT NULL, dimension "char" NOT NULL CHECK(dimension IN ('g','c','a','r','x','y')),
  completed bigint, successes bigint, challenges bigint, blocks bigint,
  p50 integer, p90 integer, p99 integer,
  CHECK((place_id IS NULL) = (dimension = 'a')
@@ -132,7 +132,7 @@ SELECT cohort,jsonb_build_object('kind',kind,'country',country,'runner_location'
 FROM cohorts;
 CREATE OR REPLACE VIEW calculated_breakdown_details AS
 SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country'
- WHEN 'r' THEN 'region' WHEN 'x' THEN 'country_asn' ELSE 'asn' END
+ WHEN 'r' THEN 'region' WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END
  AS dimension,b.position,b.ips,b.observations,CASE b.dimension
  WHEN 'g' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
   'region',p.region,'region_code',p.region_code,'city',p.city)
@@ -140,6 +140,9 @@ SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'cou
  WHEN 'r' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
   'region',p.region,'region_code',p.region_code)
  WHEN 'x' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
+  'asn',a.asn,'name',a.name,'usage_type',a.usage_type)
+ WHEN 'y' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
+  'region',p.region,'region_code',p.region_code,'city',p.city,
   'asn',a.asn,'name',a.name,'usage_type',a.usage_type)
  ELSE jsonb_build_object('asn',a.asn,'name',a.name,'usage_type',a.usage_type) END AS label,
  b.completed,b.successes,b.successes::double precision/nullif(b.completed,0) AS success_rate,
