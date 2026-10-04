@@ -276,10 +276,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     for requests without an exit location, the country the run requested. pulses: finished
     pulse batch runs (uptime). census: the latest finished census per product and country.
     outages: the outages overlapping the 30-day window, as known at the cutoff. tested: per
-    product and country, the end of its latest started census or pulse run (uptime's
-    denominator). events: the newest test_events before the cutoff. traffic: wire bytes per test
-    kind. pulse_minutes: the cohort's pulse interval, the shortest pulse_interval_minutes of
-    the pulse-enabled targets (else the shortest gap between pulse slots in the window, else
+    product and country, the spans of started census or pulse runs (uptime's denominator
+    and per-bucket monitoring evidence). events: the newest test_events before the cutoff.
+    traffic: wire bytes per test kind. pulse_minutes: the cohort's pulse interval, the shortest
+    pulse_interval_minutes of pulse-enabled targets (else the shortest gap between pulse slots, else
     None); slot_length() turns it into the time slot. overlaps: the pulse and load runs that ran
     while a census of the same product was running (census_overlaps()), from stored run start
     and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
@@ -435,10 +435,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     ).fetchall()
     tested = conn.execute(
         "SELECT br.product_id,b.country_code AS country,"
-        "max(least(coalesce(br.finished_at,%(end)s),%(end)s)) AS last "
+        "br.started_at,least(coalesce(br.finished_at,%(end)s),%(end)s) AS last "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "WHERE b.kind<>'load' AND br.started_at IS NOT NULL AND br.started_at<%(end)s "
-        "AND coalesce(br.finished_at,%(end)s)>=%(start)s GROUP BY 1,2 ORDER BY 1,2",
+        "AND coalesce(br.finished_at,%(end)s)>=%(start)s ORDER BY 1,2,br.started_at",
         {"start": start, "end": as_of},
     ).fetchall()
     pulse_minutes = conn.execute(
@@ -604,8 +604,12 @@ def build(
     for o in outages:
         outage_groups[o["product_id"]].append(o)
     tested_groups = defaultdict(dict)
+    monitored_groups = defaultdict(list)
     for t in tested:
-        tested_groups[t["product_id"]][t["country"].strip()] = t["last"]
+        country = t["country"].strip()
+        group = tested_groups[t["product_id"]]
+        group[country] = max(group.get(country, t["last"]), t["last"])
+        monitored_groups[t["product_id"]].append(t | {"country": country})
     census_groups = defaultdict(list)
     for c in census:
         census_groups[c["product_id"]].append({k: v for k, v in c.items() if k != "product_id"})
@@ -792,7 +796,15 @@ def build(
                     for e in ev + price_rows
                 ],
                 "unavailable": {k: v for k, v in UNAVAILABLE.items() if k not in values},
-                "series": series(rows, seen, since, as_of, hours),
+                "series": series(
+                    rows,
+                    seen,
+                    since,
+                    as_of,
+                    hours,
+                    outages=down,
+                    tested=monitored_groups[p["product_id"]] if scheduled else (),
+                ),
                 "previous_period": prev_m,
                 "success_delta": m["success_rate"] - prev_m["success_rate"]
                 if m["success_rate"] is not None and prev_m["success_rate"] is not None
@@ -1316,7 +1328,7 @@ def persist(conn, payload):
                         breakdowns.append((result, code, position, place, network, row))
                 for row in w["series"]:
                     conn.execute(
-                        "INSERT INTO calculated_series VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "INSERT INTO calculated_series VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (
                             result,
                             row["at"],
@@ -1324,6 +1336,7 @@ def persist(conn, payload):
                             row["successes"],
                             *[row["latency_ms"][k] for k in ("p50", "p90", "p99")],
                             row["unique_ips"],
+                            row["uptime"],
                         ),
                     )
     places = labels(conn, "places", {b[3] for b in breakdowns if b[3]})

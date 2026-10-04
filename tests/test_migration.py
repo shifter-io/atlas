@@ -8,7 +8,7 @@ builds (ready and ranked, then expired and retained scores, then an unpublished 
 fixtures/schema_v5.sql is the exact v5 schema (storage.V5_CHECKSUM) and fixtures/calculated_v2.sql
 the exact calculated v2 schema (store.V2_CHECKSUM); load_v5 builds a v5 database from the same dump
 the way the v5 release migrated it; fixtures/schema_v6.sql and schema_v7.sql are the exact v6 and
-v7 schemas (storage.V6_CHECKSUM, V7_CHECKSUM). Every path ends at schema v8 with calculated v3.
+v7 schemas (storage.V6_CHECKSUM, V7_CHECKSUM). Every path ends at schema v8 with calculated v4.
 """
 
 import gzip
@@ -46,6 +46,7 @@ SCHEMA_V5 = Path(__file__).parent / "fixtures/schema_v5.sql"
 SCHEMA_V6 = Path(__file__).parent / "fixtures/schema_v6.sql"
 SCHEMA_V7 = Path(__file__).parent / "fixtures/schema_v7.sql"
 CALCULATED_V2 = Path(__file__).parent / "fixtures/calculated_v2.sql"
+CALCULATED_V3 = Path(__file__).parent / "fixtures/calculated_v3.sql"
 SOURCE = Path(store.__file__).parents[1]
 POLICY = Path("configs/methodology.toml")
 RESOURCES = ("products", "scores", "series", "breakdowns", "overlap", "fleet", "runs")
@@ -141,7 +142,7 @@ async def test_v4_database_migrates_in_place(databases, tmp_path):
     builds = sorted(before["payloads"])
     api_before = await api_bodies(database, builds)
     result = migrate(database)
-    assert result["migrated"] and result["calculated_schema_version"] == 3
+    assert result["migrated"] and result["calculated_schema_version"] == 4
     assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 8
     assert result["from_calculated_schema_version"] == 1
     assert migrate(database)["migrated"] is False
@@ -261,7 +262,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     api_before = await api_bodies(database, builds)
     result = migrate(database)
     assert (result["from_schema_version"], result["schema_version"]) == (5, 8)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (2, 3)
+    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (2, 4)
     assert set(store.V2_CHECKS) <= set(result["verified"])
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -334,9 +335,9 @@ def load_v6(database):
     load_v6_calculated_v2(database)
     with connect(database) as conn:
         conn.execute((SOURCE / "calculated/migrate_v2_v3.sql").read_text())
-        conn.execute(store.schema()[0])
+        conn.execute(CALCULATED_V3.read_text())
         conn.execute("DELETE FROM calculation_schema")
-        conn.execute("INSERT INTO calculation_schema VALUES (%s,%s)", (3, store.schema()[1]))
+        conn.execute("INSERT INTO calculation_schema VALUES (%s,%s)", (3, store.V3_CHECKSUM))
     with connect(database) as conn:
         conn.execute("INSERT INTO runner_regions(region_id,slug,pattern) VALUES (1,'fra1','fra')")
         conn.execute(
@@ -365,8 +366,8 @@ def test_v6_database_migrates_through_v7(databases):
     before = batches(database)
     result = migrate(database)
     assert (result["from_schema_version"], result["schema_version"]) == (6, 8)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (3, 3)
-    assert result["verified"] == list(V6_CHECKS)
+    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (3, 4)
+    assert result["verified"] == [*V6_CHECKS, *store.V3_CHECKS]
     assert migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
@@ -404,7 +405,7 @@ def test_v7_database_migrates_to_v8(databases):
     before = batches(database)
     result = migrate(database)
     assert (result["from_schema_version"], result["schema_version"]) == (7, 8)
-    assert result["verified"] == []
+    assert result["verified"] == [*store.V3_CHECKS]
     assert migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)
@@ -450,7 +451,7 @@ async def test_calculated_v2_on_v6_migrates_in_place(databases, tmp_path):
         ).fetchall()
     result = migrate(database)
     assert result["from_schema_version"] == 6 and result["from_calculated_schema_version"] == 2
-    assert result["verified"] == [*store.V2_CHECKS, *V6_CHECKS]
+    assert result["verified"] == [*store.V2_CHECKS, *V6_CHECKS, *store.V3_CHECKS]
     assert migrate(database)["migrated"] is False
     store.initialize(database)
     assert canonical(v5_state(database)) == canonical(before)

@@ -911,7 +911,13 @@ def outage_list(outages, since, end, limit=50):
     return result
 
 
-def series(rows, observations, start, end, hours):
+def series(rows, observations, start, end, hours, *, outages=(), tested=()):
+    """Request history plus outage-time availability at the same bucket resolution.
+
+    A country contributes only in buckets intersecting a started census/pulse run
+    or a recorded outage. Missing monitoring evidence is null, never assumed healthy.
+    Outage intervals are unioned per country and clipped to each half-open bucket.
+    """
     step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
     buckets = defaultdict(list)
     seen = defaultdict(set)
@@ -927,6 +933,11 @@ def series(rows, observations, start, end, hours):
     t = start
     while t < end:
         m = metrics(buckets[t], step.total_seconds() / 3600)
+        stop = min(t + step, end)
+        countries = {r["country"] for r in tested if r["started_at"] < stop and r["last"] > t} | {
+            o["country"] for o in outages if o["started_at"] < stop and (o["ended_at"] or end) > t
+        }
+        availability = outage_uptime(outages, {c: stop for c in countries}, t, stop)
         out.append(
             {
                 "at": t,
@@ -935,6 +946,7 @@ def series(rows, observations, start, end, hours):
                 "success_rate": m["success_rate"],
                 "latency_ms": m["latency_ms"],
                 "unique_ips": len(seen[t]) if buckets[t] else None,
+                "uptime": availability["value"],
             }
         )
         t += step

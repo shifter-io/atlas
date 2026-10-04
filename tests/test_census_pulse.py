@@ -22,6 +22,7 @@ from milf_framework.calculated.aggregate import (
     outage_list,
     outage_uptime,
     pool_lists,
+    series,
     uptime,
 )
 from milf_framework.calculated.api import app
@@ -42,6 +43,44 @@ HOSTING = {
     "connection_type": "Corporate",
     "usage_type": "hosting",
 }
+
+
+def test_availability_history_clips_and_unions_outages_without_inventing_healthy_days():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    day = timedelta(days=1)
+
+    def h(hours):
+        return start + timedelta(hours=hours)
+
+    tested = [{"country": c, "started_at": h(25), "last": h(26)} for c in ("DE", "US")]
+    outages = [
+        {"country": "DE", "started_at": h(34), "ended_at": h(36)},
+        {"country": "DE", "started_at": h(35), "ended_at": h(37)},
+        {"country": "DE", "started_at": h(48), "ended_at": None},
+    ]
+    points = series([], [], start, start + 3 * day, 72, tested=tested, outages=outages)
+    assert [p["at"] for p in points] == [start + i * day for i in range(3)]
+    assert [p["uptime"] for p in points] == [None, 1 - 3 / 48, 0]
+    # Availability remains measurable even when request-history buckets are missing.
+    assert all(p["success_rate"] is None for p in points)
+
+
+def test_availability_history_uses_half_open_five_minute_buckets():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def m(minutes):
+        return start + timedelta(minutes=minutes)
+
+    points = series(
+        [],
+        [],
+        start,
+        m(15),
+        24,
+        tested=[{"country": "DE", "started_at": start, "last": m(5)}],
+        outages=[{"country": "DE", "started_at": m(5), "ended_at": m(10)}],
+    )
+    assert [p["uptime"] for p in points] == [1, 0, None]
 
 
 def batch(conn, kind, at, *, country="DE", target="generic_http", status="done", minutes=1):
@@ -360,6 +399,26 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
     }
     assert m["uptime"] == 0.75
     assert scheduled["windows"]["7d"]["uptime"]["value"] == pytest.approx(1 - 6 / 168)
+    # Daily availability uses the actual monitoring/outage day, with older days N/A.
+    assert [point["uptime"] for point in scheduled["windows"]["7d"]["series"]] == [
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        0.75,
+    ]
+    with connect(database) as conn:
+        stored = conn.execute(
+            "SELECT s.uptime FROM calculated_series s JOIN calculated_windows w USING(result_id) "
+            "WHERE w.build_id=%s AND w.product_id=%s AND w.cohort=%s AND w.target='' "
+            "AND w.window_hours=168 ORDER BY s.bucket_start",
+            (int(payload["snapshot_id"]), scheduled["product_id"], scheduled["cohort"]),
+        ).fetchall()
+        assert [r[0] for r in stored] == [
+            point["uptime"] for point in scheduled["windows"]["7d"]["series"]
+        ]
     assert w["targets"]["generic_http"]["metrics"]["uptime"] == 0.5
     uptime_component = w["scores"]["balanced"]["components"]["uptime"]
     # alpha is the only product of its kind with ready uptime: the leader, at 100.

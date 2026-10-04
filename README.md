@@ -197,6 +197,11 @@ light-load and under-load latency), plus top-level `events`
 `success_rate` (time-weighted), `request_success_rate`, `latency_ms` (light load),
 `latency_under_load_ms`, `under_load` (slot counts and the reason when there is no value) and
 `time_slots`; `benchmark` is kept as a copy of `metrics` for older readers.
+Each window's `series[].uptime` publishes outage-time availability at five-minute resolution
+for 24h and daily resolution for 7d/30d. Countries count in buckets intersecting a started
+census/pulse run or recorded outage; overlapping outages are unioned and clipped per country.
+Buckets without monitoring evidence are null. Calculated schema v4 persists this fraction in
+`calculated_series.uptime`; `db-migrate` adds the nullable column while preserving older history.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

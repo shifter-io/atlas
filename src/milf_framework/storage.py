@@ -979,7 +979,8 @@ def migrate(credentials_file):
     v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql,
     migrate_v6_v7.sql and migrate_v7_v8.sql; v5, v6 and v7 start at the step for their version
     (v7 only adds a table). A calculated v2 layer then runs calculated/migrate_v2_v3.sql, which is
-    also all that a current (v8) database with a calculated v2 layer needs. Every rebuilt pool,
+    followed by calculated v3 → v4 (availability). A current (v8) database
+    with an older calculated layer runs just those calculated migrations. Every rebuilt pool,
     scope, bucket and run summary, every test batch, and every calculated window, breakdown and
     score, must equal its original.
     """
@@ -1018,13 +1019,14 @@ def migrate(credentials_file):
                 )
         # A v6 or v7 database may already carry the current calculated layer.
         upgraded = layered and start in (6, 7) and layers == current_layer
+        v3_layer = layered and start >= 6 and layers == [(3, store.V3_CHECKSUM)]
         expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
-        if layered and not upgraded and layers != expected:
+        if layered and not upgraded and not v3_layer and layers != expected:
             raise ValueError(
                 "Only an unmodified calculated v1 schema can be migrated in place"
                 if start == 4
                 else "The calculated schema differs from this release; only an unmodified "
-                "calculated v2 schema can be migrated in place"
+                "calculated v2 or v3 schema can be migrated in place"
             )
         checks = {}
         if start == 4:
@@ -1036,7 +1038,7 @@ def migrate(credentials_file):
         elif start == 5:
             checks |= V5_CHECKS
             conn.execute(V5_SNAPSHOT)
-        if layered and start > 4 and not upgraded:
+        if layered and start > 4 and not upgraded and not v3_layer:
             checks |= store.V2_CHECKS
             conn.execute(store.V2_SNAPSHOT)
         if start == 6:
@@ -1048,8 +1050,12 @@ def migrate(credentials_file):
             conn.execute((root / "migrate_v6_v7.sql").read_text())
         if start < SCHEMA_VERSION:
             conn.execute((root / "migrate_v7_v8.sql").read_text())
-        if layered and not upgraded:
+        if layered and not upgraded and not v3_layer:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
+        if layered and not upgraded:
+            conn.execute(store.V3_SNAPSHOT)
+            conn.execute((root / "calculated/migrate_v3_v4.sql").read_text())
+            checks |= store.V3_CHECKS
         conn.execute(schema)
         if layered:
             conn.execute(calculated)

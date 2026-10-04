@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS calculated_series (
  bucket_start timestamptz NOT NULL,
  completed bigint NOT NULL, successes bigint NOT NULL,
  p50 integer, p90 integer, p99 integer, unique_ips bigint,
+ uptime double precision CHECK(uptime >= 0 AND uptime <= 1),
  PRIMARY KEY(result_id,bucket_start)
 );
 CREATE TABLE IF NOT EXISTS calculated_scores (

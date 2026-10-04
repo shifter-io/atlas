@@ -13,10 +13,11 @@ from ..storage import initialize as initialize_history
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
+V3_CHECKSUM = "5f24879fc7f37486903881c91f5334f85cfa83dcffd90fc00a972508424b394d"
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.
 KEEP_DRAFTS = 2
 # Test kinds of the snapshot's traffic.by_test (load since the latency-under-load test).
@@ -59,6 +60,12 @@ V2_CHECKS = {
     "v2 scores": "SELECT count(*) FROM v2_before_scores o FULL JOIN calculated_score_details n "
     "USING(result_id,profile) WHERE (o.components::text,o.weights::text,o.reasons::text) "
     "IS DISTINCT FROM (n.components::text,n.weights::text,n.reasons::text)",
+}
+V3_SNAPSHOT = "CREATE TEMP TABLE v3_before_series ON COMMIT DROP AS SELECT * FROM calculated_series"
+V3_CHECKS = {
+    "availability history": "SELECT count(*) FROM v3_before_series o FULL JOIN calculated_series n "
+    "USING(result_id,bucket_start) WHERE to_jsonb(o)::text IS DISTINCT FROM "
+    "(to_jsonb(n) - 'uptime')::text OR n.uptime IS NOT NULL",
 }
 
 
@@ -232,6 +239,8 @@ def validate_payload(payload):
         if version == 2 and not isinstance(product["census"], list):
             raise ValueError("Invalid snapshot contract")
         for window in product["windows"].values():
+            if any(not _fraction(point.get("uptime")) for point in window["series"]):
+                raise ValueError("Availability series must contain fractions or null")
             if version == 2:
                 for rows in window["breakdowns"].values():
                     for row in rows:
