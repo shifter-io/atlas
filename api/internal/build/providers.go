@@ -54,7 +54,7 @@ func pricingFrom(r *store.PricingRow, plans []store.PlanRow) model.Pricing {
 		if pl.ProviderSlug != r.ProviderSlug || pl.Category != r.Category {
 			continue
 		}
-		p.Plans = append(p.Plans, model.PricingPlan{Name: pl.Name, Price: ptrNum(pl.Price), Gb: ptrNum(pl.Gb), Ips: ptrNum(pl.Ips),
+		p.Plans = append(p.Plans, model.PricingPlan{Catalog: pl.Catalog, Name: pl.Name, Price: ptrNum(pl.Price), Gb: ptrNum(pl.Gb), Ips: ptrNum(pl.Ips),
 			Note: pl.Note, Recommended: pl.Recommended, DiscountPct: ptrNum(pl.DiscountPct)})
 	}
 	return p

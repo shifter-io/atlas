@@ -11,20 +11,21 @@ import (
 // Paths whose null is part of the contract rather than missing data
 // (patterns: array positions written as [], product categories as *).
 var contractNull = map[string]bool{
-	"measurement":            true, // raw snapshot product: null for fixtures
-	"framework":              true, // framework identity: null for fixtures
-	"overlap.likelyUpstream": true, // fixtures: no reseller signature (measured providers declare it N/A)
-	"pricing.plans[].gb":     true, // per-IP plans have no GB allowance
-	"pricing.plans[].ips":    true, // per-GB plans have no IP count
-	"at":                     true, // tape: only measured events carry an ISO stamp
-	"invoiceMonth":           true, // reviews: only invoice-verified reviews have one
-	"linkedRunId":            true,
-	"providerReply":          true,
-	"rejectionReason":        true, // community runs: only rejected runs
-	"overlapShare":           true, // only rotating products
-	"providerSlug":           true, // changelog: fleet-wide entries have no provider
-	"providerName":           true,
-	"delta":                  true,
+	"pricing.plans[].catalog.tier": true, // untiered pools have no tier selector
+	"measurement":                  true, // raw snapshot product: null for fixtures
+	"framework":                    true, // framework identity: null for fixtures
+	"overlap.likelyUpstream":       true, // fixtures: no reseller signature (measured providers declare it N/A)
+	"pricing.plans[].gb":           true, // per-IP plans have no GB allowance
+	"pricing.plans[].ips":          true, // per-GB plans have no IP count
+	"at":                           true, // tape: only measured events carry an ISO stamp
+	"invoiceMonth":                 true, // reviews: only invoice-verified reviews have one
+	"linkedRunId":                  true,
+	"providerReply":                true,
+	"rejectionReason":              true, // community runs: only rejected runs
+	"overlapShare":                 true, // only rotating products
+	"providerSlug":                 true, // changelog: fleet-wide entries have no provider
+	"providerName":                 true,
+	"delta":                        true,
 }
 
 // Array fields whose elements are named by a key in N/A paths, so a gap reads

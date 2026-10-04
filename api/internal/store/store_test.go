@@ -41,7 +41,11 @@ func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Applied) != 0 || res.Current != 1 {
+	migrations, err := store.Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Applied) != 0 || res.Current != migrations[len(migrations)-1].Version {
 		t.Fatalf("second migrate applied %v (current %d)", res.Applied, res.Current)
 	}
 	if err := store.CheckSchema(ctx, c); err != nil {

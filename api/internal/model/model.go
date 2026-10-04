@@ -314,13 +314,14 @@ func (v *PerformanceStats) UnmarshalJSON(d []byte) error {
 }
 
 type PricingPlan struct {
-	Name        Str  `json:"name"`
-	Price       Num  `json:"price"`
-	Gb          Num  `json:"gb"`
-	Ips         Num  `json:"ips"`
-	Note        Str  `json:"note"`
-	Recommended Bool `json:"recommended"`
-	DiscountPct Num  `json:"discountPct"`
+	Catalog     json.RawMessage `json:"catalog,omitempty"`
+	Name        Str             `json:"name"`
+	Price       Num             `json:"price"`
+	Gb          Num             `json:"gb"`
+	Ips         Num             `json:"ips"`
+	Note        Str             `json:"note"`
+	Recommended Bool            `json:"recommended"`
+	DiscountPct Num             `json:"discountPct"`
 }
 
 type Pricing struct {

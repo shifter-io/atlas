@@ -146,6 +146,7 @@ type PricingRow struct {
 }
 
 type PlanRow struct {
+	Catalog                json.RawMessage
 	ProviderSlug, Category string
 	Position               int32
 	Name                   *string
@@ -402,9 +403,9 @@ func Load(ctx context.Context, db interface {
 			return
 		},
 		func() (err error) {
-			in.Plans, err = collect(ctx, tx, `SELECT provider_slug, category, position, name, price, gb, ips, note, recommended, discount_pct FROM site.pricing_plans ORDER BY provider_slug, category, position`,
+			in.Plans, err = collect(ctx, tx, `SELECT provider_slug, category, position, name, price, gb, ips, note, recommended, discount_pct, catalog FROM site.pricing_plans ORDER BY provider_slug, category, position`,
 				func(r pgx.Rows, v *PlanRow) error {
-					return r.Scan(&v.ProviderSlug, &v.Category, &v.Position, &v.Name, &v.Price, &v.Gb, &v.Ips, &v.Note, &v.Recommended, &v.DiscountPct)
+					return r.Scan(&v.ProviderSlug, &v.Category, &v.Position, &v.Name, &v.Price, &v.Gb, &v.Ips, &v.Note, &v.Recommended, &v.DiscountPct, &v.Catalog)
 				})
 			return
 		},
