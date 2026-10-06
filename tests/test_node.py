@@ -56,7 +56,7 @@ def assignment(**overrides):
     return {
         "batch_id": 7, "kind": "pulse", "product_id": 1, "provider": "shifter",
         "product": "residential", "country_code": "DE", "region": "fra1",
-        "target_id": "generic_https", "target_url": "https://checkip.amazonaws.com/",
+        "target_id": "generic_https", "target_url": "https://ip-info.com/myip",
         "timeout_ms": 9000, "concurrency": 25, "stop_rule": "count", "requests": 100,
         "min_sample": None, "start_at": datetime.now(UTC).isoformat(),
     } | overrides

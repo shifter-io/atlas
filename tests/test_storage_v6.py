@@ -319,7 +319,7 @@ async def test_seed_is_idempotent_and_keeps_operator_edits(database, tmp_path):
         assert conn.execute(
             "SELECT pulse_interval_minutes,pulse_enabled,url FROM targets "
             "WHERE target_id='generic_https'"
-        ).fetchone() == (15, False, "https://checkip.amazonaws.com/")
+        ).fetchone() == (15, False, "https://ip-info.com/myip")
     assert main(["db-seed", "--database-file", str(database), "--reset-times"]) == 0
     with connect(database) as conn:
         assert conn.execute(

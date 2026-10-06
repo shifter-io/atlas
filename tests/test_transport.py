@@ -41,7 +41,7 @@ async def test_fresh_connections_and_concurrency(tmp_path):
     assert result.successes == 60
     assert gateway.connections == 60
     assert 1 < gateway.peak <= 3
-    assert all(b"http://checkip.amazonaws.com/" in r for r in gateway.requests)
+    assert all(b"http://ip-info.com/myip" in r for r in gateway.requests)
 
 
 async def test_no_hidden_retry(tmp_path):

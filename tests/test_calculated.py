@@ -204,7 +204,7 @@ def ready_inputs(products=(1, 2)):
             scope = {
                 "target": {
                     "id": target,
-                    "url": scheme + "://checkip.amazonaws.com/",
+                    "url": scheme + "://ip-info.com/myip",
                     "version": "1",
                 },
                 "config": {

@@ -558,7 +558,7 @@ async def test_work_progress_and_kill(database, db, client):
     assert assignment == {
         "batch_id": batch_id, "kind": "census", "product_id": product_id(database, "alpha"),
         "provider": "alpha", "product": "res", "country_code": "DE", "region": "fra1",
-        "target_id": "generic_http", "target_url": "http://checkip.amazonaws.com/",
+        "target_id": "generic_http", "target_url": "http://ip-info.com/myip",
         "timeout_ms": 15000, "concurrency": 1000, "stop_rule": "unique_ratio",
         "requests": None, "min_sample": 50, "stall_seconds": 600,
     }

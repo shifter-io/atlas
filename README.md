@@ -22,7 +22,7 @@ Git, packages and remote uploads. Then:
 ```sh
 uv run --no-editable milf-framework run --provider-config configs/shifter.toml \
   --credentials-file .secrets/credentials.toml --target generic_http \
-  --url http://checkip.amazonaws.com/ --requests 5000 --concurrency 100 --param country=us
+  --url http://ip-info.com/myip --requests 5000 --concurrency 100 --param country=us
 ```
 
 Both targets support the same provider config; optional per-test parameters and

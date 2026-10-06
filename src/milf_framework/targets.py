@@ -87,5 +87,5 @@ class TargetRegistry:
 
 
 registry = TargetRegistry()
-registry.register(EchoIpTarget("generic_http", "http://checkip.amazonaws.com/"))
-registry.register(EchoIpTarget("generic_https", "https://checkip.amazonaws.com/"))
+registry.register(EchoIpTarget("generic_http", "http://ip-info.com/myip"))
+registry.register(EchoIpTarget("generic_https", "https://ip-info.com/myip"))

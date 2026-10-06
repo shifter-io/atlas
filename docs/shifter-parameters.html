@@ -34,14 +34,14 @@ uv run --no-editable milf-framework providers
 uv run --no-editable milf-framework run \
   --provider-config configs/shifter.toml --target generic_http \
   --credentials-file .secrets/credentials.toml \
-  --url http://checkip.amazonaws.com/ \
+  --url http://ip-info.com/myip \
   --requests 5000 --concurrency 100 --param country=us
 
 # HTTPS with one generated session per worker, lifetime 600 seconds.
 uv run --no-editable milf-framework run \
   --provider-config configs/shifter.toml --target generic_https \
   --credentials-file .secrets/credentials.toml \
-  --url https://checkip.amazonaws.com/ \
+  --url https://ip-info.com/myip \
   --requests 10 --concurrency 2 --param country=us --param ttl=600 \
   --session-policy per_worker
 
@@ -49,7 +49,7 @@ uv run --no-editable milf-framework run \
 # --param country=null</pre>
 <p>These commands send real traffic when run with credentials. Use <code>--requests 5000 --concurrency 100</code> for a larger run when selected by your methodology. Automated tests and the 5,000-request processing benchmark use local/simulated responses.</p>
 <p>Repeat <code>--param name=value</code> for each override. Booleans and numbers use JSON syntax; strings can be unquoted. <code>null</code> removes a file parameter. Parameters not supplied by either the file or overrides stay absent. <code>--country</code> remains a metadata label: use <code>--param country=us</code> to change targeting. Conflicting metadata labels are rejected. Static <code>PROXY_URL</code> runs remain supported.</p>
-<p><code>--url</code> overrides the echo-IP endpoint per run. Its HTTP/HTTPS scheme must match the target; the response must still be a plain IP address. Amazon remains the default when omitted. The effective URL is saved in the summary; URLs with embedded credentials or fragments are rejected. Use public, non-secret query parameters only.</p>
+<p><code>--url</code> overrides the echo-IP endpoint per run. Its HTTP/HTTPS scheme must match the target; the response must still be a plain IP address. IP Info remains the default when omitted. The effective URL is saved in the summary; URLs with embedded credentials or fragments are rejected. Use public, non-secret query parameters only.</p>
 
 <h2>Call it from a rule, scheduler or script</h2>
 <pre>import asyncio
@@ -65,7 +65,7 @@ proxy = load_provider(
 async def measure():
     return await run(
         RunConfig("generic_http", proxy, requests=5_000, concurrency=100,
-                  target_url="http://checkip.amazonaws.com/"),
+                  target_url="http://ip-info.com/myip"),
         JsonSink("results"),
     )
 

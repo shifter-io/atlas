@@ -35,7 +35,7 @@ uv run --no-editable milf-framework run \
   --country US --location dubai --output results</pre>
 <p>Use <code>generic_https</code> for TLS tests. Both HTTP and SOCKS5 gateways support optional username/password authentication. SOCKS5 resolves the destination through the proxy. For static <code>PROXY_URL</code> runs, <code>--country</code> records requested geography; targeting flags must already be present in the supplied credentials.</p>
 <p class="note"><strong>Shifter Residential is implemented.</strong> Use <code>--provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml</code>. The private file uses owner-only permissions and is excluded from Git, packages and remote uploads; copy <a href="../credentials.toml.example">credentials.toml.example</a> to set up your own. Add optional overrides such as <code>--param country=us</code>. See the <a href="shifter-parameters.html">adapter guide, session policies and Python examples</a>.</p>
-<p>Set <code>--url http://checkip.amazonaws.com/</code> (or another plain-IP echo endpoint) per test. For Generic HTTPS, use an HTTPS URL. Python callers pass <code>RunConfig(target_url=...)</code>. Amazon is the default if omitted; the effective URL is recorded in each summary.</p>
+<p>Set <code>--url http://ip-info.com/myip</code> (or another plain-IP echo endpoint) per test. For Generic HTTPS, use an HTTPS URL. Python callers pass <code>RunConfig(target_url=...)</code>. IP Info is the default if omitted; the effective URL is recorded in each summary.</p>
 <p>Defaults: 100 requests, concurrency 10, timeout 15 seconds, no rate cap. Optional <code>--rate 50</code> paces request starts. There are no automatic retries, redirects, cookies or connection reuse. Response bodies are limited to 512 bytes, plus one byte to detect overflow.</p>
 <p class="note">A request succeeds only when the response is HTTP 200 and its complete trimmed body is one valid IPv4 or IPv6 address. HTTPS verifies the target certificate. Only Generic HTTP contributes IP observations and pool uniqueness metrics.</p>
 </section>
@@ -128,7 +128,7 @@ uv run --no-editable milf-framework db-status --database-file .secrets/database.
 # Saves files first, then imports the completed or partial measurement.
 uv run --no-editable milf-framework run \
   --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml \
-  --target generic_http --url http://checkip.amazonaws.com/ \
+  --target generic_http --url http://ip-info.com/myip \
   --param country=us --requests 5000 --concurrency 100 \
   --database-file .secrets/database.toml
 
@@ -250,7 +250,7 @@ REMOTE_HOST=your-ssh-alias bash scripts/test-remote.sh</pre>
 <p>Tests use loopback HTTP/SOCKS5 gateways and a private test certificate authority. They check both TLS verification outcomes, authentication, proxy-side DNS, no hidden retry, fragmented/oversized bodies, concurrency, timeouts, cancellation, exact counts, bucket transitions, checksums and versioned enrichment. The optional real-MMDB test uses the local licensed file and is skipped in public builds.</p>
 <p>The scale script simulates 5,000 successful requests with 5,000 distinct IPs at concurrency 100 and checks exported counts/percentiles. It reports wall time, peak in-flight requests and peak process memory. This is a processing benchmark, not an estimate of real proxy throughput.</p>
 <p>Remote scripts copy locally maintained code to a dedicated directory and retrieve evidence. They do not edit source remotely. Normal remote tests omit the large MMDB; set <code>INCLUDE_MMDB=1</code> to copy the local file for enrichment tests. A configured SSH identity and a remote <code>uv</code> executable are required.</p>
-<p>Live proxy tests require <code>PROXY_URL</code> or a provider config with a private credential file (environment credentials also remain supported). Automated unit/integration tests never send traffic to Amazon; live measurements are explicitly invoked. Provider tests cover Shifter flags, overrides, session isolation, both targets/transports, status preservation, secret redaction, credential-file permissions and configurable URLs.</p>
+<p>Live proxy tests require <code>PROXY_URL</code> or a provider config with a private credential file (environment credentials also remain supported). Automated unit/integration tests never send traffic to external IP-check services; live measurements are explicitly invoked. Provider tests cover Shifter flags, overrides, session isolation, both targets/transports, status preservation, secret redaction, credential-file permissions and configurable URLs.</p>
 </section>
 <footer>Standalone HTML · no server, build step or external assets required.<br>Targets, portable results, local MMDB enrichment, PostgreSQL history, calculated snapshots, configurable scoring and the local website API. Collection schedules and public deployment follow separately.</footer>
 </main></html>
