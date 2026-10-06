@@ -38,7 +38,7 @@ _CLOSED: weakref.WeakKeyDictionary[psycopg.AsyncConnection, list[int]] = (
 DEFAULTS: dict[str, Any] = {
     # Seconds between a census slot and the synchronized start every node waits for.
     "census.lead_seconds": 30,
-    # Successes before the unique-ratio rule is evaluated (RunConfig.min_sample).
+    # Completed requests before the unique-ratio rule is evaluated (including failures).
     "census.min_sample": 1000,
     # A census that had successes and then none for this long stops as 'stalled' (an outage).
     "census.stall_seconds": 600,

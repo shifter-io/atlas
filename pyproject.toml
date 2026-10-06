@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "milf-framework"
-version = "0.8.0"
+version = "0.9.3"
 description = "Composable proxy targets, bounded asynchronous runs and local IP enrichment"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,7 +37,7 @@ packages = ["src/milf_framework"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "scripts", "docs", "configs", "credentials.toml.example", "database.toml.example", "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".github", "db-ip/README.html"]
-exclude = [".secrets/**", ".state/**", "**/credentials.toml", "**/database.toml", "**/.env", "**/.env.*"]
+exclude = [".secrets/**", ".state/**", "onboarding-networks/**", "**/credentials.toml", "**/database.toml", "**/.env", "**/.env.*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

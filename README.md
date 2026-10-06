@@ -30,6 +30,14 @@ session policies are exposed through the CLI and `ShifterProxy`/`load_provider` 
 Target URLs can be supplied with `--url` or `RunConfig(target_url=...)`.
 In v0.2 custom transports must accept `execute(target, *, context=None)`.
 
+All built-in HTTP/HTTPS tests use CPU-parallel worker processes by default.
+`--processes 0` selects available cores; `--processes 4` selects four workers.
+Concurrency and rate limits remain global (2,500 requests means 625 slots per worker
+with four processes), with one exact census uniqueness set. This applies to normal
+census/pulse runs and onboarding. See [the operating guide](docs/onboarding.html)
+for CPU monitoring and cancellation behavior. A local CPU-only check is available:
+`PYTHONPATH=src uv run python scripts/check-multicore.py` (no proxy traffic).
+
 The locally supplied DB-IP MMDB belongs in `db-ip/` (or set `DBIP_MMDB`). It is
 excluded from version control and distributions. It is separate from PostgreSQL:
 MMDB provides optional offline enrichment; PostgreSQL persists history and cached lifetime metrics.
@@ -314,3 +322,12 @@ index and a live page for every running batch every 30 s, from the counters node
 `milf-framework report html --database-file F --out DIR [--batch ID]`. They are single
 self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
 challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.
+
+## Private network onboarding
+
+See [the standalone onboarding operator guide](docs/onboarding.html) for manual 24-hour
+campaigns, all eight server assignments, hourly FIFO scheduling, private JSONL exports,
+and restart behavior. `milf-framework onboarding run` accepts `--concurrency` (default
+1000) and `--timeout` in seconds (default 10). Onboarding never imports results into the
+site database. Census rule v2, shared with Test #1, counts every completed request
+(including failures) in its 1,000-request minimum sample and unique-IP ratio.

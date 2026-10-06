@@ -23,11 +23,12 @@ import struct
 import sys
 from dataclasses import dataclass
 
-# Linux tcp_info: bytes_acked and bytes_received are u64 at offsets 96 and 104
+# Linux UAPI struct tcp_info: bytes_acked and bytes_received follow the
+# 104-byte base and two u64 pacing-rate fields, at offsets 120 and 128
 # on all current kernels (>= 4.1).
-_TCP_INFO_MIN_LEN = 112
-_OFF_BYTES_ACKED = 96
-_OFF_BYTES_RECEIVED = 104
+_TCP_INFO_MIN_LEN = 136
+_OFF_BYTES_ACKED = 120
+_OFF_BYTES_RECEIVED = 128
 
 LINUX = sys.platform.startswith("linux")
 
@@ -69,8 +70,8 @@ def from_socket(sock: object) -> ByteCount | None:
         return None
     if len(raw) < _TCP_INFO_MIN_LEN:
         return None
-    (acked,) = struct.unpack_from("<Q", raw, _OFF_BYTES_ACKED)
-    (received,) = struct.unpack_from("<Q", raw, _OFF_BYTES_RECEIVED)
+    (acked,) = struct.unpack_from("=Q", raw, _OFF_BYTES_ACKED)
+    (received,) = struct.unpack_from("=Q", raw, _OFF_BYTES_RECEIVED)
     # bytes_acked counts the initial SYN, so it is one higher than the payload.
     return ByteCount(up=max(acked - 1, 0), down=received, exact=True)
 

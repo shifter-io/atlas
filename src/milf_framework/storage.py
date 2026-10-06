@@ -32,7 +32,9 @@ PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
 # and a pulse of the same product, target and country therefore share one pool.
-RUN_LENGTH = ("requests", "target_url", "stop_rule", "min_sample", "stall_seconds")
+RUN_LENGTH = ("requests", "target_url", "stop_rule", "min_sample", "stall_seconds",
+              "census_rule_version", "census_ratio_basis", "processes",
+              "execution_processes", "execution_backend", "worker_pids")
 BUCKET_KEYS = (
     "bucket_start",
     "completed",

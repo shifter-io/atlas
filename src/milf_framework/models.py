@@ -84,6 +84,7 @@ class ProxyConfig:
 
 # Written to a run's config only for non-count runs (RunConfig.public).
 STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds")
+CENSUS_RULE_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,8 @@ class RunConfig:
     # None is unbounded and requires a stop rule that ends the run by itself.
     requests: int | None = 100
     concurrency: int = 10
+    # 0 selects available CPU cores; concurrency is the total across processes.
+    processes: int = 0
     timeout_seconds: float = 15.0
     requests_per_second: float | None = None
     provider: str | None = None
@@ -101,8 +104,8 @@ class RunConfig:
     runner_location: str | None = None
     target_url: str | None = None
     # 'count' stops at `requests`; 'unique_ratio' stops issuing new requests
-    # once successes > 2 * unique_ips, evaluated only from `min_sample`
-    # successes on, or after no success in the first 5,000 completions or
+    # once completed requests > 2 * unique_ips, evaluated from `min_sample`
+    # completions on (including failures), or after no success in the first 5,000 completions or
     # 10 minutes (and still honours `requests` if set).
     stop_rule: StopRule = "count"
     min_sample: int = 1000
@@ -111,6 +114,8 @@ class RunConfig:
     stall_seconds: float = 600
 
     def __post_init__(self) -> None:
+        if type(self.processes) is not int or self.processes < 0:
+            raise ValueError("processes must be a nonnegative integer (0 means automatic)")
         if self.target_url is not None:
             try:
                 expected = {"generic_http": "http", "generic_https": "https"}[self.target]
@@ -162,7 +167,10 @@ class RunConfig:
             for name in self.__dataclass_fields__
             if name != "proxy"
             and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
-        } | self.proxy.public()
+        } | self.proxy.public() | ({
+            "census_rule_version": CENSUS_RULE_VERSION,
+            "census_ratio_basis": "completed_requests",
+        } if self.stop_rule == "unique_ratio" else {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +186,8 @@ class Outcome:
     bytes_up: int = 0
     bytes_down: int = 0
     bytes_exact: bool = False
+    # Transport completion on the system monotonic clock, before IPC/aggregation.
+    completed_at: float | None = None
 
     def __post_init__(self) -> None:
         verdict = from_error(self.error) if self.verdict is None else self.verdict

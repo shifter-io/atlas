@@ -1,0 +1,218 @@
+"""CPU-parallel HTTP execution with one authoritative runner/coordinator.
+
+Private inherited socket pairs carry bounded request/result messages. Workers
+never schedule replacement requests, count unique IPs, or write result files.
+"""
+from __future__ import annotations
+
+import asyncio
+import multiprocessing as mp
+import os
+import pickle
+import signal
+import socket
+import struct
+import time
+from dataclasses import replace
+
+from .transport import HttpTransport
+
+
+def process_count(config):
+    available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (
+        os.cpu_count() or 1
+    )
+    return min(config.processes or available, config.concurrency,
+               config.requests if config.requests is not None else config.concurrency)
+
+
+async def receive(reader):
+    size = struct.unpack("!I", await reader.readexactly(4))[0]
+    if size > 1024 * 1024:
+        raise RuntimeError("Invalid worker message")
+    # Only our own spawned child/parent can access this private socket.
+    return pickle.loads(await reader.readexactly(size))
+
+
+def send(writer, message):
+    data = pickle.dumps(message, protocol=5)
+    writer.write(struct.pack("!I", len(data)) + data)
+
+
+async def _serve(sock, config, target, factory, deadline):
+    reader, writer = await asyncio.open_connection(sock=sock)
+    tasks = set()
+    slots = asyncio.Semaphore(config.concurrency)
+    async with factory(config) as transport:
+        send(writer, ("ready", os.getpid()))
+        await writer.drain()
+
+        async def execute(context):
+            try:
+                async with slots:
+                    if deadline is not None and time.perf_counter() >= deadline:
+                        send(writer, ("expired", context.request_index))
+                    else:
+                        remaining = (max(0, deadline - time.perf_counter())
+                                     if deadline is not None else None)
+                        async with asyncio.timeout(remaining):
+                            result = await transport.execute(target, context=context)
+                        send(writer, ("result", context.request_index,
+                                      result, time.perf_counter()))
+                await writer.drain()
+            except TimeoutError:
+                send(writer, ("expired", context.request_index))
+                await writer.drain()
+            except Exception:
+                # Do not serialize exception strings that might contain credentials.
+                send(writer, ("error", context.request_index))
+                await writer.drain()
+
+        try:
+            while True:
+                context = await receive(reader)
+                if context is None:
+                    break
+                task = asyncio.create_task(execute(context))
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
+        except (EOFError, ConnectionError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+    writer.close()
+    await writer.wait_closed()
+
+
+def _entry(sock, config, target, factory, deadline):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        asyncio.run(_serve(sock, config, target, factory, deadline))
+    except Exception:
+        # Parent diagnoses an EOF as a failed worker. Never print config/tracebacks.
+        raise SystemExit(1) from None
+    finally:
+        sock.close()
+
+
+class ProcessTransport:
+    """Each fixed concurrency slot belongs to one independently executing process."""
+
+    def __init__(self, config, target, *, factory=HttpTransport, deadline=None):
+        self.config, self.target, self.factory = config, target, factory
+        self.deadline = deadline
+        self.count = process_count(config)
+        self.children = []
+        self.writers = []
+        self.readers = []
+        self.pending = {}
+        self.failure = False
+        self.pids = []
+        self.aborted = False
+
+    def abort(self):
+        """Immediate network stop, independent of the coordinator's output drain."""
+        if not self.aborted:
+            self.aborted = True
+            for child in self.children:
+                if child.is_alive():
+                    child.terminate()
+
+    async def __aenter__(self):
+        context = mp.get_context("spawn")
+        try:
+            # Launch all children before waiting for their ready messages.
+            connections = []
+            for index in range(self.count):
+                parent, child = socket.socketpair()
+                parent.setblocking(False)
+                child.setblocking(False)
+                slots = (self.config.concurrency + self.count - 1 - index) // self.count
+                process = context.Process(
+                    target=_entry, name=f"http-worker-{index}", daemon=True,
+                    args=(child, replace(self.config, concurrency=slots, processes=1),
+                          self.target, self.factory, self.deadline),
+                )
+                try:
+                    process.start()
+                except BaseException:
+                    parent.close()
+                    raise
+                finally:
+                    child.close()
+                self.children.append(process)
+                try:
+                    reader, writer = await asyncio.open_connection(sock=parent)
+                except BaseException:
+                    parent.close()
+                    raise
+                self.writers.append(writer)
+                connections.append(reader)
+            async with asyncio.timeout(30):
+                for reader in connections:
+                    message = await receive(reader)
+                    if message[0] != "ready":
+                        raise RuntimeError("Worker startup failed")
+                    self.pids.append(message[1])
+                    self.readers.append(asyncio.create_task(self._read(reader)))
+            return self
+        except BaseException:
+            await self.__aexit__()
+            raise
+
+    async def _read(self, reader):
+        try:
+            while True:
+                message = await receive(reader)
+                future = self.pending.pop(message[1], None)
+                if future is None or future.done():
+                    continue
+                if message[0] == "result":
+                    future.set_result((message[2], message[3]))
+                elif message[0] == "expired":
+                    future.cancel()
+                else:
+                    future.set_exception(RuntimeError("HTTP worker request failed"))
+        except (EOFError, ConnectionError, asyncio.IncompleteReadError):
+            self.failure = True
+            for future in self.pending.values():
+                if not future.done():
+                    future.set_exception(RuntimeError("HTTP worker exited unexpectedly"))
+
+    async def execute(self, target, *, context):
+        if self.failure:
+            raise RuntimeError("HTTP worker exited unexpectedly")
+        future = asyncio.get_running_loop().create_future()
+        self.pending[context.request_index] = future
+        writer = self.writers[context.worker_index % self.count]
+        try:
+            send(writer, context)
+            await writer.drain()
+            result, completed_at = await future
+            return replace(result, completed_at=completed_at)
+        finally:
+            self.pending.pop(context.request_index, None)
+            if not future.done():
+                future.cancel()
+
+    async def __aexit__(self, *args):
+        for writer in self.writers:
+            writer.close()
+        for reader in self.readers:
+            reader.cancel()
+        await asyncio.gather(*self.readers, return_exceptions=True)
+        # Stop network I/O immediately; do not let children drain a queued backlog.
+        self.abort()
+        for child in self.children:
+            await asyncio.to_thread(child.join, 2)
+            if child.is_alive():
+                child.kill()
+                await asyncio.to_thread(child.join)
+            child.close()
+        self.children.clear()
+        for future in self.pending.values():
+            if not future.done():
+                future.cancel()
+        self.pending.clear()

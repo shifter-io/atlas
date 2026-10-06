@@ -1,4 +1,5 @@
 import asyncio
+import socket
 import ssl
 import struct
 from functools import partial
@@ -226,15 +227,54 @@ class FakeSocket:
 
 def test_tcp_info_parsing(monkeypatch):
     raw = bytearray(232)
-    struct.pack_into("<Q", raw, 96, 1201)
-    struct.pack_into("<Q", raw, 104, 5300)
+    # Linux UAPI: receive window/retransmits and pacing rates are not byte totals.
+    struct.pack_into("=Q", raw, 96, 14480)
+    struct.pack_into("=Q", raw, 104, 900_000_000)
+    struct.pack_into("=Q", raw, 112, 2**64 - 1)
+    struct.pack_into("=Q", raw, 120, 1201)
+    struct.pack_into("=Q", raw, 128, 5300)
     monkeypatch.setattr(bytes_io, "LINUX", True)
     assert bytes_io.from_socket(FakeSocket(bytes(raw))) == bytes_io.ByteCount(1200, 5300, True)
     assert bytes_io.from_socket(FakeSocket(error=OSError())) is None
     assert bytes_io.from_socket(FakeSocket(b"short")) is None
+    assert bytes_io.from_socket(FakeSocket(bytes(raw[:135]))) is None
+    assert bytes_io.from_socket(FakeSocket(bytes(raw[:136]))) == bytes_io.ByteCount(
+        1200, 5300, True,
+    )
     assert bytes_io.from_socket(None) is None
     monkeypatch.setattr(bytes_io, "LINUX", False)
     assert bytes_io.from_socket(FakeSocket(bytes(raw))) is None
+
+
+@pytest.mark.skipif(not bytes_io.LINUX, reason="Linux TCP_INFO integration")
+def test_tcp_info_counts_real_loopback_payload():
+    # Exercise the kernel ABI, independently of the synthetic struct fixture.
+    with socket.socket() as listener, socket.socket() as client:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        client.settimeout(2)
+        client.connect(listener.getsockname())
+        peer, _ = listener.accept()
+        with peer:
+            peer.settimeout(2)
+            before = bytes_io.from_socket(client)
+            assert before is not None and before.exact
+            client.sendall(b"request" * 173)
+            remaining = 7 * 173
+            while remaining:
+                received = peer.recv(remaining)
+                assert received
+                remaining -= len(received)
+            peer.sendall(b"response" * 257)
+            remaining = 8 * 257
+            while remaining:
+                received = client.recv(remaining)
+                assert received
+                remaining -= len(received)
+            after = bytes_io.from_socket(client)
+            assert after is not None and after.exact
+            assert after.up - before.up == 7 * 173
+            assert after.down - before.down == 8 * 257
 
 
 def test_estimate_and_sizes():

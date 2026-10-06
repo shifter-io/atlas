@@ -1,0 +1,16 @@
+# Hourly pool census: rotating residential IPs with strict country targeting.
+schema_version = 1
+provider = "geonode"
+
+[credentials]
+account_env = "GEONODE_ACCOUNT"
+password_env = "GEONODE_PASSWORD"
+
+[settings]
+scheme = "http"
+host = "proxy.geonode.io"
+port = 9000
+session_policy = "rotate"
+
+[parameters]
+strict = true # Geonode requires -strict-on. Each scheduled job supplies its own country.

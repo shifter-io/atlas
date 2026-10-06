@@ -63,6 +63,13 @@ class ShifterProxy:
     id: ClassVar[str] = "shifter"
     version: ClassVar[str] = "1"
 
+    def __reduce__(self):
+        # Spawned HTTP workers receive configuration over private inherited IPC.
+        # Reconstruct through validation to retain immutable parameter mappings.
+        return (type(self), (self.account, self.password, dict(self.parameters),
+                            dict(self.extra_flags), self.scheme, self.gateway,
+                            self.session_policy, self.pool))
+
     def __post_init__(self) -> None:
         if not isinstance(self.account, str):
             raise ValueError("Shifter account is required")

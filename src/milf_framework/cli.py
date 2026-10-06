@@ -44,6 +44,7 @@ async def _run(args: argparse.Namespace) -> int:
         proxy=proxy,
         requests=args.requests,
         concurrency=args.concurrency,
+        processes=args.processes,
         timeout_seconds=args.timeout,
         requests_per_second=args.rate,
         provider=args.provider,
@@ -89,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     measure.add_argument("--requests", type=int, default=100)
     measure.add_argument("--concurrency", type=int, default=10)
+    measure.add_argument(
+        "--processes", type=int, default=0, help="HTTP worker processes; 0 = CPU count"
+    )
     measure.add_argument("--timeout", type=float, default=15)
     measure.add_argument("--rate", type=float, help="Maximum request starts per second")
     connection = measure.add_mutually_exclusive_group()
@@ -151,8 +155,13 @@ def main(argv: list[str] | None = None) -> int:
     from .orchestrator import cli as fleet
 
     fleet.register(commands)
+    from .onboarding import cli as onboarding
+
+    onboarding.register(commands)
     args = parser.parse_args(argv)
     try:
+        if args.command == "onboarding":
+            return onboarding.dispatch(args)
         if args.command in fleet.COMMANDS:
             return fleet.dispatch(args)
         if args.command in {

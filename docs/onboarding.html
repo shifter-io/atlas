@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Network onboarding · Operator guide</title><style>
+:root{color-scheme:light;--ink:#17263a;--line:#d7e0e9;--accent:#145a83}*{box-sizing:border-box}
+body{font:16px/1.65 system-ui,sans-serif;margin:0;color:var(--ink);background:#f3f6fa}
+main{max-width:1120px;margin:auto;padding:48px 28px 80px}h1{font-size:44px;line-height:1.1;margin:12px 0 22px}
+h2{font-size:26px;margin-top:38px}h3{margin-top:26px}a{color:var(--accent)}.eyebrow{font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.lead{font-size:20px;max-width:860px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:28px 0}
+.card,section{background:white;border:1px solid var(--line);border-radius:12px;padding:24px}.card b{font-size:26px;display:block}.card span{color:#4e6075}
+section{margin-top:22px}section h2:first-child{margin-top:0}pre{padding:18px;background:#142538;color:#e9f2fa;border-radius:8px;overflow:auto;font-size:13px;line-height:1.6}code{font-family:ui-monospace,monospace;font-size:.9em}
+.note{border-left:4px solid #d18b29;padding:14px 18px;background:#fff8e9}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:12px;border-bottom:1px solid var(--line)}
+details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointer}details ol{columns:3;padding-left:32px}details li{break-inside:avoid;margin:4px 0}.scroll{overflow:auto}
+@media(max-width:720px){main{padding:28px 18px}.grid{grid-template-columns:1fr}h1{font-size:34px}details ol{columns:1}}@media print{body{background:white}main{padding:0}section{break-inside:avoid}pre{white-space:pre-wrap;color:black;background:#eee}}
+</style></head><body><main><div class="eyebrow">MILF framework · Private operator workflow</div>
+<h1>24-hour network onboarding</h1><p class="lead">A manually armed campaign that reuses Test #1’s Generic HTTP tester, keeps every successful IP observation, and stores results outside the website and normal measurement database.</p>
+<div class="grid"><div class="card"><b>24 rounds</b><span>Absolute UTC hourly schedule</span></div><div class="card"><b>8 servers</b><span>249 assigned countries/territories</span></div><div class="card"><b>1 country</b><span>At a time on each server</span></div></div>
+<section><h2>1. Create one shared campaign</h2><p>Run from the <code>milf/</code> framework checkout. Install its dependencies with <code>uv sync</code>. All commands below use the source checkout explicitly, avoiding an older installed wheel.</p>
+<pre>uv run --no-editable milf-framework onboarding plan \
+  --provider-config configs/shifter.toml \
+  --product residential \
+  --start 2027-01-01T22:00:00Z</pre>
+<p>Replace the example start with a <b>future whole UTC hour</b>. The command prints the path to <code>campaign.json</code> under <code>onboarding-networks/&lt;provider&gt;/&lt;product&gt;/&lt;campaign-id&gt;/</code>. Create this manifest once. Copy the same manifest and public provider configuration to all eight servers; keep the manifest in that same relative folder structure.</p>
+<p>The manifest freezes country order, 24 scheduled timestamps, the exact end timestamp, provider configuration checksum, framework version and census rule version. Provider configuration changes require a new campaign. It contains no credentials.</p>
+<p><a href="../configs/onboarding.env.example">Public launch-settings template</a> · <a href="../configs/shifter.toml">Existing Shifter adapter configuration</a></p></section>
+<section><h2>2. Arm each regional server</h2><p>Use the same campaign, substituting the server’s region. Credentials use the existing owner-only TOML mechanism or the provider’s credential environment variables.</p>
+<pre>uv run --no-editable milf-framework onboarding run \
+  --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json \
+  --region fra1 \
+  --provider-config configs/shifter.toml \
+  --credentials-file .secrets/credentials.toml \
+  --concurrency 1000 \
+  --timeout 10</pre>
+<div class="scroll"><table><thead><tr><th>Parameter</th><th>Default</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>--concurrency</code></td><td>1,000</td><td>Maximum in-flight requests for the active country. Positive integer; may differ per server.</td></tr>
+<tr><td><code>--timeout</code></td><td>10 seconds</td><td>Request timeout. Finite positive number; fractional seconds accepted.</td></tr>
+<tr><td><code>--resume</code></td><td>Off</td><td>Explicitly resume an existing regional checkpoint, preserving its concurrency, timeout and deadline.</td></tr></tbody></table></div>
+<p>Keep the process running in a supervised terminal or service. Starting it before the campaign start arms it; no proxy requests run until the scheduled start. Validate synchronized server clocks before the first live run. On Linux, check <code>timedatectl show -p NTPSynchronized --value</code>. The schedule uses UTC, independent of server display timezone.</p>
+<p>Only implemented adapters can run. Shifter is currently registered. New network authentication and targeting belongs in a reusable provider adapter, not in the onboarding scheduler.</p></section>
+<section><h2>3. Scheduling, ordering and the hard deadline</h2><p>Every whole-hour boundary makes a new round eligible. A durable, precomputed FIFO preserves each round’s country order. If a round overruns, finish its countries before starting the next round. No country runs concurrently with another on the same server.</p>
+<pre>Campaign start       Day 1 22:00 UTC
+Round 0 scheduled    Day 1 22:00 UTC
+Round 1 scheduled    Day 1 23:00 UTC
+…
+Round 23 scheduled   Day 2 21:00 UTC
+Campaign deadline    Day 2 22:00 UTC</pre>
+<p>If round 0 ends at 23:08, round 1 starts then and retains 23:00 as its scheduled time. Round 2 remains scheduled for 00:00. Each country’s actual start is recorded separately. Finishing all available work early leaves the process waiting for the next boundary, including the final deadline.</p>
+<p class="note"><b>The deadline wins over the backlog.</b> At 24 hours, new requests stop, outstanding requests are cancelled and responses at or beyond the cutoff are excluded. Queued work becomes <code>not_started_deadline</code>. Local file finalization can finish after the cutoff; proxy testing cannot.</p>
+<p>Backward wall-clock changes do not extend a running campaign. Real systems may wake slightly late; recorded start delays make that visible.</p></section>
+<section><h2>4. Shared census rule, version 2</h2><pre>completed_requests &gt;= 1000
+AND
+unique_successful_IPs * 2 &lt; completed_requests</pre>
+<p><b>All completed failures count</b> toward the sample and denominator. Only successful IP responses contribute unique addresses. Exactly 50% does not stop. The ratio resets for every country run.</p>
+<p>An all-error country stops issuing at 1,000 completions and retains the <code>no_success</code> classification. Existing time-based no-success and stalled-network protections remain. In-flight requests normally finish after the stopping rule fires; at concurrency 1,000, up to 999 more requests can already be outstanding.</p>
+<p>The correction is shared with regular Test #1. New normal runs record census rule version 2 and the completed-request basis; old results keep their original metadata. Count-limited tests retain their existing behavior. The normal tester’s existing timeout defaults are unchanged; onboarding defaults to 10 seconds.</p></section>
+<section><h2>5. Check progress and resume</h2><pre>uv run --no-editable milf-framework onboarding status \
+  --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json \
+  --region fra1</pre>
+<p>Status reports the active country, live counters, due queue depth, regional settings, deadline, round duration, start delay and peak process memory. Country summaries include errors, throughput and the shared runner’s measurements. The initial performance target is 30–40 minutes per regional round.</p>
+<p>Stop gracefully with SIGINT or SIGTERM. To resume, run the original command with <code>--resume</code>. Omit concurrency and timeout to reuse saved values; conflicting overrides are rejected. Completed countries are never replayed. A country interrupted by a crash keeps its committed chunks and is marked interrupted before advancing to the next country. Partial diagnostic counters are identified as such. Closed campaigns never restart.</p>
+<p>Only one process can own a campaign/region on a local filesystem. Different servers must be assigned different regions; there is no distributed lock between separate machines. Storage or configuration failures stop the regional process, while ordinary proxy failures remain census outcomes.</p></section>
+<section><h2>6. Observation format and private files</h2><p>Each successful response writes one compact JSON line, including duplicates. The country code is the <b>requested</b> country, not geolocation. IPv4 and IPv6 are both supported.</p>
+<pre>{"ip":"203.0.113.42","country_code":"us","round_scheduled_at":"2027-01-01T22:00:00.000Z","country_started_at":"2027-01-01T22:04:12.381Z","observed_at":"2027-01-01T22:04:12.947Z"}</pre>
+<p>Chunks rotate after 100,000 records or five seconds of pending records. A bounded queue applies storage backpressure. Each committed chunk has a checksum and row-count sidecar. Directories are owner-only and data files use mode 0600.</p>
+<pre>onboarding-networks/&lt;provider&gt;/&lt;product&gt;/&lt;campaign-id&gt;/
+  campaign.json
+  regions/fra1/
+    state.json
+    rounds/00/de/
+      observations-000001.jsonl.gz
+      observations-000001.jsonl.meta.json
+      summary.json
+    summary.json
+  export/
+    observations.jsonl.gz
+    manifest.json
+    report.html</pre>
+<p>A crash can lose the uncommitted queue and active chunk; finalized chunks remain valid. Partial files are excluded and identified in the export report. JSONL buffering is bounded, while the exact census uniqueness set grows with distinct addresses in the current country and is released between countries.</p>
+<p>The default runtime directory is Git-ignored and excluded from source archives. Do not move captured files into another tracked folder. Onboarding never calls database ingestion, publication, or website APIs.</p></section>
+<section><h2>7. Collect and export</h2><p>After the campaign, copy each server’s <code>regions/&lt;region&gt;/</code> folder into the matching campaign directory on the collection machine. Preserve the manifest and all sidecars. The command operates on local files; it does not connect to servers or upload results.</p>
+<pre>uv run --no-editable milf-framework onboarding export \
+  --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json</pre>
+<p>The exporter locks regional folders, verifies checksums, row counts, IPs and timestamps, then streams gzip members into one <code>observations.jsonl.gz</code>. Python’s <code>gzip</code> module and standard gzip tools read this concatenated stream. Missing regions and incomplete runs are flagged; corruption fails the export. The export manifest is the commit marker and includes the final checksum. <code>report.html</code> opens directly without a server or external assets.</p>
+<pre>import gzip, json
+with gzip.open("observations.jsonl.gz", "rt", encoding="utf-8") as stream:
+    for line in stream:
+        observation = json.loads(line)
+        # Process one observation at a time; duplicates are intentional.</pre></section>
+<section><h2>CPU parallelism for all HTTP tests</h2>
+<p>The shared runner uses spawned worker processes, each with its own Python interpreter,
+HTTP event loop and connection pool. This applies to HTTP, HTTPS, count tests, normal
+census/pulse runs and onboarding. The default <code>--processes 0</code> selects the available
+CPU count, bounded by concurrency and request count. Use <code>--processes 4</code> to select
+four workers, or <code>--processes 1</code> for diagnostics.</p>
+<p>Concurrency is global: <code>--concurrency 2500 --processes 4</code> assigns 625 slots to
+each worker. One coordinator owns the request budget, rate limit, exact unique-IP set and
+census stopping decision. Counts from separate workers are never summed as independent
+unique-IP pools. Provider request/session identities remain global. In-flight work drains
+at normal census termination; operator stop and the deadline terminate all worker processes.
+A worker crash fails the run and preserves partial results.</p>
+<p>The fleet monitor shows interval CPU use per core and per worker PID, including the
+coordinator. 100% for a process means one occupied core. Live RAM is summed across these processes.
+The saved <code>peak_memory_mb</code> field is the coordinator process peak; it does not include
+worker memory. Use the live process readings when checking whole-run RAM use.
+The first sample needs a subsequent sample to calculate CPU use. Network waiting can leave
+cores idle even when work is correctly distributed; core utilization and throughput must
+be measured together. Injected custom execution adapters remain responsible for their own
+parallelism; all built-in HTTP targets use this process backend.</p></section>
+<section><h2>Strict country targeting for onboarding</h2>
+<p>Use <code>configs/shifter-onboarding.toml</code> for onboarding country campaigns.
+It sets <code>strict = true</code>, preventing Shifter from substituting a broader pool when
+no matching exit is available. Such requests fail and contribute to census termination;
+unsuccessful countries have no observation rows. Every assigned country is still attempted.</p>
+<p>The saved country code remains the requested country, not an independently verified geographic
+claim. Local geolocation databases can disagree with the provider. Each campaign freezes the
+provider configuration checksum, so distribute the exact same strict configuration to all nodes.</p>
+<p>For a single-round calibration, <code>scripts/onboarding-calibration.py</code> runs the normal
+scheduler and stops after the final country of its first round. Later rounds stay pending by
+design. <code>scripts/onboarding-verify-round.py</code> validates and combines that round's files.
+Create a separate manifest for the full 24-hour campaign.</p></section>
+<section><h2>Single-country calibration and fleet monitoring</h2>
+<p>Before a full campaign, use <code>onboarding probe</code> to measure one country with the same census rule and individual-observation writer. A scheduled start must be a future whole UTC hour. Omitting <code>--start</code> starts this manual calibration immediately.</p>
+<pre>uv run --no-editable milf-framework onboarding probe \
+  --provider-config configs/shifter.toml \
+  --credentials-file .secrets/credentials.toml \
+  --region nyc3 --country us --concurrency 2500 --timeout 10 \
+  --start 2027-01-01T22:00:00Z \
+  --output onboarding-networks/shifter/residential/probes/us-calibration</pre>
+<p>The probe writes <code>state.json</code> every five seconds while testing, plus a final <code>summary.json</code> and compressed observation chunks. The final measurement records total requests, successes, errors, unique IPs, throughput and elapsed tester time. <code>total_duration_seconds</code> also includes final file flushing. A probe has a 24-hour safety deadline by default; <code>--max-seconds</code> can set another explicit cap. Its output directory cannot be reused.</p>
+<p>Keep production host addresses and SSH identity paths in the ignored, owner-only file <code>.secrets/onboarding-servers.json</code>. Each <code>servers</code> entry maps a region to <code>host</code>, <code>user</code>, <code>identity_file</code> and an absolute remote <code>root</code>. Never include this inventory in Git, a wheel or a deployment upload.</p>
+<pre>uv run --no-editable milf-framework onboarding fleet-status \
+  --inventory .secrets/onboarding-servers.json \
+  --output .state/onboarding-monitor --watch</pre>
+<p>The monitor uses SSH to collect service state, heartbeat freshness, current country, request/error/unique counts, throughput, queue depth, host memory, process memory and free disk. It writes a standalone <code>index.html</code> and <code>snapshot.json</code> locally. Collection repeats after a ten-second pause; SSH collection time adds a few seconds. The HTML reloads itself and displays a stale-monitor warning if collection stops.</p>
+<p><b>Health states:</b> armed/running; behind (an older hourly round remains unfinished); stale (heartbeat older than 20 seconds); failed (service exited unexpectedly); unreachable (SSH failed); not_deployed (reachable but not installed); completed/closed. A probe exceeding an hour is marked <code>over_hour</code> while it continues toward its stopping rule. Armed campaigns and completed-round waits also persist fresh heartbeats.</p>
+<p>Remote helpers are project-specific: <code>scripts/onboarding-deploy.py</code> transfers a locally built wheel, locked dependency list, provider config and the selected credential file; <code>scripts/onboarding-remote-probe.py</code> starts one supervised systemd service with a 65,536-file limit and writes the private active-run pointer. They read the local inventory and never upload it. Deployment alone does not start proxy traffic.</p>
+<p>Run each helper with <code>--help</code> for exact arguments. Each remote root contains <code>active-run.json</code> with the unit name and relative state-file path used by the monitor. On the collection machine, stop a detached watcher with the process ID in <code>.state/onboarding-monitor/collector.pid</code> after confirming the process identity.</p>
+</section>
+<section><h2>Server assignments and fixed execution order</h2><p>One server in each location. Expand a region to see its ordered country list. The campaign copies these assignments from <code>configs/regions.yaml</code>.</p><details><summary><b>lon1</b> — London, United Kingdom · 31 countries/territories</summary><ol><li><code>GB</code> United Kingdom</li><li><code>GG</code> Guernsey</li><li><code>IM</code> Isle of Man</li><li><code>JE</code> Jersey</li><li><code>IE</code> Ireland</li><li><code>IS</code> Iceland</li><li><code>FO</code> Faroe Islands</li><li><code>FR</code> France</li><li><code>AD</code> Andorra</li><li><code>ES</code> Spain</li><li><code>GI</code> Gibraltar</li><li><code>PT</code> Portugal</li><li><code>MA</code> Morocco</li><li><code>EH</code> Western Sahara</li><li><code>MR</code> Mauritania</li><li><code>SN</code> Senegal</li><li><code>GM</code> Gambia</li><li><code>GW</code> Guinea-Bissau</li><li><code>GN</code> Guinea</li><li><code>SL</code> Sierra Leone</li><li><code>LR</code> Liberia</li><li><code>CI</code> Côte d&#x27;Ivoire</li><li><code>GH</code> Ghana</li><li><code>TG</code> Togo</li><li><code>BJ</code> Benin</li><li><code>BF</code> Burkina Faso</li><li><code>ML</code> Mali</li><li><code>NE</code> Niger</li><li><code>NG</code> Nigeria</li><li><code>CV</code> Cape Verde</li><li><code>SH</code> Saint Helena</li></ol></details><details><summary><b>fra1</b> — Frankfurt, Germany · 58 countries/territories</summary><ol><li><code>DE</code> Germany</li><li><code>AT</code> Austria</li><li><code>CH</code> Switzerland</li><li><code>LI</code> Liechtenstein</li><li><code>CZ</code> Czechia</li><li><code>SK</code> Slovakia</li><li><code>PL</code> Poland</li><li><code>HU</code> Hungary</li><li><code>SI</code> Slovenia</li><li><code>HR</code> Croatia</li><li><code>BA</code> Bosnia and Herzegovina</li><li><code>RS</code> Serbia</li><li><code>ME</code> Montenegro</li><li><code>MK</code> North Macedonia</li><li><code>AL</code> Albania</li><li><code>BG</code> Bulgaria</li><li><code>RO</code> Romania</li><li><code>MD</code> Moldova</li><li><code>UA</code> Ukraine</li><li><code>BY</code> Belarus</li><li><code>RU</code> Russia</li><li><code>IT</code> Italy</li><li><code>SM</code> San Marino</li><li><code>VA</code> Vatican City</li><li><code>MC</code> Monaco</li><li><code>MT</code> Malta</li><li><code>CY</code> Cyprus</li><li><code>GR</code> Greece</li><li><code>TR</code> Türkiye</li><li><code>AM</code> Armenia</li><li><code>AZ</code> Azerbaijan</li><li><code>GE</code> Georgia</li><li><code>IQ</code> Iraq</li><li><code>IL</code> Israel</li><li><code>JO</code> Jordan</li><li><code>LB</code> Lebanon</li><li><code>PS</code> Palestine</li><li><code>SY</code> Syria</li><li><code>EG</code> Egypt</li><li><code>LY</code> Libya</li><li><code>TN</code> Tunisia</li><li><code>DZ</code> Algeria</li><li><code>AO</code> Angola</li><li><code>BW</code> Botswana</li><li><code>CD</code> DR Congo</li><li><code>CF</code> Central African Republic</li><li><code>CG</code> Congo</li><li><code>GA</code> Gabon</li><li><code>GQ</code> Equatorial Guinea</li><li><code>LS</code> Lesotho</li><li><code>NA</code> Namibia</li><li><code>SZ</code> Eswatini</li><li><code>ZA</code> South Africa</li><li><code>ZM</code> Zambia</li><li><code>ZW</code> Zimbabwe</li><li><code>TD</code> Chad</li><li><code>CM</code> Cameroon</li><li><code>ST</code> São Tomé and Príncipe</li></ol></details><details><summary><b>ams3</b> — Amsterdam, Netherlands · 12 countries/territories</summary><ol><li><code>NL</code> Netherlands</li><li><code>BE</code> Belgium</li><li><code>LU</code> Luxembourg</li><li><code>DK</code> Denmark</li><li><code>NO</code> Norway</li><li><code>SE</code> Sweden</li><li><code>FI</code> Finland</li><li><code>AX</code> Åland Islands</li><li><code>EE</code> Estonia</li><li><code>LV</code> Latvia</li><li><code>LT</code> Lithuania</li><li><code>SJ</code> Svalbard and Jan Mayen</li></ol></details><details><summary><b>nyc3</b> — New York City, United States · 53 countries/territories</summary><ol><li><code>US</code> United States</li><li><code>MX</code> Mexico</li><li><code>BM</code> Bermuda</li><li><code>BS</code> Bahamas</li><li><code>BB</code> Barbados</li><li><code>BZ</code> Belize</li><li><code>CR</code> Costa Rica</li><li><code>CU</code> Cuba</li><li><code>CW</code> Curaçao</li><li><code>DM</code> Dominica</li><li><code>DO</code> Dominican Republic</li><li><code>GD</code> Grenada</li><li><code>GP</code> Guadeloupe</li><li><code>GT</code> Guatemala</li><li><code>HN</code> Honduras</li><li><code>HT</code> Haiti</li><li><code>JM</code> Jamaica</li><li><code>KN</code> Saint Kitts and Nevis</li><li><code>KY</code> Cayman Islands</li><li><code>LC</code> Saint Lucia</li><li><code>MQ</code> Martinique</li><li><code>MS</code> Montserrat</li><li><code>NI</code> Nicaragua</li><li><code>PA</code> Panama</li><li><code>PR</code> Puerto Rico</li><li><code>SV</code> El Salvador</li><li><code>SX</code> Sint Maarten</li><li><code>TC</code> Turks and Caicos Islands</li><li><code>TT</code> Trinidad and Tobago</li><li><code>VC</code> Saint Vincent and the Grenadines</li><li><code>VG</code> British Virgin Islands</li><li><code>VI</code> U.S. Virgin Islands</li><li><code>AW</code> Aruba</li><li><code>BQ</code> Caribbean Netherlands</li><li><code>AG</code> Antigua and Barbuda</li><li><code>AI</code> Anguilla</li><li><code>AR</code> Argentina</li><li><code>BO</code> Bolivia</li><li><code>BR</code> Brazil</li><li><code>CL</code> Chile</li><li><code>CO</code> Colombia</li><li><code>EC</code> Ecuador</li><li><code>FK</code> Falkland Islands</li><li><code>GF</code> French Guiana</li><li><code>GY</code> Guyana</li><li><code>PE</code> Peru</li><li><code>PY</code> Paraguay</li><li><code>SR</code> Suriname</li><li><code>UY</code> Uruguay</li><li><code>VE</code> Venezuela</li><li><code>BL</code> Saint Barthélemy</li><li><code>MF</code> Saint Martin</li><li><code>GS</code> South Georgia and the South Sandwich Islands</li></ol></details><details><summary><b>tor1</b> — Toronto, Canada · 3 countries/territories</summary><ol><li><code>CA</code> Canada</li><li><code>GL</code> Greenland</li><li><code>PM</code> Saint Pierre and Miquelon</li></ol></details><details><summary><b>sgp1</b> — Singapore · 24 countries/territories</summary><ol><li><code>BN</code> Brunei</li><li><code>CN</code> China</li><li><code>HK</code> Hong Kong</li><li><code>ID</code> Indonesia</li><li><code>JP</code> Japan</li><li><code>KH</code> Cambodia</li><li><code>KP</code> North Korea</li><li><code>KR</code> South Korea</li><li><code>LA</code> Laos</li><li><code>MM</code> Myanmar</li><li><code>MO</code> Macao</li><li><code>MY</code> Malaysia</li><li><code>PH</code> Philippines</li><li><code>SG</code> Singapore</li><li><code>TH</code> Thailand</li><li><code>TL</code> Timor-Leste</li><li><code>TW</code> Taiwan</li><li><code>VN</code> Vietnam</li><li><code>MN</code> Mongolia</li><li><code>GU</code> Guam</li><li><code>MP</code> Northern Mariana Islands</li><li><code>PW</code> Palau</li><li><code>CC</code> Cocos (Keeling) Islands</li><li><code>CX</code> Christmas Island</li></ol></details><details><summary><b>blr1</b> — Bangalore, India · 41 countries/territories</summary><ol><li><code>AF</code> Afghanistan</li><li><code>BD</code> Bangladesh</li><li><code>BT</code> Bhutan</li><li><code>IN</code> India</li><li><code>LK</code> Sri Lanka</li><li><code>MV</code> Maldives</li><li><code>NP</code> Nepal</li><li><code>PK</code> Pakistan</li><li><code>AE</code> United Arab Emirates</li><li><code>BH</code> Bahrain</li><li><code>IR</code> Iran</li><li><code>KW</code> Kuwait</li><li><code>OM</code> Oman</li><li><code>QA</code> Qatar</li><li><code>SA</code> Saudi Arabia</li><li><code>YE</code> Yemen</li><li><code>KZ</code> Kazakhstan</li><li><code>KG</code> Kyrgyzstan</li><li><code>TJ</code> Tajikistan</li><li><code>TM</code> Turkmenistan</li><li><code>UZ</code> Uzbekistan</li><li><code>IO</code> British Indian Ocean Territory</li><li><code>KM</code> Comoros</li><li><code>MG</code> Madagascar</li><li><code>MU</code> Mauritius</li><li><code>RE</code> Réunion</li><li><code>SC</code> Seychelles</li><li><code>SO</code> Somalia</li><li><code>DJ</code> Djibouti</li><li><code>ER</code> Eritrea</li><li><code>ET</code> Ethiopia</li><li><code>KE</code> Kenya</li><li><code>TZ</code> Tanzania</li><li><code>UG</code> Uganda</li><li><code>RW</code> Rwanda</li><li><code>BI</code> Burundi</li><li><code>SD</code> Sudan</li><li><code>SS</code> South Sudan</li><li><code>YT</code> Mayotte</li><li><code>MZ</code> Mozambique</li><li><code>MW</code> Malawi</li></ol></details><details><summary><b>syd1</b> — Sydney, Australia · 27 countries/territories</summary><ol><li><code>AU</code> Australia</li><li><code>NZ</code> New Zealand</li><li><code>AS</code> American Samoa</li><li><code>CK</code> Cook Islands</li><li><code>FJ</code> Fiji</li><li><code>FM</code> Micronesia</li><li><code>HM</code> Heard and McDonald Islands</li><li><code>KI</code> Kiribati</li><li><code>MH</code> Marshall Islands</li><li><code>NC</code> New Caledonia</li><li><code>NF</code> Norfolk Island</li><li><code>NR</code> Nauru</li><li><code>NU</code> Niue</li><li><code>PF</code> French Polynesia</li><li><code>PG</code> Papua New Guinea</li><li><code>PN</code> Pitcairn Islands</li><li><code>SB</code> Solomon Islands</li><li><code>TK</code> Tokelau</li><li><code>TO</code> Tonga</li><li><code>TV</code> Tuvalu</li><li><code>UM</code> U.S. Minor Outlying Islands</li><li><code>VU</code> Vanuatu</li><li><code>WF</code> Wallis and Futuna</li><li><code>WS</code> Samoa</li><li><code>AQ</code> Antarctica</li><li><code>TF</code> French Southern Territories</li><li><code>BV</code> Bouvet Island</li></ol></details></section>
+</main></body></html>

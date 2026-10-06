@@ -536,7 +536,7 @@ def test_rule_progress_and_text():
     text_ = report_html.rule_text(1200, 900, 1000)
     assert "minimum sample reached" in text_ and "unique share 75.0%" in text_
     assert "25.0 points above the 50% stop line" in text_
-    assert "500 of 1,000 successes for the minimum sample (50.0%)" in (
+    assert "500 of 1,000 completed requests for the minimum sample (50.0%)" in (
         report_html.rule_text(500, 400, 1000)
     )
     assert report_html.rule_text(1200, 500, 1000).startswith("Stop rule met")

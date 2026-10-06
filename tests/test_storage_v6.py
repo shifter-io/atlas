@@ -176,9 +176,11 @@ async def test_geo_buckets_and_outcomes_round_trip(database, tmp_path):
         ).fetchall()
     assert overrides[0][0] == {
         "requests": None, "stop_rule": "unique_ratio", "min_sample": 1000, "stall_seconds": 600,
-        "target_url": None,
+        "target_url": None, "processes": 0,
+        "execution_backend": "inline", "execution_processes": 1,
     }
-    assert overrides[2][0] == {"requests": 3, "target_url": None}
+    assert overrides[2][0] == {"requests": 3, "target_url": None, "processes": 0,
+                               "execution_backend": "inline", "execution_processes": 1}
 
 
 async def test_geo_ids_are_the_enrichment_ids(database, tmp_path):

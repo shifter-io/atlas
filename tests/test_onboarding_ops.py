@@ -1,0 +1,46 @@
+import importlib.util
+from datetime import timedelta
+from pathlib import Path
+
+from test_onboarding import START, Clock, Proxy, fake_measurement
+
+from milf_framework.onboarding import manifest
+from milf_framework.onboarding.files import read_json
+from milf_framework.onboarding.scheduler import execute
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+async def test_calibration_stops_before_second_round_even_when_first_overruns(
+    tmp_path, monkeypatch,
+):
+    root = ROOT
+    spec = importlib.util.spec_from_file_location(
+        "calibration_driver", root / "scripts/onboarding-calibration.py"
+    )
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    path = manifest.create(root / "configs/shifter.toml", "residential", manifest.timestamp(START),
+                           tmp_path, now=START - timedelta(hours=1))
+    clock = Clock(START.timestamp())
+    calls = []
+
+    async def measured(config, sink, **kwargs):
+        calls.append(config.requested_country)
+        clock.value += 3700  # Every country overruns the next hourly boundary.
+        return fake_measurement()
+
+    async def scheduled(*args, **kwargs):
+        return await execute(*args, **kwargs, clock=clock)
+
+    monkeypatch.setattr(driver, "run", measured)
+    monkeypatch.setattr(driver, "execute", scheduled)
+    monkeypatch.setattr(driver, "load_provider", lambda _, parameters, **kw: Proxy(
+        parameters["country"]))
+    monkeypatch.setattr(driver.asyncio.get_running_loop(), "add_signal_handler", lambda *a: None)
+    result = await driver.calibrate(path, "tor1", root / "configs/shifter.toml", None)
+    assert calls == ["ca", "gl", "pm"]
+    assert result["status"] == "stopped"
+    jobs = read_json(path.parent / "regions/tor1/state.json")["jobs"]
+    assert all(j["status"] == "completed" for j in jobs[:3])
+    assert all(j["status"] == "pending" for j in jobs[3:])

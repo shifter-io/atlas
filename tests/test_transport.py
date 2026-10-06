@@ -129,7 +129,7 @@ async def test_stop_in_flight(tmp_path):
     async with server(gateway) as port:
         task = asyncio.create_task(run(config(port, requests=100, concurrency=3),
                                        JsonSink(tmp_path), stop=stop))
-        await asyncio.sleep(.04)
+        await asyncio.wait_for(gateway.accepted.wait(), 5)
         stop.set()
         result = await task
     assert result.status == "cancelled"

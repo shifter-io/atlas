@@ -11,6 +11,7 @@ from aiohttp.test_utils import TestServer
 from helpers import Gateway, server
 from test_orchestrator import prepare, query
 
+from milf_framework import __version__
 from milf_framework.models import ProxyConfig
 from milf_framework.node import NodeAgent, Rejected, provider_factory, read_token
 from milf_framework.orchestrator import batches
@@ -353,7 +354,7 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
         assert data["bytes_down"] > 0 and data["duration_s"] > 0
     assert query(database, "SELECT count(*) FROM test_events") == [(4,)]
     nodes = query(database, "SELECT status,version,rss_mb IS NOT NULL FROM nodes")
-    assert nodes == [("online", "0.8.0", True)] * 2
+    assert nodes == [("online", __version__, True)] * 2
     # Uploaded directories are gone.
     assert os.listdir(tmp_path / "alpha") == os.listdir(tmp_path / "beta") == []
 

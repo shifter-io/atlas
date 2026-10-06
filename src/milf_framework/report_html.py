@@ -42,7 +42,7 @@ TOP = 15
 REFRESH_SECONDS = 30
 OPEN = ("scheduled", "running")
 OPEN_RUNS = ("queued", "running", "uploading")
-# The census stops once successes >= min_sample and successes > 2 x unique IPs.
+# Census v2 counts all completions; old saved runs keep their original basis.
 STOP_SHARE = 0.5
 KIND_LABELS = {
     "census": "Test #1 · Census",
@@ -50,8 +50,9 @@ KIND_LABELS = {
     "load": "Test #2 · Load (latency under load)",
 }
 STOP_REASONS = {
-    "unique_ratio": "Stopped on the unique-IP rule: after the minimum sample, successes passed "
-    "twice the unique IPs, so the pool had started repeating addresses.",
+    "unique_ratio": "Stopped on the unique-IP rule: after the minimum sample, "
+    "unique IPs fell below "
+    "50% of the run’s recorded ratio basis (all completed requests for census v2).",
     "no_success": "Stopped because nothing succeeded in the first requests or seconds of the "
     "run.",
     "stalled": "Stopped as stalled: it had successes, then none for the stall window (recorded "
@@ -118,39 +119,40 @@ def span(start: datetime | None, end: datetime | None, now: datetime) -> float |
     return ((end or now) - start).total_seconds()
 
 
-def rule_progress(successes: int, unique_ips: int, min_sample: int) -> dict[str, Any]:
+def rule_progress(completed: int, unique_ips: int, min_sample: int) -> dict[str, Any]:
     """How close a running census is to the unique-ratio stop rule."""
-    share = unique_ips / successes if successes else None
-    sample = min(successes / min_sample, 1.0) if min_sample else 1.0
+    share = unique_ips / completed if completed else None
+    sample = min(completed / min_sample, 1.0) if min_sample else 1.0
     return {
         "sample": sample,
         "share": share,
-        "met": successes >= min_sample and share is not None and share < STOP_SHARE,
+        "met": completed >= min_sample and share is not None and share < STOP_SHARE,
     }
 
 
-def rule_text(successes: int, unique_ips: int, min_sample: int) -> str:
-    rule = rule_progress(successes, unique_ips, min_sample)
+def rule_text(completed: int, unique_ips: int, min_sample: int,
+              basis: str = "completed requests") -> str:
+    rule = rule_progress(completed, unique_ips, min_sample)
     if rule["met"]:
         return (
-            f"Stop rule met: {num(successes)} successes ≥ {num(min_sample)} and unique share "
-            f"{pct(unique_ips, successes)} < 50%; the node stops at its next check."
+            f"Stop rule met: {num(completed)} {basis} ≥ {num(min_sample)} and unique share "
+            f"{pct(unique_ips, completed)} < 50%; the node stops at its next check."
         )
     sample = (
-        f"minimum sample reached ({num(successes)} of {num(min_sample)} successes)"
-        if successes >= min_sample
-        else f"{num(successes)} of {num(min_sample)} successes for the minimum sample "
+        f"minimum sample reached ({num(completed)} of {num(min_sample)} {basis})"
+        if completed >= min_sample
+        else f"{num(completed)} of {num(min_sample)} {basis} for the minimum sample "
         f"({rule['sample'] * 100:.1f}%)"
     )
     if rule["share"] is None:
-        share = "no successes yet, so no unique share"
+        share = f"no {basis} yet, so no unique share"
     else:
         gap = (rule["share"] - STOP_SHARE) * 100
         share = (
-            f"unique share {pct(unique_ips, successes)}, {gap:.1f} points above the 50% "
+            f"unique share {pct(unique_ips, completed)}, {gap:.1f} points above the 50% "
             "stop line"
             if gap >= 0
-            else f"unique share {pct(unique_ips, successes)}, already below the 50% stop line"
+            else f"unique share {pct(unique_ips, completed)}, already below the 50% stop line"
         )
     return f"Stop rule not met yet: {sample}; {share}."
 
@@ -328,9 +330,12 @@ def batch_data(conn: psycopg.Connection, batch_id: int) -> dict[str, Any] | None
         "SELECT br.product_id,p.provider,p.name AS product,br.node_id,n.host,br.status,"
         "br.stop_reason,br.error,br.started_at,br.finished_at,br.requests,br.successes,"
         "br.unique_ips,br.challenges,br.blocks,br.timeouts,br.proxy_errors,br.bytes_up,"
-        "br.bytes_down,br.run_key,br.last_progress_at FROM batch_runs br "
+        "br.bytes_down,br.run_key,br.last_progress_at,n.version AS node_version,"
+        "tr.summary->'config_overrides'->>'census_rule_version' AS census_rule_version "
+        "FROM batch_runs br "
         "JOIN products p USING(product_id) "
-        "LEFT JOIN nodes n ON n.node_id=br.node_id WHERE br.batch_id=%(batch)s "
+        "LEFT JOIN nodes n ON n.node_id=br.node_id "
+        "LEFT JOIN test_runs tr ON tr.run_key=br.run_key WHERE br.batch_id=%(batch)s "
         "ORDER BY p.provider,p.name",
         params,
     ).fetchall()
@@ -673,10 +678,17 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
             + "</p>"
         )
         running = r["status"] in OPEN_RUNS
+        version = str(r.get("node_version") or "0.0.0").split(".")
+        modern_node = (len(version) >= 2 and all(v.isdigit() for v in version[:2])
+                       and tuple(map(int, version[:2])) >= (0, 9))
+        completed_basis = (str(r.get("census_rule_version")) == "2"
+                           or (running and modern_node))
+        denominator = r["requests"] if completed_basis else r["successes"]
+        basis = "completed requests" if completed_basis else "successes"
         if running and batch["kind"] == "census":
-            rule = rule_progress(r["successes"], r["unique_ips"], batch["min_sample"])
+            rule = rule_progress(denominator, r["unique_ips"], batch["min_sample"])
             detail += (
-                f"<p>{esc(rule_text(r['successes'], r['unique_ips'], batch['min_sample']))}</p>"
+                f"<p>{esc(rule_text(denominator, r['unique_ips'], batch['min_sample'], basis))}</p>"
                 + meter(rule["sample"], "share of the minimum sample reached")
                 + '<p class="muted">Minimum sample</p>'
             )

@@ -210,7 +210,7 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
 
     monkeypatch.setattr("milf_framework.cli.run", fake_run)
     assert main(["providers"]) == 0
-    assert json.loads(capsys.readouterr().out) == ["shifter"]
+    assert json.loads(capsys.readouterr().out) == ["shifter", "geonode"]
     for target in ("generic_http", "generic_https"):
         assert main(["run", "--target", target, "--provider-config", str(CONFIG),
                      "--param", "country=US", "--param", "strict=true", "--param", "ttl=600",
@@ -333,7 +333,8 @@ async def test_dynamic_socks_sessions_close_on_cancellation(tmp_path, monkeypatc
     stop = asyncio.Event()
     async with server(gateway) as port:
         proxy = LoopbackProvider(shifter(scheme="socks5", session_policy="per_request"), port)
-        config = RunConfig("generic_http", proxy, requests=100, concurrency=3)
+        # This inspects in-process session objects; multiprocess cancellation has its own tests.
+        config = RunConfig("generic_http", proxy, requests=100, concurrency=3, processes=1)
         task = asyncio.create_task(run(config, JsonSink(tmp_path), stop=stop))
         await asyncio.wait_for(gateway.accepted.wait(), 2)
         stop.set()

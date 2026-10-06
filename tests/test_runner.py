@@ -265,21 +265,21 @@ async def test_unique_ratio_after_the_warm_up_sample(tmp_path, scenario, address
     result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=50),
                        JsonSink(tmp_path), transport_factory=factory)
     trace = transports[0].trace
-    first = next(index for index, (ok, unique, _, _) in enumerate(trace)
-                 if ok >= 1000 and ok > 2 * unique)
+    first = next(index for index, (ok, unique, _, done) in enumerate(trace)
+                 if done >= 1000 and done > 2 * unique)
     ok, unique, in_flight, done = trace[first]
     # Before the warm-up sample nothing stops the run, whatever the ratio.
-    assert all(s < 1000 or s <= 2 * u for s, u, _, _ in trace[:first])
+    assert all(n < 1000 or n <= 2 * u for s, u, _, n in trace[:first])
     if scenario == "low_diversity":
         # Under 50% unique when the sample completes: stop at once.
-        assert ok == 1000
+        assert done == 1000
     else:
         # Diverse enough at 1,000: continue until successes > 2 x unique.
-        assert ok > 1000 and ok == 2 * unique + 1
+        assert done >= 1000 and done > 2 * unique
     if scenario == "early_duplicates":
         assert any(s > 2 * u for s, u, _, _ in trace[:first] if s < 1000)
     if fail_every:
-        # Failures count as requests but never toward the rule.
+        # Failures count toward both the warm-up and the ratio denominator.
         assert done > ok
     # Nothing starts after the rule fires; what was in flight finishes and counts.
     assert result.started == done + in_flight
@@ -306,7 +306,7 @@ async def test_min_sample_is_configurable(tmp_path):
     assert result.completed == 10 and result.stop_reason == "unique_ratio"
 
 
-async def test_census_without_any_success_stops_after_5000_requests(tmp_path):
+async def test_census_without_any_success_stops_after_1000_completions(tmp_path):
     class Failing(FakeTransport):
         async def execute(self, target, *, context=None):
             self.count += 1
@@ -315,7 +315,7 @@ async def test_census_without_any_success_stops_after_5000_requests(tmp_path):
     result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=10),
                        JsonSink(tmp_path), transport_factory=Failing)
     assert result.stop_reason == "no_success" and result.status == "completed"
-    assert 5000 <= result.completed < 5010 and result.completed == result.started
+    assert 1000 <= result.completed < 1010 and result.completed == result.started
     assert result.successes == 0 and result.proxy_errors == result.completed
 
 
@@ -535,14 +535,16 @@ async def test_progress_is_throttled_and_final(tmp_path):
     result = await run(config(requests=60, concurrency=2), JsonSink(tmp_path),
                        transport_factory=Slow, progress=progress, progress_interval=.03)
     assert len(calls) >= 3
-    assert set(calls[0][1]) == {"requests", "successes", "unique_ips", *NEW_COUNTERS}
+    assert set(calls[0][1]) == {"requests", "successes", "unique_ips", *NEW_COUNTERS,
+                                 "execution_backend", "execution_processes"}
     times = [at for at, _ in calls[:-1]]
     assert all(b - a >= .025 for a, b in zip(times, times[1:], strict=False))
     requests = [c["requests"] for _, c in calls]
     assert requests == sorted(requests)
     assert calls[-1][1] == {"requests": 60, "successes": 60, "unique_ips": 1,
                             "challenges": 0, "blocks": 0, "timeouts": 0, "proxy_errors": 0,
-                            "bytes_up": 0, "bytes_down": 0}
+                            "bytes_up": 0, "bytes_down": 0,
+                            "execution_backend": "inline", "execution_processes": 1}
     assert result.completed == 60
 
 

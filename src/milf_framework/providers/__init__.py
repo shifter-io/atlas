@@ -10,6 +10,7 @@ from typing import Any
 
 from ..models import ProxySource
 from .credentials import read_credentials
+from .geonode import GeonodeProxy
 from .shifter import ShifterProxy
 
 
@@ -33,6 +34,7 @@ class ProviderRegistry:
 
 registry = ProviderRegistry()
 registry.register("shifter", ShifterProxy)
+registry.register("geonode", GeonodeProxy)
 
 
 def load_provider(
@@ -89,4 +91,4 @@ def load_provider(
     )
 
 
-__all__ = ["ProviderRegistry", "ShifterProxy", "load_provider", "registry"]
+__all__ = ["GeonodeProxy", "ProviderRegistry", "ShifterProxy", "load_provider", "registry"]
