@@ -706,6 +706,12 @@ type SnapshotMeta struct {
 	ContentHash    Str  `json:"contentHash"`
 }
 
+type MeasuredMarket struct {
+	Authenticity Num             `json:"authenticity"`
+	TargetCount  Num             `json:"targetCount"`
+	Views        json.RawMessage `json:"views"`
+}
+
 type Dataset struct {
 	SchemaVersion    string           `json:"schemaVersion"`
 	GeneratedAt      string           `json:"generatedAt"`
@@ -720,6 +726,7 @@ type Dataset struct {
 	Profiles         []RankingProfile `json:"profiles"`
 	Totals           FleetTotals      `json:"totals"`
 	MeasuredTotals   FleetTotals      `json:"measuredTotals"`
+	MeasuredMarket   MeasuredMarket   `json:"measuredMarket"`
 	Providers        []*Provider      `json:"providers"`
 	Tape             []TapeEvent      `json:"tape"`
 	Changelog        []ChangeEvent    `json:"changelog"`

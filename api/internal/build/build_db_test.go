@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ice-zeus/milf-website/api/internal/build"
 	"github.com/ice-zeus/milf-website/api/internal/config"
@@ -144,7 +146,7 @@ func lenOf(v any) any {
 
 // The API's additions to the fixture shape (documented in FIELDS.md).
 var allowedExtras = map[string]bool{
-	".snapshot": true, ".na": true, ".measuredTotals": true,
+	".snapshot": true, ".na": true, ".measuredTotals": true, ".measuredMarket": true,
 	".targets[].source": true, ".targets[].na": true, ".scopes[].na": true, ".profiles[].na": true,
 	".providers[].na": true, ".providers[].measurement": true, ".providers[].framework": true, ".providers[].website": true,
 	".tape[].source": true, ".tape[].na": true, ".tape[].at": true,
@@ -194,7 +196,7 @@ func TestDemoRoundTripReproducesTheFixture(t *testing.T) {
 		t.Logf("dataset na: %v", res.Dataset.NA)
 	}
 	for _, na := range res.Dataset.NA {
-		if !strings.HasPrefix(na, "snapshot.") && !strings.HasPrefix(na, "measuredTotals.") {
+		if !strings.HasPrefix(na, "snapshot.") && !strings.HasPrefix(na, "measuredTotals.") && !strings.HasPrefix(na, "measuredMarket.") {
 			t.Errorf("unexpected dataset-level N/A %s", na)
 		}
 	}
@@ -396,7 +398,7 @@ INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_
 	if res.Dataset.Totals.Providers.F() != 5 || res.Dataset.Totals.Requests24h.F() != 187263 {
 		t.Fatalf("totals %+v", res.Dataset.Totals)
 	}
-	if w := p.Windows["residential"]["24h"]; w.UptimePct.F() != 99 || w.SuccessDeltaPts.F() != 0.01 {
+	if w := p.Windows["residential"]["24h"]; w.UptimePct.F() != 99 || w.SuccessDeltaPts.OK() {
 		t.Fatalf("measured 24h window %+v", w)
 	}
 }
@@ -595,6 +597,108 @@ func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T
 		received, _ := json.Marshal(window["breakdowns"].(map[string]any)["city_asn"])
 		if !bytes.Equal(expected, received) {
 			t.Errorf("%s lost coverage network evidence: %s", rangeID, received)
+		}
+	}
+}
+
+func TestMeasuredMarketExcludesDemoNetworks(t *testing.T) {
+	db := seeded(t)
+	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Publish(t, snapshot)
+	res := buildFrom(t, db)
+	var views []build.FleetView
+	if err := json.Unmarshal(res.Dataset.MeasuredMarket.Views, &views); err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 3 {
+		t.Fatalf("market windows %d, want 3", len(views))
+	}
+	for _, v := range views {
+		measured := res.Details["shifter"].Windows["residential"][v.Range.ID]
+		if v.Fleet.Basis != "measured" || v.Fleet.Requests != measured.Requests || v.Fleet.UniqueIps != measured.UniqueIps {
+			t.Errorf("%s includes non-measured figures: %+v", v.Range.ID, v.Fleet)
+		}
+		if v.Fastest.Provider == nil || v.Fastest.Provider.Slug != "shifter" {
+			t.Errorf("fastest must come from measured networks: %+v", v.Fastest)
+		}
+		if v.MostReliable.Provider == nil || v.MostReliable.Provider.Slug != "shifter" {
+			t.Errorf("reliability must come from measured networks: %+v", v.MostReliable)
+		}
+		if v.Cheapest.Provider != nil || v.Dearest.Provider != nil {
+			t.Errorf("unpriced measured network inherited demo pricing")
+		}
+		if v.Bills.SpreadX.OK() {
+			t.Errorf("unpriced measured network inherited a demo spread")
+		}
+	}
+	p := res.Details["shifter"].Provider
+	if res.Dataset.MeasuredMarket.Authenticity.OK() != p.Trust.ResidentialAuthenticity.OK() || (p.Trust.ResidentialAuthenticity.OK() && math.Abs(res.Dataset.MeasuredMarket.Authenticity.F()-p.Trust.ResidentialAuthenticity.F()) > 1e-12) {
+		t.Errorf("authenticity is not the measured country match")
+	}
+	if res.Dataset.MeasuredMarket.TargetCount != 2 {
+		t.Errorf("target count includes demo targets: %v", res.Dataset.MeasuredMarket.TargetCount)
+	}
+}
+
+func TestMeasuredMarketDrawsFromFirstObservedSamples(t *testing.T) {
+	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture starts with one observed bucket. Add a second recent bucket
+	// to exercise the early line rather than only the first-sample dot.
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	product := doc["products"].([]any)[0].(map[string]any)
+	windows := product["windows"].(map[string]any)
+	day := windows["24h"].(map[string]any)
+	series := day["series"].([]any)
+	var sample map[string]any
+	for _, row := range series {
+		item := row.(map[string]any)
+		if item["success_rate"] != nil {
+			sample = item
+			break
+		}
+	}
+	if sample == nil {
+		t.Fatal("fixture has no observed sample")
+	}
+	copyRow := map[string]any{}
+	for key, value := range sample {
+		copyRow[key] = value
+	}
+	at, err := time.Parse(time.RFC3339Nano, sample["at"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyRow["at"] = at.Add(5 * time.Minute).Format(time.RFC3339Nano)
+	copyRow["success_rate"] = 0.95
+	day["series"] = append(series, copyRow)
+	raw, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := seeded(t)
+	db.Publish(t, raw)
+	res := buildFrom(t, db)
+	var views []build.FleetView
+	if err := json.Unmarshal(res.Dataset.MeasuredMarket.Views, &views); err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range views {
+		if len(view.HeadlineSpark.Values) < 2 {
+			t.Fatalf("%s has no early trend: %+v", view.Range.ID, view.HeadlineSpark)
+		}
+		for _, value := range view.HeadlineSpark.Values {
+			if !value.OK() {
+				t.Fatalf("%s still includes empty leading history", view.Range.ID)
+			}
 		}
 	}
 }

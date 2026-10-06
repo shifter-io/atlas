@@ -275,7 +275,7 @@ func comparePort(t *testing.T, snapshot []byte, snapshotFile string) *build.Resu
 	}
 	allowed := func(path string) bool {
 		// Measured-only insight totals are an API addition, checked separately.
-		if path == ".measuredTotals" {
+		if path == ".measuredTotals" || path == ".measuredMarket" {
 			return true
 		}
 		m := providerPath.FindStringSubmatch(path)

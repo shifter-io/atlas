@@ -314,3 +314,15 @@ differences:
 `measuredTotals` uses the same fields as `totals`, aggregated by the API over
 `source = "measured"` providers only. Overview insight descriptions read these
 totals even while demo providers remain in the database.
+
+`measuredMarket` supplies the All market panel without simulated inputs: three
+window views with measured requests, pool sizes, latency, success, observed wire
+bytes, history and price picks; `authenticity` is the exit-IP-weighted country
+match and `targetCount` counts framework targets. Missing measurements stay null.
+
+Measured `WindowStats.successDeltaPts` and `latencyDeltaPct` compare the closing
+fifth with the opening fifth of observed samples in the selected window. Finer
+24-hour history replaces overlapping daily buckets; missing samples are omitted.
+Success is a percentage-point difference; latency is a percentage change in the
+HTTP headline basis (under load for every-request snapshots). Two observations
+are required; an under-load comparison never substitutes light-load latency.

@@ -171,9 +171,9 @@ func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowSta
 		}
 		lm, target := latencyMetrics(w)
 		head, light := headlineLatency(lm), lightLatency(lm)
-		ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: w.SuccessDelta,
+		ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: measuredTrend(sp, rangeID, false),
 			LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
-			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: nan,
+			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: measuredTrend(sp, rangeID, true),
 			UniqueIps: w.Pool.UniqueIps, ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}

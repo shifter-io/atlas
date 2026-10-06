@@ -519,6 +519,11 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		}
 	}
 
+	ds.MeasuredMarket, err = measuredMarket(measuredEntries, stats, ds.MeasuredTotals, ds.Targets)
+	if err != nil {
+		return nil, err
+	}
+
 	// N/A manifests.
 	for _, e := range entries {
 		measured := e.P.Source == model.SourceMeasured
@@ -595,17 +600,18 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		}
 	}
 	meta := struct {
-		SchemaVersion    string             `json:"schemaVersion"`
-		GeneratedAt      string             `json:"generatedAt"`
-		Seed             Num                `json:"seed"`
-		RunID            model.Str          `json:"runId"`
-		CollectorVersion model.Str          `json:"collectorVersion"`
-		WindowHours      Num                `json:"windowHours"`
-		Weights          model.Breakdown    `json:"weights"`
-		Totals           model.FleetTotals  `json:"totals"`
-		MeasuredTotals   model.FleetTotals  `json:"measuredTotals"`
-		Snapshot         model.SnapshotMeta `json:"snapshot"`
-	}{ds.SchemaVersion, ds.GeneratedAt, ds.Seed, ds.RunID, ds.CollectorVersion, ds.WindowHours, ds.Weights, ds.Totals, ds.MeasuredTotals, ds.Snapshot}
+		SchemaVersion    string               `json:"schemaVersion"`
+		GeneratedAt      string               `json:"generatedAt"`
+		Seed             Num                  `json:"seed"`
+		RunID            model.Str            `json:"runId"`
+		CollectorVersion model.Str            `json:"collectorVersion"`
+		WindowHours      Num                  `json:"windowHours"`
+		Weights          model.Breakdown      `json:"weights"`
+		Totals           model.FleetTotals    `json:"totals"`
+		MeasuredTotals   model.FleetTotals    `json:"measuredTotals"`
+		MeasuredMarket   model.MeasuredMarket `json:"measuredMarket"`
+		Snapshot         model.SnapshotMeta   `json:"snapshot"`
+	}{ds.SchemaVersion, ds.GeneratedAt, ds.Seed, ds.RunID, ds.CollectorVersion, ds.WindowHours, ds.Weights, ds.Totals, ds.MeasuredTotals, ds.MeasuredMarket, ds.Snapshot}
 	declaredMeta := []string{}
 	if !ds.Simulated {
 		// A measured-only dataset has no seed by design.
