@@ -1,4 +1,13 @@
 # Hourly pool census: rotating residential IPs with strict country targeting.
+# Operational notice (2026-10-07): Geonode HTTP 469 is a rate-limit response.
+# Retrying at 2500 concurrency/server against checkip.amazonaws.com still produced
+# 91.45% HTTP 469 across eight bounded probes (including replacement attempts).
+# For the agreed census policy, exclude 469 from the minimum sample and 50%
+# unique/request denominator, retry within the run deadline, and report 469 / all
+# completed attempts separately. Keep other failures in the census denominator.
+# This provider TOML does NOT enable retries: the run caller must opt in and its
+# recorded metadata must confirm the policy. See docs/onboarding.html#geonode-469
+# for implementation availability, limits and the pre-campaign verification gate.
 schema_version = 1
 provider = "geonode"
 
