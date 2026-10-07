@@ -1,6 +1,6 @@
 """Public, scheduler-independent measurement API."""
 
-__version__ = "0.9.3"
+__version__ = "0.9.5"
 
 from .models import ProxyConfig, ProxySource, RequestContext, RunConfig, RunSummary
 from .providers import GeonodeProxy, ProviderRegistry, ShifterProxy, load_provider

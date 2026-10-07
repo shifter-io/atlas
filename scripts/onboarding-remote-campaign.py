@@ -8,7 +8,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from milf_framework.onboarding.manifest import load, moment
+from milf_framework.onboarding.manifest import load, moment, regional_window
 
 
 def main():
@@ -21,7 +21,8 @@ def main():
     manifest = load(args.manifest)
     if args.region not in manifest["regions"]:
         raise ValueError("Region absent from manifest")
-    if not args.calibration and moment(manifest["starts_at"]) <= datetime.now(UTC):
+    window = regional_window(manifest, args.region)
+    if not args.calibration and moment(window["starts_at"]) <= datetime.now(UTC):
         raise ValueError("Refusing to arm a campaign after its scheduled start")
     server = json.loads(args.inventory.read_text())["servers"][args.region]
     root = server["root"]
@@ -50,7 +51,7 @@ def main():
                "--property=UMask=0077", "--property=Restart=no",
                "--property=WorkingDirectory=" + root, "--property=RemainAfterExit=yes",
                "--property=RuntimeMaxSec=" + str(int(
-                   moment(manifest["ends_at"]).timestamp() - datetime.now(UTC).timestamp() + 600)),
+                   moment(window["ends_at"]).timestamp() - datetime.now(UTC).timestamp() + 600)),
                *base, "--manifest", directory + "/campaign.json", "--region", args.region,
                "--provider-config", root + "/configs/provider.toml",
                "--credentials-file", root + "/.secrets/credentials.toml"]
@@ -69,6 +70,9 @@ assert synced=='yes', 'Clock is not synchronized'
 marker=root/'active-run.json'
 if marker.exists():
  previous=json.loads(marker.read_text()); state=root/previous['state_path']
+ pid=subprocess.check_output(['systemctl','show',previous['unit'],'--property=MainPID',
+                              '--value'],text=True).strip()
+ assert pid in ('','0'), 'Previous assignment still has a live process'
  terminal=('completed','closed','stopped','failed','cancelled')
  assert not state.exists() or json.loads(state.read_text())['status'] in terminal, \
      'A regional run is already active'

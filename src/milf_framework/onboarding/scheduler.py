@@ -13,7 +13,7 @@ from pathlib import Path
 from ..models import RunConfig
 from ..runner import run
 from .files import atomic_json, fingerprint, lock, read_json
-from .manifest import load, moment, settings, timestamp
+from .manifest import load, moment, regional_window, settings, timestamp
 from .writer import ObservationWriter, SummarySink
 
 TERMINAL = {"completed", "interrupted", "failed", "deadline", "not_started_deadline"}
@@ -49,12 +49,12 @@ def new_state(manifest: dict, region: str, effective: dict) -> dict:
         "campaign_sha256": fingerprint(manifest),
         "settings": effective,
         "status": "armed",
-        "ends_at": manifest["ends_at"],
+        "ends_at": regional_window(manifest, region)["ends_at"],
         "active": None,
         "progress": {},
         "jobs": [
             {"round": index, "country": country, "scheduled_at": scheduled, "status": "pending"}
-            for index, scheduled in enumerate(manifest["rounds"])
+            for index, scheduled in enumerate(regional_window(manifest, region)["rounds"])
             for country in manifest["regions"][region]
         ],
     }
@@ -66,12 +66,13 @@ def validate_state(state: dict, manifest: dict, region: str) -> None:
         or state.get("region") != region
         or state.get("campaign_sha256") != fingerprint(manifest)
         or state.get("campaign_id") != manifest["campaign_id"]
-        or state.get("ends_at") != manifest["ends_at"]
+        or state.get("ends_at") != regional_window(manifest, region)["ends_at"]
     ):
         raise ValueError("Checkpoint does not match this campaign and region")
     settings(state["settings"])
     expected = [
-        (i, c, at) for i, at in enumerate(manifest["rounds"]) for c in manifest["regions"][region]
+        (i, c, at) for i, at in enumerate(regional_window(manifest, region)["rounds"])
+        for c in manifest["regions"][region]
     ]
     actual = [(j["round"], j["country"], j["scheduled_at"]) for j in state["jobs"]]
     if actual != expected or any(
@@ -150,7 +151,7 @@ async def execute(
     state_path = directory / "state.json"
     clock = clock or Clock()
     stop = stop if stop is not None else asyncio.Event()
-    end = moment(manifest["ends_at"]).timestamp()
+    end = moment(regional_window(manifest, region)["ends_at"]).timestamp()
     with lock(directory / ".lock"):
         if state_path.exists():
             if not resume:

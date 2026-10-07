@@ -174,7 +174,11 @@ async def run(
         return {
             "requests": totals.completed, "successes": totals.successes,
             "unique_ips": len(unique), **totals.verdicts(), **execution,
-        }
+        } | ({"census_requests": census_requests(),
+              "http_469_responses": totals.statuses["469"]} if config.retry_http_469 else {})
+
+    def census_requests() -> int:
+        return totals.completed - (totals.statuses["469"] if config.retry_http_469 else 0)
 
     async def report() -> None:
         assert progress is not None
@@ -254,20 +258,21 @@ async def run(
                     row[2] = max(row[2], observed)
                 else:
                     ip_rows[result.ip] = [1, observed, observed]
-            # One census rule for every caller. Failures count in the sample
-            # and denominator; only successful exits contribute distinct IPs.
-            # Preserve failure classifications before considering saturation.
+            # Preserve every attempt, status, error and byte count. The opt-in
+            # retry policy excludes only 469s from sample-based stopping rules;
+            # this worker then issues a replacement through the normal loop.
             if ratio_rule and not halted:
+                sample = census_requests()
                 if not totals.successes and (
-                    totals.completed >= min(config.min_sample, NO_SUCCESS_REQUESTS)
+                    sample >= min(config.min_sample, NO_SUCCESS_REQUESTS)
                     or time.perf_counter() - began >= NO_SUCCESS_SECONDS
                 ):
                     halted = "no_success"
                 elif (last_success is not None
                         and time.perf_counter() - last_success >= config.stall_seconds):
                     halted = "stalled"
-                elif (totals.completed >= config.min_sample
-                        and totals.completed > 2 * len(unique)):
+                elif (sample >= config.min_sample
+                        and sample > 2 * len(unique)):
                     halted = "unique_ratio"
             if observation_consumer is not None and result.ip and result.error is None:
                 # A completed response must reach the writer even if a deadline
@@ -359,6 +364,8 @@ async def run(
         **totals.verdicts(), stop_reason=stop_reason,
         outage_started_at=iso(last_success_wall)
         if stop_reason == "stalled" and last_success_wall is not None else None,
+        census_requests=census_requests() if config.retry_http_469 else None,
+        http_469_responses=totals.statuses["469"] if config.retry_http_469 else None,
     )
     release = getattr(enricher, "release", None)
     if enricher is not None and isinstance(release, dict):

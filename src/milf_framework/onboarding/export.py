@@ -12,7 +12,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from .files import atomic_bytes, atomic_json, digest, fingerprint, lock, private_dir, read_json
-from .manifest import load, moment
+from .manifest import load, moment, regional_window
 from .scheduler import job_directory, status, validate_state
 
 FIELDS = {"ip", "country_code", "round_scheduled_at", "country_started_at", "observed_at"}
@@ -157,7 +157,9 @@ def export_campaign(manifest_path: Path) -> dict:
                             chunk = folder / filename
                             if chunk.with_suffix(".meta.json") != meta_path:
                                 raise ValueError("Chunk filename does not match its sidecar")
-                            count += verify_chunk(chunk, metadata, job, manifest["ends_at"])
+                            count += verify_chunk(
+                                chunk, metadata, job, regional_window(manifest, region)["ends_at"]
+                            )
                             with chunk.open("rb") as source:
                                 shutil.copyfileobj(source, destination, length=1024 * 1024)
                             verified.add(filename)

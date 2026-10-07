@@ -25,6 +25,13 @@ def register(commands):
         "--start", required=True, help="Future whole UTC hour, e.g. 2027-01-01T22:00:00Z"
     )
     plan.add_argument("--output", type=Path, default=Path("onboarding-networks"))
+    plan.add_argument("--execution-mode", choices=("parallel", "sequential"), default="parallel")
+    plan.add_argument("--region-order", nargs="+", help="Each of the eight regions, in daily order")
+    plan.add_argument("--retry-http-469", action="store_true")
+    plan.add_argument("--target-url", help="HTTP exit-IP destination")
+    plan.add_argument("--concurrency", type=int, default=1000)
+    plan.add_argument("--processes", type=int, default=0)
+    plan.add_argument("--timeout", type=float, default=10)
     run = actions.add_parser("run", help="Arm or explicitly resume one region")
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--region", required=True)
@@ -152,7 +159,13 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.onboarding_action == "probe":
         return asyncio.run(_probe(args))
     if args.onboarding_action == "plan":
-        print(create(args.provider_config, args.product, args.start, args.output))
+        print(create(
+            args.provider_config, args.product, args.start, args.output,
+            execution_mode=args.execution_mode, region_order=args.region_order,
+            retry_http_469=args.retry_http_469, target_url=args.target_url,
+            run_settings={"concurrency": args.concurrency, "processes": args.processes,
+                          "timeout_seconds": args.timeout},
+        ))
     elif args.onboarding_action == "run":
         return asyncio.run(_run(args))
     elif args.onboarding_action == "status":

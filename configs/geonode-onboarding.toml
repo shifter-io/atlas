@@ -6,7 +6,9 @@
 # unique/request denominator, retry within the run deadline, and report 469 / all
 # completed attempts separately. Keep other failures in the census denominator.
 # This provider TOML does NOT enable retries: the run caller must opt in and its
-# recorded metadata must confirm the policy. See docs/onboarding.html#geonode-469
+# recorded metadata must confirm the policy (onboarding plan --retry-http-469).
+# Limited networks can use --execution-mode sequential: 24 hours per region.
+# See docs/onboarding.html#geonode-469
 # for implementation availability, limits and the pre-campaign verification gate.
 schema_version = 1
 provider = "geonode"

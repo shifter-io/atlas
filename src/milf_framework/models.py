@@ -85,6 +85,7 @@ class ProxyConfig:
 # Written to a run's config only for non-count runs (RunConfig.public).
 STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds")
 CENSUS_RULE_VERSION = 2
+CENSUS_RETRY_469_RULE_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,8 +113,15 @@ class RunConfig:
     # 'unique_ratio' only: once a run has had a success, this long without
     # another one means the network went down; the run stops as 'stalled'.
     stall_seconds: float = 600
+    # Opt-in census policy: keep 469 attempts in telemetry, but replace them
+    # without consuming the unique-ratio sample. Explicit attempt/time caps remain.
+    retry_http_469: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.retry_http_469) is not bool:
+            raise ValueError("retry_http_469 must be a boolean")
+        if self.retry_http_469 and self.stop_rule != "unique_ratio":
+            raise ValueError("HTTP 469 retries require the unique-ratio census rule")
         if type(self.processes) is not int or self.processes < 0:
             raise ValueError("processes must be a nonnegative integer (0 means automatic)")
         if self.target_url is not None:
@@ -166,10 +174,13 @@ class RunConfig:
             name: getattr(self, name)
             for name in self.__dataclass_fields__
             if name != "proxy"
+            and not (name == "retry_http_469" and not self.retry_http_469)
             and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
         } | self.proxy.public() | ({
-            "census_rule_version": CENSUS_RULE_VERSION,
-            "census_ratio_basis": "completed_requests",
+            "census_rule_version": (CENSUS_RETRY_469_RULE_VERSION if self.retry_http_469
+                                    else CENSUS_RULE_VERSION),
+            "census_ratio_basis": ("completed_requests_excluding_http_469"
+                                   if self.retry_http_469 else "completed_requests"),
         } if self.stop_rule == "unique_ratio" else {})
 
 
@@ -236,9 +247,14 @@ class RunSummary:
     artifacts: dict[str, Any] = field(default_factory=dict)
     # Wall time of the last success before a 'stalled' stop; omitted otherwise.
     outage_started_at: str | None = None
+    census_requests: int | None = None
+    http_469_responses: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         summary = asdict(self)
         if summary["outage_started_at"] is None:
             del summary["outage_started_at"]
+        for key in ("census_requests", "http_469_responses"):
+            if summary[key] is None:
+                del summary[key]
         return summary
