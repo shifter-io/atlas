@@ -1,0 +1,21 @@
+# ProxyEmpire Residential. https://proxyempire.io/
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/proxyempire.toml
+schema_version = 1
+provider = "proxyempire"
+
+[credentials]
+account_env = "PROXYEMPIRE_ACCOUNT"
+password_env = "PROXYEMPIRE_PASSWORD"
+
+[settings]
+scheme = "http" # http
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# All optional; None omits a value. A session implies fixed sessions.
+# country = "us"
+# region = "california"
+# city = "los_angeles"
+# session = "example1"
+# ttl = 10 # Minutes; requires a session

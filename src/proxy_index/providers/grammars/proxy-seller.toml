@@ -1,0 +1,22 @@
+# Proxy-Seller Residential. https://docs.proxy-seller.com/
+# List logins take geo and rotation from the dashboard list; username suffixes have no
+# effect. Each port 10000-10999 is one exit slot, so sessions select ports.
+schema_version = 1
+id = "proxy-seller"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+
+[account]
+pattern = "[A-Za-z0-9]+"
+
+[gateway]
+host = "res.proxy-seller.com"
+ports = { http = 10000, socks5 = 10000 }
+port_override = true
+
+[session]
+mode = "port"
+ports = [10000, 10999]
+no_session_policy = "gateway"

@@ -1,0 +1,19 @@
+# Proxy-Cheap Residential. No public grammar documentation; verified live 2026-10-22.
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/proxy-cheap.toml
+schema_version = 1
+provider = "proxy-cheap"
+
+[credentials]
+account_env = "PROXY_CHEAP_ACCOUNT"
+password_env = "PROXY_CHEAP_PASSWORD"
+
+[settings]
+scheme = "http" # http
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# All optional; None omits a value. A session implies fixed sessions.
+# country = "us"
+# session = "12345678" # Requires ttl
+# ttl = 10 # Minutes; requires a session

@@ -1,0 +1,58 @@
+# IPRoyal Residential. https://docs.iproyal.com/proxies/residential/proxy
+# Flags are appended to the PASSWORD with underscores. Unknown keys are ignored.
+schema_version = 1
+id = "iproyal"
+
+[credential]
+flags_in = "password"
+username = "{account}"
+password = "{password}"
+separator = "_"
+
+[gateway]
+host = "geo.iproyal.com"
+ports = { http = 12321 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "state-{}" # US states, e.g. california.
+case = "lower"
+spaces = ""
+pattern = "[a-z0-9]+" # "_" separates flags, so multi-word names are joined.
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+spaces = ""
+pattern = "[a-z0-9]+"
+requires = ["country"]
+
+[flags.session]
+kind = "session"
+format = "session-{}"
+pattern = "[A-Za-z0-9]{8}" # Documented as exactly eight alphanumeric characters.
+
+[flags.ttl]
+kind = "integer"
+format = "lifetime-{}m"
+min = 1
+max = 10080
+requires_session = true
+
+[flags.streaming]
+kind = "boolean"
+format = "streaming-{}"
+true = "streaming-1"
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 8
+ttl_flag = "ttl"

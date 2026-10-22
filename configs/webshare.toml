@@ -1,0 +1,19 @@
+# Webshare Residential. https://help.webshare.io/
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/webshare.toml
+schema_version = 1
+provider = "webshare"
+
+[credentials]
+account_env = "WEBSHARE_ACCOUNT"
+password_env = "WEBSHARE_PASSWORD"
+
+[settings]
+scheme = "http" # http or socks5
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# All optional; None omits a value. A session implies fixed sessions.
+# country = "us"
+# city = "los_angeles"
+# session = "1234"

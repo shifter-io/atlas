@@ -1,0 +1,61 @@
+# Byteful Residential. https://docs.byteful.com/
+# Unknown keys return 407; an invalid country returns 400.
+# Plain-HTTP targets get a gateway 301 to HTTPS (100% on 2026-10-22); use generic_https.
+schema_version = 1
+id = "byteful"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+separator = "_"
+
+[gateway]
+host = "residential.byteful.com"
+ports = { http = 8000 }
+
+[flags.country]
+kind = "country"
+format = "c_{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "state_{}"
+case = "lower"
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city_{}"
+case = "lower"
+requires = ["country"]
+
+[flags.zip]
+kind = "token"
+format = "zip_{}"
+pattern = "[A-Za-z0-9]{2,10}"
+requires = ["country"]
+
+[flags.asn]
+kind = "integer"
+format = "asn_{}"
+min = 1
+max = 4294967295
+
+[flags.session]
+kind = "session"
+format = "s_{}"
+pattern = "[A-Za-z0-9]{1,32}"
+
+[flags.ttl]
+kind = "integer"
+format = "ttl_{}m"
+min = 1
+max = 1440
+requires_session = true
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 16
+ttl_flag = "ttl"

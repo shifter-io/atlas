@@ -1,0 +1,48 @@
+# FleetProxy Residential. https://fleetproxy.io/
+# Shares ProxyEmpire's grammar and appears to share its backend; unknown keys return 502.
+# About half of plain-HTTP requests get a gateway 301 to HTTPS; HTTPS targets pass.
+schema_version = 1
+id = "fleetproxy"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+
+[gateway]
+host = "residential-v2.fleetproxy.io"
+ports = { http = 5000 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "region-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.session]
+kind = "session"
+format = "sid-{}"
+pattern = "[A-Za-z0-9]{1,32}"
+
+[flags.ttl]
+kind = "integer"
+format = "ttl-{}m"
+min = 1
+max = 1440
+requires_session = true
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 8
+ttl_flag = "ttl"

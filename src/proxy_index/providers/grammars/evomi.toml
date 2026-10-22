@@ -1,0 +1,57 @@
+# Evomi Residential. https://docs.evomi.com/proxies/residential
+# Flags are appended to the PASSWORD; dots replace spaces inside values.
+schema_version = 1
+id = "evomi"
+
+[credential]
+flags_in = "password"
+username = "{account}"
+password = "{password}"
+separator = "_"
+
+[gateway]
+host = "premium-residential.evomi.com"
+ports = { http = 1000, socks5 = 1002 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "upper"
+
+[flags.region]
+kind = "name"
+format = "region-{}"
+case = "lower"
+spaces = "."
+pattern = "[a-z0-9.]+"
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+spaces = "."
+pattern = "[a-z0-9.]+"
+
+[flags.session]
+kind = "session"
+format = "session-{}"
+pattern = "[A-Za-z0-9]{6,10}"
+
+[flags.ttl]
+kind = "integer"
+format = "lifetime-{}"
+min = 1
+max = 1440
+requires_session = true
+
+[flags.mode]
+kind = "choice"
+format = "mode-{}"
+choices = ["speed", "quality"]
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 10
+ttl_flag = "ttl"
+default_ttl_seconds = 1800

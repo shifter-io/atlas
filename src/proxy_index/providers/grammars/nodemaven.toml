@@ -1,0 +1,79 @@
+# NodeMaven Residential. https://help.nodemaven.com/
+# Units must be lowercase (ttl-10M is rejected with 407). Unknown keys are ignored.
+schema_version = 1
+id = "nodemaven"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+
+[gateway]
+host = "gate.nodemaven.com"
+ports = { http = 8080, socks5 = 1080 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "region-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+requires = ["region"]
+
+[flags.zip]
+kind = "token"
+format = "zip-{}"
+pattern = "[A-Za-z0-9]{2,10}"
+requires = ["country"]
+conflicts = ["region", "city"]
+
+[flags.isp]
+kind = "name"
+format = "isp-{}"
+case = "lower"
+
+[flags.type]
+kind = "choice"
+format = "type-{}"
+choices = ["mobile"]
+
+[flags.ipv4]
+kind = "boolean"
+format = "ipv4-{}"
+true = "ipv4-true"
+
+[flags.session]
+kind = "session"
+format = "sid-{}"
+pattern = "[A-Za-z0-9]{2,13}"
+
+[flags.ttl]
+kind = "integer"
+format = "ttl-{}m"
+min = 1
+max = 1440
+requires_session = true
+
+[flags.filter]
+kind = "choice"
+format = "filter-{}"
+choices = ["low", "medium", "high"]
+
+[flags.speed]
+kind = "choice"
+format = "speed-{}"
+choices = ["fast", "slow"]
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 13
+ttl_flag = "ttl"

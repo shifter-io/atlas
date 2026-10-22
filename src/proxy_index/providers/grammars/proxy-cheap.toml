@@ -1,0 +1,39 @@
+# Proxy-Cheap Residential. No public grammar documentation; verified live 2026-10-22.
+# Flags are appended to the PASSWORD. Self-made sessions must be eight digits and
+# carry a ttl, otherwise the gateway answers 502/504. Unknown keys return 500.
+schema_version = 1
+id = "proxy-cheap"
+
+[credential]
+flags_in = "password"
+username = "{account}"
+password = "{password}"
+separator = "_"
+
+[gateway]
+host = "thehub.proxy-cheap.com"
+ports = { http = 8080 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.session]
+kind = "session"
+format = "session-{}"
+pattern = "[0-9]{8}"
+requires = ["ttl"]
+
+[flags.ttl]
+kind = "integer"
+format = "ttl-{}" # Unit undocumented; treated as minutes.
+min = 1
+max = 1440
+requires_session = true
+
+[session]
+flag = "session"
+generate = "digits"
+length = 8
+ttl_flag = "ttl"

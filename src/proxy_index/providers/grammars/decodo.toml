@@ -1,0 +1,67 @@
+# Decodo (formerly Smartproxy) Residential. https://help.decodo.com/docs/residential-proxy-quick-start
+# The user- prefix is mandatory once any flag is present. Unknown flags are ignored.
+schema_version = 1
+id = "decodo"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+flagged = "user-{account}"
+reserved = ["user"]
+
+[account]
+strip_prefixes = ["user-"]
+pattern = "[A-Za-z0-9]+"
+
+[gateway]
+host = "gate.decodo.com"
+ports = { http = 10000, socks5 = 7000 } # Rotating; ports 10001-49999 are sticky per port.
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "state-us_{}" # US states only.
+case = "lower"
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.zip]
+kind = "token"
+format = "zip-{}"
+pattern = "[0-9]{5}" # US only.
+requires = ["country"]
+
+[flags.asn]
+kind = "integer"
+format = "asn-{}"
+min = 1
+max = 4294967295
+conflicts = ["city"]
+
+[flags.session]
+kind = "session"
+format = "session-{}"
+pattern = "[A-Za-z0-9]{1,32}"
+
+[flags.ttl]
+kind = "integer"
+format = "sessionduration-{}"
+min = 1
+max = 1440
+requires_session = true
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 16
+ttl_flag = "ttl"
+default_ttl_seconds = 600
