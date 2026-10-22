@@ -9,13 +9,13 @@ from helpers import FakeTransport
 from psycopg.rows import dict_row
 from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 
-from milf_framework.calculated import store
-from milf_framework.calculated.aggregate import metrics, pool_lists, target_score
-from milf_framework.calculated.api import app
-from milf_framework.calculated.calculator import calculate, retain
-from milf_framework.calculated.policy import composite, digest, effective, load, ratio
-from milf_framework.models import Outcome
-from milf_framework.storage import connect, ingest
+from proxy_index.calculated import store
+from proxy_index.calculated.aggregate import metrics, pool_lists, target_score
+from proxy_index.calculated.api import app
+from proxy_index.calculated.calculator import calculate, retain
+from proxy_index.calculated.policy import composite, digest, effective, load, ratio
+from proxy_index.models import Outcome
+from proxy_index.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 
@@ -280,7 +280,7 @@ def ready_inputs(products=(1, 2)):
 
 
 def test_complete_scores_ranks_overrides_and_stale_evidence():
-    from milf_framework.calculated.calculator import build
+    from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
     result = build(r, b, o, e, c, digest(c), now, 1, None, None)
@@ -328,7 +328,7 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
 
 
 def test_score_retention_and_methodology_change():
-    from milf_framework.calculated.calculator import build
+    from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
     previous = store.jsonable(build(r, b, o, e, c, digest(c), now, 1, None, None))
@@ -368,7 +368,7 @@ def peer_inputs():
 
 
 def test_peer_ratio_scores():
-    from milf_framework.calculated.calculator import build
+    from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = peer_inputs()
     result = build(r, b, o, e, c, digest(c), now, 1, None, None)
@@ -450,7 +450,7 @@ def test_peer_ratio_scores():
 
 
 def test_peer_ratio_retained_scores_and_lone_products():
-    from milf_framework.calculated.calculator import build
+    from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = peer_inputs()
     c["minimum_requests"] = 2
@@ -509,9 +509,9 @@ def test_peer_ratio_retained_scores_and_lone_products():
 
 
 def test_daily_average_counts():
-    from milf_framework.calculated.aggregate import daily_average, daily_pools
-    from milf_framework.calculated.calculator import build
-    from milf_framework.calculated.policy import DIMENSIONS
+    from proxy_index.calculated.aggregate import daily_average, daily_pools
+    from proxy_index.calculated.calculator import build
+    from proxy_index.calculated.policy import DIMENSIONS
 
     c, now, r, b, o, e = ready_inputs()
     template = o[0]
@@ -553,7 +553,7 @@ def test_daily_average_counts():
 
 
 def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
-    from milf_framework.calculated.calculator import build
+    from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs(products=(1,))
     alone = build(r, b, o, e, c, digest(c), now, 1, None, None)
@@ -582,7 +582,7 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
 
 
 def test_cohorts_and_duplicate_overlap():
-    from milf_framework.calculated.calculator import build, cohort_for
+    from proxy_index.calculated.calculator import build, cohort_for
 
     c, now, r, b, o, e = ready_inputs()
     base = cohort_for(r[0]["scope"], "residential")[0]
@@ -641,7 +641,7 @@ def test_evidence_contract(database):
         with pytest.raises(ValueError):
             store.evidence(database, invalid)
     # The shipped price list names its product portably and applies to every cohort ("*").
-    from milf_framework.calculated.calculator import pricing
+    from proxy_index.calculated.calculator import pricing
 
     prices = json.loads(Path("configs/pricing/shifter-residential.json").read_text())
     with connect(database) as conn:
@@ -671,7 +671,7 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     import psycopg
     from psycopg import sql
 
-    from milf_framework.calculated import calculator
+    from proxy_index.calculated import calculator
 
     store.initialize(database)
     directory = await measurement(tmp_path, requests=5)
@@ -809,7 +809,7 @@ def payload_mismatches(database, build_id):
 
 
 def test_score_reasons_split_around_derived_block():
-    from milf_framework.calculated.calculator import split_reasons
+    from proxy_index.calculated.calculator import split_reasons
 
     components = {
         "reliability": {"state": "ready", "reason": None},
@@ -850,7 +850,7 @@ class OtherIP(FakeTransport):
 async def benchmark_scenario(database, tmp_path):
     """Two providers with pulses on both targets and a load run in the same US slot, and
     evidence: ready, ranked, then expired scores."""
-    from milf_framework.storage import seed
+    from proxy_index.storage import seed
 
     store.initialize(database)
     seed(database)
@@ -946,7 +946,7 @@ async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_pa
 def test_cohort_criteria_keep_unusual_values(database):
     from psycopg.rows import dict_row
 
-    from milf_framework.calculated.calculator import cohort_for, store_cohort
+    from proxy_index.calculated.calculator import cohort_for, store_cohort
 
     store.initialize(database)
     scope = {

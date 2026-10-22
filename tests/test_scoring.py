@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from milf_framework.calculated.aggregate import (
+from proxy_index.calculated.aggregate import (
     LIGHT_CENSUS,
     UNDER_LOAD_CENSUS,
     UNDER_LOAD_LATE,
@@ -23,8 +23,8 @@ from milf_framework.calculated.aggregate import (
     timed,
     under_load,
 )
-from milf_framework.calculated.policy import events, load, slot_settings
-from milf_framework.stats import Histogram
+from proxy_index.calculated.policy import events, load, slot_settings
+from proxy_index.stats import Histogram
 
 T = datetime(2026, 10, 3, 18, tzinfo=UTC)
 HALF_HOUR = timedelta(minutes=30)

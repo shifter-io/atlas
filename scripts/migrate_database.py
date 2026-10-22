@@ -1,5 +1,5 @@
 """Back up the local v4 or v5 database, then migrate it in place to the current schema
-(milf-framework db-migrate).
+(proxy-index db-migrate).
 
 The migration itself compares every rebuilt summary, scope, pool and bucket (and, from v4, every
 cohort, breakdown and score) with its original JSON before committing; this wrapper adds the dump
@@ -15,8 +15,8 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from milf_framework.providers.credentials import read_credentials
-from milf_framework.storage import connect, migrate, read_summary, status
+from proxy_index.providers.credentials import read_credentials
+from proxy_index.storage import connect, migrate, read_summary, status
 
 ROOT = Path(__file__).resolve().parents[1]
 

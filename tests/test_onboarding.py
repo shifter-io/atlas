@@ -13,14 +13,14 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport
 
-from milf_framework import ProxyConfig, RunConfig, run
-from milf_framework.cli import main
-from milf_framework.models import Outcome
-from milf_framework.onboarding import manifest as campaign
-from milf_framework.onboarding.export import export_campaign
-from milf_framework.onboarding.files import atomic_json, lock, read_json
-from milf_framework.onboarding.scheduler import execute, new_state
-from milf_framework.onboarding.writer import ObservationWriter, SummarySink
+from proxy_index import ProxyConfig, RunConfig, run
+from proxy_index.cli import main
+from proxy_index.models import Outcome
+from proxy_index.onboarding import manifest as campaign
+from proxy_index.onboarding.export import export_campaign
+from proxy_index.onboarding.files import atomic_json, lock, read_json
+from proxy_index.onboarding.scheduler import execute, new_state
+from proxy_index.onboarding.writer import ObservationWriter, SummarySink
 
 ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
@@ -256,7 +256,7 @@ async def test_writer_rotates_idle_pending_records(tmp_path):
 
 
 async def test_writer_failure_is_fatal_not_a_deadlock(tmp_path, monkeypatch):
-    import milf_framework.onboarding.writer as module
+    import proxy_index.onboarding.writer as module
 
     def broken(*args, **kwargs):
         raise OSError("disk full")
@@ -464,7 +464,7 @@ async def test_exactly_half_unique_keeps_running_and_failure_crosses_threshold()
 
 
 async def test_deadline_rejects_a_late_response_even_without_watchdog_tick(monkeypatch):
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     now = [time.time()]
     monkeypatch.setattr(runner.time, "time", lambda: now[0])
@@ -543,8 +543,8 @@ async def test_partial_country_is_exportable_after_crash_without_replay(manifest
 
 
 async def test_onboarding_never_calls_normal_persistence(manifest, monkeypatch):
-    from milf_framework import storage
-    from milf_framework.sinks import JsonSink
+    from proxy_index import storage
+    from proxy_index.sinks import JsonSink
 
     def forbidden(*args, **kwargs):
         pytest.fail("Onboarding reached normal persistence")
@@ -562,7 +562,7 @@ async def test_onboarding_never_calls_normal_persistence(manifest, monkeypatch):
         return result
 
     # Use a matching fake observation timestamp instead of wall time for this integration.
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     monkeypatch.setattr(runner.time, "time", lambda: START.timestamp() + 1)
     result = await execute(manifest, "tor1", Proxy, clock=clock, run_country=measure)

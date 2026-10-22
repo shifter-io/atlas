@@ -7,10 +7,10 @@ import os
 import time
 from pathlib import Path
 
-from milf_framework.models import Outcome, ProxyConfig, RequestContext, RunConfig
-from milf_framework.onboarding.files import atomic_json
-from milf_framework.process_transport import ProcessTransport
-from milf_framework.targets import registry
+from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
+from proxy_index.onboarding.files import atomic_json
+from proxy_index.process_transport import ProcessTransport
+from proxy_index.targets import registry
 
 
 class CPUWork:

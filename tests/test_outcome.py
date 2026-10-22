@@ -8,9 +8,9 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from milf_framework import JsonSink, ProxyConfig, RunConfig, bytes_io, run
-from milf_framework.models import Outcome
-from milf_framework.outcome import (
+from proxy_index import JsonSink, ProxyConfig, RunConfig, bytes_io, run
+from proxy_index.models import Outcome
+from proxy_index.outcome import (
     CHALLENGE_MARKERS,
     GatewayCode,
     Verdict,
@@ -20,8 +20,8 @@ from milf_framework.outcome import (
     gateway_code,
     sniff_body,
 )
-from milf_framework.targets import EchoIpTarget, TargetRegistry, registry
-from milf_framework.transport import HttpTransport
+from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
+from proxy_index.transport import HttpTransport
 
 CLOUDFLARE = b"<!DOCTYPE html><html><head><title>Just a moment...</title></head></html>"
 BLOCKED = b"<html><body><h1>Access Denied</h1>You don't have permission.</body></html>"

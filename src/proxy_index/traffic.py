@@ -1,4 +1,4 @@
-"""Wire traffic of the census, pulse and load tests (milf-framework report traffic,
+"""Wire traffic of the census, pulse and load tests (proxy-index report traffic,
 GET /v1/traffic).
 
 Each provider's run in a batch counts once. A run whose artifact was ingested uses its stored

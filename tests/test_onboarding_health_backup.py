@@ -5,11 +5,11 @@ import pytest
 from test_onboarding import START
 from test_onboarding_sequential import ORDER, make
 
-from milf_framework.onboarding import manifest as campaign
-from milf_framework.onboarding.backup import tree_inventory, verify_region
-from milf_framework.onboarding.files import atomic_json
-from milf_framework.onboarding.health import audit
-from milf_framework.onboarding.scheduler import job_directory, new_state
+from proxy_index.onboarding import manifest as campaign
+from proxy_index.onboarding.backup import tree_inventory, verify_region
+from proxy_index.onboarding.files import atomic_json
+from proxy_index.onboarding.health import audit
+from proxy_index.onboarding.scheduler import job_directory, new_state
 
 
 def snapshot(m, now):

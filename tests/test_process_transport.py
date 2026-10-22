@@ -10,12 +10,12 @@ import trustme
 from aiohttp import web
 from helpers import Gateway, server
 
-from milf_framework.models import Outcome, ProxyConfig, RequestContext, RunConfig
-from milf_framework.process_transport import ProcessTransport, process_count
-from milf_framework.providers.shifter import ShifterProxy
-from milf_framework.runner import run
-from milf_framework.sinks import JsonSink
-from milf_framework.targets import registry
+from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
+from proxy_index.process_transport import ProcessTransport, process_count
+from proxy_index.providers.shifter import ShifterProxy
+from proxy_index.runner import run
+from proxy_index.sinks import JsonSink
+from proxy_index.targets import registry
 
 
 @pytest.fixture

@@ -41,7 +41,7 @@ def main():
                 [
                     sys.executable,
                     "-c",
-                    "from milf_framework.cli import main; raise SystemExit(main())",
+                    "from proxy_index.cli import main; raise SystemExit(main())",
                     "serve",
                     "--database-file",
                     ".secrets/database.toml",

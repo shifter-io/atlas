@@ -1,4 +1,4 @@
--- Transactional v4 → v5 migration, applied by storage.migrate() (milf-framework db-migrate).
+-- Transactional v4 → v5 migration, applied by storage.migrate() (proxy-index db-migrate).
 -- The v4 JSON is kept in temporary tables; after schema.sql recreates the views and functions,
 -- storage.MIGRATION_CHECKS requires every rebuilt object to equal its v4 original.
 CREATE TEMP TABLE v4_pools ON COMMIT DROP AS SELECT pool_id,definition FROM pool_stats;

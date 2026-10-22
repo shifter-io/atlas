@@ -2,7 +2,7 @@ from datetime import time
 
 import pytest
 
-from milf_framework.regions import (
+from proxy_index.regions import (
     REGIONS_FILE,
     load_countries,
     load_regions,

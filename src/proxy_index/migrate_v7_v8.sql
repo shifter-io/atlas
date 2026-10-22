@@ -1,4 +1,4 @@
--- Transactional v7 → v8 migration, applied by storage.migrate() (milf-framework db-migrate),
+-- Transactional v7 → v8 migration, applied by storage.migrate() (proxy-index db-migrate),
 -- alone from v7 or after the earlier steps. It adds the daily latency-under-load reference
 -- country of each runner region; no stored row changes. The definition repeats schema.sql
 -- exactly (tests compare catalogs).

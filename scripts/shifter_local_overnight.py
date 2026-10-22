@@ -22,14 +22,14 @@ import socket
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from milf_framework import __version__, storage
-from milf_framework.enrichment import LocalEnricher
-from milf_framework.node import Active, NodeAgent, provider_factory
-from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.control import write_settings
-from milf_framework.orchestrator.db import Database
-from milf_framework.orchestrator.jobs import register_jobs
-from milf_framework.orchestrator.scheduler import Scheduler
+from proxy_index import __version__, storage
+from proxy_index.enrichment import LocalEnricher
+from proxy_index.node import Active, NodeAgent, provider_factory
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.control import write_settings
+from proxy_index.orchestrator.db import Database
+from proxy_index.orchestrator.jobs import register_jobs
+from proxy_index.orchestrator.scheduler import Scheduler
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG = logging.getLogger("shifter-local")

@@ -14,17 +14,17 @@ from psycopg import sql
 from test_census_pulse import scenario
 from test_orchestrator import prepare, query
 
-from milf_framework import report_html
-from milf_framework.cli import main
-from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.db import DEFAULTS, Database, put_setting
-from milf_framework.orchestrator.jobs import install_reports, register_jobs
-from milf_framework.orchestrator.nodes import issue_token, token_hash
-from milf_framework.orchestrator.scheduler import Scheduler
-from milf_framework.orchestrator.staging import init, load_profile
-from milf_framework.providers.credentials import read_credentials
-from milf_framework.regions import CONFIGS
-from milf_framework.storage import connect
+from proxy_index import report_html
+from proxy_index.cli import main
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.db import DEFAULTS, Database, put_setting
+from proxy_index.orchestrator.jobs import install_reports, register_jobs
+from proxy_index.orchestrator.nodes import issue_token, token_hash
+from proxy_index.orchestrator.scheduler import Scheduler
+from proxy_index.orchestrator.staging import init, load_profile
+from proxy_index.providers.credentials import read_credentials
+from proxy_index.regions import CONFIGS
+from proxy_index.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -345,7 +345,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
             f"--database-file {staging_file} --methodology {methodology}"
         )
         assert summary["commands"]["calculate"] == (
-            f"milf-framework calculate --database-file {staging_file} --methodology {methodology}"
+            f"proxy-index calculate --database-file {staging_file} --methodology {methodology}"
         )
         assert summary["load"] == {
             "reference_defaults": {"fra1": "RO"},
@@ -543,7 +543,7 @@ def test_rule_progress_and_text():
 
 
 async def test_reports_job_writes_live_pages(database, db, tmp_path):
-    from milf_framework.orchestrator.admin import views
+    from proxy_index.orchestrator.admin import views
 
     now = datetime.now(UTC)
     prepare(database, ("DE",), DE=now.time())

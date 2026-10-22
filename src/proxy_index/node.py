@@ -1,4 +1,4 @@
-"""The always-on node agent (`milf-framework node`): one per provider product per region.
+"""The always-on node agent (`proxy-index node`): one per provider product per region.
 
 It registers with the orchestrator, polls /v1/work every few seconds and runs every assignment
 (census and pulses at once) with the ordinary runner: it waits for the shared start_at on the
@@ -396,7 +396,7 @@ class NodeAgent:
 
     async def upload(self, batch_id: int, directory: Path) -> dict[str, Any]:
         """POST the run directory as tar.gz, retrying transient failures with backoff."""
-        with tempfile.TemporaryDirectory(prefix="milf-node-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="proxy-index-node-") as temporary:
             archive = await asyncio.to_thread(pack, directory, Path(temporary) / "run.tar.gz")
             for attempt in range(UPLOAD_ATTEMPTS):
                 # Streamed from disk (aiohttp reads the file in its executor); reopened per try.

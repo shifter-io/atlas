@@ -8,14 +8,14 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 from test_orchestrator import bearer, prepare, product_id, query
 
-from milf_framework.orchestrator import app as app_module
-from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.admin import routes, views
-from milf_framework.orchestrator.app import build_app
-from milf_framework.orchestrator.db import Database
-from milf_framework.orchestrator.nodes import issue_token
-from milf_framework.regions import REGION_IDS
-from milf_framework.storage import connect
+from proxy_index.orchestrator import app as app_module
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.admin import routes, views
+from proxy_index.orchestrator.app import build_app
+from proxy_index.orchestrator.db import Database
+from proxy_index.orchestrator.nodes import issue_token
+from proxy_index.regions import REGION_IDS
+from proxy_index.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -134,7 +134,7 @@ def test_credentials_from_env_and_serve_refuses_without_password(database, monke
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     with pytest.raises(ValueError, match="ADMIN_PASSWORD"):
         app_module.serve(str(database))
-    from milf_framework.cli import main
+    from proxy_index.cli import main
 
     assert main(["orchestrator", "--database-file", str(database)]) == 2
     # The environment is read when no credential is passed.

@@ -7,10 +7,10 @@ from datetime import datetime
 import pytest
 from helpers import FakeTransport
 
-from milf_framework import JsonSink, ProxyConfig, RunConfig, run
-from milf_framework.models import Outcome
-from milf_framework.stats import LOCATION_FIELDS, NETWORK_FIELDS
-from milf_framework.targets import EchoIpTarget, TargetRegistry
+from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index.models import Outcome
+from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
+from proxy_index.targets import EchoIpTarget, TargetRegistry
 
 
 def config(**kwargs):
@@ -111,7 +111,7 @@ async def test_rate_pacing(tmp_path):
 
 async def test_bucket_boundary_is_not_run_start_time(tmp_path, monkeypatch):
     # Advance the monotonic clock from minute 4:59 to 5:01 between two results.
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "time", lambda: 299.0)
@@ -162,7 +162,7 @@ async def test_disk_failure_never_publishes_a_complete_summary(tmp_path):
 async def test_bucket_export_does_not_block_request_execution(tmp_path, monkeypatch):
     import threading
 
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     clock = [0.0]
     progressed = threading.Event()
@@ -320,7 +320,7 @@ async def test_census_without_any_success_stops_after_1000_completions(tmp_path)
 
 
 async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monkeypatch):
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "perf_counter", lambda: clock[0])
@@ -337,7 +337,7 @@ async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monk
 
 
 async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     monkeypatch.setattr(runner, "NO_SUCCESS_REQUESTS", 5)
 
@@ -359,7 +359,7 @@ async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):
 def clocked(monkeypatch, successes, *, step=15):
     """A transport whose first `successes` requests succeed (distinct exits) and the rest time
     out; each request advances the runner's monotonic clock by `step` seconds."""
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "perf_counter", lambda: clock[0])
@@ -586,7 +586,7 @@ class Enricher:
 
 
 async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
-    import milf_framework.runner as runner
+    import proxy_index.runner as runner
 
     clock = [0.0]
     monkeypatch.setattr(runner.time, "time", lambda: 290.0)
@@ -657,7 +657,7 @@ async def test_geo_artifact_exists_without_traffic(tmp_path):
 
 
 async def test_geo_with_the_local_dbip_database(tmp_path):
-    from milf_framework.enrichment import LocalEnricher, find_database
+    from proxy_index.enrichment import LocalEnricher, find_database
 
     try:
         find_database()

@@ -28,17 +28,17 @@ chmod 600 .secrets/credentials.toml
 # Edit .secrets/credentials.toml locally to replace the placeholders.</pre>
 <p>The private file is plaintext protected by filesystem permissions: current-user ownership, no group/other access, and no symlink. It is excluded from Git, source packages and remote test uploads. Only the example belongs in the community repository. Other providers use their own table in this file. When <code>--credentials-file</code> is supplied it takes precedence over the environment; without it, <code>SHIFTER_ACCOUNT</code>/<code>SHIFTER_PASSWORD</code> remain supported. Credentials are never copied into result metadata.</p>
 <pre>uv sync --locked --no-editable
-uv run --no-editable milf-framework providers
+uv run --no-editable proxy-index providers
 
 # HTTP: US targeting only, default rotation, 5,000 requests.
-uv run --no-editable milf-framework run \
+uv run --no-editable proxy-index run \
   --provider-config configs/shifter.toml --target generic_http \
   --credentials-file .secrets/credentials.toml \
   --url http://ip-info.com/myip \
   --requests 5000 --concurrency 100 --param country=us
 
 # HTTPS with one generated session per worker, lifetime 600 seconds.
-uv run --no-editable milf-framework run \
+uv run --no-editable proxy-index run \
   --provider-config configs/shifter.toml --target generic_https \
   --credentials-file .secrets/credentials.toml \
   --url https://ip-info.com/myip \
@@ -53,7 +53,7 @@ uv run --no-editable milf-framework run \
 
 <h2>Call it from a rule, scheduler or script</h2>
 <pre>import asyncio
-from milf_framework import JsonSink, RunConfig, load_provider, run
+from proxy_index import JsonSink, RunConfig, load_provider, run
 
 proxy = load_provider(
     "configs/shifter.toml",

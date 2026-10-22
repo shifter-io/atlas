@@ -28,7 +28,7 @@ from .targets import RequestSpec, Target
 # connection before `session.request` returns, so the connector records the
 # socket the moment the connection is made. Each request runs in its own task
 # context, so concurrent requests on one session never see each other's slot.
-_SOCKET: ContextVar[list[Any] | None] = ContextVar("milf_request_socket", default=None)
+_SOCKET: ContextVar[list[Any] | None] = ContextVar("proxy_index_request_socket", default=None)
 
 
 class _SocketTap:

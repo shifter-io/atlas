@@ -1,4 +1,4 @@
-"""Operator settings from the command line: the planner switches (milf-framework scheduler).
+"""Operator settings from the command line: the planner switches (proxy-index scheduler).
 
 Synchronous (psycopg) counterparts of db.setting / db.put_setting for the CLI, which runs
 without the orchestrator's async pool. The orchestrator reads the settings table on every

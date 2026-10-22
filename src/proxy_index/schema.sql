@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS products (
  product_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  provider text NOT NULL REFERENCES providers(id), name text NOT NULL, UNIQUE(provider,name)
 );
--- Census/pulse reference data, seeded by milf-framework db-seed from configs/.
+-- Census/pulse reference data, seeded by proxy-index db-seed from configs/.
 CREATE TABLE IF NOT EXISTS runner_regions (
  region_id smallint PRIMARY KEY, slug text NOT NULL UNIQUE,
  cloud text NOT NULL DEFAULT 'digitalocean', pattern text NOT NULL,

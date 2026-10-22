@@ -11,14 +11,14 @@ from aiohttp.test_utils import TestServer
 from helpers import Gateway, server
 from test_orchestrator import prepare, query
 
-from milf_framework import __version__
-from milf_framework.models import ProxyConfig
-from milf_framework.node import NodeAgent, Rejected, provider_factory, read_token
-from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.app import build_app
-from milf_framework.orchestrator.db import Database, put_setting
-from milf_framework.orchestrator.nodes import issue_token
-from milf_framework.storage import connect
+from proxy_index import __version__
+from proxy_index.models import ProxyConfig
+from proxy_index.node import NodeAgent, Rejected, provider_factory, read_token
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.app import build_app
+from proxy_index.orchestrator.db import Database, put_setting
+from proxy_index.orchestrator.nodes import issue_token
+from proxy_index.storage import connect
 
 pytest_plugins = ["test_storage"]
 
@@ -176,7 +176,7 @@ async def test_rejections_are_final_and_shutdown_reports_failure(tmp_path):
     (run_dir / "summary.json").write_text("{}")
     import aiohttp
 
-    from milf_framework.node import Active
+    from proxy_index.node import Active
 
     async with aiohttp.ClientSession() as agent.session:
         with pytest.raises(Rejected):
@@ -202,8 +202,8 @@ async def test_a_target_known_only_to_the_database_runs_as_an_echo_target(tmp_pa
 
     import aiohttp
 
-    from milf_framework.node import Active
-    from milf_framework.targets import EchoIpTarget
+    from proxy_index.node import Active
+    from proxy_index.targets import EchoIpTarget
 
     async def ok(request, attempt):
         return web.json_response({"ok": True, "status": "done"})

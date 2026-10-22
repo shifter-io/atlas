@@ -1,4 +1,4 @@
-"""Self-contained HTML reports over census and pulse batches (milf-framework report html).
+"""Self-contained HTML reports over census and pulse batches (proxy-index report html).
 
 `write(credentials_file, out_dir, batch_ids)` writes `batch-<id>.html` for each batch and
 regenerates `index.html`. Every page is one file with inline CSS (light and dark), inline SVG

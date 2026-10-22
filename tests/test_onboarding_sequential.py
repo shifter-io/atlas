@@ -5,10 +5,10 @@ from datetime import timedelta
 import pytest
 from test_onboarding import ROOT, START, Clock, Proxy, fake_measurement
 
-from milf_framework.onboarding import manifest as campaign
-from milf_framework.onboarding.export import export_campaign
-from milf_framework.onboarding.files import atomic_json, read_json
-from milf_framework.onboarding.scheduler import execute, new_state, validate_state
+from proxy_index.onboarding import manifest as campaign
+from proxy_index.onboarding.export import export_campaign
+from proxy_index.onboarding.files import atomic_json, read_json
+from proxy_index.onboarding.scheduler import execute, new_state, validate_state
 
 ORDER = ['nyc3', 'tor1', 'lon1', 'fra1', 'ams3', 'sgp1', 'blr1', 'syd1']
 
@@ -117,7 +117,7 @@ def test_resume_rejects_wrong_regional_deadline(tmp_path):
 
 
 def test_cli_freezes_sequential_policy_and_settings(tmp_path, capsys):
-    from milf_framework.cli import main
+    from proxy_index.cli import main
 
     assert main(['onboarding', 'plan', '--provider-config', str(ROOT / 'configs/shifter.toml'),
                  '--product', 'residential', '--start', campaign.timestamp(START),

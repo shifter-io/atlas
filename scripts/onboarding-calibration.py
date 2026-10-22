@@ -11,11 +11,11 @@ import json
 import signal
 from pathlib import Path
 
-from milf_framework.onboarding.files import digest
-from milf_framework.onboarding.manifest import load
-from milf_framework.onboarding.scheduler import execute
-from milf_framework.providers import load_provider
-from milf_framework.runner import run
+from proxy_index.onboarding.files import digest
+from proxy_index.onboarding.manifest import load
+from proxy_index.onboarding.scheduler import execute
+from proxy_index.providers import load_provider
+from proxy_index.runner import run
 
 
 async def calibrate(manifest_path, region, provider_config, credentials_file):

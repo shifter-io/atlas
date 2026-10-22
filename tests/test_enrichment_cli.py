@@ -10,10 +10,10 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from milf_framework import JsonSink, ProxyConfig, RunConfig, run
-from milf_framework.cli import main
-from milf_framework.enrichment import LocalEnricher, enrich_run, find_database
-from milf_framework.storage import ENRICHMENT_FIELDS
+from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index.cli import main
+from proxy_index.enrichment import LocalEnricher, enrich_run, find_database
+from proxy_index.storage import ENRICHMENT_FIELDS
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def fake_database(tmp_path, monkeypatch):
             }
 
     reader = Reader()
-    monkeypatch.setattr("milf_framework.enrichment.maxminddb.open_database", lambda _: reader)
+    monkeypatch.setattr("proxy_index.enrichment.maxminddb.open_database", lambda _: reader)
     return database, reader
 
 
@@ -121,7 +121,7 @@ async def test_cli_process_and_signal(tmp_path, interrupt):
     gateway = Gateway(auth=True, delay=.2 if interrupt else 0)
     async with server(gateway) as port:
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "milf_framework.cli", "run", "--target", "generic_http",
+            sys.executable, "-m", "proxy_index.cli", "run", "--target", "generic_http",
             "--requests", "10", "--concurrency", "2", "--output", str(tmp_path),
             env=os.environ | {
                 "PROXY_URL": f"http://test:secret@127.0.0.1:{port}",
