@@ -30,12 +30,12 @@ type DB struct {
 	Admin config.Postgres
 }
 
-// FrameworkDir locates milf/src/milf_framework.
+// FrameworkDir locates milf/src/proxy_index.
 func FrameworkDir() string {
 	if d := os.Getenv("PG_TEST_FRAMEWORK_DIR"); d != "" {
 		return d
 	}
-	return config.FindUp(filepath.Join("milf", "src", "milf_framework"))
+	return config.FindUp(filepath.Join("milf", "src", "proxy_index"))
 }
 
 // New creates a scratch database with the framework schema and the site
@@ -52,7 +52,7 @@ func New(t testing.TB) *DB {
 	}
 	fw := FrameworkDir()
 	if fw == "" {
-		t.Fatal("cannot find milf/src/milf_framework for the framework schema; set PG_TEST_FRAMEWORK_DIR")
+		t.Fatal("cannot find milf/src/proxy_index for the framework schema; set PG_TEST_FRAMEWORK_DIR")
 	}
 	buf := make([]byte, 6)
 	rand.Read(buf) //nolint:errcheck

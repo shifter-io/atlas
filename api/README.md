@@ -192,7 +192,7 @@ go test -bench . -run XXX ./internal/server/
 ```
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
-credentials. They load the framework schema from `milf/src/milf_framework/` (or
+credentials. They load the framework schema from `milf/src/proxy_index/` (or
 `PG_TEST_FRAMEWORK_DIR`) and drop the database afterwards. `proxy_reviews` is never
 touched. The suite covers:
 
