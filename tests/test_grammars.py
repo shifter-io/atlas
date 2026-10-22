@@ -223,6 +223,8 @@ def test_run_configs_load_with_private_credentials(provider, tmp_path):
     {"session": {"flag": "session", "ttl_flag": "missing"}},
     {"session": {"flag": "missing"}}, {"session": {"flag": "session", "length": 0}},
     {"id": None},
+    {"flags": {"country": {"kind": "token", "format": "c-{}", "pattern": "["}}},
+    {"session": {"flag": "session", "generate": "alnum", "length": 300}},
 ])
 def test_grammar_schema_is_validated(change):
     data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())

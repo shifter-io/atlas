@@ -140,7 +140,7 @@ class Grammar:
     def parse(cls, data: Mapping[str, Any]) -> Grammar:
         try:
             return cls._parse(data)
-        except (KeyError, TypeError, IndexError, AttributeError) as exc:
+        except (KeyError, TypeError, IndexError, AttributeError, re.error) as exc:
             raise ValueError(f"Invalid provider grammar ({type(exc).__name__})") from None
 
     @classmethod
@@ -195,6 +195,19 @@ class Grammar:
             raise ValueError("Grammar ttl_flag must name an integer flag")
         if type(session.get("length", 16)) is not int or session.get("length", 16) < 1:
             raise ValueError("Grammar generated session length must be positive")
+        for flag in flags.values():
+            if flag.pattern is not None:
+                re.compile(flag.pattern)
+        re.compile(data.get("account", {}).get("pattern", ""))
+        alphabet = ALPHABETS.get(session.get("generate"))
+        pattern = flags[session["flag"]].pattern if session.get("flag") in flags else None
+        if alphabet and pattern:
+            length = session.get("length", 16)
+            # Generated digit sessions never start with zero (see _generated).
+            forward, reverse = alphabet * length, alphabet[::-1] * length
+            samples = ("1" + forward[1:length], "1" + reverse[1:length])
+            if not all(re.fullmatch(pattern, sample) for sample in samples):
+                raise ValueError("Grammar generated sessions would not match the session pattern")
         session_flag = session.get("flag")
         mode = session.get("mode", "flag")
         if mode not in ("flag", "port") or (mode == "flag") != (session_flag is not None):
@@ -428,7 +441,8 @@ class GrammarProxy:
     def _check_delimiters(self, g: Grammar, value: str, name: str, key: str) -> None:
         # Values may contain the separator (e.g. hyphenated Shifter sids or Byteful's
         # new_york) but must not smuggle another flag into the credential.
-        if g.separator in value and set(value.lower().split(g.separator)) & g.reserved:
+        words = {re.split(r"[^a-z0-9]", token)[0] for token in value.lower().split(g.separator)}
+        if g.separator in value and words & g.reserved:
             raise ValueError(f"{name} {key} contains an ambiguous flag delimiter")
 
     def _extras(self, g: Grammar, params: Mapping[str, Any], name: str) -> dict[str, str]:
