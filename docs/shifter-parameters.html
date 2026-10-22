@@ -42,7 +42,7 @@ uv run --no-editable proxy-index run \
   --provider-config configs/shifter.toml --target generic_https \
   --credentials-file .secrets/credentials.toml \
   --url https://ip-info.com/myip \
-  --requests 10 --concurrency 2 --param country=us --param ttl=600 \
+  --requests 10 --concurrency 2 --param country=us --param ttl=10 \
   --session-policy per_worker
 
 # Explicit removal of an optional parameter configured in the TOML file:
@@ -82,8 +82,8 @@ print(summary.to_dict())</pre>
 <tr><td><code>city</code></td><td><code>city-new_york</code></td><td>City slug; country is not universally required by the gateway examples.</td></tr>
 <tr><td><code>asn</code></td><td><code>asn-7922</code></td><td>Numeric autonomous system number.</td></tr>
 <tr><td><code>strict</code></td><td><code>strict-true</code></td><td>Disable broader-pool fallback; no matching capacity returns 502. Omission permits fallback.</td></tr>
-<tr><td><code>sid</code></td><td><code>sid-example42</code></td><td>Caller-chosen sticky-session key. Omit for rotation.</td></tr>
-<tr><td><code>ttl</code></td><td><code>ttl-600</code></td><td>Session lifetime in seconds; requires <code>sid</code>. Default 120, minimum 1; maximum undocumented.</td></tr>
+<tr><td><code>session</code></td><td><code>sid-example42</code></td><td>Caller-chosen sticky-session key. Omit for rotation.</td></tr>
+<tr><td><code>ttl</code></td><td><code>ttl-600</code></td><td>Session lifetime in minutes (sent to Shifter in seconds); requires a session. Default 2 minutes; maximum undocumented.</td></tr>
 </tbody></table></div>
 <p>Geographic values are lowercase; spaces become underscores. Full Geo supports all four geographic selectors; Country Geo supports country; Non-Geo supports none. <a href="https://shifter.io/docs/products/residential-proxies/geo-targeting/">Geo documentation</a>.</p>
 <p>A residential peer can disconnect before its TTL. Sessions are regional: sharing one SID across machines requires the same regional gateway to share one exit. Supplied IDs preserve their case and hyphens. <a href="https://shifter.io/docs/products/residential-proxies/sessions/">Session documentation</a>.</p>
@@ -92,7 +92,7 @@ print(summary.to_dict())</pre>
 <h2>Session policies</h2>
 <ul>
 <li><code>rotate</code>: omit SID; Shifter rotates per request. Rotation does not guarantee every IP is unique.</li>
-<li><code>fixed</code>: require an explicit <code>sid</code>. This is also inferred when SID is supplied and no policy is specified. Reusing it intentionally shares the provider session.</li>
+<li><code>fixed</code>: require an explicit <code>session</code>. This is also inferred when SID is supplied and no policy is specified. Reusing it intentionally shares the provider session.</li>
 <li><code>per_request</code>: generate a new SID for every request.</li>
 <li><code>per_worker</code>: generate one SID for each worker in a run; successive requests from that worker reuse it.</li>
 <li><code>per_run</code>: all workers in one run share one generated SID.</li>

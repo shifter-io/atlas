@@ -326,8 +326,7 @@ class GrammarProxy:
             for prefix in g.strip_prefixes:
                 account = account.removeprefix(prefix)
             if not re.fullmatch(g.account_pattern, account) or (
-                g.target == "username" and g.separator in account
-                and set(account.lower().split(g.separator)) & g.reserved
+                g.target == "username" and set(account.lower().split(g.separator)) & g.reserved
             ):
                 raise ValueError(f"Invalid {name} account syntax")
             object.__setattr__(self, "account", account)
@@ -442,7 +441,7 @@ class GrammarProxy:
         # Values may contain the separator (e.g. hyphenated Shifter sids or Byteful's
         # new_york) but must not smuggle another flag into the credential.
         words = {re.split(r"[^a-z0-9]", token)[0] for token in value.lower().split(g.separator)}
-        if g.separator in value and words & g.reserved:
+        if words & g.reserved:
             raise ValueError(f"{name} {key} contains an ambiguous flag delimiter")
 
     def _extras(self, g: Grammar, params: Mapping[str, Any], name: str) -> dict[str, str]:
@@ -471,7 +470,10 @@ class GrammarProxy:
         scope = {"per_request": context.request_index, "per_worker": context.worker_index,
                  "per_run": 0}[self.session_policy]
         seed = f"{context.run_id}:{self.session_policy}:{scope}".encode()
-        number = int.from_bytes(hashlib.sha256(seed).digest(), "big")
+        digest = hashlib.sha256(seed)
+        if g.session_mode == "flag" and g.generate == "hex":
+            return digest.hexdigest()[:g.generate_length]  # Stable with earlier releases.
+        number = int.from_bytes(digest.digest(), "big")
         if g.session_mode == "port":
             low, high = g.session_ports
             return number % (high - low + 1)
@@ -517,10 +519,9 @@ class GrammarProxy:
         session_key = g.session or "session"
         if session_key in params:
             params[session_key] = "[redacted]"
-        ttl = None
-        if self.session_policy not in ("rotate", "gateway"):
-            ttl = (self.parameters[g.ttl] * g.ttl_seconds if g.ttl in self.parameters
-                   else g.default_ttl_seconds)
+        ttl = self.parameters[g.ttl] * g.ttl_seconds if g.ttl in self.parameters else None
+        if ttl is None and self.session_policy not in ("rotate", "gateway"):
+            ttl = g.default_ttl_seconds
         return {
             "proxy_protocol": self.scheme, "provider": self.provider, "product": g.product,
             "requested_country": (

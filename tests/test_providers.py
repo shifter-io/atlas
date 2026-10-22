@@ -9,17 +9,17 @@ import trustme
 from helpers import Gateway, server
 
 from proxy_index import (
+    GrammarProxy,
     JsonSink,
     ProviderRegistry,
     ProxyConfig,
     RequestContext,
     RunConfig,
-    ShifterProxy,
     load_provider,
     run,
 )
 from proxy_index.cli import main
-from proxy_index.providers.shifter import REGIONAL_GATEWAYS
+from proxy_index.providers import load_grammar
 from proxy_index.targets import EchoIpTarget, TargetRegistry
 from proxy_index.transport import HttpTransport
 
@@ -29,13 +29,13 @@ ENV = {"SHIFTER_ACCOUNT": "fixture_33", "SHIFTER_PASSWORD": "private-password"}
 
 
 def shifter(**kwargs):
-    return ShifterProxy("fixture_33", "private-password", **kwargs)
+    return GrammarProxy("shifter", "fixture_33", "private-password", **kwargs)
 
 
 def test_all_flags_and_omissions():
     proxy = shifter(parameters={
         "country": "US", "region": "New South Wales", "city": "New York",
-        "asn": "7922", "strict": True, "sid": "custom-session_42", "ttl": 600,
+        "asn": "7922", "strict": True, "session": "custom-session_42", "ttl": 10,
     })
     assert proxy.resolve(CONTEXT).username == (
         "customer-fixture_33-country-us-region-new_south_wales-city-new_york-"
@@ -45,17 +45,17 @@ def test_all_flags_and_omissions():
     assert rotating.resolve(CONTEXT).username == "customer-fixture_33"
     assert rotating.public()["provider_config"]["effective_ttl_seconds"] is None
     assert shifter(parameters={"city": "Berlin"}).resolve(CONTEXT).username.endswith("city-berlin")
-    fixed = shifter(parameters={"sid": "example"})
+    fixed = shifter(parameters={"session": "example"})
     assert fixed.public()["provider_config"]["effective_ttl_seconds"] == 120
     assert "ttl-" not in fixed.resolve(CONTEXT).username
-    assert ShifterProxy("customer-fixture_33", "secret").account == "fixture_33"
+    assert GrammarProxy("shifter", "customer-fixture_33", "secret").account == "fixture_33"
 
 
 @pytest.mark.parametrize("policy,expected", [
     ("rotate", 1), ("fixed", 1), ("per_run", 1), ("per_worker", 2), ("per_request", 4),
 ])
 def test_session_scope_and_run_isolation(policy, expected):
-    params = {"sid": "deliberately-shared"} if policy == "fixed" else {}
+    params = {"session": "deliberately-shared"} if policy == "fixed" else {}
     proxy = shifter(parameters=params, session_policy=policy)
     usernames = [proxy.resolve(RequestContext("one", i, i % 2)).username for i in range(4)]
     assert len(set(usernames)) == expected
@@ -64,26 +64,26 @@ def test_session_scope_and_run_isolation(policy, expected):
     assert (next_run == usernames[0]) == (policy in ("rotate", "fixed"))
 
 
-@pytest.mark.parametrize("gateway,host", REGIONAL_GATEWAYS.items())
+@pytest.mark.parametrize("gateway,host", load_grammar("shifter").hosts.items())
 def test_endpoints(gateway, host):
     resolved = shifter(gateway=gateway, scheme="socks5").resolve(CONTEXT)
     assert (resolved.scheme, resolved.host, resolved.port) == ("socks5", host, 443)
 
 
 @pytest.mark.parametrize("options", [
-    {"parameters": {"unknown": 1}}, {"parameters": {"ttl": 600}},
+    {"parameters": {"unknown": 1}}, {"parameters": {"ttl": 10}},
     {"parameters": {"ttl": 0}, "session_policy": "per_run"},
     {"parameters": {"ttl": True}, "session_policy": "per_run"},
-    {"parameters": {"sid": "example"}, "session_policy": "rotate"},
-    {"parameters": {"sid": "example"}, "session_policy": "per_request"},
+    {"parameters": {"session": "example"}, "session_policy": "rotate"},
+    {"parameters": {"session": "example"}, "session_policy": "per_request"},
     {"session_policy": "fixed"}, {"session_policy": "unknown"},
     {"parameters": {"strict": "false"}}, {"parameters": {"strict": 1}},
     {"parameters": {"country": "USA"}}, {"parameters": {"country": 1}},
     {"parameters": {"country": "us-sid-injected"}},
-    {"parameters": {"sid": "session-country-us"}},
-    {"parameters": {"sid": "country-us"}},
-    {"parameters": {"sid": "session-country", "ttl": 600}},
-    {"parameters": {"sid": "{SESSION}"}}, {"parameters": {"sid": ""}},
+    {"parameters": {"session": "session-country-us"}},
+    {"parameters": {"session": "country-us"}},
+    {"parameters": {"session": "session-country", "ttl": 10}},
+    {"parameters": {"session": "{SESSION}"}}, {"parameters": {"session": ""}},
     {"parameters": {"asn": 0}}, {"parameters": {"asn": 4294967296}},
     {"parameters": {"asn": "AS7922"}}, {"parameters": {"asn": 1.5}},
     {"parameters": {"city": "new\nyork-sid-injected"}},
@@ -94,10 +94,10 @@ def test_endpoints(gateway, host):
     {"extra_flags": {"country": "us"}}, {"extra_flags": {"password": "secret"}},
     {"extra_flags": {"bad-flag": "value"}}, {"extra_flags": {"future": "x-sid-y"}},
     {"extra_flags": {"future": {} }},
-    {"extra_flags": {"future": "x"}, "parameters": {"sid": "x-future-y"}},
-    {"extra_flags": {"future": "x"}, "parameters": {"sid": "future-y"}},
-    {"extra_flags": {"future": "x"}, "parameters": {"sid": "y-future"}},
-    {"scheme": "socks5", "parameters": {"sid": "a" * 256}},
+    {"extra_flags": {"future": "x"}, "parameters": {"session": "x-future-y"}},
+    {"extra_flags": {"future": "x"}, "parameters": {"session": "future-y"}},
+    {"extra_flags": {"future": "x"}, "parameters": {"session": "y-future"}},
+    {"scheme": "socks5", "parameters": {"session": "a" * 256}},
 ])
 def test_invalid_configuration_fails_before_traffic(options):
     with pytest.raises(ValueError):
@@ -111,13 +111,13 @@ def test_invalid_configuration_fails_before_traffic(options):
 ])
 def test_bad_credentials_do_not_echo_secrets(account, password, scheme):
     with pytest.raises(ValueError) as exc:
-        ShifterProxy(account, password, scheme=scheme)
+        GrammarProxy("shifter", account, password, scheme=scheme)
     if password:
         assert password not in str(exc.value)
 
 
 def test_immutable_inputs_future_flags_and_safe_metadata():
-    params = {"country": "US", "sid": "private-session"}
+    params = {"country": "US", "session": "private-session"}
     extras = {"future": "privatevalue", "enabled": True, "limit": 3, "absent": None}
     proxy = shifter(parameters=params, extra_flags=extras, pool="full_geo")
     params["country"] = "de"
@@ -141,9 +141,9 @@ def test_immutable_inputs_future_flags_and_safe_metadata():
 
 
 def test_toml_and_per_test_overrides(tmp_path):
-    proxy = load_provider(CONFIG, environ=ENV, parameters={"country": "us", "ttl": 600},
+    proxy = load_provider(CONFIG, environ=ENV, parameters={"country": "us", "ttl": 10},
                           session_policy="per_worker")
-    assert proxy.session_policy == "per_worker" and proxy.parameters["ttl"] == 600
+    assert proxy.session_policy == "per_worker" and proxy.parameters["ttl"] == 10
     assert load_provider(CONFIG, environ=ENV).parameters == {}
     path = tmp_path / "provider.toml"
     path.write_text(CONFIG.read_text().replace('# country = "us"', 'country = "us"'))
@@ -214,11 +214,11 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
     assert len(listed) == 18 and {"shifter", "geonode", "soax"} <= set(listed)
     for target in ("generic_http", "generic_https"):
         assert main(["run", "--target", target, "--provider-config", str(CONFIG),
-                     "--param", "country=US", "--param", "strict=true", "--param", "ttl=600",
+                     "--param", "country=US", "--param", "strict=true", "--param", "ttl=10",
                      "--session-policy", "per_request"]) == 0
         text = capsys.readouterr()
         assert "private-password" not in text.out + text.err
-        assert observed[-1].proxy.parameters == {"country": "us", "strict": True, "ttl": 600}
+        assert observed[-1].proxy.parameters == {"country": "us", "strict": True, "ttl": 10}
     for args in (
         ["--param", "country=us"], ["--provider-config", str(CONFIG), "--param", "bad"],
         ["--provider-config", str(CONFIG), "--param", "country=us", "--param", "country=de"],
@@ -283,7 +283,7 @@ async def test_provider_auth_on_both_targets_with_concurrent_sessions(
         targets = TargetRegistry()
         targets.register(EchoIpTarget(target, f"{'https' if tls else 'http'}://localhost:"
                                      f"{origin_port}/", not tls))
-        provider = shifter(scheme=scheme, parameters={"country": "us", "ttl": 600},
+        provider = shifter(scheme=scheme, parameters={"country": "us", "ttl": 10},
                            session_policy=policy)
         proxy = LoopbackProvider(provider, port)
         sink = JsonSink(tmp_path)
@@ -353,7 +353,7 @@ async def test_rotate_policy_never_sends_a_session_id(tmp_path):
                  for run in ("one", "two") for index in range(50)}
     assert usernames == {"customer-fixture_33-country-de"}
     with pytest.raises(ValueError):
-        shifter(parameters={"country": "de", "ttl": 60})
+        shifter(parameters={"country": "de", "ttl": 1})
     gateway = Gateway(auth=lambda username, password: True)
     async with server(gateway) as port:
         proxy = LoopbackProvider(provider, port)

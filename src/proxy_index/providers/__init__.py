@@ -11,9 +11,7 @@ from typing import Any
 
 from ..models import ProxySource
 from .credentials import read_credentials
-from .geonode import GeonodeProxy
 from .grammar import GrammarProxy, grammar_ids, load_grammar
-from .shifter import ShifterProxy
 
 
 class ProviderRegistry:
@@ -35,8 +33,6 @@ class ProviderRegistry:
 
 
 registry = ProviderRegistry()
-registry.register("shifter", ShifterProxy)
-registry.register("geonode", GeonodeProxy)
 for _provider in grammar_ids():
     registry.register(_provider, partial(GrammarProxy, _provider))
 
@@ -95,7 +91,4 @@ def load_provider(
     )
 
 
-__all__ = [
-    "GeonodeProxy", "GrammarProxy", "ProviderRegistry", "ShifterProxy", "load_grammar",
-    "load_provider", "registry",
-]
+__all__ = ["GrammarProxy", "ProviderRegistry", "load_grammar", "load_provider", "registry"]

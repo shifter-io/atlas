@@ -14,14 +14,14 @@ gateway = "auto" # auto, fra, ams, lon, nyc, tor, sgp, blr, syd; port 443
 # pool = "full_geo" # Set only if verified: full_geo, country_geo, non_geo
 
 [parameters]
-# All optional. Omit sid for rotation; an explicit sid implies fixed sessions.
+# All optional. Omit session for rotation; an explicit session implies fixed sessions.
 # country = "us"
 # region = "california"
 # city = "los_angeles"
 # asn = 7922
 strict = true
-# sid = "example-session"
-# ttl = 120 # Requires sid or a generated-session policy
+# session = "example-session"
+# ttl = 2 # Minutes; requires a supplied or generated session
 
 [extra_flags]
 # Explicit escape hatch for future Shifter flags; support is not guaranteed.

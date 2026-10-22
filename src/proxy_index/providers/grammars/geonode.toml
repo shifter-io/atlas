@@ -1,0 +1,74 @@
+# Geonode Residential. https://docs.geonode.com/docs/proxies/api-reference/geo-targeting/
+# Live gateways reject bare -strict; strict matching uses -strict-on, not -strict-true.
+# HTTP 469 is a rate-limit response; see docs/onboarding.html#geonode-469.
+schema_version = 1
+id = "geonode"
+version = "2"
+
+[credential]
+flags_in = "username"
+username = "geonode_{account}-type-residential"
+reserved = ["geonode", "type"]
+
+[account]
+strip_prefixes = ["geonode_"]
+
+[gateway]
+host = "proxy.geonode.io"
+host_override = true
+ports = { http = 10000, socks5 = 12000 } # Sticky ports; rotating HTTP uses 9000.
+port_override = true
+rotating_ports = { http = [9000, 9010], socks5 = [11000, 11010] }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "state-{}"
+case = "lower"
+spaces = "" # Exact provider tokens, e.g. newyork.
+requires = ["country"]
+conflicts = ["city"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+spaces = "" # e.g. losangeles.
+requires = ["country"]
+conflicts = ["region"]
+
+[flags.asn]
+kind = "integer"
+format = "asn-{}"
+min = 1
+max = 4294967295
+requires = ["country"]
+
+[flags.strict]
+kind = "boolean"
+format = "strict-{}"
+true = "strict-on"
+false = "strict-off"
+
+[flags.session]
+kind = "session"
+format = "session-{}"
+pattern = "[A-Za-z0-9_]{1,25}"
+
+[flags.ttl]
+kind = "integer"
+format = "lifetime-{}"
+min = 3
+max = 1440
+sticky_ports_only = true
+
+[session]
+flag = "session"
+generate = "hex"
+length = 25
+ttl_flag = "ttl"
+no_session_policy = "gateway"

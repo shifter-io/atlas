@@ -21,16 +21,16 @@ password_env = "GEONODE_PASSWORD"
 scheme = "http" # Supports HTTP and HTTPS targets via CONNECT.
 host = "proxy.geonode.io"
 port = 10000 # Supplied sticky endpoint; rotating HTTP uses 9000.
-# session_policy = "per_request" # fixed, per_request, per_worker, per_run
+# session_policy = "per_request" # gateway, rotate, fixed, per_request, per_worker, per_run
 
 [parameters]
 strict = true # Encodes as -strict-on; the live gateway rejects bare -strict.
 # country = "us"
-# state = "california" # Exact provider token; requires country.
+# region = "california" # Sent as state-; exact provider token; requires country.
 # city = "losangeles" # Exact provider token; cannot combine with state.
 # asn = 7922 # Requires country.
 # session = "example_session" # 1–25 alphanumeric/underscore characters.
-# lifetime = 10 # Minutes, 3–1440; sticky ports only.
+# ttl = 10 # Minutes, 3–1440; sent as lifetime-; sticky ports only.
 
 [extra_flags]
 # Unknown flags are rejected until their semantics are explicitly implemented.
