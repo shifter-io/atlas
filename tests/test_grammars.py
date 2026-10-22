@@ -16,9 +16,8 @@ CONTEXT = RequestContext("run-one", 0, 0)
 SECRET = "private-password"
 
 
-def proxy(provider, **kwargs):
-    account = None if provider == "soax" else "fixture1"
-    return GrammarProxy(provider, account, SECRET, **kwargs)
+def proxy(provider, account="fixture1", **kwargs):
+    return GrammarProxy(provider, None if provider == "soax" else account, SECRET, **kwargs)
 
 
 # Formats verified against provider documentation and live probes (2026-10-22).
@@ -154,6 +153,8 @@ def test_rotation_never_sends_a_session(provider):
     ("massive", {"parameters": {"ttl": 10}}),  # TTL needs a session.
     ("geonode", {"port": 9000, "session_policy": "per_request"}),
     ("shifter", {"parameters": {"session": "x-country-us"}}),
+    ("shifter", {"parameters": {"session": "ttl", "ttl": 10}}),  # Value equal to a flag key.
+    ("shifter", {"account": "country"}),
     ("byteful", {"scheme": "socks5"}),
     ("oxylabs", {"gateway": "fra"}),
     ("infatica", {"host": "evil.example"}),
@@ -249,3 +250,18 @@ def test_requested_country_is_canonical_lowercase():
     for provider in ("massive", "oxylabs", "evomi", "infatica", "rayobyte"):
         p = proxy(provider, parameters={"country": "us"})
         assert RunConfig("generic_http", p, requested_country="us").requested_country == "us"
+
+
+def test_migrated_providers_keep_session_ids_ports_and_ttl_metadata():
+    import hashlib
+    seed = hashlib.sha256(b"one:per_request:3").hexdigest()
+    shifter = proxy("shifter", session_policy="per_request").resolve(RequestContext("one", 3, 0))
+    assert shifter.username == f"customer-fixture1-sid-{seed[:32]}"
+    geonode = proxy("geonode", session_policy="per_request").resolve(RequestContext("one", 3, 0))
+    assert geonode.username.endswith(f"-session-{seed[:25]}")
+    socks = proxy("geonode", scheme="socks5")
+    assert socks.port == 12000 and socks.session_policy == "gateway"
+    lifetime = proxy("geonode", parameters={"ttl": 10})
+    assert lifetime.public()["provider_config"]["effective_ttl_seconds"] == 600
+    city = proxy("geonode", parameters={"country": "us", "city": "Los Angeles"})
+    assert city.resolve(CONTEXT).username.endswith("country-us-city-losangeles")

@@ -29,6 +29,7 @@ case = "lower"
 kind = "name"
 format = "state-{}"
 case = "lower"
+spaces = "" # Exact provider tokens, e.g. newyork.
 requires = ["country"]
 conflicts = ["city"]
 
@@ -36,6 +37,7 @@ conflicts = ["city"]
 kind = "name"
 format = "city-{}"
 case = "lower"
+spaces = "" # e.g. losangeles.
 requires = ["country"]
 conflicts = ["region"]
 
