@@ -26,7 +26,11 @@ uv run --no-editable proxy-index run --provider-config configs/shifter.toml \
 ```
 
 Both targets support the same provider config; optional per-test parameters and
-session policies are exposed through the CLI and `ShifterProxy`/`load_provider` Python API.
+session policies are exposed through the CLI and `GrammarProxy`/`load_provider` Python API.
+Each of the 18 supported providers has a public run config in `configs/<provider>.toml` and a
+reviewed credential grammar in `src/proxy_index/providers/grammars/<provider>.toml`; see
+[the provider guide](docs/providers.html). Parameters use the same names everywhere:
+`country`, `region`, `city`, `zip`, `asn`, `session` and `ttl` (minutes).
 Target URLs can be supplied with `--url` or `RunConfig(target_url=...)`.
 In v0.2 custom transports must accept `execute(target, *, context=None)`.
 

@@ -12,7 +12,7 @@ from helpers import Gateway, server
 
 from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
 from proxy_index.process_transport import ProcessTransport, process_count
-from proxy_index.providers.shifter import ShifterProxy
+from proxy_index.providers import GrammarProxy
 from proxy_index.runner import run
 from proxy_index.sinks import JsonSink
 from proxy_index.targets import registry
@@ -170,8 +170,8 @@ def test_process_configuration_is_bounded_and_validated():
 
 @pytest.mark.parametrize("policy", ["rotate", "fixed", "per_request", "per_worker", "per_run"])
 def test_spawn_preserves_provider_targeting_and_global_session_identity(policy):
-    proxy = ShifterProxy("fixture", "secret", parameters={"country": "us", "sid": "fixed"}
-                        if policy == "fixed" else {"country": "us"}, session_policy=policy)
+    params = {"country": "us", "session": "fixed"} if policy == "fixed" else {"country": "us"}
+    proxy = GrammarProxy("shifter", "fixture", "secret", parameters=params, session_policy=policy)
     restored = pickle.loads(pickle.dumps(proxy))
     assert restored.public() == proxy.public()
     for index in range(10):

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proxy Index · Provider guide</title>
+<style>
+:root{color-scheme:light;--ink:#192b34;--muted:#556772;--line:#d7dfdf;--accent:#086e62;--paper:#fafbf8}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,sans-serif}
+main{max-width:1050px;margin:auto;padding:50px 32px 90px}header{border-top:5px solid var(--accent);padding-top:24px;margin-bottom:32px}
+.eyebrow{font:12px/1.4 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.13em;color:var(--accent)}
+h1{font-size:34px;line-height:1.18;letter-spacing:-.03em;margin:14px 0}h2{font-size:23px;line-height:1.3;margin:38px 0 14px}
+h3{font-size:17px;margin:24px 0 8px}p{max-width:82ch}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 22px;border-block:1px solid var(--line);padding:14px 0}
+pre{overflow:auto;background:#152c35;color:#edf4ef;padding:20px;font:13px/1.7 ui-monospace,monospace;border-radius:4px}
+code{font-family:ui-monospace,monospace;font-size:.9em}li{margin:6px 0}.note{padding:15px 20px;background:#eef4ef;border-left:3px solid var(--accent)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}.muted,footer{color:var(--muted);font-size:14px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:12px 10px}th{background:#eff3ef}td:first-child{width:25%;font-family:ui-monospace,monospace}footer{margin-top:48px;border-top:1px solid var(--line);padding-top:18px}
+@media(max-width:650px){main{padding:25px 18px}.grid{grid-template-columns:1fr}h1{font-size:28px}table{font-size:12px}td,th{padding:9px 5px}}@media print{pre{white-space:pre-wrap}nav{display:none}main{max-width:none;padding:0}}
+td:first-child{width:auto}</style>
+<main>
+<header><div class="eyebrow">Proxy Index · Providers</div><h1>Provider credential grammars</h1>
+<p>Every provider encodes targeting and sessions differently. Each one has a reviewed grammar in <code>src/proxy_index/providers/grammars/&lt;provider&gt;.toml</code>, read by one shared engine, and a public run config in <code>configs/&lt;provider&gt;.toml</code>. Private credentials stay in <code>.secrets/credentials.toml</code>, one table per provider.</p></header>
+<nav><a href="index.html">Developer guide</a><a href="#parameters">Parameters</a><a href="#matrix">Provider matrix</a><a href="#sessions">Sessions</a><a href="#add">Add a provider</a></nav>
+<h2 id="parameters">Common parameters</h2>
+<p>Parameters use the same names for every provider and are translated to the provider's own keys: <code>country</code>, <code>region</code>, <code>city</code>, <code>zip</code>, <code>asn</code>, <code>session</code> and <code>ttl</code>. <code>ttl</code> is always in minutes; the grammar converts it to the provider's unit. Provider-only options keep their own names (for example <code>network</code>, <code>filter</code>, <code>mode</code>, <code>strict</code>). Unknown parameters are rejected before any traffic, because most gateways silently ignore misspelled flags and return untargeted IPs.</p>
+<pre>uv run --no-editable proxy-index run --provider-config configs/oxylabs.toml \
+  --credentials-file .secrets/credentials.toml --target generic_http \
+  --requests 100 --param country=us --session-policy per_request</pre>
+<h2 id="matrix">Provider matrix</h2>
+<table><thead><tr><th>Provider</th><th>Flags in · base</th><th>Separator</th><th>Session · ttl</th><th>Rotation</th><th>Targeting</th><th>Endpoints</th></tr></thead><tbody>
+<tr><td><a href="https://docs.byteful.com/">byteful</a></td><td>username<br><code>ACCOUNT</code></td><td><code>_</code></td><td><code>s_ID</code><br><code>ttl_Nm</code></td><td>omit session</td><td>country, region, city, zip, asn</td><td>http residential.byteful.com:8000</td></tr>
+<tr><td><a href="https://docs.dataimpulse.com/">dataimpulse</a></td><td>username<br><code>ACCOUNT</code></td><td><code>__ / ;</code></td><td><code>sessid.ID</code><br><code>sessttl.N</code></td><td>omit session</td><td>country, region, city, zip, asn</td><td>http gw.dataimpulse.com:823, socks5 gw.dataimpulse.com:824</td></tr>
+<tr><td><a href="https://help.decodo.com/docs/residential-proxy-quick-start">decodo</a></td><td>username<br><code>ACCOUNT (with flags: user-ACCOUNT)</code></td><td><code>-</code></td><td><code>session-ID</code><br><code>sessionduration-N</code></td><td>omit session</td><td>country, region, city, zip, asn</td><td>http gate.decodo.com:10000, socks5 gate.decodo.com:7000</td></tr>
+<tr><td><a href="https://docs.evomi.com/proxies/residential">evomi</a></td><td>password<br><code>PASSWORD</code></td><td><code>_</code></td><td><code>session-ID</code><br><code>lifetime-N</code></td><td>omit session</td><td>country, region, city, mode</td><td>http premium-residential.evomi.com:1000, socks5 premium-residential.evomi.com:1002</td></tr>
+<tr><td><a href="https://fleetproxy.io/">fleetproxy</a></td><td>username<br><code>ACCOUNT</code></td><td><code>-</code></td><td><code>sid-ID</code><br><code>ttl-Nm</code></td><td>omit session</td><td>country, region, city</td><td>http residential-v2.fleetproxy.io:5000</td></tr>
+<tr><td><a href="https://docs.geonode.com/docs/proxies/api-reference/geo-targeting/">geonode</a></td><td>username<br><code>geonode_ACCOUNT-type-residential</code></td><td><code>-</code></td><td><code>session-ID</code><br><code>lifetime-N</code></td><td>rotating ports</td><td>country, region, city, asn, strict</td><td>http proxy.geonode.io:10000, socks5 proxy.geonode.io:12000</td></tr>
+<tr><td><a href="https://infatica.io/documentation/">infatica</a></td><td>username<br><code>ACCOUNT</code></td><td><code>_</code></td><td><code>s_ID</code><br><code>ttl_Nm</code></td><td>omit session</td><td>country, city, asn, zip</td><td>http pool.infatica.io:10000, socks5 pool.infatica.io:10000</td></tr>
+<tr><td><a href="https://docs.iproyal.com/proxies/residential/proxy">iproyal</a></td><td>password<br><code>PASSWORD</code></td><td><code>_</code></td><td><code>session-ID</code><br><code>lifetime-Nm</code></td><td>omit session</td><td>country, region, city, streaming</td><td>http geo.iproyal.com:12321</td></tr>
+<tr><td><a href="https://docs.joinmassive.com/residential/">massive</a></td><td>username<br><code>ACCOUNT</code></td><td><code>-</code></td><td><code>session-ID</code><br><code>sessionttl-N</code></td><td>omit session</td><td>country, region, city, zip, asn, type</td><td>http network.joinmassive.com:65534, socks5 network.joinmassive.com:65533</td></tr>
+<tr><td><a href="https://help.nodemaven.com/">nodemaven</a></td><td>username<br><code>ACCOUNT</code></td><td><code>-</code></td><td><code>sid-ID</code><br><code>ttl-Nm</code></td><td>omit session</td><td>country, region, city, zip, isp, type, ipv4, filter, speed</td><td>http gate.nodemaven.com:8080, socks5 gate.nodemaven.com:1080</td></tr>
+<tr><td><a href="https://developers.oxylabs.io/proxies/residential-proxies">oxylabs</a></td><td>username<br><code>customer-ACCOUNT</code></td><td><code>-</code></td><td><code>sessid-ID</code><br><code>sesstime-N</code></td><td>omit session</td><td>country, region, city, zip, asn</td><td>http pr.oxylabs.io:7777, socks5 pr.oxylabs.io:7777</td></tr>
+<tr><td>proxy-cheap</td><td>password<br><code>PASSWORD</code></td><td><code>_</code></td><td><code>session-ID</code><br><code>ttl-N</code></td><td>omit session</td><td>country</td><td>http thehub.proxy-cheap.com:8080</td></tr>
+<tr><td><a href="https://docs.proxy-seller.com/">proxy-seller</a></td><td>port slot<br><code>ACCOUNT</code></td><td><code>-</code></td><td><code>port 10000+slot</code><br><code>—</code></td><td>dashboard setting</td><td>—</td><td>http res.proxy-seller.com:10000, socks5 res.proxy-seller.com:10000</td></tr>
+<tr><td><a href="https://proxyempire.io/">proxyempire</a></td><td>username<br><code>ACCOUNT</code></td><td><code>-</code></td><td><code>sid-ID</code><br><code>ttl-Nm</code></td><td>omit session</td><td>country, region, city</td><td>http v2.proxyempire.io:5000</td></tr>
+<tr><td><a href="https://rayobyte.com/community/residential-proxies-documentation/">rayobyte</a></td><td>password<br><code>PASSWORD</code></td><td><code>-</code></td><td><code>session-ID</code><br><code>duration-N</code></td><td>omit session</td><td>country, region, city, zip, asn</td><td>http us-east.gw.rayobyte.com:8000</td></tr>
+<tr><td><a href="https://shifter.io/docs/products/residential-proxies/">shifter</a></td><td>username<br><code>customer-ACCOUNT</code></td><td><code>-</code></td><td><code>sid-ID</code><br><code>ttl-N</code></td><td>omit session</td><td>country, region, city, asn, strict</td><td>http p.shifter.io:443, socks5 p.shifter.io:443</td></tr>
+<tr><td><a href="https://developers.soax.com/">soax</a></td><td>username<br><code>(flags only)</code></td><td><code>-</code></td><td><code>session-ID</code><br><code>rotate-timed_N</code></td><td>omit session</td><td>country, region, city, isp, asn, zip, network</td><td>http proxy.soax.com:1337, socks5 proxy.soax.com:1337</td></tr>
+<tr><td><a href="https://help.webshare.io/">webshare</a></td><td>username<br><code>ACCOUNT</code></td><td><code>-</code></td><td><code>ID</code><br><code>—</code></td><td>omit session (+rotate)</td><td>country, city</td><td>http p.webshare.io:80, socks5 p.webshare.io:1080</td></tr>
+</tbody></table>
+<h2 id="sessions">Session policies</h2>
+<ul><li><code>rotate</code>: no session; the gateway assigns a new exit per request (Webshare adds <code>-rotate</code>).</li>
+<li><code>gateway</code>: no session; the port or dashboard decides (Geonode sticky ports, Proxy-Seller lists).</li>
+<li><code>fixed</code>: the supplied <code>session</code> is reused; inferred when a session is given.</li>
+<li><code>per_request</code>, <code>per_worker</code>, <code>per_run</code>: IDs generated from the run ID and scope, in each provider's allowed alphabet and length. Proxy-Seller selects a port slot instead.</li></ul>
+<p>Provider rules are enforced: Proxy-Cheap sessions are eight digits and require <code>ttl</code>; SOAX needs at least one targeting flag and lowercase countries; IPRoyal sessions are eight characters; Evomi sessions are 6–10 characters.</p>
+<h2 id="http">Plain HTTP targets</h2>
+<p>Byteful and Infatica answered every plain-HTTP request with a gateway <code>301</code> to HTTPS on 2026-10-22, and FleetProxy and ProxyEmpire answered about half that way. The redirect carries no CDN headers, so it comes from the proxy path, not the target. Use <code>generic_https</code> for these providers; <code>generic_http</code> results would measure the redirect policy instead of the network.</p>
+<h2 id="add">Add a provider</h2>
+<ol><li>Write <code>src/proxy_index/providers/grammars/&lt;id&gt;.toml</code>: where flags go (<code>username</code> or <code>password</code>), the base template, separators, each flag's format and validation, session generation and gateway endpoints.</li>
+<li>Add <code>configs/&lt;id&gt;.toml</code> with credential environment names and defaults.</li>
+<li>Add a golden case to <code>tests/test_grammars.py</code> and verify it with a small live run.</li></ol>
+<p>Providers whose behavior cannot be expressed as a grammar get a dedicated adapter registered in <code>proxy_index.providers.registry</code>.</p>
+<footer>Grammars verified against provider documentation and live probes on 2026-10-22.</footer>
+</main>
+</html>

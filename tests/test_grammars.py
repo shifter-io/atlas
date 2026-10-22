@@ -37,6 +37,10 @@ GOLDEN = {
     "fleetproxy": ({"country": "US", "session": "abc123", "ttl": 30},
                    "residential-v2.fleetproxy.io:5000",
                    "fixture1-country-us-sid-abc123-ttl-30m", SECRET),
+    "geonode": ({"country": "US", "strict": True, "session": "abc123", "ttl": 30},
+                "proxy.geonode.io:10000",
+                "geonode_fixture1-type-residential-country-us-strict-on-session-abc123-lifetime-30",
+                SECRET),
     "infatica": ({"country": "us", "city": "New York", "session": "abc123", "ttl": 30},
                  "pool.infatica.io:10000", "fixture1_c_US_city_New-York_s_abc123_ttl_30m", SECRET),
     "iproyal": ({"country": "US", "session": "abcd1234", "ttl": 30}, "geo.iproyal.com:12321",
@@ -60,6 +64,9 @@ GOLDEN = {
     "rayobyte": ({"country": "us", "session": "abc123", "ttl": 30},
                  "us-east.gw.rayobyte.com:8000", "fixture1",
                  SECRET + "-country-US-session-abc123-duration-30"),
+    "shifter": ({"country": "US", "strict": True, "session": "abc-123", "ttl": 2},
+                "p.shifter.io:443", "customer-fixture1-country-us-strict-true-sid-abc-123-ttl-120",
+                SECRET),
     "soax": ({"country": "US", "network": "res_mob", "session": "abc_123", "ttl": 5},
              "proxy.soax.com:1337",
              "country-us-network-res_mob-session-abc_123-rotate-timed_300", SECRET),
@@ -69,7 +76,7 @@ GOLDEN = {
 
 
 def test_every_grammar_has_a_golden_case_config_and_registry_entry():
-    assert set(GOLDEN) == set(grammar_ids()) == set(registry.all()) - {"shifter", "geonode"}
+    assert set(GOLDEN) == set(grammar_ids()) == set(registry.all())
     for provider in grammar_ids():
         data = tomllib.loads((ROOT / f"configs/{provider}.toml").read_text())
         assert data["provider"] == provider and "account" not in json.dumps(data["settings"])
@@ -145,6 +152,8 @@ def test_rotation_never_sends_a_session(provider):
     ("rayobyte", {"parameters": {"ttl": 61}, "session_policy": "per_run"}),
     ("massive", {"parameters": {"city": "New York"}}),  # Geo keys require country.
     ("massive", {"parameters": {"ttl": 10}}),  # TTL needs a session.
+    ("geonode", {"port": 9000, "session_policy": "per_request"}),
+    ("shifter", {"parameters": {"session": "x-country-us"}}),
     ("byteful", {"scheme": "socks5"}),
     ("oxylabs", {"gateway": "fra"}),
     ("infatica", {"host": "evil.example"}),
@@ -177,6 +186,9 @@ def test_provider_specific_mechanics():
     assert proxy("iproyal", parameters={"country": "us", "city": "New York"}).resolve(
         CONTEXT).password.endswith("_city-newyork")
     assert GrammarProxy("iproyal", "shop_session", SECRET).account == "shop_session"
+    rotating = proxy("geonode", port=9000, session_policy="rotate")
+    assert rotating.resolve(CONTEXT).username == "geonode_fixture1-type-residential"
+    assert proxy("shifter", gateway="fra").resolve(CONTEXT).host == "fra.p.shifter.io"
     assert proxy("rayobyte", gateway="la").resolve(CONTEXT).host == "la.residential.rayobyte.com"
 
 

@@ -1,0 +1,69 @@
+# Shifter Residential. https://shifter.io/docs/products/residential-proxies/
+schema_version = 1
+id = "shifter"
+version = "2"
+extra_flags = true # Escape hatch for future Shifter flags; values are redacted.
+
+[credential]
+flags_in = "username"
+username = "customer-{account}"
+reserved = ["customer"]
+
+[account]
+strip_prefixes = ["customer-"]
+pattern = "[A-Za-z0-9_][A-Za-z0-9_.-]*"
+
+[gateway]
+default = "auto"
+hosts = { auto = "p.shifter.io", fra = "fra.p.shifter.io", ams = "ams.p.shifter.io", lon = "lon.p.shifter.io", nyc = "nyc.p.shifter.io", tor = "tor.p.shifter.io", sgp = "sgp.p.shifter.io", blr = "blr.p.shifter.io", syd = "syd.p.shifter.io" }
+ports = { http = 443, socks5 = 443 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "region-{}"
+case = "lower"
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+
+[flags.asn]
+kind = "integer"
+format = "asn-{}"
+min = 1
+max = 4294967295
+
+[flags.strict]
+kind = "boolean"
+format = "strict-{}"
+true = "strict-true" # Only strict-true is documented; false is omitted.
+
+[flags.session]
+kind = "session"
+format = "sid-{}"
+pattern = "[A-Za-z0-9_][A-Za-z0-9_.-]*" # Hyphens are valid but cannot inject a flag.
+
+[flags.ttl]
+kind = "integer"
+format = "ttl-{}"
+min = 1
+scale = 60 # Canonical minutes; Shifter expects seconds.
+requires_session = true
+
+[session]
+flag = "session"
+generate = "hex"
+length = 32
+ttl_flag = "ttl"
+default_ttl_seconds = 120
+
+[pools]
+full_geo = {}
+country_geo = { forbid = ["region", "city", "asn"] }
+non_geo = { forbid = ["country", "region", "city", "asn"] }
