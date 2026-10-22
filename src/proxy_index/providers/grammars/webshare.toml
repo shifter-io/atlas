@@ -1,0 +1,39 @@
+# Webshare Residential. https://help.webshare.io/
+# Country is a bare ISO code, -rotate rotates per request and a bare number is a sticky
+# session. Invalid parameters return 400 client_connect_invalid_params.
+schema_version = 1
+id = "webshare"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+rotation_suffix = "rotate"
+reserved = ["rotate"]
+
+[account]
+pattern = "[A-Za-z0-9]+"
+
+[gateway]
+host = "p.webshare.io"
+ports = { http = 80, socks5 = 1080 }
+
+[flags.country]
+kind = "country"
+format = "{}"
+case = "lower"
+
+[flags.city]
+kind = "name"
+format = "city_{}"
+case = "lower"
+pattern = "[a-z_]+"
+
+[flags.session]
+kind = "session"
+format = "{}"
+pattern = "[1-9][0-9]{0,8}"
+
+[session]
+flag = "session"
+generate = "digits"
+length = 6

@@ -210,7 +210,8 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
 
     monkeypatch.setattr("proxy_index.cli.run", fake_run)
     assert main(["providers"]) == 0
-    assert json.loads(capsys.readouterr().out) == ["shifter", "geonode"]
+    listed = json.loads(capsys.readouterr().out)
+    assert len(listed) == 18 and {"shifter", "geonode", "soax"} <= set(listed)
     for target in ("generic_http", "generic_https"):
         assert main(["run", "--target", target, "--provider-config", str(CONFIG),
                      "--param", "country=US", "--param", "strict=true", "--param", "ttl=600",

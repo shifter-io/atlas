@@ -1,0 +1,25 @@
+# SOAX Residential. https://developers.soax.com/
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/soax.toml
+schema_version = 1
+provider = "soax"
+
+[credentials]
+password_env = "SOAX_PASSWORD"
+
+[settings]
+scheme = "http" # http or socks5
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# SOAX requires at least one targeting flag; country is the default. A session implies
+# fixed sessions.
+country = "us"
+# region = "california"
+# city = "los_angeles"
+# isp = "value"
+# asn = 7922
+# zip = "90001"
+# network = "res"
+# session = "example1"
+# ttl = 10 # Minutes; requires a session

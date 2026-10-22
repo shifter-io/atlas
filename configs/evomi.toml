@@ -1,0 +1,22 @@
+# Evomi Residential. https://docs.evomi.com/proxies/residential
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/evomi.toml
+schema_version = 1
+provider = "evomi"
+
+[credentials]
+account_env = "EVOMI_ACCOUNT"
+password_env = "EVOMI_PASSWORD"
+
+[settings]
+scheme = "http" # http or socks5
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# All optional; None omits a value. A session implies fixed sessions.
+# country = "us"
+# region = "california"
+# city = "Los Angeles"
+# session = "example1"
+# ttl = 10 # Minutes; requires a session
+# mode = "speed"

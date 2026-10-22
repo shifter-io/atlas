@@ -1,0 +1,23 @@
+# Oxylabs Residential. https://developers.oxylabs.io/proxies/residential-proxies
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/oxylabs.toml
+schema_version = 1
+provider = "oxylabs"
+
+[credentials]
+account_env = "OXYLABS_ACCOUNT"
+password_env = "OXYLABS_PASSWORD"
+
+[settings]
+scheme = "http" # http or socks5
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# All optional; None omits a value. A session implies fixed sessions.
+# country = "us"
+# region = "california"
+# city = "los_angeles"
+# zip = "90001"
+# asn = 7922
+# session = "example1"
+# ttl = 10 # Minutes; requires a session

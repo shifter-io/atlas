@@ -1,0 +1,71 @@
+# SOAX Residential. https://developers.soax.com/
+# The username holds only flags (no account); the password is the package key. SOAX
+# rejects unknown flags, uppercase countries and session IDs outside [A-Za-z0-9_]{1,32}.
+schema_version = 1
+id = "soax"
+
+[credential]
+flags_in = "username"
+username = ""
+
+[account]
+required = false
+
+[gateway]
+host = "proxy.soax.com"
+ports = { http = 1337, socks5 = 1337 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "region-{}"
+case = "lower"
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+
+[flags.isp]
+kind = "name"
+format = "isp-{}"
+case = "lower"
+
+[flags.asn]
+kind = "integer"
+format = "asn-{}"
+min = 1
+max = 4294967295
+
+[flags.zip]
+kind = "token"
+format = "zip-{}"
+pattern = "[A-Za-z0-9]{2,10}"
+
+[flags.network]
+kind = "choice"
+format = "network-{}"
+choices = ["res", "mob", "res_mob", "any"]
+
+[flags.session]
+kind = "session"
+format = "session-{}"
+pattern = "[A-Za-z0-9_]{1,32}"
+
+[flags.ttl]
+kind = "integer"
+format = "rotate-timed_{}"
+min = 1
+max = 10080
+scale = 60 # Canonical minutes; SOAX reads a bare number as seconds.
+requires_session = true
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 16
+ttl_flag = "ttl"

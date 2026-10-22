@@ -1,0 +1,22 @@
+# IPRoyal Residential. https://docs.iproyal.com/proxies/residential/proxy
+# Never put account credentials in this file.
+# Credential grammar: src/proxy_index/providers/grammars/iproyal.toml
+schema_version = 1
+provider = "iproyal"
+
+[credentials]
+account_env = "IPROYAL_ACCOUNT"
+password_env = "IPROYAL_PASSWORD"
+
+[settings]
+scheme = "http" # http
+# session_policy = "per_request" # rotate, fixed, per_request, per_worker, per_run
+
+[parameters]
+# All optional; None omits a value. A session implies fixed sessions.
+# country = "us"
+# region = "california"
+# city = "losangeles"
+# session = "12345678"
+# ttl = 10 # Minutes; requires a session
+# streaming = true

@@ -1,0 +1,63 @@
+# Oxylabs Residential. https://developers.oxylabs.io/proxies/residential-proxies
+schema_version = 1
+id = "oxylabs"
+
+[credential]
+flags_in = "username"
+username = "customer-{account}"
+reserved = ["customer"]
+
+[account]
+strip_prefixes = ["customer-"]
+
+[gateway]
+host = "pr.oxylabs.io"
+ports = { http = 7777, socks5 = 7777 }
+
+[flags.country]
+kind = "country"
+format = "cc-{}"
+case = "upper"
+
+[flags.region]
+kind = "name"
+format = "st-us_{}" # US states only, e.g. california.
+case = "lower"
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.zip]
+kind = "token"
+format = "postalcode-{}"
+pattern = "[0-9]{5}" # US only.
+requires = ["country"]
+
+[flags.asn]
+kind = "integer"
+format = "ASN-{}"
+min = 1
+max = 4294967295
+
+[flags.session]
+kind = "session"
+format = "sessid-{}"
+pattern = "[A-Za-z0-9]{1,32}"
+
+[flags.ttl]
+kind = "integer"
+format = "sesstime-{}"
+min = 1
+max = 1440
+requires_session = true
+
+[session]
+flag = "session"
+generate = "digits"
+length = 10
+ttl_flag = "ttl"
+default_ttl_seconds = 600

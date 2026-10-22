@@ -1,0 +1,48 @@
+# ProxyEmpire Residential. https://proxyempire.io/
+# Unknown keys return HTTP 502 with an empty body.
+# About half of plain-HTTP requests get a gateway 301 to HTTPS; HTTPS targets pass.
+schema_version = 1
+id = "proxyempire"
+
+[credential]
+flags_in = "username"
+username = "{account}"
+
+[gateway]
+host = "v2.proxyempire.io"
+ports = { http = 5000 }
+
+[flags.country]
+kind = "country"
+format = "country-{}"
+case = "lower"
+
+[flags.region]
+kind = "name"
+format = "region-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.city]
+kind = "name"
+format = "city-{}"
+case = "lower"
+requires = ["country"]
+
+[flags.session]
+kind = "session"
+format = "sid-{}"
+pattern = "[A-Za-z0-9]{1,32}"
+
+[flags.ttl]
+kind = "integer"
+format = "ttl-{}m"
+min = 1
+max = 120
+requires_session = true
+
+[session]
+flag = "session"
+generate = "alnum"
+length = 8
+ttl_flag = "ttl"
