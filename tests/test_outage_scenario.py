@@ -17,13 +17,13 @@ import pytest
 from test_census_pulse import batch, batch_run, product
 from test_storage import enrichment, measurement
 
-from milf_framework.calculated import store
-from milf_framework.calculated.calculator import calculate
-from milf_framework.detect import detect
-from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.db import Database
-from milf_framework.orchestrator.nodes import issue_token
-from milf_framework.storage import connect, ingest, seed
+from proxy_index.calculated import store
+from proxy_index.calculated.calculator import calculate
+from proxy_index.detect import detect
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.db import Database
+from proxy_index.orchestrator.nodes import issue_token
+from proxy_index.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 

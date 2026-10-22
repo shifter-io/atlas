@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "milf-framework"
+name = "proxy-index"
 version = "0.9.5"
 description = "Composable proxy targets, bounded asynchronous runs and local IP enrichment"
 readme = "README.md"
@@ -18,22 +18,22 @@ dependencies = [
 ]
 
 [project.scripts]
-milf-framework = "milf_framework.cli:main"
+proxy-index = "proxy_index.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "ruff>=0.12", "trustme>=1.2"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/milf_framework"]
+packages = ["src/proxy_index"]
 
 # Nodes and the orchestrator resolve regions and seed targets from these when installed.
 [tool.hatch.build.targets.wheel.force-include]
-"configs/regions.yaml" = "milf_framework/configs/regions.yaml"
-"configs/countries.json" = "milf_framework/configs/countries.json"
-"configs/targets.toml" = "milf_framework/configs/targets.toml"
-"configs/methodology.toml" = "milf_framework/configs/methodology.toml"
-"configs/staging.toml" = "milf_framework/configs/staging.toml"
-"configs/staging-methodology.toml" = "milf_framework/configs/staging-methodology.toml"
+"configs/regions.yaml" = "proxy_index/configs/regions.yaml"
+"configs/countries.json" = "proxy_index/configs/countries.json"
+"configs/targets.toml" = "proxy_index/configs/targets.toml"
+"configs/methodology.toml" = "proxy_index/configs/methodology.toml"
+"configs/staging.toml" = "proxy_index/configs/staging.toml"
+"configs/staging-methodology.toml" = "proxy_index/configs/staging-methodology.toml"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "scripts", "docs", "configs", "credentials.toml.example", "database.toml.example", "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".github", "db-ip/README.html"]

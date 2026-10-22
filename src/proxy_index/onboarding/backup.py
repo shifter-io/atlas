@@ -82,13 +82,15 @@ def verify_region(manifest: dict, region: str, directory: Path, expected: dict) 
 
 REMOTE_TREE = '''
 import json,pathlib,sys,subprocess
-from milf_framework.onboarding.backup import tree_inventory
-from milf_framework.onboarding.files import read_json
+from proxy_index.onboarding.backup import tree_inventory
+from proxy_index.onboarding.files import read_json
 root=pathlib.Path(sys.argv[1]);state=read_json(root/'state.json')
 assert state['status'] in ('closed','completed'), 'Region has not closed naturally'
-unit='milf-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'
-assert subprocess.check_output(['systemctl','show',unit,'--property=MainPID','--value'],
-                               text=True).strip() in ('','0'), 'Region process is still alive'
+# Units launched before the Proxy Index rename keep the old prefix until they end.
+for prefix in ('proxy-index','milf'):
+    unit=prefix+'-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'
+    assert subprocess.check_output(['systemctl','show',unit,'--property=MainPID','--value'],
+                                   text=True).strip() in ('','0'), 'Region process is still alive'
 print(json.dumps(tree_inventory(root)))
 '''
 

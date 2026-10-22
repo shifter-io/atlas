@@ -9,10 +9,10 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from milf_framework import GeonodeProxy, JsonSink, RequestContext, RunConfig, load_provider, run
-from milf_framework.onboarding import manifest as campaign
-from milf_framework.targets import EchoIpTarget, TargetRegistry
-from milf_framework.transport import HttpTransport
+from proxy_index import GeonodeProxy, JsonSink, RequestContext, RunConfig, load_provider, run
+from proxy_index.onboarding import manifest as campaign
+from proxy_index.targets import EchoIpTarget, TargetRegistry
+from proxy_index.transport import HttpTransport
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV = {"GEONODE_ACCOUNT": "fixture_account", "GEONODE_PASSWORD": "private-password"}

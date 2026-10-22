@@ -1,5 +1,5 @@
 """CLI commands: orchestrator, node, node-token, scheduler and staging (registered into
-milf-framework)."""
+proxy-index)."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ def register(commands) -> None:
     serve.add_argument("--dev", action="store_true", help="Verbose logs; loopback only")
     serve.add_argument(
         "--database-file",
-        default=os.environ.get("MILF_DATABASE_FILE"),
-        help="Private PostgreSQL config (default $MILF_DATABASE_FILE)",
+        default=os.environ.get("PROXY_INDEX_DATABASE_FILE"),
+        help="Private PostgreSQL config (default $PROXY_INDEX_DATABASE_FILE)",
     )
     serve.add_argument("--methodology", help="Scoring methodology for the calculate job")
 
@@ -78,7 +78,7 @@ def register(commands) -> None:
 def dispatch(args) -> int:
     if args.command == "orchestrator":
         if not args.database_file:
-            raise ValueError("--database-file or MILF_DATABASE_FILE is required")
+            raise ValueError("--database-file or PROXY_INDEX_DATABASE_FILE is required")
         from .app import serve
 
         serve(

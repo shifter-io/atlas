@@ -9,8 +9,8 @@ import shlex
 import subprocess
 from pathlib import Path, PurePosixPath
 
-from milf_framework.onboarding.export import verify_chunk
-from milf_framework.onboarding.files import atomic_json, private_dir
+from proxy_index.onboarding.export import verify_chunk
+from proxy_index.onboarding.files import atomic_json, private_dir
 
 
 def main():

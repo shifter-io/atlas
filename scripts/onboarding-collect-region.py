@@ -8,8 +8,8 @@ import subprocess
 import tarfile
 from pathlib import Path
 
-from milf_framework.onboarding.files import private_dir
-from milf_framework.onboarding.manifest import load
+from proxy_index.onboarding.files import private_dir
+from proxy_index.onboarding.manifest import load
 
 
 def main():

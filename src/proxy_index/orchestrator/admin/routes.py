@@ -90,7 +90,7 @@ async def admin_auth(request: web.Request, handler: Handler) -> web.StreamRespon
         raise _error(
             web.HTTPUnauthorized,
             "authentication required",
-            **{"WWW-Authenticate": 'Basic realm="milf admin", charset="UTF-8"'},
+            **{"WWW-Authenticate": 'Basic realm="Proxy Index admin", charset="UTF-8"'},
         )
     return await handler(request)
 

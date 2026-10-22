@@ -73,7 +73,7 @@ fi
 {quoted}/tools/uv pip install --python {quoted}/venv/bin/python --require-hashes \
  -r {quoted}/releases/requirements.txt
 {quoted}/tools/uv pip install --python {quoted}/venv/bin/python --no-deps --reinstall {wheel}
-{quoted}/venv/bin/milf-framework onboarding probe --help
+{quoted}/venv/bin/proxy-index onboarding probe --help
 """)
     print(json.dumps({"region": args.region, "wheel_sha256": checksum, "deployed": True}))
 

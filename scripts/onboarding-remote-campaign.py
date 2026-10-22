@@ -8,7 +8,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
-from milf_framework.onboarding.manifest import load, moment, regional_window
+from proxy_index.onboarding.manifest import load, moment, regional_window
 
 
 def main():
@@ -39,8 +39,8 @@ def main():
     remote("umask 077\nmkdir -p " + shlex.quote(directory))
     subprocess.run(["scp", *options, str(args.manifest),
                     target + ":" + shlex.quote(directory + "/campaign.json")], check=True)
-    unit = "milf-onboarding-" + manifest["campaign_id"] + "-" + args.region
-    base = [root + "/venv/bin/milf-framework", "onboarding", "run"]
+    unit = "proxy-index-onboarding-" + manifest["campaign_id"] + "-" + args.region
+    base = [root + "/venv/bin/proxy-index", "onboarding", "run"]
     if args.calibration:
         driver = Path(__file__).with_name("onboarding-calibration.py")
         subprocess.run(["scp", *options, str(driver),
@@ -58,9 +58,9 @@ def main():
     # Refuse to replace a live regional assignment, and verify the installed build
     # and configuration before any new service can issue traffic.
     check = '''import json,pathlib,subprocess,sys
-from milf_framework import __version__
-from milf_framework.onboarding.files import digest,atomic_json
-from milf_framework.onboarding.manifest import load
+from proxy_index import __version__
+from proxy_index.onboarding.files import digest,atomic_json
+from proxy_index.onboarding.manifest import load
 root=pathlib.Path(sys.argv[1]); manifest=load(pathlib.Path(sys.argv[2]))
 assert manifest['framework_version']==__version__, 'Framework version mismatch'
 assert digest(root/'configs/provider.toml')==manifest['provider_config_sha256']
@@ -84,7 +84,7 @@ if marker.exists():
               "unit": unit + ".service",
               "state_path": str(relative / "regions" / args.region / "state.json")}
     save = ("import json,sys;from pathlib import Path;"
-            "from milf_framework.onboarding.files import atomic_json;"
+            "from proxy_index.onboarding.files import atomic_json;"
             "atomic_json(Path(sys.argv[1]),json.loads(sys.argv[2]))")
     remote(shlex.join([root + "/venv/bin/python", "-c", save, root + "/active-run.json",
                        json.dumps(marker)]))

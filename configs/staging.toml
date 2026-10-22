@@ -1,4 +1,4 @@
-# Staging profile for `milf-framework staging init --config configs/staging.toml [--clean]`.
+# Staging profile for `proxy-index staging init --config configs/staging.toml [--clean]`.
 # Host, port, user and password come from .secrets/database.toml (the app user owns the staging
 # database); .secrets/postgres-admin.toml creates it. The name must differ from production.
 

@@ -2,10 +2,10 @@ import math
 
 import pytest
 
-from milf_framework import ProxyConfig, RunConfig
-from milf_framework.models import Outcome
-from milf_framework.stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, Histogram, bucket_of
-from milf_framework.targets import EchoIpTarget, TargetRegistry, registry
+from proxy_index import ProxyConfig, RunConfig
+from proxy_index.models import Outcome
+from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, Histogram, bucket_of
+from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
 
 
 @pytest.mark.parametrize("body,expected", [
@@ -107,7 +107,7 @@ def test_counters_track_verdicts_and_bytes():
 
 
 def test_geo_fields_match_the_enrichment_lookup():
-    from milf_framework.storage import ENRICHMENT_FIELDS
+    from proxy_index.storage import ENRICHMENT_FIELDS
 
     assert set(LOCATION_FIELDS) | set(NETWORK_FIELDS) | {"matched"} == set(ENRICHMENT_FIELDS)
     assert not set(LOCATION_FIELDS) & set(NETWORK_FIELDS)

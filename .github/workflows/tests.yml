@@ -10,7 +10,7 @@ jobs:
           version: "0.12.10"
       - run: uv sync --locked --no-editable --python 3.12
       - run: uv run --no-editable ruff check src tests scripts
-      - run: uv run --no-editable pytest --cov=milf_framework --cov-branch
+      - run: uv run --no-editable pytest --cov=proxy_index --cov-branch
       - run: uv run --no-editable python scripts/benchmark.py
       - run: uv build
 

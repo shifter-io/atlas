@@ -1,7 +1,7 @@
 """In-place v4 → … → v8, v5 → … → v8, v6 → v7 → v8 and v7 → v8 migrations against a pg_dump of
 a v4 database.
 
-fixtures/database_v4.sql.gz was produced by milf-framework 0.8.0 (schema v4, calculated v1): two
+fixtures/database_v4.sql.gz was produced by proxy-index 0.8.0 (schema v4, calculated v1): two
 benchmarked providers with enrichment and evidence, a third with a Shifter-style provider_config,
 float timeout, rate, custom URL, an unknown config key and a non-canonical bucket label; three
 builds (ready and ranked, then expired and retained scores, then an unpublished draft).
@@ -21,10 +21,10 @@ from aiohttp.test_utils import TestClient, TestServer
 from test_calculated import payload_mismatches
 from test_storage import measurement
 
-from milf_framework.calculated import store
-from milf_framework.calculated.api import app
-from milf_framework.calculated.calculator import calculate
-from milf_framework.storage import (
+from proxy_index.calculated import store
+from proxy_index.calculated.api import app
+from proxy_index.calculated.calculator import calculate
+from proxy_index.storage import (
     SCHEMA_VERSION,
     V5_CHECKSUM,
     V6_CHECKS,
@@ -38,7 +38,7 @@ from milf_framework.storage import (
     seed,
     status,
 )
-from milf_framework.storage import (
+from proxy_index.storage import (
     _schema as storage_schema,
 )
 

@@ -81,7 +81,7 @@ min_latency_successes = 30
 min_successes = 1
 min_batches = 10
 
-# Live tape detection (milf_framework.detect). Not part of the methodology id: changing these
+# Live tape detection (proxy_index.detect). Not part of the methodology id: changing these
 # never changes a calculation. Rates are fractions; *_pp are percentage points as fractions.
 [events]
 baseline_batches = 48         # trailing pulse batches of the same product, country and target

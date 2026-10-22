@@ -6,8 +6,8 @@ import html
 import json
 from pathlib import Path
 
-from milf_framework.onboarding.files import atomic_bytes
-from milf_framework.regions import load_regions
+from proxy_index.onboarding.files import atomic_bytes
+from proxy_index.regions import load_regions
 
 
 def main():

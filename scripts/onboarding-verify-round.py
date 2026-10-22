@@ -8,16 +8,16 @@ import os
 import shutil
 from pathlib import Path
 
-from milf_framework.onboarding.export import verify_chunk
-from milf_framework.onboarding.files import (
+from proxy_index.onboarding.export import verify_chunk
+from proxy_index.onboarding.files import (
     atomic_bytes,
     atomic_json,
     digest,
     private_dir,
     read_json,
 )
-from milf_framework.onboarding.manifest import load, moment
-from milf_framework.onboarding.scheduler import job_directory, validate_state
+from proxy_index.onboarding.manifest import load, moment
+from proxy_index.onboarding.scheduler import job_directory, validate_state
 
 
 def main():

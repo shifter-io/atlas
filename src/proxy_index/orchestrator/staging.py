@@ -1,4 +1,4 @@
-"""A staging database for trying the census/pulse loop end to end (milf-framework staging init).
+"""A staging database for trying the census/pulse loop end to end (proxy-index staging init).
 
 `configs/staging.toml` names the database and the profile: a few countries, a census every few
 minutes, frequent pulses, the load test's default reference countries, the staging methodology, HTML
@@ -253,7 +253,7 @@ def init(
                 "token_file": str(path),
                 "command": " ".join(
                     [
-                        "milf-framework node",
+                        "proxy-index node",
                         f"--orchestrator {orchestrator_url}",
                         f"--token-file {_quote(path)}",
                         f"--provider {node['provider']}",
@@ -294,16 +294,16 @@ def init(
         "nodes": tokens,
         "commands": {
             "orchestrator": (
-                f"milf-framework orchestrator --dev --database-file {_quote(staging_file)}"
+                f"proxy-index orchestrator --dev --database-file {_quote(staging_file)}"
                 + (f" --methodology {_quote(methodology)}" if methodology else "")
             ),
             "calculate": (
-                f"milf-framework calculate --database-file {_quote(staging_file)}"
+                f"proxy-index calculate --database-file {_quote(staging_file)}"
                 + (f" --methodology {_quote(methodology)}" if methodology else "")
             ),
             "nodes": [token["command"] for token in tokens],
             "report": (
-                f"milf-framework report html --database-file {_quote(staging_file)} "
+                f"proxy-index report html --database-file {_quote(staging_file)} "
                 f"--out {_quote(reports_dir or 'reports/staging')}"
             ),
         },

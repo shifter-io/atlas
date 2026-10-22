@@ -11,15 +11,15 @@ from aiohttp.test_utils import TestClient, TestServer
 from helpers import FakeTransport
 from test_storage import measurement
 
-from milf_framework.orchestrator import batches
-from milf_framework.orchestrator.app import build_app
-from milf_framework.orchestrator.archive import ArchiveError, pack, unpack
-from milf_framework.orchestrator.db import Database, put_setting
-from milf_framework.orchestrator.jobs import calculate, detect, retention
-from milf_framework.orchestrator.nodes import issue_token
-from milf_framework.orchestrator.scheduler import Scheduler, Task
-from milf_framework.regions import REGION_IDS
-from milf_framework.storage import connect, ingest, seed
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.app import build_app
+from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
+from proxy_index.orchestrator.db import Database, put_setting
+from proxy_index.orchestrator.jobs import calculate, detect, retention
+from proxy_index.orchestrator.nodes import issue_token
+from proxy_index.orchestrator.scheduler import Scheduler, Task
+from proxy_index.regions import REGION_IDS
+from proxy_index.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -262,7 +262,7 @@ async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
 
 class SlowTransport(FakeTransport):
     async def execute(self, target, *, context=None):
-        from milf_framework.models import Outcome
+        from proxy_index.models import Outcome
 
         return Outcome(30.2, ip="8.8.4.4", status=200, response_body_bytes=8)
 
@@ -902,9 +902,9 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
     import types
 
     # A stand-in module: the job imports the calculator lazily, at run time.
-    module = types.ModuleType("milf_framework.calculated.calculator")
+    module = types.ModuleType("proxy_index.calculated.calculator")
     module.calculate = fake
-    monkeypatch.setitem(sys.modules, "milf_framework.calculated.calculator", module)
+    monkeypatch.setitem(sys.modules, "proxy_index.calculated.calculator", module)
     assert (await calculate(db, database, "m.toml"))["skipped"].startswith("no batch")
     prepare(database, ("DE",), DE=time(12))
     issue_token(database, provider="alpha", product="res", region="fra1")
@@ -924,8 +924,8 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
 async def test_detect_job_is_optional(database, monkeypatch):
     import sys
 
-    monkeypatch.setitem(sys.modules, "milf_framework.detect", None)
-    assert (await detect(database))["skipped"].startswith("milf_framework.detect")
+    monkeypatch.setitem(sys.modules, "proxy_index.detect", None)
+    assert (await detect(database))["skipped"].startswith("proxy_index.detect")
 
     class Module:
         @staticmethod
@@ -933,7 +933,7 @@ async def test_detect_job_is_optional(database, monkeypatch):
             assert now.tzinfo is UTC
             return 3
 
-    monkeypatch.setitem(sys.modules, "milf_framework.detect", Module)
+    monkeypatch.setitem(sys.modules, "proxy_index.detect", Module)
     assert await detect(database) == {"events": 3}
 
 
@@ -975,7 +975,7 @@ async def test_reaper_gives_uploads_longer(database, db):
 
 
 def test_cli_node_token_and_dev_bind(database, capsys):
-    from milf_framework.cli import main
+    from proxy_index.cli import main
 
     prepare(database)
     assert main(["node-token", "--database-file", str(database), "--provider", "alpha",

@@ -5,7 +5,7 @@ reap                      every minute: fail runs that never started or went sil
 offline                   every 15 s: nodes without a heartbeat go offline
 calculate                 every minute, debounced to calculate.min_interval_seconds and only
                           after a batch finished: calculated.calculator.calculate(publish=True)
-detect                    every minute: milf_framework.detect.detect(conn, now) writes the
+detect                    every minute: proxy_index.detect.detect(conn, now) writes the
                           incident events from finished pulse batches (optional module)
 retention                 daily: test_events older than retention.events_days (whole monthly
                           partitions are dropped), job_runs older than retention.job_runs_days
@@ -69,7 +69,7 @@ async def detect(credentials_file: str) -> dict[str, Any]:
     try:
         from ..detect import detect as run_detect
     except ModuleNotFoundError:
-        return {"skipped": "milf_framework.detect is not installed"}
+        return {"skipped": "proxy_index.detect is not installed"}
 
     def work() -> int:
         with storage.connect(credentials_file) as conn:

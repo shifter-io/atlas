@@ -14,9 +14,9 @@ from test_calculated import OtherIP, lenient_policy, payload_mismatches
 from test_storage import enrichment, measurement
 from test_storage_v6 import BERLIN, NETWORK, census
 
-from milf_framework import traffic
-from milf_framework.calculated import store
-from milf_framework.calculated.aggregate import (
+from proxy_index import traffic
+from proxy_index.calculated import store
+from proxy_index.calculated.aggregate import (
     breakdowns,
     downtime,
     outage_list,
@@ -25,11 +25,11 @@ from milf_framework.calculated.aggregate import (
     series,
     uptime,
 )
-from milf_framework.calculated.api import app
-from milf_framework.calculated.calculator import calculate
-from milf_framework.cli import main
-from milf_framework.detect import WATERMARK, category, detect, list_events, thresholds
-from milf_framework.storage import connect, ingest, seed
+from proxy_index.calculated.api import app
+from proxy_index.calculated.calculator import calculate
+from proxy_index.cli import main
+from proxy_index.detect import WATERMARK, category, detect, list_events, thresholds
+from proxy_index.storage import connect, ingest, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -693,7 +693,7 @@ def test_pulse_down_opens_an_outage_and_recovered_closes_it(database):
 
 
 def test_healthy_pulse_closes_a_census_outage_once(database):
-    from milf_framework.storage import partition
+    from proxy_index.storage import partition
 
     seed(database)
     with connect(database) as conn:

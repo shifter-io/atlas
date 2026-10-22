@@ -1,4 +1,4 @@
--- Transactional v6 → v7 migration, applied by storage.migrate() (milf-framework db-migrate),
+-- Transactional v6 → v7 migration, applied by storage.migrate() (proxy-index db-migrate),
 -- alone from v6 or after the earlier steps. The latency-under-load test runs as test_batches of
 -- kind 'load', and a census the orchestrator reruns after a provider outage names the census it
 -- replaces (retry_of). No stored row changes. Definitions repeat schema.sql exactly (tests

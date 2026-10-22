@@ -1,4 +1,4 @@
-# MILF framework
+# Proxy Index
 
 Standalone Python 3.12+ library and CLI for HTTP/SOCKS5 proxy measurements.
 MIT licensed. No database server or scheduler is required.
@@ -8,10 +8,10 @@ measurement definitions, result contracts and the implemented PostgreSQL schema.
 
 ```sh
 uv sync --locked --no-editable
-uv run --no-editable milf-framework targets
+uv run --no-editable proxy-index targets
 # Set PROXY_URL privately in your environment first.
-uv run --no-editable milf-framework run --target generic_http --requests 5000 --concurrency 100
-uv run --no-editable milf-framework enrich results/RUN_ID
+uv run --no-editable proxy-index run --target generic_http --requests 5000 --concurrency 100
+uv run --no-editable proxy-index enrich results/RUN_ID
 ```
 
 Shifter Residential: see [the adapter guide](docs/shifter-parameters.html).
@@ -20,7 +20,7 @@ and set directory/file permissions to `700`/`600`. The private copy is excluded 
 Git, packages and remote uploads. Then:
 
 ```sh
-uv run --no-editable milf-framework run --provider-config configs/shifter.toml \
+uv run --no-editable proxy-index run --provider-config configs/shifter.toml \
   --credentials-file .secrets/credentials.toml --target generic_http \
   --url http://ip-info.com/myip --requests 5000 --concurrency 100 --param country=us
 ```
@@ -46,7 +46,7 @@ PostgreSQL: this project uses a dedicated local cluster on `127.0.0.1:55432`.
 Run `uv run --no-editable python scripts/postgres_local.py start` after reboot.
 Private database credentials are in `.secrets/database.toml`; the public template is
 `database.toml.example`. Add `--database-file .secrets/database.toml` to `run` or
-`enrich` for automatic ingestion, or use `milf-framework ingest results/RUN_ID`
+`enrich` for automatic ingestion, or use `proxy-index ingest results/RUN_ID`
 with the same flag. Replaying an import does not double-count data. See the HTML
 guide for initialization on a new machine and the schema.
 
@@ -79,7 +79,7 @@ then none for `stall_seconds` (setting `census.stall_seconds`, default 600) stop
 its summary carries `outage_started_at` (the last success) and its failures stay in the buckets. Runs gain typed outcome counters (`challenges`, `blocks`, `timeouts`,
 `proxy_errors`, `bytes_up`, `bytes_down`) per bucket and an optional `geo.jsonl.gz` breakdown
 stored in `run_geo_buckets` against the shared location/network ids. Artifacts without these
-keys still import and rebuild unchanged. `milf-framework db-seed --database-file
+keys still import and rebuild unchanged. `proxy-index db-seed --database-file
 .secrets/database.toml` upserts regions, countries and targets from `configs/regions.yaml`,
 `configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
 target schedules once set (`--reset-times` restores the staggered default census slots).
@@ -87,7 +87,7 @@ target schedules once set (`--reset-times` restores the staggered default census
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
 replaces); schema v8 (`migrate_v7_v8.sql`) adds `load_references`, the daily reference country of
-each runner region. `db-init` verifies v8 and refuses other schemas. `milf-framework db-migrate
+each runner region. `db-init` verifies v8 and refuses other schemas. `proxy-index db-migrate
 --database-file .secrets/database.toml` upgrades an unmodified v7, v6 or v5 database, or an
 unmodified v4 database (and calculated v1 layer) through v5, v6 and v7, in place, in one
 transaction that compares every rebuilt summary, scope, pool and bucket (from v6 every test
@@ -106,11 +106,11 @@ The existing HTML guide now includes the calculated schema, API and command work
 Collection still runs independently; calculation requires PostgreSQL and never sends proxy traffic.
 
 ```sh
-milf-framework calculate-init --database-file .secrets/database.toml
-milf-framework run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
-milf-framework calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
-milf-framework snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
-milf-framework serve --database-file .secrets/database.toml
+proxy-index calculate-init --database-file .secrets/database.toml
+proxy-index run-role RUN_UUID --role pool_sampling --database-file .secrets/database.toml
+proxy-index calculate --methodology configs/methodology.toml --publish --database-file .secrets/database.toml
+proxy-index snapshot-export ../src/data/dataset.json --database-file .secrets/database.toml
+proxy-index serve --database-file .secrets/database.toml
 ```
 
 From the website root, `npm run build` exports the measured dataset and builds the site;
@@ -218,7 +218,7 @@ ASN labels; `db-migrate` preserves existing calculated rows and published snapsh
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
-`milf-framework report traffic --test census|pulse --database-file ...` prints GB per provider.
+`proxy-index report traffic --test census|pulse --database-file ...` prints GB per provider.
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
 alternative profiles use their own weights. No overall score is emitted for missing required inputs.
 The current run is explicitly a pool sample. Scoring weights remain a draft.
@@ -253,7 +253,7 @@ Value is 100 × cheapest of the kind ÷ yours. List prices are effective-dated `
 `pricing`) for the pool actually tested, naming the product by provider and product, with cohort
 `"*"` (every cohort of the product). The Shifter Residential price list (Full Geo pool, observed
 2026-10-03: $0.75/GB lowest, $1.00/GB entry) is in `configs/pricing/shifter-residential.json`;
-load it with `milf-framework metric-evidence configs/pricing/shifter-residential.json
+load it with `proxy-index metric-evidence configs/pricing/shifter-residential.json
 --database-file .secrets/database.toml` once the product exists. There is no blocklist term and
 no claim-gap input; a block is the target refusing us (403, 429, 451, a block page), proxy-side
 failures are proxy errors.
@@ -288,13 +288,13 @@ methodology `configs/staging-methodology.toml`: it `extends` `methodology.toml` 
 loads the named file (relative to it) first and merges its own settings over it.
 
 ```sh
-milf-framework staging init --config configs/staging.toml          # --clean drops and recreates
-milf-framework db-migrate --database-file .secrets/staging-database.toml   # an existing v6 one
-milf-framework orchestrator --dev --database-file .secrets/staging-database.toml \
+proxy-index staging init --config configs/staging.toml          # --clean drops and recreates
+proxy-index db-migrate --database-file .secrets/staging-database.toml   # an existing v6 one
+proxy-index orchestrator --dev --database-file .secrets/staging-database.toml \
   --methodology configs/staging-methodology.toml
-milf-framework calculate --database-file .secrets/staging-database.toml \
+proxy-index calculate --database-file .secrets/staging-database.toml \
   --methodology configs/staging-methodology.toml                     # no --publish: a draft
-milf-framework node --orchestrator http://127.0.0.1:8080 \
+proxy-index node --orchestrator http://127.0.0.1:8080 \
   --token-file .secrets/staging-tokens/shifter-residential-fra1.token \
   --provider shifter --product residential --region fra1 \
   --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml
@@ -312,14 +312,14 @@ The planners can be switched off without a restart (both when neither flag is gi
 as `skipped`:
 
 ```sh
-milf-framework scheduler off|on|status [--census|--pulse] --database-file .secrets/staging-database.toml
+proxy-index scheduler off|on|status [--census|--pulse] --database-file .secrets/staging-database.toml
 ```
 
 With the `reports.dir` setting, the orchestrator writes `batch-<id>.html` whenever a batch
 closes and regenerates `index.html` (refreshes every 30 s); its `reports` job also rewrites the
 index and a live page for every running batch every 30 s, from the counters nodes post (marked
 "live counters", with elapsed time and the distance to the census stop rule). The same pages on demand:
-`milf-framework report html --database-file F --out DIR [--batch ID]`. They are single
+`proxy-index report html --database-file F --out DIR [--batch ID]`. They are single
 self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
 challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.
 
@@ -327,7 +327,7 @@ challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs
 
 See [the standalone onboarding operator guide](docs/onboarding.html) for manual 24-hour
 campaigns, all eight server assignments, hourly FIFO scheduling, private JSONL exports,
-and restart behavior. `milf-framework onboarding run` accepts `--concurrency` (default
+and restart behavior. `proxy-index onboarding run` accepts `--concurrency` (default
 1000) and `--timeout` in seconds (default 10). Onboarding never imports results into the
 site database. Census rule v2, shared with Test #1, counts every completed request
 (including failures) in its 1,000-request minimum sample and unique-IP ratio.

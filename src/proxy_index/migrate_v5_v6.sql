@@ -1,7 +1,7 @@
--- Transactional v5 → v6 migration, applied by storage.migrate() (milf-framework db-migrate),
+-- Transactional v5 → v6 migration, applied by storage.migrate() (proxy-index db-migrate),
 -- alone from v5 or after migrate_v4_v5.sql from v4. It only adds tables, columns and foreign keys;
 -- no stored JSON changes. Table definitions repeat schema.sql exactly (tests compare catalogs).
--- Census/pulse reference data, seeded by milf-framework db-seed from configs/.
+-- Census/pulse reference data, seeded by proxy-index db-seed from configs/.
 CREATE TABLE runner_regions (
  region_id smallint PRIMARY KEY, slug text NOT NULL UNIQUE,
  cloud text NOT NULL DEFAULT 'digitalocean', pattern text NOT NULL,

@@ -79,7 +79,7 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="milf-framework")
+    parser = argparse.ArgumentParser(prog="proxy-index")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("targets", help="List available target definitions")
     commands.add_parser("providers", help="List available provider adapters")

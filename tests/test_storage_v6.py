@@ -8,9 +8,9 @@ from datetime import UTC, datetime, time
 import pytest
 from test_storage import measurement
 
-from milf_framework.cli import main
-from milf_framework.regions import REGIONS_FILE
-from milf_framework.storage import (
+from proxy_index.cli import main
+from proxy_index.regions import REGIONS_FILE
+from proxy_index.storage import (
     OUTCOME_KEYS,
     connect,
     ingest,
@@ -359,7 +359,7 @@ async def test_runner_geo_artifact_ingests(database, tmp_path, stop_rule):
     """Whatever the runner writes today (pulse and census) must ingest and rebuild exactly."""
     from helpers import FakeTransport
 
-    from milf_framework import JsonSink, ProxyConfig, RunConfig, run
+    from proxy_index import JsonSink, ProxyConfig, RunConfig, run
 
     sink = JsonSink(tmp_path / "results")
     census = stop_rule == "unique_ratio"

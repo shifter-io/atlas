@@ -9,8 +9,8 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from milf_framework import JsonSink, RunConfig, load_provider, run
-from milf_framework.enrichment import LocalEnricher
+from proxy_index import JsonSink, RunConfig, load_provider, run
+from proxy_index.enrichment import LocalEnricher
 
 
 async def check(args):

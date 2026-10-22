@@ -6,8 +6,8 @@ import pytest
 from aiohttp import web
 from helpers import FakeTransport
 
-from milf_framework import JsonSink, ProxyConfig, RunConfig, run
-from milf_framework.models import Outcome
+from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index.models import Outcome
 
 
 def config(**overrides):

@@ -228,7 +228,7 @@ async def results(request: web.Request) -> web.Response:
     async with db.connection() as conn:
         upload_limit = int(await setting(conn, "results.max_upload_bytes"))
         extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
-    with tempfile.TemporaryDirectory(prefix="milf-upload-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="proxy-index-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         await _receive(request, archive, upload_limit)
         try:

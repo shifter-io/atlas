@@ -1114,7 +1114,7 @@ def seed(
     countries_path=None,
     reset_times=False,
 ):
-    """Upsert runner_regions, countries and targets from configs/ (milf-framework db-seed).
+    """Upsert runner_regions, countries and targets from configs/ (proxy-index db-seed).
 
     Re-seeding moves countries between regions and refreshes names, patterns and target
     definitions, but keeps each country's census_time and enabled flag and each target's schedule

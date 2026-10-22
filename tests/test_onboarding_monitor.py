@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from helpers import FakeTransport
 
-from milf_framework.onboarding.files import read_json
-from milf_framework.onboarding.fleet import classify, cpu_usage, render
-from milf_framework.onboarding.manifest import timestamp
-from milf_framework.onboarding.probe import execute_probe
-from milf_framework.providers import load_provider
-from milf_framework.runner import run
+from proxy_index.onboarding.files import read_json
+from proxy_index.onboarding.fleet import classify, cpu_usage, render
+from proxy_index.onboarding.manifest import timestamp
+from proxy_index.onboarding.probe import execute_probe
+from proxy_index.providers import load_provider
+from proxy_index.runner import run
 
 ROOT = Path(__file__).resolve().parents[1]
 
