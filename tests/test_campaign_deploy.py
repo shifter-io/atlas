@@ -34,6 +34,7 @@ from campaign_deploy_fakes import (
     fast_assign,
     inventory,
     make_job,
+    other_team,
     parse,
     run_deploy,
     writes,
@@ -401,7 +402,8 @@ def plan_world(tmp_path):
     manager_inventory = tmp_path / "campaign-manager.json"
     manager_inventory.write_text(json.dumps({
         "manager_id": "500001", "wheel_sha256": "ab" * 32, "framework_version": "0.9.5",
-        "worker_key_name": "pi-camp-worker-20270101"}))
+        "worker_key_name": "pi-camp-worker-20270101", "account": "leftclick",
+        "project_id": CAMPAIGN_PROJECT, "credentials": ["shifter"]}))
     images = tmp_path / "campaign-images.json"
     images.write_text(json.dumps({"builds": [{"snapshot_id": "9001", "snapshot_name": IMAGE}]}))
     fake = FakeDigitalOcean()
@@ -486,6 +488,19 @@ async def test_plan_rejects_a_missing_input(plan_world, change, message):
     with pytest.raises((PlanError, ValueError), match=message):
         await run_plan(fake, inputs)
     assert not inputs.output.exists() or not any(inputs.output.iterdir())
+
+
+async def test_plan_refuses_another_account_than_the_managers(plan_world):
+    """B1: the spec's account and project must be the deployed manager's."""
+    from dataclasses import replace
+
+    fake, inputs = plan_world
+    with pytest.raises(PlanError, match="account"):
+        await run_plan(fake, replace(inputs, account="proxy-index"))
+    other_team(fake)
+    with pytest.raises(PlanError, match="account"):
+        await run_plan(fake, inputs)
+    assert not inputs.output.exists()
 
 
 def test_parse_networks():
