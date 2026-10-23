@@ -239,18 +239,24 @@ class _Launch(HourWork):
                 worker.droplet_id = by_name.pop(worker.name).id
 
     async def _region(self, workers: list[DropletRecord], replace: bool) -> None:
-        """One region's workers; an unexpected error stays inside this region."""
+        """One region's workers. An unexpected error stays inside this region, no task outlives
+        it, and every worker leaves it armed or in a final status (B1)."""
+        cause = None
         try:
             await self._create(workers)
             await self._assign(workers, replace)
-            await asyncio.gather(*(self._bring_up(w, replace) for w in workers
-                                   if w.status in ("assigned", "booting", "starting")))
         except Exception as error:
-            for worker in workers:
-                if worker.status in UP:
-                    worker.error_class = worker.error_class or type(error).__name__
-                    self.alert("high", "launch_error", worker.name)
-            self.save()
+            cause = type(error).__name__
+        await asyncio.gather(*(self._bring_up(w, replace) for w in workers
+                               if w.status in ("assigned", "booting", "starting")))
+        left = [w for w in workers if w.status in UP]
+        for worker in left:
+            self.alert("high", "launch_error", worker.name)
+            if worker.droplet_id is None:
+                worker.status, worker.error_class = "create_failed", cause
+        await asyncio.gather(*(self._fail(w, "start_failed", replace, cause)
+                               for w in left if w.droplet_id))
+        self.save()
 
     async def _create(self, workers: list[DropletRecord]) -> None:
         pending = [w for w in workers if w.droplet_id is None and w.status == "requested"]
@@ -301,6 +307,13 @@ class _Launch(HourWork):
                 await self._replace(worker, replace)
 
     async def _bring_up(self, worker: DropletRecord, replace: bool) -> None:
+        """Ready, push and arm one confirmed worker; any error fails only this worker."""
+        try:
+            await self._start(worker, replace)
+        except Exception as error:
+            await self._fail(worker, "start_failed", replace, type(error).__name__)
+
+    async def _start(self, worker: DropletRecord, replace: bool) -> None:
         resumed = worker.status == "starting"
         worker.status = "booting"
         self.save()
@@ -378,8 +391,10 @@ class _Launch(HourWork):
                 archive.addfile(info, io.BytesIO(data))
         return buffer.getvalue()
 
-    async def _fail(self, worker: DropletRecord, status: str, replace: bool) -> None:
-        worker.status, worker.error_class = status, status
+    async def _fail(self, worker: DropletRecord, status: str, replace: bool,
+                    cause: str | None = None) -> None:
+        """Remove a failed worker through the guard, then apply the replacement rule."""
+        worker.status, worker.error_class = status, cause or status
         self.alert("high", status, worker.name)
         await self.retire(worker)
         self.save()
