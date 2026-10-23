@@ -75,6 +75,7 @@ class Pacing:
     reconcile_every: float = 300.0
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     clock_synced: Callable[[], bool | None] = field(default_factory=lambda: ntp_synced)
+    disk_usage: Callable[[Path], tuple] = field(default_factory=lambda: shutil.disk_usage)
 
 
 @dataclass
@@ -247,7 +248,7 @@ class Collector:
             alert(self.root, now, code, key=f"{code}-{stamp}")
 
     def _disk_free_pct(self) -> float:
-        usage = shutil.disk_usage(self.root)
+        usage = self.pacing.disk_usage(self.root)
         return round(100 * usage.free / usage.total, 1)
 
     def _ratelimit(self) -> int | None:
