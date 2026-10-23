@@ -1,4 +1,4 @@
-"""CAMP-1d: hourly tick, collector daemon, orphan reconcile, alarms, traffic reports.
+"""CAMP-1d: hourly tick, collector daemon, orphan reconcile, alarms, traffic reports, Mac watch.
 
 Offline only: fake launchers and harvesters, a fake clock, the in-process fake DigitalOcean of
 the scope suite (seeded with production-like droplets) and a fake SSH remote.
@@ -52,6 +52,7 @@ from proxy_index.campaign.tick import (
     save_hour,
     set_paused,
 )
+from proxy_index.campaign.watch import Watch, WatchIO, report_message, run_watch
 from proxy_index.cli import main
 
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
@@ -546,6 +547,71 @@ def test_the_default_systemd_hooks(tmp_path, monkeypatch):
     assert commands[-1] == ["systemctl", "disable", "--now", f"{unit}.timer"]
 
 
+# 10: the watch writes the states, copies reports and notifies (faked SSH and notifications).
+def watch_data(now, *, reports=None, alerts=(), finished=False, offset=0):
+    status = {"now": now.isoformat(), "live_workers": 16, "finished": finished,
+              "hours": [{"hour": 0, "state": "done"}, {"hour": 1, "state": "running"}]}
+    tsv = "hour\tnetwork\tbytes_up\tbytes_down\n00\tshifter\t1000000000\t2000000000\n"
+    return {"status": status, "alerts": [json.dumps(a) for a in alerts], "offset": offset,
+            "reports": reports or {}, "tsv": tsv}
+
+
+def test_the_watch_writes_states_copies_reports_and_notifies(tmp_path):
+    clock, notes, replies = Clock(START), [], []
+    status_file, traffic = tmp_path / "campaign.status.md", tmp_path / "traffic"
+    status_file.write_text("State: active\n\nOperator notes stay.\n")
+    io = WatchIO(fetch=lambda inv, offset, seen: replies.pop(0), notify=notes.append,
+                 clock=clock, sleep=lambda _s: None)
+    replies.append(watch_data(START, reports={"hour-00.md": "# hour 0\n"}, offset=10))
+    watch = Watch({"host": "manager"}, status_file, traffic, io)
+    assert watch.once() == "active"
+    assert (traffic / "hour-00.md").read_text() == "# hour 0\n"
+    text = status_file.read_text()
+    assert text.startswith("State: active\nUpdated UTC: 2027-01-01T22:00:00Z\n")
+    assert "Hours: 1 done, 1 running (of 2)\nLive workers: 16\n" in text
+    assert f"Traffic-Latest: hour 00 {traffic / 'hour-00.md'}\nAlerts: 0 high\n" in text
+    assert text.endswith("\nOperator notes stay.\n")
+    assert notes == ["CAMP-1 hour 00: 3.00 GB; top network shifter 3.00 GB"]
+    high = {"code": "destroy_refused", "level": "high", "key": "123"}
+    replies.append(watch_data(START, alerts=[high, {"code": "x", "level": "info"}], offset=20))
+    assert watch.once() == "blocked" and notes[-1] == "CAMP-1 alert destroy_refused (123)"
+    replies.append(OSError("ssh"))
+    io.fetch = lambda *a: (_ for _ in ()).throw(replies.pop(0))
+    clock.now = START + timedelta(minutes=4)
+    assert Watch({}, status_file, traffic, io).once() == "blocked"  # state persists
+    assert notes[-1].startswith("CAMP-1 alert manager_stale") and len(notes) == 3
+    assert not IPV4.search(status_file.read_text())
+
+
+def test_run_watch_stops_when_finished(tmp_path):
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({"host": "manager", "campaign_id": CID}))
+    replies = [watch_data(START), watch_data(START, finished=True)]
+    io = WatchIO(fetch=lambda *a: replies.pop(0), notify=lambda _t: None, clock=Clock(START),
+                 sleep=lambda _s: None)
+    assert run_watch(inventory, tmp_path / "s.md", tmp_path / "t", io=io) == "finished"
+    assert report_message("hour-05.md", {}) == "CAMP-1 hour 05: 0.00 GB"
+
+
+def test_ssh_fetch_and_notify_build_safe_commands(monkeypatch):
+    from proxy_index.campaign import watch
+
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return types.SimpleNamespace(stdout=json.dumps({"ok": True}))
+
+    monkeypatch.setattr(watch.subprocess, "run", run)
+    inventory = {"host": "manager.example", "identity": "id_mac", "known_hosts": "kh",
+                 "campaign_id": CID}
+    assert watch.ssh_fetch(inventory, 5, []) == {"ok": True}
+    assert calls[0][:3] == ["ssh", "-i", "id_mac"] and "StrictHostKeyChecking=yes" in calls[0]
+    assert calls[0][-1].endswith(f"/opt/proxy-index-campaign/campaigns/{CID} 5 -")
+    watch.notify('hour "1"; do shell script "x"')
+    assert calls[1][-1] == 'hour "1"; do shell script "x"'  # argv only, never in the script
+
+
 # The CLI wiring, with fake CAMP-1c modules standing in for launch, harvest and fanout.
 def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     root = make_root(tmp_path, synthetic=True)
@@ -582,3 +648,10 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert lines == [{"paused": ["geonode"]}, {"launched": [0]},
                      {"finished": False, "live_workers": 0}, {"alert": None}]
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text("{}")
+    monkeypatch.setattr("proxy_index.campaign.watch.ssh_fetch",
+                        lambda *a: watch_data(datetime.now(UTC), finished=True))
+    monkeypatch.setattr("proxy_index.campaign.watch.notify", lambda _text: None)
+    assert main(["campaign", "watch", "--inventory", str(inventory), "--status-file",
+                 str(tmp_path / "s.md"), "--traffic-dir", str(tmp_path / "t"), "--once"]) == 0

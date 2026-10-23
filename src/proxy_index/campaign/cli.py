@@ -9,9 +9,9 @@ HANDLERS: dict = {}
 def register(commands) -> None:
     parser = commands.add_parser("campaign", help="Private hourly droplet campaign (operator)")
     subcommands = parser.add_subparsers(dest="campaign_action", required=True)
-    from . import collector, tick  # CAMP-1d
+    from . import collector, tick, watch  # CAMP-1d
 
-    for module in (tick, collector):
+    for module in (tick, collector, watch):
         module.register(subcommands, HANDLERS)
 
 
