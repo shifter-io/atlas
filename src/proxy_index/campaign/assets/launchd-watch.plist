@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- CAMP-1 Mac watch (alert-only, never removes anything). `campaign guard install` fills
+     ProgramArguments and the log paths. KeepAlive restarts it until it exits 0 (campaign finished). -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.proxy-index.campaign-watch</string>
+  <key>ProgramArguments</key>
+  <array/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string></string>
+  <key>StandardErrorPath</key>
+  <string></string>
+</dict>
+</plist>
