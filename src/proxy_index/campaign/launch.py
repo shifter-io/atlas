@@ -89,11 +89,6 @@ def read_hosts(root: Path, hour: int) -> dict[str, str]:
     return {str(k): str(v) for k, v in read_json(path).items()} if path.exists() else {}
 
 
-def latest(record: HourRecord) -> dict[str, DropletRecord]:
-    """The newest worker record per cell (a replacement supersedes the worker it replaces)."""
-    return {cell_key(d.network, d.region): d for d in record.droplets}
-
-
 class HourWork:
     """One pass over one hour's record: saving, alerts and guarded removal."""
 
@@ -174,8 +169,9 @@ class _Launch(HourWork):
             self._synthetic()
         else:
             await self._launch()
-        record.cells.update({key: "running" if d.status in LIVE else "failed_ours"
-                             for key, d in latest(record).items()})
+        # The newest record per cell decides: a replacement supersedes the worker it replaces.
+        record.cells.update({cell_key(d.network, d.region): "running" if d.status in LIVE
+                             else "failed_ours" for d in record.droplets})
         record.state, record.launched_at = "running", self.now()
         self.save()
 
@@ -184,7 +180,10 @@ class _Launch(HourWork):
         earlier = [load_hour(self.root, h) for h in range(record.hour)]
         live = [d for r in earlier if r for d in r.droplets if d.status in LIVE]
         for network in spec.networks:
-            countries = read_json(manifest_path(self.root, spec, network))["regions"]
+            manifest = read_json(manifest_path(self.root, spec, network))
+            if manifest["settings"]["concurrency"] != spec.concurrency:
+                raise ValueError("a manifest's concurrency differs from the campaign spec")
+            countries = manifest["regions"]
             record.traffic[network] = dict.fromkeys(TRAFFIC_KEYS, 0)
             record.traffic[network]["countries_total"] = sum(
                 len(countries[r]) for r in spec.regions)
@@ -220,45 +219,54 @@ class _Launch(HourWork):
 
     async def _adopt(self) -> None:
         """A resumed launch: our own recorded names under the hour tag, before any create."""
-        known = {d.droplet_id for d in self.record.droplets if d.droplet_id}
         waiting = [d for d in self.record.droplets if d.status in UP and (
             d.droplet_id is None or d.droplet_id not in self.cloud.created_ids)]
-        if not waiting:
-            return
-        found = await self.cloud.adopt_uncertain([d.name for d in waiting], self.tag)
-        self._take([d for d in waiting if d.droplet_id is None],
-                   [f for f in found if f.id not in known])
-        self.save()
+        if waiting:
+            self._take([d for d in waiting if d.droplet_id is None],
+                       await self._adopted([d.name for d in waiting]))
+            self.save()
+
+    async def _adopted(self, names: list[str]) -> list[Droplet]:
+        """Our droplets with exactly these names under the hour tag, not held by a record."""
+        known = {d.droplet_id for d in self.record.droplets if d.droplet_id}
+        return [d for d in await self.cloud.adopt_uncertain(names, self.tag) if d.id not in known]
 
     def _take(self, workers: list[DropletRecord], droplets: list[Droplet]) -> None:
-        by_name = {}
-        for droplet in droplets:
-            by_name.setdefault(droplet.name, droplet)
+        by_name = {d.name: d for d in reversed(droplets)}  # the first droplet per name
         for worker in workers:
             if worker.droplet_id is None and worker.name in by_name:
                 worker.droplet_id = by_name.pop(worker.name).id
 
     async def _region(self, workers: list[DropletRecord], replace: bool) -> None:
-        """One region's workers; an unexpected error stays inside this region."""
+        """One region's workers. An unexpected error stays inside this region, no task outlives
+        it, and every worker leaves it armed or in a final status (B1)."""
+        cause, unassigned = None, []
         try:
             await self._create(workers)
-            await self._assign(workers, replace)
-            await asyncio.gather(*(self._bring_up(w, replace) for w in workers
-                                   if w.status in ("assigned", "booting", "starting")))
+            unassigned = await self._assign(workers)
         except Exception as error:
-            for worker in workers:
-                if worker.status in UP:
-                    worker.error_class = worker.error_class or type(error).__name__
-                    self.alert("high", "launch_error", worker.name)
-            self.save()
+            cause = type(error).__name__
+        await asyncio.gather(*(self._bring_up(w, replace) for w in workers
+                               if w.status in ("assigned", "booting", "starting")),
+                             *(self._replace(w, replace) for w in unassigned))
+        left = [w for w in workers if w.status in UP]
+        for worker in left:
+            self.alert("high", "launch_error", worker.name)
+            if worker.droplet_id is None:
+                worker.status, worker.error_class = "create_failed", cause
+        await asyncio.gather(*(self._fail(w, "start_failed", replace, cause)
+                               for w in left if w.droplet_id))
+        self.save()
 
     async def _create(self, workers: list[DropletRecord]) -> None:
         pending = [w for w in workers if w.droplet_id is None and w.status == "requested"]
         for attempt in range(2):
+            if attempt and pending:  # a create still in flight may be listed only now (m2)
+                await self.clock.sleep(CREATE_RETRY_SECONDS)
+                self._take(pending, await self._adopted([w.name for w in pending]))
+                pending = [w for w in pending if w.droplet_id is None]
             if not pending:
                 return
-            if attempt:
-                await self.clock.sleep(CREATE_RETRY_SECONDS)
             for worker in pending:
                 worker.attempts, worker.requested_at = worker.attempts + 1, timestamp(
                     self.clock.now())
@@ -280,16 +288,14 @@ class _Launch(HourWork):
                 ssh_keys=[self.spec.ssh_key_id], monitoring=False, with_droplet_agent=False,
                 ipv6=False)
         except CreateError as error:
-            if not error.uncertain:
-                return error.created
-            known = {d.droplet_id for d in self.record.droplets if d.droplet_id}
-            found = await self.cloud.adopt_uncertain(error.pending, self.tag)
-            return error.created + [d for d in found if d.id not in known]
+            return error.created + (await self._adopted(error.pending) if error.uncertain
+                                    else [])
 
-    async def _assign(self, workers: list[DropletRecord], replace: bool) -> None:
+    async def _assign(self, workers: list[DropletRecord]) -> list[DropletRecord]:
+        """Confirm membership; returns the unconfirmed workers (removed inside scope.py)."""
         waiting = [w for w in workers if w.droplet_id and w.status == "requested"]
         if not waiting:
-            return
+            return []
         records = {d.droplet_id: d for d in self.record.droplets if d.droplet_id}
         _, failed = await scope.assign_and_verify_project(
             self.cloud, self.scope, [w.droplet_id for w in waiting], records,
@@ -298,9 +304,16 @@ class _Launch(HourWork):
         for worker in waiting:
             if worker.droplet_id in failed:
                 self.alert("high", "project_assign_failed", worker.name)
-                await self._replace(worker, replace)
+        return [w for w in waiting if w.droplet_id in failed]
 
     async def _bring_up(self, worker: DropletRecord, replace: bool) -> None:
+        """Ready, push and arm one confirmed worker; any error fails only this worker."""
+        try:
+            await self._start(worker, replace)
+        except Exception as error:
+            await self._fail(worker, "start_failed", replace, type(error).__name__)
+
+    async def _start(self, worker: DropletRecord, replace: bool) -> None:
         resumed = worker.status == "starting"
         worker.status = "booting"
         self.save()
@@ -339,23 +352,27 @@ class _Launch(HourWork):
             await self.clock.sleep(READY_POLL_SECONDS)
 
     async def _push(self, worker: DropletRecord, droplet: Droplet, resumed: bool) -> bool:
-        """Push and start, retried once on the same worker; a resumed push checks first."""
-        if resumed:
-            try:
-                if "assignment" in await self.remote.inspect(droplet):
-                    return True
-            except Exception:
-                pass
+        """Push and start, retried once on the same worker. A resume or a retry first checks
+        whether the round unit already started, so a started worker is never pushed again."""
         manifest = manifest_path(self.root, self.spec, worker.network)
         command = start_command(manifest.parent.name, worker.region, worker.hour)
         payload = self._bundle(worker)
-        for _ in range(2):
+        for attempt in range(2):
+            if (resumed or attempt) and await self._started(droplet):
+                return True
             try:
                 await self.remote.push_start(droplet, payload, command)
                 return True
             except Exception:
                 continue
         return False
+
+    async def _started(self, droplet: Droplet) -> bool:
+        try:
+            service = (await self.remote.inspect(droplet)).get("service") or {}
+        except Exception:
+            return False
+        return service.get("ActiveState") in ("active", "activating")
 
     def _bundle(self, worker: DropletRecord) -> bytes:
         """One tar: the network's manifest, run config, assignment, wheel and credentials."""
@@ -378,8 +395,10 @@ class _Launch(HourWork):
                 archive.addfile(info, io.BytesIO(data))
         return buffer.getvalue()
 
-    async def _fail(self, worker: DropletRecord, status: str, replace: bool) -> None:
-        worker.status, worker.error_class = status, status
+    async def _fail(self, worker: DropletRecord, status: str, replace: bool,
+                    cause: str | None = None) -> None:
+        """Remove a failed worker through the guard, then apply the replacement rule."""
+        worker.status, worker.error_class = status, cause or status
         self.alert("high", status, worker.name)
         await self.retire(worker)
         self.save()

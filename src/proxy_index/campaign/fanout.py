@@ -7,6 +7,8 @@ arguments. Host addresses live in memory, in `argv` and under `.runtime/` only.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import json
 import os
 import shlex
@@ -15,7 +17,7 @@ import tarfile
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from ..onboarding.files import private_dir
 from ..onboarding.fleet import REMOTE_INSPECT
@@ -23,9 +25,10 @@ from .contracts import WORKER_ROOT, WORKER_SECRETS, Droplet
 
 ROUND_UNIT, SAMPLER_UNIT = "pi-camp-round", "pi-camp-sampler"
 JOURNAL_BYTES = 5_000_000
+OUTPUT_BYTES, PULL_BYTES = 16 << 20, 8 << 30  # caps on what one worker may send (m8)
 READY_POLL_SECONDS = 2.0
 SOCKET_LIMIT = 104 - 17  # sun_path on macOS, less the suffix ssh adds while it binds
-Runner = Callable[[list[str], bytes | None, float], Awaitable[tuple[int, bytes]]]
+Runner = Callable[[list[str], bytes | None, float, BinaryIO, int], Awaitable[int]]
 
 # Runs with the worker's system Python: argv = root, secrets dir, mcid, region, round.
 START_SCRIPT = r"""
@@ -48,11 +51,9 @@ if sha != installed:
     subprocess.run(["uv", "pip", "install", "--python", python, "--no-deps", "--offline",
                     str(wheel)], check=True)
     marker.write_text(sha + "\n")
-synced = False
 for _ in range(11):
-    reply = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
-                           capture_output=True, text=True)
-    synced = reply.stdout.strip() == "yes"
+    synced = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+                            capture_output=True, text=True).stdout.strip() == "yes"
     if synced:
         break
     time.sleep(1)
@@ -76,13 +77,18 @@ subprocess.run(["systemd-run", "--unit=pi-camp-sampler", "--property=Restart=no"
                 "--output", str(folder / "host-samples.jsonl")], check=True)
 """
 
-# A round directory is pulled only once its checkpoint is terminal (or was never written).
+# A round directory is pulled once its checkpoint is terminal or the round unit has ended (a
+# killed round never writes a terminal checkpoint, B2). An unknown unit state refuses.
 TERMINAL_CHECK = r"""
-import json, pathlib, sys
+import json, pathlib, subprocess, sys
 path = pathlib.Path(sys.argv[1]) / "round.json"
-if path.exists() and json.loads(path.read_text())["status"] not in ("completed", "stopped",
-                                                                     "failed"):
-    sys.exit(3)
+if path.exists() and json.loads(path.read_text())["status"] in ("completed", "stopped", "failed"):
+    sys.exit(0)
+reply = subprocess.run(["systemctl", "show", "pi-camp-round", "--property=ActiveState,SubState"],
+                       capture_output=True, text=True)
+unit = dict(line.split("=", 1) for line in reply.stdout.splitlines() if "=" in line)
+ended = unit.get("ActiveState") in ("inactive", "failed") or unit.get("SubState") == "exited"
+sys.exit(0 if reply.returncode == 0 and ended else 3)
 """
 
 
@@ -129,17 +135,38 @@ def safe_extract(archive: Path, destination: Path, top: str) -> None:
         stream.extractall(destination, filter=only_data)
 
 
-async def run_process(argv: list[str], stdin: bytes | None, seconds: float) -> tuple[int, bytes]:
+async def run_process(argv: list[str], stdin: bytes | None, seconds: float, sink: BinaryIO,
+                      limit: int) -> int:
+    """Stream at most `limit` stdout bytes to `sink`; exit code, 255 timeout, 254 too long."""
     process = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.DEVNULL)
     try:
-        out, _ = await asyncio.wait_for(process.communicate(stdin), seconds)
+        async with asyncio.timeout(seconds):
+            with contextlib.suppress(ConnectionError):
+                process.stdin.write(stdin or b"")
+                await process.stdin.drain()
+                process.stdin.close()
+            size = 0
+            while chunk := await process.stdout.read(1 << 16):
+                size += len(chunk)
+                if size > limit:
+                    return 254
+                sink.write(chunk)
+            return await process.wait()
     except TimeoutError:
-        process.kill()
-        await process.wait()
-        return 255, b""
-    return process.returncode or 0, out
+        return 255
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+
+def owned_dir(path: Path) -> None:
+    """A private directory of this user; one planted by another user is refused (m4)."""
+    if path.exists() and path.lstat().st_uid != os.getuid():
+        raise RemoteError("control directory belongs to another user")
+    private_dir(path)
 
 
 class OpenSSHRemote:
@@ -158,13 +185,16 @@ class OpenSSHRemote:
                 droplet.public_ipv4, "--", shlex.join(command)]
 
     async def _call(self, droplet: Droplet, command: list[str], what: str, *,
-                    stdin: bytes | None = None, seconds: float = 120) -> bytes:
-        private_dir(self.runtime)
-        private_dir(control_dir(self.runtime))
-        code, out = await self._run(self.argv(droplet, command), stdin, seconds)
+                    stdin: bytes | None = None, seconds: float = 120,
+                    sink: BinaryIO | None = None, limit: int = OUTPUT_BYTES) -> bytes:
+        """Run one remote command; its output goes to `sink`, or is returned when none."""
+        owned_dir(self.runtime)
+        owned_dir(control_dir(self.runtime))
+        buffer = sink or io.BytesIO()
+        code = await self._run(self.argv(droplet, command), stdin, seconds, buffer, limit)
         if code != 0:
             raise RemoteError(f"{what} failed (exit {code})")
-        return out
+        return b"" if sink else buffer.getvalue()
 
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool:
         deadline = self._clock() + limit_seconds
@@ -193,13 +223,14 @@ class OpenSSHRemote:
         parent, name = remote.rstrip("/").rsplit("/", 1)
         command = (f"python3 -c {shlex.quote(TERMINAL_CHECK)} {shlex.quote(remote)} && "
                    f"tar -C {shlex.quote(parent)} -cf - {shlex.quote(name)}")
-        out = await self._call(droplet, ["sh", "-c", command], "pull", seconds=1800)
         private_dir(local.parent)
         archive, staging = (local.parent / f".{local.name}.pull{suffix}"
                             for suffix in (".tar", ""))
         shutil.rmtree(staging, ignore_errors=True)
         try:
-            archive.write_bytes(out)
+            with archive.open("wb") as sink:
+                await self._call(droplet, ["sh", "-c", command], "pull", seconds=1800,
+                                 sink=sink, limit=PULL_BYTES)
             safe_extract(archive, staging, name)
             shutil.rmtree(local, ignore_errors=True)
             (staging / name).replace(local)
@@ -210,8 +241,8 @@ class OpenSSHRemote:
     async def journal(self, droplet: Droplet, local: Path) -> None:
         command = (f"journalctl -u {ROUND_UNIT} -u {SAMPLER_UNIT} --no-pager -o short-iso"
                    f" | tail -c {JOURNAL_BYTES}")
-        out = await self._call(droplet, ["sh", "-c", command], "journal", seconds=120)
         private_dir(local.parent)
         fd = os.open(local, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(out)
+        with os.fdopen(fd, "wb") as sink:
+            await self._call(droplet, ["sh", "-c", command], "journal", seconds=120, sink=sink,
+                             limit=JOURNAL_BYTES)
