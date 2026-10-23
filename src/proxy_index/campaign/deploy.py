@@ -52,6 +52,7 @@ IP_ECHO = "https://ip-info.com/myip"  # the campaign's own echo target (plan D8)
 UNIT_FILES = tuple(f"proxy-index-campaign-{name}" for name in (
     "tick@.service", "tick@.timer", "collector@.service", "watchdog-armed@.service",
     "watchdog-armed@.timer", "watchdog-fired@.service", "watchdog-fired@.timer"))
+GONE = ("deleted", "absent")  # guarded_delete results that leave nothing behind
 SHRED = (f"cd {BASE} && find .secrets -type f -exec shred -u {{}} + && rm -rf .secrets && "
          "test ! -e .secrets && echo shredded")
 
@@ -373,12 +374,53 @@ def _owned(inventory: dict, images: dict) -> list[tuple[str, str]]:
     return [(kind, str(rid)) for kind, rid in found if rid]
 
 
+async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shell) -> None:
+    """Stop the units and shred the secrets: once, and only while the manager still exists
+    (a removed droplet takes its disk, and its secrets, with it)."""
+    if inventory.get("secrets_shredded") or await cloud.get(str(inventory["manager_id"])) is None:
+        return
+    remote = Manager(inventory, shell)
+    units = [unit for cid in inventory.get("campaigns", []) for unit in unit_names(cid)]
+    if units:
+        await remote.run("systemctl disable --now " + " ".join(units), "stop units")
+    if (await remote.run(SHRED, "shred secrets")).strip().splitlines()[-1:] != ["shredded"]:
+        raise DeployError("manager secrets were not shredded")
+    save(path, inventory, secrets_shredded=True)
+
+
+async def _release(cloud: DigitalOcean, inventory: dict, path: Path) -> list[dict]:
+    """Every recorded resource through the guard, except what an earlier run removed. The
+    manager's firewall stays while the manager does, so SSH never opens on a live manager."""
+    earlier = {(r["kind"], r["id"]): r["result"]
+               for r in inventory.get("teardown", {}).get("released", [])}
+    owned = _owned(inventory, load_inventory(path.with_name("campaign-images.json")))
+    ledger = Ledger({kind: {rid for k, rid in owned if k == kind} for kind, _ in owned})
+    released, manager_gone = [], False
+    for kind, rid in owned:  # the droplet is the recorded manager; other kinds ignore the role
+        result = earlier.get((kind, rid), "")
+        if result in GONE:
+            pass
+        elif kind == "firewall" and rid == str(inventory.get("manager_firewall_id")) and not (
+                manager_gone):
+            result = "kept: the manager remains"
+        else:
+            try:
+                result = await guarded_delete(cloud, kind, rid, manager_scope(inventory), ledger,
+                                              audit_path(path), "manager")
+            except Exception as error:  # audited by the guard; the other resources still go
+                result = f"failed: {type(error).__name__}"
+        manager_gone = manager_gone or (kind == "droplet" and result in GONE)
+        released.append({"kind": kind, "id": rid, "result": result})
+    return released
+
+
 async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path], *,
                    shell: Shell = run_shell,
                    remove_agent: Callable[[], bool] | None = None) -> dict:
     """Section 16: refuse unless collected and no worker lives; stop the units; shred the
     secrets; remove every recorded resource (snapshots: from the image inventory beside the
-    manager's) through the guard; remove the Mac agent; prove."""
+    manager's) through the guard; remove the Mac agent; prove. Rerun it after a partial
+    failure: it skips the steps and resources an earlier run finished."""
     inventory = load_inventory(inventory_path)
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
@@ -386,27 +428,12 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     check_reports(inventory, reports)
     if await cloud.list_tag(WORKER_TAG):
         raise DeployError("campaign workers are still alive")
-    remote, campaigns = Manager(inventory, shell), inventory.get("campaigns", [])
-    units = [unit for cid in campaigns for unit in unit_names(cid)]
-    if units:
-        await remote.run("systemctl disable --now " + " ".join(units), "stop units")
-    if (await remote.run(SHRED, "shred secrets")).strip().splitlines()[-1:] != ["shredded"]:
-        raise DeployError("manager secrets were not shredded")
-    save(inventory_path, inventory, secrets_shredded=True)
-    owned = _owned(inventory, load_inventory(inventory_path.with_name("campaign-images.json")))
-    ledger = Ledger({kind: {rid for k, rid in owned if k == kind} for kind, _ in owned})
-    released = []
-    for kind, rid in owned:  # the droplet is the recorded manager; other kinds ignore the role
-        try:
-            result = await guarded_delete(cloud, kind, rid, manager_scope(inventory), ledger,
-                                          audit_path(inventory_path), "manager")
-        except Exception as error:  # audited by the guard; the other resources still go
-            result = f"failed: {type(error).__name__}"
-        released.append({"kind": kind, "id": rid, "result": result})
-    tags = [tag for tag, _ in ROLES.values()] + [campaign_tag(c) for c in campaigns]
+    await _silence(cloud, inventory, inventory_path, shell)
+    released = await _release(cloud, inventory, inventory_path)
+    tags = [tag for tag, _ in ROLES.values()] + [
+        campaign_tag(c) for c in inventory.get("campaigns", [])]
     proof = {tag: len(await cloud.list_tag(tag)) for tag in tags}
-    clean = all(r["result"] in ("deleted", "absent") for r in released) and not any(
-        proof.values())
+    clean = all(r["result"] in GONE for r in released) and not any(proof.values())
     done = {"released": released, "agent_removed": (remove_agent or _remove_agent)(),
             "tag_counts": proof, "clean": clean}
     save(inventory_path, inventory, teardown=done)
