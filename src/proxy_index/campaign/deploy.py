@@ -63,9 +63,8 @@ class DeployError(RuntimeError):
 def unit_names(cid: str) -> list[str]:
     """The units `enable` starts for one campaign: three timers and the collector."""
     short_id(cid)
-    return [f"proxy-index-campaign-{name}@{cid}.{kind}" for name, kind in (
-        ("tick", "timer"), ("collector", "service"), ("watchdog-armed", "timer"),
-        ("watchdog-fired", "timer"))]
+    return [f"proxy-index-campaign-{name}@{cid}.{kind}" for name, kind in (("tick", "timer"), (
+        "collector", "service"), ("watchdog-armed", "timer"), ("watchdog-fired", "timer"))]
 
 
 def load_inventory(path: Path) -> dict[str, Any]:
@@ -334,9 +333,8 @@ async def allow_me(cloud: DigitalOcean, inventory_path: Path, address: str) -> d
 
 
 def _remove_agent() -> bool:
-    from . import guard
-
-    return guard.remove(Path.home())
+    from .guard import remove
+    return remove(Path.home())
 
 
 def check_reports(inventory: dict, reports: list[Path]) -> None:
@@ -352,54 +350,50 @@ def check_reports(inventory: dict, reports: list[Path]) -> None:
         raise DeployError(f"teardown needs a clean collect report for {missing or 'a campaign'}")
 
 
-def _owned(inventory: dict, images: dict) -> list[tuple[str, str, str]]:
-    """(kind, id, role) in teardown order: manager, firewalls, the two keys, snapshots."""
-    snapshots = [str(b["snapshot_id"]) for b in images.get("builds", []) if b.get("snapshot_id")]
-    found = [("droplet", inventory.get("manager_id"), "manager"),
-             ("firewall", inventory.get("manager_firewall_id"), "manager"),
-             ("firewall", inventory.get("worker_firewall_id"), "manager"),
-             ("ssh_key", inventory.get("worker_key_id"), "manager"),
-             ("ssh_key", inventory.get("mac_key_id"), "manager"),
-             *[("snapshot", sid, "manager") for sid in snapshots]]
-    return [(kind, str(rid), role) for kind, rid, role in found if rid]
+def _owned(inventory: dict, images: dict) -> list[tuple[str, str]]:
+    """(kind, id) in teardown order: manager, firewalls, the two keys, snapshots."""
+    found = [("droplet", inventory.get("manager_id"))] + [
+        (kind, inventory.get(key)) for kind, key in (
+            ("firewall", "manager_firewall_id"), ("firewall", "worker_firewall_id"),
+            ("ssh_key", "worker_key_id"), ("ssh_key", "mac_key_id"))]
+    found += [("snapshot", b.get("snapshot_id")) for b in images.get("builds", [])]
+    return [(kind, str(rid)) for kind, rid in found if rid]
 
 
 async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path], *,
                    shell: Shell = run_shell,
                    remove_agent: Callable[[], bool] | None = None) -> dict:
     """Section 16: refuse unless collected and no worker lives; stop the units; shred the
-    secrets; remove every recorded resource through the guard; remove the Mac agent; prove.
-
-    The snapshots come from the image inventory beside the manager inventory."""
+    secrets; remove every recorded resource (snapshots: from the image inventory beside the
+    manager's) through the guard; remove the Mac agent; prove."""
     inventory = load_inventory(inventory_path)
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
     check_reports(inventory, reports)
     if await cloud.list_tag(WORKER_TAG):
         raise DeployError("campaign workers are still alive")
-    remote = Manager(inventory, shell)
-    units = [unit for cid in inventory.get("campaigns", []) for unit in unit_names(cid)]
+    remote, campaigns = Manager(inventory, shell), inventory.get("campaigns", [])
+    units = [unit for cid in campaigns for unit in unit_names(cid)]
     if units:
         await remote.run("systemctl disable --now " + " ".join(units), "stop units")
     if (await remote.run(SHRED, "shred secrets")).strip().splitlines()[-1:] != ["shredded"]:
         raise DeployError("manager secrets were not shredded")
     save(inventory_path, inventory, secrets_shredded=True)
     owned = _owned(inventory, load_inventory(inventory_path.with_name("campaign-images.json")))
-    ledger = Ledger({kind: {rid for k, rid, _ in owned if k == kind} for kind, _, _ in owned})
+    ledger = Ledger({kind: {rid for k, rid in owned if k == kind} for kind, _ in owned})
     released = []
-    for kind, rid, role in owned:
+    for kind, rid in owned:  # the droplet is the recorded manager; other kinds ignore the role
         try:
             result = await guarded_delete(cloud, kind, rid, manager_scope(inventory), ledger,
-                                          audit_path(inventory_path), role)
+                                          audit_path(inventory_path), "manager")
         except Exception as error:  # audited by the guard; the other resources still go
             result = f"failed: {type(error).__name__}"
         released.append({"kind": kind, "id": rid, "result": result})
-    tags = [tag for tag, _ in ROLES.values()] + [
-        campaign_tag(cid) for cid in inventory.get("campaigns", [])]
+    tags = [tag for tag, _ in ROLES.values()] + [campaign_tag(c) for c in campaigns]
     proof = {tag: len(await cloud.list_tag(tag)) for tag in tags}
+    clean = all(r["result"] in ("deleted", "absent") for r in released) and not any(
+        proof.values())
     done = {"released": released, "agent_removed": (remove_agent or _remove_agent)(),
-            "tag_counts": proof,
-            "clean": all(r["result"] in ("deleted", "absent") for r in released)
-            and not any(proof.values())}
+            "tag_counts": proof, "clean": clean}
     save(inventory_path, inventory, teardown=done)
     return done
