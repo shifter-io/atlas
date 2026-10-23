@@ -1,6 +1,7 @@
 # FleetProxy Residential. https://fleetproxy.io/
 # Shares ProxyEmpire's grammar and appears to share its backend; unknown keys return 502.
 # About half of plain-HTTP requests get a gateway 301 to HTTPS; HTTPS targets pass.
+# HTTP echo tests follow that redirect over HTTPS ([testing] protocol mixed).
 schema_version = 1
 id = "fleetproxy"
 
@@ -46,3 +47,6 @@ flag = "session"
 generate = "alnum"
 length = 8
 ttl_flag = "ttl"
+
+[testing]
+protocol = "mixed" # HTTP first; follow a gateway redirect to HTTPS

@@ -18,7 +18,7 @@ from importlib import resources
 from types import MappingProxyType
 from typing import Any
 
-from ..models import ProxyConfig, RequestContext
+from ..models import NETWORK_PROTOCOLS, NetworkProtocol, ProxyConfig, RequestContext
 
 POLICIES = ("rotate", "gateway", "fixed", "per_request", "per_worker", "per_run")
 GENERATED = ("per_request", "per_worker", "per_run")
@@ -135,6 +135,7 @@ class Grammar:
     pools: Mapping[str, frozenset[str]]
     extra_flags: bool
     reserved: frozenset[str]
+    test_protocol: NetworkProtocol = "default"  # [testing] protocol; see models.NetworkProtocol
 
     @classmethod
     def parse(cls, data: Mapping[str, Any]) -> Grammar:
@@ -153,12 +154,14 @@ class Grammar:
                         "rotating_ports"},
             "session": {"flag", "mode", "ports", "generate", "length", "no_session_policy",
                         "ttl_flag", "default_ttl_seconds"},
+            "testing": {"protocol"},
         }
         for table, keys in tables.items():
             if set(data.get(table, {})) - keys:
                 raise ValueError(f"Unknown keys in grammar table {table}")
         allowed = {"schema_version", "id", "product", "version", "docs", "credential",
-                   "account", "gateway", "flags", "session", "pools", "extra_flags"}
+                   "account", "gateway", "flags", "session", "pools", "extra_flags",
+                   "testing"}
         if set(data) - allowed or data.get("schema_version") != 1:
             raise ValueError("Unsupported provider grammar schema")
         provider = data["id"]
@@ -229,6 +232,9 @@ class Grammar:
         ports = dict(gateway["ports"])
         if set(ports) - {"http", "socks5"} or not ports:
             raise ValueError("Grammar ports are keyed by http or socks5")
+        protocol = data.get("testing", {}).get("protocol", "default")
+        if protocol not in NETWORK_PROTOCOLS:
+            raise ValueError("Unknown grammar test protocol")
         return cls(
             id=provider, product=data.get("product", "residential"),
             version=str(data.get("version", "1")), target=cred["flags_in"],
@@ -260,6 +266,7 @@ class Grammar:
             reserved=frozenset(cred.get("reserved", ())) | {
                 flag.key for flag in flags.values()
             },
+            test_protocol=protocol,
         )
 
 
@@ -280,6 +287,13 @@ def grammar_ids() -> tuple[str, ...]:
     root = resources.files(__package__).joinpath("grammars")
     return tuple(sorted(item.name.removesuffix(".toml") for item in root.iterdir()
                         if item.name.endswith(".toml")))
+
+
+def grammar_ids_by_protocol(protocol: NetworkProtocol) -> tuple[str, ...]:
+    """Networks whose echo test uses `protocol`, e.g. 'https-only' for no plain-HTTP test."""
+    if protocol not in NETWORK_PROTOCOLS:
+        raise ValueError("Unknown network test protocol")
+    return tuple(item for item in grammar_ids() if load_grammar(item).test_protocol == protocol)
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,6 +329,10 @@ class GrammarProxy:
     @property
     def grammar(self) -> Grammar:
         return load_grammar(self.provider)
+
+    @property
+    def test_protocol(self) -> NetworkProtocol:
+        return load_grammar(self.provider).test_protocol
 
     def __post_init__(self) -> None:
         g = load_grammar(self.provider)
@@ -535,7 +553,8 @@ class GrammarProxy:
                 # Future flags may contain credentials. Values are private by default.
                 "extra_flags": dict.fromkeys(self.extra_flags, "[redacted]"),
             },
-        }
+            # Only non-default networks publish it, so default run configs are unchanged.
+        } | ({"test_protocol": g.test_protocol} if g.test_protocol != "default" else {})
 
 
 def _rebuild(*args: Any) -> GrammarProxy:

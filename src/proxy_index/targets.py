@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import ipaddress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from .models import ErrorCode, VerdictName
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
@@ -65,6 +66,19 @@ class EchoIpTarget:
             if sniffed is not None:
                 return Assessment(error=BODY_CODES[sniffed], verdict=sniffed)
             return Assessment(error="invalid_body", verdict=Verdict.ERROR)
+
+
+def https_only(target: Target) -> Target:
+    """The target as an 'https-only' network runs it: a plain-HTTP echo URL moves to HTTPS
+    (same host and path; an explicit port 80 is dropped). Any other plain-HTTP target is
+    refused, so such a network never receives a plain-HTTP request."""
+    url = urlsplit(target.build_request().url)
+    if url.scheme != "http":
+        return target
+    if not isinstance(target, EchoIpTarget):
+        raise ValueError("This network accepts HTTPS tests only")
+    netloc = url.netloc.removesuffix(":80")
+    return replace(target, url=url._replace(scheme="https", netloc=netloc).geturl())
 
 
 class TargetRegistry:

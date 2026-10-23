@@ -1,7 +1,8 @@
 # Byteful Residential. https://docs.byteful.com/
 # Unknown keys return 407; an invalid country returns 400. Underscores both separate flags
 # and replace spaces, so places containing a flag word (e.g. Kansas City) are rejected.
-# Plain-HTTP targets get a gateway 301 to HTTPS (100% on 2026-10-22); use generic_https.
+# Plain-HTTP targets get a gateway 301 to HTTPS (100% on 2026-10-22), so HTTP echo
+# tests run over HTTPS ([testing] protocol https-only).
 schema_version = 1
 id = "byteful"
 
@@ -60,3 +61,6 @@ flag = "session"
 generate = "alnum"
 length = 16
 ttl_flag = "ttl"
+
+[testing]
+protocol = "https-only" # Never send plain HTTP; echo tests use HTTPS

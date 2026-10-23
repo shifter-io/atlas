@@ -14,11 +14,11 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from . import __version__
-from .models import RequestContext, RunConfig, RunSummary
+from .models import RequestContext, RunConfig, RunSummary, protocol_of
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
 from .stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, bucket_of, iso
-from .targets import EchoIpTarget, TargetRegistry, registry
+from .targets import EchoIpTarget, TargetRegistry, https_only, registry
 from .transport import HttpTransport, Transport
 
 log = logging.getLogger(__name__)
@@ -75,6 +75,10 @@ async def run(
         if not isinstance(target, EchoIpTarget):
             raise ValueError("URL overrides require an echo-IP target")
         target = replace(target, url=config.target_url)
+    protocol = protocol_of(config.proxy)
+    if protocol == "https-only":
+        # Before any traffic, so neither transport nor worker process ever sends plain HTTP.
+        target = https_only(target)
     if target.engine != "http" and transport_factory is HttpTransport:
         raise ValueError("This target requires a different execution adapter")
     if config.stop_rule == "unique_ratio" and not target.pool_eligible:
@@ -175,7 +179,8 @@ async def run(
             "requests": totals.completed, "successes": totals.successes,
             "unique_ips": len(unique), **totals.verdicts(), **execution,
         } | ({"census_requests": census_requests(),
-              "http_469_responses": totals.statuses["469"]} if config.retry_http_469 else {})
+              "http_469_responses": totals.statuses["469"]} if config.retry_http_469 else {}
+             ) | ({"redirects": totals.redirects} if protocol == "mixed" else {})
 
     def census_requests() -> int:
         return totals.completed - (totals.statuses["469"] if config.retry_http_469 else 0)
@@ -366,6 +371,7 @@ async def run(
         if stop_reason == "stalled" and last_success_wall is not None else None,
         census_requests=census_requests() if config.retry_http_469 else None,
         http_469_responses=totals.statuses["469"] if config.retry_http_469 else None,
+        redirects=totals.redirects if protocol == "mixed" else None,
     )
     release = getattr(enricher, "release", None)
     if enricher is not None and isinstance(release, dict):

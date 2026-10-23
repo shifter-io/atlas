@@ -1,7 +1,8 @@
 # Infatica Residential. https://infatica.io/documentation/
 # Ports 10000-10999 are independent exit slots sharing the same login. Unknown keys
 # return 407; a country without exits returns 503.
-# Plain-HTTP targets get a gateway 301 to HTTPS (100% on 2026-10-22); use generic_https.
+# Plain-HTTP targets get a gateway 301 to HTTPS (100% on 2026-10-22), so HTTP echo
+# tests run over HTTPS ([testing] protocol https-only).
 schema_version = 1
 id = "infatica"
 
@@ -60,3 +61,6 @@ generate = "alnum"
 length = 12
 ttl_flag = "ttl"
 default_ttl_seconds = 3600
+
+[testing]
+protocol = "https-only" # Never send plain HTTP; echo tests use HTTPS

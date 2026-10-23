@@ -7,9 +7,10 @@ import os
 import signal
 import sys
 
-from .models import ProxyConfig, RunConfig
+from .models import NETWORK_PROTOCOLS, ProxyConfig, RunConfig
 from .providers import load_provider
 from .providers import registry as providers
+from .providers.grammar import grammar_ids_by_protocol
 from .runner import run
 from .sinks import JsonSink
 from .targets import registry
@@ -82,7 +83,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="proxy-index")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("targets", help="List available target definitions")
-    commands.add_parser("providers", help="List available provider adapters")
+    provider_list = commands.add_parser("providers", help="List available provider adapters")
+    provider_list.add_argument(
+        "--protocol", choices=NETWORK_PROTOCOLS,
+        help="Only networks whose echo test uses this protocol (e.g. https-only: no HTTP test)",
+    )
     measure = commands.add_parser("run", help="Run a target through a supplied proxy")
     measure.add_argument("--target", choices=[t.id for t in registry.all()], required=True)
     measure.add_argument(
@@ -196,7 +201,10 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
         elif args.command == "providers":
-            print(json.dumps(providers.all()))
+            if args.protocol is None:
+                print(json.dumps(providers.all()))
+            else:
+                print(json.dumps(grammar_ids_by_protocol(args.protocol)))
         elif args.command == "enrich":
             from .enrichment import enrich_run
 
