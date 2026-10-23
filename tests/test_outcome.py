@@ -246,6 +246,29 @@ def test_tcp_info_parsing(monkeypatch):
     assert bytes_io.from_socket(FakeSocket(bytes(raw))) is None
 
 
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (1, (1200, 5300)),  # ESTABLISHED
+        (4, (1200, 5300)),  # FIN_WAIT1: our FIN is not acknowledged yet
+        (5, (1199, 5300)),  # FIN_WAIT2: our FIN is acknowledged
+        (8, (1200, 5299)),  # CLOSE_WAIT: the gateway's FIN arrived
+        (9, (1200, 5299)),  # LAST_ACK
+        (11, (1200, 5299)),  # CLOSING
+        (6, (1199, 5299)),  # TIME_WAIT: both FINs
+    ],
+)
+def test_tcp_info_excludes_fin_sequence_numbers(monkeypatch, state, expected):
+    # Linux advances both byte counters by one for a FIN, like the SYN; a
+    # gateway that closes after its response must not bill a phantom byte.
+    raw = bytearray(232)
+    raw[0] = state
+    struct.pack_into("=Q", raw, 120, 1201)
+    struct.pack_into("=Q", raw, 128, 5300)
+    monkeypatch.setattr(bytes_io, "LINUX", True)
+    assert bytes_io.from_socket(FakeSocket(bytes(raw))) == bytes_io.ByteCount(*expected, True)
+
+
 @pytest.mark.skipif(not bytes_io.LINUX, reason="Linux TCP_INFO integration")
 def test_tcp_info_counts_real_loopback_payload():
     # Exercise the kernel ABI, independently of the synthetic struct fixture.

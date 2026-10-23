@@ -71,6 +71,12 @@ class ObservationWriter:
 
     async def close(self) -> None:
         self._closing.set()
+        # Wake an idle writer now rather than after its queue poll times out. A
+        # full queue needs no wake-up: the writer stops once it has drained it.
+        try:
+            self.queue.put_nowait(None)
+        except queue.Full:
+            pass
         await asyncio.to_thread(self._done.wait)
         self._thread.join()
         self.check()

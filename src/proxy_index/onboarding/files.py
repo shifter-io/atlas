@@ -32,8 +32,8 @@ def sync_dir(path: Path) -> None:
         os.close(fd)
 
 
-def atomic_json(path: Path, value: object) -> None:
-    atomic_bytes(path, (json.dumps(value, indent=2, allow_nan=False) + "\n").encode())
+def atomic_json(path: Path, value: object, *, indent: int | None = 2) -> None:
+    atomic_bytes(path, (json.dumps(value, indent=indent, allow_nan=False) + "\n").encode())
 
 
 def atomic_bytes(path: Path, value: bytes) -> None:
