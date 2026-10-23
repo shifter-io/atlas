@@ -73,9 +73,10 @@ def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, li
     }, result["issues"]
 
 
-def cell_row(path: Path, manifest: dict, network: str, region: str, hour: int,
+def cell_row(path: Path, manifest: dict, cell: tuple[str, str, int],
              droplets: list[DropletRecord] | None) -> tuple[dict, list[str]]:
-    """One TSV row (a dict over `COLUMNS`) and the cell's verification issues."""
+    """One TSV row (a dict over `COLUMNS`) and the issues of a (network, region, hour) cell."""
+    network, region, hour = cell
     row = dict.fromkeys(COLUMNS) | {
         "net": network, "region": region, "round": hour, "scheduled": manifest["rounds"][hour],
         "completed": False, "countries": len(manifest["regions"][region]),
@@ -152,8 +153,8 @@ def build(root: Path) -> dict:
         manifest = load(path)
         for region in spec.regions:
             for hour in range(HOURS):
-                row, problems = cell_row(path, manifest, network, region, hour,
-                                         droplets.get((network, region, hour)))
+                cell = (network, region, hour)
+                row, problems = cell_row(path, manifest, cell, droplets.get(cell))
                 rows.append(row)
                 issues += [f"{network} {region} h{hour:02d}: {issue}" for issue in problems]
     result = {
