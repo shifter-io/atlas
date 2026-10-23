@@ -420,8 +420,18 @@ async def _release(cloud: DigitalOcean, inventory: dict, path: Path) -> list[dic
                for r in inventory.get("teardown", {}).get("released", [])}
     owned = _owned(inventory, load_inventory(path.with_name("campaign-images.json")))
     ledger = Ledger({kind: {rid for k, rid in owned if k == kind} for kind, _ in owned})
+    scope, audit = manager_scope(inventory), audit_path(path)
+
+    async def remove(kind: str, rid: str) -> str:
+        """The droplet is the recorded manager (other kinds ignore the role). A refusal or
+        error is audited by the guard and returned, so the other resources still go."""
+        try:
+            return await guarded_delete(cloud, kind, rid, scope, ledger, audit, "manager")
+        except Exception as error:
+            return f"failed: {type(error).__name__}"
+
     released, manager_gone = [], False
-    for kind, rid in owned:  # the droplet is the recorded manager; other kinds ignore the role
+    for kind, rid in owned:
         result = earlier.get((kind, rid), "")
         if result in GONE:
             pass
@@ -429,11 +439,7 @@ async def _release(cloud: DigitalOcean, inventory: dict, path: Path) -> list[dic
                 manager_gone):
             result = "kept: the manager remains"
         else:
-            try:
-                result = await guarded_delete(cloud, kind, rid, manager_scope(inventory), ledger,
-                                              audit_path(path), "manager")
-            except Exception as error:  # audited by the guard; the other resources still go
-                result = f"failed: {type(error).__name__}"
+            result = await remove(kind, rid)
         manager_gone = manager_gone or (kind == "droplet" and result in GONE)
         released.append({"kind": kind, "id": rid, "result": result})
     return released
