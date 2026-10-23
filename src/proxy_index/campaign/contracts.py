@@ -130,6 +130,9 @@ class CampaignSpec:
             (self.create_lead_seconds <= 0 or self.replace_until_minutes < 0, "timing"),
             (not 1 <= self.concurrency <= 5000, "concurrency"),
         ]
+        integers = ("hours", "grace_hours", "create_lead_seconds", "replace_until_minutes",
+                    "concurrency", "schema_version")
+        problems += [(type(getattr(self, name)) is not int, name) for name in integers]
         bad = [name for failed, name in problems if failed]
         if bad:
             raise ValueError(f"invalid campaign spec: {', '.join(bad)}")
