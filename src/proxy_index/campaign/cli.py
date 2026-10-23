@@ -169,6 +169,17 @@ PARSERS.append(_ops_parsers)
 HANDLERS.update(limits=_limits, image=_image, guard=_guard)
 
 
+def _scheduler_parsers(actions) -> None:
+    """CAMP-1d: tick, watchdog, network pause and the collector."""
+    from . import collector, tick
+
+    for module in (tick, collector):
+        module.register(actions, HANDLERS)
+
+
+PARSERS.append(_scheduler_parsers)
+
+
 def _plan_parsers(actions) -> None:
     """CAMP-1g: the campaign plan and the manager's deploy, enable, allow-me and teardown."""
     from .contracts import ACCOUNTS
