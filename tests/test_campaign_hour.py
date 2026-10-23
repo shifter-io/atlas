@@ -943,7 +943,8 @@ class HarvestRemote(FakeRemote):
         if self.pull_failures:
             self.pull_failures -= 1
             raise fanout.RemoteError("pull failed (exit 1)")
-        service = (self.inspected.get(droplet.name) or {}).get("service") or {}
+        service = (self.inspected.get(droplet.name) or {}).get("service") or {
+            "ActiveState": "inactive", "SubState": "dead"}  # systemd's answer for no unit
         unit = "\n".join(f"{key}={value}" for key, value in service.items())
         check = await asyncio.to_thread(
             subprocess.run, [sys.executable, "-c", fanout.TERMINAL_CHECK, str(self.source)],
@@ -1273,3 +1274,19 @@ async def test_m7_a_collect_failed_worker_without_a_memo_is_repulled(tmp_path):
     await harvested(spec, record, root, fake, remote, clock)
     assert worker.status == "destroyed" and len(remote.pulls) == 1
     assert [a["kind"] for a in record.alerts] == []
+
+
+async def test_1e_r1_an_unconfirmed_start_that_never_ran_ends_failed_ours(tmp_path):
+    """A worker armed as start_unconfirmed whose round never started: removed, never
+    start_failed; armed_at stays, so 1e never reads it as a round that provably did not run."""
+    spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
+    shutil.rmtree(remote.source)
+    remote.source.mkdir()
+    worker = record.droplets[0]
+    worker.error_class = "start_unconfirmed"
+    remote.inspected[worker.name] = {"server_time": 0}  # reachable, no fleet marker
+    await harvested(spec, record, root, fake, remote, clock)
+    assert (worker.status, worker.exit_code, worker.error_class) == (
+        "destroyed", 1, "round_failed")
+    assert worker.armed_at and record.cells == {"net00/tor1": "failed_ours"}
+    assert record.state == "done"
