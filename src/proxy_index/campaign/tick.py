@@ -73,37 +73,46 @@ def read_alerts(root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-# alerts.jsonl path -> (size read, (code, key) pairs); the file is append-only (m3).
-_raised: dict[Path, tuple[int, set[tuple[str, str]]]] = {}
+class AlertLog:
+    """alerts.jsonl and its raised (code, key) pairs, owned by one caller (r3).
 
+    The pairs are re-read only when the append-only file has grown since the last read, so a
+    long-lived owner (the collector) does not re-read the whole file for every alert (m3).
+    """
 
-def _raised_keys(path: Path) -> set[tuple[str, str]]:
-    size = path.stat().st_size if path.exists() else 0
-    if path not in _raised or _raised[path][0] != size:
-        pairs = {(str(item.get("code")), str(item.get("key"))) for item in read_alerts(
-            path.parent)} if size else set()
-        _raised[path] = (size, pairs)
-    return _raised[path][1]
+    def __init__(self, root: Path):
+        self.root, self.path, self.size, self.raised = root, alerts_path(root), -1, set()
+
+    def _pairs(self) -> set[tuple[str, str]]:
+        size = self.path.stat().st_size if self.path.exists() else 0
+        if size != self.size:
+            self.size, self.raised = size, {(str(item.get("code")), str(item.get("key")))
+                                            for item in read_alerts(self.root)}
+        return self.raised
+
+    def add(self, now: datetime, code: str, level: str = "high", key: str | None = None,
+            **details: object) -> bool:
+        """Append one alert unless (code, key) was raised before. No IPs."""
+        key = key or code
+        if (code, key) in self._pairs():
+            return False
+        entry = {"time": now.isoformat(), "code": code, "level": level, "key": key, **details}
+        private_dir(self.path.parent)
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, (json.dumps(entry, sort_keys=True, allow_nan=False) + "\n").encode())
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        self.raised.add((code, key))
+        self.size = self.path.stat().st_size
+        return True
 
 
 def alert(root: Path, now: datetime, code: str, level: str = "high", key: str | None = None,
           **details: object) -> bool:
-    """Append one alert to alerts.jsonl unless (code, key) was raised before. No IPs."""
-    key = key or code
-    raised = _raised_keys(alerts_path(root))
-    if (code, key) in raised:
-        return False
-    entry = {"time": now.isoformat(), "code": code, "level": level, "key": key, **details}
-    private_dir(alerts_path(root).parent)
-    fd = os.open(alerts_path(root), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.write(fd, (json.dumps(entry, sort_keys=True, allow_nan=False) + "\n").encode())
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    raised.add((code, key))
-    _raised[alerts_path(root)] = (alerts_path(root).stat().st_size, raised)
-    return True
+    """One alert from a short-lived caller (tick, watchdog)."""
+    return AlertLog(root).add(now, code, level, key, **details)
 
 
 def overlay_path(root: Path) -> Path:

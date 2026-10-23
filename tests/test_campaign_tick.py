@@ -770,3 +770,71 @@ async def test_m1_a_launcher_that_saved_its_record_is_not_overwritten(tmp_path):
     assert await run_tick(root, launcher=saving, clock=clock, disable_timer=refuse) == [23]
     assert load_hour(root, make_spec(), 23).launched_at == "saved-by-launcher"
     assert [a["code"] for a in read_alerts(root)] == ["timer_disable_failed"]
+
+
+async def test_r1_every_reconcile_outage_alerts_again(tmp_path):
+    root, clock = make_root(tmp_path), Clock(START + timedelta(hours=2))
+    failing = [True]
+
+    class Flaky:
+        ratelimit_remaining = 900
+
+        async def list_tag(self, tag):
+            if failing[0]:
+                raise ApiError("GET", "/v2/droplets", 503)
+            return []
+
+        async def project_droplet_ids(self, project_id):
+            return frozenset()
+
+    async def harvest(spec, record, root):
+        return record
+
+    collector = collector_module.Collector(root, harvest, Flaky(), None, clock, pacing(clock))
+
+    async def passes(count):
+        for _ in range(count):
+            await collector.pass_once()
+            collector.reconciled_at = None
+            clock.now += timedelta(minutes=5)
+
+    await passes(3)
+    failing[0] = False
+    await passes(1)
+    failing[0] = True
+    clock.now += timedelta(hours=3)
+    await passes(3)
+    levels = [a["level"] for a in read_alerts(root) if a["code"] == "reconcile_error"]
+    assert levels == ["info", "high"] * 2  # one of each per outage, not once per campaign
+
+
+@pytest.mark.parametrize("case", ["no_ipv4", "no_launcher"])
+async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
+        tmp_path, monkeypatch, case):
+    root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
+    if case == "no_ipv4":
+        install_host_map(monkeypatch)
+    else:  # CAMP-1c's launcher is not installed yet
+        monkeypatch.setitem(sys.modules, "proxy_index.campaign.launch", None)
+    fake = FakeDigitalOcean()
+    name = f"pic-{SID}-h03-lon1-shifter"
+    active = fake.add(name, OURS, project=CAMPAIGN_PROJECT,
+                      ip=None if case == "no_ipv4" else "203.0.113.10")
+    stuck = fake.add(f"pic-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
+    save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
+                               report_path="reports/traffic/hour-03.md", droplets=[
+                                   worker("shifter", "nyc3", 3, droplet_id=stuck,
+                                          status="destroyed")]))
+    remote = FakeRemote({name: {"assignment": {"kind": "round"}}})
+
+    async def harvest(spec, record, root):
+        return record
+
+    async with running(fake) as cloud:
+        status = await collector_module.Collector(
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)).pass_once()
+    hour = load_hour(root, make_spec(), 3)
+    assert active not in {d.droplet_id for d in hour.droplets} and hour.state == "done"
+    assert fake.deleted == [("droplet", stuck)]  # the rest of the reconcile still ran
+    assert status["live_workers"] == 1 and not (root / ".runtime" / "hosts-03.json").exists()
+    assert {a["code"] for a in read_alerts(root)} == {"orphan_unreachable"}
