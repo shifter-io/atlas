@@ -268,11 +268,16 @@ def running_hour(root, hour, clock):
     save_hour(root, record)
 
 
+def disk(free_pct):
+    """A fixed disk reading: the collector's alerts never depend on the test host's disk."""
+    return lambda _path: types.SimpleNamespace(total=100, free=free_pct)
+
+
 def pacing(clock, step=timedelta(seconds=30)):
     async def sleep(_seconds):
         clock.now += step
 
-    return Pacing(sleep=sleep, clock_synced=lambda: True)
+    return Pacing(sleep=sleep, clock_synced=lambda: True, disk_usage=disk(50))
 
 
 # 5: the collector finalizes overlapping hours independently, then exits when done.
@@ -507,8 +512,7 @@ async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monk
     assert {a["code"] for a in read_alerts(root)} == {"destroy_refused", "destroy_failed"}
 
 
-async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tmp_path,
-                                                                             monkeypatch):
+async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tmp_path):
     root = make_root(tmp_path, synthetic=True)
     clock = Clock(START + timedelta(hours=12, minutes=1))
     record = HourRecord(CID, 0, START.isoformat(), state="running", alerts=[
@@ -523,11 +527,9 @@ async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tm
             raise TimeoutError("ssh")
         return record
 
-    monkeypatch.setattr(collector_module.shutil, "disk_usage",
-                        lambda _path: types.SimpleNamespace(total=100, free=10))
     cloud = types.SimpleNamespace(ratelimit_remaining=0)
-    status = await collector_module.Collector(
-        root, harvest, cloud, None, clock, Pacing(clock_synced=lambda: False)).pass_once()
+    status = await collector_module.Collector(root, harvest, cloud, None, clock, Pacing(
+        clock_synced=lambda: False, disk_usage=disk(10))).pass_once()
     codes = {(a["code"], a["level"]) for a in read_alerts(root)}
     assert {("auth_failed", "high"),
             ("create_failures", "high"), ("harvest_error", "info"), ("disk_low", "high"),
@@ -766,7 +768,8 @@ async def test_s2_launcher_and_harvester_alerts_keep_their_kind_and_name(tmp_pat
         return record
 
     await collector_module.Collector(root, harvest, None, None, clock,
-                                     Pacing(clock_synced=lambda: True)).pass_once()
+                                     Pacing(clock_synced=lambda: True,
+                                            disk_usage=disk(50))).pass_once()
     mirrored = {(a["code"], a["level"], a.get("name")) for a in read_alerts(root)}
     assert mirrored == {("auth_failed", "high", name), ("round_long_3h", "info", name)}
 
