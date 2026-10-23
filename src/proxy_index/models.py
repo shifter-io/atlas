@@ -16,6 +16,12 @@ ErrorCode = Literal[
 VerdictName = Literal["ok", "challenge", "block", "timeout", "proxy_error", "error"]
 VERDICTS = ("ok", "challenge", "block", "timeout", "proxy_error", "error")
 StopRule = Literal["count", "unique_ratio"]
+# How a network runs the echo test (provider grammar [testing] protocol). 'default' sends
+# each target's own scheme; 'https-only' upgrades plain-HTTP echo targets to HTTPS before
+# any request (the gateway answers plain HTTP with a 301); 'mixed' sends HTTP and follows
+# one gateway redirect to the same URL over HTTPS, counting it as a redirect.
+NetworkProtocol = Literal["default", "https-only", "mixed"]
+NETWORK_PROTOCOLS: tuple[NetworkProtocol, ...] = ("default", "https-only", "mixed")
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +40,14 @@ class ProxySource(Protocol):
 
     def resolve(self, context: RequestContext) -> ProxyConfig: ...
     def public(self) -> dict[str, Any]: ...
+
+
+def protocol_of(proxy: ProxySource) -> NetworkProtocol:
+    """The network's test protocol, published by its provider adapter (default otherwise)."""
+    protocol = proxy.public().get("test_protocol", "default")
+    if protocol not in NETWORK_PROTOCOLS:
+        raise ValueError("Unknown network test protocol")
+    return protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +155,7 @@ class RunConfig:
                 raise ValueError("Target URL must match the generic target protocol, "
                                  "without credentials or a fragment") from None
         metadata = self.proxy.public()
+        protocol_of(self.proxy)  # Reject an unknown network test protocol before any traffic.
         for name in ("provider", "product", "requested_country"):
             effective = metadata.get(name)
             supplied = getattr(self, name)
@@ -199,6 +214,9 @@ class Outcome:
     bytes_exact: bool = False
     # Transport completion on the system monotonic clock, before IPC/aggregation.
     completed_at: float | None = None
+    # A 'mixed' network answered HTTP with a redirect that was followed over HTTPS;
+    # latency, bytes and body then cover both legs and status is the HTTPS answer.
+    redirected: bool = False
 
     def __post_init__(self) -> None:
         verdict = from_error(self.error) if self.verdict is None else self.verdict
@@ -249,12 +267,14 @@ class RunSummary:
     outage_started_at: str | None = None
     census_requests: int | None = None
     http_469_responses: int | None = None
+    # Completed requests that followed an HTTP-to-HTTPS redirect; 'mixed' networks only.
+    redirects: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         summary = asdict(self)
         if summary["outage_started_at"] is None:
             del summary["outage_started_at"]
-        for key in ("census_requests", "http_469_responses"):
+        for key in ("census_requests", "http_469_responses", "redirects"):
             if summary[key] is None:
                 del summary[key]
         return summary

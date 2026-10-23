@@ -6,7 +6,9 @@ import ssl
 import time
 import uuid
 from contextvars import ContextVar
+from dataclasses import replace
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import aiohttp
 from aiohttp_socks import (
@@ -19,7 +21,7 @@ from aiohttp_socks import (
 
 from . import bytes_io
 from .bytes_io import ByteCount
-from .models import Outcome, ProxyConfig, RequestContext, RunConfig
+from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
 from .targets import RequestSpec, Target
 
@@ -29,6 +31,8 @@ from .targets import RequestSpec, Target
 # socket the moment the connection is made. Each request runs in its own task
 # context, so concurrent requests on one session never see each other's slot.
 _SOCKET: ContextVar[list[Any] | None] = ContextVar("proxy_index_request_socket", default=None)
+# Gateway redirect statuses a 'mixed' network may answer plain HTTP with.
+REDIRECTS = frozenset({301, 302, 303, 307, 308})
 
 
 class _SocketTap:
@@ -66,6 +70,8 @@ class HttpTransport:
         self._opened = False
         self._run_id = str(uuid.uuid4())
         self._request_index = 0
+        # Only a 'mixed' network follows a gateway's HTTP-to-HTTPS redirect (models).
+        self._mixed = protocol_of(config.proxy) == "mixed"
 
     async def __aenter__(self) -> HttpTransport:
         # HTTP auth is per request. A dynamic SOCKS source needs an isolated
@@ -117,20 +123,29 @@ class HttpTransport:
         proxy = self.config.proxy.resolve(context)
         if proxy.scheme != self.config.proxy.scheme:
             raise ValueError("Provider transport scheme cannot change within a run")
-        kwargs = {"headers": dict(spec.headers)}
-        if proxy.scheme == "http":
-            host = f"[{proxy.host}]" if ":" in proxy.host else proxy.host
-            kwargs["proxy"] = f"http://{host}:{proxy.port}"
-            if proxy.username is not None:
-                # Plain HTTP goes to the gateway in absolute-URI form. For
-                # HTTPS the credentials belong on CONNECT only, never TLS traffic.
-                header_key = "proxy_headers" if spec.url.startswith("https:") else "headers"
-                auth_header = aiohttp.encode_basic_auth(proxy.username, proxy.password)
-                kwargs.setdefault(header_key, {})["Proxy-Authorization"] = auth_header
+        first, location = await self._attempt(target, spec, proxy, self.config.timeout_seconds)
+        upgrade = _https_upgrade(spec.url, first.status, location) if self._mixed else None
+        if upgrade is None:
+            return first
+        # A 'mixed' network: the same request over HTTPS, within the one timeout budget and
+        # on the same resolved proxy (session), measured and billed as one test.
+        remaining = max(0.0, self.config.timeout_seconds - first.latency_ms / 1000)
+        second, _ = await self._attempt(target, replace(spec, url=upgrade), proxy, remaining)
+        return replace(
+            second, latency_ms=first.latency_ms + second.latency_ms,
+            response_body_bytes=first.response_body_bytes + second.response_body_bytes,
+            bytes_up=first.bytes_up + second.bytes_up,
+            bytes_down=first.bytes_down + second.bytes_down,
+            bytes_exact=first.bytes_exact and second.bytes_exact, redirected=True,
+        )
+
+    async def _attempt(
+        self, target: Target, spec: RequestSpec, proxy: ProxyConfig, budget: float,
+    ) -> tuple[Outcome, str | None]:
+        """One request; returns its outcome and any redirect Location header."""
+        kwargs = _proxy_kwargs(spec, proxy)
         raw = bytearray()
-        status = None
-        error = None
-        exit_ip = None
+        status = location = error = exit_ip = None
         verdict: str | None = None
         counted: ByteCount | None = None
         tls = spec.url.startswith("https:")
@@ -140,11 +155,12 @@ class HttpTransport:
         started = time.perf_counter()
         try:
             # Outer timeout also bounds SOCKS negotiation and all body reads.
-            async with asyncio.timeout(self.config.timeout_seconds):
+            async with asyncio.timeout(budget):
                 async with session.request(
                     spec.method, spec.url, data=spec.body, allow_redirects=False, **kwargs,
                 ) as response:
                     status = response.status
+                    location = response.headers.get("Location")
                     sock = slot[-1] if slot else None
 
                     def measure() -> ByteCount:
@@ -163,51 +179,12 @@ class HttpTransport:
                         if not part:
                             break
                         raw.extend(part)
-                    if len(raw) > spec.max_body_bytes:
-                        # Too large to assess, but a challenge page announces
-                        # itself in its first few hundred bytes.
-                        sniffed = sniff_body(bytes(raw)) if status == 200 else None
-                        error = BODY_CODES[sniffed] if sniffed else "body_too_large"
-                        verdict = sniffed or failed_response(status, bytes(raw))
-                    else:
-                        assessment = target.assess(status, bytes(raw))
-                        error, exit_ip = assessment.error, assessment.ip
-                        verdict = assessment.verdict
-                        if verdict is None:
-                            verdict = (Verdict.OK if error is None
-                                       else failed_response(status, bytes(raw)))
-        except (TimeoutError, ProxyTimeoutError):
-            error, verdict = "timeout", Verdict.TIMEOUT
-        except aiohttp.ClientHttpProxyError as exc:
-            # How a CONNECT-tunnelled request surfaces a gateway status.
-            status = exc.status
-            error = "proxy_auth" if exc.status == 407 else "proxy_connect"
-            verdict = Verdict.PROXY_ERROR
-        except (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLError):
-            error, verdict = "tls", Verdict.ERROR
-        except aiohttp.ClientConnectorDNSError:
-            # The gateway's name did not resolve: the proxy side failed.
-            error, verdict = "dns", Verdict.PROXY_ERROR
-        except (aiohttp.ClientProxyConnectionError, ProxyConnectionError):
-            error, verdict = "proxy_connect", Verdict.PROXY_ERROR
-        except ProxyError as exc:
-            error = "proxy_auth" if "authentication" in str(exc).lower() else "proxy_connect"
-            verdict = Verdict.PROXY_ERROR
-        except aiohttp.ClientPayloadError:
-            error, verdict = "protocol", Verdict.ERROR
-        except (aiohttp.ClientConnectionError, OSError) as exc:
-            # aiohttp wraps raw SOCKS TLS failures in ClientOSError. Classify
-            # by the exception chain, without retaining/publishing its text.
-            # A reset or dropped connection to the gateway is a proxy error.
-            cause = exc
-            error, verdict = "connection", Verdict.PROXY_ERROR
-            while cause is not None:
-                if isinstance(cause, ssl.SSLError):
-                    error, verdict = "tls", Verdict.ERROR
-                    break
-                cause = cause.__cause__
-        except aiohttp.ClientError:
-            error, verdict = "protocol", Verdict.ERROR
+                    error, exit_ip, verdict = _assess(target, spec, status, bytes(raw))
+        except Exception as exc:
+            classified = _classify(exc)
+            if classified is None:
+                raise
+            error, verdict, status = classified[0], classified[1], classified[2] or status
         finally:
             latency_ms = (time.perf_counter() - started) * 1000
             _SOCKET.reset(token)
@@ -221,7 +198,90 @@ class HttpTransport:
             ip=exit_ip, error=error, status=status, response_body_bytes=len(raw),
             verdict=verdict, bytes_up=counted.up, bytes_down=counted.down,
             bytes_exact=counted.exact,
-        )
+        ), location
+
+
+def _proxy_kwargs(spec: RequestSpec, proxy: ProxyConfig) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {"headers": dict(spec.headers)}
+    if proxy.scheme == "http":
+        host = f"[{proxy.host}]" if ":" in proxy.host else proxy.host
+        kwargs["proxy"] = f"http://{host}:{proxy.port}"
+        if proxy.username is not None:
+            # Plain HTTP goes to the gateway in absolute-URI form. For
+            # HTTPS the credentials belong on CONNECT only, never TLS traffic.
+            header_key = "proxy_headers" if spec.url.startswith("https:") else "headers"
+            auth_header = aiohttp.encode_basic_auth(proxy.username, proxy.password)
+            kwargs.setdefault(header_key, {})["Proxy-Authorization"] = auth_header
+    return kwargs
+
+
+def _assess(
+    target: Target, spec: RequestSpec, status: int, raw: bytes,
+) -> tuple[str | None, str | None, str]:
+    """(error, exit IP, verdict) for a received response body."""
+    if len(raw) > spec.max_body_bytes:
+        # Too large to assess, but a challenge page announces
+        # itself in its first few hundred bytes.
+        sniffed = sniff_body(raw) if status == 200 else None
+        return (BODY_CODES[sniffed] if sniffed else "body_too_large", None,
+                sniffed or failed_response(status, raw))
+    assessment = target.assess(status, raw)
+    verdict = assessment.verdict
+    if verdict is None:
+        verdict = Verdict.OK if assessment.error is None else failed_response(status, raw)
+    return assessment.error, assessment.ip, verdict
+
+
+def _classify(exc: Exception) -> tuple[str, str, int | None] | None:
+    """(error, verdict, gateway status) for a request failure; None re-raises it."""
+    if isinstance(exc, (TimeoutError, ProxyTimeoutError)):
+        return "timeout", Verdict.TIMEOUT, None
+    if isinstance(exc, aiohttp.ClientHttpProxyError):
+        # How a CONNECT-tunnelled request surfaces a gateway status.
+        error = "proxy_auth" if exc.status == 407 else "proxy_connect"
+        return error, Verdict.PROXY_ERROR, exc.status
+    if isinstance(exc, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError,
+                        ssl.SSLError)):
+        return "tls", Verdict.ERROR, None
+    if isinstance(exc, aiohttp.ClientConnectorDNSError):
+        # The gateway's name did not resolve: the proxy side failed.
+        return "dns", Verdict.PROXY_ERROR, None
+    if isinstance(exc, (aiohttp.ClientProxyConnectionError, ProxyConnectionError)):
+        return "proxy_connect", Verdict.PROXY_ERROR, None
+    if isinstance(exc, ProxyError):
+        error = "proxy_auth" if "authentication" in str(exc).lower() else "proxy_connect"
+        return error, Verdict.PROXY_ERROR, None
+    if isinstance(exc, aiohttp.ClientPayloadError):
+        return "protocol", Verdict.ERROR, None
+    if isinstance(exc, (aiohttp.ClientConnectionError, OSError)):
+        # aiohttp wraps raw SOCKS TLS failures in ClientOSError. Classify
+        # by the exception chain, without retaining/publishing its text.
+        # A reset or dropped connection to the gateway is a proxy error.
+        cause: BaseException | None = exc
+        while cause is not None:
+            if isinstance(cause, ssl.SSLError):
+                return "tls", Verdict.ERROR, None
+            cause = cause.__cause__
+        return "connection", Verdict.PROXY_ERROR, None
+    if isinstance(exc, aiohttp.ClientError):
+        return "protocol", Verdict.ERROR, None
+    return None
+
+
+def _https_upgrade(url: str, status: int | None, location: str | None) -> str | None:
+    """The HTTPS URL to follow when a gateway redirects a plain-HTTP request to the same
+    host over HTTPS; None for any other response (which stays the request's outcome)."""
+    if status not in REDIRECTS or not location or not url.startswith("http:"):
+        return None
+    try:
+        source, destination = urlsplit(url), urlsplit(location)
+        if (destination.scheme.lower() != "https" or destination.hostname is None
+                or destination.hostname != source.hostname or destination.username is not None
+                or destination.password is not None):
+            return None
+        return destination._replace(fragment="").geturl()
+    except ValueError:
+        return None
 
 
 def _estimate(

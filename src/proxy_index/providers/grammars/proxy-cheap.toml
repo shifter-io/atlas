@@ -1,6 +1,8 @@
 # Proxy-Cheap Residential. No public grammar documentation; verified live 2026-10-22.
 # Flags are appended to the PASSWORD. Self-made sessions must be eight digits and
 # carry a ttl, otherwise the gateway answers 502/504. Unknown keys return 500.
+# About 45% of plain-HTTP requests get a gateway 301 to HTTPS (2026-10-23); HTTP echo
+# tests follow that redirect over HTTPS ([testing] protocol mixed).
 schema_version = 1
 id = "proxy-cheap"
 
@@ -37,3 +39,6 @@ flag = "session"
 generate = "digits"
 length = 8
 ttl_flag = "ttl"
+
+[testing]
+protocol = "mixed" # HTTP first; follow a gateway redirect to HTTPS

@@ -174,3 +174,18 @@ class FakeTransport:
         from proxy_index.models import Outcome
         self.count += 1
         return Outcome(10.1, ip="8.8.8.8", status=200, response_body_bytes=8)
+
+
+class Network:
+    """A loopback proxy source labelled with a network test protocol (models.NetworkProtocol)."""
+
+    def __init__(self, proxy, protocol):
+        self.proxy = proxy
+        self.protocol = protocol
+        self.scheme = proxy.scheme
+
+    def resolve(self, context):
+        return self.proxy
+
+    def public(self):
+        return {"proxy_protocol": self.scheme, "test_protocol": self.protocol}

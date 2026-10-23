@@ -1,6 +1,7 @@
 # ProxyEmpire Residential. https://proxyempire.io/
 # Unknown keys return HTTP 502 with an empty body.
 # About half of plain-HTTP requests get a gateway 301 to HTTPS; HTTPS targets pass.
+# HTTP echo tests follow that redirect over HTTPS ([testing] protocol mixed).
 schema_version = 1
 id = "proxyempire"
 
@@ -46,3 +47,6 @@ flag = "session"
 generate = "alnum"
 length = 8
 ttl_flag = "ttl"
+
+[testing]
+protocol = "mixed" # HTTP first; follow a gateway redirect to HTTPS

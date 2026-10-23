@@ -75,9 +75,12 @@ class Counters:
     proxy_errors: int = 0
     bytes_up: int = 0
     bytes_down: int = 0
+    # Run totals only (RunSummary.redirects); not part of bucket or geo exports.
+    redirects: int = 0
 
     def add(self, result: Outcome) -> None:
         self.completed += 1
+        self.redirects += result.redirected
         self.body_bytes += result.response_body_bytes
         self.bytes_up += result.bytes_up
         self.bytes_down += result.bytes_down
