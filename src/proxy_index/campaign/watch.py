@@ -126,13 +126,21 @@ def state_path(status_file: Path) -> Path:
     return status_file.with_name(f".{status_file.stem}.watch.json")
 
 
+def ack_path(status_file: Path) -> Path:
+    """w1b: written only by `--ack`, so the running watch's own saves never overwrite it."""
+    return status_file.with_name(f".{status_file.stem}.watch-ack.json")
+
+
+def acknowledged(status_file: Path) -> int:
+    path = ack_path(status_file)
+    return int(json.loads(path.read_text())["acked"]) if path.exists() else 0
+
+
 def acknowledge(status_file: Path) -> int:
     """Mark every high alert seen so far as handled; the next poll clears `blocked`."""
-    path = state_path(status_file)
-    memory = json.loads(path.read_text())
-    memory["acked"] = memory["high"]
-    write_text(path, json.dumps(memory, indent=2) + "\n")
-    return memory["acked"]
+    high = json.loads(state_path(status_file).read_text())["high"]
+    write_text(ack_path(status_file), json.dumps({"acked": high}) + "\n")
+    return high
 
 
 class Watch:
@@ -149,6 +157,7 @@ class Watch:
 
     def once(self) -> str:
         memory, now = self.memory, self.io.clock()
+        memory["acked"] = acknowledged(self.status_file)
         try:
             self._absorb(self.io.fetch(self.inventory, memory["offset"], memory["seen"]))
         except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):

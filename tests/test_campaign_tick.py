@@ -968,3 +968,23 @@ async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
     assert fake.deleted == [("droplet", stuck)]  # the rest of the reconcile still ran
     assert status["live_workers"] == 1 and not (root / ".runtime" / "hosts-03.json").exists()
     assert {a["code"] for a in read_alerts(root)} == {"orphan_unreachable"}
+
+
+def test_w1b_an_ack_reaches_the_long_running_watch(tmp_path):
+    """The launchd watch keeps one Watch for the whole campaign; its saves never undo --ack."""
+    clock, notes = Clock(START), []
+    status_file = tmp_path / "campaign.status.md"
+    high = json.dumps({"code": "missed_launch", "level": "high", "key": "h01-armed"})
+    replies = [watch_data(START, offset=10) | {"alerts": [high]},
+               watch_data(START, offset=10), watch_data(START, offset=10),
+               watch_data(START, offset=20) | {"alerts": [high.replace("h01", "h02")]}]
+    watch = Watch({}, status_file, tmp_path / "traffic", WatchIO(
+        fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock,
+        sleep=lambda _s: None))
+    assert watch.once() == "blocked"
+    assert acknowledge(status_file) == 1
+    assert watch.once() == "active" and watch.once() == "active"  # the same, long-lived watch
+    assert "Alerts: 1 high (0 new)" in status_file.read_text()
+    assert watch.once() == "blocked"  # a later high alert blocks again
+    assert "Alerts: 2 high (1 new)" in status_file.read_text()
+
