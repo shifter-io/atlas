@@ -52,10 +52,11 @@ class PlanInputs:
 
 
 def parse_networks(value: str) -> tuple[str, ...]:
-    names = ALL16 if value == "all16" else tuple(n.strip() for n in value.split(",") if n)
+    names = tuple(n for part in value.split(",") if part.strip()
+                  for n in (ALL16 if part.strip() == "all16" else (part.strip(),)))
     if not names or len(set(names)) != len(names) or any(
             not re.fullmatch(NETWORK_RE, n) for n in names):
-        raise PlanError("--networks must be all16 or distinct network names")
+        raise PlanError("--networks must be distinct network names (all16 adds the 16)")
     return names
 
 
@@ -133,6 +134,9 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
     if not all(manager.get(key) for key in ("manager_id", "wheel_sha256", "framework_version")):
         raise PlanError("deploy the manager before planning (inventory incomplete)")
     check_credentials(inputs)
+    absent = [n for n in inputs.networks if n not in manager.get("credentials", [])]
+    if absent:
+        raise PlanError(f"the manager holds no credentials for {', '.join(absent)}; deploy them")
     key_name = inputs.ssh_key_name or manager.get("worker_key_name", "")
     found = await check_cloud(cloud, inputs, key_name)
     if (manager.get("account"), manager.get("project_id")) != (inputs.account,

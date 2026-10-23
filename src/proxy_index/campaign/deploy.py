@@ -218,6 +218,8 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
     now, path = now or datetime.now(UTC), job.inventory
     inventory = load_inventory(path)
     project_id = await check_account(cloud, inventory, job.account)  # before any write
+    if inventory.get("host") and inventory.get("campaigns"):
+        await _refuse_while_running(Manager(inventory, shell), inventory["campaigns"])
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
     mac_key_id, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
     save(path, inventory, account=job.account, project_id=project_id, mac_key_id=mac_key_id,
@@ -243,10 +245,20 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
          worker_firewall_id=await ops_api.apply_firewall(
              cloud, scope, rules, inventory.get("worker_firewall_id")),
          wheel_sha256=digest(job.wheel), framework_version=job.wheel.name.split("-")[1],
-         credentials=sorted(job.credentials), deployed_at=now.isoformat())
+         credentials=sorted({*inventory.get("credentials", []), *job.credentials}),
+         deployed_at=now.isoformat())
     keys = ("manager_id", "manager_name", "manager_firewall_id", "worker_firewall_id",
             "worker_key_id", "worker_key_name", "wheel_sha256", "credentials")
     return {key: inventory[key] for key in keys}
+
+
+async def _refuse_while_running(remote: Manager, campaigns: list[str]) -> None:
+    """A deploy reinstalls the venv and the wheel under the units: never while one runs."""
+    units = " ".join(unit for cid in campaigns for unit in unit_names(cid))
+    out = await remote.run(f"for u in {units}; do systemctl is-active --quiet $u && "
+                           "echo active $u; done; true", "check running units")
+    if "active " in out:
+        raise DeployError("a campaign's units are running; deploy only between campaigns")
 
 
 async def _ensure_manager(cloud: DigitalOcean, job: DeployJob, inventory: dict, now: datetime,
@@ -302,34 +314,46 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
     """Copy a planned campaign root to the manager; never over an existing campaign."""
     inventory = load_inventory(inventory_path)
     spec = CampaignSpec.from_json(spec_path(root).read_text())
-    if not inventory.get("manager_id") or (spec.manager_droplet_id, spec.wheel_sha256) != (
-            str(inventory["manager_id"]), inventory.get("wheel_sha256")):
-        raise DeployError("the spec does not name the deployed manager and wheel")
+    if not inventory.get("manager_id") or (
+            spec.manager_droplet_id, spec.wheel_sha256, spec.account, spec.project_id) != (
+            str(inventory["manager_id"]), inventory.get("wheel_sha256"),
+            inventory.get("account"), inventory.get("project_id")):
+        raise DeployError("the spec does not name the deployed manager, wheel and account")
     target = f"{BASE}/campaigns/{spec.campaign_id}"
     await Manager(inventory, shell).run(
         f"umask 077 && test ! -e {target} && mkdir {target} && "
         f"tar -x --no-same-owner -C {target}", "upload-spec (exists or failed)",
         spec_payload(root))
     campaigns = sorted({*inventory.get("campaigns", []), spec.campaign_id})
-    save(inventory_path, inventory, campaigns=campaigns, campaign_id=spec.campaign_id)
+    specs = inventory.get("specs", {}) | {spec.campaign_id: {
+        "starts_at": spec.starts_at, "synthetic": spec.synthetic}}
+    save(inventory_path, inventory, campaigns=campaigns, campaign_id=spec.campaign_id,
+         specs=specs)
     return {"campaign_id": spec.campaign_id, "campaigns": campaigns}
 
 
-def owner_go_record(cid: str, owner_go: Path | None, now: datetime) -> dict:
-    """The owner's go (D9) as recorded: the answer file's path and SHA-256, and the time."""
-    if owner_go is None or not owner_go.is_file() or not owner_go.read_text().strip():
+def owner_go_record(cid: str, owner_go: Path | None, spec: dict, now: datetime) -> dict:
+    """The owner's go (D9) as recorded: the answer file's path and SHA-256, and the time. A
+    real campaign's answer must name its start hour (`HH:00`, UTC), so an older answer such
+    as the plan approval cannot start it."""
+    text = owner_go.read_text() if owner_go is not None and owner_go.is_file() else ""
+    if not text.strip():
         raise DeployError("enable needs --owner-go with the owner's recorded answer (D9)")
-    return {"campaign_id": cid, "owner_go": str(owner_go.resolve()),
-            "owner_go_sha256": digest(owner_go), "enabled_at": now.isoformat()}
+    hour = f"{datetime.fromisoformat(spec['starts_at']).astimezone(UTC):%H}:00"
+    if not spec["synthetic"] and hour not in text:
+        raise DeployError(f"the owner's go must name the start hour {hour} UTC (D9)")
+    return {"campaign_id": cid, "owner_go": str(owner_go.resolve()), "synthetic": spec[
+        "synthetic"], "owner_go_sha256": digest(owner_go), "enabled_at": now.isoformat()}
 
 
 async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
                  shell: Shell = run_shell, now: datetime | None = None) -> dict:
     """Start the tick timer, collector and watchdogs, only with the owner's recorded go (D9)."""
-    go = owner_go_record(cid, owner_go, now or datetime.now(UTC))
     units, inventory = unit_names(cid), load_inventory(inventory_path)
-    if cid not in inventory.get("campaigns", []):
+    spec = inventory.get("specs", {}).get(cid)
+    if cid not in inventory.get("campaigns", []) or spec is None:
         raise DeployError("campaign was never uploaded to the recorded manager")
+    go = owner_go_record(cid, owner_go, spec, now or datetime.now(UTC))
     save(inventory_path, inventory, enabled=go, campaign_id=cid)
     await Manager(inventory, shell).run("systemctl enable --now " + " ".join(units), "enable")
     return go | {"units": units}
@@ -356,9 +380,10 @@ def check_reports(inventory: dict, reports: list[Path]) -> None:
     clean = set()
     for path in reports:
         report = read_json(path)
-        if report.get("clean") is True and not any(
+        if report.get("clean") is not True or any(
                 report.get(key) for key in ("mismatches", "missing", "extra")):
-            clean.add(report.get("campaign_id"))
+            raise DeployError(f"collect report {path.name} is not clean")
+        clean.add(report.get("campaign_id"))
     missing = [cid for cid in inventory.get("campaigns", []) if cid not in clean]
     if not reports or missing:
         raise DeployError(f"teardown needs a clean collect report for {missing or 'a campaign'}")
@@ -433,8 +458,10 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     tags = [tag for tag, _ in ROLES.values()] + [
         campaign_tag(c) for c in inventory.get("campaigns", [])]
     proof = {tag: len(await cloud.list_tag(tag)) for tag in tags}
-    clean = all(r["result"] in GONE for r in released) and not any(proof.values())
+    stray = [i for i in inventory.get("unassigned_managers", []) if await cloud.get(str(i))]
+    clean = all(r["result"] in GONE for r in released) and not any(proof.values()) and not (
+        stray)
     done = {"released": released, "agent_removed": (remove_agent or _remove_agent)(),
-            "tag_counts": proof, "clean": clean}
+            "tag_counts": proof, "unassigned_managers": stray, "clean": clean}
     save(inventory_path, inventory, teardown=done)
     return done

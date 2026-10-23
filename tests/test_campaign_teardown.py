@@ -66,8 +66,8 @@ async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
 
 @pytest.mark.parametrize("reports, message", [
     ([], "clean collect report"),
-    ([{"clean": False}], "clean collect report"),
-    ([{"mismatches": ["a"]}], "clean collect report"),
+    ([{"clean": False}], "is not clean"),
+    ([{"mismatches": ["a"]}], "is not clean"),
     ([{"cid": "20270101t230000z-ffffffffffff"}], "clean collect report"),
 ])
 async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, message):
@@ -229,3 +229,26 @@ async def test_a_surviving_manager_keeps_its_firewall_until_a_rerun(job, tmp_pat
                                       remove_agent=lambda: True)
     assert shell.calls == [] and again["clean"] is True
     assert manager not in fake.droplets and manager_fw not in fake.resources["firewall"]
+
+
+async def test_an_unclean_report_is_refused_even_with_no_campaign_recorded(job, tmp_path):
+    """m5: a given report must itself be clean."""
+    fake, saved, _ = await owned_world(job)
+    deploy.save(job.inventory, saved, campaigns=[])
+    report = clean_report(tmp_path, "20270101t230000z-ffffffffffff", clean=False)
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match="is not clean"):
+            await deploy.teardown(cloud, job.inventory, [report], shell=Shell())
+    assert not fake.deleted
+
+
+async def test_a_stray_unassigned_manager_keeps_the_teardown_unclean(job, tmp_path):
+    """m1: a manager the guard could not remove at deploy time is listed, never forgotten."""
+    fake, saved, _ = await owned_world(job)
+    stray = fake.add("pi-camp-manager-20270101-beef", [MANAGER_TAG])
+    deploy.save(job.inventory, saved, unassigned_managers=[stray, "999999"])
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     shell=Shell(), remove_agent=lambda: True)
+    assert done["unassigned_managers"] == [stray] and done["clean"] is False
+    assert stray in fake.droplets

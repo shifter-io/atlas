@@ -168,6 +168,28 @@ async def test_a_second_deploy_updates_without_a_second_manager(job):
         assert again[key] == first[key]
 
 
+async def test_a_deploy_never_runs_under_a_campaign_and_keeps_earlier_credentials(job):
+    from dataclasses import replace
+
+    fake = Fake()
+    await run_deploy(fake, job)
+    deploy.save(job.inventory, inventory(job), campaigns=[CID])
+    before = job.inventory.read_bytes()
+
+    class Running(Shell):
+        async def __call__(self, argv, stdin):
+            self.calls.append((argv, stdin))
+            return 0, f"active proxy-index-campaign-tick@{CID}.timer\n"
+
+    shell = Running()
+    with pytest.raises(deploy.DeployError, match="units are running"):  # m4
+        await run_deploy(fake, job, shell)
+    assert job.inventory.read_bytes() == before and len(shell.calls) == 1
+    assert "is-active" in shell.calls[0][0][-1]
+    await run_deploy(fake, replace(job, credentials={"geonode": b"[geonode]\n"}))
+    assert inventory(job)["credentials"] == ["geonode", "shifter"]
+
+
 async def test_an_uncertain_create_adopts_the_manager_by_name(job):
     fake = Fake()
     fake.create_then_fail = 1
@@ -318,7 +340,8 @@ def deployed(job):
     deploy.save(job.inventory, {}, manager_id="500001", host=MANAGER_IP, user="root",
                 identity="k", identity_file="k", known_hosts="kh", project_id=CAMPAIGN_PROJECT,
                 manager_since=NOW.isoformat(), manager_firewall_id="fw-1", campaigns=[CID],
-                wheel_sha256="ab" * 32)
+                wheel_sha256="ab" * 32, account="leftclick", specs={CID: {
+                    "starts_at": "2027-01-01T23:00:00+00:00", "synthetic": False}})
     return job.inventory
 
 
@@ -334,11 +357,26 @@ async def test_enable_refuses_without_the_owners_go(deployed, tmp_path):
     with pytest.raises(deploy.DeployError, match="never uploaded"):
         await deploy.enable(deployed, "20270101t230000z-ffffffffffff", answer, shell=shell)
     assert shell.calls == [] and "enabled" not in json.loads(deployed.read_text())
+    stale = tmp_path / "CAMP-1-plan-approval.md"
+    stale.write_text("Owner: the plan is approved.\n")
+    with pytest.raises(deploy.DeployError, match="start hour 23:00"):  # m3
+        await deploy.enable(deployed, CID, stale, shell=shell, now=NOW)
+    assert shell.calls == []
     result = await deploy.enable(deployed, CID, answer, shell=shell, now=NOW)
     assert shell.commands() == ["systemctl enable --now " + " ".join(deploy.unit_names(CID))]
     recorded = json.loads(deployed.read_text())["enabled"]
     assert recorded["owner_go"] == str(answer.resolve()) and len(recorded["owner_go_sha256"]) == 64
-    assert result["units"] == deploy.unit_names(CID)
+    assert result["units"] == deploy.unit_names(CID) and recorded["synthetic"] is False
+
+
+async def test_a_synthetic_campaign_needs_a_go_but_no_start_hour(deployed, tmp_path):
+    saved = json.loads(deployed.read_text())
+    deploy.save(deployed, saved, specs={CID: {"starts_at": "2027-01-01T23:00:00+00:00",
+                                              "synthetic": True}})
+    approval = tmp_path / "approval.md"
+    approval.write_text("Owner: plan approved, including the scheduler proof.\n")
+    result = await deploy.enable(deployed, CID, approval, shell=Shell(), now=NOW)
+    assert result["synthetic"] is True
 
 
 def test_the_enable_cli_refuses_without_owner_go(deployed, capsys):
@@ -372,10 +410,16 @@ async def test_upload_spec_sends_the_root_and_records_the_campaign(deployed, tmp
     assert sorted(tarfile.open(fileobj=io.BytesIO(stdin)).getnames()) == [
         "campaign-spec.json", "networks/shifter/residential/m/campaign.json",
         "networks/shifter/residential/m/provider.toml"]
-    assert json.loads(deployed.read_text())["campaign_id"] == CID
+    saved = json.loads(deployed.read_text())
+    assert saved["campaign_id"] == CID and saved["specs"][CID] == {
+        "starts_at": "2027-01-01T23:00:00+00:00", "synthetic": False}
+    deploy.save(deployed, saved, account="proxy-index")
+    with pytest.raises(deploy.DeployError, match="account"):
+        await deploy.upload_spec(deployed, planned_root(tmp_path / "c"), shell=shell)
+    deploy.save(deployed, saved, account="leftclick")
     for other in (planned_root(tmp_path / "a", manager_id="9"),
                   planned_root(tmp_path / "b", wheel="cd" * 32)):
-        with pytest.raises(deploy.DeployError, match="deployed manager"):
+        with pytest.raises(deploy.DeployError, match="deployed manager, wheel and account"):
             await deploy.upload_spec(deployed, other, shell=shell)
     with pytest.raises(deploy.DeployError, match="exists or failed"):
         await deploy.upload_spec(deployed, root, shell=Shell(fail=("test ! -e",)))
@@ -458,6 +502,7 @@ async def test_plan_now_hour_and_options(plan_world):
     ("key", "ssh key"), ("recorded image", "not one recorded build"),
     ("manager", "deploy the manager"), ("region", "--regions"), ("offset", "UTC offset"),
     ("config", "network shifter"), ("concurrency", "concurrency"), ("past", "future"),
+    ("manager credentials", "no credentials for shifter"),
 ])
 async def test_plan_rejects_a_missing_input(plan_world, change, message):
     from dataclasses import replace
@@ -481,6 +526,9 @@ async def test_plan_rejects_a_missing_input(plan_world, change, message):
         inputs = replace(inputs, start="2027-01-01T23:00:00")
     elif change == "config":
         inputs = replace(inputs, configs=inputs.output)
+    elif change == "manager credentials":
+        recorded = json.loads(inputs.inventory.read_text())
+        inputs.inventory.write_text(json.dumps(recorded | {"credentials": planspec.ALL16}))
     elif change == "concurrency":
         inputs = replace(inputs, concurrency=0)
     else:
@@ -506,7 +554,8 @@ async def test_plan_refuses_another_account_than_the_managers(plan_world):
 def test_parse_networks():
     assert planspec.parse_networks("all16") == planspec.ALL16 and len(planspec.ALL16) == 16
     assert planspec.parse_networks("shifter,soax") == ("shifter", "soax")
-    for bad in ("", "a,a", "Bad"):
+    assert planspec.parse_networks("all16,shifter") == (*planspec.ALL16, "shifter")
+    for bad in ("", "a,a", "Bad", "all16,soax"):
         with pytest.raises(PlanError):
             planspec.parse_networks(bad)
 
