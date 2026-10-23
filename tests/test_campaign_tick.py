@@ -1,4 +1,4 @@
-"""CAMP-1d: hourly tick, collector daemon, orphan reconcile, alarms, traffic reports.
+"""CAMP-1d: hourly tick, collector daemon, orphan reconcile, alarms, traffic reports, Mac watch.
 
 Offline only: fake launchers and harvesters, a fake clock, the in-process fake DigitalOcean of
 the scope suite (seeded with production-like droplets) and a fake SSH remote.
@@ -53,6 +53,7 @@ from proxy_index.campaign.tick import (
     save_hour,
     set_paused,
 )
+from proxy_index.campaign.watch import Watch, WatchIO, acknowledge, report_message, run_watch
 from proxy_index.cli import main
 
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
@@ -569,6 +570,125 @@ def test_the_default_systemd_hooks(tmp_path, monkeypatch):
     assert commands[-1] == ["systemctl", "disable", "--now", f"{unit}.timer"]
 
 
+# 10: the watch writes the states, copies reports and notifies (faked SSH and notifications).
+def watch_data(now, *, reports=None, alerts=(), finished=False, offset=0):
+    status = {"now": now.isoformat(), "live_workers": 16, "finished": finished,
+              "hours": [{"hour": 0, "state": "done"}, {"hour": 1, "state": "running"}]}
+    tsv = "hour\tnetwork\tbytes_up\tbytes_down\n00\tshifter\t1000000000\t2000000000\n"
+    return {"status": status, "alerts": [json.dumps(a) for a in alerts], "offset": offset,
+            "reports": reports or {}, "tsv": tsv}
+
+
+def test_the_watch_writes_states_copies_reports_and_notifies(tmp_path):
+    clock, notes, replies = Clock(START), [], []
+    status_file, traffic = tmp_path / "campaign.status.md", tmp_path / "traffic"
+    status_file.write_text("State: active\n\nOperator notes stay.\n")
+    io = WatchIO(fetch=lambda inv, offset, seen: replies.pop(0), notify=notes.append,
+                 clock=clock, sleep=lambda _s: None)
+    replies.append(watch_data(START, reports={"hour-00.md": "# hour 0\n"}, offset=10))
+    watch = Watch({"host": "manager"}, status_file, traffic, io)
+    assert watch.once() == "active"
+    assert (traffic / "hour-00.md").read_text() == "# hour 0\n"
+    text = status_file.read_text()
+    assert text.startswith("State: active\nUpdated UTC: 2027-01-01T22:00:00Z\n")
+    assert "Hours: 1 done, 1 running (of 2)\nLive workers: 16\n" in text
+    assert "Traffic-Latest: hour 00 traffic/hour-00.md\nAlerts: 0 high (0 new)\n" in text  # w3
+    assert text.endswith("\nOperator notes stay.\n")
+    assert notes == ["CAMP-1 hour 00: 3.00 GB; top network shifter 3.00 GB"]
+    high = {"code": "destroy_refused", "level": "high", "key": "123"}
+    replies.append(watch_data(START, alerts=[high, {"code": "x", "level": "info"}], offset=20))
+    assert watch.once() == "blocked" and notes[-1] == "CAMP-1 alert destroy_refused (123)"
+    replies.append(OSError("ssh"))
+    io.fetch = lambda *a: (_ for _ in ()).throw(replies.pop(0))
+    clock.now = START + timedelta(minutes=4)
+    assert Watch({}, status_file, traffic, io).once() == "blocked"  # state persists
+    assert notes[-1].startswith("CAMP-1 alert manager_stale") and len(notes) == 3
+    assert not IPV4.search(status_file.read_text())
+
+
+def test_run_watch_stops_when_finished(tmp_path):
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({"host": "manager", "campaign_id": CID}))
+    replies = [watch_data(START), watch_data(START, finished=True)]
+    io = WatchIO(fetch=lambda *a: replies.pop(0), notify=lambda _t: None, clock=Clock(START),
+                 sleep=lambda _s: None)
+    assert run_watch(inventory, tmp_path / "s.md", tmp_path / "t", io=io) == "finished"
+    assert report_message("hour-05.md", {}) == "CAMP-1 hour 05: 0.00 GB"
+
+
+def test_ssh_fetch_and_notify_build_safe_commands(monkeypatch):
+    from proxy_index.campaign import watch
+
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return types.SimpleNamespace(stdout=json.dumps({"ok": True}))
+
+    monkeypatch.setattr(watch.subprocess, "run", run)
+    inventory = {"host": "manager.example", "identity": "id_mac", "known_hosts": "kh",
+                 "campaign_id": CID}
+    assert watch.ssh_fetch(inventory, 5, {}) == {"ok": True}
+    assert calls[0][:3] == ["ssh", "-i", "id_mac"] and "StrictHostKeyChecking=yes" in calls[0]
+    assert calls[0][-1].endswith(f"/opt/proxy-index-campaign/campaigns/{CID} 5 -")
+    watch.ssh_fetch(inventory, 5, {"hour-01.md": "ab", "hour-00.md": "cd"})
+    assert calls[1][-1].endswith(" 5 hour-00.md:cd,hour-01.md:ab")
+    watch.notify('hour "1"; do shell script "x"')
+    assert calls[2][-1] == 'hour "1"; do shell script "x"'  # argv only, never in the script
+
+
+def test_the_remote_reader_returns_new_and_rewritten_reports(tmp_path):
+    """w2: reports are tracked by name and content hash, so a rewritten report comes again."""
+    import hashlib
+    import subprocess
+
+    from proxy_index.campaign import watch
+
+    reports = tmp_path / "reports" / "traffic"
+    reports.mkdir(parents=True)
+    (reports / "hour-00.md").write_text("old\n")
+    (tmp_path / "alerts.jsonl").write_text('{"code": "a"}\n{"code": "b"}\n')
+
+    def read(offset, seen):
+        out = subprocess.run([sys.executable, "-c", watch.REMOTE_READ, str(tmp_path),
+                              str(offset), seen], capture_output=True, text=True, check=True)
+        return json.loads(out.stdout)
+
+    first = read(0, "-")
+    assert first["reports"] == {"hour-00.md": "old\n"} and len(first["alerts"]) == 2
+    seen = f"hour-00.md:{hashlib.sha256(b'old' + bytes([10])).hexdigest()}"
+    again = read(first["offset"], seen)
+    assert again["reports"] == {} and again["alerts"] == [] and again["status"] is None
+    (reports / "hour-00.md").write_text("rewritten\n")
+    assert read(first["offset"], seen)["reports"] == {"hour-00.md": "rewritten\n"}
+
+
+def test_the_watch_acknowledges_alerts_and_survives_bad_lines(tmp_path):
+    """w1: only unacknowledged high alerts block; w2: a bad line never repeats notifications."""
+    clock, notes, replies = Clock(START), [], []
+    status_file, traffic = tmp_path / "campaign.status.md", tmp_path / "traffic"
+    io = WatchIO(fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock,
+                 sleep=lambda _s: None)
+    high = json.dumps({"code": "missed_launch", "level": "high", "key": "h01-armed"})
+    replies.append(watch_data(START, reports={"hour-00.md": "# hour 0\n"}, offset=10)
+                   | {"alerts": ["not json", "[1]", high]})
+    assert Watch({}, status_file, traffic, io).once() == "blocked"
+    assert notes[1:] == ["CAMP-1 alert watch_parse_error: skipped a malformed alert line",
+                         "CAMP-1 alert missed_launch (h01-armed)"]
+    assert "Alerts: 1 high (1 new)" in status_file.read_text()
+    assert acknowledge(status_file) == 1
+    replies.append(watch_data(START, reports={"hour-00.md": "# hour 0, rewritten\n"},
+                              offset=20) | {"alerts": ["also bad"]})
+    watch = Watch({}, status_file, traffic, io)
+    assert watch.once() == "active" and "Alerts: 1 high (0 new)" in status_file.read_text()
+    assert (traffic / "hour-00.md").read_text() == "# hour 0, rewritten\n"
+    assert len(notes) == 4  # the rewritten report once; the parse error only once
+    replies.append({"reports": {"hour-01.md": "# hour 1\n"}, "tsv": "", "alerts": None})
+    assert watch.once() == "active"  # malformed reply: the report is kept, state saved
+    assert notes[-1] == "CAMP-1 hour 01: 0.00 GB" and "hour-01.md" in watch.memory["seen"]
+    assert "hour-01.md" in Watch({}, status_file, traffic, io).memory["seen"]
+
+
 # The CLI wiring, with fake CAMP-1c modules standing in for launch, harvest and fanout.
 def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     root = make_root(tmp_path, synthetic=True)
@@ -605,6 +725,16 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert lines == [{"paused": ["geonode"]}, {"launched": [0]},
                      {"finished": False, "live_workers": 0}, {"alert": None}]
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text("{}")
+    monkeypatch.setattr("proxy_index.campaign.watch.ssh_fetch",
+                        lambda *a: watch_data(datetime.now(UTC), finished=True))
+    monkeypatch.setattr("proxy_index.campaign.watch.notify", lambda _text: None)
+    assert main(["campaign", "watch", "--inventory", str(inventory), "--status-file",
+                 str(tmp_path / "s.md"), "--traffic-dir", str(tmp_path / "t"), "--once"]) == 0
+    assert main(["campaign", "watch", "--inventory", str(inventory), "--status-file",
+                 str(tmp_path / "s.md"), "--traffic-dir", str(tmp_path / "t"), "--ack"]) == 0
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"acked": 0}
 
 
 # Review findings S1-S7: each test failed at 34bdc8b.
@@ -838,3 +968,23 @@ async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
     assert fake.deleted == [("droplet", stuck)]  # the rest of the reconcile still ran
     assert status["live_workers"] == 1 and not (root / ".runtime" / "hosts-03.json").exists()
     assert {a["code"] for a in read_alerts(root)} == {"orphan_unreachable"}
+
+
+def test_w1b_an_ack_reaches_the_long_running_watch(tmp_path):
+    """The launchd watch keeps one Watch for the whole campaign; its saves never undo --ack."""
+    clock, notes = Clock(START), []
+    status_file = tmp_path / "campaign.status.md"
+    high = json.dumps({"code": "missed_launch", "level": "high", "key": "h01-armed"})
+    replies = [watch_data(START, offset=10) | {"alerts": [high]},
+               watch_data(START, offset=10), watch_data(START, offset=10),
+               watch_data(START, offset=20) | {"alerts": [high.replace("h01", "h02")]}]
+    watch = Watch({}, status_file, tmp_path / "traffic", WatchIO(
+        fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock,
+        sleep=lambda _s: None))
+    assert watch.once() == "blocked"
+    assert acknowledge(status_file) == 1
+    assert watch.once() == "active" and watch.once() == "active"  # the same, long-lived watch
+    assert "Alerts: 1 high (0 new)" in status_file.read_text()
+    assert watch.once() == "blocked"  # a later high alert blocks again
+    assert "Alerts: 2 high (1 new)" in status_file.read_text()
+
