@@ -253,8 +253,11 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
 
 
 async def _refuse_while_running(remote: Manager, campaigns: list[str]) -> None:
-    """A deploy reinstalls the venv and the wheel under the units: never while one runs."""
-    units = " ".join(unit for cid in campaigns for unit in unit_names(cid))
+    """A deploy reinstalls the venv and the wheel under the units: never while a campaign's
+    tick or collector runs. The watchdog timers stay active until `disable` (they only alert)."""
+    units = " ".join(f"proxy-index-campaign-{name}@{cid}.{kind}" for cid in campaigns
+                     for name, kind in (("tick", "timer"), ("tick", "service"),
+                                        ("collector", "service")))
     out = await remote.run(f"for u in {units}; do systemctl is-active --quiet $u && "
                            "echo active $u; done; true", "check running units")
     if "active " in out:
@@ -334,14 +337,14 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
 
 def owner_go_record(cid: str, owner_go: Path | None, spec: dict, now: datetime) -> dict:
     """The owner's go (D9) as recorded: the answer file's path and SHA-256, and the time. A
-    real campaign's answer must name its start hour (`HH:00`, UTC), so an older answer such
-    as the plan approval cannot start it."""
+    real campaign's answer must hold the exact line `Start: <YYYY-MM-DDTHH:00Z>` (its UTC
+    start), so an older answer such as the plan approval cannot start it."""
     text = owner_go.read_text() if owner_go is not None and owner_go.is_file() else ""
     if not text.strip():
         raise DeployError("enable needs --owner-go with the owner's recorded answer (D9)")
-    hour = f"{datetime.fromisoformat(spec['starts_at']).astimezone(UTC):%H}:00"
-    if not spec["synthetic"] and hour not in text:
-        raise DeployError(f"the owner's go must name the start hour {hour} UTC (D9)")
+    line = f"Start: {datetime.fromisoformat(spec['starts_at']).astimezone(UTC):%Y-%m-%dT%H:00Z}"
+    if not spec["synthetic"] and line not in text.splitlines():
+        raise DeployError(f"the owner's go must hold the line '{line}' (D9)")
     return {"campaign_id": cid, "owner_go": str(owner_go.resolve()), "synthetic": spec[
         "synthetic"], "owner_go_sha256": digest(owner_go), "enabled_at": now.isoformat()}
 
@@ -357,6 +360,18 @@ async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
     save(inventory_path, inventory, enabled=go, campaign_id=cid)
     await Manager(inventory, shell).run("systemctl enable --now " + " ".join(units), "enable")
     return go | {"units": units}
+
+
+async def disable(inventory_path: Path, cid: str, *, shell: Shell = run_shell,
+                  now: datetime | None = None) -> dict:
+    """Stop one campaign's timers and collector (the end of the dry run, or an owner's stop)."""
+    units, inventory = unit_names(cid), load_inventory(inventory_path)
+    if cid not in inventory.get("campaigns", []):
+        raise DeployError("campaign was never uploaded to the recorded manager")
+    await Manager(inventory, shell).run("systemctl disable --now " + " ".join(units), "disable")
+    disabled = inventory.get("disabled", {}) | {cid: (now or datetime.now(UTC)).isoformat()}
+    save(inventory_path, inventory, disabled=disabled)
+    return {"campaign_id": cid, "units": units}
 
 
 async def allow_me(cloud: DigitalOcean, inventory_path: Path, address: str) -> dict:

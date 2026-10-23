@@ -190,6 +190,49 @@ async def test_a_deploy_never_runs_under_a_campaign_and_keeps_earlier_credential
     assert inventory(job)["credentials"] == ["geonode", "shifter"]
 
 
+class UnitShell(Shell):
+    """Answers the running-units check per unit, as `systemctl is-active` would."""
+
+    def __init__(self, active):
+        super().__init__()
+        self.active = active
+
+    async def __call__(self, argv, stdin):
+        command = argv[-1]
+        if "is-active" not in command:
+            return await super().__call__(argv, stdin)
+        self.calls.append((argv, stdin))
+        checked = command.split(" in ", 1)[1].split(";", 1)[0].split()
+        return 0, "".join(f"active {u}\n" for u in checked if u in self.active)
+
+
+async def test_a_finished_campaign_with_active_watchdogs_does_not_block_a_deploy(job):
+    """n1: the watchdog timers stay active after the last hour; only tick and collector count."""
+    fake = Fake()
+    await run_deploy(fake, job)
+    deploy.save(job.inventory, inventory(job), campaigns=[CID])
+    watchdogs = {u for u in deploy.unit_names(CID) if "watchdog" in u}
+    shell = UnitShell(watchdogs)
+    await run_deploy(fake, job, shell)
+    assert "is-active" in shell.calls[0][0][-1] and shell.commands()[-1].split("&&")[1].strip(
+        ).startswith("cat > ")
+    for unit in (f"proxy-index-campaign-tick@{CID}.service",
+                 f"proxy-index-campaign-collector@{CID}.service"):
+        with pytest.raises(deploy.DeployError, match="units are running"):
+            await run_deploy(fake, job, UnitShell(watchdogs | {unit}))
+
+
+async def test_disable_stops_one_campaigns_units_and_records_it(deployed):
+    shell = Shell()
+    with pytest.raises(deploy.DeployError, match="never uploaded"):
+        await deploy.disable(deployed, "20270101t230000z-ffffffffffff", shell=shell)
+    assert shell.calls == []
+    result = await deploy.disable(deployed, CID, shell=shell, now=NOW)
+    assert shell.commands() == ["systemctl disable --now " + " ".join(deploy.unit_names(CID))]
+    assert result["units"] == deploy.unit_names(CID)
+    assert json.loads(deployed.read_text())["disabled"] == {CID: NOW.isoformat()}
+
+
 async def test_an_uncertain_create_adopts_the_manager_by_name(job):
     fake = Fake()
     fake.create_then_fail = 1
@@ -353,14 +396,16 @@ async def test_enable_refuses_without_the_owners_go(deployed, tmp_path):
         with pytest.raises(deploy.DeployError, match="--owner-go"):
             await deploy.enable(deployed, CID, go, shell=shell, now=NOW)
     answer = tmp_path / "CAMP-1-go.md"
-    answer.write_text("Owner: start at 23:00 UTC on leftclick.\n")
+    answer.write_text("Owner: go.\nStart: 2027-01-01T23:00Z\nAccount: leftclick\n")
     with pytest.raises(deploy.DeployError, match="never uploaded"):
         await deploy.enable(deployed, "20270101t230000z-ffffffffffff", answer, shell=shell)
     assert shell.calls == [] and "enabled" not in json.loads(deployed.read_text())
     stale = tmp_path / "CAMP-1-plan-approval.md"
-    stale.write_text("Owner: the plan is approved.\n")
-    with pytest.raises(deploy.DeployError, match="start hour 23:00"):  # m3
-        await deploy.enable(deployed, CID, stale, shell=shell, now=NOW)
+    for text in ("Owner: the plan is approved.\n", "start at 23:00 UTC, round HH:00:00\n",
+                 "T22:23:00Z and 2027-01-01T23:00Z\n", "Start: 2027-01-01T23:00Z, maybe\n"):
+        stale.write_text(text)  # m3, n2: only the exact start line counts
+        with pytest.raises(deploy.DeployError, match="'Start: 2027-01-01T23:00Z'"):
+            await deploy.enable(deployed, CID, stale, shell=shell, now=NOW)
     assert shell.calls == []
     result = await deploy.enable(deployed, CID, answer, shell=shell, now=NOW)
     assert shell.commands() == ["systemctl enable --now " + " ".join(deploy.unit_names(CID))]
@@ -586,6 +631,7 @@ class NoCloud:
 @pytest.mark.parametrize("argv, called", [
     (["upload-spec", "root"], "upload_spec"),
     (["enable", CID, "--owner-go", "go.md"], "enable"),
+    (["disable", CID], "disable"),
     (["allow-me", "--mac-ip", MAC_IP], "allow_me"),
     (["allow-me"], "allow_me"),
     (["teardown", "--after-collect", "r.json"], "teardown"),
@@ -602,7 +648,7 @@ def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, c
             return result
         return step
 
-    for name in ("upload_spec", "enable", "allow_me", "teardown", "deploy"):
+    for name in ("upload_spec", "enable", "disable", "allow_me", "teardown", "deploy"):
         monkeypatch.setattr(deploy, name, stub(name, {"clean": name != "teardown"}))
     monkeypatch.setattr(deploy, "mac_ipv4", lambda: OTHER_IP)
     monkeypatch.setattr(deploy, "credential_files", lambda path, nets: {n: b"" for n in nets})

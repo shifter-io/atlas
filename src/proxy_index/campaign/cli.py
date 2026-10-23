@@ -214,12 +214,14 @@ def _plan_parsers(actions) -> None:
     enable = steps.add_parser("enable", help="Start a campaign's timers (owner's go only)")
     enable.add_argument("campaign_id")
     enable.add_argument("--owner-go", type=Path, help="the owner's recorded answer file")
+    stop = steps.add_parser("disable", help="Stop a campaign's timers and collector")
+    stop.add_argument("campaign_id")
     allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
     teardown = steps.add_parser("teardown", help="Remove the manager and its resources")
     teardown.add_argument("--after-collect", type=Path, action="append", required=True)
     for step in (deploy, allow):
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
-    for step in (deploy, upload, enable, allow, teardown):
+    for step in (deploy, upload, enable, stop, allow, teardown):
         step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
 
 
@@ -252,6 +254,8 @@ async def _manager_step(args) -> dict:
         return await deploy.upload_spec(args.inventory, args.root)
     if args.manager_action == "enable":
         return await deploy.enable(args.inventory, args.campaign_id, args.owner_go)
+    if args.manager_action == "disable":
+        return await deploy.disable(args.inventory, args.campaign_id)
     # teardown and allow-me act on the account the inventory records (deploy checks it too)
     account = args.account if args.manager_action == "deploy" else deploy.load_inventory(
         args.inventory).get("account")
