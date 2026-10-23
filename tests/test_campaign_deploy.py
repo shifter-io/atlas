@@ -519,17 +519,33 @@ def test_the_plan_cli_reports_bad_input(capsys):
     assert "Not planned" in capsys.readouterr().err
 
 
+class NoCloud:
+    """Stands in for the client the CLI builds; records the account it was built for."""
+
+    accounts: list = []
+
+    def __init__(self, account):
+        self.accounts.append(account)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+
 @pytest.mark.parametrize("argv, called", [
     (["upload-spec", "root"], "upload_spec"),
     (["enable", CID, "--owner-go", "go.md"], "enable"),
-    (["allow-me", "--account", "leftclick", "--mac-ip", MAC_IP], "allow_me"),
-    (["allow-me", "--account", "leftclick"], "allow_me"),
-    (["teardown", "--account", "leftclick", "--after-collect", "r.json"], "teardown"),
+    (["allow-me", "--mac-ip", MAC_IP], "allow_me"),
+    (["allow-me"], "allow_me"),
+    (["teardown", "--after-collect", "r.json"], "teardown"),
     (["deploy", "--account", "leftclick", "--wheel", "w", "--requirements", "r",
       "--networks", "shifter", "--mac-ip", MAC_IP], "deploy"),
 ])
 def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, called):
-    seen = []
+    seen, recorded = [], tmp_path / "campaign-manager.json"
+    recorded.write_text(json.dumps({"account": "proxy-index"}))
 
     def stub(name, result):
         async def step(*args, **_):
@@ -542,15 +558,27 @@ def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, c
     monkeypatch.setattr(deploy, "mac_ipv4", lambda: OTHER_IP)
     monkeypatch.setattr(deploy, "credential_files", lambda path, nets: {n: b"" for n in nets})
     monkeypatch.setattr("proxy_index.campaign.image.ensure_mac_key", lambda path: path)
-    args = parse(["campaign", "manager", *argv])
+    monkeypatch.setattr(campaign_cli, "_cloud", NoCloud)
+    NoCloud.accounts = []
+    args = parse(["campaign", "manager", *argv, "--inventory", str(recorded)])
     assert campaign_cli.dispatch(args) == (3 if called == "teardown" else 0)
     assert [name for name, _ in seen] == [called]
+    if called in ("allow_me", "teardown"):  # B1: the inventory's account, never a flag
+        assert NoCloud.accounts == ["proxy-index"]
     if called == "allow_me":
         assert seen[0][1][-1] == (MAC_IP if "--mac-ip" in argv else OTHER_IP)
     if called == "deploy":
         job = seen[0][1][1]
         assert job.mac_ipv4 == MAC_IP and list(job.credentials) == ["shifter"]
+        assert NoCloud.accounts == ["leftclick"]
     assert json.loads(capsys.readouterr().out) == {"clean": called != "teardown"}
+
+
+def test_the_manager_cli_needs_a_recorded_manager_for_teardown(tmp_path, capsys):
+    args = parse(["campaign", "manager", "teardown", "--after-collect", "r.json",
+                  "--inventory", str(tmp_path / "none.json")])
+    assert campaign_cli.dispatch(args) == 3
+    assert "no manager is recorded" in capsys.readouterr().err
 
 
 def test_a_table_that_does_not_round_trip_is_refused(monkeypatch):

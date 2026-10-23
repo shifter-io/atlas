@@ -78,6 +78,17 @@ def save(path: Path, inventory: dict[str, Any], **values: Any) -> dict[str, Any]
     return inventory
 
 
+async def check_account(cloud: DigitalOcean, inventory: dict[str, Any], account: str) -> str:
+    """The client must act for the inventory's manager: the same account key and the same
+    Proxy Index project id (each team has its own). Returns the project id."""
+    project_id = await cloud.project_id(PROJECT_NAME)
+    if (inventory.get("account", account), inventory.get("project_id", project_id)) != (
+            account, project_id):
+        raise DeployError(f"the recorded manager is on account {inventory.get('account')}, "
+                          f"not on this client's account ({account})")
+    return project_id
+
+
 def audit_path(inventory: Path) -> Path:
     return inventory.with_name("campaign-ops-audit.jsonl")
 
@@ -205,10 +216,11 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
     Run again with a new wheel to update a recorded manager; it is never created twice."""
     now, path = now or datetime.now(UTC), job.inventory
     inventory = load_inventory(path)
+    project_id = await check_account(cloud, inventory, job.account)  # before any write
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
     mac_key_id, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
-    save(path, inventory, account=job.account, project_id=await cloud.project_id(
-        PROJECT_NAME), mac_key_id=mac_key_id, user="root",
+    save(path, inventory, account=job.account, project_id=project_id, mac_key_id=mac_key_id,
+         user="root",
          identity=str(job.mac_key), identity_file=str(job.mac_key),
          known_hosts=str(path.with_name("campaign-manager.known_hosts")),
          campaigns_root=f"{BASE}/campaigns")
@@ -325,6 +337,7 @@ async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
 async def allow_me(cloud: DigitalOcean, inventory_path: Path, address: str) -> dict:
     """Point the manager firewall's only SSH rule at this Mac's current public IPv4."""
     inventory, address = load_inventory(inventory_path), checked_ipv4(address)
+    await check_account(cloud, inventory, inventory.get("account", ""))
     rules = ops_api.manager_firewall(address, str(inventory["manager_id"]))
     firewall = await ops_api.apply_firewall(cloud, manager_scope(inventory), rules,
                                             inventory["manager_firewall_id"])
@@ -369,6 +382,7 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     inventory = load_inventory(inventory_path)
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
+    await check_account(cloud, inventory, inventory.get("account", ""))
     check_reports(inventory, reports)
     if await cloud.list_tag(WORKER_TAG):
         raise DeployError("campaign workers are still alive")

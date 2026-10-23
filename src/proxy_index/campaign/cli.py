@@ -219,8 +219,6 @@ def _plan_parsers(actions) -> None:
     teardown.add_argument("--after-collect", type=Path, action="append", required=True)
     for step in (deploy, allow):
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
-    for step in (allow, teardown):
-        step.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
     for step in (deploy, upload, enable, allow, teardown):
         step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
 
@@ -254,7 +252,12 @@ async def _manager_step(args) -> dict:
         return await deploy.upload_spec(args.inventory, args.root)
     if args.manager_action == "enable":
         return await deploy.enable(args.inventory, args.campaign_id, args.owner_go)
-    async with _cloud(args.account) as cloud:
+    # teardown and allow-me act on the account the inventory records (deploy checks it too)
+    account = args.account if args.manager_action == "deploy" else deploy.load_inventory(
+        args.inventory).get("account")
+    if account is None:
+        raise deploy.DeployError("no manager is recorded")
+    async with _cloud(account) as cloud:
         if args.manager_action == "teardown":
             return await deploy.teardown(cloud, args.inventory, args.after_collect)
         address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()

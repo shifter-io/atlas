@@ -135,6 +135,10 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
     check_credentials(inputs)
     key_name = inputs.ssh_key_name or manager.get("worker_key_name", "")
     found = await check_cloud(cloud, inputs, key_name)
+    if (manager.get("account"), manager.get("project_id")) != (inputs.account,
+                                                               found["project_id"]):
+        raise PlanError(f"the manager is on account {manager.get('account')}, "
+                        f"not {inputs.account}")
     cid = f"{begins:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
     root = inputs.output / cid
     if root.exists():
