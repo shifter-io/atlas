@@ -338,3 +338,24 @@ def test_round_cli_refuses_a_changed_provider_config_before_traffic(live, tmp_pa
     assert main(["onboarding", "round", *live.args, "--provider-config", str(changed)]) == 1
     assert live.calls == []
     assert not round_directory(live.path, "tor1", 0).exists()
+
+
+async def test_verify_round_flags_a_crashed_round_overlaps_and_foreign_queues(ephemeral):
+    await run_round(ephemeral, 12)
+    path = round_directory(ephemeral, "tor1", 12) / "round.json"
+    saved = read_json(path)
+    crashed = deepcopy(saved)
+    crashed["status"] = "running"
+    crashed["jobs"][2]["status"] = "running"
+    crashed["jobs"][1]["started_at"] = crashed["jobs"][0]["started_at"]
+    path.write_text(json.dumps(crashed))
+    issues = verify_round(ephemeral, "tor1", 12)["issues"]
+    assert issues[:3] == ["round is running", "GL: overlaps the previous country",
+                          "GL: failed verification (ValueError)"]
+    assert issues[-1] == "PM: running"
+    saved["jobs"].reverse()
+    path.write_text(json.dumps(saved))
+    with pytest.raises(ValueError, match="queue differs"):
+        verify_round(ephemeral, "tor1", 12)
+    with pytest.raises(ValueError, match="Unknown campaign region"):
+        verify_round(ephemeral, "mars1", 12)
