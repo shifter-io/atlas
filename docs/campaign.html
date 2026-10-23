@@ -19,7 +19,7 @@ details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointe
 <tr><td><code>contracts</code></td><td>Frozen tags, name patterns, accounts, the campaign spec, ledger records, protocols and paths.</td></tr>
 <tr><td><code>do_api</code></td><td>The asynchronous DigitalOcean client: read, create and assign only; no delete method.</td></tr>
 <tr><td><code>scope</code></td><td>The scope guard: the only delete path, its audit, and verified project assignment.</td></tr>
-<tr><td><code>cli</code></td><td><code>proxy-index campaign …</code> commands; each later part adds its own.</td></tr>
+<tr><td><code>cli</code></td><td>The <code>proxy-index campaign …</code> command group; each later part registers its own subcommands in <code>HANDLERS</code>.</td></tr>
 </tbody></table></div></section>
 <section id="scope-safety"><h2>Scope safety</h2>
 <p>Every campaign resource carries <b>all</b> of its ownership markers:</p>
@@ -50,8 +50,7 @@ details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointe
 <li><code>list_tag</code> refuses tags without the <code>pi-camp-</code> prefix; listing pages hold 200 items.</li>
 <li>A 429 waits for <code>Retry-After</code> or the rate-limit reset (at most 60 s); 5xx and connection errors back off 1, 2, 4, 8 s; other errors raise <code>ApiError</code> with method, path and status only.</li>
 <li>A limiter allows at most 200 requests per minute; <code>ratelimit_remaining</code> shows the API's count.</li></ul>
-<pre>uv run --no-editable proxy-index campaign limits --account leftclick</pre>
-<p>Read-only. It prints the droplet limit and account status, the counts of our role tags, the number of droplets in project Proxy Index, the remaining rate limit and which of our regions offer each size (default <code>c-2 s-8vcpu-16gb s-1vcpu-1gb</code>). It never lists production droplets and prints no IP addresses and no token.</p></section>
+<p><code>project_id(name)</code> resolves project Proxy Index by its exact name; <code>account()</code> returns only the droplet limit and account status. A read-only <code>campaign limits</code> command, which prints counts only, follows in a later task.</p></section>
 <section id="launch"><h2>Launch</h2><p>Written by CAMP-1c.</p></section>
 <section id="harvest"><h2>Harvest</h2><p>Written by CAMP-1c.</p></section>
 <section id="scheduling"><h2>Scheduling and alarms</h2><p>Written by CAMP-1d.</p></section>

@@ -1,8 +1,6 @@
 """Frozen campaign contracts: ownership markers, accounts, records, protocols and paths.
 
-Every campaign resource carries all of its ownership markers (tags, name pattern, project and a
-recorded id); `scope.guarded_delete` checks them before any delete. Changing this module is its own
-reviewed task, merged before any consumer and re-run against tests/test_campaign_scope.py.
+Changing this module is its own reviewed task, merged first and re-run with the scope suite.
 """
 
 from __future__ import annotations
@@ -24,6 +22,9 @@ RESOURCE_PREFIX = "pi-camp-"
 WORKER_NAME_RE = r"^pic-[0-9a-f]{8}-h[0-9]{2}-[a-z0-9]+-[a-z0-9-]+$"
 MANAGER_NAME_RE = r"^pi-camp-manager-[0-9]{8}-[0-9a-f]{4}$"
 BUILDER_NAME_RE = r"^pi-camp-builder-[0-9]{8}-[0-9a-f]{4}$"
+# Droplet role -> (role tag, name pattern); a droplet carries exactly one role tag.
+ROLES = {"worker": (WORKER_TAG, WORKER_NAME_RE), "manager": (MANAGER_TAG, MANAGER_NAME_RE),
+         "builder": (BUILDER_TAG, BUILDER_NAME_RE)}
 CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
 WORKER_ROOT = "/opt/proxy-index-worker"
@@ -234,33 +235,21 @@ class Scope:
 class Cloud(Protocol):
     """Read and create operations only. Deletes exist solely in `scope.guarded_delete`."""
 
-    async def create(
-        self, names: list[str], *, region: str, size: str, image: str,
-        tags: list[str], ssh_keys: list[str],
-    ) -> list[Droplet]: ...
-
+    async def create(self, names: list[str], *, region: str, size: str, image: str,
+                     tags: list[str], ssh_keys: list[str]) -> list[Droplet]: ...
     async def assign_project(self, project_id: str, droplet_ids: list[str]) -> None: ...
-
     async def get(self, droplet_id: str) -> Droplet | None: ...
-
     async def list_tag(self, tag: str) -> list[Droplet]: ...
-
     async def project_droplet_ids(self, project_id: str) -> frozenset[str]: ...
-
     async def account(self) -> dict[str, Any]: ...
 
 
 class Remote(Protocol):
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool: ...
-
     async def push_start(self, droplet: Droplet, payload: bytes, command: list[str]) -> None: ...
-
     async def inspect(self, droplet: Droplet) -> dict[str, Any]: ...
-
     async def stop(self, droplet: Droplet) -> None: ...
-
     async def pull(self, droplet: Droplet, remote: str, local: Path) -> None: ...
-
     async def journal(self, droplet: Droplet, local: Path) -> None: ...
 
 

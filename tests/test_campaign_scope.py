@@ -87,7 +87,7 @@ async def test_every_destructive_path_over_the_whole_account_deletes_only_ours(t
             for droplet_id in sorted(everything):
                 try:
                     if await guarded_delete(cloud, "droplet", droplet_id, role_scope,
-                                            everything, audit, role=role) == "deleted":
+                                            everything, audit, role) == "deleted":
                         results[role].add(droplet_id)
                 except OwnershipError:
                     pass
@@ -142,23 +142,22 @@ async def test_an_unrecorded_owned_droplet_is_refused(tmp_path):
     assert refused.value.failed == ["recorded"] and target in fake.droplets
 
 
-async def test_a_stale_project_cache_is_refreshed_before_a_refusal(tmp_path):
+async def test_a_stale_project_cache_is_refreshed_before_a_refusal(tmp_path, monkeypatch):
     fake = FakeDigitalOcean()
     first = fake.add(NAME, OURS, project=CAMPAIGN_PROJECT)
     late = fake.add(f"pic-{SID}-h03-fra1-shifter", OURS, project=None)
     moved = fake.add(f"pic-{SID}-h03-syd1-shifter", OURS, project=CAMPAIGN_PROJECT)
     audit, now = tmp_path / "audit.jsonl", [0.0]
     recorded = {first, late, moved}
+    monkeypatch.setattr(scope, "monotonic", lambda: now[0])
     async with running(fake) as cloud:
-        await guarded_delete(cloud, "droplet", first, SCOPE, recorded, audit, clock=lambda: now[0])
+        await guarded_delete(cloud, "droplet", first, SCOPE, recorded, audit)
         fake.projects[CAMPAIGN_PROJECT].add(late)  # assigned after the cache was filled
-        assert await guarded_delete(cloud, "droplet", late, SCOPE, recorded, audit,
-                                    clock=lambda: now[0]) == "deleted"
+        assert await guarded_delete(cloud, "droplet", late, SCOPE, recorded, audit) == "deleted"
         fake.projects[CAMPAIGN_PROJECT].discard(moved)  # moved out: the cache expires in 60 s
         now[0] = 61.0
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "droplet", moved, SCOPE, recorded, audit,
-                                 clock=lambda: now[0])
+            await guarded_delete(cloud, "droplet", moved, SCOPE, recorded, audit)
     assert refused.value.failed == ["project"]
     project_reads = [p for m, p, _, _ in fake.requests if p.endswith("/resources")]
     assert len(project_reads) == 3
@@ -256,14 +255,17 @@ async def test_assignment_moves_only_recorded_owned_droplets_and_verifies(tmp_pa
             sleeps.append(seconds)
 
         result = await assign_or_destroy(cloud, SCOPE, created, ids, tmp_path / "a.jsonl",
-                                         sleep=sleep)
+                                         retry=scope.Retry(sleep=sleep))
         assert result.assigned == ids and not result.destroyed and not result.refused
         assert sleeps == [15.0, 15.0] and ids <= fake.projects[CAMPAIGN_PROJECT]
-        assert await scope.assign_verified(cloud, SCOPE, [], ids) == frozenset()
+        empty = await assign_or_destroy(cloud, SCOPE, [], ids, tmp_path / "a.jsonl")
+        assert empty == scope.AssignResult(frozenset(), frozenset(), frozenset())
         stranger = await cloud.get(production)
+        before = len(fake.requests)
         for droplets, recorded in (([stranger], {production}), (created, set())):
             with pytest.raises(OwnershipError):
-                await scope.assign_verified(cloud, SCOPE, droplets, recorded)
+                await assign_or_destroy(cloud, SCOPE, droplets, recorded, tmp_path / "a.jsonl")
+        assert len(fake.requests) == before  # refused before any request
     assert production in fake.projects["prj-production"]
 
 
@@ -276,7 +278,7 @@ async def test_failed_assignment_fails_closed_through_the_guard(tmp_path, delay,
                                      ssh_keys=["9"])
         fake.assign_delay = delay
         result = await assign_or_destroy(cloud, SCOPE, created, {created[0].id}, audit,
-                                         attempts=2, delay=0)
+                                         retry=scope.Retry(attempts=2, delay=0))
     assert not result.assigned and getattr(result, outcome) == {created[0].id}
     assert (created[0].id in fake.droplets) is (outcome == "refused")
     assert audit_lines(audit)[-1]["result"] == ("deleted" if outcome == "destroyed" else "refused")

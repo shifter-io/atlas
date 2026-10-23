@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import re
@@ -26,7 +27,6 @@ from proxy_index.campaign.contracts import (
 from proxy_index.campaign.do_api import ApiError, ScopeError, TokenError
 
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
-IP = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
 
 
 def spec(**changes) -> CampaignSpec:
@@ -123,6 +123,13 @@ async def test_create_splits_into_batches_of_ten_and_sends_every_option():
     assert [len(b["names"]) for b in bodies] == [10, 6] and len(created) == 16
     assert bodies[0]["ssh_keys"] == ["9"] and bodies[0]["monitoring"] is True
     assert bodies[0]["with_droplet_agent"] is False and bodies[0]["ipv6"] is False
+
+
+async def test_create_refuses_unknown_flags():
+    async with running(FakeDigitalOcean()) as cloud:
+        with pytest.raises(ScopeError):
+            await cloud.create([f"pic-{SID}-h03-lon1-x"], region="lon1", size="c-2", image="1",
+                               tags=OURS, ssh_keys=["9"], backups=True)
 
 
 @pytest.mark.parametrize(
@@ -294,32 +301,8 @@ def test_token_sources_read_memory_only_and_refuse_loose_files(tmp_path, monkeyp
     assert TOKEN not in str(missing.value)
 
 
-async def test_limits_reports_counts_only(capsys):
-    fake = FakeDigitalOcean()
-    fake.seed_production(30)
-    fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
-    async with running(fake) as cloud:
-        report = await campaign_cli.limits(cloud, "Proxy Index", ["c-2", "s-1vcpu-1gb", "x"])
-    assert report["droplet_limit"] == 10000 and report["account_status"] == "active"
-    assert report["our_tag_counts"] == {WORKER_TAG: 1, MANAGER_TAG: 0, "pi-camp-builder": 0}
-    assert report["project"] == {"name": "Proxy Index", "droplets": 1}
-    assert report["sizes"] == {"c-2": ["lon1", "fra1"], "s-1vcpu-1gb": [], "x": []}
-    text = json.dumps(report)
-    assert not IP.search(text) and TOKEN not in text and "owner-at-example" not in text
-    listed = [q for m, p, q, _ in fake.requests if p == "/v2/droplets"]
-    assert listed and all(q["tag_name"].startswith("pi-camp-") for q in listed)
-
-
-def test_campaign_limits_command_is_wired(monkeypatch, capsys):
-    seen = {}
-
-    async def limits(cloud, project, sizes):
-        seen.update(cloud=cloud, project=project, sizes=sizes)
-        return {"droplet_limit": 1}
-
-    monkeypatch.setattr(campaign_cli, "limits", limits)
-    monkeypatch.setattr(campaign_cli, "keychain_token", lambda account: lambda: TOKEN)
-    assert main_cli.main(["campaign", "limits", "--account", "leftclick"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"droplet_limit": 1}
-    assert seen["project"] == "Proxy Index" and seen["sizes"] == list(campaign_cli.DEFAULT_SIZES)
-    assert isinstance(seen["cloud"], do_api.DigitalOcean)
+def test_campaign_command_group_is_registered(monkeypatch):
+    monkeypatch.setitem(campaign_cli.HANDLERS, "probe", lambda args: 7)
+    assert campaign_cli.dispatch(argparse.Namespace(campaign_action="probe")) == 7
+    with pytest.raises(SystemExit):
+        main_cli.main(["campaign"])

@@ -1,8 +1,7 @@
 """Asynchronous DigitalOcean client that can only read, create and assign within our scope.
 
-It has no delete method. `request()` refuses `DELETE` unless the caller passes the guard token that
-only `scope.py` holds, so `scope.guarded_delete` is the single delete path. The API token lives in
-memory only and never appears in `repr`, exceptions or logs.
+It has no delete method: `request()` refuses `DELETE` without the token only `scope.py` holds.
+The API token lives in memory only and never appears in `repr`, exceptions or logs.
 """
 
 from __future__ import annotations
@@ -21,21 +20,12 @@ from typing import Any
 
 import aiohttp
 
-from .contracts import (
-    BUILDER_NAME_RE,
-    BUILDER_TAG,
-    MANAGER_NAME_RE,
-    MANAGER_TAG,
-    RESOURCE_PREFIX,
-    WORKER_NAME_RE,
-    WORKER_TAG,
-    Account,
-    Droplet,
-)
+from .contracts import RESOURCE_PREFIX, ROLES, WORKER_TAG, Account, Droplet
 
 API = "https://api.digitalocean.com"
 PAGE_SIZE = 200
 CREATE_BATCH = 10
+CREATE_FLAGS = ("monitoring", "with_droplet_agent", "ipv6")
 PER_MINUTE = 200
 BACKOFF = (1, 2, 4, 8)
 MAX_WAIT = 60.0
@@ -99,16 +89,15 @@ def parse_droplet(raw: dict[str, Any]) -> Droplet:
 
 def check_create(names: list[str], tags: list[str], ssh_keys: list[str]) -> None:
     """Refuse a create whose names, tags or keys do not carry all ownership markers."""
-    roles = [tag for tag in (WORKER_TAG, MANAGER_TAG, BUILDER_TAG) if tag in tags]
+    roles = [(tag, pattern) for tag, pattern in ROLES.values() if tag in tags]
     if len(roles) != 1 or any(not tag.startswith(RESOURCE_PREFIX) for tag in tags):
         raise ScopeError("create needs exactly one role tag and only pi-camp- tags")
     if not names or not ssh_keys:
         raise ScopeError("create needs names and ssh_keys")
-    pattern = {WORKER_TAG: WORKER_NAME_RE, MANAGER_TAG: MANAGER_NAME_RE,
-               BUILDER_TAG: BUILDER_NAME_RE}[roles[0]]
+    [(role_tag, pattern)] = roles
     if any(not re.fullmatch(pattern, name) for name in names):
         raise ScopeError("create name does not match its role's pattern")
-    if roles[0] == WORKER_TAG:
+    if role_tag == WORKER_TAG:
         sids = {name.split("-")[1] for name in names}
         if len(sids) != 1 or f"{RESOURCE_PREFIX}{sids.pop()}" not in tags:
             raise ScopeError("worker create needs the campaign tag of its names")
@@ -123,8 +112,7 @@ class DigitalOcean:
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
                  clock: Callable[[], float] = time.monotonic, per_minute: int = PER_MINUTE):
         self._token_source, self._base_url = token_source, base_url.rstrip("/")
-        self._per_minute = per_minute
-        self._sleep, self._clock = sleep, clock
+        self._sleep, self._clock, self._per_minute = sleep, clock, per_minute
         self.__token: str | None = None
         self._session: aiohttp.ClientSession | None = None
         self._sent: deque[float] = deque()
@@ -215,14 +203,16 @@ class DigitalOcean:
             page += 1
 
     async def create(self, names: list[str], *, region: str, size: str, image: str,
-                     tags: list[str], ssh_keys: list[str], monitoring: bool = False,
-                     with_droplet_agent: bool = False, ipv6: bool = False) -> list[Droplet]:
+                     tags: list[str], ssh_keys: list[str], **flags: bool) -> list[Droplet]:
+        """Create droplets; `flags` sets monitoring, with_droplet_agent and ipv6 (default off)."""
         check_create(names, tags, ssh_keys)
+        if set(flags) - set(CREATE_FLAGS):
+            raise ScopeError("unknown create flag")
         created = []
         for start in range(0, len(names), CREATE_BATCH):
             body = {"names": names[start:start + CREATE_BATCH], "region": region, "size": size,
-                    "image": image, "tags": tags, "ssh_keys": ssh_keys, "monitoring": monitoring,
-                    "with_droplet_agent": with_droplet_agent, "ipv6": ipv6}
+                    "image": image, "tags": tags, "ssh_keys": ssh_keys,
+                    **{flag: bool(flags.get(flag, False)) for flag in CREATE_FLAGS}}
             payload = await self.request("POST", "/v2/droplets", body=body)
             created.extend(parse_droplet(raw) for raw in payload.get("droplets", []))
         return created
@@ -267,7 +257,3 @@ class DigitalOcean:
     async def account(self) -> dict[str, Any]:
         raw = (await self.request("GET", "/v2/account"))["account"]
         return {"droplet_limit": raw.get("droplet_limit"), "status": raw.get("status")}
-
-    async def sizes(self) -> dict[str, list[str]]:
-        found = await self._pages("/v2/sizes", "sizes")
-        return {s["slug"]: list(s.get("regions", [])) for s in found if s.get("available")}
