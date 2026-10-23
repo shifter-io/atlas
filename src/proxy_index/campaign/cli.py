@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 # Subcommand name -> handler(args) -> exit code; each task appends its own entries.
@@ -36,10 +37,14 @@ def _data_parsers(actions) -> None:
 
 
 def _merge(args) -> int:
-    from .merge import load_spec, merge_network
+    from .merge import CampaignNotFinished, RoundDataMissing, load_spec, merge_networks
 
-    for network in args.network or load_spec(args.root).networks:
-        summaries = merge_network(args.root, network)
+    try:
+        merged = merge_networks(args.root, args.network or load_spec(args.root).networks)
+    except (CampaignNotFinished, RoundDataMissing) as exc:
+        print(f"Not merged: {exc}", file=sys.stderr)  # names the cell; holds no IP
+        return 3
+    for network, summaries in merged.items():
         print(json.dumps({"network": network, "regions": len(summaries),
                           "unfinished_countries": sum(s["unfinished_countries"]
                                                       for s in summaries)}))

@@ -25,9 +25,12 @@ REPORT = "collect-report.json"
 CAMPAIGNS_ROOT = "/opt/proxy-index-campaign/campaigns"
 SPACE_FACTOR = 1.25
 FREE_FLOOR = 0.20
-# Runs with the manager's system Python. Prints the manifest it wrote, then the total size.
+# Runs with the manager's system Python (3.11 or newer, for `hashlib.file_digest`). Prints
+# the manifest it wrote, then the total size.
 REMOTE_MANIFEST = r"""
 import hashlib, os, pathlib, sys
+if sys.version_info < (3, 11):
+    raise SystemExit("the archive manifest needs Python 3.11 or newer on the manager")
 root = pathlib.Path(sys.argv[1]); lines = []; size = 0
 for path in sorted(root.rglob("*")):
     rel = path.relative_to(root)

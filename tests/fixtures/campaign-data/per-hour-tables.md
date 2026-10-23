@@ -1,12 +1,12 @@
 # Campaign 20270101t220000z-0123456789ab: per-hour completeness
 
-Cell = that hour's round of one network in one region. ✓ complete and verified, `partial` some countries interrupted, failed or unverified (each followed by the error rate %, errors / requests), ✗ ours = create, boot, start or collect failed, `running` not finished, · not launched.
+Cell = that hour's round of one network in one region. ✓ complete and verified, `partial` some countries interrupted, failed or unverified (each followed by the error rate %, errors / requests), ✗ ours = our side failed (create, assign, boot, start, or the round failed or ended without closing), ⚠ data = the round ran but its data is not in the campaign root, `running` not finished, · not launched.
 
-| Network | complete | partial | failed_ours | running | pending | cells |
-|---|---|---|---|---|---|---|
-| geonode | 4 | 0 | 43 | 1 | 0 | 48 |
-| shifter | 5 | 1 | 42 | 0 | 0 | 48 |
-| total | 9 | 1 | 85 | 1 | 0 | 96 |
+| Network | complete | partial | failed_ours | uncollected | running | pending | cells |
+|---|---|---|---|---|---|---|---|
+| geonode | 4 | 0 | 43 | 0 | 1 | 0 | 48 |
+| shifter | 5 | 1 | 42 | 0 | 0 | 0 | 48 |
+| total | 9 | 1 | 85 | 0 | 1 | 0 | 96 |
 
 ## geonode
 

@@ -14,15 +14,15 @@ from ..onboarding.manifest import load, moment
 from ..onboarding.rounds import TERMINAL, round_directory, verify_round
 from ..providers.grammar import grammar_ids, load_grammar
 from .contracts import DropletRecord
-from .merge import HOURS, ROUND_TERMINAL, ledger_cell, ledger_droplets, load_spec, manifest_path
+from .merge import HOURS, cell_status, ledger_droplets, load_spec, manifest_path
 
 DATA1_COLUMNS = ("net", "region", "round", "scheduled", "started", "finished", "completed",
                  "delay", "duration", "countries", "jobs_ok", "missing", "dup", "badchunk",
                  "no_success", "requests", "errors", "observations")
 COLUMNS = DATA1_COLUMNS + ("cell", "size", "start_lateness_s", "create_to_ready_s", "overlap",
                            "bytes_up", "bytes_down", "protocol")
-STATUSES = ("complete", "partial", "failed_ours", "running", "pending")
-MARKS = {"failed_ours": "✗ ours", "running": "running", "pending": "·"}
+STATUSES = ("complete", "partial", "failed_ours", "uncollected", "running", "pending")
+MARKS = {"failed_ours": "✗ ours", "uncollected": "⚠ data", "running": "running", "pending": "·"}
 
 
 def _seconds(start: str | None, end: str | None) -> float | None:
@@ -44,12 +44,12 @@ def _droplet_columns(droplets: list[DropletRecord] | None) -> dict:
             "overlap": last.overlap}
 
 
-def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, list[str]]:
-    """Measured columns and the cell status of one pulled, terminal round."""
+def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, list[str], bool]:
+    """Measured columns, issues and completeness of one pulled round."""
     try:
         result = verify_round(path, region, hour)
     except (OSError, ValueError, KeyError) as exc:
-        return {"cell": "partial"}, [f"round failed verification ({type(exc).__name__})"]
+        return {}, [f"round failed verification ({type(exc).__name__})"], False
     countries = result["countries"]
     labels = {f"{c['country']}: {c['status']}" for c in countries}
     labels |= {f"{c['country']}: not started" for c in countries}
@@ -69,8 +69,7 @@ def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, li
         "no_success": sum(c["stop_reason"] == "no_success" for c in countries),
         **{key: sum(c[key] for c in countries)
            for key in ("requests", "errors", "observations", "bytes_up", "bytes_down")},
-        "cell": "complete" if result["complete"] else "partial",
-    }, result["issues"]
+    }, result["issues"], result["complete"]
 
 
 def cell_row(path: Path, manifest: dict, cell: tuple[str, str, int],
@@ -83,13 +82,15 @@ def cell_row(path: Path, manifest: dict, cell: tuple[str, str, int],
         "protocol": protocol(manifest["provider"]),
     } | _droplet_columns(droplets)
     file = round_directory(path, region, hour) / "round.json"
-    if not file.exists():
-        return row | {"cell": ledger_cell(droplets)}, []
-    state = read_json(file)
-    if state.get("status") not in ROUND_TERMINAL:
-        return row | {"cell": "running"}, []
-    measured, issues = _verified(path, region, hour, state)
-    return row | measured, issues
+    state = read_json(file) if file.exists() else None
+    kind, note = cell_status(state, droplets)
+    issues = [note] if note else []
+    if state is None or kind == "running":
+        return row | {"cell": kind}, issues
+    measured, problems, complete = _verified(path, region, hour, state)
+    if kind == "pulled":
+        kind = "complete" if complete else "partial"
+    return row | measured | {"cell": kind}, issues + problems
 
 
 def _text(value) -> str:
@@ -115,8 +116,10 @@ def render_tables(result: dict) -> str:
     lines = [f"# Campaign {result['campaign_id']}: per-hour completeness", "",
              "Cell = that hour's round of one network in one region. ✓ complete and verified, "
              "`partial` some countries interrupted, failed or unverified (each followed by the "
-             "error rate %, errors / requests), ✗ ours = create, boot, start or collect "
-             "failed, `running` not finished, · not launched.", "",
+             "error rate %, errors / requests), ✗ ours = our side failed (create, assign, "
+             "boot, start, or the round failed or ended without closing), ⚠ data = the round "
+             "ran but its data is not in the campaign root, `running` not finished, · not "
+             "launched.", "",
              "| Network | " + " | ".join(STATUSES) + " | cells |",
              "|---|" + "---|" * (len(STATUSES) + 1)]
     for name, counts in [*result["networks"].items(), ("total", result["totals"])]:

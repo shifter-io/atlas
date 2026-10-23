@@ -196,6 +196,7 @@ def test_merge_refuses_a_running_round_and_a_foreign_manifest(root):
     path = round_directory(merge.manifest_path(root, "shifter"), "tor1", 0) / "round.json"
     state = read_json(path)
     atomic_json(path, state | {"status": "running"})
+    write_hour(root, 0, _cells("destroyed") | {("shifter", "tor1"): "running"})
     with pytest.raises(merge.CampaignNotFinished, match="shifter tor1 h00 is running"):
         merge.merge_network(root, "shifter")
     atomic_json(path, state | {"campaign_id": "20270101t220000z-ffffffffffff"})
@@ -312,17 +313,38 @@ def test_b2_completeness_verifies_a_killed_round_as_failed_ours(root):
     assert "shifter tor1 h00: PM: running" in result["issues"]
 
 
+def test_m1_a_failed_round_is_our_failure_with_its_data_verified(root):
+    path = round_directory(merge.manifest_path(root, "shifter"), "ams3", 1) / "round.json"
+    atomic_json(path, read_json(path) | {"status": "failed"})
+    row = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}[
+        "shifter", "ams3", 1]
+    assert (row["cell"], row["jobs_ok"], row["observations"]) == ("failed_ours", 12, 24)
+
+
+def test_m2_m3_merge_cli_names_the_cell_and_writes_no_network(root, capsys):
+    finish_day(root)
+    write_hour(root, 23, _cells("create_failed") | {("shifter", "tor1"): "collect_failed"})
+    assert main(["campaign", "merge", "--root", str(root)]) == 3
+    assert capsys.readouterr().err.strip() == (
+        "Not merged: shifter tor1 h23: data waits on a kept worker (collect_failed)")
+    assert not list(root.glob("networks/*/residential/*/regions/*/state.json"))
+    finish_day(root)
+    assert main(["campaign", "merge", "--root", str(root)]) == 0
+    assert len(list(root.glob("networks/*/residential/*/regions/*/state.json"))) == 4
+
+
 def test_completeness_golden_tsv_and_tables(root, capsys):
     finish_day(root)
     path = round_directory(merge.manifest_path(root, "geonode"), "tor1", 0) / "round.json"
     atomic_json(path, read_json(path) | {"status": "running"})
+    write_hour(root, 0, _cells("destroyed") | {("geonode", "tor1"): "running"})
     result = completeness.build(root)
     folder = root / "completeness"
     for name in ("per-hour-completeness.tsv", "per-hour-tables.md"):
         assert (folder / name).read_text() == (GOLDEN / name).read_text(), name
     assert result["cells"] == 2 * 2 * 24 and result["networks"]["shifter"]["cells"] == 48
     assert result["totals"] == {"complete": 9, "partial": 1, "failed_ours": 85,
-                                "running": 1, "pending": 0, "cells": 96}
+                                "uncollected": 0, "running": 1, "pending": 0, "cells": 96}
     assert result["issues"] == ["shifter tor1 h01: GL: interrupted",
                                 "shifter tor1 h01: PM: not started"]
     assert read_json(folder / "completeness.json") == result
@@ -348,7 +370,7 @@ def test_a_tampered_chunk_is_caught(root):
     tampered = rows["shifter", "ams3", 0]
     assert (tampered["cell"], tampered["badchunk"], tampered["completed"]) == (
         "partial", 1, True)
-    assert rows["geonode", "tor1", 1]["cell"] == "running"
+    assert rows["geonode", "tor1", 1]["cell"] == "failed_ours"
     path.write_text(json.dumps({"status": "completed"}))
     result = completeness.build(root)
     assert "geonode tor1 h01: round failed verification (ValueError)" in result["issues"]
@@ -368,8 +390,14 @@ def test_no_ipv4_in_any_output(root):
 
 # Collect: the "manager" is a local directory and commands run in a local shell.
 
+def roomy(path):
+    return shutil._ntuple_diskusage(10**12, 10**11, 9 * 10**11)
+
+
 @pytest.fixture
-def manager(root, tmp_path):
+def manager(root, tmp_path, monkeypatch):
+    # The free-space rule is tested on its own below; collect tests never read the real disk.
+    monkeypatch.setattr(collector.shutil, "disk_usage", roomy)
     campaigns = tmp_path / "manager" / "campaigns"
     remote = Path(shutil.copytree(root, campaigns / CID))
     (remote / ".runtime").mkdir(mode=0o700)
@@ -469,6 +497,18 @@ def test_collect_cli_uses_ssh_from_the_inventory(manager, tmp_path, monkeypatch,
     report = collector.verify_tree(dest, collector.parse_manifest(
         (dest / collector.MANIFEST).read_text() + "size 1\n")[0])
     assert report["mismatches"] == ["campaign-spec.json"] and not report["clean"]
+
+
+@pytest.mark.parametrize("free, ok", [(3000, True), (2999, False), (1249, False)])
+def test_free_space_keeps_a_fifth_of_the_disk_and_a_quarter_spare(monkeypatch, free, ok):
+    # 1,000 bytes on a 10,000-byte disk: 2,000 must stay free afterwards (and 1,250 spare).
+    monkeypatch.setattr(collector.shutil, "disk_usage",
+                        lambda p: shutil._ntuple_diskusage(10000, 10000 - free, free))
+    if ok:
+        collector.check_space(Path("."), 1000)
+    else:
+        with pytest.raises(ValueError, match="disk space"):
+            collector.check_space(Path("."), 1000)
 
 
 @pytest.mark.parametrize("data, message", [
