@@ -88,17 +88,24 @@ def _droplet(network, region, hour, status, **extra) -> DropletRecord:
               "start_lateness_seconds": 0.25} | extra
     if status.endswith("_failed"):  # a failed worker was never ready and never started
         values |= {"ssh_ready_at": None, "start_lateness_seconds": None}
+    else:  # a worker that got this far armed and started its round
+        values = {"armed_at": values["ssh_ready_at"],
+                  "started_at": campaign.timestamp(scheduled)} | values
     return DropletRecord(network, region, hour, droplet_name(CID, hour, region, network),
                          **values)
 
 
 def write_hour(root: Path, hour: int, statuses: dict) -> None:
-    """One ledger record; `statuses` maps (network, region) to a status or a list of them."""
+    """One ledger record; `statuses` maps (network, region) to a status or a list of them.
+
+    A status may be a `(status, {field: value})` pair to override record fields.
+    """
     droplets = []
     for (network, region), status in statuses.items():
         for item in status if isinstance(status, list) else [status]:
+            item, extra = item if isinstance(item, tuple) else (item, {})
             overlap = 1 if (network, region, hour) == STOPPED else 0
-            droplets.append(_droplet(network, region, hour, item, overlap=overlap))
+            droplets.append(_droplet(network, region, hour, item, overlap=overlap, **extra))
     record = HourRecord(CID, hour, campaign.timestamp(START + timedelta(hours=hour)),
                         state="done", droplets=droplets)
     atomic_json(hour_path(root, hour), record.to_dict())
@@ -201,6 +208,108 @@ def test_merge_refuses_a_running_round_and_a_foreign_manifest(root):
                     root / "networks", now=START - timedelta(hours=1))
     with pytest.raises(ValueError, match="version 3"):
         merge.merge_network(root, "geonode")
+
+
+def unpull(root: Path, network: str, region: str, hour: int) -> Path:
+    """Remove a cell's pulled round, as if the harvest never brought it home."""
+    path = merge.manifest_path(root, network)
+    shutil.rmtree(round_directory(path, region, hour))
+    return path
+
+
+def kill_round(root: Path, network: str, region: str, hour: int) -> None:
+    """A round killed during its last country: the 5-second checkpoint still says running."""
+    folder = round_directory(merge.manifest_path(root, network), region, hour)
+    state = read_json(folder / "round.json")
+    last = state["jobs"][-1]
+    for key in ("finished_at", "observations", "duration_seconds", "requests", "errors",
+                "stop_reason"):
+        last.pop(key)
+    last["status"] = "running"
+    state.update(status="running", active={"round": hour, "country": last["country"],
+                                           "started_at": last["started_at"]})
+    atomic_json(folder / "round.json", state)
+    (folder / last["country"].lower() / "summary.json").unlink()
+
+
+def test_b1_a_collect_failed_cell_refuses_the_merge(root):
+    finish_day(root)
+    path = unpull(root, "geonode", "tor1", 1)
+    write_hour(root, 1, _cells("destroyed") | {("geonode", "tor1"): "collect_failed"})
+    with pytest.raises(merge.CampaignNotFinished,
+                       match=r"geonode tor1 h01: data waits on a kept worker \(collect_failed\)"):
+        merge.merge_network(root, "geonode")
+    assert not list(path.parent.glob("regions/*/state.json"))
+
+
+@pytest.mark.parametrize("status", ["destroyed", "collected", "destroy_refused"])
+def test_b1_a_started_worker_without_its_round_refuses_the_merge(root, status):
+    finish_day(root)
+    path = unpull(root, "geonode", "tor1", 1)
+    write_hour(root, 1, _cells("destroyed") | {("geonode", "tor1"): status})
+    with pytest.raises(merge.RoundDataMissing,
+                       match="geonode tor1 h01: round ran; data not collected"):
+        merge.merge_network(root, "geonode")
+    assert not list(path.parent.glob("regions/*/state.json"))
+
+
+@pytest.mark.parametrize("status", [
+    "create_failed", "assign_failed", "boot_failed", "start_failed",
+    *[(s, {"armed_at": None, "started_at": None})
+      for s in ("destroyed", "destroy_refused", "destroy_failed")],
+])
+def test_b1_never_started_workers_still_merge_as_not_started(root, status):
+    finish_day(root)
+    path = unpull(root, "geonode", "tor1", 1)
+    write_hour(root, 1, _cells("destroyed") | {("geonode", "tor1"): ["boot_failed", status]})
+    merge.merge_network(root, "geonode")
+    state = read_json(path.parent / "regions/tor1/state.json")
+    assert {j["status"] for j in state["jobs"] if j["round"] == 1} == {"not_started_deadline"}
+
+
+def test_b1_completeness_shows_rounds_that_ran_but_were_not_collected(root):
+    finish_day(root)
+    unpull(root, "geonode", "tor1", 1)
+    unpull(root, "geonode", "tor1", 2)
+    write_hour(root, 1, _cells("destroyed") | {("geonode", "tor1"): "collect_failed"})
+    result = completeness.build(root)
+    rows = {(r["net"], r["region"], r["round"]): r["cell"] for r in result["rows"]}
+    assert rows["geonode", "tor1", 1] == rows["geonode", "tor1", 2] == "uncollected"
+    assert result["totals"]["uncollected"] == 2
+    assert "geonode tor1 h01: data waits on a kept worker (collect_failed)" in result["issues"]
+    assert "geonode tor1 h02: round ran; data not collected" in result["issues"]
+    assert "⚠ data" in (root / "completeness" / "per-hour-tables.md").read_text()
+
+
+def test_b2_a_killed_round_merges_with_its_jobs_closed(root):
+    finish_day(root)
+    kill_round(root, "shifter", "tor1", 0)
+    merge.merge_network(root, "shifter")
+    path = merge.manifest_path(root, "shifter")
+    state = read_json(path.parent / "regions/tor1/state.json")
+    assert [j["status"] for j in state["jobs"] if j["round"] == 0] == [
+        "completed", "completed", "failed"]
+    assert export_campaign(path)["rows"] > 0
+
+
+def test_b2_a_killed_round_with_a_live_worker_is_still_running(root):
+    finish_day(root)
+    kill_round(root, "shifter", "tor1", 0)
+    write_hour(root, 0, _cells("destroyed") | {("shifter", "tor1"): "running"})
+    with pytest.raises(merge.CampaignNotFinished, match="shifter tor1 h00 is running"):
+        merge.merge_network(root, "shifter")
+    rows = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}
+    assert rows["shifter", "tor1", 0]["cell"] == "running"
+
+
+def test_b2_completeness_verifies_a_killed_round_as_failed_ours(root):
+    kill_round(root, "shifter", "tor1", 0)
+    result = completeness.build(root)
+    row = {(r["net"], r["region"], r["round"]): r for r in result["rows"]}["shifter", "tor1", 0]
+    assert (row["cell"], row["jobs_ok"], row["observations"], row["requests"]) == (
+        "failed_ours", 2, 4, 6)
+    assert "shifter tor1 h00: round ended without closing" in result["issues"]
+    assert "shifter tor1 h00: PM: running" in result["issues"]
 
 
 def test_completeness_golden_tsv_and_tables(root, capsys):
