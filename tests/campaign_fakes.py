@@ -50,6 +50,11 @@ class FakeDigitalOcean:
         self.sizes = [{"slug": "c-2", "available": True, "regions": ["lon1", "fra1", "nyc9"]},
                       {"slug": "s-1vcpu-1gb", "available": False, "regions": ["lon1"]}]
         self._ids = itertools.count(700001)
+        self.images: dict[str, dict] = {}
+        self.actions: dict[str, dict] = {}
+        self.action_polls = 0  # each action answers "in-progress" this many times first
+        self.failing_actions: set[str] = set()  # action types that end "errored"
+        self.bodies: list[tuple[str, str, dict]] = []
 
     def add(self, name, tags=(), project=PROD_PROJECT, created=CREATE_TIME, droplet_id=None,
             ip="203.0.113.10"):
@@ -87,6 +92,15 @@ class FakeDigitalOcean:
         route.add_get("/v2/projects/{pid}/resources", self._project_resources)
         route.add_post("/v2/projects/{pid}/resources", self._assign)
         route.add_get("/v2/sizes", self._sizes)
+        route.add_get("/v2/account/keys", self._lister("ssh_key", "ssh_keys"))
+        route.add_post("/v2/account/keys", self._add_key)
+        route.add_get("/v2/actions/{id}", self._action)
+        route.add_post("/v2/droplets/{id}/actions", self._droplet_action)
+        route.add_get("/v2/droplets/{id}/snapshots", self._droplet_snapshots)
+        route.add_get("/v2/images/{id}", self._getter("image"))
+        route.add_post("/v2/images/{id}/actions", self._image_action)
+        route.add_post("/v2/firewalls", self._firewall)
+        route.add_put("/v2/firewalls/{id}", self._firewall)
         for kind, prefix in (("droplet", "/v2/droplets"), ("ssh_key", "/v2/account/keys"),
                              ("firewall", "/v2/firewalls"), ("snapshot", "/v2/snapshots")):
             route.add_get(prefix + "/{id}", self._getter(kind))
@@ -174,9 +188,70 @@ class FakeDigitalOcean:
     async def _sizes(self, request):
         return self._page(request, "sizes", self.sizes)
 
+    def _lister(self, kind, key):
+        async def listing(request):
+            return self._page(request, key, list(self.resources[kind].values()))
+
+        return listing
+
+    async def _body(self, request):
+        body = await request.json()
+        self.bodies.append((request.method, request.path, body))
+        return body
+
+    async def _add_key(self, request):
+        body = await self._body(request)
+        key = {"id": next(self._ids), **body}
+        self.resources["ssh_key"][str(key["id"])] = key
+        return web.json_response({"ssh_key": key}, status=201)
+
+    def _new_action(self, kind, resource_id):
+        action_id = str(next(self._ids))
+        self.actions[action_id] = {"id": int(action_id), "type": kind, "polls": self.action_polls,
+                                   "resource_id": resource_id}
+        return web.json_response({"action": self.actions[action_id]}, status=201)
+
+    async def _action(self, request):
+        action = self.actions[request.match_info["id"]]
+        status = "errored" if action["type"] in self.failing_actions else "completed"
+        if action["polls"] > 0:
+            action["polls"] -= 1
+            status = "in-progress"
+        return web.json_response({"action": {**action, "status": status}})
+
+    async def _droplet_action(self, request):
+        body, droplet_id = await self._body(request), request.match_info["id"]
+        droplet = self.droplets[droplet_id]
+        if body["type"] in ("shutdown", "power_off"):
+            droplet["status"] = "off"
+        else:
+            image_id = str(next(self._ids))
+            self.images[image_id] = {"id": int(image_id), "name": body["name"], "type": "snapshot",
+                                     "regions": [droplet["region"]["slug"]], "droplet": droplet_id}
+        return self._new_action(body["type"], droplet_id)
+
+    async def _droplet_snapshots(self, request):
+        found = [i for i in self.images.values() if i["droplet"] == request.match_info["id"]]
+        return self._page(request, "snapshots", found)
+
+    async def _image_action(self, request):
+        body, image_id = await self._body(request), request.match_info["id"]
+        if body["type"] not in self.failing_actions:
+            self.images[image_id]["regions"].append(body["region"])
+        return self._new_action(body["type"], image_id)
+
+    async def _firewall(self, request):
+        body = await self._body(request)
+        firewall_id = request.match_info.get("id") or (
+            f"33333333-3333-4333-8333-{next(self._ids):012d}")
+        self.resources["firewall"][firewall_id] = {"id": firewall_id, **body}
+        return web.json_response({"firewall": self.resources["firewall"][firewall_id]},
+                                 status=200 if request.method == "PUT" else 202)
+
     def _getter(self, kind):
         async def get(request):
-            store = self.droplets if kind == "droplet" else self.resources[kind]
+            stores = {"droplet": self.droplets, "image": self.images, **self.resources}
+            store = stores[kind]
             found = store.get(request.match_info["id"])
             if found is None:
                 return web.json_response({"id": "not_found"}, status=404)
