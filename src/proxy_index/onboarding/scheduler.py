@@ -280,6 +280,33 @@ async def run_job(context: JobContext, job: dict) -> None:
         raise error
 
 
+def _recover_running(state: dict, directory: Path, now: float) -> None:
+    """A process interruption cannot replay a partially measured country."""
+    for job in state["jobs"]:
+        if job["status"] != "running":
+            continue
+        summary_path = job_directory(directory, job) / "summary.json"
+        if summary_path.exists():
+            saved = read_json(summary_path)
+            for key in ("status", "finished_at", "observations", "requests", "errors",
+                        "duration_seconds", "stop_reason"):
+                job[key] = saved[key]
+            continue
+        folder = job_directory(directory, job)
+        committed = sum(
+            read_json(p)["rows"] for p in folder.glob("observations-*.jsonl.meta.json")
+        )
+        counters = state.get("progress", {})
+        job.update(
+            status="interrupted",
+            finished_at=timestamp(now),
+            observations=committed,
+            requests=counters.get("requests", 0),
+            errors=counters.get("requests", 0) - counters.get("successes", 0),
+            counters_partial=True,
+        )
+
+
 async def execute(
     manifest_path: Path,
     region: str,
@@ -332,36 +359,7 @@ async def execute(
             # Rewritten after every country, so it skips the slow indented encoder.
             atomic_json(state_path, state, indent=None)
 
-        # A process interruption cannot replay a partially measured country.
-        for job in state["jobs"]:
-            if job["status"] == "running":
-                summary_path = job_directory(directory, job) / "summary.json"
-                if summary_path.exists():
-                    saved = read_json(summary_path)
-                    for key in (
-                        "status",
-                        "finished_at",
-                        "observations",
-                        "requests",
-                        "errors",
-                        "duration_seconds",
-                        "stop_reason",
-                    ):
-                        job[key] = saved[key]
-                else:
-                    folder = job_directory(directory, job)
-                    committed = sum(
-                        read_json(p)["rows"] for p in folder.glob("observations-*.jsonl.meta.json")
-                    )
-                    counters = state.get("progress", {})
-                    job.update(
-                        status="interrupted",
-                        finished_at=timestamp(clock.now()),
-                        observations=committed,
-                        requests=counters.get("requests", 0),
-                        errors=counters.get("requests", 0) - counters.get("successes", 0),
-                        counters_partial=True,
-                    )
+        _recover_running(state, directory, clock.now())
         state["active"] = None
         state["status"] = "armed"
         save()

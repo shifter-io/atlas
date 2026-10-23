@@ -8,6 +8,7 @@ to their natural end: no request cap and no deadline. Its checkpoint is
 from __future__ import annotations
 
 import asyncio
+import functools
 import gzip
 import json
 import math
@@ -75,6 +76,23 @@ def validate_round(state: dict, manifest: dict, region: str, index: int) -> None
         raise ValueError("Round checkpoint country queue differs from the campaign")
 
 
+def _save(path: Path, state: dict, clock) -> None:
+    state["pid"] = os.getpid()
+    state["updated_at"] = timestamp(clock.now())
+    state["peak_memory_mb"] = peak_memory_mb()
+    atomic_json(path, state, indent=None)
+
+
+def _close(state: dict) -> None:
+    """Leave every job terminal: queued ones never started, a stray active one failed."""
+    for job in state["jobs"]:
+        if job["status"] == "pending":
+            job["status"] = "not_started_deadline"
+        elif job["status"] == "running":
+            job["status"] = "failed"
+    state["active"] = None
+
+
 async def _wait_until(state: dict, save: Callable, scheduled: float, clock, stop) -> None:
     while clock.now() < scheduled and not stop.is_set():
         await clock.sleep(min(0.25, scheduled - clock.now()))
@@ -111,13 +129,7 @@ async def execute_round(
         if clock.now() < scheduled - EARLY_START_SECONDS:
             raise ValueError("A round may be armed at most 300 seconds before it is scheduled")
         state = new_round(manifest, region, round_index)
-
-        def save():
-            state["pid"] = os.getpid()
-            state["updated_at"] = timestamp(clock.now())
-            state["peak_memory_mb"] = peak_memory_mb()
-            atomic_json(path, state, indent=None)
-
+        save = functools.partial(_save, path, state, clock)
         save()
         context = JobContext(manifest, region, directory, state["settings"], state, save,
                              proxy_factory, run_country, stop, clock, math.inf, None)
@@ -132,12 +144,7 @@ async def execute_round(
             state["status"] = "failed"
             raise
         finally:
-            for job in state["jobs"]:
-                if job["status"] == "pending":
-                    job["status"] = "not_started_deadline"
-                elif job["status"] == "running":
-                    job["status"] = "failed"
-            state["active"] = None
+            _close(state)
             save()
     return state
 

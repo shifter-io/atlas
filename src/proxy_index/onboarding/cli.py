@@ -198,6 +198,19 @@ async def _probe(args):
         return 130 if stop.is_set() else 0
 
 
+def _plan(args) -> Path:
+    run_settings = {"processes": args.processes, "timeout_seconds": args.timeout}
+    if args.concurrency is not None:
+        run_settings["concurrency"] = args.concurrency
+    return create(
+        args.provider_config, args.product, args.start, args.output,
+        execution_mode=args.execution_mode, region_order=args.region_order,
+        retry_http_469=args.retry_http_469, target_url=args.target_url,
+        run_settings=run_settings, grace_hours=args.grace_hours,
+        allow_current_hour=args.allow_current_hour,
+    )
+
+
 def dispatch(args: argparse.Namespace) -> int:
     if args.onboarding_action == "fleet-status":
         from . import fleet
@@ -210,16 +223,7 @@ def dispatch(args: argparse.Namespace) -> int:
     if args.onboarding_action == "verify-round":
         return _round_command(_verify_round, args)
     if args.onboarding_action == "plan":
-        run_settings = {"processes": args.processes, "timeout_seconds": args.timeout}
-        if args.concurrency is not None:
-            run_settings["concurrency"] = args.concurrency
-        print(create(
-            args.provider_config, args.product, args.start, args.output,
-            execution_mode=args.execution_mode, region_order=args.region_order,
-            retry_http_469=args.retry_http_469, target_url=args.target_url,
-            run_settings=run_settings, grace_hours=args.grace_hours,
-            allow_current_hour=args.allow_current_hour,
-        ))
+        print(_plan(args))
     elif args.onboarding_action == "run":
         return asyncio.run(_run(args))
     elif args.onboarding_action == "status":
