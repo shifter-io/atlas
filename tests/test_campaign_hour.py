@@ -889,10 +889,18 @@ class HarvestRemote(FakeRemote):
         self.source, self.pull_failures, self.pulls, self.stops = source, 0, [], []
 
     async def pull(self, droplet, remote, local):
+        """Applies the real `TERMINAL_CHECK` to the source, with the unit state `inspect` shows."""
         self.pulls.append(remote)
         if self.pull_failures:
             self.pull_failures -= 1
             raise fanout.RemoteError("pull failed (exit 1)")
+        service = (self.inspected.get(droplet.name) or {}).get("service") or {}
+        unit = "\n".join(f"{key}={value}" for key, value in service.items())
+        check = await asyncio.to_thread(
+            subprocess.run, [sys.executable, "-c", fanout.TERMINAL_CHECK, str(self.source)],
+            env=stub_systemctl(self.source.parent, unit), check=False)
+        if check.returncode:
+            raise fanout.RemoteError(f"pull failed (exit {check.returncode})")
         shutil.rmtree(local, ignore_errors=True)
         shutil.copytree(self.source, local)
 
@@ -913,7 +921,8 @@ async def harvest_setup(tmp_path, *, samples=True):
     if samples:
         (source / "host-samples.jsonl").write_text("\n".join(json.dumps(
             {"cpu_pct": v, "core_max_pct": v + 5, "steal_pct": 1.0, "load1": 1.5,
-             "mem_used_pct": 30.0, "rss_mb": 200.0}) for v in (40.0, 60.0, 90.0)) + "\n")
+             "mem_used_pct": 30.0, "rss_mb": 200.0}) for v in (40.0, 60.0, 90.0)) + "\n"
+            + json.dumps({"time": AT_HH - 30, "cpu_pct": 1.0}) + "\n")  # idle lead-in (m6)
     spec = make_spec(NETWORKS[:1], ("tor1",))
     root = make_root(tmp_path, spec)
     (root / spec.manifests["net00"]).write_bytes(worker_manifest.read_bytes())
@@ -1103,7 +1112,8 @@ async def test_synthetic_workers_finish_after_synthetic_minutes_without_calls(tm
     for network in spec.networks:
         manifest = root / spec.manifests[network]
         manifest.parent.mkdir(parents=True)
-        manifest.write_text(json.dumps({"regions": {r: ["US"] for r in REGIONS}}))
+        manifest.write_text(json.dumps({"regions": {r: ["US"] for r in REGIONS},
+                                        "settings": {"concurrency": 2000}}))
     record = HourRecord(CID, 0, SCHEDULED)
     clock = FakeClock(PRE_CREATE)
     await launch.launch_hour(spec, record, root, cloud=None, remote_factory=None, clock=clock)
@@ -1147,3 +1157,70 @@ async def test_a_missing_checkpoint_after_a_clean_exit_is_repulled_and_a_journal
     await harvested(spec, record, root, fake, remote, clock)
     assert record.droplets[0].status == "destroyed"
     assert [(a["level"], a["kind"]) for a in record.alerts] == [("info", "journal_failed")]
+
+
+async def test_b2_a_killed_round_is_collected_partially_and_removed(tmp_path):
+    """B2: SIGKILL left the checkpoint `running`; the ended unit still lets it be pulled."""
+    spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
+    checkpoint = json.loads((remote.source / "round.json").read_text())
+    (remote.source / "round.json").write_text(json.dumps(checkpoint | {"status": "running"}))
+    worker = record.droplets[0]
+    remote.inspected[worker.name] = {
+        "service": {"ActiveState": "failed", "SubState": "failed", "ExecMainStatus": "9"},
+        "state": {"status": "running", "jobs": [{"started_at": "2027-01-01T22:00:01.500Z"}]}}
+    await harvested(spec, record, root, fake, remote, clock)
+    assert (worker.status, worker.exit_code, worker.error_class) == (
+        "destroyed", 9, "round_failed")
+    assert record.cells == {"net00/tor1": "failed_ours"} and record.state == "done"
+    local = root / "networks/net00/residential/m-net00/regions/tor1/rounds/00"
+    assert json.loads((local / "round.json").read_text())["status"] == "running"
+    assert fake.deleted == [("droplet", worker.droplet_id)]
+
+
+async def test_b2_a_running_round_is_never_pulled_even_if_inspect_misreads_it(tmp_path):
+    spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
+    checkpoint = json.loads((remote.source / "round.json").read_text())
+    (remote.source / "round.json").write_text(json.dumps(checkpoint | {"status": "running"}))
+    worker = record.droplets[0]
+    remote.inspected[worker.name] = {"service": {"ActiveState": "active", "SubState": "running",
+                                                 "ExecMainStatus": "0"}}
+    worker.status, worker.exit_code = "finished", 0
+    await harvested(spec, record, root, fake, remote, clock)
+    assert worker.status == "collect_failed" and fake.deleted == []
+
+
+async def test_b1_after_a_readiness_api_error_the_hour_reaches_done(tmp_path):
+    """B1 (a): every created droplet was retired at launch, so one pass finishes the hour."""
+    fake = ListFailsAfterCreate()
+    spec = make_spec(NETWORKS[:2], REGIONS[:1])
+    record, root, remote, clock = await launched(tmp_path, fake, spec)
+    await harvested(spec, record, root, fake, remote, clock)
+    assert record.state == "done" and {d.status for d in record.droplets} == {"destroyed"}
+
+
+async def test_b1_a_failed_region_does_not_keep_the_hour_open(tmp_path):
+    """B1 (c): a region whose create raised ends create_failed; harvest finishes the hour."""
+    fake = FakeDigitalOcean()
+    spec = make_spec(NETWORKS[:1], ("fra1",))
+    original = launch._Launch._create_call
+
+    async def broken(self, workers):
+        raise RuntimeError("boom")
+
+    launch._Launch._create_call = broken
+    try:
+        record, root, remote, clock = await launched(tmp_path, fake, spec)
+    finally:
+        launch._Launch._create_call = original
+    await harvested(spec, record, root, fake, remote, clock)
+    assert [d.status for d in record.droplets] == ["create_failed"] and record.state == "done"
+
+
+async def test_m7_a_collect_failed_worker_without_a_memo_is_repulled(tmp_path):
+    spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
+    worker = record.droplets[0]
+    worker.status, worker.exit_code, worker.finished_at = "collect_failed", 0, SCHEDULED
+    assert not harvest.harvest_state_path(root, 0).exists()
+    await harvested(spec, record, root, fake, remote, clock)
+    assert worker.status == "destroyed" and len(remote.pulls) == 1
+    assert [a["kind"] for a in record.alerts] == []

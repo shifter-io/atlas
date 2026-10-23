@@ -159,7 +159,8 @@ class _Harvest(HourWork):
     async def _collect(self, worker: DropletRecord, droplet: Droplet) -> bool:
         """Pull, verify, journal and record; a failure keeps the worker and re-pulls later."""
         memo, now = self.memo.setdefault(str(worker.droplet_id), {}), self.clock.now()
-        if worker.status == "collect_failed" and now - memo["last_pull"] < PULL_RETRY_SECONDS:
+        if worker.status == "collect_failed" and now - memo.get("last_pull", 0) < (
+                PULL_RETRY_SECONDS):  # the memo may predate a restart (m7)
             return False
         memo["last_pull"] = now
         manifest = manifest_path(self.root, self.spec, worker.network)
@@ -205,7 +206,8 @@ class _Harvest(HourWork):
         worker.errors = sum(c["errors"] for c in countries)
         worker.bytes_up = sum(c["bytes_up"] for c in countries)
         worker.bytes_down = sum(c["bytes_down"] for c in countries)
-        cpu = sampler.summarize(local / "host-samples.jsonl")
+        cpu = sampler.summarize(local / "host-samples.jsonl", since=moment(
+            worker.started_at).timestamp() if worker.started_at else None)
         worker.cpu_p50_pct, worker.cpu_p95_pct = cpu["cpu_p50_pct"], cpu["cpu_p95_pct"]
         worker.cpu_max_pct, worker.cpu_peak_pct = cpu["cpu_max_pct"], cpu["cpu_peak_pct"]
         worker.cpu_core_max_pct, worker.steal_p95_pct = (cpu["cpu_core_max_pct"],
