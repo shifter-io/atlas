@@ -33,7 +33,7 @@ WORKER_SECRETS = "/run/proxy-index-worker"
 HourState = Literal["planned", "launching", "running", "harvesting", "done", "failed"]
 CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours"]
 DropletStatus = Literal[
-    "requested", "create_failed", "assigned", "booting", "boot_failed", "starting",
+    "requested", "create_failed", "assign_failed", "assigned", "booting", "boot_failed", "starting",
     "start_failed", "armed", "running", "finished", "collected", "collect_failed",
     "destroyed", "destroy_refused", "destroy_failed",
 ]
@@ -69,10 +69,11 @@ class Account:
     project_name: str
 
 
+PROJECT_NAME = "Proxy Index"  # every account keeps campaign resources in this project
 ACCOUNTS = {
-    "leftclick": Account("leftclick", "Leftclick DigitalOcean", "team: Leftclick", "Proxy Index"),
+    "leftclick": Account("leftclick", "Leftclick DigitalOcean", "team: Leftclick", PROJECT_NAME),
     "proxy-index": Account(
-        "proxy-index", "Proxy Index DigitalOcean", "team: Proxy Index", "Proxy Index"
+        "proxy-index", "Proxy Index DigitalOcean", "team: Proxy Index", PROJECT_NAME
     ),
 }
 
@@ -105,6 +106,7 @@ class CampaignSpec:
     create_lead_seconds: int = 90
     replace_until_minutes: int = 15
     synthetic: bool = False
+    concurrency: int = 2000
     hours: int = 24
     schema_version: int = 1
 
@@ -126,6 +128,7 @@ class CampaignSpec:
             (set(self.image_by_region) != set(self.regions), "image_by_region"),
             (not re.fullmatch(r"[0-9a-f]{64}", self.wheel_sha256), "wheel_sha256"),
             (self.create_lead_seconds <= 0 or self.replace_until_minutes < 0, "timing"),
+            (not 1 <= self.concurrency <= 5000, "concurrency"),
         ]
         bad = [name for failed, name in problems if failed]
         if bad:
@@ -179,6 +182,14 @@ class DropletRecord:
     bytes_down: int = 0
     cpu_peak_pct: float | None = None
     rss_peak_mb: float | None = None
+    concurrency: int | None = None
+    cpu_p50_pct: float | None = None
+    cpu_p95_pct: float | None = None
+    cpu_max_pct: float | None = None
+    cpu_core_max_pct: float | None = None
+    steal_p95_pct: float | None = None
+    load1_p95: float | None = None
+    mem_used_max_pct: float | None = None
 
 
 @dataclass
@@ -236,8 +247,9 @@ class Cloud(Protocol):
     """Read and create operations only. Deletes exist solely in `scope.guarded_delete`."""
 
     async def create(self, names: list[str], *, region: str, size: str, image: str,
-                     tags: list[str], ssh_keys: list[str]) -> list[Droplet]: ...
-    async def assign_project(self, project_id: str, droplet_ids: list[str]) -> None: ...
+                     tags: list[str], ssh_keys: list[str], **flags: bool) -> list[Droplet]: ...
+    async def assign_project(self, project_id: str, droplet_ids: list[str], *,
+                             guard: object) -> None: ...
     async def get(self, droplet_id: str) -> Droplet | None: ...
     async def list_tag(self, tag: str) -> list[Droplet]: ...
     async def project_droplet_ids(self, project_id: str) -> frozenset[str]: ...
