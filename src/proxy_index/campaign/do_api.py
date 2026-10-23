@@ -14,7 +14,7 @@ import stat
 import subprocess
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -22,7 +22,17 @@ from typing import Any
 
 import aiohttp
 
-from .contracts import RESOURCE_PREFIX, ROLES, WORKER_TAG, Account, Droplet
+from ..regions import REGION_IDS
+from .contracts import (
+    BUILDER_NAME_RE,
+    BUILDER_TAG,
+    PROJECT_NAME,
+    RESOURCE_PREFIX,
+    ROLES,
+    WORKER_TAG,
+    Account,
+    Droplet,
+)
 
 API = "https://api.digitalocean.com"
 PAGE_SIZE = 200
@@ -48,6 +58,51 @@ ALLOWED = MappingProxyType({
     **{(method, path): (NONE, method == "DELETE") for method in ("GET", "DELETE") for path in (
         f"/v2/droplets/{ID}", f"/v2/account/keys/{ID}", f"/v2/firewalls/{UUID}",
         f"/v2/snapshots/{ID}")},
+    # CAMP-1 limits and cloud operations (keys, firewalls, the worker snapshot).
+    ("GET", "/v2/sizes"): (PAGE, False),
+    ("GET", "/v2/account/keys"): (PAGE, False),
+    ("POST", "/v2/account/keys"): (NONE, False),
+    ("GET", f"/v2/actions/{ID}"): (NONE, False),
+    ("GET", f"/v2/droplets/{ID}/snapshots"): (PAGE, False),
+    ("GET", f"/v2/images/{ID}"): (NONE, False),
+    ("POST", f"/v2/droplets/{ID}/actions"): (NONE, False),
+    ("POST", f"/v2/images/{ID}/actions"): (NONE, False),
+    ("POST", "/v2/firewalls"): (NONE, False),
+    ("PUT", f"/v2/firewalls/{UUID}"): (NONE, False),
+})
+ROLE_TAGS = frozenset(tag for tag, _ in ROLES.values())
+SNAPSHOT_NAME_RE = r"^pi-camp-worker-[0-9A-Za-z.+]+-[0-9a-f]{12}-[0-9]{8}$"
+FIREWALL_KEYS = frozenset({"name", "inbound_rules", "outbound_rules", "tags", "droplet_ids"})
+
+
+def _droplet_action(body: dict) -> bool:
+    if body.get("type") == "snapshot":
+        return set(body) == {"type", "name"} and bool(
+            re.fullmatch(SNAPSHOT_NAME_RE, str(body["name"])))
+    return set(body) == {"type"} and body["type"] in ("shutdown", "power_off")
+
+
+def _firewall(body: dict) -> bool:
+    return (set(body) <= FIREWALL_KEYS and str(body.get("name", "")).startswith(RESOURCE_PREFIX)
+            and set(body.get("tags") or []) <= ROLE_TAGS
+            and all(str(i).isdigit() for i in body.get("droplet_ids") or []))
+
+
+# Writes to a droplet or firewall that may not be ours. They need `_OWNED`, which only this
+# client's ownership-checking methods pass, after a fresh GET (as DELETE needs scope's token).
+OWNED_WRITES = MappingProxyType({key: True for key in (
+    ("POST", f"/v2/droplets/{ID}/actions"), ("POST", "/v2/firewalls"),
+    ("PUT", f"/v2/firewalls/{UUID}"))})
+_OWNED = object()
+# Bodies the operations calls may carry; checked with the allowlist, before anything is sent.
+BODIES = MappingProxyType({
+    ("POST", "/v2/account/keys"): lambda body: set(body) == {"name", "public_key"} and str(
+        body["name"]).startswith(RESOURCE_PREFIX),
+    ("POST", f"/v2/droplets/{ID}/actions"): _droplet_action,
+    ("POST", f"/v2/images/{ID}/actions"): lambda body: set(body) == {"type", "region"} and (
+        body["type"] == "transfer" and body["region"] in REGION_IDS),
+    ("POST", "/v2/firewalls"): _firewall,
+    ("PUT", f"/v2/firewalls/{UUID}"): _firewall,
 })
 TokenSource = Callable[[], str]
 
@@ -82,12 +137,21 @@ class CreateError(ApiError):
         self.uncertain = isinstance(error, Uncertain)
 
 
-def check_allowed(method: str, path: str, params: dict[str, Any] | None, guard: object) -> None:
+def _lookup(table: Mapping, method: str, path: str) -> Any:
+    return next((value for (m, pattern), value in table.items()
+                 if m == method and re.fullmatch(pattern, path)), None)
+
+
+def check_allowed(method: str, path: str, params: dict[str, Any] | None, guard: object,
+                  body: dict[str, Any] | None = None) -> None:
     """Refuse every call that is not on the allowlist, before anything is sent."""
-    entry = next((value for (m, pattern), value in ALLOWED.items()
-                  if m == method and re.fullmatch(pattern, path)), None)
+    entry, shape = _lookup(ALLOWED, method, path), _lookup(BODIES, method, path)
     if entry is None or not set(params or {}) <= entry[0]:
         raise ScopeError(f"{method} {path} is not on the client allowlist")
+    if shape is not None and not (isinstance(body, dict) and shape(body)):
+        raise ScopeError(f"{method} {path} body is outside the campaign's scope")
+    if _lookup(OWNED_WRITES, method, path) and guard is not _OWNED:
+        raise ScopeError(f"{method} {path} is sent only after an ownership check")
     if "tag_name" in entry[0] and not str((params or {}).get("tag_name")).startswith(
             RESOURCE_PREFIX):
         raise ScopeError("droplets are listed only by a pi-camp- tag")
@@ -201,7 +265,7 @@ class DigitalOcean:
     async def request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
                       body: dict[str, Any] | None = None, guard: object = None) -> dict[str, Any]:
         method = method.upper()
-        check_allowed(method, path, params, guard)
+        check_allowed(method, path, params, guard, body)
         if self._session is None:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
         # A droplet create is not idempotent: a 5xx or lost answer may still have created it.
@@ -330,3 +394,83 @@ class DigitalOcean:
     async def account(self) -> dict[str, Any]:
         raw = (await self.request("GET", "/v2/account"))["account"]
         return {"droplet_limit": raw.get("droplet_limit"), "status": raw.get("status")}
+
+    async def sizes(self) -> dict[str, list[str]]:
+        found = await self._pages("/v2/sizes", "sizes")
+        return {s["slug"]: list(s.get("regions", [])) for s in found if s.get("available")}
+
+    async def ssh_keys(self) -> list[dict[str, Any]]:
+        """Registered keys with a pi-camp- name only."""
+        found = await self._pages("/v2/account/keys", "ssh_keys")
+        return [key for key in found if str(key.get("name", "")).startswith(RESOURCE_PREFIX)]
+
+    async def create_ssh_key(self, name: str, public_key: str) -> dict[str, Any]:
+        body = {"name": name, "public_key": public_key}
+        return (await self.request("POST", "/v2/account/keys", body=body))["ssh_key"]
+
+    async def droplet_action(self, droplet_id: str, kind: str, project_id: str,
+                             name: str | None = None) -> dict:
+        """Shut down, power off or snapshot a builder this client created, in Proxy Index."""
+        droplet = await self.get(droplet_id) if droplet_id in self._created else None
+        if droplet is None or BUILDER_TAG not in droplet.tags or not re.fullmatch(
+                BUILDER_NAME_RE, droplet.name) or not await self._in_project(
+                project_id, [droplet_id]):
+            raise ScopeError("droplet actions run only on a builder this client created")
+        body = {"type": kind, **({"name": name} if name else {})}
+        return (await self.request("POST", f"/v2/droplets/{droplet_id}/actions", body=body,
+                                   guard=_OWNED))["action"]
+
+    async def action(self, action_id: str | int) -> dict[str, Any]:
+        return (await self.request("GET", f"/v2/actions/{action_id}"))["action"]
+
+    async def image(self, image_id: str | int) -> dict[str, Any] | None:
+        return await self.get_resource(f"/v2/images/{image_id}", "image")
+
+    async def droplet_snapshots(self, droplet_id: str) -> list[dict[str, Any]]:
+        return await self._pages(f"/v2/droplets/{droplet_id}/snapshots", "snapshots")
+
+    async def transfer_image(self, image_id: str | int, region: str) -> dict[str, Any]:
+        """Copy a campaign worker snapshot (by its name, on a fresh GET) to one more region."""
+        found = await self.image(image_id)
+        if found is None or not re.fullmatch(SNAPSHOT_NAME_RE, str(found.get("name"))):
+            raise ScopeError("only campaign worker snapshots are transferred")
+        return (await self.request("POST", f"/v2/images/{image_id}/actions",
+                                   body={"type": "transfer", "region": region}))["action"]
+
+    async def create_firewall(self, rules: dict[str, Any], project_id: str) -> dict[str, Any]:
+        await self._own_firewall(rules, project_id)
+        return (await self.request("POST", "/v2/firewalls", body=rules,
+                                   guard=_OWNED))["firewall"]
+
+    async def update_firewall(self, firewall_id: str, rules: dict[str, Any],
+                              project_id: str) -> dict[str, Any]:
+        """Replace a campaign firewall; the current one must be ours on a fresh GET."""
+        current = await self.get_resource(f"/v2/firewalls/{firewall_id}", "firewall")
+        if current is None:
+            raise ScopeError("firewall not found")
+        await self._own_firewall(current, project_id)
+        await self._own_firewall(rules, project_id)
+        return (await self.request("PUT", f"/v2/firewalls/{firewall_id}", body=rules,
+                                   guard=_OWNED))["firewall"]
+
+    async def _own_firewall(self, rules: dict[str, Any], project_id: str) -> None:
+        """A pi-camp- name, only role tags, and droplets that each show a role's markers on a
+        fresh GET and are in project Proxy Index."""
+        if not _firewall({key: rules[key] for key in FIREWALL_KEYS if key in rules}):
+            raise ScopeError("firewall is outside the campaign's scope")
+        ids = [str(i) for i in rules.get("droplet_ids") or []]
+        for droplet_id in ids:
+            found = await self.get(droplet_id)
+            if found is None or not any(tag in found.tags and re.fullmatch(pattern, found.name)
+                                        for tag, pattern in ROLES.values()):
+                raise ScopeError("firewall targets a droplet that is not the campaign's")
+        if not await self._in_project(project_id, ids):
+            raise ScopeError("firewall targets a droplet outside project Proxy Index")
+
+    async def _in_project(self, project_id: str, droplet_ids: list[str]) -> bool:
+        """Every id is in `project_id`, and that project is the one named Proxy Index."""
+        if not droplet_ids:
+            return True
+        if await self.project_name(project_id) != PROJECT_NAME:
+            return False
+        return set(droplet_ids) <= await self.project_droplet_ids(project_id)
