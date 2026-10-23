@@ -146,6 +146,15 @@ async def test_round_runs_only_its_countries_in_order_with_round_layout(ephemera
     assert not (ephemeral.parent / "regions/tor1/state.json").exists()
 
 
+@pytest.mark.parametrize("concurrency", [2000, 2500])
+async def test_round_runs_every_country_at_the_manifest_concurrency(tmp_path, concurrency):
+    path = make(tmp_path, run_settings={"concurrency": concurrency})
+    assert campaign.load(path)["settings"]["concurrency"] == concurrency
+    result, calls = await run_round(path, 0)
+    assert result["settings"]["concurrency"] == concurrency
+    assert len(calls) == 3 and all(c.concurrency == concurrency for c in calls)
+
+
 async def test_no_deadline_a_long_country_simply_finishes(ephemeral):
     result, calls = await run_round(ephemeral, 0, seconds=30 * 3600.0)
     assert result["status"] == "completed" and len(calls) == 3
