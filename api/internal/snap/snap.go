@@ -1,5 +1,5 @@
 // Package snap reads the framework's published calculated snapshot (v1 or v2,
-// see src/lib/measured-types.ts and milf calculated/calculator.py build()).
+// see src/lib/measured-types.ts and proxy-index calculated/calculator.py build()).
 //
 // Only the fields the website maps are typed. Num fields decode missing keys
 // and nulls as NaN, which is what the TypeScript port relies on

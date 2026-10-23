@@ -26,7 +26,7 @@ type BackupResult struct {
 	Restore  string    `json:"restore"`
 }
 
-// PgBinDir reads bin_dir from milf/.state/postgres/runtime.json.
+// PgBinDir reads bin_dir from proxy-index/.state/postgres/runtime.json.
 func PgBinDir(runtimeFile string) (string, error) {
 	body, err := os.ReadFile(runtimeFile)
 	if err != nil {

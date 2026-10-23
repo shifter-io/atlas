@@ -1,6 +1,6 @@
 // Writes fixtures/measured/snapshot-every-request.json: the committed v1 Shifter
 // fixture (fixtures/measured/snapshot.json) rewritten in the snapshot shape of
-// the framework's every-request scoring (milf branch `score-from-all-requests`,
+// the framework's every-request scoring (proxy-index branch `score-from-all-requests`,
 // calculated/calculator.py build(), aggregate.py timed()/with_under_load()/
 // latency_detail()/pool()/pricing()). Test input only: the API's Go tests and
 // the site's Vitest read it, so both sides parse the same new-shape payload.

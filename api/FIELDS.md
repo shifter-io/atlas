@@ -196,7 +196,7 @@ percentile. Missing values are null and listed in `na`. Coverage evidence shows
 this country rank beneath each available local latency; its tooltip gives the
 country p50 and peer count. City/ASN percentiles are never averaged for ranking.
 
-The framework's every-request scoring (milf `score-from-all-requests`) keeps
+The framework's every-request scoring (proxy-index branch `score-from-all-requests`) keeps
 `schema_version` 2 and adds fields; the API reads both shapes. A window's
 `metrics` with `time_slots` is every-request: `success_rate` is time-weighted
 (mean of slot rates), `request_success_rate` is successes ÷ requests,

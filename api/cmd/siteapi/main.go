@@ -8,7 +8,7 @@
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //
 // The database comes from DATABASE_URL, --database-file, or
-// milf/.secrets/database.toml found above the working directory.
+// proxy-index/.secrets/database.toml found above the working directory.
 package main
 
 import (
@@ -57,7 +57,7 @@ type common struct {
 }
 
 func (c *common) register(fs *flag.FlagSet) {
-	fs.StringVar(&c.databaseFile, "database-file", os.Getenv("SITEAPI_DATABASE_FILE"), "framework credentials TOML with a [postgres] section (default: milf/.secrets/database.toml above the working directory); DATABASE_URL wins")
+	fs.StringVar(&c.databaseFile, "database-file", os.Getenv("SITEAPI_DATABASE_FILE"), "framework credentials TOML with a [postgres] section (default: proxy-index/.secrets/database.toml above the working directory); DATABASE_URL wins")
 }
 
 func (c *common) dsn() (string, error) {
@@ -189,8 +189,8 @@ type backupFlags struct {
 
 func (b *backupFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&b.noBackup, "no-backup", false, "skip the pg_dump taken before writing")
-	fs.StringVar(&b.backupDir, "backup-dir", "", "backup folder (default: milf/.state/postgres/backups above the working directory)")
-	fs.StringVar(&b.runtimeFile, "runtime-file", "", "Postgres runtime.json with bin_dir (default: milf/.state/postgres/runtime.json)")
+	fs.StringVar(&b.backupDir, "backup-dir", "", "backup folder (default: proxy-index/.state/postgres/backups above the working directory)")
+	fs.StringVar(&b.runtimeFile, "runtime-file", "", "Postgres runtime.json with bin_dir (default: proxy-index/.state/postgres/runtime.json)")
 }
 
 func (b *backupFlags) run(dsn, label string) (*store.BackupResult, error) {
@@ -199,10 +199,10 @@ func (b *backupFlags) run(dsn, label string) (*store.BackupResult, error) {
 	}
 	runtime := b.runtimeFile
 	if runtime == "" {
-		runtime = config.FindUp(filepath.Join("milf", ".state", "postgres", "runtime.json"))
+		runtime = config.FrameworkPath(".state", "postgres", "runtime.json")
 	}
 	if runtime == "" {
-		return nil, errors.New("cannot find milf/.state/postgres/runtime.json for pg_dump; pass --runtime-file or --no-backup")
+		return nil, errors.New("cannot find proxy-index/.state/postgres/runtime.json for pg_dump; pass --runtime-file or --no-backup")
 	}
 	dir := b.backupDir
 	if dir == "" {

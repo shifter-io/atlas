@@ -26,8 +26,8 @@ Module: `github.com/ice-zeus/milf-website/api`, Go 1.27 (`/opt/homebrew/bin/go`)
 ## Commands
 
 All commands find the database the same way: `DATABASE_URL`, else
-`--database-file <toml>` (a `[postgres]` section like `milf/.secrets/database.toml`),
-else `milf/.secrets/database.toml` in or above the working directory.
+`--database-file <toml>` (a `[postgres]` section like `proxy-index/.secrets/database.toml`),
+else `proxy-index/.secrets/database.toml` in or above the working directory.
 
 ```sh
 cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # or: npm run api:build (→ api/bin/siteapi)
@@ -44,12 +44,12 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # or: npm run api:bu
 | Flag / env | Default | Used by |
 |---|---|---|
 | `--listen`, `SITEAPI_LISTEN` | `127.0.0.1:8090` | serve |
-| `--database-file`, `SITEAPI_DATABASE_FILE`; `DATABASE_URL` wins | `milf/.secrets/database.toml` | all |
+| `--database-file`, `SITEAPI_DATABASE_FILE`; `DATABASE_URL` wins | `proxy-index/.secrets/database.toml` | all |
 | `--interval` | `10s` | serve: change-detection poll |
 | `--content-dir`, `SITEAPI_CONTENT_DIR` (`-` disables) | `src/content` above cwd | serve, dump: guide/review search entries |
 | `--file` | `fixtures/demo/design-demo.json` above cwd | seed-demo |
 | `--force` | false | seed-demo |
-| `--no-backup`, `--backup-dir`, `--runtime-file` | backups in `milf/.state/postgres/backups/`, `pg_dump` from `bin_dir` in `milf/.state/postgres/runtime.json` | seed-demo, unseed-demo |
+| `--no-backup`, `--backup-dir`, `--runtime-file` | backups in `proxy-index/.state/postgres/backups/`, `pg_dump` from `bin_dir` in `proxy-index/.state/postgres/runtime.json` | seed-demo, unseed-demo |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 
 `seed-demo` is idempotent. It records the file's sha256 in `site.datasets`. The same
@@ -186,13 +186,13 @@ is still missing.
 cd api
 go vet ./... && gofmt -l .
 go test ./...                                                   # database tests skip with a message
-PG_TEST_ADMIN_FILE=$PWD/../milf/.secrets/postgres-admin.toml go test ./...   # full suite
+PG_TEST_ADMIN_FILE=$PWD/../proxy-index/.secrets/postgres-admin.toml go test ./...   # full suite
 PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
-credentials. They load the framework schema from `milf/src/proxy_index/` (or
+credentials. They load the framework schema from `proxy-index/src/proxy_index/` (or
 `PG_TEST_FRAMEWORK_DIR`) and drop the database afterwards. `proxy_reviews` is never
 touched. The suite covers:
 
@@ -253,15 +253,16 @@ From least to most drastic:
    then deletes every `is_demo` row.
 2. **Restore the database as it was before seeding.** The backup from the first real
    seed is
-   `milf/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
+   `proxy-index/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
    Its `backup.json` has the sha256 and the exact command. It was taken after
    `migrate`, so it holds an empty `site` schema. To restore it, stop anything using
-   the database, then:
+   the database, then run from the website folder, with `<bin_dir>` taken from
+   `proxy-index/.state/postgres/runtime.json`:
 
    ```sh
-   '~/Desktop/Cursor/Scraping/pulse/.cache/native/bin/pg_restore' --clean --if-exists --no-owner \
+   '<bin_dir>/pg_restore' --clean --if-exists --no-owner \
      -h 127.0.0.1 -p 55432 -U proxy_reviews -d proxy_reviews \
-     '~/Desktop/Cursor/Proxy reviews/milf/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump'
+     proxy-index/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump
    ```
 
 3. **Remove the site schema entirely.** It is owned by the API, and nothing in the

@@ -149,9 +149,9 @@ func TestSeedAndUnseedAreIdempotent(t *testing.T) {
 
 func TestBackupWritesARestorableDump(t *testing.T) {
 	db := testdb.New(t)
-	runtime := config.FindUp(filepath.Join("milf", ".state", "postgres", "runtime.json"))
+	runtime := config.FrameworkPath(".state", "postgres", "runtime.json")
 	if runtime == "" {
-		t.Skip("no milf/.state/postgres/runtime.json with pg_dump")
+		t.Skip("no proxy-index/.state/postgres/runtime.json with pg_dump")
 	}
 	bin, err := store.PgBinDir(runtime)
 	if err != nil {

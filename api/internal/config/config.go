@@ -11,7 +11,11 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Postgres is the [postgres] section of milf/.secrets/*.toml.
+// FrameworkFolder is the folder name of the framework checkout
+// (ice-zeus/proxy-index) inside the website folder.
+const FrameworkFolder = "proxy-index"
+
+// Postgres is the [postgres] section of proxy-index/.secrets/*.toml.
 type Postgres struct {
 	Host     string `toml:"host"`
 	Port     any    `toml:"port"`
@@ -75,16 +79,22 @@ func ResolveDSN(databaseURL, databaseFile string) (string, error) {
 		return databaseURL, nil
 	}
 	if databaseFile == "" {
-		databaseFile = FindUp(filepath.Join("milf", ".secrets", "database.toml"))
+		databaseFile = FrameworkPath(".secrets", "database.toml")
 	}
 	if databaseFile == "" {
-		return "", errors.New("no database configured: set DATABASE_URL or --database-file milf/.secrets/database.toml")
+		return "", errors.New("no database configured: set DATABASE_URL or --database-file proxy-index/.secrets/database.toml")
 	}
 	p, err := ReadDatabaseFile(databaseFile)
 	if err != nil {
 		return "", err
 	}
 	return p.DSN(), nil
+}
+
+// FrameworkPath looks for FrameworkFolder/<parts...> in the working directory
+// and its parents, like FindUp, and returns "" when there is none.
+func FrameworkPath(parts ...string) string {
+	return FindUp(filepath.Join(append([]string{FrameworkFolder}, parts...)...))
 }
 
 // FindUp looks for a relative path in the working directory and its parents.

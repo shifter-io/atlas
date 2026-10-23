@@ -1,9 +1,9 @@
 // Package testdb creates throwaway Postgres databases for integration tests.
 //
 // Tests that need a database call New, which skips the test unless
-// PG_TEST_ADMIN_FILE names a credentials TOML (e.g. milf/.secrets/postgres-admin.toml)
+// PG_TEST_ADMIN_FILE names a credentials TOML (e.g. proxy-index/.secrets/postgres-admin.toml)
 // for a role allowed to CREATE DATABASE. Each test gets its own database named
-// siteapi_test_<random>, loaded with the framework schema read from the milf/
+// siteapi_test_<random>, loaded with the framework schema read from the proxy-index/
 // checkout (PG_TEST_FRAMEWORK_DIR overrides), and dropped afterwards. The real
 // proxy_reviews database is never touched.
 package testdb
@@ -30,12 +30,12 @@ type DB struct {
 	Admin config.Postgres
 }
 
-// FrameworkDir locates milf/src/proxy_index.
+// FrameworkDir locates proxy-index/src/proxy_index.
 func FrameworkDir() string {
 	if d := os.Getenv("PG_TEST_FRAMEWORK_DIR"); d != "" {
 		return d
 	}
-	return config.FindUp(filepath.Join("milf", "src", "proxy_index"))
+	return config.FrameworkPath("src", "proxy_index")
 }
 
 // New creates a scratch database with the framework schema and the site
@@ -44,7 +44,7 @@ func New(t testing.TB) *DB {
 	t.Helper()
 	file := os.Getenv("PG_TEST_ADMIN_FILE")
 	if file == "" {
-		t.Skip("database tests skipped: set PG_TEST_ADMIN_FILE=<path to milf/.secrets/postgres-admin.toml> to run them against a scratch database")
+		t.Skip("database tests skipped: set PG_TEST_ADMIN_FILE=<path to proxy-index/.secrets/postgres-admin.toml> to run them against a scratch database")
 	}
 	admin, err := config.ReadDatabaseFile(file)
 	if err != nil {
@@ -52,7 +52,7 @@ func New(t testing.TB) *DB {
 	}
 	fw := FrameworkDir()
 	if fw == "" {
-		t.Fatal("cannot find milf/src/proxy_index for the framework schema; set PG_TEST_FRAMEWORK_DIR")
+		t.Fatal("cannot find proxy-index/src/proxy_index for the framework schema; set PG_TEST_FRAMEWORK_DIR")
 	}
 	buf := make([]byte, 6)
 	rand.Read(buf) //nolint:errcheck
