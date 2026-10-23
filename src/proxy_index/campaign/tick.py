@@ -52,9 +52,8 @@ def due_at(spec: CampaignSpec, slot: int) -> datetime:
 
 def load_hour(root: Path, spec: CampaignSpec, slot: int) -> HourRecord:
     path = hour_path(root, slot)
-    if path.exists():
-        return HourRecord.from_dict(read_json(path))
-    return HourRecord(spec.campaign_id, slot, scheduled_at(spec, slot).isoformat())
+    return (HourRecord.from_dict(read_json(path)) if path.exists()
+            else HourRecord(spec.campaign_id, slot, scheduled_at(spec, slot).isoformat()))
 
 
 def load_hours(root: Path, spec: CampaignSpec) -> dict[int, HourRecord]:
@@ -68,17 +67,13 @@ def save_hour(root: Path, record: HourRecord) -> None:
 
 def read_alerts(root: Path) -> list[dict]:
     path = alerts_path(root)
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    lines = path.read_text().splitlines() if path.exists() else []
+    return [json.loads(line) for line in lines if line.strip()]
 
 
 class AlertLog:
-    """alerts.jsonl and its raised (code, key) pairs, owned by one caller (r3).
-
-    The pairs are re-read only when the append-only file has grown since the last read, so a
-    long-lived owner (the collector) does not re-read the whole file for every alert (m3).
-    """
+    """alerts.jsonl and its raised (code, key) pairs, owned by one caller (r3); the pairs are
+    re-read only when the append-only file has grown (m3)."""
 
     def __init__(self, root: Path):
         self.root, self.path, self.size, self.raised = root, alerts_path(root), -1, set()
@@ -194,11 +189,8 @@ def _disable(spec: CampaignSpec, root: Path, disable_timer: Callable[[], None] |
 async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now,
                    now_mode: bool = False, slot: int | None = None,
                    disable_timer: Callable[[], None] | None = None) -> list[int]:
-    """Launch every due slot still `planned` (or resume a crashed `launching` one), at once.
-
-    Serialized by `flock(ledger/.lock)`. With `now_mode` only `slot` is launched, immediately.
-    Once no slot is left to launch, a timer tick disables the timer. Returns the slots launched.
-    """
+    """Launch every due slot still `planned` (or resume a crashed `launching` one), at once,
+    under `flock(ledger/.lock)`; `now_mode` launches only `slot`, immediately. Returns them."""
     lock = root / "ledger" / ".lock"
     private_dir(lock.parent)
     fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -222,11 +214,8 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
 def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
                  start_tick: Callable[[], None] | None = None,
                  timer_enabled: Callable[[], bool] | None = None) -> str | None:
-    """Alarm: at *:00:30 (`armed`) the current hour's workers are armed; at *:02:00 it fired.
-
-    With the timer enabled it also starts the tick. A disabled timer is the operator's: a due
-    slot still `planned` then raises the alarm only (S7).
-    """
+    """At *:00:30 (`armed`) the hour's workers are armed; at *:02:00 it fired. An enabled timer
+    also gets the tick started; a disabled one (the operator's) only the alarm (S7)."""
     spec, now = load_spec(root), clock()
     slot = (now - scheduled_at(spec, 0)) // HOUR
     if not 0 <= slot < spec.hours:

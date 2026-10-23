@@ -1,9 +1,6 @@
-"""The always-on collector: harvest every live hour, finalize, reconcile orphans, write status.
-
-Every 30 s it harvests every hour in `running` or `harvesting` (hours overlap freely), writes the
-traffic report of each newly finished hour, reconciles orphans every 5 min through
-`scope.guarded_delete` only, raises the section 9 and 11 alerts and writes `status.json`.
-"""
+"""The always-on collector: every 30 s it harvests every live hour (hours overlap), reports each
+newly final hour, reconciles orphans every 5 min (deleting only through `scope.guarded_delete`),
+raises the section 9 and 11 alerts and writes `status.json`."""
 
 from __future__ import annotations
 
@@ -141,9 +138,9 @@ class Collector:
             await self.reconcile(spec, hours)
         except Exception as error:
             self.reconcile_failures += 1
-            if self.reconcile_failures == 1:
+            if self.reconcile_failures == 1:  # r1: keyed by the streak, so every outage alerts
                 self.failing_since = now.strftime("%Y%m%dT%H%M")
-            streak = self.failing_since  # r1: every outage alerts again
+            streak = self.failing_since
             self.log.add(now, "reconcile_error", "info", key=f"{streak}-{type(error).__name__}",
                          error=type(error).__name__)
             if self.reconcile_failures >= RECONCILE_HIGH_AFTER:
@@ -175,10 +172,8 @@ class Collector:
 
     @staticmethod
     def _retry(record: HourRecord, drop: DropletRecord) -> bool:
-        """Retire again: `destroyed` but still listed, or a failed retire in a final hour (S5).
-
-        While an hour is not final its harvester retries `destroy_failed` itself.
-        """
+        """`destroyed` but still listed, or `destroy_failed` in a final hour (S5; before that the
+        harvester retries it)."""
         return drop.status == "destroyed" or (
             drop.status == "destroy_failed" and record.state in FINAL)
 
@@ -210,11 +205,8 @@ class Collector:
         await self._retire(scope, record, drop, hours)
 
     def _host(self, hour: int, droplet: Droplet) -> bool:
-        """S6: put the worker in CAMP-1c's host map (`.runtime`, 0600) so it can be harvested.
-
-        False (treat as unreachable, retry next reconcile) without an IPv4 (r2) or while
-        CAMP-1c's launcher is not installed (r4).
-        """
+        """S6: add the worker to CAMP-1c's host map so it can be harvested; False (unreachable,
+        retried) without an IPv4 (r2) or before CAMP-1c's launcher is installed (r4)."""
         try:
             from .launch import hosts_path, read_hosts
         except ImportError:
@@ -226,10 +218,8 @@ class Collector:
         return True
 
     async def _retire(self, scope, record: HourRecord, drop: DropletRecord, hours) -> None:
-        ledger = Ledger({"droplet": [d.droplet_id for r in hours.values() for d in r.droplets
-                                     if d.droplet_id]},
-                        {d.droplet_id: d for r in hours.values() for d in r.droplets
-                         if d.droplet_id})
+        known = {d.droplet_id: d for r in hours.values() for d in r.droplets if d.droplet_id}
+        ledger = Ledger({"droplet": list(known)}, known)
         try:
             await guarded_delete(self.cloud, "droplet", drop.droplet_id, scope, ledger,
                                  audit_path(self.root))

@@ -1,9 +1,6 @@
-"""Per-hour traffic reports per network (D5) and the cumulative `reports/traffic.tsv`.
-
-Bytes, requests and outcomes are summed from the hour's worker records (the framework's
-client-side wire counts); countries and worker-hours come from the harvest's per-network
-`traffic` (CAMP-1c owns both counts). No IPs.
-"""
+"""Per-hour traffic reports per network (D5) and `reports/traffic.tsv`. Bytes and outcomes are
+summed from worker records (client-side wire counts); countries and worker-hours come from
+CAMP-1c's per-network `traffic`. No IPs."""
 
 from __future__ import annotations
 
@@ -28,13 +25,9 @@ NOTE = ("Bytes are the framework's client-side wire counts (`bytes_up` and `byte
         "country summary); a provider's own billing may differ slightly.")
 
 
-def _time(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value else None
-
-
 def _span(start: str | None, end: str | None) -> float:
-    first, last = _time(start), _time(end)
-    return (last - first).total_seconds() if first and last else 0.0
+    return ((datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
+            if start and end else 0.0)
 
 
 def network_rows(record: HourRecord, regions: int) -> dict[str, dict]:
