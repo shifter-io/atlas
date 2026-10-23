@@ -206,7 +206,6 @@ def _plan_parsers(actions) -> None:
     allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
     teardown = steps.add_parser("teardown", help="Remove the manager and its resources")
     teardown.add_argument("--after-collect", type=Path, action="append", required=True)
-    teardown.add_argument("--images", type=Path, default=SECRETS / "campaign-images.json")
     for step in (deploy, allow):
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
     for step in (allow, teardown):
@@ -246,7 +245,7 @@ async def _manager_step(args) -> dict:
         return await deploy.enable(args.inventory, args.campaign_id, args.owner_go)
     async with _cloud(args.account) as cloud:
         if args.manager_action == "teardown":
-            return await deploy.teardown(cloud, args.inventory, args.after_collect, args.images)
+            return await deploy.teardown(cloud, args.inventory, args.after_collect)
         address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
         if args.manager_action == "allow-me":
             return await deploy.allow_me(cloud, args.inventory, address)

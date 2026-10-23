@@ -244,6 +244,20 @@ async def test_a_failed_create_stops_before_anything_else(job):
     assert "manager_id" not in inventory(job) and not fake.resources["firewall"]
 
 
+async def test_a_manager_never_confirmed_in_the_project_is_removed_and_forgotten(job):
+    fake = Fake()
+    fake.assign_delay = 100
+    with pytest.raises(ops_api.OpsError, match="not confirmed"):
+        await run_deploy(fake, job)
+    saved = inventory(job)
+    [gone] = saved["unassigned_managers"]
+    assert saved["manager_id"] is None and ("droplet", gone) in fake.deleted
+    assert not fake.resources["firewall"]
+    fake.assign_delay = 0
+    await run_deploy(fake, job)
+    assert inventory(job)["manager_id"] not in (None, gone)
+
+
 @pytest.mark.parametrize("shell, message", [
     (Shell(verdict="weak: sshd passwords"), "provision failed"),
     (Shell(fail=("do-token",)), "secret do-token"),
@@ -455,7 +469,7 @@ async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
     production = {k for k, d in fake.droplets.items() if MANAGER_TAG not in d["tags"]}
     shell, removed = Shell(), []
     async with running(fake) as cloud:
-        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)], images,
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
                                      shell=shell, remove_agent=lambda: removed.append(1) or True)
     assert shell.commands() == [
         "systemctl disable --now " + " ".join(deploy.unit_names(CID)), deploy.SHRED]
@@ -488,7 +502,7 @@ async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, m
     shell = Shell()
     async with running(fake) as cloud:
         with pytest.raises(deploy.DeployError, match=message):
-            await deploy.teardown(cloud, job.inventory, paths, images, shell=shell)
+            await deploy.teardown(cloud, job.inventory, paths, shell=shell)
     assert shell.calls == [] and not fake.deleted
 
 
@@ -499,7 +513,7 @@ async def test_teardown_refuses_while_a_worker_lives(job, tmp_path):
     shell = Shell()
     async with running(fake) as cloud:
         with pytest.raises(deploy.DeployError, match="still alive"):
-            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)], images,
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
                                   shell=shell)
     assert shell.calls == [] and not fake.deleted
 
@@ -514,10 +528,10 @@ async def test_teardown_never_releases_before_the_secrets_are_shredded(job, tmp_
 
     async with running(fake) as cloud:
         with pytest.raises(deploy.DeployError, match="not shredded"):
-            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)], images,
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
                                   shell=Unshredded())
         with pytest.raises(deploy.DeployError, match="stop units"):
-            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)], images,
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
                                   shell=Shell(fail=("systemctl",)))
     assert not fake.deleted
 
@@ -526,7 +540,7 @@ async def test_a_refused_release_is_reported_and_the_rest_still_go(job, tmp_path
     fake, saved, images = await owned_world(job)
     fake.resources["ssh_key"][saved["worker_key_id"]]["name"] = "production-key"
     async with running(fake) as cloud:
-        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)], images,
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
                                      shell=Shell(), remove_agent=lambda: False)
     results = {(r["kind"], r["id"]): r["result"] for r in done["released"]}
     assert results[("ssh_key", saved["worker_key_id"])] == "failed: OwnershipError"
@@ -538,14 +552,14 @@ async def test_a_refused_release_is_reported_and_the_rest_still_go(job, tmp_path
 async def test_teardown_without_a_manager_or_campaign_units(job, tmp_path):
     with pytest.raises(deploy.DeployError, match="no manager"):
         async with running(Fake()) as cloud:
-            await deploy.teardown(cloud, job.inventory, [], job.inventory)
+            await deploy.teardown(cloud, job.inventory, [])
     fake, saved, images = await owned_world(job)
     deploy.save(job.inventory, saved, campaigns=[])
     shell = Shell()
     async with running(fake) as cloud:
+        images.unlink()
         done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                     tmp_path / "no-images.json", shell=shell,
-                                     remove_agent=lambda: True)
+                                     shell=shell, remove_agent=lambda: True)
     assert shell.commands() == [deploy.SHRED] and done["clean"] is True
 
 

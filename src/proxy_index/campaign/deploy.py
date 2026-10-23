@@ -254,8 +254,13 @@ async def _ensure_manager(cloud: DigitalOcean, job: DeployJob, inventory: dict, 
                 raise
             droplet = adopted[0]
         save(job.inventory, inventory, manager_id=droplet.id)
-        await ops_api.assign(cloud, manager_scope(inventory), droplet, audit_path(job.inventory),
-                             "manager")
+        try:
+            await ops_api.assign(cloud, manager_scope(inventory), droplet,
+                                 audit_path(job.inventory), "manager")
+        except ops_api.OpsError:  # removed through the guard (or listed); a rerun starts fresh
+            save(job.inventory, inventory, manager_id=None, unassigned_managers=[
+                *inventory.get("unassigned_managers", []), droplet.id])
+            raise
     ready = await ops_api.wait_droplet(cloud, str(inventory["manager_id"]), "active", sleep)
     save(job.inventory, inventory, host=ready.public_ipv4)
     return ready
@@ -359,11 +364,13 @@ def _owned(inventory: dict, images: dict) -> list[tuple[str, str, str]]:
     return [(kind, str(rid), role) for kind, rid, role in found if rid]
 
 
-async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path],
-                   images_path: Path, *, shell: Shell = run_shell,
+async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path], *,
+                   shell: Shell = run_shell,
                    remove_agent: Callable[[], bool] | None = None) -> dict:
     """Section 16: refuse unless collected and no worker lives; stop the units; shred the
-    secrets; remove every recorded resource through the guard; remove the Mac agent; prove."""
+    secrets; remove every recorded resource through the guard; remove the Mac agent; prove.
+
+    The snapshots come from the image inventory beside the manager inventory."""
     inventory = load_inventory(inventory_path)
     if not inventory.get("manager_id"):
         raise DeployError("no manager is recorded")
@@ -377,7 +384,7 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     if (await remote.run(SHRED, "shred secrets")).strip().splitlines()[-1:] != ["shredded"]:
         raise DeployError("manager secrets were not shredded")
     save(inventory_path, inventory, secrets_shredded=True)
-    owned = _owned(inventory, load_inventory(images_path))
+    owned = _owned(inventory, load_inventory(inventory_path.with_name("campaign-images.json")))
     ledger = Ledger({kind: {rid for k, rid, _ in owned if k == kind} for kind, _, _ in owned})
     released = []
     for kind, rid, role in owned:
