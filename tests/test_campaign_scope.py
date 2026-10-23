@@ -452,6 +452,31 @@ async def test_a_refused_or_failed_destroy_is_recorded(tmp_path, monkeypatch):
     assert more[third.id].status == "destroy_refused" and third.id in fake.droplets
 
 
+async def test_an_unexpected_destroy_error_does_not_stop_the_other_destroys(tmp_path, monkeypatch):
+    """r2: one id's error is audited and recorded; the remaining ids are still destroyed."""
+    fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
+    async with running(fake) as cloud:
+        first, records = await created_worker(cloud)
+        second, more = await created_worker(cloud, f"pic-{SID}-h03-fra1-shifter")
+        records |= more
+        broken, parse = min(first.id, second.id), scope.parse_droplet
+
+        def parse_or_fail(raw):
+            if str(raw["id"]) == broken:
+                raise RuntimeError("malformed droplet")
+            return parse(raw)
+
+        monkeypatch.setattr(scope, "parse_droplet", parse_or_fail)
+        fake.assign_delay = 99
+        _, failed = await assign_and_verify_project(cloud, SCOPE, [first.id, second.id], records,
+                                                    audit, retry=scope.Retry(attempts=1))
+    other = max(first.id, second.id)
+    assert failed == {first.id, second.id}
+    assert records[broken].status == "destroy_failed" and broken in fake.droplets
+    assert records[other].status == "destroyed" and other not in fake.droplets
+    assert {"result": "failed", "error": "RuntimeError"}.items() <= audit_lines(audit)[0].items()
+
+
 async def test_assignment_refuses_foreign_or_spoofed_ids_before_any_post(tmp_path):
     """S2: a fresh GET of each id, our own create, and the ledger record; never a caller object."""
     fake = FakeDigitalOcean()
@@ -519,6 +544,49 @@ def _names(tree):
 DELETE_WORD = re.compile(r"(?<![\w-])delete(?![\w-])", re.IGNORECASE)
 
 
+PRIVATE_STATE = {"_GUARD", "_created", "_projects", "_named", "_assign_failed"}
+PATCHABLE = {"ALLOWED", "PATHS", "monotonic", "utcnow", "require_guard", "check_allowed",
+             "OWN_UNASSIGNED_SECONDS", "PROJECT_CACHE_SECONDS"}
+MUTATORS = {"update", "setdefault", "pop", "popitem", "clear", "__setitem__", "__delitem__"}
+
+
+def _target_names(node):
+    targets = node.targets if isinstance(node, (ast.Assign, ast.Delete)) else [node.target]
+    for target in targets:
+        while isinstance(target, ast.Subscript):
+            target = target.value
+        if isinstance(target, (ast.Attribute, ast.Name)):
+            yield target.attr if isinstance(target, ast.Attribute) else target.id
+
+
+def tampering(source: str, reflective: bool) -> list[str]:
+    """r1: touching the guard's private state or patching its tables, from outside the pair.
+
+    `reflective` also refuses vars/setattr/delattr/globals and a getattr that is not a plain
+    public attribute of `self` (campaign code only; the rest of src/ uses getattr freely).
+    """
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute) and node.attr in PRIVATE_STATE | {"__dict__"}:
+            found.append(f"private {node.attr}")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and (
+                node.value in PRIVATE_STATE or node.value.startswith("_GU")):
+            found.append(f"private name {node.value!r}")
+        elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+            found += [f"patches {t}" for t in _target_names(node) if t in PATCHABLE]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and (
+                node.func.attr in MUTATORS) and _call_name(
+                ast.Call(func=node.func.value, args=[], keywords=[])) in {"ALLOWED", "PATHS"}:
+            found.append(f"mutates {node.func.attr}")
+        elif reflective and isinstance(node, ast.Call) and _call_name(node) in {
+                "vars", "setattr", "delattr", "globals"}:
+            found.append(f"reflection {_call_name(node)}")
+        elif reflective and isinstance(node, ast.Call) and _call_name(node) == "getattr" and not (
+                isinstance(node.args[0], ast.Name) and node.args[0].id == "self"):
+            found.append("reflection getattr")
+    return found
+
+
 def scan_violations(source: str, name: str) -> list[str]:
     """Rule breaks in one campaign source file; scope.py and do_api.py are the guarded pair."""
     tree, guarded = ast.parse(source), name in ("scope.py", "do_api.py")
@@ -536,7 +604,7 @@ def scan_violations(source: str, name: str) -> list[str]:
             found.append(f"call {call_name}")
         if name != "scope.py" and call_name == "assign_project":
             found.append("assign_project outside scope.py")
-    return found
+    return found + ([] if guarded else tampering(source, reflective=True))
 
 
 def side_doors(source: str) -> list[str]:
@@ -550,7 +618,7 @@ def side_doors(source: str) -> list[str]:
     if {a.name for n in imports for a in n.names} & private or _names(tree) & {
             "_GUARD", "_assign_failed"}:
         found.append("private client name")
-    return found
+    return found + tampering(source, reflective=False)
 
 
 @pytest.mark.parametrize("source", [
@@ -567,6 +635,30 @@ def test_the_scans_catch_known_bypasses(source):
     assert scan_violations(source, "launch.py")
     assert side_doors('URL = "https://api.digitalocean.com/v2"') and side_doors(
         "from proxy_index.campaign.scope import _GUARD") and side_doors("x = ['doctl']")
+
+
+@pytest.mark.parametrize("source", [
+    'do_api.ALLOWED[("POST", "/v2/droplets/1/actions")] = (frozenset(), False)',
+    'do_api.ALLOWED.update({})',
+    'scope.PATHS["volume"] = "/v2/volumes/{}"',
+    'cloud._created.add("123")',
+    'getattr(cloud, "_created")',
+    'scope._projects[cloud] = {"p": (0, {"1"})}',
+    'scope._named[cloud] = {"p"}',
+    'scope.monotonic = lambda: 0.0',
+    'token = vars(scope)["_GU" + "ARD"]',
+    'del scope.PATHS',
+])
+def test_the_scans_catch_tampering_with_private_state(source):
+    """r1: each of these passed both scans at the reviewed head."""
+    assert scan_violations(source, "launch.py") and side_doors(source)
+
+
+def test_the_tables_are_read_only():
+    for table, key in ((do_api.ALLOWED, ("POST", "/v2/droplets/1/actions")),
+                       (scope.PATHS, "volume")):
+        with pytest.raises(TypeError):
+            table[key] = None
 
 
 def test_static_scan_allows_delete_only_behind_the_guard():

@@ -17,6 +17,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import aiohttp
@@ -35,7 +36,8 @@ PAGE = frozenset({"page", "per_page"})
 NONE: frozenset[str] = frozenset()
 # (method, path pattern) -> (allowed query keys, needs the scope guard). A delete names one
 # resource. Later tasks add endpoints here under scope review; nothing else can be sent.
-ALLOWED = {
+# Read-only at run time (MappingProxyType); the scans forbid patching it from elsewhere.
+ALLOWED = MappingProxyType({
     ("GET", "/v2/account"): (NONE, False),
     ("GET", "/v2/droplets"): (PAGE | {"tag_name"}, False),
     ("GET", "/v2/projects"): (PAGE, False),
@@ -46,7 +48,7 @@ ALLOWED = {
     **{(method, path): (NONE, method == "DELETE") for method in ("GET", "DELETE") for path in (
         f"/v2/droplets/{ID}", f"/v2/account/keys/{ID}", f"/v2/firewalls/{UUID}",
         f"/v2/snapshots/{ID}")},
-}
+})
 TokenSource = Callable[[], str]
 
 

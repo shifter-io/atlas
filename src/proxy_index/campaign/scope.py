@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal
 
 from ..onboarding.files import private_dir
@@ -36,8 +37,8 @@ from .do_api import ApiError, DigitalOcean, ScopeError, parse_droplet
 _GUARD = object()
 PROJECT_CACHE_SECONDS = 60.0
 OWN_UNASSIGNED_SECONDS = 30 * 60
-PATHS = {"droplet": "/v2/droplets/{}", "ssh_key": "/v2/account/keys/{}",
-         "firewall": "/v2/firewalls/{}", "snapshot": "/v2/snapshots/{}"}
+PATHS = MappingProxyType({"droplet": "/v2/droplets/{}", "ssh_key": "/v2/account/keys/{}",
+                          "firewall": "/v2/firewalls/{}", "snapshot": "/v2/snapshots/{}"})
 Kind = Literal["droplet", "ssh_key", "firewall", "snapshot"]
 Role = Literal["worker", "manager", "builder"]
 # Per client: project membership cache, project ids whose name was checked, and the ids that
@@ -271,6 +272,6 @@ async def assign_and_verify_project(
             records[rid].status, records[rid].destroyed_at = "destroyed", utcnow().isoformat()
         except OwnershipError:
             records[rid].status = "destroy_refused"
-        except ApiError:
+        except Exception:  # audited by guarded_delete; never stop before the other ids
             records[rid].status = "destroy_failed"
     return frozenset(ids) - missing, frozenset(missing)
