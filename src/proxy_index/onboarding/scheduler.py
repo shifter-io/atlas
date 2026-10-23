@@ -8,7 +8,9 @@ import resource
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..models import RunConfig
 from ..runner import run
@@ -130,6 +132,154 @@ def status(state: dict, now: float | None = None) -> dict:
     }
 
 
+@dataclass(slots=True)
+class JobContext:
+    """What one country run needs from the executor that owns its checkpoint document.
+
+    ``state`` is the checkpoint holding ``active``, ``progress`` and ``status``; ``save``
+    persists it. ``end`` bounds observations and the stop watcher (``math.inf`` for an
+    ephemeral round); ``deadline`` is the runner's deadline (``None`` for no deadline).
+    """
+
+    manifest: dict
+    region: str
+    directory: Path
+    effective: dict
+    state: dict
+    save: Callable[[], None]
+    proxy_factory: Callable
+    run_country: Callable
+    stop: asyncio.Event
+    clock: Any
+    end: float
+    deadline: float | None
+
+
+def _start_job(context: JobContext, job: dict) -> float:
+    state, began = context.state, context.clock.now()
+    job.update(
+        status="running",
+        started_at=timestamp(began),
+        delay_seconds=max(0.0, began - moment(job["scheduled_at"]).timestamp()),
+    )
+    state["active"] = {
+        "round": job["round"],
+        "country": job["country"],
+        "started_at": job["started_at"],
+    }
+    state["status"] = "running"
+    state["progress"] = {}
+    context.save()
+    return began
+
+
+async def _measure(context: JobContext, job: dict, writer: ObservationWriter, sink: SummarySink):
+    """Run one country; return ``(summary, error)`` after the writer has been closed."""
+    clock, stop, end, manifest = context.clock, context.stop, context.end, context.manifest
+    country_stop = asyncio.Event()
+    checkpoint_error = [None]
+
+    async def watch():
+        while not stop.is_set() and clock.now() < end:
+            await clock.sleep(min(0.05, end - clock.now()))
+        country_stop.set()
+
+    async def progress(counters):
+        try:
+            writer.check()
+            context.state["progress"] = dict(counters) | {"observations_saved": writer.rows}
+            context.save()
+        except Exception as exc:
+            checkpoint_error[0] = exc
+            country_stop.set()
+
+    watcher = asyncio.create_task(watch())
+    summary = None
+    error = None
+    try:
+        proxy = context.proxy_factory(job["country"])
+        metadata = proxy.public()
+        if (
+            metadata.get("provider") != manifest["provider"]
+            or metadata.get("product") != manifest["product"]
+            or str(metadata.get("requested_country", "")).lower() != job["country"].lower()
+        ):
+            raise ValueError("Provider must target and label the configured country")
+        config = RunConfig("generic_http", proxy, requests=None, stop_rule="unique_ratio",
+                           runner_location=context.region, target_url=manifest["target_url"],
+                           **context.effective)
+        summary = await context.run_country(
+            config, sink, stop=country_stop, deadline=context.deadline, aggregate_ips=False,
+            wall_clock=clock.now, observation_consumer=writer.observe, progress=progress,
+            progress_interval=5,
+        )
+    except BaseException as exc:
+        error = exc
+    finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
+        try:
+            await writer.close()
+        except Exception as exc:
+            error = error or exc
+    return summary, error or checkpoint_error[0]
+
+
+def _job_status(error, summary, finished: float, end: float) -> str:
+    if error is not None:
+        return "interrupted" if isinstance(error, asyncio.CancelledError) else "failed"
+    if summary is not None and summary.status == "completed":
+        # Successful measurement stays complete if local file finalization
+        # crosses the campaign deadline.
+        return "completed"
+    if finished >= end or (summary and summary.stop_reason == "deadline"):
+        return "deadline"
+    return "interrupted"
+
+
+async def run_job(context: JobContext, job: dict) -> None:
+    """Measure one country of ``job``, write its ``summary.json`` and update ``job``.
+
+    Any measurement or file error is recorded as a ``failed`` (or ``interrupted``) job and
+    then re-raised, exactly as the regional executor has always done.
+    """
+    began = _start_job(context, job)
+    folder = job_directory(context.directory, job)
+    writer = ObservationWriter(folder, country=job["country"], scheduled=job["scheduled_at"],
+                               started=job["started_at"], deadline=context.end)
+    sink = SummarySink()
+    summary, error = await _measure(context, job, writer, sink)
+    finished = context.clock.now()
+    measurements = summary or getattr(sink, "summary", None)
+    job.update(
+        status=_job_status(error, summary, finished, context.end),
+        finished_at=timestamp(finished),
+        observations=writer.rows,
+        duration_seconds=max(0, finished - began),
+        requests=measurements.completed if measurements else 0,
+        errors=measurements.total_errors if measurements else 0,
+        stop_reason=measurements.stop_reason if measurements else "error",
+    )
+    atomic_json(
+        folder / "summary.json",
+        {
+            "schema_version": 1,
+            "campaign_id": context.manifest["campaign_id"],
+            "region": context.region,
+            **job,
+            "settings": context.effective,
+            "chunks": writer.chunks,
+            "peak_queue": writer.peak_queue,
+            "peak_memory_mb": peak_memory_mb(),
+            "measurement": measurements.to_dict() if measurements else None,
+        },
+    )
+    context.state["active"] = None
+    context.save()
+    if error is not None:
+        raise error
+
+
 async def execute(
     manifest_path: Path,
     region: str,
@@ -215,6 +365,8 @@ async def execute(
         state["active"] = None
         state["status"] = "armed"
         save()
+        context = JobContext(manifest, region, directory, effective, state, save, proxy_factory,
+                             run_country, stop, clock, end, end)
         try:
             for job in state["jobs"]:
                 if job["status"] in TERMINAL:
@@ -226,135 +378,7 @@ async def execute(
                         save()
                 if stop.is_set() or clock.now() >= end:
                     break
-                began = clock.now()
-                job.update(
-                    status="running",
-                    started_at=timestamp(began),
-                    delay_seconds=max(0.0, began - scheduled),
-                )
-                state["active"] = {
-                    "round": job["round"],
-                    "country": job["country"],
-                    "started_at": job["started_at"],
-                }
-                state["status"] = "running"
-                state["progress"] = {}
-                save()
-                folder = job_directory(directory, job)
-                writer = ObservationWriter(
-                    folder,
-                    country=job["country"],
-                    scheduled=job["scheduled_at"],
-                    started=job["started_at"],
-                    deadline=end,
-                )
-                sink = SummarySink()
-                country_stop = asyncio.Event()
-                checkpoint_error = [None]
-
-                async def watch(country_stop=country_stop):
-                    while not stop.is_set() and clock.now() < end:
-                        await clock.sleep(min(0.05, end - clock.now()))
-                    country_stop.set()
-
-                async def progress(
-                    counters,
-                    writer=writer,
-                    country_stop=country_stop,
-                    checkpoint_error=checkpoint_error,
-                ):
-                    try:
-                        writer.check()
-                        state["progress"] = dict(counters) | {"observations_saved": writer.rows}
-                        save()
-                    except Exception as exc:
-                        checkpoint_error[0] = exc
-                        country_stop.set()
-
-                watcher = asyncio.create_task(watch())
-                summary = None
-                error = None
-                try:
-                    proxy = proxy_factory(job["country"])
-                    metadata = proxy.public()
-                    if (
-                        metadata.get("provider") != manifest["provider"]
-                        or metadata.get("product") != manifest["product"]
-                        or str(metadata.get("requested_country", "")).lower()
-                        != job["country"].lower()
-                    ):
-                        raise ValueError("Provider must target and label the configured country")
-                    config = RunConfig(
-                        "generic_http",
-                        proxy,
-                        requests=None,
-                        stop_rule="unique_ratio",
-                        runner_location=region,
-                        target_url=manifest["target_url"],
-                        **effective,
-                    )
-                    summary = await run_country(
-                        config,
-                        sink,
-                        stop=country_stop,
-                        deadline=end,
-                        aggregate_ips=False,
-                        wall_clock=clock.now,
-                        observation_consumer=writer.observe,
-                        progress=progress,
-                        progress_interval=5,
-                    )
-                except BaseException as exc:
-                    error = exc
-                finally:
-                    watcher.cancel()
-                    await asyncio.gather(watcher, return_exceptions=True)
-                    try:
-                        await writer.close()
-                    except Exception as exc:
-                        error = error or exc
-                error = error or checkpoint_error[0]
-                finished = clock.now()
-                if error is not None:
-                    job_status = (
-                        "interrupted" if isinstance(error, asyncio.CancelledError) else "failed"
-                    )
-                elif summary is not None and summary.status == "completed":
-                    # Successful measurement stays complete if local file finalization
-                    # crosses the campaign deadline.
-                    job_status = "completed"
-                elif finished >= end or (summary and summary.stop_reason == "deadline"):
-                    job_status = "deadline"
-                else:
-                    job_status = "interrupted"
-                measurements = summary or getattr(sink, "summary", None)
-                job.update(
-                    status=job_status,
-                    finished_at=timestamp(finished),
-                    observations=writer.rows,
-                    duration_seconds=max(0, finished - began),
-                    requests=measurements.completed if measurements else 0,
-                    errors=measurements.total_errors if measurements else 0,
-                    stop_reason=measurements.stop_reason if measurements else "error",
-                )
-                atomic_json(
-                    folder / "summary.json",
-                    {
-                        "schema_version": 1,
-                        "campaign_id": manifest["campaign_id"],
-                        "region": region,
-                        **job,
-                        "settings": effective,
-                        "chunks": writer.chunks,
-                        "peak_queue": writer.peak_queue,
-                        "peak_memory_mb": peak_memory_mb(),
-                        "measurement": measurements.to_dict() if measurements else None,
-                    },
-                )
-                state["active"] = None
-                save()
-                if error is not None:
-                    raise error
+                await run_job(context, job)
             if not stop.is_set() and all(j["status"] in TERMINAL for j in state["jobs"]):
                 state["status"] = "waiting_for_deadline"
                 save()
