@@ -151,6 +151,7 @@ class _Steps:
     shell: Shell
     sleep: ops_api.Sleep
     builder_id: str | None = None
+    unresolved: str | None = None  # a builder name whose create outcome stayed unknown
 
     @property
     def audit(self) -> Path:
@@ -171,6 +172,7 @@ class _Steps:
             adopted = await self.cloud.adopt_uncertain([name], BUILDER_TAG) if (
                 error.uncertain) else []
             if not adopted:
+                self.unresolved = name if error.uncertain else None
                 raise
             builder = adopted[0]
         self.builder_id = builder.id
@@ -184,14 +186,15 @@ class _Steps:
         with tempfile.TemporaryDirectory(prefix="pi-camp-build-") as runtime:
             await provision(self.shell, self.job, ready.public_ipv4,
                             Path(runtime) / "known_hosts", sleep)
-        image = await ops_api.snapshot(cloud, builder.id, name, sleep)
+        image = await ops_api.snapshot(cloud, self.scope, builder.id, name, sleep)
         self.note(snapshot_id=str(image["id"]), snapshot_name=name)
         self.note(regions=await ops_api.transfer(cloud, str(image["id"]), list(self.job.regions),
                                                  sleep))
 
     async def cleanup(self, key_id: str | None) -> None:
         """Remove the builder, then the key made for this build; record what stayed behind."""
-        left = []
+        # The listing may lag a lost create: check `campaign limits` before building again.
+        left = [f"builder_unresolved: {self.unresolved}"] if self.unresolved else []
         for kind, resource_id in (("droplet", self.builder_id), ("ssh_key", key_id)):
             if resource_id is None:
                 continue

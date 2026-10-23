@@ -579,8 +579,9 @@ DELETE_WORD = re.compile(r"(?<![\w-])delete(?![\w-])", re.IGNORECASE)
 
 
 PRIVATE_STATE = {"_GUARD", "_OWNED", "_created", "_projects", "_named", "_assign_failed"}
-PATCHABLE = {"ALLOWED", "PATHS", "monotonic", "utcnow", "require_guard", "check_allowed",
-             "OWN_UNASSIGNED_SECONDS", "PROJECT_CACHE_SECONDS"}
+TABLES = {"ALLOWED", "PATHS", "BODIES", "OWNED_WRITES"}
+PATCHABLE = TABLES | {"monotonic", "utcnow", "require_guard", "check_allowed",
+                      "OWN_UNASSIGNED_SECONDS", "PROJECT_CACHE_SECONDS"}
 MUTATORS = {"update", "setdefault", "pop", "popitem", "clear", "__setitem__", "__delitem__"}
 
 
@@ -610,7 +611,7 @@ def tampering(source: str, reflective: bool) -> list[str]:
             found += [f"patches {t}" for t in _target_names(node) if t in PATCHABLE]
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and (
                 node.func.attr in MUTATORS) and _call_name(
-                ast.Call(func=node.func.value, args=[], keywords=[])) in {"ALLOWED", "PATHS"}:
+                ast.Call(func=node.func.value, args=[], keywords=[])) in TABLES:
             found.append(f"mutates {node.func.attr}")
         elif reflective and isinstance(node, ast.Call) and _call_name(node) in {
                 "vars", "setattr", "delattr", "globals"}:
@@ -687,6 +688,8 @@ def test_the_scans_catch_known_bypasses(source):
     'del scope.PATHS',
     'await cloud.request("POST", "/v2/firewalls", body=rules, guard=do_api._OWNED)',
     'token = vars(do_api)["_OWNED"]',
+    'do_api.OWNED_WRITES = {}',
+    'do_api.BODIES.clear()',
 ])
 def test_the_scans_catch_tampering_with_private_state(source):
     """r1: each of these passed both scans at the reviewed head."""
@@ -695,7 +698,8 @@ def test_the_scans_catch_tampering_with_private_state(source):
 
 def test_the_tables_are_read_only():
     for table, key in ((do_api.ALLOWED, ("POST", "/v2/droplets/1/actions")),
-                       (scope.PATHS, "volume")):
+                       (scope.PATHS, "volume"), (do_api.BODIES, ("PUT", "/v2/x")),
+                       (do_api.OWNED_WRITES, ("PUT", "/v2/x"))):
         with pytest.raises(TypeError):
             table[key] = None
 

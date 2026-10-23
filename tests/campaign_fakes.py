@@ -69,6 +69,12 @@ class FakeDigitalOcean:
             self.projects[project].add(droplet_id)
         return droplet_id
 
+    def move(self, droplet_id, project=CAMPAIGN_PROJECT):
+        """Put a droplet into one project, as a project assignment would."""
+        for members in self.projects.values():
+            members.discard(str(droplet_id))
+        self.projects[project].add(str(droplet_id))
+
     def add_resource(self, kind, resource_id, **values):
         self.resources[kind][str(resource_id)] = {"id": resource_id, **values}
         return str(resource_id)

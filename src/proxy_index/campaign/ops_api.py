@@ -55,7 +55,10 @@ async def assign(cloud: DigitalOcean, scope: Scope, droplet: Droplet, audit: Pat
 
 async def release(cloud: DigitalOcean, kind: Kind, resource_id: str, scope: Scope, audit: Path,
                   role: Role = "builder") -> str:
-    """Remove one recorded resource through the scope guard ("deleted" or "absent")."""
+    """Remove one recorded resource through the scope guard ("deleted" or "absent").
+
+    The ledger holds only this id. A firewall that names droplets (the manager's) is refused
+    here; teardown passes `guarded_delete` a ledger that also records those droplet ids."""
     return await guarded_delete(cloud, kind, resource_id, scope,
                                 Ledger({kind: {str(resource_id)}}), audit, role)
 
@@ -95,12 +98,14 @@ async def wait_droplet(cloud: DigitalOcean, droplet_id: str, status: str,
     return await _poll(reached, f"droplet {droplet_id} {status}", limit, sleep)
 
 
-async def snapshot(cloud: DigitalOcean, builder_id: str, name: str,
+async def snapshot(cloud: DigitalOcean, scope: Scope, builder_id: str, name: str,
                    sleep: Sleep = asyncio.sleep) -> dict[str, Any]:
     """Shut the builder down, snapshot it and return the snapshot image."""
-    await wait_action(cloud, await cloud.droplet_action(builder_id, "shutdown"), sleep)
+    project = scope.project_id
+    await wait_action(cloud, await cloud.droplet_action(builder_id, "shutdown", project), sleep)
     await wait_droplet(cloud, builder_id, "off", sleep)
-    await wait_action(cloud, await cloud.droplet_action(builder_id, "snapshot", name), sleep)
+    await wait_action(cloud, await cloud.droplet_action(builder_id, "snapshot", project, name),
+                      sleep)
     found = [s for s in await cloud.droplet_snapshots(builder_id) if s.get("name") == name]
     if len(found) != 1:
         raise OpsError(f"expected one snapshot named {name}, found {len(found)}")
@@ -109,11 +114,11 @@ async def snapshot(cloud: DigitalOcean, builder_id: str, name: str,
 
 async def transfer(cloud: DigitalOcean, image_id: str, regions: list[str],
                    sleep: Sleep = asyncio.sleep) -> list[str]:
-    """Copy the snapshot to every region it is not in yet; returns the regions it is in."""
+    """Copy the snapshot, one region after another, to every region it is not in yet;
+    returns the regions it is in."""
     image = await cloud.image(image_id) or {}
-    missing = [r for r in regions if r not in image.get("regions", [])]
-    actions = [await cloud.transfer_image(image_id, region) for region in missing]
-    await asyncio.gather(*(wait_action(cloud, action, sleep) for action in actions))
+    for region in [r for r in regions if r not in image.get("regions", [])]:
+        await wait_action(cloud, await cloud.transfer_image(image_id, region), sleep)
     present = (await cloud.image(image_id) or {}).get("regions", [])
     if set(regions) - set(present):
         raise OpsError(f"snapshot {image_id} missing in {sorted(set(regions) - set(present))}")
@@ -142,10 +147,11 @@ def manager_firewall(mac_ipv4: str, manager_id: str) -> dict[str, Any]:
             "outbound_rules": outbound_all(), "tags": [], "droplet_ids": [int(manager_id)]}
 
 
-async def apply_firewall(cloud: DigitalOcean, rules: dict[str, Any],
+async def apply_firewall(cloud: DigitalOcean, scope: Scope, rules: dict[str, Any],
                          firewall_id: str | None = None) -> str:
-    """Create the firewall, or replace the recorded one; returns its id."""
+    """Create the firewall, or replace the recorded one; returns its id. Its droplets must be
+    the campaign's and in the scope's project (checked by the client on a fresh GET)."""
     if firewall_id is None:
-        return str((await cloud.create_firewall(rules))["id"])
-    return str((await cloud.update_firewall(firewall_id, rules))["id"])
+        return str((await cloud.create_firewall(rules, scope.project_id))["id"])
+    return str((await cloud.update_firewall(firewall_id, rules, scope.project_id))["id"])
 

@@ -35,6 +35,7 @@ from proxy_index.regions import REGION_IDS
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "src" / "proxy_index" / "campaign" / "assets"
 NOW = datetime(2027, 1, 1, 21, 55, tzinfo=UTC)
+SCOPE = ops_api.ops_scope(CAMPAIGN_PROJECT, NOW)
 PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyForTests pi-camp-mac"
 IPV4 = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
 # Private keys, DigitalOcean tokens, passwords and home paths (split so the diff's own
@@ -190,7 +191,9 @@ async def test_an_unknown_create_outcome_with_nothing_to_adopt_is_reported(job):
     fake.faults.append(Fault("POST", "/v2/droplets", 500, times=1))
     with pytest.raises(Exception, match="create stopped"):
         await run_build(fake, job)
-    assert inventory(job)["state"] == "failed" and not fake.resources["ssh_key"]
+    entry = inventory(job)
+    assert entry["state"] == "failed" and not fake.resources["ssh_key"]
+    assert entry["leftovers"] == [f"builder_unresolved: {entry['builder_name']}"]  # m3
 
 
 async def test_a_builder_the_guard_cannot_remove_is_reported_as_left_over(job):
@@ -221,9 +224,10 @@ async def test_snapshot_and_transfer_helpers_check_what_they_find():
                                        ssh_keys=["9"])
         fake.images["13"] = {"id": 13, "name": "pi-camp-worker-1-0123456789ab-20270101",
                              "regions": [], "droplet": builder.id}
+        fake.move(builder.id)
         with pytest.raises(ops_api.OpsError, match="expected one snapshot"):
-            await ops_api.snapshot(cloud, builder.id, "pi-camp-worker-1-0123456789ab-20270101",
-                                   no_sleep)
+            await ops_api.snapshot(cloud, SCOPE, builder.id,
+                                   "pi-camp-worker-1-0123456789ab-20270101", no_sleep)
         assert await ops_api.transfer(cloud, "12", ["lon1", "fra1", "ams3"], no_sleep) == [
             "ams3", "fra1", "lon1"]
         fake.failing_actions.add("transfer")
@@ -263,7 +267,8 @@ async def test_polling_gives_up_after_its_limit():
         [builder] = await cloud.create(["pi-camp-builder-20270101-ab12"], region="lon1",
                                        size="s-1vcpu-1gb", image="x", tags=[BUILDER_TAG],
                                        ssh_keys=["9"])
-        action = await cloud.droplet_action(builder.id, "shutdown")
+        fake.move(builder.id)
+        action = await cloud.droplet_action(builder.id, "shutdown", CAMPAIGN_PROJECT)
         with pytest.raises(ops_api.OpsError, match="timed out"):
             await ops_api.wait_action(cloud, action, no_sleep, limit=10)
 
@@ -285,12 +290,13 @@ def test_firewall_rules_are_exact():
 
 async def test_firewalls_are_created_then_replaced_on_campaign_droplets_only():
     fake = FakeDigitalOcean()
-    manager = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG], droplet_id=MANAGER_ID)
+    manager = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG], droplet_id=MANAGER_ID,
+                       project=CAMPAIGN_PROJECT)
     async with running(fake) as cloud:
         firewall_id = await ops_api.apply_firewall(
-            cloud, ops_api.manager_firewall("203.0.113.5", manager))
+            cloud, SCOPE, ops_api.manager_firewall("203.0.113.5", manager))
         again = await ops_api.apply_firewall(
-            cloud, ops_api.manager_firewall("203.0.113.6", manager), firewall_id)
+            cloud, SCOPE, ops_api.manager_firewall("203.0.113.6", manager), firewall_id)
     assert again == firewall_id
     stored = fake.resources["firewall"][firewall_id]
     assert stored["inbound_rules"][0]["sources"] == {"addresses": ["203.0.113.6/32"]}
@@ -305,6 +311,11 @@ def test_provision_script_is_valid_pinned_and_secret_free():
     assert "sha256sum -c" in text and "--require-hashes" in text
     assert "cloud-init clean" in text and "datasource_list: [ DigitalOcean ]" in text
     assert text.rstrip().endswith("hygiene") and "echo clean" in text
+    # m1: our sshd drop-in is read before cloud-init's, and the effective values are checked.
+    assert "/etc/ssh/sshd_config.d/01-pi-camp.conf" in text and "sshd -T" in text
+    assert text.index("SSHD_EFFECTIVE=") < text.index("rm -f /etc/ssh/ssh_host_*")
+    # m2: the build's login traces are emptied and checked.
+    assert "/var/log/auth.log /var/log/wtmp" in text and "login trace" in text
     assert not SECRET.search(text) and not IPV4.search(text)
 
 

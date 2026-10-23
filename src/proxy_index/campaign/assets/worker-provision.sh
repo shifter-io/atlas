@@ -37,12 +37,16 @@ systemctl enable systemd-timesyncd
 cat > /etc/cloud/cloud.cfg.d/90-pi-camp.cfg <<'CFG'
 datasource_list: [ DigitalOcean ]
 CFG
-cat > /etc/ssh/sshd_config.d/50-pi-camp.conf <<'SSHD'
+# sshd keeps the first value it reads and reads drop-ins in name order, so ours comes before
+# 50-cloud-init.conf, which cloud-init writes on every worker's first boot.
+cat > /etc/ssh/sshd_config.d/01-pi-camp.conf <<'SSHD'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 AuthenticationMethods publickey
 SSHD
+# The effective settings, read while the host keys still exist (sshd -T needs them).
+SSHD_EFFECTIVE="$(/usr/sbin/sshd -T 2>/dev/null || true)"
 
 # Strip every key, password and trace; each worker gets new host keys and its key at first boot.
 passwd -l root > /dev/null
@@ -53,6 +57,11 @@ apt-get clean
 cloud-init clean --logs --machine-id
 journalctl --rotate > /dev/null 2>&1 || true
 journalctl --vacuum-time=1s > /dev/null 2>&1 || true
+# The build's SSH logins (with the Mac's address) must not travel into every worker.
+LOGIN_LOGS="/var/log/auth.log /var/log/wtmp /var/log/btmp /var/log/lastlog /var/log/syslog"
+for log in $LOGIN_LOGS; do
+  if [ -f "$log" ]; then : > "$log"; fi
+done
 
 hygiene() {
   local reasons=()
@@ -70,6 +79,11 @@ hygiene() {
     [ "$(systemctl is-enabled "$unit" 2>/dev/null || true)" = "masked" ] || reasons+=("$unit")
   done
   [ -x "$WORKER_ROOT/venv/bin/proxy-index" ] || reasons+=("venv")
+  grep -qx "passwordauthentication no" <<< "$SSHD_EFFECTIVE" || reasons+=("sshd passwords")
+  grep -qx "authenticationmethods publickey" <<< "$SSHD_EFFECTIVE" || reasons+=("sshd methods")
+  for log in $LOGIN_LOGS; do
+    if [ -s "$log" ]; then reasons+=("login trace $log"); fi
+  done
   if [ ${#reasons[@]} -eq 0 ]; then
     echo clean
   else

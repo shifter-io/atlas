@@ -10,7 +10,15 @@ import time
 
 import pytest
 from aiohttp import web
-from campaign_fakes import CAMPAIGN_PROJECT, SID, TOKEN, FakeDigitalOcean, Fault, running
+from campaign_fakes import (
+    CAMPAIGN_PROJECT,
+    PROD_PROJECT,
+    SID,
+    TOKEN,
+    FakeDigitalOcean,
+    Fault,
+    running,
+)
 
 from proxy_index import cli as main_cli
 from proxy_index.campaign import cli as campaign_cli
@@ -393,12 +401,22 @@ async def test_droplet_actions_run_only_on_a_builder_this_client_created():
             image="ubuntu-24-04-x64", tags=[BUILDER_TAG], ssh_keys=["9"]))[0] for i in range(3)]
         fake.droplets[renamed.id]["name"] = "prod-node-0002"
         fake.droplets.pop(gone.id)
-        for target in (production, foreign, worker.id, renamed.id, gone.id):
+        for target in (production, foreign, worker.id, renamed.id, gone.id, builder.id):
+            with pytest.raises(ScopeError):  # the builder is not in Proxy Index yet
+                await cloud.droplet_action(target, "power_off", CAMPAIGN_PROJECT)
+        for droplet_id in (production, foreign, worker.id, renamed.id, builder.id):
+            fake.move(droplet_id)
+        for target in (production, foreign, worker.id, renamed.id):
             with pytest.raises(ScopeError):
-                await cloud.droplet_action(target, "power_off")
+                await cloud.droplet_action(target, "power_off", CAMPAIGN_PROJECT)
+        fake.move(builder.id, PROD_PROJECT)
+        fake.project_names[PROD_PROJECT] = "Proxy Index (copy)"
+        with pytest.raises(ScopeError):  # a project that is not the one named Proxy Index
+            await cloud.droplet_action(builder.id, "power_off", PROD_PROJECT)
+        fake.move(builder.id)
         assert not [b for b in fake.bodies if "/actions" in b[1]]
-        off = await cloud.droplet_action(builder.id, "shutdown")
-        shot = await cloud.droplet_action(builder.id, "snapshot", SNAPSHOT)
+        off = await cloud.droplet_action(builder.id, "shutdown", CAMPAIGN_PROJECT)
+        shot = await cloud.droplet_action(builder.id, "snapshot", CAMPAIGN_PROJECT, SNAPSHOT)
         assert (await cloud.action(off["id"]))["status"] == "completed"
         [image] = await cloud.droplet_snapshots(builder.id)
         assert image["name"] == SNAPSHOT and shot["type"] == "snapshot"
@@ -426,16 +444,23 @@ async def test_firewalls_attach_only_to_campaign_droplets():
     manager = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG])
     fake.add_resource("firewall", FIREWALL, name="prod-fw", tags=["prod"], droplet_ids=[])
     async with running(fake) as cloud:
-        for target in (production, "999"):
+        fake.move(production)
+        for target in (production, "999", manager):  # the manager is not in Proxy Index yet
             with pytest.raises(ScopeError):
-                await cloud.create_firewall({**RULES, "tags": [], "droplet_ids": [int(target)]})
+                await cloud.create_firewall({**RULES, "tags": [], "droplet_ids": [int(target)]},
+                                            CAMPAIGN_PROJECT)
         for firewall_id in (FIREWALL, "33333333-3333-4333-8333-999999999999"):
             with pytest.raises(ScopeError):
-                await cloud.update_firewall(firewall_id, RULES)
+                await cloud.update_firewall(firewall_id, RULES, CAMPAIGN_PROJECT)
         with pytest.raises(ScopeError):
-            await cloud.create_firewall({**RULES, "name": "default"})
-        created = await cloud.create_firewall({**RULES, "droplet_ids": [int(manager)]})
-        updated = await cloud.update_firewall(created["id"], {**RULES, "droplet_ids": []})
+            await cloud.create_firewall({**RULES, "name": "default"}, CAMPAIGN_PROJECT)
+        fake.move(manager)
+        with pytest.raises(ScopeError):  # not the project named Proxy Index
+            await cloud.create_firewall({**RULES, "droplet_ids": [int(manager)]}, PROD_PROJECT)
+        created = await cloud.create_firewall({**RULES, "droplet_ids": [int(manager)]},
+                                              CAMPAIGN_PROJECT)
+        updated = await cloud.update_firewall(created["id"], {**RULES, "droplet_ids": []},
+                                              CAMPAIGN_PROJECT)
     assert [m for m, _, _ in fake.bodies] == ["POST", "PUT"]
     assert updated["droplet_ids"] == [] and fake.resources["firewall"][FIREWALL]["name"] == (
         "prod-fw")
