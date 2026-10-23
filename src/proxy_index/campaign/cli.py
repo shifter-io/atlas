@@ -8,7 +8,11 @@ HANDLERS: dict = {}
 
 def register(commands) -> None:
     parser = commands.add_parser("campaign", help="Private hourly droplet campaign (operator)")
-    parser.add_subparsers(dest="campaign_action", required=True)
+    subcommands = parser.add_subparsers(dest="campaign_action", required=True)
+    from . import collector, tick  # CAMP-1d
+
+    for module in (tick, collector):
+        module.register(subcommands, HANDLERS)
 
 
 def dispatch(args) -> int:
