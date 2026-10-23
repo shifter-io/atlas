@@ -109,13 +109,11 @@ def control_dir(runtime: Path) -> Path:
 
 
 def ssh_options(runtime: Path, hour: int) -> list[str]:
-    options = {
-        "BatchMode": "yes", "IdentitiesOnly": "yes", "User": "root",
-        "UserKnownHostsFile": str(runtime / f"known_hosts-{hour:02d}"),
-        "StrictHostKeyChecking": "accept-new", "ConnectTimeout": "5",
-        "ServerAliveInterval": "10", "ServerAliveCountMax": "3", "ControlMaster": "auto",
-        "ControlPath": str(control_dir(runtime) / "cm-%C"), "ControlPersist": "4h",
-    }
+    options = {"BatchMode": "yes", "IdentitiesOnly": "yes", "User": "root",
+               "UserKnownHostsFile": str(runtime / f"known_hosts-{hour:02d}"),
+               "StrictHostKeyChecking": "accept-new", "ConnectTimeout": "5",
+               "ServerAliveInterval": "10", "ServerAliveCountMax": "3", "ControlMaster": "auto",
+               "ControlPath": str(control_dir(runtime) / "cm-%C"), "ControlPersist": "4h"}
     return [item for key, value in options.items() for item in ("-o", f"{key}={value}")]
 
 
@@ -221,7 +219,8 @@ class OpenSSHRemote:
     async def pull(self, droplet: Droplet, remote: str, local: Path) -> None:
         """Replace `local` with the remote round directory, once its state is terminal."""
         parent, name = remote.rstrip("/").rsplit("/", 1)
-        command = (f"python3 -c {shlex.quote(TERMINAL_CHECK)} {shlex.quote(remote)} && "
+        where = shlex.quote(remote)  # an unstarted round's directory is pulled empty
+        command = (f"python3 -c {shlex.quote(TERMINAL_CHECK)} {where} && mkdir -p {where} && "
                    f"tar -C {shlex.quote(parent)} -cf - {shlex.quote(name)}")
         private_dir(local.parent)
         archive, staging = (local.parent / f".{local.name}.pull{suffix}"
