@@ -76,13 +76,18 @@ subprocess.run(["systemd-run", "--unit=pi-camp-sampler", "--property=Restart=no"
                 "--output", str(folder / "host-samples.jsonl")], check=True)
 """
 
-# A round directory is pulled only once its checkpoint is terminal (or was never written).
+# A round directory is pulled once its checkpoint is terminal or the round unit has ended (a
+# killed round never writes a terminal checkpoint, B2). An unknown unit state refuses.
 TERMINAL_CHECK = r"""
-import json, pathlib, sys
+import json, pathlib, subprocess, sys
 path = pathlib.Path(sys.argv[1]) / "round.json"
-if path.exists() and json.loads(path.read_text())["status"] not in ("completed", "stopped",
-                                                                     "failed"):
-    sys.exit(3)
+if path.exists() and json.loads(path.read_text())["status"] in ("completed", "stopped", "failed"):
+    sys.exit(0)
+reply = subprocess.run(["systemctl", "show", "pi-camp-round", "--property=ActiveState,SubState"],
+                       capture_output=True, text=True)
+unit = dict(line.split("=", 1) for line in reply.stdout.splitlines() if "=" in line)
+ended = unit.get("ActiveState") in ("inactive", "failed") or unit.get("SubState") == "exited"
+sys.exit(0 if reply.returncode == 0 and ended else 3)
 """
 
 
