@@ -42,6 +42,7 @@ from proxy_index.campaign.contracts import (
     spec_path,
     status_path,
 )
+from proxy_index.campaign.do_api import ApiError
 from proxy_index.campaign.reports import write_traffic_report
 from proxy_index.campaign.tick import (
     due_at,
@@ -218,13 +219,15 @@ def test_the_watchdog_raises_missed_launch_and_starts_the_tick(tmp_path):
         return run_watchdog(root, check=kind, clock=clock, start_tick=lambda: started.append(1),
                             timer_enabled=lambda: enabled)
 
-    assert check("armed", enabled=False) is None
     assert check("armed") == "missed_launch" and started == [1]
     assert check("armed") == "missed_launch" and len(read_alerts(root)) == 1  # one alert
     record = load_hour(root, make_spec(), 0)
     record.state, record.fired_at = "running", clock().isoformat()
     save_hour(root, record)
     assert check("armed") is None
+    record.state = "launching"
+    save_hour(root, record)
+    assert check("armed", enabled=False) is None  # not planned: a stopped timer is no alarm
     clock.now = START + timedelta(minutes=2)
     assert check("fired") is None
     clock.now = START + timedelta(hours=1, minutes=2)
@@ -323,7 +326,9 @@ Start lateness: 0.2–1.4 s. Concurrency per worker: 2000. Launch delay: 0.4 s.
 | 2.50 | 1.200 |
 | shifter | 0.300 | 2.700 | 3.000 | 700 | 693 | 1.0 | 50/50 | 2/2 | nyc3 (1h 30m) \
 | 3.00 | 4.000 |
-| **Total** | 0.500 | 3.700 | 4.200 | 1000 | 963 | 3.7 |  |  |  | 5.50 | 5.200 |
+| **Total** | 0.500 | 3.700 | 4.200 | 1000 | 963 | 3.7 | 70/75 | 3/4 |  | 5.50 | 5.200 |
+
+Cumulative GB: every worker collected so far, in all hours, when this report was written.
 
 ## CPU per region (worst worker)
 
@@ -361,11 +366,14 @@ def report_fixture(root):
     ]
     record = HourRecord(CID, 3, "2027-01-02T01:00:00+00:00", state="done", droplets=drops,
                         launch_delay_seconds=0.4,
-                        traffic={"shifter": {"countries_done": 50, "countries_total": 50},
-                                 "geonode": {"countries_done": 20, "countries_total": 25}})
+                        traffic={"shifter": {"countries_done": 50, "countries_total": 50,
+                                             "worker_hours": 3.0},
+                                 "geonode": {"countries_done": 20, "countries_total": 25,
+                                             "worker_hours": 2.5}})
     save_hour(root, record)
     earlier = HourRecord(CID, 2, "2027-01-02T00:00:00+00:00", state="done", droplets=[
-        worker("shifter", "lon1", 2, droplet_id="4", bytes_up=5 * 10**8, bytes_down=5 * 10**8)])
+        worker("shifter", "lon1", 2, droplet_id="4", bytes_up=5 * 10**8, bytes_down=5 * 10**8,
+               collected_at=base)])
     save_hour(root, earlier)
     return record
 
@@ -393,6 +401,17 @@ def test_an_hour_without_samples_or_traffic_still_reports(tmp_path):
     assert "No CPU samples recorded." in text and "Start lateness: not recorded" in text
 
 
+def install_host_map(monkeypatch):
+    """CAMP-1c's host-map helpers (`launch.hosts_path`, `launch.read_hosts`), same format."""
+    def path(root, hour):
+        return root / ".runtime" / f"hosts-{hour:02d}.json"
+
+    hosts = types.SimpleNamespace(hosts_path=path, read_hosts=lambda root, hour: (
+        json.loads(path(root, hour).read_text()) if path(root, hour).exists() else {}))
+    monkeypatch.setitem(sys.modules, "proxy_index.campaign.launch", hosts)
+    return hosts
+
+
 class FakeRemote:
     def __init__(self, answers):
         self.answers = answers
@@ -405,7 +424,9 @@ class FakeRemote:
 
 
 # 7 and 11: orphan reconcile over the production-like fake account; no IPv4 anywhere.
-async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplets(tmp_path):
+async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplets(
+        tmp_path, monkeypatch):
+    install_host_map(monkeypatch)
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=4))
     fake = FakeDigitalOcean()
     fake.seed_production(200)
@@ -486,8 +507,8 @@ async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monk
     assert {a["code"] for a in read_alerts(root)} == {"destroy_refused", "destroy_failed"}
 
 
-async def test_collector_alerts_for_long_rounds_errors_and_the_manager_host(tmp_path,
-                                                                            monkeypatch):
+async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tmp_path,
+                                                                             monkeypatch):
     root = make_root(tmp_path, synthetic=True)
     clock = Clock(START + timedelta(hours=12, minutes=1))
     record = HourRecord(CID, 0, START.isoformat(), state="running", alerts=[
@@ -508,10 +529,10 @@ async def test_collector_alerts_for_long_rounds_errors_and_the_manager_host(tmp_
     status = await collector_module.Collector(
         root, harvest, cloud, None, clock, Pacing(clock_synced=lambda: False)).pass_once()
     codes = {(a["code"], a["level"]) for a in read_alerts(root)}
-    assert {("long_round", "info"), ("long_round", "high"), ("auth_failed", "high"),
+    assert {("auth_failed", "high"),
             ("create_failures", "high"), ("harvest_error", "info"), ("disk_low", "high"),
             ("clock_unsynced", "high"), ("ratelimit_low", "high")} == codes
-    assert status["alerts_open"] == 6 and status["disk_free_pct"] == 10.0
+    assert status["alerts_open"] == 5 and status["disk_free_pct"] == 10.0
     assert status["clock_synced"] is False and status["live_workers"] == 1
 
 
@@ -617,12 +638,12 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     root = make_root(tmp_path, synthetic=True)
     created = {}
 
-    async def launch_hour(spec, record, root, *, cloud, remote_factory, clock):
+    async def launch_hour(spec, record, root, *, cloud, remote_factory, clock=None):
         created["remote"] = remote_factory(record.hour)
         record.state = "running"
         return record
 
-    async def harvest_hour(spec, record, root, *, cloud, remote_factory, clock):
+    async def harvest_hour(spec, record, root, *, cloud, remote_factory, clock=None):
         record.state = "done"
         return record
 
@@ -655,3 +676,167 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("proxy_index.campaign.watch.notify", lambda _text: None)
     assert main(["campaign", "watch", "--inventory", str(inventory), "--status-file",
                  str(tmp_path / "s.md"), "--traffic-dir", str(tmp_path / "t"), "--once"]) == 0
+
+
+# Review findings S1-S7: each test failed at 34bdc8b.
+def test_s1_the_armed_watchdog_accepts_a_launching_hour_with_armed_workers(tmp_path):
+    root = make_root(tmp_path)
+    clock = Clock(START + timedelta(seconds=30))
+    record = load_hour(root, make_spec(), 0)
+    record.state, record.fired_at = "launching", due_at(make_spec(), 0).isoformat()
+    record.droplets = [worker("shifter", "lon1", 0, droplet_id="1", status="armed"),
+                       worker("shifter", "nyc3", 0, droplet_id="2", status="booting")]
+    save_hour(root, record)
+
+    def check():
+        return run_watchdog(root, check="armed", clock=clock, start_tick=lambda: None,
+                            timer_enabled=lambda: True)
+
+    assert check() is None and read_alerts(root) == []
+    record.droplets[0].status = "booting"
+    save_hour(root, record)
+    assert check() == "missed_launch"  # launching with no worker armed yet
+
+
+async def test_s2_launcher_and_harvester_alerts_keep_their_kind_and_name(tmp_path):
+    root, clock = make_root(tmp_path, synthetic=True), Clock(START + timedelta(hours=1))
+    name = f"pic-{SID}-h00-lon1-shifter"
+    save_hour(root, HourRecord(CID, 0, START.isoformat(), state="running", alerts=[
+        {"time": START.isoformat(), "level": "high", "kind": "auth_failed", "name": name},
+        {"time": START.isoformat(), "level": "info", "kind": "round_long_3h", "name": name}]))
+
+    async def harvest(spec, record, root):
+        return record
+
+    await collector_module.Collector(root, harvest, None, None, clock,
+                                     Pacing(clock_synced=lambda: True)).pass_once()
+    mirrored = {(a["code"], a["level"], a.get("name")) for a in read_alerts(root)}
+    assert mirrored == {("auth_failed", "high", name), ("round_long_3h", "info", name)}
+
+
+async def test_s3_a_reconcile_error_never_stops_reports_or_status(tmp_path):
+    root, clock = make_root(tmp_path), Clock(START + timedelta(hours=2))
+    save_hour(root, HourRecord(CID, 0, START.isoformat(), state="done"))
+
+    class Broken:
+        ratelimit_remaining = 900
+
+        async def list_tag(self, tag):
+            raise ApiError("GET", "/v2/droplets", 503)
+
+    async def harvest(spec, record, root):
+        return record
+
+    collector = collector_module.Collector(root, harvest, Broken(), None, clock,
+                                           pacing(clock))
+    for _ in range(3):
+        status = await collector.pass_once()
+        collector.reconciled_at = None
+    assert (root / "reports/traffic/hour-00.md").exists() and status_path(root).exists()
+    assert status["hours"][0]["state"] == "done"
+    assert {(a["code"], a["level"]) for a in read_alerts(root)} == {
+        ("reconcile_error", "info"), ("reconcile_error", "high")}
+
+
+def test_s4_cumulative_gb_counts_every_hour_collected_so_far(tmp_path):
+    root = make_root(tmp_path)
+    late = START + timedelta(hours=2)
+    save_hour(root, HourRecord(CID, 0, START.isoformat(), state="done", droplets=[
+        worker("shifter", "lon1", 0, droplet_id="1", bytes_up=10**9, bytes_down=10**9,
+               collected_at=late.isoformat())]))
+    save_hour(root, HourRecord(CID, 1, (START + timedelta(hours=1)).isoformat(), state="done",
+                               droplets=[worker("shifter", "lon1", 1, droplet_id="2",
+                                                bytes_up=10**9, bytes_down=2 * 10**9,
+                                                collected_at=late.isoformat())]))
+    text = write_traffic_report(root, 0).read_text()
+    assert "| shifter | 1.000 | 1.000 | 2.000 |" in text
+    assert text.split("| shifter |")[1].splitlines()[0].endswith("| 5.000 |")
+
+
+async def test_s5_failed_retires_are_retried_and_unreachable_orphans_keep_it_alive(tmp_path):
+    root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
+    fake = FakeDigitalOcean()
+    stuck = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    lost = fake.add(f"pic-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
+    save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
+                               report_path="reports/traffic/hour-03.md", droplets=[
+                                   worker("shifter", "lon1", 3, droplet_id=stuck,
+                                          status="destroy_failed")]))
+    remote = FakeRemote({f"pic-{SID}-h03-nyc3-shifter": OSError("ssh down")})
+
+    async def harvest(spec, record, root):
+        return record
+
+    async with running(fake) as cloud:
+        status = await collector_module.Collector(
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)).pass_once()
+    assert fake.deleted == [("droplet", stuck)] and lost in fake.droplets
+    assert load_hour(root, make_spec(), 3).droplets[0].status == "destroyed"
+    assert status["live_workers"] == 1 and not status["finished"]
+
+
+async def test_s6_an_adopted_active_orphan_gets_its_host_map_entry(tmp_path, monkeypatch):
+    root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
+    hosts = install_host_map(monkeypatch)
+    fake = FakeDigitalOcean()
+    active = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
+    save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
+                               report_path="reports/traffic/hour-03.md"))
+    remote = FakeRemote({f"pic-{SID}-h03-lon1-shifter": {"assignment": {"kind": "round"}}})
+
+    async def harvest(spec, record, root):
+        return record
+
+    async with running(fake) as cloud:
+        await collector_module.Collector(root, harvest, cloud, lambda hour: remote, clock,
+                                         pacing(clock)).pass_once()
+    assert hosts.read_hosts(root, 3) == {active: "203.0.113.10"}
+    assert not IPV4.search(hour_path(root, 3).read_text())
+
+
+async def test_s7_the_timer_stays_while_any_slot_is_planned_or_launching(tmp_path):
+    root, calls, disabled = make_root(tmp_path), [], []
+    clock = Clock(START + timedelta(hours=23, minutes=5))
+    assert await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock,
+                          now_mode=True, slot=23, disable_timer=lambda: disabled.append(1)) == [23]
+    assert disabled == []
+    inner = fake_launcher(clock, calls)
+
+    async def fail_22(spec, record, root):
+        if record.hour == 22:
+            raise RuntimeError("crash")
+        return await inner(spec, record, root)
+
+    with pytest.raises(RuntimeError):
+        await run_tick(root, launcher=fail_22, clock=clock,
+                       disable_timer=lambda: disabled.append(1))
+    assert load_hour(root, make_spec(), 22).state == "launching" and disabled == []
+    await run_tick(root, launcher=inner, clock=clock, disable_timer=lambda: disabled.append(1))
+    assert disabled == [1]
+
+
+def test_s7_the_watchdog_alarms_when_the_timer_is_off_but_a_due_slot_is_planned(tmp_path):
+    root, started = make_root(tmp_path), []
+    clock = Clock(START + timedelta(hours=2, seconds=30))
+    assert run_watchdog(root, check="armed", clock=clock, start_tick=lambda: started.append(1),
+                        timer_enabled=lambda: False) == "missed_launch"
+    assert started == []  # a disabled timer is the operator's; only the alarm is raised
+
+
+async def test_m1_a_launcher_that_saved_its_record_is_not_overwritten(tmp_path):
+    root, clock = make_root(tmp_path), Clock(due_at(make_spec(), 23))
+    for slot in range(23):
+        save_hour(root, HourRecord(CID, slot, START.isoformat(), state="done"))
+
+    async def saving(spec, record, root):  # like CAMP-1c: saves, then the collector owns it
+        record.state, record.launched_at = "running", "saved-by-launcher"
+        save_hour(root, record)
+        record.launched_at = "stale-copy"
+        return record
+
+    def refuse():
+        raise tick_module.subprocess.CalledProcessError(1, "systemctl")
+
+    assert await run_tick(root, launcher=saving, clock=clock, disable_timer=refuse) == [23]
+    assert load_hour(root, make_spec(), 23).launched_at == "saved-by-launcher"
+    assert [a["code"] for a in read_alerts(root)] == ["timer_disable_failed"]
