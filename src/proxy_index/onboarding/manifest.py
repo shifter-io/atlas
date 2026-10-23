@@ -6,6 +6,7 @@ import math
 import re
 import tomllib
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -23,6 +24,9 @@ DEFAULTS = {
     "min_sample": 1000,
     "stall_seconds": 600.0,
 }
+# Ephemeral (version 3) workers run one round each on a fresh node, at a higher default.
+EPHEMERAL_CONCURRENCY = 2000
+GRACE_HOURS = (1, 168)
 
 
 def timestamp(value: float | datetime) -> str:
@@ -62,19 +66,60 @@ def settings(value: dict) -> dict:
     return dict(value)
 
 
-def create(
-    provider_config: Path, product: str, start: str, output: Path, *, now: datetime | None = None,
-    execution_mode: str = "parallel", region_order: list[str] | None = None,
-    retry_http_469: bool = False, target_url: str | None = None,
-    run_settings: dict | None = None,
-) -> Path:
-    if execution_mode not in ("parallel", "sequential"):
-        raise ValueError("Execution mode must be parallel or sequential")
+@dataclass(frozen=True, slots=True)
+class PlanOptions:
+    """The keyword options of :func:`create`; unknown names raise ``TypeError``."""
+
+    execution_mode: str = "parallel"
+    region_order: list[str] | None = None
+    retry_http_469: bool = False
+    target_url: str | None = None
+    run_settings: dict | None = None
+    grace_hours: int = 48
+    allow_current_hour: bool = False
+
+
+def _start(start: str, now: datetime | None, plan: PlanOptions) -> datetime:
+    if plan.execution_mode not in ("parallel", "sequential", "ephemeral"):
+        raise ValueError("Execution mode must be parallel, sequential or ephemeral")
+    if plan.allow_current_hour and plan.execution_mode != "ephemeral":
+        raise ValueError("Only ephemeral campaigns may start in the current hour")
     begins = moment(start)
     if begins.minute or begins.second or begins.microsecond:
         raise ValueError("Campaign start must be a whole UTC hour")
-    if begins <= (now or datetime.now(UTC)):
+    current = now or datetime.now(UTC)
+    if begins <= current and not (plan.allow_current_hour
+                                  and current < begins + timedelta(hours=1)):
         raise ValueError("Campaign start must be in the future")
+    return begins
+
+
+def _run_settings(plan: PlanOptions) -> dict:
+    base = DEFAULTS | ({"concurrency": EPHEMERAL_CONCURRENCY}
+                       if plan.execution_mode == "ephemeral" else {})
+    effective = settings(base | (plan.run_settings or {}))
+    if type(plan.retry_http_469) is not bool:
+        raise ValueError("retry_http_469 must be a boolean")
+    if plan.retry_http_469:
+        effective["retry_http_469"] = True
+    elif effective.get("retry_http_469"):
+        raise ValueError("Enable retry_http_469 explicitly")
+    return effective
+
+
+def create(
+    provider_config: Path, product: str, start: str, output: Path, *, now: datetime | None = None,
+    **options,
+) -> Path:
+    """Write a frozen campaign manifest; ``options`` are the :class:`PlanOptions` fields.
+
+    ``ephemeral`` (version 3) campaigns run each hourly round on its own fresh node;
+    ``grace_hours`` (1-168) extends ``ends_at`` past the last round as an observation-validity
+    bound, never a stop. ``allow_current_hour`` (ephemeral only) accepts the current whole
+    UTC hour as the start; past hours are always refused.
+    """
+    plan = PlanOptions(**options)
+    begins = _start(start, now, plan)
     with provider_config.open("rb") as stream:
         config = tomllib.load(stream)
     provider = slug(config["provider"])
@@ -82,39 +127,37 @@ def create(
         raise ValueError("A registered provider adapter and version 1 configuration are required")
     campaign_id = f"{begins.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}".lower()
     mapping = load_regions()
-    order = region_order if region_order is not None else [r.slug for r in mapping.regions]
+    order = plan.region_order if plan.region_order is not None else [
+        r.slug for r in mapping.regions]
     if (not isinstance(order, list) or len(order) != len(REGION_IDS)
             or set(order) != set(REGION_IDS)):
         raise ValueError("Region order must contain each region exactly once")
-    effective = settings(dict(DEFAULTS) | (run_settings or {}))
-    if type(retry_http_469) is not bool:
-        raise ValueError("retry_http_469 must be a boolean")
-    if retry_http_469:
-        effective["retry_http_469"] = True
-    elif effective.get("retry_http_469"):
-        raise ValueError("Enable retry_http_469 explicitly")
+    retry = plan.retry_http_469
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
         "provider": provider,
         "product": slug(product),
         "target": "generic_http",
-        "target_url": target_url or targets.get("generic_http").url,
+        "target_url": plan.target_url or targets.get("generic_http").url,
         "starts_at": timestamp(begins),
         "ends_at": timestamp(begins + timedelta(hours=24)),
         "rounds": [timestamp(begins + timedelta(hours=i)) for i in range(24)],
         "regions": {region.slug: list(region.countries) for region in mapping.regions},
-        "settings": effective,
+        "settings": _run_settings(plan),
         "provider_config_sha256": digest(provider_config),
         "framework_version": __version__,
-        "census_rule_version": (CENSUS_RETRY_469_RULE_VERSION if retry_http_469
-                                else CENSUS_RULE_VERSION),
-        "census_ratio_basis": ("completed_requests_excluding_http_469" if retry_http_469
+        "census_rule_version": CENSUS_RETRY_469_RULE_VERSION if retry else CENSUS_RULE_VERSION,
+        "census_ratio_basis": ("completed_requests_excluding_http_469" if retry
                                else "completed_requests"),
     }
-    if execution_mode == "sequential":
+    if plan.execution_mode == "sequential":
         manifest.update(schema_version=2, execution_mode="sequential", region_order=order,
                         ends_at=timestamp(begins + timedelta(days=len(order))))
+    elif plan.execution_mode == "ephemeral":
+        manifest.update(schema_version=3, execution_mode="ephemeral",
+                        grace_hours=plan.grace_hours)
+        manifest["ends_at"] = timestamp(begins + timedelta(hours=24 + ephemeral_grace(manifest)))
     validate(manifest)
     directory = output / provider / product / campaign_id
     private_dir(directory.parent)
@@ -132,6 +175,10 @@ def regional_window(manifest: dict, region: str) -> dict:
     """A region always owns 24 hourly slots, even in an eight-day campaign."""
     if region not in manifest["regions"]:
         raise ValueError("Unknown campaign region")
+    if manifest.get("execution_mode") == "ephemeral":
+        # Every region shares the campaign window, including its grace bound.
+        return {"starts_at": manifest["starts_at"], "ends_at": manifest["ends_at"],
+                "rounds": list(manifest["rounds"])}
     offset = (manifest["region_order"].index(region)
               if manifest.get("execution_mode", "parallel") == "sequential" else 0)
     start = moment(manifest["starts_at"]) + timedelta(days=offset)
@@ -144,7 +191,7 @@ def validate(data: dict) -> dict:
     version = CENSUS_RETRY_469_RULE_VERSION if retry else CENSUS_RULE_VERSION
     basis = "completed_requests_excluding_http_469" if retry else "completed_requests"
     if (
-        data.get("schema_version") not in (1, 2)
+        data.get("schema_version") not in (1, 2, 3)
         or data.get("target") != "generic_http"
         or data.get("census_rule_version") != version
         or data.get("census_ratio_basis") != basis
@@ -164,6 +211,8 @@ def validate(data: dict) -> dict:
             raise ValueError("Sequential schedule requires each region exactly once")
     start, end = moment(data["starts_at"]), moment(data["ends_at"])
     hours = 24 * (len(REGION_IDS) if mode == "sequential" else 1)
+    if data["schema_version"] == 3:
+        hours += ephemeral_grace(data)
     if start.minute or start.second or start.microsecond or end - start != timedelta(hours=hours):
         raise ValueError("Campaign duration must give each region exactly 24 whole UTC hours")
     if data["rounds"] != [timestamp(start + timedelta(hours=i)) for i in range(24)]:
@@ -187,3 +236,13 @@ def validate(data: dict) -> dict:
     RunConfig("generic_http", ProxyConfig("http", "localhost", 8080),
               target_url=data["target_url"])
     return data
+
+
+def ephemeral_grace(data: dict) -> int:
+    """Validate the version 3 fields and return the grace bound in hours."""
+    grace = data.get("grace_hours")
+    if data.get("execution_mode") != "ephemeral" or "region_order" in data:
+        raise ValueError("Manifest version 3 requires the ephemeral execution mode")
+    if type(grace) is not int or not GRACE_HOURS[0] <= grace <= GRACE_HOURS[1]:
+        raise ValueError("grace_hours must be an integer from 1 to 168")
+    return grace
