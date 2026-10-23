@@ -321,6 +321,8 @@ async def execute(
     run_country=run,
 ) -> dict:
     manifest = load(manifest_path)
+    if manifest["schema_version"] == 3:
+        raise ValueError("Ephemeral campaigns run one round per node; use 'onboarding round'")
     if region not in manifest["regions"]:
         raise ValueError("Unknown campaign region")
     effective = settings(manifest["settings"])

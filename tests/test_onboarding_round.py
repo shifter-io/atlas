@@ -17,6 +17,7 @@ from proxy_index.onboarding import cli as onboarding_cli
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.files import read_json
 from proxy_index.onboarding.rounds import execute_round, round_directory, verify_round
+from proxy_index.onboarding.scheduler import execute
 
 TOR1 = ["CA", "GL", "PM"]
 
@@ -210,6 +211,9 @@ async def test_replay_and_non_ephemeral_manifests_are_refused(ephemeral, tmp_pat
         await run_round(make(tmp_path / "v1", execution_mode="parallel"), 0)
     with pytest.raises(ValueError, match="hourly index"):
         await execute_round(ephemeral, "tor1", 24, Proxy)
+    with pytest.raises(ValueError, match="one round per node"):
+        await execute(ephemeral, "tor1", Proxy)
+    assert not (ephemeral.parent / "regions/tor1/state.json").exists()
 
 
 async def test_verify_round_passes_without_ips(ephemeral):
