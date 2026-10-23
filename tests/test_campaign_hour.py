@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from aiohttp import web
 from campaign_fakes import (
     CAMPAIGN_PROJECT,
     CID,
@@ -378,6 +379,7 @@ async def test_a_resumed_started_worker_is_not_pushed_again(tmp_path):
 
 
 async def test_one_region_failing_does_not_stop_the_others(tmp_path):
+    """B1 (c): the failed region's workers end in a final status, not `requested`."""
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:2], image_by_region={"lon1": "x", "fra1": "y"})
     original = launch._Launch._create_call
@@ -393,9 +395,74 @@ async def test_one_region_failing_does_not_stop_the_others(tmp_path):
     finally:
         launch._Launch._create_call = original
     assert {d.region: d.status for d in record.droplets} == {"lon1": "armed",
-                                                             "fra1": "requested"}
+                                                             "fra1": "create_failed"}
     assert record.cells == {"net00/lon1": "running", "net00/fra1": "failed_ours"}
     assert record.droplets[1].error_class == "RuntimeError"
+    assert not {d.status for d in record.droplets} & set(launch.UP)
+
+
+class ListFailsAfterCreate(FakeDigitalOcean):
+    """Every hour-tag list fails (5xx after the client's retries) once droplets exist."""
+
+    broken = False
+
+    async def _create(self, request):
+        response = await super()._create(request)
+        self.broken = True
+        return response
+
+    async def _list(self, request):
+        if self.broken:
+            return web.json_response({"id": "server_error"}, status=500)
+        return await super()._list(request)
+
+
+async def test_b1_a_readiness_api_error_retires_every_created_droplet(tmp_path):
+    """B1 (a): no task outlives the launch; every created droplet goes through the guard."""
+    fake = ListFailsAfterCreate()
+    spec = make_spec(NETWORKS[:2], REGIONS[:1])
+    record, root, remote, _ = await launched(tmp_path, fake, spec)
+    created = {d.droplet_id for d in record.droplets}
+    assert len(record.droplets) == 4 and None not in created  # two workers, one replacement each
+    assert {d.status for d in record.droplets} == {"destroyed"} and remote.pushes == []
+    assert {i for kind, i in fake.deleted} == created and len(fake.deleted) == 4
+    audit = [json.loads(line) for line in audit_path(root).read_text().splitlines()]
+    assert sorted(a["id"] for a in audit if a["result"] == "deleted") == sorted(created)
+    assert set(record.cells.values()) == {"failed_ours"} and record.state == "running"
+    assert {d.error_class for d in record.droplets} == {"ApiError"}
+    assert [t for t in asyncio.all_tasks() if t is not asyncio.current_task()] == []
+
+
+async def test_b1_b_a_missing_credentials_file_fails_only_its_network(tmp_path):
+    """B1 (b): one network's missing credentials never stop the other networks' workers."""
+    fake = FakeDigitalOcean()
+    spec = make_spec(NETWORKS[:2], REGIONS[:2])
+    make_root(tmp_path, spec)
+    (tmp_path / "manager" / ".secrets" / "credentials" / "net01.toml").unlink()
+    record, *_ = await launched(tmp_path, fake, spec)
+    good = [d for d in record.droplets if d.network == "net00"]
+    bad = [d for d in record.droplets if d.network == "net01"]
+    assert len(good) == 2 and {d.status for d in good} == {"armed"}
+    assert len(bad) == 4 and {(d.status, d.error_class) for d in bad} == {
+        ("destroyed", "FileNotFoundError")}
+    assert {i for _, i in fake.deleted} == {d.droplet_id for d in bad}
+    assert record.cells == {"net00/lon1": "running", "net00/fra1": "running",
+                            "net01/lon1": "failed_ours", "net01/fra1": "failed_ours"}
+
+
+async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, monkeypatch):
+    """A created droplet whose assignment raised is handed to the guard, which may refuse."""
+    fake = FakeDigitalOcean()
+    spec = make_spec(NETWORKS[:1], REGIONS[:1])
+
+    async def refuse(*args, **kwargs):
+        raise launch.scope.OwnershipError("droplet", "1", ["exists"])
+
+    monkeypatch.setattr(launch.scope, "assign_and_verify_project", refuse)
+    record, *_ = await launched(tmp_path, fake, spec)
+    assert [d.status for d in record.droplets] == ["destroy_refused"] * 2
+    assert fake.deleted == [] and record.cells == {"net00/lon1": "failed_ours"}
+    assert {d.error_class for d in record.droplets} == {"OwnershipError"}
 
 
 async def test_synthetic_mode_makes_no_cloud_or_ssh_calls(tmp_path):
@@ -541,6 +608,37 @@ async def test_run_process_runs_and_times_out():
     code, out = await fanout.run_process(
         [sys.executable, "-c", "import time; time.sleep(30)"], None, 0.2)
     assert (code, out) == (255, b"")
+
+
+def stub_systemctl(tmp_path: Path, state: str | None) -> dict:
+    """A `systemctl` that prints `state` (or fails when it is None); returns the env."""
+    bin_dir = tmp_path / "bin-systemctl"
+    bin_dir.mkdir(exist_ok=True)
+    body = f"printf '{state}\\n'" if state is not None else "exit 1"
+    (bin_dir / "systemctl").write_text(f"#!/bin/sh\n{body}\n")
+    (bin_dir / "systemctl").chmod(0o755)
+    return {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+
+
+@pytest.mark.parametrize("checkpoint,unit,allowed", [
+    ("running", "ActiveState=active\nSubState=running", False),
+    ("armed", "ActiveState=activating\nSubState=start", False),
+    ("running", None, False),  # systemctl itself failed: keep refusing (data first)
+    ("running", "ActiveState=failed\nSubState=failed", True),  # killed round (B2)
+    ("running", "ActiveState=inactive\nSubState=dead", True),  # unit gone after a reboot
+    ("running", "ActiveState=active\nSubState=exited", True),
+    ("completed", "ActiveState=active\nSubState=running", True),
+    (None, "ActiveState=failed\nSubState=failed", True),
+])
+def test_b2_the_pull_check_allows_a_round_whose_unit_ended(tmp_path, checkpoint, unit, allowed):
+    """B2: a hard-killed round (checkpoint never terminal) can still be pulled."""
+    folder = tmp_path / "00"
+    folder.mkdir()
+    if checkpoint:
+        (folder / "round.json").write_text(json.dumps({"status": checkpoint}))
+    reply = subprocess.run([sys.executable, "-c", fanout.TERMINAL_CHECK, str(folder)],
+                           env=stub_systemctl(tmp_path, unit), check=False)
+    assert (reply.returncode == 0) is allowed
 
 
 def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
