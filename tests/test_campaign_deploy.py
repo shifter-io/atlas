@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import configparser
 import io
@@ -14,19 +13,39 @@ import stat
 import subprocess
 import tarfile
 import tomllib
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from campaign_fakes import CAMPAIGN_PROJECT, TOKEN, FakeDigitalOcean, Fault, no_sleep, running
+from campaign_deploy_fakes import (
+    ASSETS,
+    CID,
+    CREDENTIALS,
+    IMAGE,
+    MAC_IP,
+    MAC_PUBLIC,
+    MANAGER_IP,
+    NOW,
+    OTHER_IP,
+    PLAN_CREDENTIALS,
+    ROOT,
+    WORKER_PUBLIC,
+    Fake,
+    Shell,
+    fast_assign,
+    inventory,
+    make_job,
+    parse,
+    run_deploy,
+    writes,
+)
+from campaign_fakes import CAMPAIGN_PROJECT, TOKEN, FakeDigitalOcean, Fault, running
 
 from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, ops_api, planspec, scope
+from proxy_index.campaign import deploy, ops_api, planspec
 from proxy_index.campaign.contracts import (
     MANAGER_TAG,
     WORKER_TAG,
     CampaignSpec,
-    campaign_tag,
     spec_path,
 )
 from proxy_index.campaign.do_api import CreateError
@@ -34,96 +53,15 @@ from proxy_index.campaign.planspec import PlanError, PlanInputs
 from proxy_index.onboarding import manifest
 from proxy_index.regions import REGION_IDS
 
-ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "src" / "proxy_index" / "campaign" / "assets"
-NOW = datetime(2027, 1, 1, 21, 55, tzinfo=UTC)
-MAC_IP, OTHER_IP, MANAGER_IP = "198.51.100.7", "198.51.100.8", "203.0.113.10"
-MAC_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMacKeyForTests pi-camp-mac"
-WORKER_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWorkerKeyForTests"
-CREDENTIALS = {"shifter": {"account": "customer-a\"b\\c", "password": "p\tw"},
-               "geonode": {"username": "u", "password": "v"}}
-PLAN_CREDENTIALS = {"account": "customer-acct_9", "password": "p\"w"}
-CID = "20270101t230000z-0123456789ab"
-IMAGE = "pi-camp-worker-0.9.5-0123456789ab-20270101"
-
-
-class Shell:
-    """Fake SSH to the manager: records argv and stdin; answers like the provisioned host."""
-
-    def __init__(self, verdict="hardened", fail=()):
-        self.calls, self.verdict, self.fail = [], verdict, fail
-
-    async def __call__(self, argv, stdin):
-        self.calls.append((argv, stdin))
-        command = argv[-1]
-        if any(word in command for word in self.fail):
-            return 1, ""
-        if command.endswith("manager-provision.sh"):
-            code = 0 if self.verdict == "hardened" else 1
-            return code, f"apt\nworker-key {WORKER_PUBLIC}\n{self.verdict}\n"
-        return 0, "shredded\n" if "shred -u" in command else ""
-
-    def commands(self):
-        return [argv[-1] for argv, _ in self.calls]
-
-
-class Fake(FakeDigitalOcean):
-    """Also records create bodies."""
-
-    async def _create(self, request):
-        self.bodies.append(("POST", "/v2/droplets", await request.json()))
-        return await super()._create(request)
-
 
 @pytest.fixture(autouse=True)
 def quick_assign(monkeypatch):
-    original = ops_api.assign_and_verify_project
-
-    async def assign(*args, **kwargs):
-        return await original(*args, retry=scope.Retry(sleep=no_sleep), **kwargs)
-
-    monkeypatch.setattr(ops_api, "assign_and_verify_project", assign)
+    fast_assign(monkeypatch)
 
 
 @pytest.fixture
 def job(tmp_path):
-    wheel = tmp_path / "dist" / "proxy_index-0.9.5-py3-none-any.whl"
-    wheel.parent.mkdir()
-    wheel.write_bytes(b"wheel bytes")
-    requirements = tmp_path / "dist" / "requirements.txt"
-    requirements.write_text("aiohttp==3.14.3 --hash=sha256:00\n")
-    key = tmp_path / "keys" / "proxy-index-campaign"
-    key.parent.mkdir()
-    key.write_text("private part, never read by deploy\n")
-    key.with_name(key.name + ".pub").write_text(MAC_PUBLIC + "\n")
-    credentials = tmp_path / "credentials.toml"
-    credentials.write_text("".join(
-        deploy.toml_table(n, v).decode() for n, v in CREDENTIALS.items()))
-    return deploy.DeployJob("leftclick", wheel, requirements, key,
-                            tmp_path / "secrets" / "campaign-manager.json",
-                            deploy.credential_files(credentials, ("shifter",)), MAC_IP,
-                            lambda: TOKEN)
-
-
-async def run_deploy(fake, job, shell=None):
-    async with running(fake) as cloud:
-        return await deploy.deploy(cloud, job, shell=shell or Shell(), sleep=no_sleep, now=NOW)
-
-
-def parse(argv):
-    """The `proxy-index` arguments for the campaign group, without running them."""
-    parser = argparse.ArgumentParser(prog="proxy-index")
-    campaign_cli.register(parser.add_subparsers(dest="command", required=True))
-    return parser.parse_args(argv)
-
-
-def inventory(job):
-    return json.loads(job.inventory.read_text())
-
-
-def writes(fake):
-    return [(m, re.sub(r"/[0-9a-f-]{6,}", "/N", p)) for m, p, _, _ in fake.requests
-            if m != "GET"]
+    return make_job(tmp_path)
 
 
 async def test_deploy_creates_a_hardened_manager_in_order(job):
@@ -442,127 +380,6 @@ async def test_upload_spec_sends_the_root_and_records_the_campaign(deployed, tmp
         await deploy.upload_spec(deployed, root, shell=Shell(fail=("test ! -e",)))
 
 
-async def owned_world(job):
-    """A deployed manager in the fake, plus a recorded snapshot and production droplets."""
-    fake = Fake()
-    fake.seed_production(40)
-    await run_deploy(fake, job)
-    saved = inventory(job)
-    deploy.save(job.inventory, saved, campaigns=[CID])
-    fake.add_resource("snapshot", 9001, name=IMAGE)
-    fake.add_resource("snapshot", 9002, name="prod-backup")
-    images = job.inventory.with_name("campaign-images.json")
-    images.write_text(json.dumps({"builds": [{"snapshot_id": "9001", "snapshot_name": IMAGE},
-                                             {"state": "failed"}]}))
-    return fake, saved, images
-
-
-def clean_report(tmp_path, cid=CID, **changes):
-    path = tmp_path / f"collect-{cid}-{len(changes)}.json"
-    path.write_text(json.dumps({"campaign_id": cid, "clean": True, "mismatches": [],
-                                "missing": [], "extra": [], **changes}))
-    return path
-
-
-async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
-    fake, saved, images = await owned_world(job)
-    production = {k for k, d in fake.droplets.items() if MANAGER_TAG not in d["tags"]}
-    shell, removed = Shell(), []
-    async with running(fake) as cloud:
-        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                     shell=shell, remove_agent=lambda: removed.append(1) or True)
-    assert shell.commands() == [
-        "systemctl disable --now " + " ".join(deploy.unit_names(CID)), deploy.SHRED]
-    assert fake.deleted == [
-        ("droplet", saved["manager_id"]), ("firewall", saved["manager_firewall_id"]),
-        ("firewall", saved["worker_firewall_id"]), ("ssh_key", saved["worker_key_id"]),
-        ("ssh_key", saved["mac_key_id"]), ("snapshot", "9001")]
-    assert set(fake.droplets) == production and "9002" in fake.resources["snapshot"]
-    assert done["clean"] is True and removed == [1]
-    assert done["tag_counts"] == {"pi-camp-worker": 0, "pi-camp-manager": 0,
-                                  "pi-camp-builder": 0, campaign_tag(CID): 0}
-    audit = [json.loads(line) for line in deploy.audit_path(job.inventory).read_text()
-             .splitlines()]
-    assert [a["kind"] for a in audit if a["result"] == "deleted"] == [
-        "droplet", "firewall", "firewall", "ssh_key", "ssh_key", "snapshot"]
-    assert all(all(a["checks"].values()) for a in audit if a["result"] == "deleted")
-    assert json.loads(job.inventory.read_text())["teardown"] == done
-    assert ("DELETE", "/v2/droplets") not in [(m, p) for m, p, _, _ in fake.requests]
-
-
-@pytest.mark.parametrize("reports, message", [
-    ([], "clean collect report"),
-    ([{"clean": False}], "clean collect report"),
-    ([{"mismatches": ["a"]}], "clean collect report"),
-    ([{"cid": "20270101t230000z-ffffffffffff"}], "clean collect report"),
-])
-async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, message):
-    fake, _, images = await owned_world(job)
-    paths = [clean_report(tmp_path, change.pop("cid", CID), **change) for change in reports]
-    shell = Shell()
-    async with running(fake) as cloud:
-        with pytest.raises(deploy.DeployError, match=message):
-            await deploy.teardown(cloud, job.inventory, paths, shell=shell)
-    assert shell.calls == [] and not fake.deleted
-
-
-async def test_teardown_refuses_while_a_worker_lives(job, tmp_path):
-    fake, _, images = await owned_world(job)
-    fake.add("pic-01234567-h00-lon1-shifter", [WORKER_TAG, "pi-camp-01234567"],
-             project=CAMPAIGN_PROJECT)
-    shell = Shell()
-    async with running(fake) as cloud:
-        with pytest.raises(deploy.DeployError, match="still alive"):
-            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                  shell=shell)
-    assert shell.calls == [] and not fake.deleted
-
-
-async def test_teardown_never_releases_before_the_secrets_are_shredded(job, tmp_path):
-    fake, _, images = await owned_world(job)
-
-    class Unshredded(Shell):
-        async def __call__(self, argv, stdin):
-            self.calls.append((argv, stdin))
-            return 0, ""
-
-    async with running(fake) as cloud:
-        with pytest.raises(deploy.DeployError, match="not shredded"):
-            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                  shell=Unshredded())
-        with pytest.raises(deploy.DeployError, match="stop units"):
-            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                  shell=Shell(fail=("systemctl",)))
-    assert not fake.deleted
-
-
-async def test_a_refused_release_is_reported_and_the_rest_still_go(job, tmp_path):
-    fake, saved, images = await owned_world(job)
-    fake.resources["ssh_key"][saved["worker_key_id"]]["name"] = "production-key"
-    async with running(fake) as cloud:
-        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                     shell=Shell(), remove_agent=lambda: False)
-    results = {(r["kind"], r["id"]): r["result"] for r in done["released"]}
-    assert results[("ssh_key", saved["worker_key_id"])] == "failed: OwnershipError"
-    assert saved["worker_key_id"] in fake.resources["ssh_key"] and "9001" not in (
-        fake.resources["snapshot"])
-    assert done["clean"] is False
-
-
-async def test_teardown_without_a_manager_or_campaign_units(job, tmp_path):
-    with pytest.raises(deploy.DeployError, match="no manager"):
-        async with running(Fake()) as cloud:
-            await deploy.teardown(cloud, job.inventory, [])
-    fake, saved, images = await owned_world(job)
-    deploy.save(job.inventory, saved, campaigns=[])
-    shell = Shell()
-    async with running(fake) as cloud:
-        images.unlink()
-        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                     shell=shell, remove_agent=lambda: True)
-    assert shell.commands() == [deploy.SHRED] and done["clean"] is True
-
-
 async def test_allow_me_replaces_the_only_ssh_source(job):
     fake = Fake()
     await run_deploy(fake, job)
@@ -725,14 +542,6 @@ def test_a_table_that_does_not_round_trip_is_refused(monkeypatch):
     monkeypatch.setattr(deploy, "_toml_string", lambda value: '"changed"')
     with pytest.raises(deploy.DeployError, match="round-trip"):
         deploy.toml_table("x", {"a": "b"})
-
-
-def test_teardown_removes_the_mac_agent_by_default(monkeypatch):
-    from proxy_index.campaign import guard
-
-    homes = []
-    monkeypatch.setattr(guard, "remove", lambda home: homes.append(home) or True)
-    assert deploy._remove_agent() is True and homes == [Path.home()]
 
 
 def test_plan_refuses_a_config_for_another_provider_or_an_existing_folder(
