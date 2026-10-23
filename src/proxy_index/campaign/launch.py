@@ -35,10 +35,9 @@ from .contracts import (
     runtime_dir,
 )
 from .do_api import CreateError, DigitalOcean
-from .fanout import start_command
+from .fanout import READY_POLL_SECONDS, start_command
 
 READY_LIMIT_SECONDS = 180
-READY_POLL_SECONDS = 2.0
 CREATE_RETRY_SECONDS = 15
 SYNTHETIC_MINUTES = 5
 LIVE = frozenset({"armed", "running"})
@@ -57,8 +56,7 @@ class WorkerInputs:
 
     @classmethod
     def for_root(cls, root: Path, wheel_sha256: str) -> WorkerInputs:
-        """The manager layout `<base>/campaigns/<cid>`: the wheel in `<base>/wheels` whose
-        SHA-256 the spec binds, and `<base>/.secrets/credentials/<network>.toml`."""
+        """`<base>/campaigns/<cid>`: the spec's wheel in `<base>/wheels`, `<base>/.secrets`."""
         base = root.parent.parent
         wheels = [w for w in sorted((base / "wheels").glob("*.whl"))
                   if digest(w) == wheel_sha256]
@@ -209,9 +207,8 @@ class _Launch(HourWork):
 
     async def _launch(self) -> None:
         self.inputs = WorkerInputs.for_root(self.root, self.spec.wheel_sha256)
-        if self.clock.now() < self.scheduled - self.spec.create_lead_seconds:
-            await self.clock.sleep(self.scheduled - self.spec.create_lead_seconds
-                                   - self.clock.now())
+        await self.clock.sleep(max(0.0, self.scheduled - self.spec.create_lead_seconds
+                                   - self.clock.now()))
         await self._adopt()
         await asyncio.gather(*(self._region([d for d in self.record.droplets
                                              if d.region == region and d.status in UP], True)
@@ -311,7 +308,8 @@ class _Launch(HourWork):
         try:
             await self._start(worker, replace)
         except Exception as error:
-            await self._fail(worker, "start_failed", replace, type(error).__name__)
+            if worker.armed_at is None:  # an armed worker is never start_failed (m10)
+                await self._fail(worker, "start_failed", replace, type(error).__name__)
 
     async def _start(self, worker: DropletRecord, replace: bool) -> None:
         resumed = worker.status == "starting"
@@ -352,27 +350,32 @@ class _Launch(HourWork):
             await self.clock.sleep(READY_POLL_SECONDS)
 
     async def _push(self, worker: DropletRecord, droplet: Droplet, resumed: bool) -> bool:
-        """Push and start, retried once on the same worker. A resume or a retry first checks
-        whether the round unit already started, so a started worker is never pushed again."""
+        """Push and start, retried once. False only when the round provably never started; a
+        started or unreadable worker is armed (`start_unconfirmed`), never start_failed (m9)."""
         manifest = manifest_path(self.root, self.spec, worker.network)
         command = start_command(manifest.parent.name, worker.region, worker.hour)
         payload = self._bundle(worker)
-        for attempt in range(2):
-            if (resumed or attempt) and await self._started(droplet):
-                return True
+        if resumed and await self._started(droplet):
+            return True
+        for _ in range(2):
             try:
                 await self.remote.push_start(droplet, payload, command)
                 return True
             except Exception:
-                continue
+                started = await self._started(droplet)
+                if started is not False:
+                    worker.error_class = None if started else "start_unconfirmed"
+                    return True
         return False
 
-    async def _started(self, droplet: Droplet) -> bool:
+    async def _started(self, droplet: Droplet) -> bool | None:
+        """Whether the round unit was ever started; None when the worker cannot be read."""
         try:
-            service = (await self.remote.inspect(droplet)).get("service") or {}
+            info = await self.remote.inspect(droplet)
         except Exception:
-            return False
-        return service.get("ActiveState") in ("active", "activating")
+            return None
+        unit = (info.get("service") or {}).get("ActiveState", "inactive")
+        return "assignment" in info or unit != "inactive"  # the fleet marker, or any unit (m9)
 
     def _bundle(self, worker: DropletRecord) -> bytes:
         """One tar: the network's manifest, run config, assignment, wheel and credentials."""

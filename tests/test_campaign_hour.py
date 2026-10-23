@@ -237,10 +237,59 @@ async def test_a_push_error_is_retried_once_on_the_same_worker(tmp_path):
                                 setup=lambda r: r.push_failures.update({name: 1}))
     assert len(record.droplets) == 1 and record.droplets[0].status == "armed"
     fake = FakeDigitalOcean()
-    record, *_ = await launched(tmp_path / "twice", fake, spec,
-                                setup=lambda r: r.push_failures.update({name: 2}))
+
+    def never_started(remote):
+        remote.push_failures[name] = 2
+        remote.inspected[name] = {"service": {"ActiveState": "inactive"}}
+
+    record, *_ = await launched(tmp_path / "twice", fake, spec, setup=never_started)
     assert [d.error_class for d in record.droplets] == ["start_failed", None]
-    assert record.droplets[1].status == "armed"
+    assert record.droplets[0].armed_at is None and record.droplets[1].status == "armed"
+
+
+async def test_1e_r1_a_failed_push_on_an_unreadable_worker_is_armed_not_start_failed(tmp_path):
+    """1e r1: the round may have started, so the worker goes to harvest, never start_failed."""
+    fake = FakeDigitalOcean()
+    spec = make_spec(NETWORKS[:1], REGIONS[:1])
+    name = droplet_name(CID, 0, "lon1", "net00")
+    record, *_ = await launched(tmp_path, fake, spec,
+                                setup=lambda r: r.push_failures.update({name: 2}))
+    worker = record.droplets[0]
+    assert (worker.status, worker.error_class) == ("armed", "start_unconfirmed")
+    assert worker.armed_at and len(record.droplets) == 1 and fake.deleted == []
+
+
+@pytest.mark.parametrize("seen", [{"service": {"ActiveState": "failed"}},
+                                  {"assignment": {}, "service": {"ActiveState": "inactive"}}])
+async def test_1e_r1_a_failed_unit_after_a_failed_push_counts_as_started(tmp_path, seen):
+    """m9: a unit that ran and failed, or the fleet marker alone, counts as started."""
+    fake = FakeDigitalOcean()
+    spec = make_spec(NETWORKS[:1], REGIONS[:1])
+    name = droplet_name(CID, 0, "lon1", "net00")
+
+    def ran_and_failed(remote):
+        remote.push_failures[name] = 1
+        remote.inspected[name] = seen
+
+    record, _, remote, _ = await launched(tmp_path, fake, spec, setup=ran_and_failed)
+    assert (record.droplets[0].status, record.droplets[0].error_class) == ("armed", None)
+    assert remote.pushes == [] and fake.deleted == []
+
+
+async def test_1e_r1_an_error_after_arming_never_becomes_start_failed(tmp_path, monkeypatch):
+    fake = FakeDigitalOcean()
+    spec = make_spec(NETWORKS[:1], REGIONS[:1])
+    original, raised = launch._Launch.save, []
+
+    def save(self):
+        if not raised and any(d.status == "armed" for d in self.record.droplets):
+            raised.append(True)
+            raise OSError("disk full")
+        original(self)
+
+    monkeypatch.setattr(launch._Launch, "save", save)
+    record, *_ = await launched(tmp_path, fake, spec)
+    assert [d.status for d in record.droplets] == ["armed"] and fake.deleted == []
 
 
 async def test_a_guard_refusal_is_final_with_no_fallback(tmp_path):
@@ -668,8 +717,8 @@ async def test_pull_replaces_the_local_round_with_the_remote_one(tmp_path):
     await remote.pull(DROPLET, f"{WORKER_ROOT}/run/m/regions/lon1/rounds/00", local)
     assert sorted(p.name for p in local.rglob("*")) == [
         "host-samples.jsonl", "round.json", "summary.json", "us"]
-    assert "tar -C /opt/proxy-index-worker/run/m/regions/lon1/rounds -cf - 00" in (
-        runner.calls[0][0][-1])
+    assert "mkdir -p /opt/proxy-index-worker/run/m/regions/lon1/rounds/00 && tar -C " \
+        "/opt/proxy-index-worker/run/m/regions/lon1/rounds -cf - 00" in runner.calls[0][0][-1]
     assert sorted(p.name for p in local.parent.iterdir()) == ["00"]
 
 
