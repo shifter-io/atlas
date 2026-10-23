@@ -1,0 +1,254 @@
+"""CAMP-1g: manager teardown and the account binding of every manager step (fakes only)."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from campaign_deploy_fakes import (
+    CID,
+    OTHER_IP,
+    Fake,
+    Shell,
+    clean_report,
+    fast_assign,
+    inventory,
+    make_job,
+    other_team,
+    owned_world,
+    run_deploy,
+    running,
+    writes,
+)
+from campaign_fakes import CAMPAIGN_PROJECT, Fault
+
+from proxy_index.campaign import deploy
+from proxy_index.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag
+
+
+@pytest.fixture(autouse=True)
+def quick_assign(monkeypatch):
+    fast_assign(monkeypatch)
+
+
+@pytest.fixture
+def job(tmp_path):
+    return make_job(tmp_path)
+
+
+async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
+    fake, saved, images = await owned_world(job)
+    production = {k for k, d in fake.droplets.items() if MANAGER_TAG not in d["tags"]}
+    shell, removed = Shell(), []
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     shell=shell, remove_agent=lambda: removed.append(1) or True)
+    assert shell.commands() == [
+        "systemctl disable --now " + " ".join(deploy.unit_names(CID)), deploy.SHRED]
+    assert fake.deleted == [
+        ("droplet", saved["manager_id"]), ("firewall", saved["manager_firewall_id"]),
+        ("firewall", saved["worker_firewall_id"]), ("ssh_key", saved["worker_key_id"]),
+        ("ssh_key", saved["mac_key_id"]), ("snapshot", "9001")]
+    assert set(fake.droplets) == production and "9002" in fake.resources["snapshot"]
+    assert done["clean"] is True and removed == [1]
+    assert done["tag_counts"] == {"pi-camp-worker": 0, "pi-camp-manager": 0,
+                                  "pi-camp-builder": 0, campaign_tag(CID): 0}
+    audit = [json.loads(line) for line in deploy.audit_path(job.inventory).read_text()
+             .splitlines()]
+    assert [a["kind"] for a in audit if a["result"] == "deleted"] == [
+        "droplet", "firewall", "firewall", "ssh_key", "ssh_key", "snapshot"]
+    assert all(all(a["checks"].values()) for a in audit if a["result"] == "deleted")
+    assert json.loads(job.inventory.read_text())["teardown"] == done
+    assert ("DELETE", "/v2/droplets") not in [(m, p) for m, p, _, _ in fake.requests]
+
+
+@pytest.mark.parametrize("reports, message", [
+    ([], "clean collect report"),
+    ([{"clean": False}], "is not clean"),
+    ([{"mismatches": ["a"]}], "is not clean"),
+    ([{"cid": "20270101t230000z-ffffffffffff"}], "clean collect report"),
+])
+async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, message):
+    fake, _, images = await owned_world(job)
+    paths = [clean_report(tmp_path, change.pop("cid", CID), **change) for change in reports]
+    shell = Shell()
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match=message):
+            await deploy.teardown(cloud, job.inventory, paths, shell=shell)
+    assert shell.calls == [] and not fake.deleted
+
+
+async def test_teardown_refuses_while_a_worker_lives(job, tmp_path):
+    fake, _, images = await owned_world(job)
+    fake.add("pic-01234567-h00-lon1-shifter", [WORKER_TAG, "pi-camp-01234567"],
+             project=CAMPAIGN_PROJECT)
+    shell = Shell()
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match="still alive"):
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                  shell=shell)
+    assert shell.calls == [] and not fake.deleted
+
+
+async def test_teardown_never_releases_before_the_secrets_are_shredded(job, tmp_path):
+    fake, _, images = await owned_world(job)
+
+    class Unshredded(Shell):
+        async def __call__(self, argv, stdin):
+            self.calls.append((argv, stdin))
+            return 0, ""
+
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match="not shredded"):
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                  shell=Unshredded())
+        with pytest.raises(deploy.DeployError, match="stop units"):
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                  shell=Shell(fail=("systemctl",)))
+    assert not fake.deleted
+
+
+async def test_a_refused_release_is_reported_and_the_rest_still_go(job, tmp_path):
+    fake, saved, images = await owned_world(job)
+    fake.resources["ssh_key"][saved["worker_key_id"]]["name"] = "production-key"
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     shell=Shell(), remove_agent=lambda: False)
+    results = {(r["kind"], r["id"]): r["result"] for r in done["released"]}
+    assert results[("ssh_key", saved["worker_key_id"])] == "failed: OwnershipError"
+    assert saved["worker_key_id"] in fake.resources["ssh_key"] and "9001" not in (
+        fake.resources["snapshot"])
+    assert done["clean"] is False
+
+
+async def test_teardown_without_a_manager_or_campaign_units(job, tmp_path):
+    with pytest.raises(deploy.DeployError, match="no manager"):
+        async with running(Fake()) as cloud:
+            await deploy.teardown(cloud, job.inventory, [])
+    fake, saved, images = await owned_world(job)
+    deploy.save(job.inventory, saved, campaigns=[])
+    shell = Shell()
+    async with running(fake) as cloud:
+        images.unlink()
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     shell=shell, remove_agent=lambda: True)
+    assert shell.commands() == [deploy.SHRED] and done["clean"] is True
+
+
+
+def test_teardown_removes_the_mac_agent_by_default(monkeypatch):
+    from proxy_index.campaign import guard
+
+    homes = []
+    monkeypatch.setattr(guard, "remove", lambda home: homes.append(home) or True)
+    assert deploy._remove_agent() is True and homes == [Path.home()]
+
+
+async def test_teardown_on_another_account_refuses_before_any_ssh_or_release(job, tmp_path):
+    """B1: a client of another team must not pass the live-worker check or the proof."""
+    fake, _, _ = await owned_world(job)
+    other, shell = other_team(Fake()), Shell()
+    async with running(other) as cloud:
+        with pytest.raises(deploy.DeployError, match="account"):
+            await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)], shell=shell,
+                                  remove_agent=lambda: True)
+    assert shell.calls == [] and not other.deleted and not fake.deleted
+    assert writes(other) == [] and "teardown" not in inventory(job)
+
+
+async def test_deploy_on_another_account_writes_nothing(job):
+    """B1: neither another account key nor another team's token touches the inventory."""
+    await run_deploy(Fake(), job)
+    before = job.inventory.read_bytes()
+    for other_job in (replace(job, account="proxy-index"), job):
+        other = other_team(Fake())
+        with pytest.raises(deploy.DeployError, match="account"):
+            await run_deploy(other, other_job)
+        assert job.inventory.read_bytes() == before and writes(other) == []
+
+
+async def test_allow_me_on_another_account_refuses(job):
+    await run_deploy(Fake(), job)
+    other = other_team(Fake())
+    async with running(other) as cloud:
+        with pytest.raises(deploy.DeployError, match="account"):
+            await deploy.allow_me(cloud, job.inventory, OTHER_IP)
+    assert writes(other) == []
+
+
+async def test_a_rerun_after_a_failed_release_finishes_without_ssh(job, tmp_path):
+    """B2: one failed delete is retried alone; the manager is not contacted again."""
+    fake, saved, _ = await owned_world(job)
+    worker_fw = saved["worker_firewall_id"]
+    fake.faults.append(Fault("DELETE", f"/v2/firewalls/{worker_fw}", 422))
+    report = clean_report(tmp_path)
+    async with running(fake) as cloud:
+        first = await deploy.teardown(cloud, job.inventory, [report], shell=Shell(),
+                                      remove_agent=lambda: True)
+    assert first["clean"] is False and worker_fw in fake.resources["firewall"]
+    fake.deleted.clear()
+    shell = Shell()
+    async with running(fake) as cloud:
+        again = await deploy.teardown(cloud, job.inventory, [report], shell=shell,
+                                      remove_agent=lambda: True)
+    assert shell.calls == [] and fake.deleted == [("firewall", worker_fw)]
+    assert again["clean"] is True and len(again["released"]) == len(first["released"])
+    assert all(r["result"] in ("deleted", "absent") for r in again["released"])
+
+
+async def test_a_manager_already_gone_is_never_contacted(job, tmp_path):
+    """B2: the droplet (and its disk with the secrets) is gone, so no SSH is attempted."""
+    fake, saved, _ = await owned_world(job)
+    fake.droplets.pop(saved["manager_id"])
+    shell = Shell()
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     shell=shell, remove_agent=lambda: True)
+    assert shell.calls == [] and done["clean"] is True
+    assert ("droplet", saved["manager_id"]) not in fake.deleted
+
+
+async def test_a_surviving_manager_keeps_its_firewall_until_a_rerun(job, tmp_path):
+    """B2: SSH is never opened on a manager that is still there."""
+    fake, saved, _ = await owned_world(job)
+    manager, manager_fw = saved["manager_id"], saved["manager_firewall_id"]
+    fake.faults.append(Fault("DELETE", f"/v2/droplets/{manager}", 422))
+    report = clean_report(tmp_path)
+    async with running(fake) as cloud:
+        first = await deploy.teardown(cloud, job.inventory, [report], shell=Shell(),
+                                      remove_agent=lambda: True)
+    results = {(r["kind"], r["id"]): r["result"] for r in first["released"]}
+    assert results[("droplet", manager)] == "failed: ApiError"
+    assert results[("firewall", manager_fw)].startswith("kept")
+    assert manager_fw in fake.resources["firewall"] and first["clean"] is False
+    shell = Shell()
+    async with running(fake) as cloud:
+        again = await deploy.teardown(cloud, job.inventory, [report], shell=shell,
+                                      remove_agent=lambda: True)
+    assert shell.calls == [] and again["clean"] is True
+    assert manager not in fake.droplets and manager_fw not in fake.resources["firewall"]
+
+
+async def test_an_unclean_report_is_refused_even_with_no_campaign_recorded(job, tmp_path):
+    """m5: a given report must itself be clean."""
+    fake, saved, _ = await owned_world(job)
+    deploy.save(job.inventory, saved, campaigns=[])
+    report = clean_report(tmp_path, "20270101t230000z-ffffffffffff", clean=False)
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match="is not clean"):
+            await deploy.teardown(cloud, job.inventory, [report], shell=Shell())
+    assert not fake.deleted
+
+
+async def test_a_stray_unassigned_manager_keeps_the_teardown_unclean(job, tmp_path):
+    """m1: a manager the guard could not remove at deploy time is listed, never forgotten."""
+    fake, saved, _ = await owned_world(job)
+    stray = fake.add("pi-camp-manager-20270101-beef", [MANAGER_TAG])
+    deploy.save(job.inventory, saved, unassigned_managers=[stray, "999999"])
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     shell=Shell(), remove_agent=lambda: True)
+    assert done["unassigned_managers"] == [stray] and done["clean"] is False
+    assert stray in fake.droplets

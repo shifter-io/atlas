@@ -338,3 +338,5 @@ and restart behavior. `proxy-index onboarding run` accepts `--concurrency` (defa
 1000) and `--timeout` in seconds (default 10). Onboarding never imports results into the
 site database. Census rule v2, shared with Test #1, counts every completed request
 (including failures) in its 1,000-request minimum sample and unique-IP ratio.
+The hourly droplet campaign (`proxy-index campaign …`: plan, manager deploy, enable,
+teardown) is described in [the campaign operating guide](docs/campaign.html).

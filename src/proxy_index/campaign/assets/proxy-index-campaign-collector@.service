@@ -1,0 +1,20 @@
+# CAMP-1: harvest, finalize and reconcile campaign %i every 30 s, until it is finished.
+[Unit]
+Description=Proxy Index campaign %i: collector
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/opt/proxy-index-campaign/venv/bin/proxy-index campaign collector --root /opt/proxy-index-campaign/campaigns/%i
+WorkingDirectory=/opt/proxy-index-campaign
+Restart=always
+RestartSec=2
+# Exit 0 means every hour is final and no worker is alive: stay stopped.
+RestartPreventExitStatus=0
+LimitNOFILE=65536
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

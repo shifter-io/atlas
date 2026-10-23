@@ -1,0 +1,10 @@
+# CAMP-1: the watchdog's "armed" check every hour at *:00:30.
+[Unit]
+Description=Proxy Index campaign %i: watchdog (armed) at *:00:30
+
+[Timer]
+OnCalendar=*-*-* *:00:30
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

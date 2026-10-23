@@ -178,3 +178,119 @@ def _scheduler_parsers(actions) -> None:
 
 
 PARSERS.append(_scheduler_parsers)
+
+
+def _plan_parsers(actions) -> None:
+    """CAMP-1g: the campaign plan and the manager's deploy, enable, allow-me and teardown."""
+    from .contracts import ACCOUNTS
+
+    plan = actions.add_parser("plan", help="Validate inputs; write the manifests and the spec")
+    plan.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    plan.add_argument("--start", required=True, help="ISO whole hour with offset, or now-hour")
+    plan.add_argument("--networks", required=True, help="all16, or comma-separated names")
+    plan.add_argument("--regions", nargs="+")
+    plan.add_argument("--concurrency", type=int, default=2000)
+    plan.add_argument("--image", required=True, help="snapshot name from `image build`")
+    plan.add_argument("--grace-hours", type=int, default=48)
+    plan.add_argument("--ssh-key-name", help="default: the deployed worker key")
+    plan.add_argument("--synthetic", action="store_true")
+    plan.add_argument("--output", type=Path, required=True)
+    plan.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
+    plan.add_argument("--configs", type=Path, default=Path("configs"))
+    plan.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
+    plan.add_argument("--images", type=Path, default=SECRETS / "campaign-images.json")
+    manager = actions.add_parser("manager", help="Deploy and operate the campaign manager")
+    steps = manager.add_subparsers(dest="manager_action", required=True)
+    deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
+    deploy.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    deploy.add_argument("--wheel", type=Path, required=True)
+    deploy.add_argument("--requirements", type=Path, required=True)
+    deploy.add_argument("--networks", default="all16")
+    deploy.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
+    deploy.add_argument("--mac-key", type=Path,
+                        default=Path("~/.ssh/proxy-index-campaign").expanduser())
+    upload = steps.add_parser("upload-spec", help="Copy a planned campaign to the manager")
+    upload.add_argument("root", type=Path)
+    enable = steps.add_parser("enable", help="Start a campaign's timers (owner's go only)")
+    enable.add_argument("campaign_id")
+    enable.add_argument("--owner-go", type=Path, help="the owner's recorded answer file")
+    stop = steps.add_parser("disable", help="Stop a campaign's timers and collector")
+    stop.add_argument("campaign_id")
+    allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
+    teardown = steps.add_parser("teardown", help="Remove the manager and its resources")
+    teardown.add_argument("--after-collect", type=Path, action="append", required=True)
+    for step in (deploy, allow):
+        step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
+    for step in (deploy, upload, enable, stop, allow, teardown):
+        step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
+
+
+def _plan(args) -> int:
+    from ..regions import REGION_IDS
+    from .planspec import PlanError, PlanInputs, parse_networks, plan
+
+    try:
+        inputs = PlanInputs(
+            args.account, args.start, parse_networks(args.networks), args.image, args.output,
+            args.credentials_file, args.inventory, args.images,
+            tuple(args.regions or REGION_IDS), args.configs, args.ssh_key_name,
+            args.concurrency, args.grace_hours, args.synthetic)
+
+        async def run() -> dict:
+            async with _cloud(args.account) as cloud:
+                return await plan(cloud, inputs)
+
+        print(json.dumps(asyncio.run(run()), indent=2))
+    except PlanError as exc:
+        print(f"Not planned: {exc}", file=sys.stderr)
+        return 3
+    return 0
+
+
+async def _manager_step(args) -> dict:
+    from . import deploy
+
+    if args.manager_action == "upload-spec":
+        return await deploy.upload_spec(args.inventory, args.root)
+    if args.manager_action == "enable":
+        return await deploy.enable(args.inventory, args.campaign_id, args.owner_go)
+    if args.manager_action == "disable":
+        return await deploy.disable(args.inventory, args.campaign_id)
+    # teardown and allow-me act on the account the inventory records (deploy checks it too)
+    account = args.account if args.manager_action == "deploy" else deploy.load_inventory(
+        args.inventory).get("account")
+    if account is None:
+        raise deploy.DeployError("no manager is recorded")
+    async with _cloud(account) as cloud:
+        if args.manager_action == "teardown":
+            return await deploy.teardown(cloud, args.inventory, args.after_collect)
+        address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
+        if args.manager_action == "allow-me":
+            return await deploy.allow_me(cloud, args.inventory, address)
+        from .contracts import ACCOUNTS
+        from .do_api import keychain_token
+        from .image import ensure_mac_key
+        from .planspec import parse_networks
+
+        job = deploy.DeployJob(
+            args.account, args.wheel, args.requirements, ensure_mac_key(args.mac_key),
+            args.inventory, deploy.credential_files(args.credentials_file,
+                                                    parse_networks(args.networks)),
+            address, keychain_token(ACCOUNTS[args.account]))  # read only when streamed
+        return await deploy.deploy(cloud, job)
+
+
+def _manager(args) -> int:
+    from .deploy import DeployError
+
+    try:
+        result = asyncio.run(_manager_step(args))
+    except DeployError as exc:
+        print(f"Manager {args.manager_action} refused or failed: {exc}", file=sys.stderr)
+        return 3
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("clean", True) else 3
+
+
+PARSERS.append(_plan_parsers)
+HANDLERS.update(plan=_plan, manager=_manager)
