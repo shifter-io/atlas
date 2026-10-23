@@ -59,7 +59,8 @@ def test_spec_round_trips_and_validates():
         {"manifests": {}}, {"size_by_region": {}}, {"image_by_region": {}},
         {"wheel_sha256": "x"}, {"grace_hours": 0}, {"hours": 23}, {"project_id": ""},
         {"create_lead_seconds": 0}, {"schema_version": 2}, {"concurrency": 0},
-        {"concurrency": 5001},
+        {"concurrency": 5001}, {"concurrency": True}, {"hours": 24.0}, {"grace_hours": True},
+        {"create_lead_seconds": 90.5},
     ):
         with pytest.raises(ValueError):
             spec(**changes).validate()
