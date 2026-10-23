@@ -163,10 +163,14 @@ def main(argv: list[str] | None = None) -> int:
     from .onboarding import cli as onboarding
 
     onboarding.register(commands)
+    from .campaign import cli as campaign
+
+    campaign.register(commands)
     args = parser.parse_args(argv)
     try:
-        if args.command == "onboarding":
-            return onboarding.dispatch(args)
+        private = {"onboarding": onboarding.dispatch, "campaign": campaign.dispatch}
+        if args.command in private:
+            return private[args.command](args)
         if args.command in fleet.COMMANDS:
             return fleet.dispatch(args)
         if args.command in {
