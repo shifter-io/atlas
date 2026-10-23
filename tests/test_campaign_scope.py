@@ -54,6 +54,10 @@ CAMPAIGN_SRC = ROOT / "src" / "proxy_index" / "campaign"
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
 NAME = f"pic-{SID}-h03-lon1-shifter"
+SNAPSHOT = "pi-camp-worker-0.9.5-0123456789ab-20270101"
+PROD_FIREWALL = "33333333-3333-4333-8333-000000000099"
+FIREWALL_RULES = {"name": "pi-camp-x", "inbound_rules": [], "outbound_rules": [], "tags": [],
+                  "droplet_ids": []}
 # Near-misses: (key, name, tags, project, created, failing check, role).
 NEAR_MISSES = [
     ("untagged", "web-legacy", [], PROD_PROJECT, None, "tags", "worker"),
@@ -332,6 +336,12 @@ async def test_no_delete_without_the_guard_in_any_letter_case(method):
         ("GET", "/v2/account", {"page": 1}, None),
         ("POST", f"/v2/projects/{PROD_PROJECT}/resources", None, {"resources": []}),
         ("HEAD", "/v2/account", None, None),
+        # B1 (CAMP-1f): well-formed writes to a droplet or firewall need the ownership token.
+        ("POST", "/v2/droplets/700001/actions", None, {"type": "power_off"}),
+        ("POST", "/v2/droplets/700001/actions", None, {"type": "shutdown"}),
+        ("POST", "/v2/droplets/700001/actions", None, {"type": "snapshot", "name": SNAPSHOT}),
+        ("POST", "/v2/firewalls", None, {**FIREWALL_RULES, "droplet_ids": [700001]}),
+        ("PUT", f"/v2/firewalls/{PROD_FIREWALL}", None, FIREWALL_RULES),
     ],
 )
 async def test_everything_off_the_allowlist_is_refused_before_the_network(
@@ -345,6 +355,30 @@ async def test_everything_off_the_allowlist_is_refused_before_the_network(
         with pytest.raises(ScopeError):
             await cloud.assign_project(CAMPAIGN_PROJECT, ["700001"], guard=object())
     assert not fake.requests and not fake.unlisted
+
+
+@pytest.mark.parametrize("token", [None, object(), "scope"])
+async def test_raw_writes_never_reach_a_production_droplet_or_firewall(token):
+    """B1 (CAMP-1f): power-off, snapshot and firewall writes need the client's own token,
+    which only its ownership-checking methods pass; the scope guard's token does not do."""
+    fake = FakeDigitalOcean()
+    production = fake.add("prod-node-0001", ["prod"])
+    fake.add_resource("firewall", PROD_FIREWALL, name="prod-fw", tags=["prod"],
+                      droplet_ids=[int(production)], inbound_rules=[{"protocol": "tcp"}])
+    guard = scope._GUARD if token == "scope" else token
+    writes = [
+        ("POST", f"/v2/droplets/{production}/actions", {"type": "power_off"}),
+        ("POST", f"/v2/droplets/{production}/actions", {"type": "snapshot", "name": SNAPSHOT}),
+        ("POST", "/v2/firewalls", {**FIREWALL_RULES, "droplet_ids": [int(production)]}),
+        ("PUT", f"/v2/firewalls/{PROD_FIREWALL}", FIREWALL_RULES),
+    ]
+    async with running(fake) as cloud:
+        for method, path, body in writes:
+            with pytest.raises(ScopeError):
+                await cloud.request(method, path, body=body, guard=guard)
+    assert not fake.requests and fake.droplets[production]["status"] == "active"
+    assert fake.resources["firewall"][PROD_FIREWALL]["name"] == "prod-fw"
+    assert len(fake.resources["firewall"]) == 1 and not fake.bodies
 
 
 async def test_assignment_is_confirmed_on_the_first_try(tmp_path):
@@ -544,7 +578,7 @@ def _names(tree):
 DELETE_WORD = re.compile(r"(?<![\w-])delete(?![\w-])", re.IGNORECASE)
 
 
-PRIVATE_STATE = {"_GUARD", "_created", "_projects", "_named", "_assign_failed"}
+PRIVATE_STATE = {"_GUARD", "_OWNED", "_created", "_projects", "_named", "_assign_failed"}
 PATCHABLE = {"ALLOWED", "PATHS", "monotonic", "utcnow", "require_guard", "check_allowed",
              "OWN_UNASSIGNED_SECONDS", "PROJECT_CACHE_SECONDS"}
 MUTATORS = {"update", "setdefault", "pop", "popitem", "clear", "__setitem__", "__delitem__"}
@@ -593,7 +627,8 @@ def scan_violations(source: str, name: str) -> list[str]:
     strings, names, found = _strings(tree), _names(tree), []
     if not guarded and any(DELETE_WORD.search(v) for v in strings):
         found.append("delete word")
-    if not guarded and names & {"_GUARD", "request", "_attempt", "_session", "aiohttp"}:
+    if not guarded and names & {"_GUARD", "_OWNED", "request", "_attempt", "_session",
+                                  "aiohttp"}:
         found.append("raw client access")
     if name not in ("scope.py", "contracts.py") and "assign_failed" in strings:
         found.append("assign_failed set outside scope.py")
@@ -609,14 +644,15 @@ def scan_violations(source: str, name: str) -> list[str]:
 
 def side_doors(source: str) -> list[str]:
     """Ways around the client from any module or script (m4)."""
-    private = {"_GUARD", "_attempt", "_session", "_created", "_assign_failed", "_named"}
+    private = {"_GUARD", "_OWNED", "_attempt", "_session", "_created", "_assign_failed",
+               "_named"}
     tree, found = ast.parse(source), []
     if "api.digitalocean.com" in source or re.search(r"\bdoctl\b", source):
         found.append("direct API or doctl")
     imports = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
                and (n.module or "").endswith(("do_api", "scope"))]
     if {a.name for n in imports for a in n.names} & private or _names(tree) & {
-            "_GUARD", "_assign_failed"}:
+            "_GUARD", "_OWNED", "_assign_failed"}:
         found.append("private client name")
     return found + tampering(source, reflective=False)
 
@@ -635,6 +671,7 @@ def test_the_scans_catch_known_bypasses(source):
     assert scan_violations(source, "launch.py")
     assert side_doors('URL = "https://api.digitalocean.com/v2"') and side_doors(
         "from proxy_index.campaign.scope import _GUARD") and side_doors("x = ['doctl']")
+    assert side_doors("from proxy_index.campaign.do_api import _OWNED")
 
 
 @pytest.mark.parametrize("source", [
@@ -648,6 +685,8 @@ def test_the_scans_catch_known_bypasses(source):
     'scope.monotonic = lambda: 0.0',
     'token = vars(scope)["_GU" + "ARD"]',
     'del scope.PATHS',
+    'await cloud.request("POST", "/v2/firewalls", body=rules, guard=do_api._OWNED)',
+    'token = vars(do_api)["_OWNED"]',
 ])
 def test_the_scans_catch_tampering_with_private_state(source):
     """r1: each of these passed both scans at the reviewed head."""
