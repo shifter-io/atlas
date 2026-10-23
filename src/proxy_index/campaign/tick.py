@@ -52,9 +52,8 @@ def due_at(spec: CampaignSpec, slot: int) -> datetime:
 
 def load_hour(root: Path, spec: CampaignSpec, slot: int) -> HourRecord:
     path = hour_path(root, slot)
-    if path.exists():
-        return HourRecord.from_dict(read_json(path))
-    return HourRecord(spec.campaign_id, slot, scheduled_at(spec, slot).isoformat())
+    return (HourRecord.from_dict(read_json(path)) if path.exists()
+            else HourRecord(spec.campaign_id, slot, scheduled_at(spec, slot).isoformat()))
 
 
 def load_hours(root: Path, spec: CampaignSpec) -> dict[int, HourRecord]:
@@ -68,42 +67,47 @@ def save_hour(root: Path, record: HourRecord) -> None:
 
 def read_alerts(root: Path) -> list[dict]:
     path = alerts_path(root)
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    lines = path.read_text().splitlines() if path.exists() else []
+    return [json.loads(line) for line in lines if line.strip()]
 
 
-# alerts.jsonl path -> (size read, (code, key) pairs); the file is append-only (m3).
-_raised: dict[Path, tuple[int, set[tuple[str, str]]]] = {}
+class AlertLog:
+    """alerts.jsonl and its raised (code, key) pairs, owned by one caller (r3); the pairs are
+    re-read only when the append-only file has grown (m3)."""
 
+    def __init__(self, root: Path):
+        self.root, self.path, self.size, self.raised = root, alerts_path(root), -1, set()
 
-def _raised_keys(path: Path) -> set[tuple[str, str]]:
-    size = path.stat().st_size if path.exists() else 0
-    if path not in _raised or _raised[path][0] != size:
-        pairs = {(str(item.get("code")), str(item.get("key"))) for item in read_alerts(
-            path.parent)} if size else set()
-        _raised[path] = (size, pairs)
-    return _raised[path][1]
+    def _pairs(self) -> set[tuple[str, str]]:
+        size = self.path.stat().st_size if self.path.exists() else 0
+        if size != self.size:
+            self.size, self.raised = size, {(str(item.get("code")), str(item.get("key")))
+                                            for item in read_alerts(self.root)}
+        return self.raised
+
+    def add(self, now: datetime, code: str, level: str = "high", key: str | None = None,
+            **details: object) -> bool:
+        """Append one alert unless (code, key) was raised before. No IPs."""
+        key = key or code
+        if (code, key) in self._pairs():
+            return False
+        entry = {"time": now.isoformat(), "code": code, "level": level, "key": key, **details}
+        private_dir(self.path.parent)
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(fd, (json.dumps(entry, sort_keys=True, allow_nan=False) + "\n").encode())
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        self.raised.add((code, key))
+        self.size = self.path.stat().st_size
+        return True
 
 
 def alert(root: Path, now: datetime, code: str, level: str = "high", key: str | None = None,
           **details: object) -> bool:
-    """Append one alert to alerts.jsonl unless (code, key) was raised before. No IPs."""
-    key = key or code
-    raised = _raised_keys(alerts_path(root))
-    if (code, key) in raised:
-        return False
-    entry = {"time": now.isoformat(), "code": code, "level": level, "key": key, **details}
-    private_dir(alerts_path(root).parent)
-    fd = os.open(alerts_path(root), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    try:
-        os.write(fd, (json.dumps(entry, sort_keys=True, allow_nan=False) + "\n").encode())
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    raised.add((code, key))
-    _raised[alerts_path(root)] = (alerts_path(root).stat().st_size, raised)
-    return True
+    """One alert from a short-lived caller (tick, watchdog)."""
+    return AlertLog(root).add(now, code, level, key, **details)
 
 
 def overlay_path(root: Path) -> Path:
@@ -185,11 +189,8 @@ def _disable(spec: CampaignSpec, root: Path, disable_timer: Callable[[], None] |
 async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now,
                    now_mode: bool = False, slot: int | None = None,
                    disable_timer: Callable[[], None] | None = None) -> list[int]:
-    """Launch every due slot still `planned` (or resume a crashed `launching` one), at once.
-
-    Serialized by `flock(ledger/.lock)`. With `now_mode` only `slot` is launched, immediately.
-    Once no slot is left to launch, a timer tick disables the timer. Returns the slots launched.
-    """
+    """Launch every due slot still `planned` (or resume a crashed `launching` one), at once,
+    under `flock(ledger/.lock)`; `now_mode` launches only `slot`, immediately. Returns them."""
     lock = root / "ledger" / ".lock"
     private_dir(lock.parent)
     fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -213,11 +214,8 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
 def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
                  start_tick: Callable[[], None] | None = None,
                  timer_enabled: Callable[[], bool] | None = None) -> str | None:
-    """Alarm: at *:00:30 (`armed`) the current hour's workers are armed; at *:02:00 it fired.
-
-    With the timer enabled it also starts the tick. A disabled timer is the operator's: a due
-    slot still `planned` then raises the alarm only (S7).
-    """
+    """At *:00:30 (`armed`) the hour's workers are armed; at *:02:00 it fired. An enabled timer
+    also gets the tick started; a disabled one (the operator's) only the alarm (S7)."""
     spec, now = load_spec(root), clock()
     slot = (now - scheduled_at(spec, 0)) // HOUR
     if not 0 <= slot < spec.hours:
