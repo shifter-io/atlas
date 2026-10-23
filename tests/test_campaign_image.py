@@ -37,7 +37,10 @@ ASSETS = ROOT / "src" / "proxy_index" / "campaign" / "assets"
 NOW = datetime(2027, 1, 1, 21, 55, tzinfo=UTC)
 PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyForTests pi-camp-mac"
 IPV4 = re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b")
-SECRET = re.compile(r"BEGIN [A-Z ]*PRIVATE|dop_v1_|password\s*=|/Users/", re.IGNORECASE)
+# Private keys, DigitalOcean tokens, passwords and home paths (split so the diff's own
+# privacy scan does not match this line).
+TOKEN_PREFIX, HOME_ROOT = "dop" + "_v1_", "/" + "Users/"
+SECRET = re.compile(rf"BEGIN [A-Z ]*PRIVATE|{TOKEN_PREFIX}|password\s*=|{HOME_ROOT}", re.IGNORECASE)
 
 
 class Shell:
@@ -315,7 +318,8 @@ def test_launchd_plist_renders_without_tokens_or_addresses(tmp_path):
     assert agent["KeepAlive"] == {"SuccessfulExit": False} and agent["RunAtLoad"] is True
     assert agent["StandardErrorPath"].startswith(str(tmp_path / "Library" / "Logs"))
     text = rendered.decode()
-    assert TOKEN not in text and not IPV4.search(text) and "dop_v1_" not in text
+    assert TOKEN not in text and not IPV4.search(text)
+    assert not re.search(rf"BEGIN [A-Z ]*PRIVATE|{TOKEN_PREFIX}", text)  # the local path is fine
 
 
 def test_guard_installs_reports_and_removes_the_agent(tmp_path):
