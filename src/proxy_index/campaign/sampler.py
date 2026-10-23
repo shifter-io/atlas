@@ -84,8 +84,9 @@ def percentile(values: list[float], fraction: float) -> float | None:
     return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
 
 
-def summarize(path: Path) -> dict[str, float | None]:
-    """The record's CPU fields from a samples file; missing or broken lines count as absent."""
+def summarize(path: Path, since: float | None = None) -> dict[str, float | None]:
+    """The record's CPU fields from a samples file; missing or broken lines count as absent.
+    Samples before `since` (the round's first start; the idle lead-in) are ignored."""
     lines = []
     try:
         for text in path.read_text().splitlines():
@@ -97,7 +98,8 @@ def summarize(path: Path) -> dict[str, float | None]:
         pass
 
     def values(key):
-        return [float(item[key]) for item in lines if isinstance(item.get(key), (int, float))]
+        return [float(item[key]) for item in lines if isinstance(item.get(key), (int, float))
+                and (since is None or item.get("time", since) >= since)]
 
     cpu = values("cpu_pct")
     return {"cpu_p50_pct": percentile(cpu, 0.5), "cpu_p95_pct": percentile(cpu, 0.95),
