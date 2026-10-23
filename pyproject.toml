@@ -21,7 +21,7 @@ dependencies = [
 proxy-index = "proxy_index.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "ruff>=0.12", "trustme>=1.2"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "pytest-timeout>=2.4", "ruff>=0.12", "trustme>=1.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/proxy_index"]
@@ -46,6 +46,8 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"
 markers = ["scale: simulated high-volume benchmark"]
+# A hung test fails on its own instead of stalling the whole run.
+timeout = 300
 
 [tool.ruff]
 line-length = 100

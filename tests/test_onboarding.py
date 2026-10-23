@@ -255,6 +255,22 @@ async def test_writer_rotates_idle_pending_records(tmp_path):
     await writer.close()
 
 
+async def test_writer_close_does_not_wait_for_the_idle_poll(tmp_path):
+    # Every scheduled country opens and closes one writer; an idle writer must stop
+    # as soon as it is closed, not after its queue poll times out.
+    began = time.perf_counter()
+    for index in range(100):
+        writer = ObservationWriter(
+            tmp_path / str(index),
+            country="US",
+            scheduled=campaign.timestamp(START),
+            started=campaign.timestamp(START),
+            deadline=START.timestamp() + 60,
+        )
+        await writer.close()
+    assert time.perf_counter() - began < 5
+
+
 async def test_writer_failure_is_fatal_not_a_deadlock(tmp_path, monkeypatch):
     import proxy_index.onboarding.writer as module
 

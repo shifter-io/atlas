@@ -179,7 +179,8 @@ async def execute(
             state["pid"] = os.getpid()
             state["updated_at"] = timestamp(clock.now())
             state["peak_memory_mb"] = peak_memory_mb()
-            atomic_json(state_path, state)
+            # Rewritten after every country, so it skips the slow indented encoder.
+            atomic_json(state_path, state, indent=None)
 
         # A process interruption cannot replay a partially measured country.
         for job in state["jobs"]:

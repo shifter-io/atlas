@@ -30,6 +30,11 @@ _TCP_INFO_MIN_LEN = 136
 _OFF_BYTES_ACKED = 120
 _OFF_BYTES_RECEIVED = 128
 
+# tcpi_state values (include/net/tcp_states.h) after our FIN was acknowledged
+# and after the peer's FIN arrived.
+_OWN_FIN_ACKED = frozenset({5, 6})  # FIN_WAIT2, TIME_WAIT
+_PEER_FIN_RECEIVED = frozenset({6, 8, 9, 11})  # TIME_WAIT, CLOSE_WAIT, LAST_ACK, CLOSING
+
 LINUX = sys.platform.startswith("linux")
 
 # `socket.TCP_INFO` is absent on macOS; 11 is the Linux value.
@@ -70,10 +75,15 @@ def from_socket(sock: object) -> ByteCount | None:
         return None
     if len(raw) < _TCP_INFO_MIN_LEN:
         return None
+    state = raw[0]
     (acked,) = struct.unpack_from("=Q", raw, _OFF_BYTES_ACKED)
     (received,) = struct.unpack_from("=Q", raw, _OFF_BYTES_RECEIVED)
-    # bytes_acked counts the initial SYN, so it is one higher than the payload.
-    return ByteCount(up=max(acked - 1, 0), down=received, exact=True)
+    # Each FIN, like the SYN, takes one sequence number that the counters
+    # include. bytes_acked counts the initial SYN, so it is one higher than the
+    # payload; CLOSE is left alone because a reset and a full close look alike.
+    acked -= 1 + (state in _OWN_FIN_ACKED)
+    received -= state in _PEER_FIN_RECEIVED
+    return ByteCount(up=max(acked, 0), down=max(received, 0), exact=True)
 
 
 # Measured against checkip.amazonaws.com on 2026-09-09. Providers meter
