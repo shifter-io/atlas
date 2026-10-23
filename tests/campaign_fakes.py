@@ -12,8 +12,8 @@ from aiohttp.test_utils import TestServer
 from proxy_index.campaign.do_api import DigitalOcean
 
 TOKEN = "fake-do-token-for-tests-only"
-PROD_PROJECT = "prj-production"
-CAMPAIGN_PROJECT = "prj-proxy-index"
+PROD_PROJECT = "11111111-1111-4111-8111-111111111111"  # the team's default project
+CAMPAIGN_PROJECT = "22222222-2222-4222-8222-222222222222"
 CID = "20270101t220000z-0123456789ab"
 SID = "01234567"
 OTHER_SID = "89abcdef"
@@ -44,7 +44,9 @@ class FakeDigitalOcean:
         self.faults: list[Fault] = []
         self.deleted: list[tuple[str, str]] = []
         self.assign_delay = 0
+        self.create_then_fail = 0
         self.pending: set[str] = set()
+        self.unlisted: list[tuple[str, str]] = []
         self.sizes = [{"slug": "c-2", "available": True, "regions": ["lon1", "fra1", "nyc9"]},
                       {"slug": "s-1vcpu-1gb", "available": False, "regions": ["lon1"]}]
         self._ids = itertools.count(700001)
@@ -81,6 +83,7 @@ class FakeDigitalOcean:
         route.add_post("/v2/droplets", self._create)
         route.add_delete("/v2/droplets", self._bulk_delete)
         route.add_get("/v2/projects", self._projects)
+        route.add_get("/v2/projects/{pid}", self._project)
         route.add_get("/v2/projects/{pid}/resources", self._project_resources)
         route.add_post("/v2/projects/{pid}/resources", self._assign)
         route.add_get("/v2/sizes", self._sizes)
@@ -88,7 +91,19 @@ class FakeDigitalOcean:
                              ("firewall", "/v2/firewalls"), ("snapshot", "/v2/snapshots")):
             route.add_get(prefix + "/{id}", self._getter(kind))
             route.add_delete(prefix + "/{id}", self._deleter(kind))
+        # Anything else (actions, tags, PUT, PATCH, ...) exists, so a leak would be visible here.
+        route.add_route("*", "/{tail:.*}", self._unlisted)
         return app
+
+    async def _unlisted(self, request):
+        self.unlisted.append((request.method, request.path))
+        return web.json_response({})
+
+    async def _project(self, request):
+        pid = request.match_info["pid"]
+        if pid not in self.project_names:
+            return web.json_response({"id": "not_found"}, status=404)
+        return web.json_response({"project": {"id": pid, "name": self.project_names[pid]}})
 
     @web.middleware
     async def _middleware(self, request, handler):
@@ -121,8 +136,10 @@ class FakeDigitalOcean:
 
     async def _create(self, request):
         body = await request.json()
-        created = [self.droplets[self.add(name, body["tags"], project=None)]
-                   for name in body["names"]]
+        created = [self.droplets[self.add(name, body["tags"])] for name in body["names"]]
+        if self.create_then_fail:  # created, but the answer is lost
+            self.create_then_fail -= 1
+            return web.json_response({"id": "server_error"}, status=500)
         return web.json_response({"droplets": created}, status=202)
 
     async def _bulk_delete(self, request):

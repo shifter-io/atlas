@@ -1,6 +1,7 @@
-"""Asynchronous DigitalOcean client that can only read, create and assign within our scope.
+"""Asynchronous DigitalOcean client limited to an explicit allowlist of calls.
 
-It has no delete method: `request()` refuses `DELETE` without the token only `scope.py` holds.
+`request()` sends only the method, path and query shapes in `ALLOWED`; anything else is refused
+before the network. DELETE and project assignment also need the token only `scope.py` holds.
 The API token lives in memory only and never appears in `repr`, exceptions or logs.
 """
 
@@ -29,8 +30,23 @@ CREATE_FLAGS = ("monitoring", "with_droplet_agent", "ipv6")
 PER_MINUTE = 200
 BACKOFF = (1, 2, 4, 8)
 MAX_WAIT = 60.0
-# A delete always names one resource; never a collection, a tag or a query.
-DELETE_PATH = r"/v2/(droplets|account/keys|firewalls|snapshots)/[0-9A-Za-z-]+"
+ID, UUID = r"[0-9]+", r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+PAGE = frozenset({"page", "per_page"})
+NONE: frozenset[str] = frozenset()
+# (method, path pattern) -> (allowed query keys, needs the scope guard). A delete names one
+# resource. Later tasks add endpoints here under scope review; nothing else can be sent.
+ALLOWED = {
+    ("GET", "/v2/account"): (NONE, False),
+    ("GET", "/v2/droplets"): (PAGE | {"tag_name"}, False),
+    ("GET", "/v2/projects"): (PAGE, False),
+    ("GET", f"/v2/projects/{UUID}"): (NONE, False),
+    ("GET", f"/v2/projects/{UUID}/resources"): (PAGE, False),
+    ("POST", "/v2/droplets"): (NONE, False),
+    ("POST", f"/v2/projects/{UUID}/resources"): (NONE, True),
+    **{(method, path): (NONE, method == "DELETE") for method in ("GET", "DELETE") for path in (
+        f"/v2/droplets/{ID}", f"/v2/account/keys/{ID}", f"/v2/firewalls/{UUID}",
+        f"/v2/snapshots/{ID}")},
+}
 TokenSource = Callable[[], str]
 
 
@@ -48,6 +64,35 @@ class ScopeError(ValueError):
 
 class TokenError(RuntimeError):
     pass
+
+
+class Uncertain(ApiError):
+    """A non-idempotent call whose outcome is unknown (5xx or lost response); never retried."""
+
+
+class CreateError(ApiError):
+    """A create that stopped part-way: `created` exist (ours, recorded); `pending` did not, or
+    are unknown when `uncertain` (resolve with `adopt_uncertain` before any re-create)."""
+
+    def __init__(self, error: ApiError, created: list[Droplet], pending: list[str]):
+        super().__init__(error.method, error.path, error.status, "create stopped")
+        self.created, self.pending = created, pending
+        self.uncertain = isinstance(error, Uncertain)
+
+
+def check_allowed(method: str, path: str, params: dict[str, Any] | None, guard: object) -> None:
+    """Refuse every call that is not on the allowlist, before anything is sent."""
+    entry = next((value for (m, pattern), value in ALLOWED.items()
+                  if m == method and re.fullmatch(pattern, path)), None)
+    if entry is None or not set(params or {}) <= entry[0]:
+        raise ScopeError(f"{method} {path} is not on the client allowlist")
+    if "tag_name" in entry[0] and not str((params or {}).get("tag_name")).startswith(
+            RESOURCE_PREFIX):
+        raise ScopeError("droplets are listed only by a pi-camp- tag")
+    if entry[1]:
+        from .scope import require_guard
+
+        require_guard(guard)
 
 
 def keychain_token(account: Account) -> TokenSource:
@@ -116,7 +161,13 @@ class DigitalOcean:
         self.__token: str | None = None
         self._session: aiohttp.ClientSession | None = None
         self._sent: deque[float] = deque()
+        self._created: set[str] = set()
         self.ratelimit_remaining: int | None = None
+
+    @property
+    def created_ids(self) -> frozenset[str]:
+        """Ids this client got back from its own creates (or adopted after an uncertain one)."""
+        return frozenset(self._created)
 
     def __repr__(self) -> str:
         return f"DigitalOcean(base_url={self._base_url!r})"
@@ -147,18 +198,20 @@ class DigitalOcean:
 
     async def request(self, method: str, path: str, *, params: dict[str, Any] | None = None,
                       body: dict[str, Any] | None = None, guard: object = None) -> dict[str, Any]:
-        if method == "DELETE":
-            from . import scope
-
-            if guard is not scope._DELETE_TOKEN or params or not re.fullmatch(DELETE_PATH, path):
-                raise ScopeError("DELETE is only possible through scope.guarded_delete")
+        method = method.upper()
+        check_allowed(method, path, params, guard)
         if self._session is None:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
+        # A droplet create is not idempotent: a 5xx or lost answer may still have created it.
+        # A retried DELETE needs no new GET: DigitalOcean never reuses ids.
+        once = (method, path) == ("POST", "/v2/droplets")
         for attempt in range(len(BACKOFF) + 1):
             await self._throttle()
             wait, payload = await self._attempt(method, path, params, body)
             if wait is None:
                 return payload
+            if once and wait == 0:
+                raise Uncertain(method, path, None, "outcome unknown")
             if attempt < len(BACKOFF):
                 await self._sleep(wait if wait > 0 else BACKOFF[attempt])
         raise ApiError(method, path, None, "retries exhausted")
@@ -188,7 +241,7 @@ class DigitalOcean:
             return min(float(after), MAX_WAIT)
         if reset.isdigit():
             return min(max(float(reset) - time.time(), 1.0), MAX_WAIT)
-        return 0
+        return float(BACKOFF[0])
 
     async def _pages(self, path: str, key: str, params: dict[str, Any] | None = None) -> list:
         items, page = [], 1
@@ -196,9 +249,11 @@ class DigitalOcean:
             payload = await self.request(
                 "GET", path, params={**(params or {}), "page": page, "per_page": PAGE_SIZE}
             )
-            batch = payload.get(key, [])
+            batch, meta = payload.get(key, []), payload.get("meta")
+            if not isinstance(meta, dict) or not isinstance(meta.get("total"), int):
+                raise ApiError("GET", path, None, "no pagination total")
             items.extend(batch)
-            if not batch or len(items) >= payload.get("meta", {}).get("total", 0):
+            if not batch or len(items) >= meta["total"]:
                 return items
             page += 1
 
@@ -213,15 +268,29 @@ class DigitalOcean:
             body = {"names": names[start:start + CREATE_BATCH], "region": region, "size": size,
                     "image": image, "tags": tags, "ssh_keys": ssh_keys,
                     **{flag: bool(flags.get(flag, False)) for flag in CREATE_FLAGS}}
-            payload = await self.request("POST", "/v2/droplets", body=body)
-            created.extend(parse_droplet(raw) for raw in payload.get("droplets", []))
+            try:
+                payload = await self.request("POST", "/v2/droplets", body=body)
+            except ApiError as error:
+                raise CreateError(error, created, names[start:]) from None
+            batch = [parse_droplet(raw) for raw in payload.get("droplets", [])]
+            self._created.update(droplet.id for droplet in batch)
+            created.extend(batch)
         return created
 
-    async def assign_project(self, project_id: str, droplet_ids: list[str]) -> None:
+    async def adopt_uncertain(self, names: list[str], tag: str) -> list[Droplet]:
+        """After an uncertain create: the droplets under our tag with exactly these names."""
+        found = [d for d in await self.list_tag(tag) if d.name in set(names)]
+        self._created.update(droplet.id for droplet in found)
+        return found
+
+    async def assign_project(self, project_id: str, droplet_ids: list[str], *,
+                             guard: object) -> None:
+        """Only `scope.assign_and_verify_project` holds the guard this needs."""
         if not droplet_ids or any(not str(i).isdigit() for i in droplet_ids):
             raise ScopeError("project assignment needs droplet ids")
         urns = [f"do:droplet:{i}" for i in droplet_ids]
-        await self.request("POST", f"/v2/projects/{project_id}/resources", body={"resources": urns})
+        await self.request("POST", f"/v2/projects/{project_id}/resources",
+                           body={"resources": urns}, guard=guard)
 
     async def get(self, droplet_id: str) -> Droplet | None:
         found = await self.get_resource(f"/v2/droplets/{droplet_id}", "droplet")
@@ -237,8 +306,6 @@ class DigitalOcean:
             raise
 
     async def list_tag(self, tag: str) -> list[Droplet]:
-        if not tag.startswith(RESOURCE_PREFIX):
-            raise ScopeError("only pi-camp- tags may be listed")
         found = await self._pages("/v2/droplets", "droplets", {"tag_name": tag})
         return [parse_droplet(raw) for raw in found]
 
@@ -246,6 +313,10 @@ class DigitalOcean:
         found = await self._pages(f"/v2/projects/{project_id}/resources", "resources")
         return frozenset(item["urn"].removeprefix("do:droplet:") for item in found
                          if item.get("urn", "").startswith("do:droplet:"))
+
+    async def project_name(self, project_id: str) -> str | None:
+        found = await self.get_resource(f"/v2/projects/{project_id}", "project")
+        return None if found is None else found.get("name")
 
     async def project_id(self, name: str) -> str:
         matches = [p["id"] for p in await self._pages("/v2/projects", "projects")
