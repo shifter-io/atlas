@@ -73,11 +73,25 @@ def read_alerts(root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+# alerts.jsonl path -> (size read, (code, key) pairs); the file is append-only (m3).
+_raised: dict[Path, tuple[int, set[tuple[str, str]]]] = {}
+
+
+def _raised_keys(path: Path) -> set[tuple[str, str]]:
+    size = path.stat().st_size if path.exists() else 0
+    if path not in _raised or _raised[path][0] != size:
+        pairs = {(str(item.get("code")), str(item.get("key"))) for item in read_alerts(
+            path.parent)} if size else set()
+        _raised[path] = (size, pairs)
+    return _raised[path][1]
+
+
 def alert(root: Path, now: datetime, code: str, level: str = "high", key: str | None = None,
           **details: object) -> bool:
     """Append one alert to alerts.jsonl unless (code, key) was raised before. No IPs."""
     key = key or code
-    if any(item.get("code") == code and item.get("key") == key for item in read_alerts(root)):
+    raised = _raised_keys(alerts_path(root))
+    if (code, key) in raised:
         return False
     entry = {"time": now.isoformat(), "code": code, "level": level, "key": key, **details}
     private_dir(alerts_path(root).parent)
@@ -87,6 +101,8 @@ def alert(root: Path, now: datetime, code: str, level: str = "high", key: str | 
         os.fsync(fd)
     finally:
         os.close(fd)
+    raised.add((code, key))
+    _raised[alerts_path(root)] = (alerts_path(root).stat().st_size, raised)
     return True
 
 
@@ -146,10 +162,24 @@ async def _launch(root: Path, spec: CampaignSpec, slot: int, launcher: HourLaunc
     launch_spec = active_spec(spec, paused)
     if not launch_spec.networks:
         record.state, record.finished_at = "done", clock().isoformat()
-    else:
-        record = await launcher(launch_spec, record, root)
+        save_hour(root, record)
+        return
+    record = await launcher(launch_spec, record, root)
+    # m1: the launcher saves its own record; once it is past `launching` the collector owns it.
+    if load_hour(root, spec, slot).state in LAUNCHABLE:
         record.launched_at = record.launched_at or clock().isoformat()
-    save_hour(root, record)
+        save_hour(root, record)
+
+
+def _disable(spec: CampaignSpec, root: Path, disable_timer: Callable[[], None] | None) -> None:
+    """S7: the timer goes only when no slot is left `planned` or `launching`."""
+    if any(load_hour(root, spec, k).state in LAUNCHABLE for k in range(spec.hours)):
+        return
+    unit = f"proxy-index-campaign-tick@{spec.campaign_id}.timer"
+    try:
+        (disable_timer or (lambda: _systemctl("disable", "--now", unit)))()
+    except (OSError, subprocess.SubprocessError) as error:
+        alert(root, utc_now(), "timer_disable_failed", "info", error=type(error).__name__)
 
 
 async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now,
@@ -158,7 +188,7 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
     """Launch every due slot still `planned` (or resume a crashed `launching` one), at once.
 
     Serialized by `flock(ledger/.lock)`. With `now_mode` only `slot` is launched, immediately.
-    After the last slot is launched the timer is disabled. Returns the slots it launched.
+    Once no slot is left to launch, a timer tick disables the timer. Returns the slots launched.
     """
     lock = root / "ledger" / ".lock"
     private_dir(lock.parent)
@@ -170,9 +200,8 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
         results = await asyncio.gather(
             *(_launch(root, spec, k, launcher, clock, now_mode) for k in slots),
             return_exceptions=True)
-        if load_hour(root, spec, spec.hours - 1).state not in LAUNCHABLE:
-            (disable_timer or (lambda: _systemctl(
-                "disable", "--now", f"proxy-index-campaign-tick@{spec.campaign_id}.timer")))()
+        if not now_mode:
+            _disable(spec, root, disable_timer)
         failures = [result for result in results if isinstance(result, BaseException)]
         if failures:
             raise failures[0]  # the service restarts and resumes the `launching` record
@@ -184,7 +213,11 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
 def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
                  start_tick: Callable[[], None] | None = None,
                  timer_enabled: Callable[[], bool] | None = None) -> str | None:
-    """Alarm only: at *:00:30 (`armed`) the current hour runs; at *:02:00 (`fired`) it fired."""
+    """Alarm: at *:00:30 (`armed`) the current hour's workers are armed; at *:02:00 it fired.
+
+    With the timer enabled it also starts the tick. A disabled timer is the operator's: a due
+    slot still `planned` then raises the alarm only (S7).
+    """
     spec, now = load_spec(root), clock()
     slot = (now - scheduled_at(spec, 0)) // HOUR
     if not 0 <= slot < spec.hours:
@@ -194,13 +227,25 @@ def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
         ["systemctl", "is-enabled", f"{unit}.timer"], capture_output=True, text=True,
         timeout=30).stdout.strip() == "enabled")
     record = load_hour(root, spec, slot)
-    ok = (record.fired_at is not None if check == "fired"
-          else record.state in ("running", "harvesting", *FINAL))
-    if ok or not enabled():
+    if _on_time(record, check):
         return None
-    alert(root, now, "missed_launch", key=f"h{slot:02d}-{check}", hour=slot, check=check)
-    (start_tick or (lambda: _systemctl("start", "--no-block", f"{unit}.service")))()
+    timer = enabled()
+    if not timer and record.state != "planned":
+        return None
+    alert(root, now, "missed_launch", key=f"h{slot:02d}-{check}", hour=slot, check=check,
+          timer="enabled" if timer else "disabled")
+    if timer:
+        (start_tick or (lambda: _systemctl("start", "--no-block", f"{unit}.service")))()
     return "missed_launch"
+
+
+def _on_time(record: HourRecord, check: str) -> bool:
+    """S1: an hour still `launching` is on time once any of its workers is armed."""
+    if check == "fired":
+        return record.fired_at is not None
+    armed = any(d.status in ("armed", "running") for d in record.droplets)
+    return record.state in ("running", "harvesting", *FINAL) or (
+        record.state == "launching" and record.fired_at is not None and armed)
 
 
 def _tick_command(args) -> int:
