@@ -221,11 +221,9 @@ def validate(data: dict) -> dict:
                 or len(order) != len(REGION_IDS) or set(order) != set(REGION_IDS)):
             raise ValueError("Sequential schedule requires each region exactly once")
     start, end = moment(data["starts_at"]), moment(data["ends_at"])
-    slot = timedelta(minutes=slot_minutes(data))
-    hours = 24 * (len(REGION_IDS) if mode == "sequential" else 1)
-    span = timedelta(hours=hours) if slot == timedelta(hours=1) else 24 * slot
-    if data["schema_version"] == 3:
-        span += timedelta(hours=ephemeral_grace(data))
+    slot = timedelta(minutes=slot_minutes(data))  # one hour but in an ephemeral manifest
+    span = 24 * slot * (len(REGION_IDS) if mode == "sequential" else 1)
+    span += timedelta(hours=ephemeral_grace(data) if data["schema_version"] == 3 else 0)
     if start.minute or start.second or start.microsecond or end - start != span:
         raise ValueError("Campaign duration must give each region exactly 24 whole UTC hours")
     if data["rounds"] != [timestamp(start + i * slot) for i in range(24)]:
