@@ -92,9 +92,9 @@ def make_job(tmp_path, account="leftclick"):
                             lambda: TOKEN)
 
 
-async def run_deploy(fake, job, shell=None):
+async def run_deploy(fake, job, shell=None, now=NOW):
     async with running(fake) as cloud:
-        return await deploy.deploy(cloud, job, shell=shell or Shell(), sleep=no_sleep, now=NOW)
+        return await deploy.deploy(cloud, job, shell=shell or Shell(), sleep=no_sleep, now=now)
 
 
 def parse(argv):

@@ -327,6 +327,10 @@ async def test_no_delete_without_the_guard_in_any_letter_case(method):
         ("POST", "/v2/droplets/700001/actions", None, {"type": "rebuild"}),
         ("post", "/v2/droplets/actions", {"tag_name": "prod"}, {"type": "power_off"}),
         ("POST", "/v2/tags/pi-camp-worker/resources", None, {"resources": []}),
+        ("DELETE", "/v2/tags/pi-camp-worker/resources", None, {"resources": []}),
+        ("DELETE", "/v2/tags/pi-camp-worker", None, None),
+        ("GET", "/v2/tags", None, None),
+        ("GET", "/v2/tags/prod", None, None),
         ("PUT", f"/v2/projects/{CAMPAIGN_PROJECT}", None, {"name": "x"}),
         ("PATCH", "/v2/droplets/700001", None, {}),
         ("PUT", "/v2/firewalls/33333333-3333-4333-8333-333333333333", None, {}),
@@ -342,6 +346,9 @@ async def test_no_delete_without_the_guard_in_any_letter_case(method):
         ("POST", "/v2/droplets/700001/actions", None, {"type": "snapshot", "name": SNAPSHOT}),
         ("POST", "/v2/firewalls", None, {**FIREWALL_RULES, "droplet_ids": [700001]}),
         ("PUT", f"/v2/firewalls/{PROD_FIREWALL}", None, FIREWALL_RULES),
+        # CAMP-1h: the tag calls too, which only the client's own `_ensure_tag` sends.
+        ("GET", "/v2/tags/pi-camp-worker", None, None),
+        ("POST", "/v2/tags", None, {"name": "pi-camp-worker"}),
     ],
 )
 async def test_everything_off_the_allowlist_is_refused_before_the_network(
@@ -371,6 +378,7 @@ async def test_raw_writes_never_reach_a_production_droplet_or_firewall(token):
         ("POST", f"/v2/droplets/{production}/actions", {"type": "snapshot", "name": SNAPSHOT}),
         ("POST", "/v2/firewalls", {**FIREWALL_RULES, "droplet_ids": [int(production)]}),
         ("PUT", f"/v2/firewalls/{PROD_FIREWALL}", FIREWALL_RULES),
+        ("POST", "/v2/tags", {"name": "pi-camp-worker"}),
     ]
     async with running(fake) as cloud:
         for method, path, body in writes:
@@ -631,6 +639,8 @@ def scan_violations(source: str, name: str) -> list[str]:
     if not guarded and names & {"_GUARD", "_OWNED", "request", "_attempt", "_session",
                                   "aiohttp"}:
         found.append("raw client access")
+    if re.search(r"/v2/tags/[^\n]*resources", source):  # CAMP-1h: never tag or untag
+        found.append("tag resources")
     if name not in ("scope.py", "contracts.py") and "assign_failed" in strings:
         found.append("assign_failed set outside scope.py")
     for call in _calls(tree):
@@ -694,6 +704,29 @@ def test_the_scans_catch_known_bypasses(source):
 def test_the_scans_catch_tampering_with_private_state(source):
     """r1: each of these passed both scans at the reviewed head."""
     assert scan_violations(source, "launch.py") and side_doors(source)
+
+
+@pytest.mark.parametrize("name", ["do_api.py", "scope.py", "launch.py"])
+def test_the_scan_refuses_tagging_resources_even_in_the_guarded_pair(name):
+    """CAMP-1h: tags are read and created only; nothing may put one on or off a resource."""
+    for source in ('PATH = f"/v2/tags/{tag}/resources"',
+                   'await self._session.request("DELETE", "/v2/tags/" + tag + "/resources")'):
+        assert "tag resources" in scan_violations(source, name)
+
+
+def test_tags_are_only_read_and_created_behind_the_token():
+    """CAMP-1h: exactly these two tag calls, both needing the client's own token."""
+    tag_calls = {key for key in do_api.ALLOWED if "/tags" in key[1]}
+    assert tag_calls == {("GET", f"/v2/tags/{do_api.TAG}"), ("POST", "/v2/tags")}
+    assert all(do_api._lookup(do_api.OWNED_WRITES, m, p) for m, p in (
+        ("GET", "/v2/tags/pi-camp-worker"), ("POST", "/v2/tags")))
+    for method, path in (("GET", "/v2/tags"), ("GET", "/v2/tags/prod"),
+                         ("GET", "/v2/tags/pi-camp-worker/resources"),
+                         ("POST", "/v2/tags/pi-camp-worker/resources"),
+                         ("DELETE", "/v2/tags/pi-camp-worker/resources"),
+                         ("DELETE", "/v2/tags/pi-camp-worker"), ("PUT", "/v2/tags/pi-camp-x")):
+        with pytest.raises(ScopeError):
+            do_api.check_allowed(method, path, None, do_api._OWNED, {"resources": []})
 
 
 def test_the_tables_are_read_only():

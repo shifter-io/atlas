@@ -367,6 +367,10 @@ RULES = {"name": "pi-camp-worker-fw", "inbound_rules": [], "outbound_rules": [],
     ("POST", "/v2/firewalls", {**RULES, "droplet_ids": ["all"]}),
     ("POST", "/v2/firewalls", {**RULES, "load_balancer_uids": ["x"]}),
     ("PUT", f"/v2/firewalls/{FIREWALL}", {**RULES, "name": "default"}),
+    ("POST", "/v2/tags", {"name": "prod"}),
+    ("POST", "/v2/tags", {"name": "pi-camp-Worker"}),
+    ("POST", "/v2/tags", {"name": WORKER_TAG, "resources": [{"resource_id": "1"}]}),
+    ("POST", "/v2/tags", None),
 ])
 async def test_operation_bodies_outside_our_scope_are_refused_before_the_network(
     method, path, body
@@ -461,6 +465,31 @@ async def test_firewalls_attach_only_to_campaign_droplets():
                                               CAMPAIGN_PROJECT)
         updated = await cloud.update_firewall(created["id"], {**RULES, "droplet_ids": []},
                                               CAMPAIGN_PROJECT)
-    assert [m for m, _, _ in fake.bodies] == ["POST", "PUT"]
+    assert [(m, p) for m, p, _ in fake.bodies] == [
+        ("POST", "/v2/tags"), ("POST", "/v2/firewalls"), ("PUT", f"/v2/firewalls/{created['id']}")]
     assert updated["droplet_ids"] == [] and fake.resources["firewall"][FIREWALL]["name"] == (
         "prod-fw")
+
+
+async def test_a_firewall_tag_is_created_only_when_missing_and_only_ours():
+    """CAMP-1h: DigitalOcean refuses a firewall naming a tag that does not exist (422)."""
+    fake = FakeDigitalOcean()
+    manager = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG], project=CAMPAIGN_PROJECT)
+    async with running(fake) as cloud:
+        for name in ("prod", "pi-camp-", "pi-camp-x/resources"):
+            with pytest.raises(ScopeError):
+                await cloud._ensure_tag(name)
+        for body in ({"name": "prod"}, {"name": WORKER_TAG, "resources": []}):
+            with pytest.raises(ScopeError):
+                await cloud.request("POST", "/v2/tags", body=body, guard=do_api._OWNED)
+        fake.faults.append(Fault("GET", f"/v2/tags/{WORKER_TAG}", 403))
+        with pytest.raises(ApiError):
+            await cloud.create_firewall(RULES, CAMPAIGN_PROJECT)
+        assert WORKER_TAG not in fake.tags and not fake.resources["firewall"]
+        created = await cloud.create_firewall(RULES, CAMPAIGN_PROJECT)
+        await cloud.update_firewall(created["id"], {**RULES, "tags": [WORKER_TAG, MANAGER_TAG]},
+                                    CAMPAIGN_PROJECT)
+    assert [b for b in fake.bodies if b[1] == "/v2/tags"] == [
+        ("POST", "/v2/tags", {"name": WORKER_TAG})]
+    assert fake.resources["firewall"][created["id"]]["tags"] == [WORKER_TAG, MANAGER_TAG]
+    assert not fake.unlisted and fake.droplets[manager]["tags"] == [MANAGER_TAG]  # untouched
