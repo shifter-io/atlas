@@ -26,10 +26,18 @@ from campaign_fakes import (
     Fault,
     running,
 )
-from test_campaign_hour import NETWORKS, launched, make_spec
+from test_campaign_hour import NETWORKS, SCHEDULED, launched, make_spec
 
 from proxy_index.campaign import launch, scope
-from proxy_index.campaign.contracts import WORKER_TAG, DropletRecord, Scope, audit_path, hour_path
+from proxy_index.campaign.contracts import (
+    WORKER_TAG,
+    DropletRecord,
+    HourRecord,
+    Scope,
+    audit_path,
+    droplet_name,
+    hour_path,
+)
 from proxy_index.campaign.scope import OwnershipError, assign_and_verify_project
 
 FIRST = "700001"  # the fake's first droplet id: the hour's only worker
@@ -148,6 +156,27 @@ async def test_an_own_unassigned_removal_that_does_not_happen_is_flagged(tmp_pat
         "normal" if outcome == "destroy_refused" else "own_unassigned"}
     assert record.traffic["net00"]["worker_hours"] == 0
 
+
+async def test_a_recorded_worker_this_client_did_not_create_keeps_the_plain_guard(tmp_path):
+    """Review m2: a resumed launch whose recorded id the listing does not show again (no hour
+    tag here), so it is not in created_ids. Its assignment refuses it; it goes to the plain
+    guard (refused, alerted, never marked) and the launch still completes."""
+    fake = FakeDigitalOcean()
+    name = droplet_name(CID, 0, "lon1", "net00")
+    orphan = fake.add(name, [WORKER_TAG, f"pi-camp-{SID}"], project=None)
+    worker = DropletRecord("net00", "lon1", 0, name, orphan, size="c-2", image_id="snap-lon1",
+                           attempts=1, requested_at=SCHEDULED)
+    record = HourRecord(CID, 0, SCHEDULED, state="launching", droplets=[worker],
+                        traffic={"net00": dict.fromkeys(launch.TRAFFIC_KEYS, 0)})
+    record, root, *_ = await launched(tmp_path, fake, lon1_spec(replace_until_minutes=0),
+                                      start=NOW_LATE, record=record)
+    assert record.state == "running" and record.droplets == [worker]
+    assert (worker.status, worker.error_class) == ("destroy_refused", "OwnershipError")
+    assert worker.assign_failed_at is None and orphan in fake.droplets and not fake.deleted
+    assert {a["kind"] for a in record.alerts} >= {"start_failed", "destroy_refused"}
+    assert [a["path"] for a in audit_lines(audit_path(root))] == ["normal"]
+    assert not [r for r in fake.requests if r[0] == "POST"]
+
 async def test_a_now_launch_past_hh15_still_replaces_a_failed_create(tmp_path):
     """The window counts from the launch (or the slot, if later), not from HH:00 alone."""
     fake = FakeDigitalOcean()
@@ -169,16 +198,20 @@ async def test_the_window_from_the_launch_still_closes(tmp_path):
     assert "cell_failed" in {a["kind"] for a in record.alerts}
 
 
-@pytest.mark.parametrize("tags", [[], OURS], ids=["not_shown", "our_name_and_tags"])
-async def test_a_droplet_we_did_not_create_is_refused_at_once(tmp_path, tags):
+@pytest.mark.parametrize(("tags", "unreadable"), [([], False), (OURS, False), (OURS, True)],
+                         ids=["not_shown", "our_name_and_tags", "unreadable"])
+async def test_a_droplet_we_did_not_create_is_refused_at_once(tmp_path, tags, unreadable):
     """Settling is only for our own creates: a recorded lookalike that this client did not
-    create is refused on the first read, with no wait, no POST and no delete."""
+    create is refused on the first read, even when every read fails (review m1), with no
+    wait, no POST and no delete."""
     fake, sleeps = FakeDigitalOcean(), []
 
     async def sleep(seconds):
         sleeps.append(seconds)
 
     lookalike = fake.add(NAME, tags, project=None)
+    if unreadable:  # every request try of every settle read
+        fake.faults.append(Fault("GET", f"/v2/droplets/{lookalike}", 500, times=SETTLE_READS * 5))
     records = {lookalike: DropletRecord("shifter", "lon1", 3, NAME, lookalike)}
     async with running(fake) as cloud:
         await cloud.create([f"pic-{SID}-h03-fra1-shifter"], region="fra1", size="c-2",

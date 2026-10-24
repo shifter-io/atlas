@@ -349,6 +349,10 @@ async def test_a_droplet_never_active_within_180_seconds_is_boot_failed(tmp_path
     record, root, remote, clock = await launched(tmp_path, fake, spec)
     assert {(d.status, d.error_class) for d in record.droplets} == {("destroyed", "boot_failed")}
     assert remote.pushes == [] and not launch.hosts_path(root, 0).exists()
+    # Confirmed in the project before it failed: the plain guard, never the own-unassigned mark.
+    assert all(d.assigned_at and d.assign_failed_at is None for d in record.droplets)
+    audit = [json.loads(line) for line in audit_path(root).read_text().splitlines()]
+    assert audit and {a["path"] for a in audit} == {"normal"}
     lists = [r for r in fake.requests if r[0] == "GET" and r[2].get("tag_name")]
     assert len(lists) <= 2 * (1 + launch.REPLACEMENTS_PER_CELL) * (
         launch.READY_LIMIT_SECONDS / launch.READY_POLL_SECONDS + 2)
