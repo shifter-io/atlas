@@ -44,7 +44,7 @@ from .contracts import (
 )
 from .do_api import CreateError, DigitalOcean
 from .fanout import INSTALL_WHEEL, RemoteError
-from .launch import READY_LIMIT_SECONDS, WorkerInputs, manifest_path
+from .launch import CREATE_RETRY_SECONDS, READY_LIMIT_SECONDS, WorkerInputs, manifest_path
 
 REQUESTS, START, STEP, FLOOR = 25_000, 2000, 500, 500
 COUNTRY, REGION, SIZE = "US", "nyc3", "c-4"
@@ -206,6 +206,10 @@ class Probe:
             size=inputs.size, image_id=self.spec.image_by_region[inputs.region])
         self.result: dict[str, Any] = {
             "probe_id": self.probe_id, "campaign_id": self.spec.campaign_id,
+            # What `campaign probe --remove` needs to rebuild this scope in a later process.
+            "scope": {"project_id": self.scope.project_id,
+                      "manager_droplet_id": self.scope.manager_droplet_id,
+                      "created_at": self.scope.created_at.isoformat()},
             "requests": inputs.requests, "country": inputs.country, "region": inputs.region,
             "size": inputs.size, "ladder": [inputs.floor, *inputs.ladder()], "networks": {}}
 
@@ -235,18 +239,44 @@ class Probe:
         atomic_bytes(self.folder / "probe-result.md", markdown(self.result).encode())
 
     async def run(self) -> dict[str, Any]:
-        """Create, confirm, set up, measure every network; the worker never outlives it."""
+        """Create, confirm, set up, measure every network; the worker is removed whatever
+        happens, also when a signal cancels the probe (the CLI turns SIGTERM, SIGHUP and SIGINT
+        into a cancel). A worker left behind is reported with its recovery command."""
         try:
             droplet = await self.create()
             await self.measure_all(droplet)
+        except asyncio.CancelledError:
+            self.result["error"] = "cancelled by a signal"
         except Exception as error:
             message = scope.SECRETS.sub("[removed]", str(error))
             self.result["error"] = f"{type(error).__name__}: {message}"[:scope.MESSAGE_LIMIT]
         finally:
-            await self.remove()
-            self.result["worker_status"] = self.worker.status
-            self.write()
+            cleanup = asyncio.ensure_future(self.cleanup())
+            while not cleanup.done():  # a signal during the removal never interrupts it
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    self.result["error"] = "cancelled by a signal"
         return self.result
+
+    async def cleanup(self) -> None:
+        worker = self.worker
+        if worker.droplet_id is None and worker.error_class == "create_uncertain":
+            await self.adopt()  # one last look before reporting it
+        if worker.droplet_id is not None:
+            await release(self.cloud, self.scope, worker, audit_path(self.folder), self.sleep)
+        self.result["worker_status"] = worker.status
+        if worker.status != "destroyed" and (
+                worker.droplet_id or worker.error_class == "create_uncertain"):
+            self.result["recover"] = f"campaign probe --remove {self.folder}"
+        self.write()
+
+    async def adopt(self) -> Droplet | None:
+        """Our worker by exact name under the probe's hour tag; an API error finds nothing."""
+        found = await adopt(self.cloud, self.worker, self.probe_id)
+        if found is not None:
+            self.save()
+        return found
 
     async def create(self) -> Droplet:
         """Name before the create, id right after; a lost answer is adopted by exact name."""
@@ -260,12 +290,18 @@ class Probe:
                 ssh_keys=[self.spec.ssh_key_id], monitoring=False, with_droplet_agent=False,
                 ipv6=False)
         except CreateError as error:
-            found = error.created + (await self.cloud.adopt_uncertain([worker.name], tag)
-                                     if error.uncertain else [])
-            if not found:
+            found = error.created[0] if error.created else None
+            if found is None and error.uncertain:
+                # The listing may lag a create that landed: look again later, as a launch does.
+                found = await self.adopt()
+                if found is None:
+                    await self.sleep(CREATE_RETRY_SECONDS)
+                    found = await self.adopt()
+            if found is None:
                 worker.status = "create_failed"
+                worker.error_class = "create_uncertain" if error.uncertain else "create_failed"
                 raise
-            droplet = found[0]
+            droplet = found
         worker.droplet_id = droplet.id
         self.save()
         _, failed = await scope.assign_and_verify_project(
@@ -337,27 +373,78 @@ class Probe:
             return {"concurrency": concurrency, "requested": self.inputs.requests,
                     "run_failed": type(error).__name__}
 
-    async def remove(self) -> None:
-        """The guard removes the worker: on the own-unassigned path when its project membership
-        was never confirmed, else the plain path. A refusal is final and reported."""
-        worker = self.worker
-        if worker.droplet_id is None or worker.status in ("destroyed", "destroy_refused"):
-            return
-        rid, records, audit = worker.droplet_id, {worker.droplet_id: worker}, audit_path(
-            self.folder)
-        try:
-            if worker.assigned_at is None:  # sets the record's final status itself
-                await scope.remove_unassigned(self.cloud, self.scope, records, audit,
-                                              {rid: scope.error_detail(self.cloud, [rid])})
+
+async def adopt(cloud: DigitalOcean, worker: DropletRecord, probe_id: str) -> Droplet | None:
+    """The droplet with the worker's exact name under the probe's hour tag (`adopt_uncertain`,
+    which also counts it as this client's own create); None when absent or unreadable."""
+    try:
+        found = await cloud.adopt_uncertain([worker.name], hour_tag(probe_id, 0))
+    except Exception:
+        return None
+    mine = [d for d in found if worker.droplet_id in (None, d.id)]
+    if len(mine) != 1:
+        return None
+    worker.droplet_id, worker.error_class = mine[0].id, None
+    return mine[0]
+
+
+async def release(cloud: DigitalOcean, probe_scope: Scope, worker: DropletRecord, audit: Path,
+                  sleep: ops_api.Sleep) -> None:
+    """Remove the probe worker through the guard and set its final status.
+
+    Confirmed in the project: the plain `guarded_delete`. Marked by a failed assignment: the
+    guard's own-unassigned path. Neither (the process stopped between the create and the
+    assignment): it is first confirmed in the project, as a resumed launch does; one that is
+    not confirmed is removed on the own-unassigned path inside `assign_and_verify_project`.
+    A refusal is final (`destroy_refused`), an error leaves `destroy_failed` for a rerun."""
+    if worker.status in ("destroyed", "destroy_refused"):  # done, or the owner's to decide
+        return
+    rid, records = str(worker.droplet_id), {str(worker.droplet_id): worker}
+    try:
+        if worker.assigned_at is None and worker.assign_failed_at is None:
+            _, failed = await scope.assign_and_verify_project(
+                cloud, probe_scope, [rid], records, audit, retry=scope.Retry(sleep=sleep))
+            if failed:
                 return
-            await scope.guarded_delete(self.cloud, "droplet", rid, self.scope,
-                                       scope.Ledger({"droplet": [rid]}, records), audit)
-            worker.status, worker.destroyed_at = "destroyed", timestamp(
-                datetime.now(UTC).timestamp())
-        except scope.OwnershipError:
-            worker.status = "destroy_refused"
-        except Exception as error:  # audited by the guard; reported for the operator
-            worker.status, worker.error_class = "destroy_failed", type(error).__name__
+        await scope.guarded_delete(cloud, "droplet", rid, probe_scope,
+                                   scope.Ledger({"droplet": [rid]}, records), audit)
+        worker.status, worker.destroyed_at = "destroyed", timestamp(datetime.now(UTC).timestamp())
+    except scope.OwnershipError:
+        worker.status = "destroy_refused"
+    except Exception as error:  # audited by the guard; `campaign probe --remove` retries
+        worker.status, worker.error_class = "destroy_failed", type(error).__name__
+
+
+async def recover(cloud: DigitalOcean, folder: Path, *,
+                  sleep: ops_api.Sleep = asyncio.sleep) -> dict[str, Any]:
+    """`campaign probe --remove <folder>`: remove a probe's worker that its own run left.
+
+    Rebuilds the scope from the folder's record, finds the worker by its exact name under the
+    probe's hour tag (and, when an id is recorded, only that id), then `release`. Writes the
+    outcome back into the record; never touches anything the record does not name."""
+    path = folder / "probe-result.json"
+    try:
+        result = json.loads(path.read_text())
+        recorded = result["scope"]
+        worker = DropletRecord(**result["worker"])
+        probe_scope = Scope(result["probe_id"], short_id(result["probe_id"]),
+                            recorded["project_id"], recorded["manager_droplet_id"],
+                            datetime.fromisoformat(recorded["created_at"]))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ProbeError(f"no probe record in that folder ({type(error).__name__})") from None
+    if worker.status != "destroyed":
+        found = await adopt(cloud, worker, result["probe_id"])
+        if found is None and (worker.droplet_id is None or await cloud.get(
+                str(worker.droplet_id)) is None):
+            worker.status = "absent"  # never created, or already gone
+        else:
+            await release(cloud, probe_scope, worker, audit_path(folder), sleep)
+    result.update(worker=asdict(worker), worker_status=worker.status,
+                  recovered_at=timestamp(datetime.now(UTC).timestamp()))
+    if worker.status in ("destroyed", "absent"):
+        result.pop("recover", None)
+    atomic_json(path, result)
+    return {"probe_id": result["probe_id"], "worker_status": worker.status}
 
 
 async def probe(cloud: DigitalOcean, remotes: Callable[[Path], ProbeRemote],

@@ -6,6 +6,7 @@ step with a run summary; no request or SSH connection leaves the machine.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import re
@@ -16,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from aiohttp import web
 from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault, no_sleep, running
 from test_campaign_hour import (
     DROPLET,
@@ -278,17 +280,42 @@ async def test_an_unconfirmed_worker_is_removed_on_the_own_unassigned_path(tmp_p
     assert audit[-1]["path"] == "own_unassigned" and audit[-1]["result"] == "deleted"
 
 
-async def test_a_worker_created_but_never_assigned_is_removed_on_the_own_path(tmp_path,
-                                                                             monkeypatch):
+async def test_an_assignment_error_is_retried_by_the_removal_then_recovered(tmp_path,
+                                                                           monkeypatch):
+    """S1: an assignment that raised leaves no mark; the removal confirms it first."""
+    real, calls = probing.scope.assign_and_verify_project, []
+
+    async def once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("assignment crashed")
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(probing.scope, "assign_and_verify_project", once)
+    fake = FakeDigitalOcean()
+    inputs, _ = world(tmp_path / "a")
+    result = await probed(fake, FakeProbeRemote({}), inputs)
+    assert result["error"] == "RuntimeError: assignment crashed" and len(calls) == 2
+    assert result["worker_status"] == "destroyed" and len(fake.deleted) == 1
+    assert "recover" not in result
+
     async def broken(*args, **kwargs):
         raise RuntimeError("assignment crashed")
 
     monkeypatch.setattr(probing.scope, "assign_and_verify_project", broken)
     fake = FakeDigitalOcean()
-    inputs, _ = world(tmp_path)
+    inputs, _ = world(tmp_path / "b")
     result = await probed(fake, FakeProbeRemote({}), inputs)
-    assert result["error"] == "RuntimeError: assignment crashed"
-    assert result["worker_status"] == "destroyed" and len(fake.deleted) == 1
+    folder = inputs.output / result["probe_id"]
+    assert result["worker_status"] == "destroy_failed" and fake.deleted == []
+    assert result["recover"] == f"campaign probe --remove {folder}"
+    monkeypatch.setattr(probing.scope, "assign_and_verify_project", real)
+    async with running(fake) as cloud:  # a later process: a new client, nothing in memory
+        assert await probing.recover(cloud, folder, sleep=no_sleep) == {
+            "probe_id": result["probe_id"], "worker_status": "destroyed"}
+    saved = json.loads((folder / "probe-result.json").read_text())
+    assert saved["worker_status"] == "destroyed" and "recover" not in saved
+    assert fake.deleted == [("droplet", result["worker"]["droplet_id"])]
 
 
 async def test_a_lost_create_answer_is_adopted_and_a_failed_create_reported(tmp_path):
@@ -456,3 +483,224 @@ def test_the_setup_script_writes_private_credentials_and_installs_like_a_round(t
     assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
     assert (root / "probe" / "soax.toml").exists() and not (root / "secrets").exists()
     assert len((stub / "calls").read_text().splitlines()) == 1
+
+
+class Hidden(FakeDigitalOcean):
+    """The create answer is lost and the first `hide` tag listings do not show it yet."""
+
+    def __init__(self, hide):
+        super().__init__()
+        self.hide, self.create_then_fail = hide, 1
+
+    async def _list(self, request):
+        if self.hide and request.query.get("tag_name"):
+            self.hide -= 1
+            return web.json_response({"droplets": [], "meta": {"total": 0}})
+        return await super()._list(request)
+
+
+def sleeps_into(seen):
+    async def sleep(seconds):
+        seen.append(seconds)
+
+    return sleep
+
+
+async def test_s1_a_lost_create_is_looked_up_again_after_the_launch_delay(tmp_path):
+    fake, seen = Hidden(1), []
+    inputs, _ = world(tmp_path)
+    async with running(fake) as cloud:
+        result = await probing.probe(cloud, FakeProbeRemote({}).factory, inputs, now=NOW,
+                                     sleep=sleeps_into(seen))
+    assert probing.CREATE_RETRY_SECONDS in seen and "error" not in result
+    assert len(posts(fake, "/v2/droplets")) == 1 and result["worker_status"] == "destroyed"
+
+
+async def test_s1_a_create_still_unlisted_is_reported_and_recovered_later(tmp_path):
+    fake = Hidden(3)  # the first look, the look 15 s later, the last look in the cleanup
+    fake.seed_production(40)
+    production = set(fake.droplets)
+    inputs, _ = world(tmp_path)
+    result = await probed(fake, FakeProbeRemote({}), inputs)
+    folder = inputs.output / result["probe_id"]
+    assert result["worker"]["error_class"] == "create_uncertain"
+    assert result["worker_status"] == "create_failed" and result["worker"]["droplet_id"] is None
+    assert result["recover"] == f"campaign probe --remove {folder}"
+    [left] = set(fake.droplets) - production  # the droplet the lost answer created
+    async with running(fake) as cloud:
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+            "destroyed")
+    assert fake.deleted == [("droplet", left)] and set(fake.droplets) == production
+    async with running(fake) as cloud:  # a rerun finds it removed and does nothing
+        assert (await probing.recover(cloud, folder))["worker_status"] == "destroyed"
+    assert len(fake.deleted) == 1
+
+
+async def test_s1_an_unreadable_listing_or_a_create_that_never_landed(tmp_path):
+    fake = FakeDigitalOcean()
+    fake.create_then_fail = 1
+    fake.faults.append(Fault("GET", "/v2/droplets", 400, times=10))
+    inputs, _ = world(tmp_path / "a")
+    result = await probed(fake, FakeProbeRemote({}), inputs)
+    assert result["worker"]["error_class"] == "create_uncertain" and "recover" in result
+    fake = FakeDigitalOcean()
+    fake.faults.append(Fault("POST", "/v2/droplets", 500, times=10))  # nothing was created
+    inputs, _ = world(tmp_path / "b")
+    result = await probed(fake, FakeProbeRemote({}), inputs)
+    async with running(fake) as cloud:
+        found = await probing.recover(cloud, inputs.output / result["probe_id"])
+    assert found["worker_status"] == "absent" and fake.deleted == []
+
+
+async def died(fake, inputs, monkeypatch, stage):
+    """A probe process that stops for good (SIGKILL, OOM, reboot) at `stage`: no cleanup."""
+    if stage == "before_assignment":
+        async def gone(*args, **kwargs):
+            raise RuntimeError("killed")
+
+        monkeypatch.setattr(probing.scope, "assign_and_verify_project", gone)
+    async with running(fake) as cloud:
+        run = probing.Probe(cloud, FakeProbeRemote({}).factory, inputs, NOW, no_sleep)
+        with pytest.raises(RuntimeError if stage == "before_assignment" else ProbeError):
+            await run.create()
+            raise ProbeError("killed after the assignment")
+    monkeypatch.undo()
+    return inputs.output / run.probe_id
+
+
+@pytest.mark.parametrize("stage", ["before_assignment", "after_assignment"])
+async def test_s1_a_dead_probe_is_recovered_through_the_guard(tmp_path, monkeypatch, stage):
+    fake = FakeDigitalOcean()
+    fake.seed_production(40)
+    production = set(fake.droplets)
+    inputs, _ = world(tmp_path)
+    folder = await died(fake, inputs, monkeypatch, stage)
+    worker = json.loads((folder / "probe-result.json").read_text())["worker"]
+    assert worker["droplet_id"] and bool(worker["assigned_at"]) == (stage == "after_assignment")
+    async with running(fake) as cloud:  # nothing in memory: the record is all it has
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+            "destroyed")
+    assert fake.deleted == [("droplet", worker["droplet_id"])] and set(fake.droplets) == (
+        production)
+    audit = [json.loads(line) for line in audit_path(folder).read_text().splitlines()]
+    assert audit[-1]["result"] == "deleted" and audit[-1]["path"] == "normal"
+
+
+async def test_s1_a_marked_worker_whose_removal_failed_takes_the_own_unassigned_path(tmp_path):
+    fake = FakeDigitalOcean()
+    fake.faults += [Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3),
+                    Fault("DELETE", "", 500)]  # path set below, once the id is known
+    inputs, _ = world(tmp_path)
+    async with running(fake) as cloud:
+        run = probing.Probe(cloud, FakeProbeRemote({}).factory, inputs, NOW, no_sleep)
+        original = cloud.create
+
+        async def create(*args, **kwargs):
+            made = await original(*args, **kwargs)
+            fake.faults[-1] = Fault("DELETE", f"/v2/droplets/{made[0].id}", 500, times=10)
+            return made
+
+        cloud.create = create
+        result = await run.run()
+    assert result["worker"]["assign_failed_at"] and result["worker_status"] == "destroy_failed"
+    fake.faults.clear()
+    async with running(fake) as cloud:
+        assert (await probing.recover(cloud, inputs.output / run.probe_id))[
+            "worker_status"] == "destroyed"
+    audit = [json.loads(line) for line in audit_path(
+        inputs.output / run.probe_id).read_text().splitlines()]
+    assert audit[-1]["path"] == "own_unassigned" and audit[-1]["result"] == "deleted"
+
+
+async def test_s1_recovery_never_touches_a_droplet_the_record_does_not_own(tmp_path):
+    fake = FakeDigitalOcean()
+    fake.seed_production(20)
+    inputs, _ = world(tmp_path)
+    result = await probed(fake, FakeProbeRemote({}, ready=False), inputs)
+    folder = inputs.output / result["probe_id"]
+    record = json.loads((folder / "probe-result.json").read_text())
+    victim = next(iter(fake.droplets))
+    record["worker"].update(droplet_id=victim, status="destroy_failed", assigned_at=None)
+    (folder / "probe-result.json").write_text(json.dumps(record))
+    async with running(fake) as cloud:
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+            "destroy_refused")
+    assert victim in fake.droplets and fake.deleted[-1] != ("droplet", victim)
+    with pytest.raises(ProbeError, match="no probe record"):
+        async with running(fake) as cloud:
+            await probing.recover(cloud, tmp_path)
+
+
+async def test_s1_a_signal_cancels_the_probe_and_the_worker_is_still_removed(tmp_path,
+                                                                            monkeypatch):
+    class Cancelled(FakeProbeRemote):
+        async def run(self, droplet, command, what, *, stdin=None, seconds=120):
+            if what == "probe net01":
+                asyncio.current_task().cancel()
+                await asyncio.sleep(0)
+            return await super().run(droplet, command, what, stdin=stdin, seconds=seconds)
+
+    real = probing.release
+
+    async def interrupted(*args, **kwargs):  # a second signal during the removal
+        outer.cancel()
+        await asyncio.sleep(0)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(probing, "release", interrupted)
+    fake = FakeDigitalOcean()
+    inputs, _ = world(tmp_path)
+    outer = asyncio.current_task()
+    result = await probed(fake, Cancelled({}), inputs)
+    assert result["error"] == "cancelled by a signal" and result["worker_status"] == "destroyed"
+    assert list(result["networks"]) == ["net00", "net01"] and len(fake.deleted) == 1
+    assert json.loads((inputs.output / result["probe_id"] / "probe-result.json").read_text())[
+        "worker_status"] == "destroyed"
+
+
+def test_s1_the_cli_cancels_on_sigterm_and_wires_remove(tmp_path, monkeypatch, capsys):
+    import os
+    import signal
+
+    async def stopped(cloud, remotes, inputs):
+        os.kill(os.getpid(), signal.SIGTERM)
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            os.kill(os.getpid(), signal.SIGTERM)  # ignored while the removal runs
+            await asyncio.sleep(0)
+            return {"worker_status": "destroyed", "error": "cancelled by a signal"}
+        return {"worker_status": "destroyed"}
+
+    monkeypatch.setattr(probing, "probe", stopped)
+    monkeypatch.setattr("proxy_index.campaign.do_api.file_token", lambda path: lambda: "t")
+    assert main_cli.main(["campaign", "probe", "--root", str(tmp_path)]) == 3
+    assert json.loads(capsys.readouterr().out)["error"] == "cancelled by a signal"
+
+    async def removed(cloud, folder):
+        return {"probe_id": "p", "worker_status": "absent"}
+
+    monkeypatch.setattr(probing, "recover", removed)
+    assert main_cli.main(["campaign", "probe", "--remove", str(tmp_path)]) == 0
+
+    async def interrupted(cloud, folder):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(probing, "recover", interrupted)
+    assert main_cli.main(["campaign", "probe", "--remove", str(tmp_path)]) == 3
+    assert "Interrupted" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        main_cli.main(["campaign", "probe", "--root", "a", "--remove", "b"])
+
+
+async def test_s1_a_recovered_worker_the_project_never_confirms_is_removed_fail_closed(
+        tmp_path, monkeypatch):
+    fake = FakeDigitalOcean()
+    inputs, _ = world(tmp_path)
+    folder = await died(fake, inputs, monkeypatch, "before_assignment")
+    fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3))
+    async with running(fake) as cloud:
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+            "destroyed")
+    audit = [json.loads(line) for line in audit_path(folder).read_text().splitlines()]
+    assert audit[-1]["path"] == "own_unassigned" and len(fake.deleted) == 1
