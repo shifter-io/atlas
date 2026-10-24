@@ -52,6 +52,7 @@ from proxy_index.campaign.contracts import (
 )
 from proxy_index.campaign.do_api import ApiError, CreateError
 from proxy_index.campaign.planspec import PlanError, PlanInputs
+from proxy_index.campaign.tick import timer_calendars
 from proxy_index.models import RequestContext
 from proxy_index.onboarding import manifest
 from proxy_index.onboarding.files import digest
@@ -475,11 +476,13 @@ def test_the_enable_cli_refuses_without_owner_go(deployed, capsys):
     assert "--owner-go" in capsys.readouterr().err
 
 
-def planned_root(tmp_path, manager_id="500001", wheel="ab" * 32):
-    spec = CampaignSpec(
+def planned_root(tmp_path, manager_id="500001", wheel="ab" * 32, **changes):
+    from dataclasses import replace
+
+    spec = replace(CampaignSpec(
         CID, NOW.isoformat(), "leftclick", CAMPAIGN_PROJECT, "2027-01-01T23:00:00+00:00", 48,
         ("lon1",), ("shifter",), {"shifter": "networks/shifter/residential/m/campaign.json"},
-        {"lon1": "c-2"}, {"lon1": "9001"}, IMAGE, wheel, "0.9.5", "77", manager_id)
+        {"lon1": "c-2"}, {"lon1": "9001"}, IMAGE, wheel, "0.9.5", "77", manager_id), **changes)
     root = tmp_path / "plan" / CID
     (root / "networks/shifter/residential/m").mkdir(parents=True)
     (root / "networks/shifter/residential/m/campaign.json").write_text("{}")
@@ -830,3 +833,69 @@ def test_the_plan_cli_prints_the_summary(monkeypatch, capsys):
     assert campaign_cli.dispatch(args) == 0
     assert campaign_cli.dispatch(parse([*args_list, "--size", "c-4"])) == 0
     assert seen == ["c-2", "c-4"]
+
+
+# CAMP-1n: a compressed test (4 slots of 15 minutes) moves the three timers to its slots.
+def test_the_timer_calendars_match_the_unit_files_and_quarter_slots():
+    found, hourly = units(), timer_calendars(60, 90)
+    for name in ("tick", "watchdog-armed", "watchdog-fired"):
+        assert found[f"proxy-index-campaign-{name}@.timer"]["Timer"]["OnCalendar"] == hourly[name]
+    assert timer_calendars(15, 90) == {"tick": "*-*-* *:13,28,43,58:30",
+                                       "watchdog-armed": "*-*-* *:00,15,30,45:30",
+                                       "watchdog-fired": "*-*-* *:02,17,32,47:00"}
+    assert timer_calendars(20, 90)["tick"] == "*-*-* *:18,38,58:30"
+    assert deploy.timer_dropins(CID, {"starts_at": "x", "synthetic": False}) == []
+
+
+async def test_enable_installs_quarter_slot_timer_dropins(deployed, tmp_path):
+    saved = json.loads(deployed.read_text())
+    deploy.save(deployed, saved, campaigns=[])
+    root = planned_root(tmp_path, slot_minutes=15, hours=4)
+    await deploy.upload_spec(deployed, root, shell=Shell())
+    assert json.loads(deployed.read_text())["specs"][CID] == {
+        "starts_at": "2027-01-01T23:00:00+00:00", "synthetic": False, "slot_minutes": 15,
+        "create_lead_seconds": 90}
+    answer = tmp_path / "CAMP-1-go.md"
+    answer.write_text("Start: 2027-01-01T23:00Z\n")
+    shell = Shell()
+    await deploy.enable(deployed, CID, answer, shell=shell, now=NOW)
+    [(argv, stdin)] = shell.calls
+    assert argv[-1] == ("umask 022 && tar -x --no-same-owner -C /etc/systemd/system && "
+                        "systemctl daemon-reload && systemctl enable --now "
+                        + " ".join(deploy.unit_names(CID)))
+    archive = tarfile.open(fileobj=io.BytesIO(stdin))
+    dropins = {m.name: archive.extractfile(m).read().decode() for m in archive.getmembers()}
+    assert {m.mode for m in archive.getmembers()} == {0o644}
+    calendars = timer_calendars(15, 90)
+    assert dropins == {
+        f"proxy-index-campaign-{name}@{CID}.timer.d/slots.conf":
+            f"# CAMP-1: campaign {CID} has a slot every 15 minutes.\n[Timer]\n"
+            f"OnCalendar=\nOnCalendar={calendars[name]}\n"
+        for name in ("tick", "watchdog-armed", "watchdog-fired")}
+
+
+async def test_plan_with_quarter_slots_spaces_the_spec_and_the_manifests(plan_world):
+    from dataclasses import replace
+
+    fake, inputs = plan_world
+    result = await run_plan(fake, replace(inputs, slot_minutes=15, slots=4))
+    root = Path(result["root"])
+    spec = CampaignSpec.from_json(spec_path(root).read_text())
+    assert (spec.slot_minutes, spec.hours, spec.replace_until_minutes) == (15, 4, 15)
+    assert (result["slot_minutes"], result["slots"], spec.create_lead_seconds) == (15, 4, 90)
+    rounds = manifest.load(root / spec.manifests["shifter"])["rounds"]
+    assert rounds[:4] == ["2027-01-01T23:00:00.000Z", "2027-01-01T23:15:00.000Z",
+                          "2027-01-01T23:30:00.000Z", "2027-01-01T23:45:00.000Z"]
+    hourly = CampaignSpec.from_json(spec_path(Path(
+        (await run_plan(fake, inputs))["root"])).read_text())
+    assert (hourly.slot_minutes, hourly.hours, hourly.replace_until_minutes) == (60, 24, 15)
+    ten = await run_plan(fake, replace(inputs, slot_minutes=10, slots=6))
+    assert CampaignSpec.from_json(spec_path(Path(ten["root"])).read_text(
+        )).replace_until_minutes == 10
+    for bad in ({"slot_minutes": 45}, {"slot_minutes": 7}, {"slots": 0}, {"slots": 25}):
+        with pytest.raises(PlanError, match="--slot-minutes"):
+            await run_plan(fake, replace(inputs, **bad))
+    args = parse(["campaign", "plan", "--account", "leftclick", "--start", "now-hour",
+                  "--networks", "shifter", "--image", IMAGE, "--output", "o",
+                  "--slot-minutes", "15", "--slots", "4"])
+    assert (args.slot_minutes, args.slots) == (15, 4)

@@ -27,6 +27,8 @@ DEFAULTS = {
 # Ephemeral (version 3) workers run one round each on a fresh node, at a higher default.
 EPHEMERAL_CONCURRENCY = 2000
 GRACE_HOURS = (1, 168)
+# Ephemeral (version 3) round spacing in minutes; 60 (hourly) is the default and is not written.
+SLOT_MINUTES = (5, 6, 10, 12, 15, 20, 30, 60)
 
 
 def timestamp(value: float | datetime) -> str:
@@ -77,6 +79,7 @@ class PlanOptions:
     run_settings: dict | None = None
     grace_hours: int = 48
     allow_current_hour: bool = False
+    slot_minutes: int = 60
 
 
 def _start(start: str, now: datetime | None, plan: PlanOptions) -> datetime:
@@ -115,11 +118,14 @@ def create(
 
     ``ephemeral`` (version 3) campaigns run each hourly round on its own fresh node;
     ``grace_hours`` (1-168) extends ``ends_at`` past the last round as an observation-validity
-    bound, never a stop. ``allow_current_hour`` (ephemeral only) accepts the current whole
-    UTC hour as the start; past hours are always refused.
+    bound, never a stop. ``slot_minutes`` (ephemeral only, a divisor of 60) spaces the 24
+    rounds that many minutes apart instead of one hour. ``allow_current_hour`` (ephemeral
+    only) accepts the current whole UTC hour as the start; past hours are always refused.
     """
     plan = PlanOptions(**options)
     begins = _start(start, now, plan)
+    if plan.slot_minutes != 60 and plan.execution_mode != "ephemeral":
+        raise ValueError("Only ephemeral campaigns may use another slot interval")
     with provider_config.open("rb") as stream:
         config = tomllib.load(stream)
     provider = slug(config["provider"])
@@ -157,7 +163,12 @@ def create(
     elif plan.execution_mode == "ephemeral":
         manifest.update(schema_version=3, execution_mode="ephemeral",
                         grace_hours=plan.grace_hours)
-        manifest["ends_at"] = timestamp(begins + timedelta(hours=24 + ephemeral_grace(manifest)))
+        if plan.slot_minutes != 60:
+            manifest["slot_minutes"] = plan.slot_minutes
+        slot = timedelta(minutes=slot_minutes(manifest))
+        manifest["rounds"] = [timestamp(begins + i * slot) for i in range(24)]
+        manifest["ends_at"] = timestamp(begins + 24 * slot
+                                        + timedelta(hours=ephemeral_grace(manifest)))
     validate(manifest)
     directory = output / provider / product / campaign_id
     private_dir(directory.parent)
@@ -210,12 +221,14 @@ def validate(data: dict) -> dict:
                 or len(order) != len(REGION_IDS) or set(order) != set(REGION_IDS)):
             raise ValueError("Sequential schedule requires each region exactly once")
     start, end = moment(data["starts_at"]), moment(data["ends_at"])
+    slot = timedelta(minutes=slot_minutes(data))
     hours = 24 * (len(REGION_IDS) if mode == "sequential" else 1)
+    span = timedelta(hours=hours) if slot == timedelta(hours=1) else 24 * slot
     if data["schema_version"] == 3:
-        hours += ephemeral_grace(data)
-    if start.minute or start.second or start.microsecond or end - start != timedelta(hours=hours):
+        span += timedelta(hours=ephemeral_grace(data))
+    if start.minute or start.second or start.microsecond or end - start != span:
         raise ValueError("Campaign duration must give each region exactly 24 whole UTC hours")
-    if data["rounds"] != [timestamp(start + timedelta(hours=i)) for i in range(24)]:
+    if data["rounds"] != [timestamp(start + i * slot) for i in range(24)]:
         raise ValueError("Campaign must contain exactly 24 hourly rounds")
     regions = data["regions"]
     if not isinstance(regions, dict) or set(regions) != set(REGION_IDS):
@@ -236,6 +249,16 @@ def validate(data: dict) -> dict:
     RunConfig("generic_http", ProxyConfig("http", "localhost", 8080),
               target_url=data["target_url"])
     return data
+
+
+def slot_minutes(data: dict) -> int:
+    """Minutes between rounds: 60 unless an ephemeral manifest records `slot_minutes`."""
+    if "slot_minutes" not in data:
+        return 60
+    value = data["slot_minutes"]
+    if data.get("schema_version") != 3 or type(value) is not int or value not in SLOT_MINUTES[:-1]:
+        raise ValueError("slot_minutes must be a divisor of 60 below 60, ephemeral only")
+    return value
 
 
 def ephemeral_grace(data: dict) -> int:

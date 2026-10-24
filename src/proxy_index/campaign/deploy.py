@@ -43,6 +43,7 @@ from .contracts import (
 from .do_api import CreateError, DigitalOcean, TokenSource
 from .image import BASE_IMAGE, SSH_TRIES, Shell, run_shell
 from .scope import Ledger, guarded_delete
+from .tick import timer_calendars
 
 BASE = "/opt/proxy-index-campaign"
 SECRETS = f"{BASE}/.secrets"
@@ -66,6 +67,19 @@ def unit_names(cid: str) -> list[str]:
     short_id(cid)
     return [f"proxy-index-campaign-{name}@{cid}.{kind}" for name, kind in (("tick", "timer"), (
         "collector", "service"), ("watchdog-armed", "timer"), ("watchdog-fired", "timer"))]
+
+
+def timer_dropins(cid: str, spec: dict) -> list[tuple[str, bytes, int]]:
+    """Per-campaign drop-ins that move the three timers to the spec's slots; none for the
+    hourly default, whose times the unit files already hold."""
+    slot = spec.get("slot_minutes", 60)
+    if slot == 60:
+        return []
+    found = timer_calendars(slot, spec.get("create_lead_seconds", 90))
+    return [(f"proxy-index-campaign-{name}@{cid}.timer.d/slots.conf",
+             f"# CAMP-1: campaign {cid} has a slot every {slot} minutes.\n[Timer]\n"
+             f"OnCalendar=\nOnCalendar={calendar}\n".encode(), 0o644)
+            for name, calendar in found.items()]
 
 
 def load_inventory(path: Path) -> dict[str, Any]:
@@ -327,8 +341,10 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
         f"tar -x --no-same-owner -C {target}", "upload-spec (exists or failed)",
         spec_payload(root))
     campaigns = sorted({*inventory.get("campaigns", []), spec.campaign_id})
+    slots = ({"slot_minutes": spec.slot_minutes, "create_lead_seconds": spec.create_lead_seconds}
+             if spec.slot_minutes != 60 else {})
     specs = inventory.get("specs", {}) | {spec.campaign_id: {
-        "starts_at": spec.starts_at, "synthetic": spec.synthetic}}
+        "starts_at": spec.starts_at, "synthetic": spec.synthetic, **slots}}
     save(inventory_path, inventory, campaigns=campaigns, campaign_id=spec.campaign_id,
          specs=specs)
     return {"campaign_id": spec.campaign_id, "campaigns": campaigns}
@@ -350,14 +366,20 @@ def owner_go_record(cid: str, owner_go: Path | None, spec: dict, now: datetime) 
 
 async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
                  shell: Shell = run_shell, now: datetime | None = None) -> dict:
-    """Start the tick timer, collector and watchdogs, only with the owner's recorded go (D9)."""
+    """Start the tick timer, collector and watchdogs, only with the owner's recorded go (D9).
+    A campaign with other than hourly slots first gets its timer drop-ins (`timer_dropins`)."""
     units, inventory = unit_names(cid), load_inventory(inventory_path)
     spec = inventory.get("specs", {}).get(cid)
     if cid not in inventory.get("campaigns", []) or spec is None:
         raise DeployError("campaign was never uploaded to the recorded manager")
     go = owner_go_record(cid, owner_go, spec, now or datetime.now(UTC))
     save(inventory_path, inventory, enabled=go, campaign_id=cid)
-    await Manager(inventory, shell).run("systemctl enable --now " + " ".join(units), "enable")
+    dropins = timer_dropins(cid, spec)
+    command = "systemctl enable --now " + " ".join(units)
+    if dropins:
+        command = ("umask 022 && tar -x --no-same-owner -C /etc/systemd/system && "
+                   f"systemctl daemon-reload && {command}")
+    await Manager(inventory, shell).run(command, "enable", _tar(dropins) if dropins else b"")
     return go | {"units": units}
 
 

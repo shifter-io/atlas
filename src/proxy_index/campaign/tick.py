@@ -1,7 +1,8 @@
-"""The hourly launcher tick, the missed-hour watchdog and network pause, over the hour ledger.
+"""The launcher tick, the missed-slot watchdog and network pause, over the hour ledger.
 
-Every slot launches at `starts_at + k h - create_lead_seconds` (HH:58:30), whatever earlier hours
-are doing (D6). A late tick launches every due slot at once; no slot is skipped or relaunched.
+Every slot launches at `starts_at + k * slot_minutes - create_lead_seconds` (HH:58:30 for the
+default hourly slots), whatever earlier slots are doing (D6). A late tick launches every due slot
+at once; no slot is skipped or relaunched. `timer_calendars` gives the systemd times that match.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from .contracts import (
     spec_path,
 )
 
-HOUR = timedelta(hours=1)
 LATE_SECONDS = 60.0
 DUE_TOLERANCE = timedelta(seconds=2)  # the timer may fire a fraction of a second early
 LAUNCHABLE = ("planned", "launching")  # `launching` is a crashed tick: resume, never re-create
@@ -42,8 +42,20 @@ def load_spec(root: Path) -> CampaignSpec:
     return CampaignSpec.from_json(spec_path(root).read_text())
 
 
+def slot_length(spec: CampaignSpec) -> timedelta:
+    return timedelta(minutes=spec.slot_minutes)
+
+
 def scheduled_at(spec: CampaignSpec, slot: int) -> datetime:
-    return datetime.fromisoformat(spec.starts_at) + slot * HOUR
+    return datetime.fromisoformat(spec.starts_at) + slot * slot_length(spec)
+
+
+def slot_label(spec: CampaignSpec, slot: int, short: bool = False) -> str:
+    """`hour NN` (`hNN`) for hourly slots, else `slot NN (HH:MM UTC)` (`sNN HH:MM`)."""
+    if spec.slot_minutes == 60:
+        return f"h{slot:02d}" if short else f"hour {slot:02d}"
+    at = scheduled_at(spec, slot).astimezone(UTC)
+    return f"s{slot:02d} {at:%H:%M}" if short else f"slot {slot:02d} ({at:%H:%M} UTC)"
 
 
 def due_at(spec: CampaignSpec, slot: int) -> datetime:
@@ -134,6 +146,17 @@ def active_spec(spec: CampaignSpec, paused: list[str]) -> CampaignSpec:
                    manifests={net: spec.manifests[net] for net in networks})
 
 
+def timer_calendars(slot_minutes: int, lead_seconds: int) -> dict[str, str]:
+    """OnCalendar per timer: the tick `lead_seconds` before each slot, the watchdog's `armed`
+    check 30 s and its `fired` check 120 s after it (hourly: *:58:30, *:00:30, *:02:00)."""
+    def calendar(offset: int) -> str:
+        moments = sorted((start * 60 + offset) % 3600 for start in range(0, 60, slot_minutes))
+        minutes = ",".join(f"{m // 60:02d}" for m in moments)
+        return f"*-*-* *:{minutes}:{moments[0] % 60:02d}"
+    return {"tick": calendar(-lead_seconds), "watchdog-armed": calendar(30),
+            "watchdog-fired": calendar(120)}
+
+
 def _systemctl(*args: str) -> None:
     subprocess.run(["systemctl", *args], check=True, capture_output=True, timeout=30)
 
@@ -214,10 +237,11 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
 def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
                  start_tick: Callable[[], None] | None = None,
                  timer_enabled: Callable[[], bool] | None = None) -> str | None:
-    """At *:00:30 (`armed`) the hour's workers are armed; at *:02:00 it fired. An enabled timer
-    also gets the tick started; a disabled one (the operator's) only the alarm (S7)."""
+    """30 s after a slot starts (`armed`, *:00:30 hourly) its workers are armed; 120 s after
+    (`fired`, *:02:00) it fired. An enabled timer also gets the tick started; a disabled one
+    (the operator's) only the alarm (S7)."""
     spec, now = load_spec(root), clock()
-    slot = (now - scheduled_at(spec, 0)) // HOUR
+    slot = (now - scheduled_at(spec, 0)) // slot_length(spec)
     if not 0 <= slot < spec.hours:
         return None
     unit = f"proxy-index-campaign-tick@{spec.campaign_id}"
@@ -275,11 +299,11 @@ def _network_command(args) -> int:
 
 
 def register(subcommands, handlers: dict) -> None:
-    tick = subcommands.add_parser("tick", help="Launch every due hour (systemd timer, *:58:30)")
+    tick = subcommands.add_parser("tick", help="Launch every due slot (systemd timer, *:58:30)")
     tick.add_argument("--root", required=True)
     tick.add_argument("--slot", type=int)
     tick.add_argument("--now", action="store_true", help="launch --slot immediately (dry run)")
-    watchdog = subcommands.add_parser("watchdog", help="Missed-hour alarm (*:00:30, *:02:00)")
+    watchdog = subcommands.add_parser("watchdog", help="Missed-slot alarm (*:00:30, *:02:00)")
     watchdog.add_argument("--root", required=True)
     watchdog.add_argument("--check", choices=("armed", "fired"), required=True)
     network = subcommands.add_parser("network", help="Pause or resume a network from next hour")

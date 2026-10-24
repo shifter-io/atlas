@@ -3,9 +3,10 @@
 Names are persisted before the create and ids right after it. Only workers whose membership in
 project Proxy Index is confirmed are ever pushed (fail-closed). A create, assignment, boot, push
 or start failure gets a replacement in the same hour, up to `REPLACEMENTS_PER_CELL` per cell and
-only before `replace_until_minutes` past HH:00 or past a later launch; then the cell is
-`failed_ours` with a high alert. Every removal goes through `scope.guarded_delete`, that of a
-worker whose membership was never confirmed on the own-unassigned path. A resumed launch and
+only before `replace_until_minutes` (at most the slot length) past the slot's start or past a
+later launch; then the cell is `failed_ours` with a high alert. Every removal goes through
+`scope.guarded_delete`, that of a worker whose membership was never confirmed on the
+own-unassigned path. A resumed launch and
 every replacement adopt their own names before they create anything, so nothing is created
 twice.
 """
@@ -164,7 +165,7 @@ class _Launch(HourWork):
         if record.state not in ("planned", "launching"):
             return
         record.state, record.fired_at = "launching", record.fired_at or self.now()
-        # The window opens at HH:00, or at a later launch (`tick --now`, a late timer).
+        # The window opens at the slot's start, or at a later launch (`tick --now`, a late timer).
         self.replace_until = max(self.scheduled, moment(record.fired_at).timestamp()) + (
             self.spec.replace_until_minutes * 60)
         if not record.droplets:
