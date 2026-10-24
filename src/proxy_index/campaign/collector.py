@@ -30,7 +30,14 @@ from .contracts import (
     status_path,
 )
 from .reports import latest_summary, write_traffic_report
-from .scope import Ledger, OwnershipError, guarded_delete, role_checks, scope_for
+from .scope import (
+    UNASSIGNED_REMOVABLE,
+    Ledger,
+    OwnershipError,
+    guarded_delete,
+    role_checks,
+    scope_for,
+)
 from .tick import (
     FINAL,
     LAUNCHABLE,
@@ -150,7 +157,8 @@ class Collector:
         self.reconcile_failures = 0
 
     async def reconcile(self, spec: CampaignSpec, hours: dict[int, HourRecord]) -> None:
-        """Section 9: adopt unrecorded owned droplets, retire `destroyed` ones that remain."""
+        """Section 9: adopt unrecorded owned droplets, retire `destroyed` ones that remain, and
+        retire our own workers whose project assignment was never confirmed (CAMP-1k)."""
         scope = scope_for(spec)
         known = {d.droplet_id: (record, d) for record in hours.values() for d in record.droplets
                  if d.droplet_id}
@@ -162,13 +170,16 @@ class Collector:
             hour = int(droplet.name.split("-")[2][1:]) if checks["name"] else None
             if hour in hours and hours[hour].state in LAUNCHABLE:
                 continue  # the tick owns a launching hour; its creates may not be recorded yet
-            if hour not in hours or not all(checks.values()) or droplet.id not in members:
+            entry = known.get(droplet.id)
+            stray = entry is not None and entry[1].assign_failed_at is not None
+            if hour not in hours or not all(checks.values()) or (
+                    droplet.id not in members and not stray):
                 self.log.add(self.clock(), "foreign_tagged", key=droplet.id,
                              droplet_id=droplet.id, name=droplet.name)
-            elif droplet.id not in known:
+            elif entry is None:
                 await self._adopt(scope, hours[hour], droplet, hours)
-            elif self._retry(*known[droplet.id]):
-                await self._retire(scope, *known[droplet.id], hours)
+            elif self._retry(*entry) or (stray and entry[1].status in UNASSIGNED_REMOVABLE):
+                await self._retire(scope, *entry, hours)
 
     @staticmethod
     def _retry(record: HourRecord, drop: DropletRecord) -> bool:
