@@ -595,7 +595,8 @@ async def test_b1_b_a_missing_credentials_file_fails_only_its_network(tmp_path):
 
 
 async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, monkeypatch):
-    """A created droplet whose assignment raised is handed to the guard, which may refuse."""
+    """A created droplet whose assignment raised is never confirmed: CAMP-1l removes it on the
+    own-unassigned path (the plain guard refused it, project=false, and left it alive)."""
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
 
@@ -604,9 +605,10 @@ async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, mo
 
     monkeypatch.setattr(launch.scope, "assign_and_verify_project", refuse)
     record, *_ = await launched(tmp_path, fake, spec)
-    assert [d.status for d in record.droplets] == ["destroy_refused"] * (
+    assert [d.status for d in record.droplets] == ["destroyed"] * (
         1 + launch.REPLACEMENTS_PER_CELL)
-    assert fake.deleted == [] and record.cells == {"net00/lon1": "failed_ours"}
+    assert len(fake.deleted) == 1 + launch.REPLACEMENTS_PER_CELL and not fake.droplets
+    assert record.cells == {"net00/lon1": "failed_ours"}
     assert {d.error_class for d in record.droplets} == {"OwnershipError"}
 
 

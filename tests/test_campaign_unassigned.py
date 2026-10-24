@@ -45,7 +45,7 @@ from proxy_index.campaign.scope import (
 from proxy_index.campaign.tick import read_alerts
 
 FIRST = "700001"  # the fake's first droplet id: the hour's only worker
-LATE = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()  # past HH:15: no replacement
+LATE = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()  # past HH:15
 TRIES = 5  # one `request` call: the first try and four backoff retries
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
@@ -56,8 +56,13 @@ def audit_lines(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def nyc3_spec():
-    return make_spec(NETWORKS[:1], ("nyc3",))
+def nyc3_spec(**changes):
+    return make_spec(NETWORKS[:1], ("nyc3",), **changes)
+
+
+def no_replacement_spec():
+    """The replacement window counts from the launch (CAMP-1l): a zero window replaces none."""
+    return nyc3_spec(replace_until_minutes=0)
 
 
 @pytest.mark.parametrize("failures", [TRIES, 3 * TRIES], ids=["transient", "persistent"])
@@ -93,7 +98,7 @@ async def test_a_restarted_collector_removes_an_unconfirmed_worker(tmp_path, pas
     fake = FakeDigitalOcean()
     fake.faults += [Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3),
                     Fault("DELETE", f"/v2/droplets/{FIRST}", 500, times=TRIES)]
-    spec = nyc3_spec()
+    spec = no_replacement_spec()
     _, root, remote, clock = await launched(tmp_path, fake, spec, start=LATE)
     record = launch.load_hour(root, 0)  # the ledger on disk, as a restarted process reads it
     [worker] = record.droplets
@@ -121,7 +126,7 @@ async def test_a_refused_removal_at_launch_is_alerted(tmp_path, monkeypatch):
     fake = FakeDigitalOcean()
     fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3))
     monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T23:00Z"))
-    record, *_ = await launched(tmp_path, fake, nyc3_spec(), start=LATE)
+    record, *_ = await launched(tmp_path, fake, no_replacement_spec(), start=LATE)
     assert [d.status for d in record.droplets] == ["destroy_refused"] and FIRST in fake.droplets
     assert [a["kind"] for a in record.alerts] == [
         "project_assign_failed", "destroy_refused", "cell_failed"]
@@ -216,7 +221,7 @@ async def test_reconcile_leaves_a_marked_worker_alone_unless_removable(tmp_path,
     """m2: a marked worker is retired only in assign_failed/destroy_failed/destroyed; a refused
     or live one is neither retried nor reported as foreign_tagged."""
     fake = FakeDigitalOcean()
-    spec = nyc3_spec()
+    spec = no_replacement_spec()
     _, root, _, _ = await launched(tmp_path, fake, spec, start=LATE)
     record = launch.load_hour(root, 0)
     [worker] = record.droplets
