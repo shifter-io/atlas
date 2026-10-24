@@ -31,12 +31,14 @@ from .contracts import (
 )
 from .reports import latest_summary, write_traffic_report
 from .scope import (
+    OWN_UNASSIGNED_SECONDS,
     UNASSIGNED_REMOVABLE,
     Ledger,
     OwnershipError,
     guarded_delete,
     role_checks,
     scope_for,
+    settling_refusal,
 )
 from .tick import (
     FINAL,
@@ -158,7 +160,7 @@ class Collector:
 
     async def reconcile(self, spec: CampaignSpec, hours: dict[int, HourRecord]) -> None:
         """Section 9: adopt unrecorded owned droplets, retire `destroyed` ones that remain, and
-        retire our own workers whose project assignment was never confirmed (CAMP-1k)."""
+        retire our own workers whose project assignment was never confirmed (CAMP-1k, CAMP-1r)."""
         scope = scope_for(spec)
         known = {d.droplet_id: (record, d) for record in hours.values() for d in record.droplets
                  if d.droplet_id}
@@ -178,7 +180,7 @@ class Collector:
                              droplet_id=droplet.id, name=droplet.name)
             elif entry is None:
                 await self._adopt(scope, hours[hour], droplet, hours)
-            elif self._retry(*entry) or (stray and entry[1].status in UNASSIGNED_REMOVABLE):
+            elif self._retry(*entry) or (stray and self._own_retry(entry[1], droplet)):
                 await self._retire(scope, *entry, hours)
 
     @staticmethod
@@ -187,6 +189,16 @@ class Collector:
         harvester retries it)."""
         return drop.status == "destroyed" or (
             drop.status == "destroy_failed" and record.state in FINAL)
+
+    def _own_retry(self, drop: DropletRecord, droplet: Droplet) -> bool:
+        """Our own marked worker goes to the guard again: in a status a later process may hand
+        it in, or `destroy_refused` only because DigitalOcean was still catching up with its
+        create (its audit), while it is within the 30-minute own window."""
+        if drop.status in UNASSIGNED_REMOVABLE:
+            return True
+        young = (self.clock() - droplet.created_at).total_seconds() <= OWN_UNASSIGNED_SECONDS
+        return (drop.status == "destroy_refused" and young
+                and settling_refusal(audit_path(self.root), drop.droplet_id))
 
     async def _adopt(self, scope, record: HourRecord, droplet: Droplet, hours) -> None:
         _, _, _, region, network = droplet.name.split("-", 4)

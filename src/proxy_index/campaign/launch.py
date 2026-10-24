@@ -318,7 +318,7 @@ class _Launch(HourWork):
         records = {d.droplet_id: d for d in self.record.droplets if d.droplet_id}
         _, failed = await scope.assign_and_verify_project(
             self.cloud, self.scope, [w.droplet_id for w in waiting], records,
-            audit_path(self.root), retry=scope.Retry(sleep=self.clock.sleep))
+            audit_path(self.root), retry=scope.Retry(sleep=self.clock.sleep, save=self.save))
         self.save()
         for worker in waiting:
             if worker.droplet_id in failed:
@@ -442,7 +442,7 @@ class _Launch(HourWork):
     async def _unassigned(self, worker: DropletRecord) -> None:
         records = {d.droplet_id: d for d in self.record.droplets if d.droplet_id}
         await scope.remove_unassigned(self.cloud, self.scope, records, audit_path(self.root),
-                                      {worker.droplet_id: worker.error_detail})
+                                      {worker.droplet_id: worker.error_detail}, save=self.save)
         if worker.status == "destroy_refused":
             self.alert("high", "destroy_refused", worker.name)
         elif worker.status == "destroyed":
