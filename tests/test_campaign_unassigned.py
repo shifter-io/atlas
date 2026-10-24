@@ -116,6 +116,16 @@ async def test_a_restarted_collector_removes_an_unconfirmed_worker(tmp_path, pas
     assert worker.assign_failed_at  # the ledger's proof, written by the launch's own scope call
 
 
+async def test_a_refused_removal_at_launch_is_alerted(tmp_path, monkeypatch):
+    """Unconfirmed, and the guard refuses (here: older than 30 min): a high alert, no retry."""
+    fake = FakeDigitalOcean()
+    fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3))
+    monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T23:00Z"))
+    record, *_ = await launched(tmp_path, fake, nyc3_spec(), start=LATE)
+    assert [d.status for d in record.droplets] == ["destroy_refused"] and FIRST in fake.droplets
+    assert [a["kind"] for a in record.alerts] == ["project_assign_failed", "destroy_refused"]
+
+
 async def created(cloud, name=NAME):
     [droplet] = await cloud.create([name], region="nyc3", size="c-4", image="1", tags=OURS,
                                    ssh_keys=["9"])

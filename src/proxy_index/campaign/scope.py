@@ -31,7 +31,7 @@ from .contracts import (
     Scope,
     short_id,
 )
-from .do_api import ApiError, DigitalOcean, ScopeError, parse_droplet
+from .do_api import DigitalOcean, ScopeError, parse_droplet
 
 # Only this module holds the token `DigitalOcean.request` needs for DELETE and assignment.
 _GUARD = object()
@@ -41,11 +41,9 @@ PATHS = MappingProxyType({"droplet": "/v2/droplets/{}", "ssh_key": "/v2/account/
                           "firewall": "/v2/firewalls/{}", "snapshot": "/v2/snapshots/{}"})
 Kind = Literal["droplet", "ssh_key", "firewall", "snapshot"]
 Role = Literal["worker", "manager", "builder"]
-# Per client: project membership cache, project ids whose name was checked, and the ids that
-# assign_and_verify_project could not confirm (the only way into the own-unassigned path).
+# Per client: project membership cache and the project ids whose name was checked.
 _projects: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _named: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-_assign_failed: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 monotonic = time.monotonic  # the project cache's clock; tests replace it
 
 
@@ -134,10 +132,14 @@ async def _droplet_checks(cloud: DigitalOcean, droplet: Droplet, scope: Scope, l
     if await _in_project(cloud, scope.project_id, droplet.id):
         return checks | {"project": True}
     record = ledger.records.get(droplet.id)
+    # The ledger mark: only assign_and_verify_project writes it, for an id it had checked
+    # against its own client's create. A restarted process has no other proof of that create.
+    marked = (record is not None and record.droplet_id == droplet.id
+              and record.assign_failed_at is not None)
     exception = {
-        "assign_failed": record is not None and record.status == "assign_failed"
-        and droplet.id in _assign_failed.get(cloud, ()),
-        "own_create": droplet.id in cloud.created_ids,
+        "assign_failed": marked,
+        "own_create": droplet.id in cloud.created_ids or marked,
+        "exact_name": marked and record.name == droplet.name,
         "fresh": (utcnow() - droplet.created_at).total_seconds() <= OWN_UNASSIGNED_SECONDS,
     }
     if all(exception.values()):
@@ -193,7 +195,7 @@ async def guarded_delete(
             await _droplet_checks(cloud, parse_droplet(raw), scope, ledger, role, entry)
             if kind == "droplet" else _other_checks(kind, raw, ledger))
         entry["checks"] = checks
-        failed = [name for name, passed in checks.items() if not passed]
+        failed = _failed(checks)
         if failed:
             _audit(audit_path, entry | {"result": "refused"})
             raise OwnershipError(kind, rid, failed)
@@ -210,32 +212,80 @@ async def guarded_delete(
 
 
 async def _fresh_owned(cloud: DigitalOcean, scope: Scope, rid: str,
-                       records: Mapping[str, DropletRecord], role: Role) -> None:
-    """Refuse an id that is not recorded, not from our create, or lacks a marker on a fresh GET."""
-    record, droplet = records.get(rid), await cloud.get(rid)
+                       records: Mapping[str, DropletRecord], role: Role) -> bool:
+    """Refuse an id that is not recorded, not from our create, or lacks a marker on a fresh GET.
+
+    False when the id is ours but the GET failed or does not show it yet: the caller reads it
+    again, then counts it unconfirmed (the guard checks every marker again before a delete).
+    """
+    record = records.get(rid)
     checks = {"recorded": record is not None and record.droplet_id == rid,
-              "own_create": rid in cloud.created_ids, "exists": droplet is not None}
+              "own_create": rid in cloud.created_ids}
+    try:
+        droplet = await cloud.get(rid)
+    except Exception:  # unreadable: retried for our own ids only
+        if not all(checks.values()):
+            raise OwnershipError("droplet", rid, _failed(checks)) from None
+        return False
+    checks["exists"] = droplet is not None
     if droplet is not None:
         checks |= role_checks(droplet, scope, role)
-    failed = [name for name, passed in checks.items() if not passed]
-    if failed:
+    failed = _failed(checks)
+    if failed and failed != ["exists"]:
         raise OwnershipError("droplet", rid, failed)
+    return not failed
 
 
-async def _assign(cloud: DigitalOcean, project_id: str, missing: set[str], retry: Retry) -> None:
-    """Assign and re-read the project until `missing` is empty or the attempts run out."""
+def _failed(checks: Mapping[str, bool]) -> list[str]:
+    return [name for name, passed in checks.items() if not passed]
+
+
+async def _retrying(retry: Retry, step: Callable[[], Awaitable[bool]]) -> None:
+    """Run `step` until it returns True, at most `retry.attempts` times, `retry.delay` apart."""
     for attempt in range(retry.attempts):
-        try:
-            await cloud.assign_project(project_id, sorted(missing), guard=_GUARD)
-            members = await cloud.project_droplet_ids(project_id)
-            _projects.setdefault(cloud, {})[project_id] = (monotonic(), members)
-            missing -= members
-        except ApiError:
-            pass
-        if not missing:
+        if await step():
             return
         if attempt + 1 < retry.attempts:
             await retry.sleep(retry.delay)
+
+
+async def _shown(cloud: DigitalOcean, scope: Scope, ids: list[str],
+                 records: Mapping[str, DropletRecord], role: Role, retry: Retry) -> set[str]:
+    """Before any POST: the ids a fresh GET shows with every marker, re-read while unreadable.
+    An id that is not provably ours raises `OwnershipError`."""
+    shown: set[str] = set()
+
+    async def read() -> bool:
+        for rid in ids:
+            if rid not in shown and await _fresh_owned(cloud, scope, rid, records, role):
+                shown.add(rid)
+        return len(shown) == len(ids)
+
+    await _retrying(retry, read)
+    return shown
+
+
+async def _assign(cloud: DigitalOcean, project_id: str, missing: set[str], retry: Retry) -> None:
+    """Assign and re-read the project until `missing` is empty or the attempts run out. A failed
+    call leaves its ids unconfirmed; only a project that is not Proxy Index raises."""
+
+    async def attempt() -> bool:
+        try:
+            named = await _project_named(cloud, project_id)
+        except Exception:  # unconfirmed this time: retried, then fail closed
+            return False
+        if not named:
+            raise OwnershipError("project", project_id, ["project_id"])
+        try:
+            await cloud.assign_project(project_id, sorted(missing), guard=_GUARD)
+            members = await cloud.project_droplet_ids(project_id)
+        except Exception:  # unconfirmed this time: retried, then fail closed
+            return False
+        _projects.setdefault(cloud, {})[project_id] = (monotonic(), members)
+        missing.difference_update(members)
+        return not missing
+
+    await _retrying(retry, attempt)
 
 
 async def assign_and_verify_project(
@@ -246,27 +296,31 @@ async def assign_and_verify_project(
     """The only assignment path: move droplets we just created into project Proxy Index.
 
     Before any POST, every id must be recorded, come from this client's create, and show every
-    marker on a fresh GET. Returns (confirmed, failed). Fail closed: a failed id is set to
-    `assign_failed`, must never be started, and is deleted through the own-unassigned path.
+    marker on a fresh GET; an id that fails a check raises `OwnershipError`, and so does a
+    project that is not Proxy Index. Every read and write is retried (`retry`). Returns
+    (confirmed, failed). Fail closed: an id that is not confirmed for any other reason (an
+    error, a droplet not shown yet, a project that never lists it) is set to `assign_failed`
+    with the ledger mark `assign_failed_at`, must never be started, and is deleted through the
+    own-unassigned path; the mark lets a later process retry that delete.
     """
     ids = sorted({str(i) for i in droplet_ids})
-    for rid in ids:
-        await _fresh_owned(cloud, scope, rid, records, role)
+    shown = await _shown(cloud, scope, ids, records, role, retry)
     if not ids:
         return frozenset(), frozenset()
-    if not await _project_named(cloud, scope.project_id):
-        raise OwnershipError("project", scope.project_id, ["project_id"])
-    missing = set(ids)
-    await _assign(cloud, scope.project_id, missing, retry)
+    missing = set(shown)
+    if missing:
+        await _assign(cloud, scope.project_id, missing, retry)
+    unconfirmed = missing | (set(ids) - shown)
+    now = utcnow().isoformat()
     for rid in ids:
         record = records[rid]
-        if rid in missing:
+        if rid in unconfirmed:
             record.status, record.error_class = "assign_failed", "project_assign_failed"
-            _assign_failed.setdefault(cloud, set()).add(rid)
+            record.assign_failed_at = now
         else:
-            record.status, record.assigned_at = "assigned", utcnow().isoformat()
+            record.status, record.assigned_at = "assigned", now
     ledger = Ledger({"droplet": ids}, records)
-    for rid in sorted(missing):
+    for rid in sorted(unconfirmed):
         try:
             await guarded_delete(cloud, "droplet", rid, scope, ledger, audit_path, role)
             records[rid].status, records[rid].destroyed_at = "destroyed", utcnow().isoformat()
@@ -274,4 +328,4 @@ async def assign_and_verify_project(
             records[rid].status = "destroy_refused"
         except Exception:  # audited by guarded_delete; never stop before the other ids
             records[rid].status = "destroy_failed"
-    return frozenset(ids) - missing, frozenset(missing)
+    return frozenset(ids) - unconfirmed, frozenset(unconfirmed)

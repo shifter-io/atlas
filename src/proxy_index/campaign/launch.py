@@ -301,6 +301,8 @@ class _Launch(HourWork):
         for worker in waiting:
             if worker.droplet_id in failed:
                 self.alert("high", "project_assign_failed", worker.name)
+            if worker.status == "destroy_refused":
+                self.alert("high", "destroy_refused", worker.name)
         return [w for w in waiting if w.droplet_id in failed]
 
     async def _bring_up(self, worker: DropletRecord, replace: bool) -> None:

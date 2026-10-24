@@ -193,6 +193,9 @@ class DropletRecord:
     steal_p95_pct: float | None = None
     load1_p95: float | None = None
     mem_used_max_pct: float | None = None
+    # Written only by scope.assign_and_verify_project: this id came from our own create and its
+    # membership in Proxy Index was never confirmed. The own-unassigned proof across processes.
+    assign_failed_at: str | None = None
 
 
 @dataclass

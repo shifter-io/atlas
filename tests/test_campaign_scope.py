@@ -454,16 +454,15 @@ async def test_the_own_unassigned_path_needs_every_condition(tmp_path, monkeypat
     fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
-        if case == "not_our_create":
+        if case == "not_our_create":  # a lookalike: our markers, recorded, but never marked
             droplet_id = fake.add(f"pic-{SID}-h03-fra1-shifter", OURS)
             records = {droplet_id: DropletRecord("shifter", "fra1", 3, "x", droplet_id,
                                                  status="assign_failed")}
-            scope._assign_failed.setdefault(cloud, set()).add(droplet_id)
         else:
             droplet_id = droplet.id
             records[droplet_id].status = "assign_failed"  # set by hand, not by the function
             if case == "too_old":
-                scope._assign_failed.setdefault(cloud, set()).add(droplet_id)
+                records[droplet_id].assign_failed_at = SPEC_TIME
                 monkeypatch.setattr(scope, "utcnow",
                                     lambda: datetime.fromisoformat("2027-01-01T22:29:00Z"))
         with pytest.raises(OwnershipError) as refused:
@@ -572,6 +571,16 @@ def _strings(tree):
             and isinstance(n.value, str) and id(n) not in docs]
 
 
+def _writes(tree, attribute):
+    """An assignment to `<x>.attribute` (also in a tuple), or `attribute=` passed to a call."""
+    kinds = ast.Assign | ast.AugAssign | ast.AnnAssign
+    targets = [n for node in ast.walk(tree) if isinstance(node, kinds)
+               for t in getattr(node, "targets", [getattr(node, "target", None)])
+               for n in ast.walk(t)]
+    return any(isinstance(n, ast.Attribute) and n.attr == attribute for n in targets) or any(
+        keyword.arg == attribute for call in _calls(tree) for keyword in call.keywords)
+
+
 def _names(tree):
     names = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
     names |= {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
@@ -643,6 +652,8 @@ def scan_violations(source: str, name: str) -> list[str]:
         found.append("tag resources")
     if name not in ("scope.py", "contracts.py") and "assign_failed" in strings:
         found.append("assign_failed set outside scope.py")
+    if name != "scope.py" and _writes(tree, "assign_failed_at"):  # CAMP-1k: the ledger mark
+        found.append("assign_failed_at set outside scope.py")
     for call in _calls(tree):
         call_name = _call_name(call).lower()
         if call_name != "guarded_delete" and any(
@@ -675,6 +686,8 @@ def side_doors(source: str) -> list[str]:
     'await cloud.assign_project(pid, ids, guard=token)',
     'import aiohttp',
     'record.status = "assign_failed"',
+    'worker.assign_failed_at = now',
+    'DropletRecord("n", "lon1", 3, NAME, "1", assign_failed_at="x")',
     'await cloud.destroy(droplet)',
 ])
 def test_the_scans_catch_known_bypasses(source):
@@ -772,6 +785,7 @@ def test_scope_coverage_gate(tmp_path):
     run = subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", __file__,
          str(Path(__file__).with_name("test_campaign_api.py")),
+         str(Path(__file__).with_name("test_campaign_unassigned.py")),
          "--cov=proxy_index.campaign.scope", "--cov=proxy_index.campaign.do_api",
          "--cov-branch", "--cov-fail-under=100", "--cov-report=term-missing"],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=240, check=False,
