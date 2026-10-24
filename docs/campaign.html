@@ -175,7 +175,7 @@ proxy-index campaign manager teardown --after-collect &lt;dest&gt;/collect-repor
 <p><b>Rerun after a partial failure.</b> Teardown is meant to be run again after a failed or refused removal (once the cause is fixed or the owner has decided): it skips the units and shred step once the secrets are shredded or the manager is gone, retries only the resources whose last result was not <code>deleted</code> or <code>absent</code>, and recomputes the proof. Never remove anything by hand.</p>
 </section>
 <section id="probe"><h2>Concurrency probe</h2>
-<p>Before the campaign, each network's highest safe concurrency is measured from one worker and recorded in its grammar as <code>[testing] max_concurrency = N</code> (<a href="providers.html#http">provider grammars</a>); <code>campaign plan</code> then runs each network at min(<code>--concurrency</code>, its maximum). Shifter records 2,000.</p>
+<p>Before the campaign, each network's highest safe concurrency is measured from one worker and recorded in its grammar as <code>[testing] max_concurrency = N</code> (<a href="providers.html#http">provider grammars</a>); <code>campaign plan</code> then runs each network at min(<code>--concurrency</code>, its maximum). Recorded from the 2026-10-24 probe: 2,000 for Shifter and 13 other networks, 500 for Proxy-Cheap and SOAX; Proxy-Seller has none yet (its probe run failed at the floor).</p>
 <pre>proxy-index campaign plan --account leftclick --start now-hour --networks all16 --regions nyc3 --size c-4 --image pi-camp-worker-… --synthetic --output &lt;dir&gt;
 proxy-index campaign manager upload-spec &lt;dir&gt;/&lt;campaign id&gt;
 ssh -i ~/.ssh/proxy-index-campaign -o UserKnownHostsFile=.secrets/campaign-manager.known_hosts root@&lt;host from the inventory&gt;
