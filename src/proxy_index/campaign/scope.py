@@ -80,15 +80,21 @@ class Ledger:
         return resource_id in {str(i) for i in self.ids.get(kind, ())}
 
 
+def _unsaved() -> None:
+    """The default `save`: a caller that keeps no ledger file."""
+
+
 @dataclass(frozen=True)
 class Retry:
-    """The assignment's tries (`attempts`, `delay` apart) and the waits between the fresh
-    reads of our own new droplets (`settle`)."""
+    """The assignment's tries (`attempts`, `delay` apart), the waits between the fresh reads
+    of our own new droplets (`settle`) and the caller's ledger `save`, which
+    `remove_unassigned` calls between the mark and the delete."""
 
     attempts: int = 3
     delay: float = 5.0
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     settle: tuple[float, ...] = SETTLE_DELAYS
+    save: Callable[[], None] = _unsaved
 
 
 ASSIGN_RETRY = Retry()  # 3 tries, 5 s apart (plan sections 2 and 9)
@@ -270,6 +276,29 @@ def _failed(checks: Mapping[str, bool]) -> list[str]:
     return [name for name, passed in checks.items() if not passed]
 
 
+def settling_refusal(audit_path: Path, droplet_id: str) -> bool:
+    """Whether the latest audited delete of this droplet was refused only because DigitalOcean
+    had not caught up with its create: a check in `SETTLING`, plus `project`, which a name not
+    shown yet also fails on the own-unassigned path. Reconcile then hands our own marked worker
+    to the guard again, which checks everything afresh. No audit line is False."""
+    latest = None
+    try:
+        lines = audit_path.read_text().splitlines()
+    except FileNotFoundError:
+        return False
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:  # a line cut short by a crash
+            continue
+        if entry.get("kind") == "droplet" and entry.get("id") == droplet_id:
+            latest = entry
+    if latest is None or latest.get("result") != "refused":
+        return False
+    failed = set(_failed(latest["checks"]))
+    return bool(failed & SETTLING) and failed <= SETTLING | {"project"}
+
+
 async def _retrying(retry: Retry, step: Callable[[], Awaitable[bool]]) -> None:
     """Run `step` until it returns True, at most `retry.attempts` times, `retry.delay` apart."""
     for attempt in range(retry.attempts):
@@ -349,7 +378,7 @@ async def assign_and_verify_project(
         records[rid].status, records[rid].assigned_at = "assigned", now
     await remove_unassigned(cloud, scope, records, audit_path, {
         rid: error_detail(cloud, [rid], failed=reads[rid] or ["project"]) for rid in unconfirmed},
-        role)
+        role, retry.save)
     return frozenset(ids) - set(unconfirmed), frozenset(unconfirmed)
 
 
@@ -364,14 +393,16 @@ def _require_own(cloud: DigitalOcean, ids: Collection[str],
 
 async def remove_unassigned(
     cloud: DigitalOcean, scope: Scope, records: Mapping[str, DropletRecord], audit_path: Path,
-    causes: Mapping[str, dict], role: Role = "worker",
+    causes: Mapping[str, dict], role: Role = "worker", save: Callable[[], None] = _unsaved,
 ) -> None:
     """Fail closed for droplets this client just created whose assignment was never confirmed,
     for any reason (`causes`: id -> `error_detail`). Each is set to `assign_failed` with the
     ledger mark `assign_failed_at` and its error, must never be started, and is deleted through
-    the guard (the own-unassigned path; the mark lets a later process retry that delete). Its
-    record ends `destroyed`, or `destroy_refused` / `destroy_failed` for the caller to flag.
-    An id that is not from this client's create raises `OwnershipError` and nothing is marked.
+    the guard (the own-unassigned path; the mark lets a later process retry that delete). The
+    caller's `save` writes the mark to its ledger before any delete, so a crash in between
+    cannot leave an unmarked worker. Its record ends `destroyed`, or `destroy_refused` /
+    `destroy_failed` for the caller to flag (and save). An id that is not from this client's
+    create raises `OwnershipError` and nothing is marked.
     """
     ids = sorted(causes)
     _require_own(cloud, ids, records)
@@ -381,6 +412,10 @@ async def remove_unassigned(
         record.status, record.assign_failed_at = "assign_failed", now
         record.error_class = record.error_class or "project_assign_failed"
         record.error_detail = causes[rid]
+    try:
+        save()
+    except Exception:  # never keep the delete from running; the caller's own save re-raises
+        pass
     ledger = Ledger({"droplet": ids}, records)
     for rid in ids:
         try:

@@ -438,6 +438,51 @@ async def test_never_confirmed_is_assign_failed_and_destroyed_through_own_unassi
     assert all(deleted["checks"].values())
 
 
+@pytest.mark.parametrize("save_fails", [False, True], ids=["saved", "save_failed"])
+async def test_the_mark_is_saved_before_the_delete(tmp_path, save_fails):
+    """CAMP-1r (a): the caller's save sees the mark and no delete yet; a failing save never
+    keeps our own unassigned droplet alive."""
+    fake, audit, seen = FakeDigitalOcean(), tmp_path / "audit.jsonl", []
+    async with running(fake) as cloud:
+        droplet, records = await created_worker(cloud)
+
+        def save():
+            record = records[droplet.id]
+            seen.append((record.status, bool(record.assign_failed_at), list(fake.deleted)))
+            if save_fails:
+                raise OSError("disk full")
+
+        fake.assign_delay = 99
+        _, failed = await assign_and_verify_project(
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(delay=0, save=save))
+    assert seen == [("assign_failed", True, [])] and failed == {droplet.id}
+    assert records[droplet.id].status == "destroyed" and droplet.id not in fake.droplets
+
+
+def test_settling_refusal_reads_only_the_latest_audit_line_of_the_droplet(tmp_path):
+    """CAMP-1r (b): retried only after a refusal on checks that settle after a create."""
+    audit = tmp_path / "audit.jsonl"
+    assert not scope.settling_refusal(audit, "7")  # no audit yet
+
+    def write(*entries):
+        audit.write_text("".join(json.dumps({"kind": "droplet", "id": "7"} | e) + "\n"
+                                 for e in entries) + '{"kind": "drop')  # cut short by a crash
+
+    def refused(*failed):
+        checks = dict.fromkeys(["recorded", "tags", "name", "not_manager", "project"], True)
+        return {"result": "refused", "checks": checks | dict.fromkeys(failed, False)}
+
+    write({"result": "deleted"})
+    assert not scope.settling_refusal(audit, "8")  # no line of this droplet
+    for failed, retried in ((["tags"], True), (["name", "project"], True),
+                            (["created_after", "project"], True), (["project"], False),
+                            (["tags", "not_manager"], False), (["recorded", "tags"], False)):
+        write(refused(*failed), {"id": "8", "result": "deleted"})
+        assert scope.settling_refusal(audit, "7") is retried, failed
+    write(refused("tags"), {"result": "deleted"}, {"kind": "ssh_key", **refused("tags")})
+    assert not scope.settling_refusal(audit, "7")
+
+
 async def test_a_late_arrival_is_destroyed_through_the_normal_path(tmp_path):
     fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
