@@ -145,9 +145,30 @@ def test_the_step_down_rule():
     assert reasons(step_result(2000, 25_000, summary(
         statuses={"504": 100}, errors={"timeout": 250})), base) == []
     high = step_result(500, 25_000, summary(errors={"timeout": 2500}))  # 10% at the floor
-    assert reasons(step_result(2000, 25_000, summary(errors={"timeout": 5000})), high) == []
+    assert reasons(step_result(2000, 25_000, summary(errors={"timeout": 3250})), high) == []
     assert reasons(step_result(2000, 25_000, summary(errors={"timeout": 5001})), high) == [
-        "timeouts_5xx"]
+        "timeouts_5xx", "success_drop"]
+
+
+def test_s2_every_failure_class_and_a_success_drop_count():
+    """S2: 407s, DNS, TLS, protocol errors, other statuses and blocks can no longer pass."""
+    base = step_result(500, 25_000, summary(errors={"tls": 50}))  # 0.2% other at the floor
+    cases = {
+        # The reviewer's case: 30% 407, 4% DNS, 4% protocol errors.
+        ("proxy_connect", "other_errors", "success_drop"): summary(
+            errors={"proxy_auth": 7500, "dns": 1000, "protocol": 1000}),
+        ("proxy_connect",): summary(errors={"proxy_auth": 501}),  # a 407 storm
+        ("other_errors",): summary(errors={"protocol": 150, "http_status": 151}),  # 1.204%
+        ("other_errors", "success_drop"): summary(errors={"blocked": 450, "challenge": 450}),
+        # Every class under its own limit, yet 5.5 points less success than the baseline.
+        ("success_drop",): summary(statuses={"429": 475}, errors={
+            "proxy_connect": 475, "timeout": 240, "tls": 225}),
+    }
+    for expected, run in cases.items():
+        assert reasons(step_result(2000, 25_000, run), base) == list(expected), expected
+    assert reasons(step_result(2000, 25_000, summary(errors={"tls": 299})), base) == []
+    assert step_result(2000, 25_000, summary(errors={"proxy_auth": 5, "dns": 5}))[
+        "proxy_connect_pct"] == 0.04
 
 
 def test_the_ladder_steps_down_to_just_above_the_floor(tmp_path):
@@ -179,7 +200,7 @@ async def test_the_probe_finds_each_networks_max_and_removes_its_worker(tmp_path
     net00, net01 = result["networks"]["net00"], result["networks"]["net01"]
     assert [s["concurrency"] for s in net00["steps"]] == [500, 2000, 1500, 1000]
     assert [s["step_down"] for s in net00["steps"]] == [
-        [], ["rate_limited"], ["proxy_connect"], []]
+        [], ["rate_limited", "success_drop"], ["proxy_connect"], []]
     assert net00["max_concurrency"] == 1000 and net01["max_concurrency"] == 2000
     assert [s["concurrency"] for s in net01["steps"]] == [500, 2000]
 

@@ -52,13 +52,17 @@ STEP_SECONDS = 1800.0  # one 25,000-request run; a timeout of 10 s bounds it nea
 TIMEOUT_SECONDS = 10  # per request, as the census rounds (onboarding manifest default)
 # The step-down rule (docs/campaign.html#probe). A step fails for concurrency when:
 RATE_LIMIT_PCT = 2.0  # more than 2% of completed requests are HTTP 429 (or Geonode's 469);
-CONNECT_PCT = 2.0  # more than 2% fail to connect to or through the gateway;
-SLOWDOWN_FACTOR, SLOWDOWN_POINTS = 2.0, 1.0  # timeouts + 502/503/504 exceed twice the
-# baseline rate and the baseline plus 1 point;
+CONNECT_PCT = 2.0  # more than 2% are refused by or cannot reach the gateway (incl. 407, DNS);
+SLOWDOWN_FACTOR, SLOWDOWN_POINTS = 2.0, 1.0  # timeouts + 502/503/504, or every other failure
+# (TLS, protocol, other statuses, challenges, blocks), exceed twice the baseline rate and the
+# baseline plus 1 point;
+SUCCESS_DROP_POINTS = 3.0  # success falls more than 3 points below the baseline's;
 COMPLETE_SHARE = 0.95  # fewer than 95% of the requests completed, or the run failed.
 USABLE_PCT = 50.0  # below this success rate at the floor the network is not probed further
 RATE_STATUSES, GATEWAY_STATUSES = ("429", "469"), ("502", "503", "504")
-CONNECT_ERRORS = ("proxy_connect", "connection")
+# The gateway refused or could not be reached: CONNECT failures, resets, a 407 (some gateways
+# answer a connection or thread limit with it) and an unresolvable gateway.
+CONNECT_ERRORS = ("proxy_connect", "connection", "proxy_auth", "dns")
 
 # Runs with the worker's system Python: argv = worker root, secrets dir. Credentials go to a
 # 0600 file under the secrets dir; the wheel is installed as for a round (`INSTALL_WHEEL`).
@@ -139,9 +143,13 @@ def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
         found.append("rate_limited")
     if step["proxy_connect_pct"] > CONNECT_PCT:
         found.append("proxy_connect")
-    slow, base = (s["timeout_pct"] + s["gateway_5xx_pct"] for s in (step, baseline))
-    if slow > max(SLOWDOWN_FACTOR * base, base + SLOWDOWN_POINTS):
-        found.append("timeouts_5xx")
+    for reason, keys in (("timeouts_5xx", ("timeout_pct", "gateway_5xx_pct")),
+                         ("other_errors", ("other_pct",))):
+        rate, base = (sum(s[k] for k in keys) for s in (step, baseline))
+        if rate > max(SLOWDOWN_FACTOR * base, base + SLOWDOWN_POINTS):
+            found.append(reason)
+    if step["success_pct"] < baseline["success_pct"] - SUCCESS_DROP_POINTS:
+        found.append("success_drop")
     return found
 
 
