@@ -30,6 +30,18 @@ READY_POLL_SECONDS = 2.0
 SOCKET_LIMIT = 104 - 17  # sun_path on macOS, less the suffix ssh adds while it binds
 Runner = Callable[[list[str], bytes | None, float, BinaryIO, int], Awaitable[int]]
 
+# Worker script lines: install `wheel` into the image's venv under `root` unless that exact
+# wheel is installed already. Shared by the round start and `campaign probe` (one install path).
+INSTALL_WHEEL = r"""sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
+marker = root / "installed-wheel.sha256"
+installed = marker.read_text().strip() if marker.exists() else ""
+python = str(root / "venv" / "bin" / "python")
+if sha != installed:
+    subprocess.run(["uv", "pip", "install", "--python", python, "--no-deps", "--offline",
+                    str(wheel)], check=True)
+    marker.write_text(sha + "\n")
+"""
+
 # Runs with the worker's system Python: argv = root, secrets dir, mcid, region, round.
 START_SCRIPT = r"""
 import hashlib, io, json, os, pathlib, subprocess, sys, tarfile, time
@@ -43,15 +55,7 @@ os.write(fd, secret); os.close(fd)
 members = [m for m in archive.getmembers() if m.name.startswith(("run/", "wheel/"))]
 archive.extractall(root, members=members, filter="data")
 wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
-sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
-marker = root / "installed-wheel.sha256"
-installed = marker.read_text().strip() if marker.exists() else ""
-python = str(root / "venv" / "bin" / "python")
-if sha != installed:
-    subprocess.run(["uv", "pip", "install", "--python", python, "--no-deps", "--offline",
-                    str(wheel)], check=True)
-    marker.write_text(sha + "\n")
-for _ in range(11):
+""" + INSTALL_WHEEL + r"""for _ in range(11):
     synced = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
                             capture_output=True, text=True).stdout.strip() == "yes"
     if synced:

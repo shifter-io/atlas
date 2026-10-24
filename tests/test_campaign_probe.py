@@ -422,3 +422,37 @@ async def test_a_capped_manifest_launches_at_its_own_concurrency(tmp_path):
                                         "settings": {"concurrency": bad}}))
         with pytest.raises(ValueError, match="exceeds the campaign spec"):
             await launched(tmp_path, FakeDigitalOcean(), spec)
+
+
+def test_the_setup_script_writes_private_credentials_and_installs_like_a_round(tmp_path):
+    """m5: the probe and the round share one wheel install block."""
+    import os
+    import stat
+    import subprocess
+    import sys
+
+    assert fanout.INSTALL_WHEEL in probing.SETUP_SCRIPT
+    assert fanout.INSTALL_WHEEL in fanout.START_SCRIPT
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    (stub / "uv").write_text("#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/calls\"\n")
+    (stub / "uv").chmod(0o755)
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w") as archive:
+        for name, data in (("wheel/w-1-py3-none-any.whl", b"wheel"),
+                           ("probe/soax.toml", b"provider = 'soax'\n"),
+                           ("secrets/soax.toml", b"password = 'x'\n")):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+    root, secrets = tmp_path / "worker", tmp_path / "run"
+    env = os.environ | {"PATH": f"{stub}:{os.environ['PATH']}"}
+    for _ in range(2):  # the second push finds the same wheel installed
+        reply = subprocess.run([sys.executable, "-c", probing.SETUP_SCRIPT, str(root),
+                                str(secrets)], input=payload.getvalue(), capture_output=True,
+                               env=env, check=True)
+        assert reply.stdout.decode().splitlines()[-1] == "ready"
+    credentials = secrets / "probe" / "soax.toml"
+    assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
+    assert (root / "probe" / "soax.toml").exists() and not (root / "secrets").exists()
+    assert len((stub / "calls").read_text().splitlines()) == 1

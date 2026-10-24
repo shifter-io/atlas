@@ -43,7 +43,7 @@ from .contracts import (
     spec_path,
 )
 from .do_api import CreateError, DigitalOcean
-from .fanout import RemoteError
+from .fanout import INSTALL_WHEEL, RemoteError
 from .launch import READY_LIMIT_SECONDS, WorkerInputs, manifest_path
 
 REQUESTS, START, STEP, FLOOR = 25_000, 2000, 500, 500
@@ -61,7 +61,7 @@ RATE_STATUSES, GATEWAY_STATUSES = ("429", "469"), ("502", "503", "504")
 CONNECT_ERRORS = ("proxy_connect", "connection")
 
 # Runs with the worker's system Python: argv = worker root, secrets dir. Credentials go to a
-# 0600 file under the secrets dir; the wheel is installed into the image's venv when new.
+# 0600 file under the secrets dir; the wheel is installed as for a round (`INSTALL_WHEEL`).
 SETUP_SCRIPT = r"""
 import hashlib, io, os, pathlib, subprocess, sys, tarfile
 root, secrets = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]) / "probe"
@@ -75,13 +75,7 @@ for member in archive.getmembers():
 members = [m for m in archive.getmembers() if m.name.startswith(("probe/", "wheel/"))]
 archive.extractall(root, members=members, filter="data")
 wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
-sha = hashlib.sha256(wheel.read_bytes()).hexdigest()
-marker = root / "installed-wheel.sha256"
-if (marker.read_text().strip() if marker.exists() else "") != sha:
-    subprocess.run(["uv", "pip", "install", "--python", str(root / "venv" / "bin" / "python"),
-                    "--no-deps", "--offline", str(wheel)], check=True)
-    marker.write_text(sha + "\n")
-print("ready")
+""" + INSTALL_WHEEL + r"""print("ready")
 """
 
 
