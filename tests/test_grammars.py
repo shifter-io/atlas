@@ -54,9 +54,9 @@ GOLDEN = {
     "oxylabs": ({"country": "us", "region": "california", "session": "abc123", "ttl": 30},
                 "pr.oxylabs.io:7777",
                 "customer-fixture1-cc-US-st-us_california-sessid-abc123-sesstime-30", SECRET),
-    "proxy-cheap": ({"country": "US", "session": "12345678", "ttl": 30},
+    "proxy-cheap": ({"country": "US", "session": "12345678", "ttl": 10},
                     "thehub.proxy-cheap.com:8080", "fixture1",
-                    SECRET + "_country-us_session-12345678_ttl-30"),
+                    SECRET + "_country-US_session-12345678_ttl-10"),
     "proxy-seller": ({"session": 7}, "res.proxy-seller.com:10007", "fixture1", SECRET),
     "proxyempire": ({"country": "US", "session": "abc123", "ttl": 30}, "v2.proxyempire.io:5000",
                     "fixture1-country-us-sid-abc123-ttl-30m", SECRET),
@@ -130,6 +130,19 @@ def test_rotation_never_sends_a_session(provider):
     if key is not None and key.format != "{}":
         rendered = key.format.split("{}")[0]
         assert rendered not in f"{first.username} {first.password}"
+
+
+def test_proxy_cheap_renders_the_dashboard_credential_shape():
+    # The dashboard generator emits {password}_country-US_session-<8 digits>_ttl-<n>.
+    rotating = proxy("proxy-cheap", parameters={"country": "us"})
+    assert rotating.resolve(CONTEXT).password == SECRET + "_country-US"
+    sessions = proxy("proxy-cheap", parameters={"country": "us", "ttl": 10},
+                     session_policy="per_request")
+    passwords = {sessions.resolve(RequestContext("run-one", i, 0)).password
+                 for i in range(100)}
+    assert len(passwords) == 100
+    shape = re.escape(SECRET) + r"_country-US_session-[1-9][0-9]{7}_ttl-10"
+    assert all(re.fullmatch(shape, password) for password in passwords)
 
 
 @pytest.mark.parametrize("provider,options", [
@@ -247,7 +260,7 @@ def test_grammar_schema_is_validated(change):
 
 
 def test_requested_country_is_canonical_lowercase():
-    for provider in ("massive", "oxylabs", "evomi", "infatica", "rayobyte"):
+    for provider in ("massive", "oxylabs", "evomi", "infatica", "rayobyte", "proxy-cheap"):
         p = proxy(provider, parameters={"country": "us"})
         assert RunConfig("generic_http", p, requested_country="us").requested_country == "us"
 

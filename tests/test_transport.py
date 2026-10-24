@@ -44,6 +44,30 @@ async def test_fresh_connections_and_concurrency(tmp_path):
     assert all(b"http://ip-info.com/myip" in r for r in gateway.requests)
 
 
+async def test_fresh_connection_even_when_the_gateway_keeps_alive(tmp_path):
+    # Rotating gateways can pin an exit to a reused connection, so every request
+    # opens its own connection even when the gateway offers keep-alive.
+    connections, requests = [], []
+
+    async def gateway(reader, writer):
+        connections.append(None)
+        while True:
+            try:
+                request = await reader.readuntil(b"\r\n\r\n")
+            except (asyncio.IncompleteReadError, ConnectionError):
+                break
+            requests.append(request)
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n"
+                         b"Connection: keep-alive\r\n\r\n192.0.2.1\n")
+            await writer.drain()
+
+    async with server(gateway) as port:
+        result = await run(config(port, requests=12, concurrency=3), JsonSink(tmp_path))
+    assert result.successes == 12
+    assert len(connections) == len(requests) == 12
+    assert all(b"\r\nConnection: close\r\n" in request for request in requests)
+
+
 async def test_no_hidden_retry(tmp_path):
     gateway = Gateway(disconnect=True)
     async with server(gateway) as port:
