@@ -139,6 +139,8 @@ def _manifests(inputs: PlanInputs, begins: datetime, current: bool, root: Path,
             execution_mode="ephemeral", grace_hours=inputs.grace_hours,
             allow_current_hour=current, run_settings={"concurrency": inputs.concurrency},
             slot_minutes=inputs.slot_minutes)
+        if manifest.slot_minutes(manifest.load(path)) != inputs.slot_minutes:
+            raise PlanError("a manifest's slot_minutes differs from the campaign spec")
         atomic_bytes(path.parent / "provider.toml", config.read_bytes())
         found[network] = path.relative_to(root).as_posix()
     return found

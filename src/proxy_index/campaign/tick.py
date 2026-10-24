@@ -299,11 +299,13 @@ def _network_command(args) -> int:
 
 
 def register(subcommands, handlers: dict) -> None:
-    tick = subcommands.add_parser("tick", help="Launch every due slot (systemd timer, *:58:30)")
+    tick = subcommands.add_parser(
+        "tick", help="Launch every due slot (systemd timer; hourly default *:58:30)")
     tick.add_argument("--root", required=True)
     tick.add_argument("--slot", type=int)
     tick.add_argument("--now", action="store_true", help="launch --slot immediately (dry run)")
-    watchdog = subcommands.add_parser("watchdog", help="Missed-slot alarm (*:00:30, *:02:00)")
+    watchdog = subcommands.add_parser(
+        "watchdog", help="Missed-slot alarm (hourly default *:00:30, *:02:00)")
     watchdog.add_argument("--root", required=True)
     watchdog.add_argument("--check", choices=("armed", "fired"), required=True)
     network = subcommands.add_parser("network", help="Pause or resume a network from next hour")

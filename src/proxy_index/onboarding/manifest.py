@@ -225,9 +225,10 @@ def validate(data: dict) -> dict:
     span = 24 * slot * (len(REGION_IDS) if mode == "sequential" else 1)
     span += timedelta(hours=ephemeral_grace(data) if data["schema_version"] == 3 else 0)
     if start.minute or start.second or start.microsecond or end - start != span:
-        raise ValueError("Campaign duration must give each region exactly 24 whole UTC hours")
+        raise ValueError("Campaign duration must give each region exactly 24 rounds "
+                         "slot_minutes apart")
     if data["rounds"] != [timestamp(start + i * slot) for i in range(24)]:
-        raise ValueError("Campaign must contain exactly 24 hourly rounds")
+        raise ValueError("Campaign must contain exactly 24 rounds slot_minutes apart")
     regions = data["regions"]
     if not isinstance(regions, dict) or set(regions) != set(REGION_IDS):
         raise ValueError("Campaign must contain all eight regions")

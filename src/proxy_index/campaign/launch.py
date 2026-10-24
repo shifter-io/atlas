@@ -189,6 +189,8 @@ class _Launch(HourWork):
             manifest = read_json(manifest_path(self.root, spec, network))
             if manifest["settings"]["concurrency"] != spec.concurrency:
                 raise ValueError("a manifest's concurrency differs from the campaign spec")
+            if manifest.get("slot_minutes", 60) != spec.slot_minutes:
+                raise ValueError("a manifest's slot_minutes differs from the campaign spec")
             countries = manifest["regions"]
             record.traffic[network] = dict.fromkeys(TRAFFIC_KEYS, 0)
             record.traffic[network]["countries_total"] = sum(

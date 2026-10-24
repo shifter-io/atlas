@@ -29,6 +29,7 @@ from proxy_index.campaign.tick import (
     scheduled_at,
     slot_label,
 )
+from proxy_index.campaign.watch import report_label, report_message
 from proxy_index.onboarding import manifest
 
 QUARTER = timedelta(minutes=15)
@@ -147,3 +148,27 @@ def test_a_15_minute_manifest_spaces_its_24_rounds_15_minutes_apart(tmp_path):
             manifest.validate(data | {"slot_minutes": bad})
     with pytest.raises(ValueError):
         manifest.validate(hourly | {"slot_minutes": 15})
+
+
+async def test_a_manifest_with_another_slot_interval_is_refused_before_any_create(tmp_path):
+    """m3: a hand-edited spec whose manifests are hourly fails before anything is created."""
+    fake = FakeDigitalOcean()
+    spec = hour_spec(NETWORKS[:1], REGIONS[:1], **COMPRESSED)
+    hourly = hour_spec(NETWORKS[:1], REGIONS[:1])
+    _, root, *_ = await launched(tmp_path, FakeDigitalOcean(), hourly)
+    with pytest.raises(ValueError, match="slot_minutes differs"):
+        await launched(tmp_path, fake, spec, record=HourRecord(CID, 1, "2027-01-01T22:15:00Z"))
+    assert not [r for r in fake.requests if r[0] == "POST"]
+
+
+def test_the_mac_watch_names_the_slot_and_its_time(tmp_path):
+    """m4: the notification and Traffic-Latest name `slot NN (HH:MM UTC)`, not `hour NN`."""
+    root = make_root(tmp_path, **COMPRESSED)
+    save_hour(root, HourRecord(CID, 2, (START + 2 * QUARTER).isoformat(), state="failed"))
+    text = write_traffic_report(root, 2).read_text()
+    totals = {"02": {"shifter": 3 * 10**9}}
+    assert report_label("hour-02.md", text) == "slot 02 (22:30 UTC)"
+    assert report_message("hour-02.md", totals, text) == (
+        "CAMP-1 slot 02 (22:30 UTC): 3.00 GB; top network shifter 3.00 GB")
+    assert report_label("hour-02.md") == "hour 02"
+    assert report_label("hour-02.md", "# Campaign hour 02 — traffic per network\n") == "hour 02"

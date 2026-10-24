@@ -869,9 +869,14 @@ async def test_enable_installs_quarter_slot_timer_dropins(deployed, tmp_path):
     calendars = timer_calendars(15, 90)
     assert dropins == {
         f"proxy-index-campaign-{name}@{CID}.timer.d/slots.conf":
-            f"# CAMP-1: campaign {CID} has a slot every 15 minutes.\n[Timer]\n"
+            f"# CAMP-1: campaign {CID} has a slot every 15 minutes.\n[Unit]\n"
+            f"Description=Proxy Index campaign %i: {role} every 15 min at "
+            f"{calendars[name].removeprefix('*-*-* ')}\n[Timer]\n"
             f"OnCalendar=\nOnCalendar={calendars[name]}\n"
-        for name in ("tick", "watchdog-armed", "watchdog-fired")}
+        for name, role in (("tick", "launch"), ("watchdog-armed", "watchdog (armed)"),
+                           ("watchdog-fired", "watchdog (fired)"))}
+    assert "launch every 15 min at *:13,28,43,58:30" in dropins[
+        f"proxy-index-campaign-tick@{CID}.timer.d/slots.conf"]
 
 
 async def test_plan_with_quarter_slots_spaces_the_spec_and_the_manifests(plan_world):
@@ -899,3 +904,14 @@ async def test_plan_with_quarter_slots_spaces_the_spec_and_the_manifests(plan_wo
                   "--networks", "shifter", "--image", IMAGE, "--output", "o",
                   "--slot-minutes", "15", "--slots", "4"])
     assert (args.slot_minutes, args.slots) == (15, 4)
+
+
+async def test_plan_refuses_manifests_with_another_slot_interval(plan_world, monkeypatch):
+    """CAMP-1n m3: the spec and its manifests must agree on the slot interval."""
+    from dataclasses import replace
+
+    fake, inputs = plan_world
+    monkeypatch.setattr(planspec.manifest, "slot_minutes", lambda data: 60)
+    with pytest.raises(PlanError, match="slot_minutes differs"):
+        await run_plan(fake, replace(inputs, slot_minutes=15, slots=4))
+    assert not inputs.output.exists() or not list(inputs.output.iterdir())
