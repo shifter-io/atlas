@@ -46,4 +46,5 @@ length = 8
 ttl_flag = "ttl"
 
 [testing]
+max_concurrency = 500 # CONC-1 probe 2026-10-24: highest step that passed, one c-4 worker, US, 25,000 requests
 protocol = "mixed" # HTTP first; follow a gateway redirect to HTTPS
