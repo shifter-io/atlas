@@ -798,3 +798,80 @@ def test_m7_a_real_run_summary_is_classified():
             found["proxy_connect_pct"], found["timeout_pct"], found["other_pct"]) == (
         90.0, 3.0, 1.0, 2.5, 2.0, 1.5)
     assert (found["rps"], found["latency_p50_ms"], found["latency_p95_ms"]) == (100.0, 700, 1900)
+
+
+async def test_s1r_a_listing_error_during_remove_changes_nothing_and_a_rerun_removes(tmp_path,
+                                                                                    monkeypatch):
+    """S1r (a), (b): only a listing that answered may say absent or mark the worker ours."""
+    for case in ("no_id", "neither", "get_fails"):
+        fake = Hidden(3) if case == "no_id" else FakeDigitalOcean()
+        inputs, _ = world(tmp_path / case)
+        if case == "no_id":  # the create's answer was lost and every look missed it
+            folder = inputs.output / (await probed(fake, FakeProbeRemote({}), inputs))[
+                "probe_id"]
+        else:  # the process died between the create and the assignment
+            folder = await died(fake, inputs, monkeypatch, "before_assignment")
+        record = (folder / "probe-result.json").read_bytes()
+        if case == "get_fails":
+            worker_id = json.loads(record)["worker"]["droplet_id"]
+            fake.faults += [Fault("GET", f"/v2/droplets/{worker_id}", 400, times=1)]
+            fake.hide, fake.__class__ = 1, Hidden  # the listing answers, without the worker
+        else:
+            fake.faults.append(Fault("GET", "/v2/droplets", 400, times=1))
+        async with running(fake) as cloud:
+            with pytest.raises(ProbeError, match="could not read the probe's droplets.*again"):
+                await probing.recover(cloud, folder, sleep=no_sleep)
+        assert (folder / "probe-result.json").read_bytes() == record and fake.deleted == []
+        async with running(fake) as cloud:  # the outage is over
+            assert (await probing.recover(cloud, folder, sleep=no_sleep))[
+                "worker_status"] == "destroyed", case
+        assert len(fake.deleted) == 1
+
+
+class CancelledCreate(FakeDigitalOcean):
+    """The create lands; the next tag listings do not show it yet."""
+
+    def __init__(self, hide):
+        super().__init__()
+        self.hide = hide
+
+    async def _list(self, request):
+        if self.hide and request.query.get("tag_name"):
+            self.hide -= 1
+            return web.json_response({"droplets": [], "meta": {"total": 0}})
+        return await super()._list(request)
+
+
+@pytest.mark.parametrize("moment", ["post", "retry_wait"])
+async def test_s1r_a_signal_during_the_create_still_reports_the_worker(tmp_path, moment):
+    """S1r (c): cancelled during the POST or the 15 s wait: the hint, then --remove."""
+    fake = CancelledCreate(1 if moment == "post" else 2)  # every in-run look misses it
+    fake.create_then_fail = int(moment == "retry_wait")
+    inputs, _ = world(tmp_path)
+    task = asyncio.current_task()
+
+    async def sleep(seconds):
+        if seconds == probing.CREATE_RETRY_SECONDS:
+            task.cancel()
+            await asyncio.sleep(0)
+
+    async with running(fake) as cloud:
+        if moment == "post":
+            original = cloud.create
+
+            async def create(*args, **kwargs):
+                await original(*args, **kwargs)  # it landed; the answer never arrives
+                task.cancel()
+                await asyncio.sleep(0)
+
+            cloud.create = create
+        result = await probing.probe(cloud, FakeProbeRemote({}).factory, inputs, now=NOW,
+                                     sleep=sleep)
+    folder = inputs.output / result["probe_id"]
+    assert result["error"] == "cancelled by a signal" and result["worker"]["droplet_id"] is None
+    assert result["worker"]["error_class"] == "create_uncertain"
+    assert result["recover"] == f"campaign probe --remove {folder}" and fake.deleted == []
+    async with running(fake) as cloud:
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+            "destroyed")
+    assert len(fake.deleted) == 1

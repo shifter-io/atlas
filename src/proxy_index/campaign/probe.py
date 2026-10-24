@@ -309,6 +309,9 @@ class Probe:
         """Name before the create, id right after; a lost answer is adopted by exact name."""
         worker, tag = self.worker, hour_tag(self.probe_id, 0)
         worker.attempts, worker.requested_at = 1, timestamp(datetime.now(UTC).timestamp())
+        # Uncertain until an id is known or the create definitely failed, so a signal during
+        # the POST or the retry wait still gets the cleanup's last look and the recover hint.
+        worker.error_class = "create_uncertain"
         self.save()
         try:
             [droplet] = await self.cloud.create(
@@ -329,7 +332,7 @@ class Probe:
                 worker.error_class = "create_uncertain" if error.uncertain else "create_failed"
                 raise
             droplet = found
-        worker.droplet_id = droplet.id
+        worker.droplet_id, worker.error_class = droplet.id, None
         self.save()
         _, failed = await scope.assign_and_verify_project(
             self.cloud, self.scope, [droplet.id], {droplet.id: worker},
@@ -402,12 +405,16 @@ class Probe:
                     "run_failed": type(error).__name__}
 
 
-async def adopt(cloud: DigitalOcean, worker: DropletRecord, probe_id: str) -> Droplet | None:
+async def adopt(cloud: DigitalOcean, worker: DropletRecord, probe_id: str, *,
+                strict: bool = False) -> Droplet | None:
     """The droplet with the worker's exact name under the probe's hour tag (`adopt_uncertain`,
-    which also counts it as this client's own create); None when absent or unreadable."""
+    which also counts it as this client's own create); None when absent, or when unreadable
+    unless `strict` (then the API error is raised)."""
     try:
         found = await cloud.adopt_uncertain([worker.name], hour_tag(probe_id, 0))
     except Exception:
+        if strict:
+            raise
         return None
     mine = [d for d in found if worker.droplet_id in (None, d.id)]
     if len(mine) != 1:
@@ -461,9 +468,14 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ProbeError(f"no probe record in that folder ({type(error).__name__})") from None
     if worker.status != "destroyed":
-        found = await adopt(cloud, worker, result["probe_id"])
-        if found is None and (worker.droplet_id is None or await cloud.get(
-                str(worker.droplet_id)) is None):
+        try:  # only a listing that answered may say "absent", or mark the droplet our own
+            found = await adopt(cloud, worker, result["probe_id"], strict=True)
+            gone = found is None and (worker.droplet_id is None or await cloud.get(
+                str(worker.droplet_id)) is None)
+        except Exception as error:
+            raise ProbeError(f"could not read the probe's droplets ({type(error).__name__}); "
+                             "nothing changed, run --remove again") from None
+        if gone:
             worker.status = "absent"  # never created, or already gone
         else:
             await release(cloud, probe_scope, worker, audit_path(folder), sleep)
