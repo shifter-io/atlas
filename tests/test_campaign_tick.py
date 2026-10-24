@@ -206,8 +206,29 @@ async def test_pause_and_resume_change_only_later_hours(tmp_path):
     clock.now = due_at(make_spec(), 2)
     await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock)
     assert len(calls) == 2 and load_hour(root, make_spec(), 2).state == "done"
+    assert [load_hour(root, make_spec(), k).paused_networks for k in range(3)] == [
+        ["shifter"], [], ["geonode", "shifter"]]
     with pytest.raises(ValueError):
         set_paused(root, "unknown", True)
+
+
+async def test_a_resumed_slot_records_the_networks_it_launched_without(tmp_path):
+    """CAMP-1p: merge reads `paused_networks`, so it names the overlay the launch used."""
+    root, calls = make_root(tmp_path), []
+    clock = Clock(due_at(make_spec(), 0))
+    set_paused(root, "shifter", True)
+
+    async def crash(spec, record, root):
+        raise RuntimeError("tick killed mid-launch")
+
+    with pytest.raises(RuntimeError):
+        await run_tick(root, launcher=crash, clock=clock)
+    assert load_hour(root, make_spec(), 0).paused_networks == ["shifter"]
+    set_paused(root, "shifter", False)
+    set_paused(root, "geonode", True)
+    await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock)
+    assert calls == [(0, clock(), ("shifter",))]
+    assert load_hour(root, make_spec(), 0).paused_networks == ["geonode"]
 
 
 # 8: watchdog alarms.

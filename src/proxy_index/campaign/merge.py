@@ -2,12 +2,13 @@
 
 A campaign cell is one network, region and hour. Its data is the round the harvest pulled
 (`regions/<R>/rounds/<NN>/round.json`); a cell without one is judged from the hour ledger's
-droplet records. The merged region is an ordinary closed onboarding checkpoint, so
-`onboarding export` reads it unchanged.
+droplet records and paused networks. The merged region is an ordinary closed onboarding
+checkpoint, so `onboarding export` reads it unchanged.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import get_args
 
@@ -60,16 +61,32 @@ def manifest_path(root: Path, network: str) -> Path:
     return found[0]
 
 
-def ledger_droplets(root: Path) -> dict[tuple[str, str, int], list[DropletRecord]]:
-    """Droplet records per (network, region, hour), in ledger order, from every hour record."""
+@dataclass(frozen=True)
+class Ledger:
+    """What merge reads from the hour records: droplet records per (network, region, hour),
+    in ledger order, and the (network, hour) pairs whose network was paused at launch."""
+
+    droplets: dict[tuple[str, str, int], list[DropletRecord]]
+    paused: frozenset[tuple[str, int]]
+
+    def paused_cell(self, cell: tuple[str, str, int]) -> bool:
+        network, _, hour = cell
+        return (network, hour) in self.paused
+
+
+def read_ledger(root: Path) -> Ledger:
+    """The `Ledger` of every hour record under `root`."""
     cells: dict[tuple[str, str, int], list[DropletRecord]] = {}
+    paused: set[tuple[str, int]] = set()
     for hour in range(HOURS):
         path = hour_path(root, hour)
         if path.exists():
-            for droplet in HourRecord.from_dict(read_json(path)).droplets:
+            record = HourRecord.from_dict(read_json(path))
+            paused |= {(network, hour) for network in record.paused_networks}
+            for droplet in record.droplets:
                 key = (droplet.network, droplet.region, droplet.hour)
                 cells.setdefault(key, []).append(droplet)
-    return cells
+    return Ledger(cells, frozenset(paused))
 
 
 def _never_started(droplet: DropletRecord) -> bool:
@@ -77,12 +94,15 @@ def _never_started(droplet: DropletRecord) -> bool:
     return droplet.status in NEVER_STARTED or (droplet.status in DESTROYED and unstarted)
 
 
-def cell_status(state: dict | None, droplets: list[DropletRecord] | None) -> tuple[str, str | None]:
+def cell_status(state: dict | None, droplets: list[DropletRecord] | None,
+                paused: bool = False) -> tuple[str, str | None]:
     """A cell's status and qualifying note from its pulled round (or None) and its workers.
 
     Statuses: `pulled` (a closed round, judged by its data), `failed_ours`, `running`,
-    `pending` and `uncollected` (the round ran but is not in the campaign root). A round that
-    is not closed while no worker is live ended without closing (killed): `failed_ours`.
+    `pending`, `uncollected` (the round ran but is not in the campaign root) and `paused`
+    (no worker, and the network was paused when its hour launched: final, with no data). A
+    round that is not closed while no worker is live ended without closing (killed):
+    `failed_ours`.
     """
     live = any(d.status in LIVE for d in droplets or ())
     if state is not None:
@@ -90,7 +110,7 @@ def cell_status(state: dict | None, droplets: list[DropletRecord] | None) -> tup
             return ("failed_ours" if state["status"] == "failed" else "pulled"), None
         return ("running", None) if live else ("failed_ours", ENDED)
     if not droplets:
-        return "pending", None
+        return ("paused" if paused else "pending"), None
     if live:
         return "running", None
     if any(d.status == "collect_failed" for d in droplets):
@@ -117,11 +137,11 @@ def _unstarted_jobs(manifest: dict, region: str, hour: int) -> list[dict]:
 
 
 def _cell_jobs(path: Path, manifest: dict, cell: tuple[str, str, int],
-               droplets: list[DropletRecord] | None) -> tuple[list[dict], dict | None]:
+               ledger: Ledger) -> tuple[list[dict], dict | None]:
     """The jobs one finished cell contributes, and its round; raises for any other cell."""
     network, region, hour = cell
     state = read_round(path, manifest, region, hour)
-    kind, note = cell_status(state, droplets)
+    kind, note = cell_status(state, ledger.droplets.get(cell), ledger.paused_cell(cell))
     label = f"{network} {region} h{hour:02d}"
     if kind in ("pending", "running") or note == WAITING:
         raise CampaignNotFinished(f"{label}: {note}" if note else f"{label} is {kind}")
@@ -136,7 +156,7 @@ def _cell_jobs(path: Path, manifest: dict, cell: tuple[str, str, int],
 
 
 def build_region(path: Path, manifest: dict, network: str, region: str,
-                 droplets: dict, slots: int = HOURS) -> dict:
+                 ledger: Ledger, slots: int = HOURS) -> dict:
     """The closed 24-round checkpoint of one region; raises on an unfinished cell. Rounds past
     the spec's `slots` (a compressed test) are never launched: they close unstarted."""
     jobs, rounds = [], []
@@ -145,7 +165,7 @@ def build_region(path: Path, manifest: dict, network: str, region: str,
             jobs.extend(_unstarted_jobs(manifest, region, hour))
             continue
         cell = (network, region, hour)
-        cell_jobs, state = _cell_jobs(path, manifest, cell, droplets.get(cell))
+        cell_jobs, state = _cell_jobs(path, manifest, cell, ledger)
         jobs.extend(cell_jobs)
         rounds += [state] if state else []
     merged = new_state(manifest, region, settings(manifest["settings"]))
@@ -162,21 +182,22 @@ def merge_networks(root: Path, networks: list[str] | tuple[str, ...]) -> dict[st
     Every cell of every requested network is checked before anything is written. A cell is
     finished when its pulled round is closed, its round ended without closing and no worker
     is live (open jobs close as `failed` or `not_started_deadline`), or no worker ever
-    started (countries become `not_started_deadline` at the manifest's `scheduled_at`).
+    started or the cell is `paused` (countries become `not_started_deadline` at the
+    manifest's `scheduled_at`, with no data).
     Pending, running and `collect_failed` cells raise `CampaignNotFinished`; a started
     worker whose round is not in the root raises `RoundDataMissing`.
     """
     spec = load_spec(root)
     if not set(networks) <= set(spec.networks):
         raise ValueError("Network is not part of this campaign")
-    droplets = ledger_droplets(root)
+    ledger = read_ledger(root)
     built = []
     for network in networks:
         path = manifest_path(root, network)
         manifest = load(path)
         if manifest["schema_version"] != 3:
             raise ValueError("Campaign merge requires ephemeral (version 3) manifests")
-        built += [(network, path, build_region(path, manifest, network, region, droplets,
+        built += [(network, path, build_region(path, manifest, network, region, ledger,
                                                     spec.hours))
                   for region in spec.regions]
     summaries: dict[str, list[dict]] = {network: [] for network in networks}

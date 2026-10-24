@@ -181,11 +181,14 @@ async def _launch(root: Path, spec: CampaignSpec, slot: int, launcher: HourLaunc
         record.fired_at, record.launch_delay_seconds = now.isoformat(), round(delay, 3)
         if paused:
             record.alerts.append({"code": "network_paused", "level": "info", "networks": paused})
-        record.state = "launching"
+        record.state, record.paused_networks = "launching", paused
         save_hour(root, record)
         if delay > LATE_SECONDS and not now_mode:
             alert(root, now, "late_launch", key=f"h{slot:02d}", hour=slot,
                   launch_delay_seconds=record.launch_delay_seconds)
+    elif record.paused_networks != paused:  # a resumed slot launches with the current overlay
+        record.paused_networks = paused
+        save_hour(root, record)
     launch_spec = active_spec(spec, paused)
     if not launch_spec.networks:
         record.state, record.finished_at = "done", clock().isoformat()
