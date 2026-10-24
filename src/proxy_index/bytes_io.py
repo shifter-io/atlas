@@ -12,8 +12,9 @@ for the handshake. Estimated figures are flagged as such (`exact=False`),
 because "we measured 26 MB" and "we think it was about 26 MB" differ when they
 are compared against an invoice.
 
-Ported from collector/src/milf/engine/bytes_io.py; the SOCKS5 negotiation size
-and the `connect` switch are framework additions.
+Ported from the old collector's engine/bytes_io.py (removed from the website
+repository); the SOCKS5 negotiation size and the `connect` switch are framework
+additions.
 """
 
 from __future__ import annotations

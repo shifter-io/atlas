@@ -1,6 +1,9 @@
-# Proxy-Cheap Residential. No public grammar documentation; verified live 2026-10-22.
-# Flags are appended to the PASSWORD. Self-made sessions must be eight digits and
-# carry a ttl, otherwise the gateway answers 502/504. Unknown keys return 500.
+# Proxy-Cheap Rotating Residential, in the shape its dashboard credentials generator emits:
+# password {password}_country-US_session-<8 digits>_ttl-<n>. Docs: support.proxy-cheap.com
+# articles 30423207064349 (Random IP rotates per request or connection; a Session ID with
+# TTL keeps one exit for up to 30 minutes) and 24640951600413 (credentials generator).
+# Self-made sessions must be eight digits and carry a ttl, otherwise the gateway answers
+# 502/504. Unknown keys return 500.
 # About 45% of plain-HTTP requests get a gateway 301 to HTTPS (2026-10-23); HTTP echo
 # tests follow that redirect over HTTPS ([testing] protocol mixed).
 schema_version = 1
@@ -19,7 +22,7 @@ ports = { http = 8080 }
 [flags.country]
 kind = "country"
 format = "country-{}"
-case = "lower"
+case = "upper"
 
 [flags.session]
 kind = "session"
@@ -31,6 +34,8 @@ requires = ["ttl"]
 kind = "integer"
 format = "ttl-{}" # Unit undocumented; treated as minutes.
 min = 1
+# Accepted up to 1440, although the docs keep one exit for at most 30 minutes: no live
+# check has shown how the gateway treats larger values, so do not rely on them.
 max = 1440
 requires_session = true
 

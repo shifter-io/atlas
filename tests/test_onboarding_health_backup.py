@@ -82,3 +82,11 @@ def test_backup_never_treats_terminal_failure_as_complete(tmp_path):
     receipt = verify_region(m, 'tor1', directory, tree_inventory(directory))
     assert receipt['verified_backup'] and not receipt['complete_measurement']
     assert receipt['completed_jobs'] == 71
+
+
+def test_remote_tree_checks_only_the_current_unit_name():
+    from proxy_index.onboarding.backup import REMOTE_TREE
+    compile(REMOTE_TREE, 'remote_tree', 'exec')
+    assert ("unit='proxy-index-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'"
+            in REMOTE_TREE)
+    assert REMOTE_TREE.count('.service') == 1

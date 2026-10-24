@@ -17,9 +17,10 @@ timeout, never a block. A target that answers with any other error status
 (404, 500, ...) is an error: it did not refuse us, it is broken or the request
 was wrong.
 
-Ported from collector/src/milf/engine/outcome.py. The framework adds ERROR, the
-verdict for everything that is neither the target's nor the gateway's answer
-(TLS, DNS, a dropped connection, a malformed body).
+Ported from the old collector's engine/outcome.py (removed from the website
+repository). The framework adds ERROR, the verdict for everything that is
+neither the target's nor the gateway's answer (TLS, DNS, a dropped
+connection, a malformed body).
 """
 
 from __future__ import annotations
