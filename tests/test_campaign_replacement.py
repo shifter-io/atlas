@@ -119,3 +119,8 @@ async def test_spent_replacements_make_the_cell_failed_ours_with_an_alert(tmp_pa
     assert entry["extra_delay_seconds"] is None
     assert [a["kind"] for a in record.alerts] == ["project_assign_failed", "cell_failed"]
     assert [a["level"] for a in record.alerts] == ["high", "high"]
+
+
+def test_the_replacement_budget_is_three_per_cell():
+    """r1: the owner's bound; the tests above derive their counts from it."""
+    assert launch.REPLACEMENTS_PER_CELL == 3
