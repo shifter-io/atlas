@@ -373,7 +373,7 @@ def test_a_tampered_chunk_is_caught(root):
     assert rows["geonode", "tor1", 1]["cell"] == "failed_ours"
     path.write_text(json.dumps({"status": "completed"}))
     result = completeness.build(root)
-    assert "geonode tor1 h01: round failed verification (ValueError)" in result["issues"]
+    assert "geonode tor1 h01: round failed verification (RoundRefused)" in result["issues"]
     assert "shifter ams3 h00: NL: failed verification (ValueError)" in result["issues"]
 
 

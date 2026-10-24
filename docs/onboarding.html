@@ -16,12 +16,12 @@ details{padding:14px 0;border-bottom:1px solid var(--line)}summary{cursor:pointe
 <div class="grid"><div class="card"><b>24 rounds</b><span>Absolute UTC hourly schedule</span></div><div class="card"><b>8 servers</b><span>249 assigned countries/territories</span></div><div class="card"><b>1 country</b><span>At a time on each server</span></div></div>
 <section><h2>1. Create one shared campaign</h2><p>Run from the <code>proxy-index/</code> checkout. Install its dependencies with <code>uv sync</code>. All commands below use the source checkout explicitly, avoiding an older installed wheel.</p>
 <pre>uv run --no-editable proxy-index onboarding plan \
-  --provider-config configs/shifter.toml \
+  --provider-config configs/shifter-onboarding.toml \
   --product residential \
   --start 2027-01-01T22:00:00Z</pre>
 <p>Replace the example start with a <b>future whole UTC hour</b>. The command prints the path to <code>campaign.json</code> under <code>onboarding-networks/&lt;provider&gt;/&lt;product&gt;/&lt;campaign-id&gt;/</code>. Create this manifest once. Copy the same manifest and public provider configuration to all eight servers; keep the manifest in that same relative folder structure.</p>
 <p>The manifest freezes country order, 24 scheduled timestamps, the exact end timestamp, provider configuration checksum, framework version and census rule version. Provider configuration changes require a new campaign. It contains no credentials.</p>
-<p><a href="../configs/onboarding.env.example">Public launch-settings template</a> · <a href="../configs/shifter.toml">Existing Shifter adapter configuration</a></p></section>
+<p><a href="../configs/onboarding.env.example">Public launch-settings template</a> · <a href="../configs/shifter-onboarding.toml">Shifter onboarding configuration (strict)</a></p></section>
 <section id="execution-modes"><h2>Parallel or sequential regional campaigns</h2>
 <p><code>onboarding plan --execution-mode parallel</code> is the default: all eight regions share one 24-hour window, preserving the existing version-1 manifest behavior. <code>--execution-mode sequential</code> creates a version-2 manifest spanning eight days. Each region owns one non-overlapping 24-hour window, with 24 hourly rounds over its existing ordered country list. Both modes schedule all 249 countries 24 times: 5,976 country jobs.</p>
 <pre>proxy-index onboarding plan \
@@ -45,12 +45,12 @@ PYTHONPATH=src .venv/bin/python -m proxy_index.onboarding.backup \
 <section id="ephemeral-rounds"><h2>Ephemeral hourly rounds</h2>
 <p><code>--execution-mode ephemeral</code> creates a version-3 manifest for campaigns that run every hourly round of every region on its own fresh node. The manifest keeps the 24 hourly rounds and all eight regional country lists. Its default concurrency is 2,000 requests per country; <code>--concurrency</code> overrides it. <code>ends_at</code> is the last round's start plus one hour plus <code>--grace-hours</code> (default 48, range 1–168). It bounds observation validity only and never stops a round. <code>--allow-current-hour</code> accepts the current whole UTC hour as the start, for an immediate test; past hours are always refused.</p>
 <pre>proxy-index onboarding plan \
-  --provider-config configs/shifter.toml --product residential \
+  --provider-config configs/shifter-onboarding.toml --product residential \
   --start 2027-01-01T08:00:00Z --execution-mode ephemeral --grace-hours 48
 
 proxy-index onboarding round \
   --manifest &lt;campaign.json&gt; --region lon1 --round 0 \
-  --provider-config configs/shifter.toml --credentials-file .secrets/credentials.toml
+  --provider-config configs/shifter-onboarding.toml --credentials-file .secrets/credentials.toml
 
 proxy-index onboarding verify-round --manifest &lt;campaign.json&gt; --region lon1 --round 0</pre>
 <p><code>onboarding round</code> runs exactly one round of one region: its countries in manifest order, one at a time, with the census rule and no request cap or deadline, so every country runs to its natural end. Before any traffic it checks the provider configuration's SHA-256 against the manifest and every country's proxy targeting. It may be started up to 300 seconds before the round's scheduled time and waits for it; an earlier start is refused. A node runs a round once: an existing checkpoint refuses a replay.</p>
@@ -61,7 +61,7 @@ proxy-index onboarding verify-round --manifest &lt;campaign.json&gt; --region lo
 <pre>uv run --no-editable proxy-index onboarding run \
   --manifest onboarding-networks/shifter/residential/&lt;campaign-id&gt;/campaign.json \
   --region fra1 \
-  --provider-config configs/shifter.toml \
+  --provider-config configs/shifter-onboarding.toml \
   --credentials-file .secrets/credentials.toml \
   --concurrency 1000 \
   --timeout 10</pre>
@@ -171,7 +171,7 @@ Create a separate manifest for the full 24-hour campaign.</p></section>
 <section><h2>Single-country calibration and fleet monitoring</h2>
 <p>Before a full campaign, use <code>onboarding probe</code> to measure one country with the same census rule and individual-observation writer. A scheduled start must be a future whole UTC hour. Omitting <code>--start</code> starts this manual calibration immediately.</p>
 <pre>uv run --no-editable proxy-index onboarding probe \
-  --provider-config configs/shifter.toml \
+  --provider-config configs/shifter-onboarding.toml \
   --credentials-file .secrets/credentials.toml \
   --region nyc3 --country us --concurrency 2500 --timeout 10 \
   --start 2027-01-01T22:00:00Z \
