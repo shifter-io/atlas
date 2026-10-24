@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from ..onboarding.manifest import SLOT_MINUTES
 from ..regions import REGION_IDS
 
 WORKER_TAG = "pi-camp-worker"
@@ -107,8 +108,9 @@ class CampaignSpec:
     replace_until_minutes: int = 15
     synthetic: bool = False
     concurrency: int = 2000
-    hours: int = 24
+    hours: int = 24  # the number of slots (24 for a campaign; fewer for a compressed test)
     schema_version: int = 1
+    slot_minutes: int = 60  # slot k is scheduled at starts_at + k * slot_minutes
 
     def validate(self) -> CampaignSpec:
         short_id(self.campaign_id)
@@ -119,7 +121,8 @@ class CampaignSpec:
             (not self.project_id or not self.manager_droplet_id or not self.ssh_key_id, "ids"),
             (not _whole_hour(self.starts_at), "starts_at"),
             (datetime.fromisoformat(self.created_at).utcoffset() is None, "created_at"),
-            (self.hours != 24 or not 1 <= self.grace_hours <= 168, "hours"),
+            (not 1 <= self.hours <= 24 or not 1 <= self.grace_hours <= 168, "hours"),
+            (self.slot_minutes not in SLOT_MINUTES, "slot_minutes"),
             (not self.regions or list(self.regions) != order, "regions"),
             (not self.networks or len(set(self.networks)) != len(self.networks), "networks"),
             (any(not re.fullmatch(NETWORK_RE, n) for n in self.networks), "network names"),
@@ -127,11 +130,13 @@ class CampaignSpec:
             (set(self.size_by_region) != set(self.regions), "size_by_region"),
             (set(self.image_by_region) != set(self.regions), "image_by_region"),
             (not re.fullmatch(r"[0-9a-f]{64}", self.wheel_sha256), "wheel_sha256"),
-            (self.create_lead_seconds <= 0 or self.replace_until_minutes < 0, "timing"),
+            (self.create_lead_seconds <= 0 or self.replace_until_minutes < 0
+             or self.create_lead_seconds >= self.slot_minutes * 60
+             or self.replace_until_minutes > self.slot_minutes, "timing"),
             (not 1 <= self.concurrency <= 5000, "concurrency"),
         ]
         integers = ("hours", "grace_hours", "create_lead_seconds", "replace_until_minutes",
-                    "concurrency", "schema_version")
+                    "concurrency", "schema_version", "slot_minutes")
         problems += [(type(getattr(self, name)) is not int, name) for name in integers]
         bad = [name for failed, name in problems if failed]
         if bad:

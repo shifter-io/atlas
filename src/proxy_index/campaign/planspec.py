@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, read_json
+from ..onboarding.manifest import SLOT_MINUTES
 from ..providers import load_provider
 from ..providers.grammar import load_grammar
 from ..regions import REGION_IDS
@@ -53,6 +54,8 @@ class PlanInputs:
     grace_hours: int = 48
     synthetic: bool = False
     size: str = WORKER_SIZE
+    slot_minutes: int = 60  # a divisor of 60: slot k starts k * slot_minutes after the start
+    slots: int = 24  # fewer slots make a compressed test (4 slots of 15 minutes: one hour)
 
 
 def parse_networks(value: str) -> tuple[str, ...]:
@@ -134,7 +137,10 @@ def _manifests(inputs: PlanInputs, begins: datetime, current: bool, root: Path,
         path = manifest.create(
             config, PRODUCT, begins.isoformat(), root / "networks", now=now,
             execution_mode="ephemeral", grace_hours=inputs.grace_hours,
-            allow_current_hour=current, run_settings={"concurrency": inputs.concurrency})
+            allow_current_hour=current, run_settings={"concurrency": inputs.concurrency},
+            slot_minutes=inputs.slot_minutes)
+        if manifest.slot_minutes(manifest.load(path)) != inputs.slot_minutes:
+            raise PlanError("a manifest's slot_minutes differs from the campaign spec")
         atomic_bytes(path.parent / "provider.toml", config.read_bytes())
         found[network] = path.relative_to(root).as_posix()
     return found
@@ -149,6 +155,8 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         raise PlanError("--regions must be campaign regions")
     if not re.fullmatch(SIZE_RE, inputs.size):
         raise PlanError("--size must be a CPU-Optimized or Basic droplet slug")
+    if inputs.slot_minutes not in SLOT_MINUTES or not 1 <= inputs.slots <= 24:
+        raise PlanError(f"--slot-minutes must be one of {SLOT_MINUTES}; --slots 1 to 24")
     manager = read_json(inputs.inventory)
     if not all(manager.get(key) for key in ("manager_id", "wheel_sha256", "framework_version")):
         raise PlanError("deploy the manager before planning (inventory incomplete)")
@@ -175,7 +183,9 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         image_by_region=dict.fromkeys(regions, found["image_id"]), image_name=inputs.image,
         wheel_sha256=manager["wheel_sha256"], framework_version=manager["framework_version"],
         ssh_key_id=found["ssh_key_id"], manager_droplet_id=str(manager["manager_id"]),
-        synthetic=inputs.synthetic, concurrency=inputs.concurrency).validate()
+        synthetic=inputs.synthetic, concurrency=inputs.concurrency, hours=inputs.slots,
+        slot_minutes=inputs.slot_minutes,
+        replace_until_minutes=min(15, inputs.slot_minutes)).validate()
     try:
         spec = replace(spec, manifests=_manifests(inputs, begins, current, root, now)).validate()
     except Exception:
@@ -184,4 +194,5 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
     atomic_bytes(spec_path(root), spec.to_json().encode())
     return {"campaign_id": cid, "root": str(root), "starts_at": spec.starts_at,
             "networks": list(spec.networks), "regions": list(regions),
-            "concurrency": spec.concurrency, "synthetic": spec.synthetic}
+            "concurrency": spec.concurrency, "synthetic": spec.synthetic,
+            "slot_minutes": spec.slot_minutes, "slots": spec.hours}

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from ..onboarding.files import atomic_bytes
 from .contracts import CampaignSpec, DropletRecord, HourRecord, reports_dir
-from .tick import FINAL, load_hours, load_spec
+from .tick import FINAL, load_hours, load_spec, slot_label
 
 GB = 1e9
 SUMS = ("bytes_up", "bytes_down", "requests", "successes", "errors")
@@ -115,12 +115,17 @@ def render(spec: CampaignSpec, record: HourRecord, hours: dict[int, HourRecord])
     lateness = f"{min(late):.1f}–{max(late):.1f} s" if late else "not recorded"
     used = sorted({d.concurrency for d in record.droplets if d.concurrency} or {spec.concurrency})
     return "\n".join([
-        f"# Campaign hour {record.hour:02d} — traffic per network", "",
-        f"Campaign `{spec.campaign_id}`, hour scheduled {record.scheduled_at}, state "
+        f"# Campaign {slot_label(spec, record.hour)} — traffic per network", "",
+        f"Campaign `{spec.campaign_id}`, {slot_label(spec, record.hour).split()[0]} scheduled "
+        f"{record.scheduled_at}{every(spec)}, state "
         f"{record.state}. Start lateness: {lateness}. Concurrency per worker: "
         f"{', '.join(map(str, used))}. Launch delay: {record.launch_delay_seconds or 0:.1f} s.",
         "", *_traffic_table(rows, _cumulative(hours)), "", CUMULATIVE, "",
         "## CPU per region (worst worker)", "", *_cpu_table(record), "", NOTE, ""])
+
+
+def every(spec: CampaignSpec) -> str:
+    return "" if spec.slot_minutes == 60 else f" (a slot every {spec.slot_minutes} min)"
 
 
 def tsv(hours: dict[int, HourRecord], regions: int) -> str:

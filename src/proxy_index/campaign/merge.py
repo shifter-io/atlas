@@ -136,10 +136,14 @@ def _cell_jobs(path: Path, manifest: dict, cell: tuple[str, str, int],
 
 
 def build_region(path: Path, manifest: dict, network: str, region: str,
-                 droplets: dict) -> dict:
-    """The closed 24-round checkpoint of one region; raises on an unfinished cell."""
+                 droplets: dict, slots: int = HOURS) -> dict:
+    """The closed 24-round checkpoint of one region; raises on an unfinished cell. Rounds past
+    the spec's `slots` (a compressed test) are never launched: they close unstarted."""
     jobs, rounds = [], []
     for hour in range(HOURS):
+        if hour >= slots:
+            jobs.extend(_unstarted_jobs(manifest, region, hour))
+            continue
         cell = (network, region, hour)
         cell_jobs, state = _cell_jobs(path, manifest, cell, droplets.get(cell))
         jobs.extend(cell_jobs)
@@ -172,7 +176,8 @@ def merge_networks(root: Path, networks: list[str] | tuple[str, ...]) -> dict[st
         manifest = load(path)
         if manifest["schema_version"] != 3:
             raise ValueError("Campaign merge requires ephemeral (version 3) manifests")
-        built += [(network, path, build_region(path, manifest, network, region, droplets))
+        built += [(network, path, build_region(path, manifest, network, region, droplets,
+                                                    spec.hours))
                   for region in spec.regions]
     summaries: dict[str, list[dict]] = {network: [] for network in networks}
     for network, path, state in built:

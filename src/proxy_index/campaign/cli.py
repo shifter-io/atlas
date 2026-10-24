@@ -193,6 +193,9 @@ def _plan_parsers(actions) -> None:
     plan.add_argument("--size", default="c-2", help="worker droplet size slug (c-…, s-…)")
     plan.add_argument("--image", required=True, help="snapshot name from `image build`")
     plan.add_argument("--grace-hours", type=int, default=48)
+    plan.add_argument("--slot-minutes", type=int, default=60,
+                      help="minutes between slots, a divisor of 60 (15: four slots an hour)")
+    plan.add_argument("--slots", type=int, default=24, help="number of slots (1-24)")
     plan.add_argument("--ssh-key-name", help="default: the deployed worker key")
     plan.add_argument("--synthetic", action="store_true")
     plan.add_argument("--output", type=Path, required=True)
@@ -241,7 +244,8 @@ def _plan(args) -> int:
             args.account, args.start, parse_networks(args.networks), args.image, args.output,
             args.credentials_file, args.inventory, args.images,
             tuple(args.regions or REGION_IDS), args.configs, args.ssh_key_name,
-            args.concurrency, args.grace_hours, args.synthetic, args.size)
+            args.concurrency, args.grace_hours, args.synthetic, args.size,
+            args.slot_minutes, args.slots)
 
         async def run() -> dict:
             async with _cloud(args.account) as cloud:

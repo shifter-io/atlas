@@ -527,3 +527,21 @@ def test_inventory_validation(tmp_path, data, message):
 def test_manifest_parsing_rejects_bad_lines(text):
     with pytest.raises(ValueError):
         collector.parse_manifest(text)
+
+
+def test_a_compressed_spec_checks_and_merges_only_its_slots(root):
+    """CAMP-1n: a 3-slot spec has 3 cells per network and region; its later rounds were
+    never launched and close unstarted, so no day has to be finished first."""
+    from dataclasses import replace
+
+    spec = CampaignSpec.from_json(spec_path(root).read_text())
+    spec_path(root).write_text(replace(spec, hours=3).to_json())
+    result = completeness.build(root)
+    assert result["cells"] == 2 * 2 * 3 and result["totals"]["pending"] == 0
+    tables = (root / "completeness" / "per-hour-tables.md").read_text()
+    assert "| Region | h00 | h01 | h02 |\n|---|---|---|---|" in tables
+    merge.merge_network(root, "shifter")
+    state = read_json(merge.manifest_path(root, "shifter").parent / "regions" / "ams3"
+                      / "state.json")
+    assert {j["status"] for j in state["jobs"] if j["round"] >= 3} == {"not_started_deadline"}
+    assert {j["round"] for j in state["jobs"]} == set(range(24))
