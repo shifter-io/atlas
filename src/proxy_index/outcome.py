@@ -19,8 +19,8 @@ was wrong.
 
 Ported from the old collector's engine/outcome.py (removed from the website
 repository). The framework adds ERROR, the verdict for everything that is
-neither the target's nor the gateway's answer (TLS, DNS, a dropped connection, a malformed
-body).
+neither the target's nor the gateway's answer (TLS, DNS, a dropped
+connection, a malformed body).
 """
 
 from __future__ import annotations

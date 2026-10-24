@@ -86,6 +86,7 @@ def test_backup_never_treats_terminal_failure_as_complete(tmp_path):
 
 def test_remote_tree_checks_only_the_current_unit_name():
     from proxy_index.onboarding.backup import REMOTE_TREE
-    code = compile(REMOTE_TREE, 'remote_tree', 'exec')
-    assert 'proxy-index-onboarding-' in REMOTE_TREE and code
+    compile(REMOTE_TREE, 'remote_tree', 'exec')
+    assert ("unit='proxy-index-onboarding-'+state['campaign_id']+'-'+state['region']+'.service'"
+            in REMOTE_TREE)
     assert REMOTE_TREE.count('.service') == 1
