@@ -112,7 +112,9 @@ def make_root(tmp_path: Path, spec: CampaignSpec) -> Path:
         manifest = root / spec.manifests[network]
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({"regions": {r: ["US", "GB"] for r in REGIONS},
-                                        "settings": {"concurrency": spec.concurrency}}))
+                                        "settings": {"concurrency": spec.concurrency},
+                                        **({"slot_minutes": spec.slot_minutes}
+                                           if spec.slot_minutes != 60 else {})}))
         (manifest.parent / "provider.toml").write_text(f"provider = '{network}'\n")
         secrets = base / ".secrets" / "credentials"
         secrets.mkdir(parents=True, exist_ok=True)

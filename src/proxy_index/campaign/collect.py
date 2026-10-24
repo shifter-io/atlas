@@ -64,9 +64,17 @@ def load_inventory(path: Path) -> dict:
 
 
 def ssh_command(inventory: dict) -> list[str]:
-    """The SSH prefix for one manager command; the host appears only in this argv."""
+    """The SSH prefix for one manager command; the host appears only in this argv.
+
+    With the inventory's ``known_hosts`` (written by ``manager deploy``) the manager's key is
+    checked strictly against that file; without it the user's own known-hosts file applies.
+    """
+    pinned = []
+    if inventory.get("known_hosts"):
+        pinned = ["-o", f"UserKnownHostsFile={os.path.expanduser(inventory['known_hosts'])}",
+                  "-o", "StrictHostKeyChecking=yes"]
     return ["ssh", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=15",
-            "-i", os.path.expanduser(inventory["identity_file"]),
+            *pinned, "-i", os.path.expanduser(inventory["identity_file"]),
             f"{inventory.get('user', 'root')}@{inventory['host']}"]
 
 

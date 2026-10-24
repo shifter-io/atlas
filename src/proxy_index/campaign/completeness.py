@@ -15,6 +15,7 @@ from ..onboarding.rounds import TERMINAL, round_directory, verify_round
 from ..providers.grammar import grammar_ids, load_grammar
 from .contracts import DropletRecord
 from .merge import HOURS, cell_status, ledger_droplets, load_spec, manifest_path
+from .tick import slot_label
 
 DATA1_COLUMNS = ("net", "region", "round", "scheduled", "started", "finished", "completed",
                  "delay", "duration", "countries", "jobs_ok", "missing", "dup", "badchunk",
@@ -110,9 +111,10 @@ def _mark(row: dict) -> str:
     return f"{'✓' if row['cell'] == 'complete' else 'partial'} {rate}"
 
 
-def render_tables(result: dict) -> str:
-    """One table per network (rows = regions, columns h00-h23) after the status totals."""
-    hours = [f"h{hour:02d}" for hour in range(HOURS)]
+def render_tables(result: dict, labels: list[str] | None = None) -> str:
+    """One table per network (rows = regions, one column per slot: h00-h23 hourly, else the
+    slot index and its scheduled UTC time) after the status totals."""
+    hours = labels or [f"h{hour:02d}" for hour in range(HOURS)]
     lines = [f"# Campaign {result['campaign_id']}: per-hour completeness", "",
              "Cell = that hour's round of one network in one region. ✓ complete and verified, "
              "`partial` some countries interrupted, failed or unverified (each followed by the "
@@ -127,7 +129,7 @@ def render_tables(result: dict) -> str:
                      + f" | {counts['cells']} |")
     for network in result["networks"]:
         lines += ["", f"## {network}", "", "| Region | " + " | ".join(hours) + " |",
-                  "|---|" + "---|" * HOURS]
+                  "|---|" + "---|" * len(hours)]
         regions = dict.fromkeys(r["region"] for r in result["rows"] if r["net"] == network)
         for region in regions:
             marks = [_mark(r) for r in result["rows"] if (r["net"], r["region"]) == (
@@ -144,7 +146,7 @@ def _counts(rows: list[dict]) -> dict:
 def build(root: Path) -> dict:
     """Check every cell of the campaign at `root` and write `completeness/`.
 
-    Writes `completeness.json` (rows, issues, totals per network out of 24 × regions and
+    Writes `completeness.json` (rows, issues, totals per network out of slots × regions and
     overall), `per-hour-completeness.tsv` (`COLUMNS`, in order) and `per-hour-tables.md`.
     Reads only; a cell may be pending or running. Returns the JSON document.
     """
@@ -155,7 +157,7 @@ def build(root: Path) -> dict:
         path = manifest_path(root, network)
         manifest = load(path)
         for region in spec.regions:
-            for hour in range(HOURS):
+            for hour in range(spec.hours):
                 cell = (network, region, hour)
                 row, problems = cell_row(path, manifest, cell, droplets.get(cell))
                 rows.append(row)
@@ -168,5 +170,6 @@ def build(root: Path) -> dict:
     folder = root / "completeness"
     atomic_json(folder / "completeness.json", result)
     atomic_bytes(folder / "per-hour-completeness.tsv", render_tsv(rows).encode())
-    atomic_bytes(folder / "per-hour-tables.md", render_tables(result).encode())
+    atomic_bytes(folder / "per-hour-tables.md", render_tables(
+        result, [slot_label(spec, slot, short=True) for slot in range(spec.hours)]).encode())
     return result

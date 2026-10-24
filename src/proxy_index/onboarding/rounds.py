@@ -30,6 +30,10 @@ class RoundDataError(ValueError):
     """A verification finding whose message is fixed text, safe to report."""
 
 
+class RoundRefused(ValueError):
+    """A round refused before or instead of running; its message is fixed text, safe to print."""
+
+
 def round_directory(manifest_path: Path, region: str, index: int) -> Path:
     return manifest_path.parent / "regions" / region / "rounds" / f"{index:02d}"
 
@@ -37,11 +41,11 @@ def round_directory(manifest_path: Path, region: str, index: int) -> Path:
 def _ephemeral(manifest_path: Path, region: str, index: int) -> dict:
     manifest = load(manifest_path)
     if manifest["schema_version"] != 3:
-        raise ValueError("One-round execution requires an ephemeral (version 3) manifest")
+        raise RoundRefused("One-round execution requires an ephemeral (version 3) manifest")
     if region not in manifest["regions"]:
-        raise ValueError("Unknown campaign region")
+        raise RoundRefused("Unknown campaign region")
     if type(index) is not int or not 0 <= index < len(manifest["rounds"]):
-        raise ValueError("Round must be an hourly index from 0 to 23")
+        raise RoundRefused("Round must be an hourly index from 0 to 23")
     return manifest
 
 
@@ -69,11 +73,11 @@ def validate_round(state: dict, manifest: dict, region: str, index: int) -> None
     keys = ("schema_version", "kind", "campaign_id", "region", "round", "scheduled_at",
             "campaign_sha256")
     if any(state.get(key) != expected[key] for key in keys):
-        raise ValueError("Round checkpoint does not match this campaign, region and round")
+        raise RoundRefused("Round checkpoint does not match this campaign, region and round")
     settings(state["settings"])
     jobs = [(j["round"], j["country"], j["scheduled_at"]) for j in state["jobs"]]
     if jobs != [(j["round"], j["country"], j["scheduled_at"]) for j in expected["jobs"]]:
-        raise ValueError("Round checkpoint country queue differs from the campaign")
+        raise RoundRefused("Round checkpoint country queue differs from the campaign")
 
 
 def _save(path: Path, state: dict, clock) -> None:
@@ -125,9 +129,9 @@ async def execute_round(
     scheduled = moment(manifest["rounds"][round_index]).timestamp()
     with lock(directory / ".lock"):
         if path.exists():
-            raise ValueError("This round already has a checkpoint; a replay is refused")
+            raise RoundRefused("This round already has a checkpoint; a replay is refused")
         if clock.now() < scheduled - EARLY_START_SECONDS:
-            raise ValueError("A round may be armed at most 300 seconds before it is scheduled")
+            raise RoundRefused("A round may be armed at most 300 seconds before it is scheduled")
         state = new_round(manifest, region, round_index)
         save = functools.partial(_save, path, state, clock)
         save()
@@ -214,7 +218,7 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
 
     ``complete`` is true when every country completed and its chunks (SHA-256, rows, time
     bounds up to the country's ``finished_at``) and counters reconcile. A checkpoint that does
-    not belong to this campaign, region and round raises ``ValueError``.
+    not belong to this campaign, region and round raises ``RoundRefused``.
     """
     manifest = _ephemeral(manifest_path, region, round_index)
     folder = round_directory(manifest_path, region, round_index)
