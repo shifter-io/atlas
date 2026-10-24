@@ -196,6 +196,8 @@ class DropletRecord:
     # Written only by scope.assign_and_verify_project: this id came from our own create and its
     # membership in Proxy Index was never confirmed. The own-unassigned proof across processes.
     assign_failed_at: str | None = None
+    # A replacement: the index, in its hour's `droplets`, of the worker it replaces.
+    replaced_from: int | None = None
 
 
 @dataclass
@@ -213,6 +215,9 @@ class HourRecord:
     traffic: dict[str, dict[str, float]] = field(default_factory=dict)
     report_path: str | None = None
     alerts: list[dict[str, Any]] = field(default_factory=list)
+    # Per replaced cell: `replaced_from` (each failed worker's droplet id, status and error
+    # class) and `extra_delay_seconds` (how far past HH:00 the replacement armed, else None).
+    replacements: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

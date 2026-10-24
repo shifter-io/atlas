@@ -1,9 +1,11 @@
 """Launch one hour: create, confirm project membership, wait for readiness, push and arm.
 
 Names are persisted before the create and ids right after it. Only workers whose membership in
-project Proxy Index is confirmed are ever pushed (fail-closed). A boot, SSH, start or assignment
-failure gets one replacement before HH:00 + `replace_until_minutes`. Every removal goes through
-`scope.guarded_delete`; a resumed launch adopts its own names before it creates anything.
+project Proxy Index is confirmed are ever pushed (fail-closed). A create, assignment, boot, push
+or start failure gets a replacement in the same hour, up to `REPLACEMENTS_PER_CELL` per cell and
+only before HH:00 + `replace_until_minutes`; then the cell is `failed_ours` with a high alert.
+Every removal goes through `scope.guarded_delete`; a resumed launch and every replacement adopt
+their own names before they create anything, so nothing is created twice.
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ from .fanout import READY_POLL_SECONDS, start_command
 READY_LIMIT_SECONDS = 180
 CREATE_RETRY_SECONDS = 15
 SYNTHETIC_MINUTES = 5
+REPLACEMENTS_PER_CELL = 3
 LIVE = frozenset({"armed", "running"})
 UP = ("requested", "assigned", "booting", "starting")
 RemoteFactory = Callable[[int], Remote]
@@ -211,7 +214,7 @@ class _Launch(HourWork):
                                    - self.clock.now()))
         await self._adopt()
         await asyncio.gather(*(self._region([d for d in self.record.droplets
-                                             if d.region == region and d.status in UP], True)
+                                             if d.region == region and d.status in UP])
                                for region in self.spec.regions))
 
     async def _adopt(self) -> None:
@@ -234,7 +237,7 @@ class _Launch(HourWork):
             if worker.droplet_id is None and worker.name in by_name:
                 worker.droplet_id = by_name.pop(worker.name).id
 
-    async def _region(self, workers: list[DropletRecord], replace: bool) -> None:
+    async def _region(self, workers: list[DropletRecord]) -> None:
         """One region's workers. An unexpected error stays inside this region, no task outlives
         it, and every worker leaves it armed or in a final status (B1)."""
         cause, unassigned = None, []
@@ -243,20 +246,26 @@ class _Launch(HourWork):
             unassigned = await self._assign(workers)
         except Exception as error:
             cause = type(error).__name__
-        await asyncio.gather(*(self._bring_up(w, replace) for w in workers
+        await asyncio.gather(*(self._bring_up(w) for w in workers
                                if w.status in ("assigned", "booting", "starting")),
-                             *(self._replace(w, replace) for w in unassigned))
+                             *(self._replace(w) for w in unassigned),
+                             *(self._replace(w) for w in workers if w.status == "create_failed"))
         left = [w for w in workers if w.status in UP]
         for worker in left:
             self.alert("high", "launch_error", worker.name)
             if worker.droplet_id is None:
                 worker.status, worker.error_class = "create_failed", cause
-        await asyncio.gather(*(self._fail(w, "start_failed", replace, cause)
-                               for w in left if w.droplet_id))
+        await asyncio.gather(*(self._fail(w, "start_failed", cause) for w in left if w.droplet_id),
+                             *(self._replace(w) for w in left if w.droplet_id is None))
         self.save()
 
     async def _create(self, workers: list[DropletRecord]) -> None:
         pending = [w for w in workers if w.droplet_id is None and w.status == "requested"]
+        if any(w.replaced_from is not None for w in pending):  # an earlier create may have landed
+            self._take(pending, await self._adopted([w.name for w in pending]))
+            for worker in [w for w in pending if w.droplet_id and not w.requested_at]:
+                worker.requested_at = timestamp(self.clock.now())  # its boot deadline starts now
+            pending = [w for w in pending if w.droplet_id is None]
         for attempt in range(2):
             if attempt and pending:  # a create still in flight may be listed only now (m2)
                 await self.clock.sleep(CREATE_RETRY_SECONDS)
@@ -305,29 +314,32 @@ class _Launch(HourWork):
                 self.alert("high", "destroy_refused", worker.name)
         return [w for w in waiting if w.droplet_id in failed]
 
-    async def _bring_up(self, worker: DropletRecord, replace: bool) -> None:
+    async def _bring_up(self, worker: DropletRecord) -> None:
         """Ready, push and arm one confirmed worker; any error fails only this worker."""
         try:
-            await self._start(worker, replace)
+            await self._start(worker)
         except Exception as error:
             if worker.armed_at is None:  # an armed worker is never start_failed (m10)
-                await self._fail(worker, "start_failed", replace, type(error).__name__)
+                await self._fail(worker, "start_failed", type(error).__name__)
 
-    async def _start(self, worker: DropletRecord, replace: bool) -> None:
+    async def _start(self, worker: DropletRecord) -> None:
         resumed = worker.status == "starting"
         worker.status = "booting"
         self.save()
         droplet = await self._active(worker)
         limit = moment(worker.requested_at).timestamp() + READY_LIMIT_SECONDS - self.clock.now()
         if droplet is None or not await self.remote.wait_ready(droplet, max(limit, 1.0)):
-            await self._fail(worker, "boot_failed", replace)
+            await self._fail(worker, "boot_failed")
             return
         worker.status, worker.ssh_ready_at = "starting", self.now()
         self.save()
         if not await self._push(worker, droplet, resumed):
-            await self._fail(worker, "start_failed", replace)
+            await self._fail(worker, "start_failed")
             return
         worker.status, worker.armed_at = "armed", self.now()
+        if worker.replaced_from is not None:  # its round starts now: record the extra delay
+            self.record.replacements[cell_key(worker.network, worker.region)][
+                "extra_delay_seconds"] = round(max(0.0, self.clock.now() - self.scheduled), 3)
         self.save()
 
     async def _listing(self) -> list[Droplet]:
@@ -400,21 +412,29 @@ class _Launch(HourWork):
                 archive.addfile(info, io.BytesIO(data))
         return buffer.getvalue()
 
-    async def _fail(self, worker: DropletRecord, status: str, replace: bool,
-                    cause: str | None = None) -> None:
+    async def _fail(self, worker: DropletRecord, status: str, cause: str | None = None) -> None:
         """Remove a failed worker through the guard, then apply the replacement rule."""
         worker.status, worker.error_class = status, cause or status
         self.alert("high", status, worker.name)
         await self.retire(worker)
         self.save()
-        await self._replace(worker, replace)
+        await self._replace(worker)
 
-    async def _replace(self, worker: DropletRecord, replace: bool) -> None:
-        """One replacement per cell, only before HH:00 + replace_until_minutes."""
+    async def _replace(self, worker: DropletRecord) -> None:
+        """Replace a failed worker in the same hour: at most `REPLACEMENTS_PER_CELL` times per
+        cell, only before HH:00 + replace_until_minutes. Past either bound the cell is lost
+        (`failed_ours`, from the newest record) with the high alert `cell_failed`."""
         tries = sum(d.name == worker.name for d in self.record.droplets)
-        if not replace or tries > 1 or self.clock.now() >= self.replace_until:
+        if tries > REPLACEMENTS_PER_CELL or self.clock.now() >= self.replace_until:
+            self.alert("high", "cell_failed", worker.name)
             return
+        cell = self.record.replacements.setdefault(
+            cell_key(worker.network, worker.region),
+            {"replaced_from": [], "extra_delay_seconds": None})
+        cell["replaced_from"].append({"droplet_id": worker.droplet_id, "status": worker.status,
+                                      "error_class": worker.error_class})
         fresh = self._worker(worker.network, worker.region, worker.overlap)
+        fresh.replaced_from = next(i for i, d in enumerate(self.record.droplets) if d is worker)
         self.record.droplets.append(fresh)
         self.save()
-        await self._region([fresh], False)
+        await self._region([fresh])
