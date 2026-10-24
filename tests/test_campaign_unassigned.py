@@ -123,7 +123,8 @@ async def test_a_refused_removal_at_launch_is_alerted(tmp_path, monkeypatch):
     monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T23:00Z"))
     record, *_ = await launched(tmp_path, fake, nyc3_spec(), start=LATE)
     assert [d.status for d in record.droplets] == ["destroy_refused"] and FIRST in fake.droplets
-    assert [a["kind"] for a in record.alerts] == ["project_assign_failed", "destroy_refused"]
+    assert [a["kind"] for a in record.alerts] == [
+        "project_assign_failed", "destroy_refused", "cell_failed"]
 
 
 async def created(cloud, name=NAME):

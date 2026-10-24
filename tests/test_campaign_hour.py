@@ -178,12 +178,13 @@ async def test_a_failed_create_is_retried_once_after_15_seconds(tmp_path):
     assert {d.status for d in record.droplets} == {"armed"}
     assert clock.t >= PRE_CREATE + launch.CREATE_RETRY_SECONDS
 
-    fake = FakeDigitalOcean()
-    fake.faults.append(Fault("POST", "/v2/droplets", 422, times=4))
+    fake = FakeDigitalOcean()  # every create refused: each cell spends its replacements
+    fake.faults.append(Fault("POST", "/v2/droplets", 422, times=99))
     record, *_ = await launched(tmp_path / "again", fake)
     assert {d.status for d in record.droplets} == {"create_failed"}
+    assert len(record.droplets) == 4 * (1 + launch.REPLACEMENTS_PER_CELL)
     assert set(record.cells.values()) == {"failed_ours"}
-    assert {a["kind"] for a in record.alerts} == {"create_failed"}
+    assert {a["kind"] for a in record.alerts} == {"create_failed", "cell_failed"}
 
 
 async def test_an_uncertain_create_adopts_its_names_and_retries_only_the_rest(tmp_path):
@@ -214,22 +215,25 @@ async def test_an_unconfirmed_assignment_is_never_pushed_and_is_replaced(tmp_pat
     assert [a["kind"] for a in record.alerts] == ["project_assign_failed"]
 
 
-async def test_ssh_never_ready_gets_one_replacement_before_the_cutoff(tmp_path):
-    """4: replacement before HH:15, none after; both removed through the guard."""
+async def test_ssh_never_ready_gets_its_replacements_before_the_cutoff(tmp_path):
+    """4: replacements before HH:15, none after; all removed through the guard."""
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
     record, *_ = await launched(tmp_path, fake, spec,
                                 setup=lambda r: r.never_ready.add(name))
+    tries = 1 + launch.REPLACEMENTS_PER_CELL
     assert [(d.status, d.error_class) for d in record.droplets] == [
-        ("destroyed", "boot_failed")] * 2
-    assert record.cells == {"net00/lon1": "failed_ours"} and len(fake.deleted) == 2
+        ("destroyed", "boot_failed")] * tries
+    assert record.cells == {"net00/lon1": "failed_ours"} and len(fake.deleted) == tries
+    assert [a["kind"] for a in record.alerts] == ["boot_failed", "cell_failed"]
 
     late = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()
     fake = FakeDigitalOcean()
     record, *_ = await launched(tmp_path / "late", fake, spec, start=late,
                                 setup=lambda r: r.never_ready.add(name))
     assert len(record.droplets) == 1 and record.droplets[0].status == "destroyed"
+    assert "cell_failed" in {a["kind"] for a in record.alerts}
 
 
 async def test_a_push_error_is_retried_once_on_the_same_worker(tmp_path):
@@ -340,7 +344,8 @@ async def test_a_droplet_never_active_within_180_seconds_is_boot_failed(tmp_path
     assert {(d.status, d.error_class) for d in record.droplets} == {("destroyed", "boot_failed")}
     assert remote.pushes == [] and not launch.hosts_path(root, 0).exists()
     lists = [r for r in fake.requests if r[0] == "GET" and r[2].get("tag_name")]
-    assert len(lists) <= 2 * (launch.READY_LIMIT_SECONDS / launch.READY_POLL_SECONDS + 2)
+    assert len(lists) <= 2 * (1 + launch.REPLACEMENTS_PER_CELL) * (
+        launch.READY_LIMIT_SECONDS / launch.READY_POLL_SECONDS + 2)
 
 
 async def test_m1_a_replacement_does_not_delay_the_confirmed_workers(tmp_path):
@@ -557,10 +562,13 @@ async def test_b1_a_readiness_api_error_retires_every_created_droplet(tmp_path):
     fake = ListFailsAfterCreate()
     spec = make_spec(NETWORKS[:2], REGIONS[:1])
     record, root, remote, _ = await launched(tmp_path, fake, spec)
-    created = {d.droplet_id for d in record.droplets}
-    assert len(record.droplets) == 4 and None not in created  # two workers, one replacement each
-    assert {d.status for d in record.droplets} == {"destroyed"} and remote.pushes == []
-    assert {i for kind, i in fake.deleted} == created and len(fake.deleted) == 4
+    created = {d.droplet_id for d in record.droplets if d.droplet_id}
+    assert len(created) == 2 and remote.pushes == []  # the two first workers
+    # Their replacements cannot list the hour tag, so they never create blind (no duplicate).
+    assert {d.status for d in record.droplets if d.droplet_id} == {"destroyed"}
+    assert {d.status for d in record.droplets if not d.droplet_id} == {"create_failed"}
+    assert len(record.droplets) == 2 * (1 + launch.REPLACEMENTS_PER_CELL)
+    assert {i for kind, i in fake.deleted} == created and len(fake.deleted) == 2
     audit = [json.loads(line) for line in audit_path(root).read_text().splitlines()]
     assert sorted(a["id"] for a in audit if a["result"] == "deleted") == sorted(created)
     assert set(record.cells.values()) == {"failed_ours"} and record.state == "running"
@@ -578,7 +586,8 @@ async def test_b1_b_a_missing_credentials_file_fails_only_its_network(tmp_path):
     good = [d for d in record.droplets if d.network == "net00"]
     bad = [d for d in record.droplets if d.network == "net01"]
     assert len(good) == 2 and {d.status for d in good} == {"armed"}
-    assert len(bad) == 4 and {(d.status, d.error_class) for d in bad} == {
+    assert len(bad) == 2 * (1 + launch.REPLACEMENTS_PER_CELL) and {
+        (d.status, d.error_class) for d in bad} == {
         ("destroyed", "FileNotFoundError")}
     assert {i for _, i in fake.deleted} == {d.droplet_id for d in bad}
     assert record.cells == {"net00/lon1": "running", "net00/fra1": "running",
@@ -595,7 +604,8 @@ async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, mo
 
     monkeypatch.setattr(launch.scope, "assign_and_verify_project", refuse)
     record, *_ = await launched(tmp_path, fake, spec)
-    assert [d.status for d in record.droplets] == ["destroy_refused"] * 2
+    assert [d.status for d in record.droplets] == ["destroy_refused"] * (
+        1 + launch.REPLACEMENTS_PER_CELL)
     assert fake.deleted == [] and record.cells == {"net00/lon1": "failed_ours"}
     assert {d.error_class for d in record.droplets} == {"OwnershipError"}
 
@@ -962,7 +972,7 @@ class HarvestRemote(FakeRemote):
         self.stops.append(droplet.name)
 
 
-async def harvest_setup(tmp_path, *, samples=True):
+async def harvest_setup(tmp_path, *, samples=True, fake=None):
     """A launched hour (net00 in tor1) and a worker round directory with real data."""
     worker_manifest = make_manifest(tmp_path / "worker")
     await run_round(worker_manifest, 0, rows=2)
@@ -976,9 +986,9 @@ async def harvest_setup(tmp_path, *, samples=True):
     spec = make_spec(NETWORKS[:1], ("tor1",))
     root = make_root(tmp_path, spec)
     (root / spec.manifests["net00"]).write_bytes(worker_manifest.read_bytes())
-    fake = FakeDigitalOcean()
+    fake = fake or FakeDigitalOcean()
     record, *_ = await launched(tmp_path, fake, spec)
-    assert record.droplets[0].status == "armed"
+    assert record.droplets[-1].status == "armed"
     clock = FakeClock(AT_HH + 60)
     return spec, root, fake, record, HarvestRemote(clock, source), clock
 
@@ -1245,7 +1255,8 @@ async def test_b1_after_a_readiness_api_error_the_hour_reaches_done(tmp_path):
     spec = make_spec(NETWORKS[:2], REGIONS[:1])
     record, root, remote, clock = await launched(tmp_path, fake, spec)
     await harvested(spec, record, root, fake, remote, clock)
-    assert record.state == "done" and {d.status for d in record.droplets} == {"destroyed"}
+    assert record.state == "done" and {d.status for d in record.droplets} == {
+        "destroyed", "create_failed"}
 
 
 async def test_b1_a_failed_region_does_not_keep_the_hour_open(tmp_path):
@@ -1263,7 +1274,8 @@ async def test_b1_a_failed_region_does_not_keep_the_hour_open(tmp_path):
     finally:
         launch._Launch._create_call = original
     await harvested(spec, record, root, fake, remote, clock)
-    assert [d.status for d in record.droplets] == ["create_failed"] and record.state == "done"
+    assert [d.status for d in record.droplets] == ["create_failed"] * (
+        1 + launch.REPLACEMENTS_PER_CELL) and record.state == "done"
 
 
 async def test_m7_a_collect_failed_worker_without_a_memo_is_repulled(tmp_path):
