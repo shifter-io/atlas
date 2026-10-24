@@ -34,6 +34,8 @@ requires = ["ttl"]
 kind = "integer"
 format = "ttl-{}" # Unit undocumented; treated as minutes.
 min = 1
+# Accepted up to 1440, although the docs keep one exit for at most 30 minutes: no live
+# check has shown how the gateway treats larger values, so do not rely on them.
 max = 1440
 requires_session = true
 
