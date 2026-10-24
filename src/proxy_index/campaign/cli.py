@@ -224,7 +224,8 @@ def _plan_parsers(actions) -> None:
     teardown.add_argument("--after-collect", type=Path, action="append", required=True)
     teardown.add_argument("--keep-worker-assets", action="store_true",
                           help="remove only the manager and its firewall; keep the worker "
-                          "snapshots, firewall and keys for the next manager")
+                          "snapshots, firewall and keys for the next manager (they can only "
+                          "be removed by a full teardown after the next deploy)")
     for step in (deploy, allow):
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
     for step in (deploy, upload, enable, stop, allow, teardown):

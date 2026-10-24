@@ -6,8 +6,10 @@ from dataclasses import replace
 
 import pytest
 from campaign_deploy_fakes import Fake, fast_assign, inventory, make_job, parse, run_deploy, writes
+from campaign_fakes import Fault
 
 from proxy_index.campaign import deploy
+from proxy_index.campaign.do_api import CreateError
 
 
 @pytest.fixture(autouse=True)
@@ -65,16 +67,42 @@ async def test_a_recorded_manager_keeps_its_size_on_a_rerun(job):
     assert len(writes(fake)) == posts
 
 
-async def test_a_manager_recorded_before_sizes_counts_as_the_default_size(job):
-    fake = Fake()
-    await run_deploy(fake, job)
+def forget_size(job):
     saved = inventory(job)
     saved.pop("manager_size")
     deploy.save(job.inventory, saved)
+
+
+async def test_a_manager_recorded_before_sizes_counts_as_the_default_size(job):
+    fake = Fake()
     await run_deploy(fake, job)
-    with pytest.raises(deploy.DeployError, match="the recorded manager is s-8vcpu-16gb"):
-        await run_deploy(fake, replace(job, size="s-2vcpu-4gb"))
+    forget_size(job)
+    await run_deploy(fake, job)
+    assert inventory(job)["manager_size"] == "s-8vcpu-16gb"
     assert created_sizes(fake) == ["s-8vcpu-16gb"]
+
+
+async def test_a_new_size_on_a_legacy_manager_is_refused_before_any_write(job):
+    """m2: the live O1 manager has no `manager_size`; `--size` before a teardown is refused."""
+    fake = Fake()
+    await run_deploy(fake, job)
+    forget_size(job)
+    before, requests = job.inventory.read_text(), len(fake.requests)
+    with pytest.raises(deploy.DeployError, match="tear it down with --keep-worker-assets"):
+        await run_deploy(fake, replace(job, size="s-2vcpu-4gb"))
+    assert job.inventory.read_text() == before
+    assert [p for m, p, _, _ in fake.requests[requests:] if m != "GET" or p == "/v2/sizes"] == []
+
+
+async def test_a_rerun_after_a_failed_create_keeps_the_size_it_asked_for(job):
+    """m3: the size of an attempt whose manager was never recorded is kept without --size."""
+    fake = Fake()
+    fake.faults.append(Fault("POST", "/v2/droplets", 422))
+    with pytest.raises(CreateError):
+        await run_deploy(fake, replace(job, size="s-2vcpu-4gb"))
+    assert "manager_id" not in inventory(job)
+    await run_deploy(fake, job)
+    assert created_sizes(fake)[-1] == "s-2vcpu-4gb" == inventory(job)["manager_size"]
 
 
 def test_the_cli_options():

@@ -265,11 +265,12 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
 
 async def manager_size(cloud: DigitalOcean, inventory: dict[str, Any], wanted: str | None) -> str:
     """The manager's size: a recorded manager keeps its own (one created before sizes were
-    recorded is MANAGER_SIZE); a new one takes `wanted` (default MANAGER_SIZE), which must be
-    offered in MANAGER_REGION."""
+    recorded is MANAGER_SIZE); a new one takes `wanted`, else the size of an attempt that
+    failed before its manager was recorded, else MANAGER_SIZE, and it must be offered in
+    MANAGER_REGION."""
     recorded = inventory.get("manager_size", MANAGER_SIZE) if inventory.get(
         "manager_id") else None
-    size = wanted or recorded or MANAGER_SIZE
+    size = wanted or recorded or inventory.get("manager_size") or MANAGER_SIZE
     if recorded and size != recorded:
         raise DeployError(f"the recorded manager is {recorded}; tear it down with "
                           f"--keep-worker-assets before deploying a {size} manager")

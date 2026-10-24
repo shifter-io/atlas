@@ -305,10 +305,13 @@ async def test_the_next_manager_reuses_the_worker_firewall_and_a_full_teardown_e
     assert new["worker_key_id"] != saved["worker_key_id"]
     assert new["worker_key_name"].startswith(saved["worker_key_name"] + "-")  # unique for plan
     assert new["mac_key_id"] == saved["mac_key_id"]
+    assert "secrets_shredded" not in new  # m1: the new manager's secrets are shredded too
     fake.deleted.clear()
+    shell = Shell()
     async with running(fake) as cloud:
-        done = await deploy.teardown(cloud, job.inventory, [report], shell=Shell(),
+        done = await deploy.teardown(cloud, job.inventory, [report], shell=shell,
                                      remove_agent=lambda: True)
+    assert shell.commands()[-1] == deploy.SHRED
     assert fake.deleted == [
         ("droplet", new["manager_id"]), ("firewall", new["manager_firewall_id"]),
         ("firewall", saved["worker_firewall_id"]), ("ssh_key", new["worker_key_id"]),
