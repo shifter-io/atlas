@@ -770,6 +770,7 @@ def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, c
     if called == "deploy":
         job = seen[0][1][1]
         assert job.mac_ipv4 == MAC_IP and list(job.credentials) == ["shifter"]
+        assert job.size is None  # the recorded manager's size, else s-8vcpu-16gb
         assert NoCloud.accounts == ["leftclick"]
     assert json.loads(capsys.readouterr().out) == {"clean": called != "teardown"}
 
