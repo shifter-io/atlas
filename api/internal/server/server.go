@@ -21,8 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ice-zeus/milf-website/api/internal/build"
-	"github.com/ice-zeus/milf-website/api/internal/store"
+	"github.com/ice-zeus/proxy-index-website/api/internal/build"
+	"github.com/ice-zeus/proxy-index-website/api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

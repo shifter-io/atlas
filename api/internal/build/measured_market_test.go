@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ice-zeus/milf-website/api/internal/model"
+	"github.com/ice-zeus/proxy-index-website/api/internal/model"
 )
 
 func TestMeasuredMarketCombinesLiveNetworksAndKeepsHistoryGaps(t *testing.T) {

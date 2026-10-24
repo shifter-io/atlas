@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/ice-zeus/milf-website/api/internal/jsnum"
+	"github.com/ice-zeus/proxy-index-website/api/internal/jsnum"
 )
 
 type Num = jsnum.Num

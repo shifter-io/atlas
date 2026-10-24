@@ -5,10 +5,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/ice-zeus/milf-website/api/internal/jsnum"
-	"github.com/ice-zeus/milf-website/api/internal/model"
-	"github.com/ice-zeus/milf-website/api/internal/snap"
-	"github.com/ice-zeus/milf-website/api/internal/store"
+	"github.com/ice-zeus/proxy-index-website/api/internal/jsnum"
+	"github.com/ice-zeus/proxy-index-website/api/internal/model"
+	"github.com/ice-zeus/proxy-index-website/api/internal/snap"
+	"github.com/ice-zeus/proxy-index-website/api/internal/store"
 )
 
 // TapeProduct is tape.ts TapeProduct.

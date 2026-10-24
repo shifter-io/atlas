@@ -3,8 +3,8 @@ package build
 import (
 	"testing"
 
-	"github.com/ice-zeus/milf-website/api/internal/model"
-	"github.com/ice-zeus/milf-website/api/internal/snap"
+	"github.com/ice-zeus/proxy-index-website/api/internal/model"
+	"github.com/ice-zeus/proxy-index-website/api/internal/snap"
 )
 
 func TestCountryLatencyRanks(t *testing.T) {

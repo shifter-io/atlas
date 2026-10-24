@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/ice-zeus/milf-website/api/internal/jsnum"
-	"github.com/ice-zeus/milf-website/api/internal/model"
+	"github.com/ice-zeus/proxy-index-website/api/internal/jsnum"
+	"github.com/ice-zeus/proxy-index-website/api/internal/model"
 	"gopkg.in/yaml.v3"
 )
 

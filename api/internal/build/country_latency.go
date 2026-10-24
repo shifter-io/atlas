@@ -3,8 +3,8 @@ package build
 import (
 	"strings"
 
-	"github.com/ice-zeus/milf-website/api/internal/model"
-	"github.com/ice-zeus/milf-website/api/internal/snap"
+	"github.com/ice-zeus/proxy-index-website/api/internal/model"
+	"github.com/ice-zeus/proxy-index-website/api/internal/snap"
 )
 
 type countryLatencyGroup struct {

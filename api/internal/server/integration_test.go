@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ice-zeus/milf-website/api/internal/build"
-	"github.com/ice-zeus/milf-website/api/internal/config"
-	"github.com/ice-zeus/milf-website/api/internal/server"
-	"github.com/ice-zeus/milf-website/api/internal/store"
-	"github.com/ice-zeus/milf-website/api/internal/testdb"
+	"github.com/ice-zeus/proxy-index-website/api/internal/build"
+	"github.com/ice-zeus/proxy-index-website/api/internal/config"
+	"github.com/ice-zeus/proxy-index-website/api/internal/server"
+	"github.com/ice-zeus/proxy-index-website/api/internal/store"
+	"github.com/ice-zeus/proxy-index-website/api/internal/testdb"
 )
 
 // TestServeFromDatabase runs the real read path against a seeded scratch

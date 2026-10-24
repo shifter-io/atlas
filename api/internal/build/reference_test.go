@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ice-zeus/milf-website/api/internal/build"
-	"github.com/ice-zeus/milf-website/api/internal/config"
-	"github.com/ice-zeus/milf-website/api/internal/jsnum"
-	"github.com/ice-zeus/milf-website/api/internal/model"
-	"github.com/ice-zeus/milf-website/api/internal/store"
+	"github.com/ice-zeus/proxy-index-website/api/internal/build"
+	"github.com/ice-zeus/proxy-index-website/api/internal/config"
+	"github.com/ice-zeus/proxy-index-website/api/internal/jsnum"
+	"github.com/ice-zeus/proxy-index-website/api/internal/model"
+	"github.com/ice-zeus/proxy-index-website/api/internal/store"
 )
 
 // Documented deviations of the Go port from presentation.ts for a measured

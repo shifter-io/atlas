@@ -1,4 +1,4 @@
-module github.com/ice-zeus/milf-website/api
+module github.com/ice-zeus/proxy-index-website/api
 
 go 1.27.1
 
