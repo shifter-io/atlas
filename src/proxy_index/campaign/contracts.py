@@ -28,11 +28,13 @@ ROLES = {"worker": (WORKER_TAG, WORKER_NAME_RE), "manager": (MANAGER_TAG, MANAGE
          "builder": (BUILDER_TAG, BUILDER_NAME_RE)}
 CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
+# CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
+SIZE_RE = r"c2?-\d+(-intel)?|s-\d+vcpu-\d+gb(-amd|-intel)?"
 WORKER_ROOT = "/opt/proxy-index-worker"
 WORKER_SECRETS = "/run/proxy-index-worker"
 
 HourState = Literal["planned", "launching", "running", "harvesting", "done", "failed"]
-CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours"]
+CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours", "paused"]
 DropletStatus = Literal[
     "requested", "create_failed", "assign_failed", "assigned", "booting", "boot_failed", "starting",
     "start_failed", "armed", "running", "finished", "collected", "collect_failed",
@@ -127,7 +129,9 @@ class CampaignSpec:
             (not self.networks or len(set(self.networks)) != len(self.networks), "networks"),
             (any(not re.fullmatch(NETWORK_RE, n) for n in self.networks), "network names"),
             (set(self.manifests) != set(self.networks), "manifests"),
-            (set(self.size_by_region) != set(self.regions), "size_by_region"),
+            (set(self.size_by_region) != set(self.regions)
+             or any(not isinstance(size, str) or not re.fullmatch(SIZE_RE, size)
+                    for size in self.size_by_region.values()), "size_by_region"),
             (set(self.image_by_region) != set(self.regions), "image_by_region"),
             (not re.fullmatch(r"[0-9a-f]{64}", self.wheel_sha256), "wheel_sha256"),
             (self.create_lead_seconds <= 0 or self.replace_until_minutes < 0
@@ -226,6 +230,9 @@ class HourRecord:
     # Per replaced cell: `replaced_from` (each failed worker's droplet id, status and error
     # class) and `extra_delay_seconds` (how far past HH:00 the replacement armed, else None).
     replacements: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Networks the owner had paused when the tick launched this hour; their cells without a
+    # worker are final `paused` cells. Empty in records written before the field existed.
+    paused_networks: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

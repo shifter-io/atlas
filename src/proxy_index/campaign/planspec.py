@@ -21,15 +21,13 @@ from ..onboarding.manifest import SLOT_MINUTES
 from ..providers import load_provider
 from ..providers.grammar import load_grammar
 from ..regions import REGION_IDS
-from .contracts import NETWORK_RE, PROJECT_NAME, CampaignSpec, spec_path
+from .contracts import NETWORK_RE, PROJECT_NAME, SIZE_RE, CampaignSpec, spec_path
 from .do_api import DigitalOcean
 
 ALL16 = ("byteful", "dataimpulse", "decodo", "evomi", "fleetproxy", "infatica", "iproyal",
          "massive", "nodemaven", "oxylabs", "proxy-cheap", "proxy-seller", "proxyempire",
          "rayobyte", "soax", "webshare")
 WORKER_SIZE = "c-2"  # the default worker size
-# CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
-SIZE_RE = r"c2?-\d+(-intel)?|s-\d+vcpu-\d+gb(-amd|-intel)?"
 PRODUCT = "residential"
 
 

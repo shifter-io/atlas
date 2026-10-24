@@ -100,3 +100,20 @@ def test_v2_1_load_and_cpu_fields():
     assert set(sampled) <= {item.name for item in fields(DropletRecord)}
     assert "assign_failed" in typing.get_args(contracts.DropletStatus)
     assert contracts.PROJECT_NAME == "Proxy Index"
+
+
+def test_worker_sizes_must_be_droplet_slugs():
+    """CAMP-1p: the spec refuses a size the plan command would refuse."""
+    for size in ("c-2", "c2-4", "c-4-intel", "s-2vcpu-4gb", "s-4vcpu-8gb-amd"):
+        assert spec(size_by_region={"lon1": size, "nyc3": "c-2"}).validate()
+    for size in ("", "C-2", "g-2vcpu-8gb", "c-2 ", "s-2vcpu", 2):
+        with pytest.raises(ValueError, match="size_by_region"):
+            spec(size_by_region={"lon1": size, "nyc3": "c-2"}).validate()
+
+
+def test_hour_records_carry_paused_networks_and_old_records_still_load():
+    hour = HourRecord(CID, 3, "2027-01-02T01:00:00+00:00", paused_networks=["geonode"])
+    assert HourRecord.from_dict(json.loads(json.dumps(hour.to_dict()))) == hour
+    old = {key: value for key, value in hour.to_dict().items() if key != "paused_networks"}
+    assert HourRecord.from_dict(old).paused_networks == []
+    assert "paused" in typing.get_args(contracts.CellStatus)

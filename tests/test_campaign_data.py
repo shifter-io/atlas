@@ -95,10 +95,11 @@ def _droplet(network, region, hour, status, **extra) -> DropletRecord:
                          **values)
 
 
-def write_hour(root: Path, hour: int, statuses: dict) -> None:
+def write_hour(root: Path, hour: int, statuses: dict, paused: tuple[str, ...] = ()) -> None:
     """One ledger record; `statuses` maps (network, region) to a status or a list of them.
 
-    A status may be a `(status, {field: value})` pair to override record fields.
+    A status may be a `(status, {field: value})` pair to override record fields; `paused`
+    names the networks paused when the hour launched.
     """
     droplets = []
     for (network, region), status in statuses.items():
@@ -107,7 +108,7 @@ def write_hour(root: Path, hour: int, statuses: dict) -> None:
             overlap = 1 if (network, region, hour) == STOPPED else 0
             droplets.append(_droplet(network, region, hour, item, overlap=overlap, **extra))
     record = HourRecord(CID, hour, campaign.timestamp(START + timedelta(hours=hour)),
-                        state="done", droplets=droplets)
+                        state="done", droplets=droplets, paused_networks=list(paused))
     atomic_json(hour_path(root, hour), record.to_dict())
 
 
@@ -344,7 +345,8 @@ def test_completeness_golden_tsv_and_tables(root, capsys):
         assert (folder / name).read_text() == (GOLDEN / name).read_text(), name
     assert result["cells"] == 2 * 2 * 24 and result["networks"]["shifter"]["cells"] == 48
     assert result["totals"] == {"complete": 9, "partial": 1, "failed_ours": 85,
-                                "uncollected": 0, "running": 1, "pending": 0, "cells": 96}
+                                "uncollected": 0, "running": 1, "pending": 0, "paused": 0,
+                                "cells": 96}
     assert result["issues"] == ["shifter tor1 h01: GL: interrupted",
                                 "shifter tor1 h01: PM: not started"]
     assert read_json(folder / "completeness.json") == result
@@ -545,3 +547,38 @@ def test_a_compressed_spec_checks_and_merges_only_its_slots(root):
                       / "state.json")
     assert {j["status"] for j in state["jobs"] if j["round"] >= 3} == {"not_started_deadline"}
     assert {j["round"] for j in state["jobs"]} == set(range(24))
+
+
+def test_a_network_paused_for_an_hour_merges_with_paused_cells(root, capsys):
+    """CAMP-1p: geonode was paused when hour 1 launched, so it has no worker and no round
+    there. Its cells are final `paused` cells: merge proceeds and they bring no data."""
+    finish_day(root)
+    for region in REGIONS:
+        unpull(root, "geonode", region, 1)
+    write_hour(root, 1, {("shifter", region): "destroyed" for region in REGIONS},
+               paused=("geonode",))
+    result = completeness.build(root)
+    rows = {(r["net"], r["region"], r["round"]): r for r in result["rows"]}
+    assert rows["geonode", "ams3", 1]["cell"] == rows["geonode", "tor1", 1]["cell"] == "paused"
+    assert rows["shifter", "ams3", 1]["cell"] == "complete"
+    assert result["totals"]["paused"] == 2 and result["networks"]["shifter"]["paused"] == 0
+    assert not [issue for issue in result["issues"] if issue.startswith("geonode")]
+    tables = (root / "completeness" / "per-hour-tables.md").read_text()
+    assert "| ams3 | ✓ 25 | ‖ paused | ✗ ours |" in tables
+    assert main(["campaign", "completeness", "--root", str(root)]) == 3
+    capsys.readouterr()
+    summaries = merge.merge_network(root, "geonode")
+    assert len(summaries) == len(REGIONS)
+    path = merge.manifest_path(root, "geonode")
+    for region in REGIONS:
+        state = read_json(path.parent / "regions" / region / "state.json")
+        jobs = [j for j in state["jobs"] if j["round"] == 1]
+        assert {j["status"] for j in jobs} == {"not_started_deadline"}
+        assert not any(j.get("started_at") or j.get("requests") for j in jobs)
+
+
+def test_paused_applies_only_to_a_cell_without_workers():
+    worker = _droplet("geonode", "ams3", 1, "running")
+    assert merge.cell_status(None, None, paused=True) == ("paused", None)
+    assert merge.cell_status(None, [worker], paused=True) == ("running", None)
+    assert merge.cell_status(None, None) == ("pending", None)

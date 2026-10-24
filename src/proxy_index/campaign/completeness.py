@@ -14,7 +14,7 @@ from ..onboarding.manifest import load, moment
 from ..onboarding.rounds import TERMINAL, round_directory, verify_round
 from ..providers.grammar import grammar_ids, load_grammar
 from .contracts import DropletRecord
-from .merge import HOURS, cell_status, ledger_droplets, load_spec, manifest_path
+from .merge import HOURS, Ledger, cell_status, load_spec, manifest_path, read_ledger
 from .tick import slot_label
 
 DATA1_COLUMNS = ("net", "region", "round", "scheduled", "started", "finished", "completed",
@@ -22,8 +22,9 @@ DATA1_COLUMNS = ("net", "region", "round", "scheduled", "started", "finished", "
                  "no_success", "requests", "errors", "observations")
 COLUMNS = DATA1_COLUMNS + ("cell", "size", "start_lateness_s", "create_to_ready_s", "overlap",
                            "bytes_up", "bytes_down", "protocol")
-STATUSES = ("complete", "partial", "failed_ours", "uncollected", "running", "pending")
-MARKS = {"failed_ours": "✗ ours", "uncollected": "⚠ data", "running": "running", "pending": "·"}
+STATUSES = ("complete", "partial", "failed_ours", "uncollected", "running", "pending", "paused")
+MARKS = {"failed_ours": "✗ ours", "uncollected": "⚠ data", "running": "running", "pending": "·",
+         "paused": "‖ paused"}
 
 
 def _seconds(start: str | None, end: str | None) -> float | None:
@@ -74,9 +75,10 @@ def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, li
 
 
 def cell_row(path: Path, manifest: dict, cell: tuple[str, str, int],
-             droplets: list[DropletRecord] | None) -> tuple[dict, list[str]]:
+             ledger: Ledger) -> tuple[dict, list[str]]:
     """One TSV row (a dict over `COLUMNS`) and the issues of a (network, region, hour) cell."""
     network, region, hour = cell
+    droplets = ledger.droplets.get(cell)
     row = dict.fromkeys(COLUMNS) | {
         "net": network, "region": region, "round": hour, "scheduled": manifest["rounds"][hour],
         "completed": False, "countries": len(manifest["regions"][region]),
@@ -84,7 +86,7 @@ def cell_row(path: Path, manifest: dict, cell: tuple[str, str, int],
     } | _droplet_columns(droplets)
     file = round_directory(path, region, hour) / "round.json"
     state = read_json(file) if file.exists() else None
-    kind, note = cell_status(state, droplets)
+    kind, note = cell_status(state, droplets, ledger.paused_cell(cell))
     issues = [note] if note else []
     if state is None or kind == "running":
         return row | {"cell": kind}, issues
@@ -121,7 +123,7 @@ def render_tables(result: dict, labels: list[str] | None = None) -> str:
              "error rate %, errors / requests), ✗ ours = our side failed (create, assign, "
              "boot, start, or the round failed or ended without closing), ⚠ data = the round "
              "ran but its data is not in the campaign root, `running` not finished, · not "
-             "launched.", "",
+             "launched, ‖ paused = the network was paused for that hour (final, no data).", "",
              "| Network | " + " | ".join(STATUSES) + " | cells |",
              "|---|" + "---|" * (len(STATUSES) + 1)]
     for name, counts in [*result["networks"].items(), ("total", result["totals"])]:
@@ -151,7 +153,7 @@ def build(root: Path) -> dict:
     Reads only; a cell may be pending or running. Returns the JSON document.
     """
     spec = load_spec(root)
-    droplets = ledger_droplets(root)
+    ledger = read_ledger(root)
     rows, issues = [], []
     for network in spec.networks:
         path = manifest_path(root, network)
@@ -159,7 +161,7 @@ def build(root: Path) -> dict:
         for region in spec.regions:
             for hour in range(spec.hours):
                 cell = (network, region, hour)
-                row, problems = cell_row(path, manifest, cell, droplets.get(cell))
+                row, problems = cell_row(path, manifest, cell, ledger)
                 rows.append(row)
                 issues += [f"{network} {region} h{hour:02d}: {issue}" for issue in problems]
     result = {
