@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -95,11 +96,19 @@ def hour_totals(tsv: str) -> dict[str, dict[str, int]]:
     return totals
 
 
-def report_message(name: str, totals: dict[str, dict[str, int]]) -> str:
+def report_label(name: str, text: str = "") -> str:
+    """`hour NN`, or the report heading's `slot NN (HH:MM UTC)` for other than hourly slots."""
+    heading = re.fullmatch(r"# Campaign (slot \d{2} \(\d{2}:\d{2} UTC\)) — traffic per network",
+                           text.partition("\n")[0])
+    return heading.group(1) if heading else "hour " + name.removeprefix("hour-").removesuffix(
+        ".md")
+
+
+def report_message(name: str, totals: dict[str, dict[str, int]], report: str = "") -> str:
     hour = name.removeprefix("hour-").removesuffix(".md")
     networks = totals.get(hour, {})
     top = max(networks, key=networks.__getitem__) if networks else None
-    text = f"CAMP-1 hour {hour}: {sum(networks.values()) / 1e9:.2f} GB"
+    text = f"CAMP-1 {report_label(name, report)}: {sum(networks.values()) / 1e9:.2f} GB"
     return text + (f"; top network {top} {networks[top] / 1e9:.2f} GB" if top else "")
 
 
@@ -179,10 +188,9 @@ class Watch:
         for name, text in sorted(data["reports"].items()):
             write_text(self.traffic_dir / name, text)
             memory["seen"][name] = hashlib.sha256(text.encode()).hexdigest()
-            hour = name.removeprefix("hour-").removesuffix(".md")
             path = os.path.relpath(self.traffic_dir / name, self.status_file.parent)  # w3
-            memory["latest"] = f"hour {hour} {path}"
-            self.io.notify(report_message(name, totals))
+            memory["latest"] = f"{report_label(name, text)} {path}"
+            self.io.notify(report_message(name, totals, text))
             self._save()  # w2: a later failure never repeats this report's notification
         for line in data["alerts"]:
             item = self._parse(line)

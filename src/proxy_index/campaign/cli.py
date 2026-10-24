@@ -190,9 +190,12 @@ def _plan_parsers(actions) -> None:
     plan.add_argument("--networks", required=True, help="all16, or comma-separated names")
     plan.add_argument("--regions", nargs="+")
     plan.add_argument("--concurrency", type=int, default=2000)
-    plan.add_argument("--size", default="c-2", help="worker droplet size slug (c-…, s-…)")
+    plan.add_argument("--size", default="c-2", help="worker droplet size slug (c-…, c2-…, s-…)")
     plan.add_argument("--image", required=True, help="snapshot name from `image build`")
     plan.add_argument("--grace-hours", type=int, default=48)
+    plan.add_argument("--slot-minutes", type=int, default=60,
+                      help="minutes between slots, a divisor of 60 (15: four slots an hour)")
+    plan.add_argument("--slots", type=int, default=24, help="number of slots (1-24)")
     plan.add_argument("--ssh-key-name", help="default: the deployed worker key")
     plan.add_argument("--synthetic", action="store_true")
     plan.add_argument("--output", type=Path, required=True)
@@ -206,6 +209,8 @@ def _plan_parsers(actions) -> None:
     deploy.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
     deploy.add_argument("--wheel", type=Path, required=True)
     deploy.add_argument("--requirements", type=Path, required=True)
+    deploy.add_argument("--size", help="a new manager's droplet size slug, offered in lon1 "
+                        "(default: the recorded manager's, else s-8vcpu-16gb)")
     deploy.add_argument("--networks", default="all16")
     deploy.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
     deploy.add_argument("--mac-key", type=Path,
@@ -220,6 +225,10 @@ def _plan_parsers(actions) -> None:
     allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
     teardown = steps.add_parser("teardown", help="Remove the manager and its resources")
     teardown.add_argument("--after-collect", type=Path, action="append", required=True)
+    teardown.add_argument("--keep-worker-assets", action="store_true",
+                          help="remove only the manager and its firewall; keep the worker "
+                          "snapshots, firewall and keys for the next manager (they can only "
+                          "be removed by a full teardown after the next deploy)")
     for step in (deploy, allow):
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
     for step in (deploy, upload, enable, stop, allow, teardown):
@@ -235,7 +244,8 @@ def _plan(args) -> int:
             args.account, args.start, parse_networks(args.networks), args.image, args.output,
             args.credentials_file, args.inventory, args.images,
             tuple(args.regions or REGION_IDS), args.configs, args.ssh_key_name,
-            args.concurrency, args.grace_hours, args.synthetic, args.size)
+            args.concurrency, args.grace_hours, args.synthetic, args.size,
+            args.slot_minutes, args.slots)
 
         async def run() -> dict:
             async with _cloud(args.account) as cloud:
@@ -264,7 +274,8 @@ async def _manager_step(args) -> dict:
         raise deploy.DeployError("no manager is recorded")
     async with _cloud(account) as cloud:
         if args.manager_action == "teardown":
-            return await deploy.teardown(cloud, args.inventory, args.after_collect)
+            return await deploy.teardown(cloud, args.inventory, args.after_collect,
+                                         keep_worker_assets=args.keep_worker_assets)
         address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
         if args.manager_action == "allow-me":
             return await deploy.allow_me(cloud, args.inventory, address)
@@ -277,7 +288,8 @@ async def _manager_step(args) -> dict:
             args.account, args.wheel, args.requirements, ensure_mac_key(args.mac_key),
             args.inventory, deploy.credential_files(args.credentials_file,
                                                     parse_networks(args.networks)),
-            address, keychain_token(ACCOUNTS[args.account]))  # read only when streamed
+            address, keychain_token(ACCOUNTS[args.account]),  # read only when streamed
+            args.size)
         return await deploy.deploy(cloud, job)
 
 
