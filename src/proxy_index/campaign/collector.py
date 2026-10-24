@@ -30,7 +30,14 @@ from .contracts import (
     status_path,
 )
 from .reports import latest_summary, write_traffic_report
-from .scope import Ledger, OwnershipError, guarded_delete, role_checks, scope_for
+from .scope import (
+    UNASSIGNED_REMOVABLE,
+    Ledger,
+    OwnershipError,
+    guarded_delete,
+    role_checks,
+    scope_for,
+)
 from .tick import (
     FINAL,
     LAUNCHABLE,
@@ -171,7 +178,7 @@ class Collector:
                              droplet_id=droplet.id, name=droplet.name)
             elif entry is None:
                 await self._adopt(scope, hours[hour], droplet, hours)
-            elif self._retry(*entry) or (stray and entry[1].status != "destroy_refused"):
+            elif self._retry(*entry) or (stray and entry[1].status in UNASSIGNED_REMOVABLE):
                 await self._retire(scope, *entry, hours)
 
     @staticmethod

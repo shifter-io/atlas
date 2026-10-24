@@ -37,6 +37,8 @@ from .do_api import DigitalOcean, ScopeError, parse_droplet
 _GUARD = object()
 PROJECT_CACHE_SECONDS = 60.0
 OWN_UNASSIGNED_SECONDS = 30 * 60
+# The only statuses in which a later process may hand a worker with the ledger mark to the guard.
+UNASSIGNED_REMOVABLE = ("assign_failed", "destroy_failed", "destroyed")
 PATHS = MappingProxyType({"droplet": "/v2/droplets/{}", "ssh_key": "/v2/account/keys/{}",
                           "firewall": "/v2/firewalls/{}", "snapshot": "/v2/snapshots/{}"})
 Kind = Literal["droplet", "ssh_key", "firewall", "snapshot"]
@@ -311,6 +313,9 @@ async def assign_and_verify_project(
     if missing:
         await _assign(cloud, scope.project_id, missing, retry)
     unconfirmed = missing | (set(ids) - shown)
+    for rid in sorted(unconfirmed):  # the mark's own precondition (m1): only our own creates
+        if rid not in cloud.created_ids or records[rid].droplet_id != rid:
+            raise OwnershipError("droplet", rid, ["own_create"])
     now = utcnow().isoformat()
     for rid in ids:
         record = records[rid]

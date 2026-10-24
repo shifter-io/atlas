@@ -176,18 +176,60 @@ async def test_a_droplet_that_never_appears_ends_absent(tmp_path):
     assert audit_lines(tmp_path / "a")[-1]["result"] == "absent"
 
 
-async def test_an_unreadable_foreign_id_is_refused_before_any_post(tmp_path):
-    """Retrying is only for our own ids: a foreign id with a failing GET is still refused."""
+@pytest.mark.parametrize("failures", [TRIES, 3 * TRIES], ids=["transient", "persistent"])
+async def test_an_unreadable_foreign_id_is_refused_before_any_post(tmp_path, failures):
+    """Retrying is only for our own ids: a foreign id with a failing GET is still refused, even
+    when every read fails (m1)."""
     fake = FakeDigitalOcean()
-    lookalike = fake.add(NAME, OURS, project=PROD_PROJECT)
-    fake.faults.append(Fault("GET", f"/v2/droplets/{lookalike}", 500, times=TRIES))
+    lookalike = fake.add(NAME, OURS, project=None)
+    fake.faults.append(Fault("GET", f"/v2/droplets/{lookalike}", 500, times=failures))
     records = {lookalike: DropletRecord("shifter", "nyc3", 3, NAME, lookalike)}
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await assign_and_verify_project(cloud, SCOPE, [lookalike], records, tmp_path / "a")
+            await assign_and_verify_project(cloud, SCOPE, [lookalike], records, tmp_path / "a",
+                                            retry=scope.Retry(delay=0))
     assert refused.value.failed == ["own_create"] and lookalike in fake.droplets
-    assert records[lookalike].assign_failed_at is None
+    assert records[lookalike].assign_failed_at is None and not fake.deleted
     assert not [r for r in fake.requests if r[0] == "POST"]
+
+
+async def test_the_mark_writer_refuses_an_id_it_did_not_create(tmp_path, monkeypatch):
+    """m1: even if the read step let a foreign id through, the writer itself refuses to mark it."""
+    fake = FakeDigitalOcean()
+    lookalike = fake.add(NAME, OURS, project=None)
+    records = {lookalike: DropletRecord("shifter", "nyc3", 3, NAME, lookalike)}
+
+    async def unreadable(*_args):
+        return False
+
+    monkeypatch.setattr(scope, "_fresh_owned", unreadable)
+    async with running(fake) as cloud:
+        with pytest.raises(OwnershipError) as refused:
+            await assign_and_verify_project(cloud, SCOPE, [lookalike], records, tmp_path / "a",
+                                            retry=scope.Retry(attempts=1))
+    assert refused.value.failed == ["own_create"] and records[lookalike].assign_failed_at is None
+    assert records[lookalike].status == "requested" and not fake.deleted
+
+
+@pytest.mark.parametrize("status", ["destroy_refused", "running"])
+async def test_reconcile_leaves_a_marked_worker_alone_unless_removable(tmp_path, status):
+    """m2: a marked worker is retired only in assign_failed/destroy_failed/destroyed; a refused
+    or live one is neither retried nor reported as foreign_tagged."""
+    fake = FakeDigitalOcean()
+    spec = nyc3_spec()
+    _, root, _, _ = await launched(tmp_path, fake, spec, start=LATE)
+    record = launch.load_hour(root, 0)
+    [worker] = record.droplets
+    stray = fake.add(worker.name, fake.droplets[worker.droplet_id]["tags"], project=None)
+    marked = DropletRecord(worker.network, worker.region, 0, worker.name, stray,
+                           status=status, assign_failed_at=SPEC_TIME)
+    record.droplets.append(marked)
+    async with running(fake) as cloud:
+        collector = collector_module.Collector(
+            root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing())
+        await collector.reconcile(spec, {0: record})
+    assert stray in fake.droplets and marked.status == status and not fake.deleted
+    assert "foreign_tagged" not in {a["code"] for a in read_alerts(root)}
 
 
 async def test_the_ledger_mark_survives_a_new_client(tmp_path):
