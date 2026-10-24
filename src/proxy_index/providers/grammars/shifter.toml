@@ -67,3 +67,6 @@ default_ttl_seconds = 120
 full_geo = {}
 country_geo = { forbid = ["region", "city", "asn"] }
 non_geo = { forbid = ["country", "region", "city", "asn"] }
+
+[testing]
+max_concurrency = 2000 # Owner record 2026-10-24: sustained from one worker

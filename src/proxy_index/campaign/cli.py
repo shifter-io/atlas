@@ -307,3 +307,84 @@ def _manager(args) -> int:
 
 PARSERS.append(_plan_parsers)
 HANDLERS.update(plan=_plan, manager=_manager)
+
+
+def _probe_parsers(actions) -> None:
+    """CONC-1: each network's max safe concurrency, from one worker (run on the manager)."""
+    from . import probe
+
+    found = actions.add_parser("probe", help="Measure each network's max concurrency (manager)")
+    what = found.add_mutually_exclusive_group(required=True)
+    what.add_argument("--root", type=Path, help="a planned campaign uploaded to this manager")
+    what.add_argument("--remove", type=Path, metavar="PROBE_FOLDER",
+                      help="remove the worker a stopped probe left (guarded)")
+    found.add_argument("--networks", help="comma-separated; default: the campaign's networks")
+    found.add_argument("--requests", type=int, default=probe.REQUESTS)
+    found.add_argument("--start", type=int, default=probe.START)
+    found.add_argument("--step", type=int, default=probe.STEP)
+    found.add_argument("--floor", type=int, default=probe.FLOOR)
+    found.add_argument("--country", default=probe.COUNTRY)
+    found.add_argument("--region", default=probe.REGION)
+    found.add_argument("--size", default=probe.SIZE)
+    found.add_argument("--output", type=Path, help="default: <manager>/probes")
+
+
+def cancel_on_signals() -> None:
+    """The first SIGTERM, SIGHUP or SIGINT cancels the running probe, whose `finally` still
+    removes its worker; later ones are ignored so that removal can finish."""
+    import signal
+
+    loop, task = asyncio.get_running_loop(), asyncio.current_task()
+    numbers = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+
+    def stop() -> None:
+        for number in numbers:
+            loop.add_signal_handler(number, lambda: None)
+        task.cancel()
+
+    for number in numbers:
+        loop.add_signal_handler(number, stop)
+
+
+def _probe(args) -> int:
+    from .collector import MANAGER_ROOT
+    from .contracts import runtime_dir
+    from .do_api import DigitalOcean, file_token
+    from .fanout import OpenSSHRemote
+    from .planspec import PlanError, parse_networks
+    from .probe import ProbeError, ProbeInputs, probe, recover
+
+    secrets = MANAGER_ROOT / ".secrets"
+    output = args.output or MANAGER_ROOT / "probes"
+    try:
+        inputs = ProbeInputs(
+            args.root, output, parse_networks(args.networks) if args.networks else (),
+            args.requests, args.start, args.step, args.floor, args.country, args.region,
+            args.size)
+    except PlanError as exc:
+        print(f"Not probed: {exc}", file=sys.stderr)
+        return 3
+
+    async def run() -> dict:
+        cancel_on_signals()
+        async with DigitalOcean(file_token(secrets / "do-token")) as cloud:
+            if args.remove:
+                return await recover(cloud, args.remove)
+            return await probe(cloud, lambda folder: OpenSSHRemote(
+                secrets / "worker-key", runtime_dir(folder), 0), inputs)
+
+    try:
+        result = asyncio.run(run())
+    except ProbeError as exc:
+        print(f"Not probed: {exc}", file=sys.stderr)
+        return 3
+    except asyncio.CancelledError:  # stopped outside a probe run, e.g. during --remove
+        print("Interrupted: run `campaign probe --remove` again", file=sys.stderr)
+        return 3
+    print(json.dumps(result, indent=2))
+    done = ("destroyed", "absent") if args.remove else ("destroyed",)
+    return 0 if result["worker_status"] in done and "error" not in result else 3
+
+
+PARSERS.append(_probe_parsers)
+HANDLERS.update(probe=_probe)
