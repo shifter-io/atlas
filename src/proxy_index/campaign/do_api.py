@@ -43,6 +43,7 @@ BACKOFF = (1, 2, 4, 8)
 MAX_WAIT = 60.0
 ID, UUID = r"[0-9]+", r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 PAGE = frozenset({"page", "per_page"})
+TAG = re.escape(RESOURCE_PREFIX) + r"[a-z0-9-]+"
 NONE: frozenset[str] = frozenset()
 # (method, path pattern) -> (allowed query keys, needs the scope guard). A delete names one
 # resource. Later tasks add endpoints here under scope review; nothing else can be sent.
@@ -69,6 +70,10 @@ ALLOWED = MappingProxyType({
     ("POST", f"/v2/images/{ID}/actions"): (NONE, False),
     ("POST", "/v2/firewalls"): (NONE, False),
     ("PUT", f"/v2/firewalls/{UUID}"): (NONE, False),
+    # CAMP-1h: a firewall may only name a tag that exists. Read and create a pi-camp- tag;
+    # never list tags or tag/untag a resource.
+    ("GET", f"/v2/tags/{TAG}"): (NONE, False),
+    ("POST", "/v2/tags"): (NONE, False),
 })
 ROLE_TAGS = frozenset(tag for tag, _ in ROLES.values())
 SNAPSHOT_NAME_RE = r"^pi-camp-worker-[0-9A-Za-z.+]+-[0-9a-f]{12}-[0-9]{8}$"
@@ -88,11 +93,12 @@ def _firewall(body: dict) -> bool:
             and all(str(i).isdigit() for i in body.get("droplet_ids") or []))
 
 
-# Writes to a droplet or firewall that may not be ours. They need `_OWNED`, which only this
-# client's ownership-checking methods pass, after a fresh GET (as DELETE needs scope's token).
+# Writes to a droplet or firewall that may not be ours, and the tag calls. They need `_OWNED`,
+# which only this client's checking methods pass, after a fresh GET (as DELETE needs scope's
+# token); the tag calls only from `_ensure_tag`, before a firewall write.
 OWNED_WRITES = MappingProxyType({key: True for key in (
     ("POST", f"/v2/droplets/{ID}/actions"), ("POST", "/v2/firewalls"),
-    ("PUT", f"/v2/firewalls/{UUID}"))})
+    ("PUT", f"/v2/firewalls/{UUID}"), ("GET", f"/v2/tags/{TAG}"), ("POST", "/v2/tags"))})
 _OWNED = object()
 # Bodies the operations calls may carry; checked with the allowlist, before anything is sent.
 BODIES = MappingProxyType({
@@ -103,6 +109,8 @@ BODIES = MappingProxyType({
         body["type"] == "transfer" and body["region"] in REGION_IDS),
     ("POST", "/v2/firewalls"): _firewall,
     ("PUT", f"/v2/firewalls/{UUID}"): _firewall,
+    ("POST", "/v2/tags"): lambda body: set(body) == {"name"} and bool(
+        re.fullmatch(TAG, str(body["name"]))),
 })
 TokenSource = Callable[[], str]
 
@@ -439,6 +447,7 @@ class DigitalOcean:
 
     async def create_firewall(self, rules: dict[str, Any], project_id: str) -> dict[str, Any]:
         await self._own_firewall(rules, project_id)
+        await self._ensure_tags(rules)
         return (await self.request("POST", "/v2/firewalls", body=rules,
                                    guard=_OWNED))["firewall"]
 
@@ -450,6 +459,7 @@ class DigitalOcean:
             raise ScopeError("firewall not found")
         await self._own_firewall(current, project_id)
         await self._own_firewall(rules, project_id)
+        await self._ensure_tags(rules)
         return (await self.request("PUT", f"/v2/firewalls/{firewall_id}", body=rules,
                                    guard=_OWNED))["firewall"]
 
@@ -466,6 +476,23 @@ class DigitalOcean:
                 raise ScopeError("firewall targets a droplet that is not the campaign's")
         if not await self._in_project(project_id, ids):
             raise ScopeError("firewall targets a droplet outside project Proxy Index")
+
+    async def _ensure_tags(self, rules: dict[str, Any]) -> None:
+        """DigitalOcean refuses (422) a firewall naming a tag that does not exist yet, as
+        pi-camp-worker does before the first worker: create each missing one."""
+        for tag in rules.get("tags") or []:
+            await self._ensure_tag(str(tag))
+
+    async def _ensure_tag(self, name: str) -> None:
+        """Create the pi-camp- tag `name` unless it exists; it is never put on a resource."""
+        if not re.fullmatch(TAG, name):
+            raise ScopeError("only pi-camp- tags are created")
+        try:
+            await self.request("GET", f"/v2/tags/{name}", guard=_OWNED)
+        except ApiError as error:
+            if error.status != 404:
+                raise
+            await self.request("POST", "/v2/tags", body={"name": name}, guard=_OWNED)
 
     async def _in_project(self, project_id: str, droplet_ids: list[str]) -> bool:
         """Every id is in `project_id`, and that project is the one named Proxy Index."""
