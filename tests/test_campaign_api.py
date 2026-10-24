@@ -461,6 +461,7 @@ async def test_firewalls_attach_only_to_campaign_droplets():
                                               CAMPAIGN_PROJECT)
         updated = await cloud.update_firewall(created["id"], {**RULES, "droplet_ids": []},
                                               CAMPAIGN_PROJECT)
-    assert [m for m, _, _ in fake.bodies] == ["POST", "PUT"]
+    assert [(m, p) for m, p, _ in fake.bodies] == [
+        ("POST", "/v2/tags"), ("POST", "/v2/firewalls"), ("PUT", f"/v2/firewalls/{created['id']}")]
     assert updated["droplet_ids"] == [] and fake.resources["firewall"][FIREWALL]["name"] == (
         "prod-fw")

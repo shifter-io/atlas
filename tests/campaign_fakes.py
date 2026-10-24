@@ -40,6 +40,7 @@ class FakeDigitalOcean:
         self.projects = {PROD_PROJECT: set(), CAMPAIGN_PROJECT: set()}
         self.project_names = {PROD_PROJECT: "LeftClick Production", CAMPAIGN_PROJECT: "Proxy Index"}
         self.resources = {"ssh_key": {}, "firewall": {}, "snapshot": {}}
+        self.tags: set[str] = set()  # as on DigitalOcean: made by POST /v2/tags or a create
         self.requests: list[tuple[str, str, dict, bool]] = []
         self.faults: list[Fault] = []
         self.deleted: list[tuple[str, str]] = []
@@ -65,6 +66,7 @@ class FakeDigitalOcean:
             "networks": {"v4": [{"type": "private", "ip_address": "192.0.2.2"},
                                 {"type": "public", "ip_address": ip}]},
         }
+        self.tags.update(tags)
         if project:
             self.projects[project].add(droplet_id)
         return droplet_id
@@ -107,11 +109,13 @@ class FakeDigitalOcean:
         route.add_post("/v2/images/{id}/actions", self._image_action)
         route.add_post("/v2/firewalls", self._firewall)
         route.add_put("/v2/firewalls/{id}", self._firewall)
+        route.add_get("/v2/tags/{name}", self._tag)
+        route.add_post("/v2/tags", self._add_tag)
         for kind, prefix in (("droplet", "/v2/droplets"), ("ssh_key", "/v2/account/keys"),
                              ("firewall", "/v2/firewalls"), ("snapshot", "/v2/snapshots")):
             route.add_get(prefix + "/{id}", self._getter(kind))
             route.add_delete(prefix + "/{id}", self._deleter(kind))
-        # Anything else (actions, tags, PUT, PATCH, ...) exists, so a leak would be visible here.
+        # Anything else (actions, tag resources, PUT, PATCH, ...) exists, so a leak is visible.
         route.add_route("*", "/{tail:.*}", self._unlisted)
         return app
 
@@ -246,8 +250,21 @@ class FakeDigitalOcean:
             self.images[image_id]["regions"].append(body["region"])
         return self._new_action(body["type"], image_id)
 
+    async def _tag(self, request):
+        name = request.match_info["name"]
+        if name not in self.tags:
+            return web.json_response({"id": "not_found"}, status=404)
+        return web.json_response({"tag": {"name": name}})
+
+    async def _add_tag(self, request):
+        body = await self._body(request)
+        self.tags.add(body["name"])
+        return web.json_response({"tag": {"name": body["name"]}}, status=201)
+
     async def _firewall(self, request):
         body = await self._body(request)
+        if set(body.get("tags") or []) - self.tags:  # DigitalOcean: "tag ... does not exist"
+            return web.json_response({"id": "unprocessable_entity"}, status=422)
         firewall_id = request.match_info.get("id") or (
             f"33333333-3333-4333-8333-{next(self._ids):012d}")
         self.resources["firewall"][firewall_id] = {"id": firewall_id, **body}

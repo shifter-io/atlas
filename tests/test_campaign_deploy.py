@@ -49,7 +49,7 @@ from proxy_index.campaign.contracts import (
     CampaignSpec,
     spec_path,
 )
-from proxy_index.campaign.do_api import CreateError
+from proxy_index.campaign.do_api import ApiError, CreateError
 from proxy_index.campaign.planspec import PlanError, PlanInputs
 from proxy_index.onboarding import manifest
 from proxy_index.regions import REGION_IDS
@@ -71,7 +71,7 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
     assert writes(fake) == [
         ("POST", "/v2/account/keys"), ("POST", "/v2/droplets"),
         ("POST", "/v2/projects/N/resources"), ("POST", "/v2/firewalls"),
-        ("POST", "/v2/account/keys"), ("POST", "/v2/firewalls")]
+        ("POST", "/v2/account/keys"), ("POST", "/v2/tags"), ("POST", "/v2/firewalls")]
     [create] = [b for _, p, b in fake.bodies if p == "/v2/droplets"]
     assert create["tags"] == [MANAGER_TAG] and re.fullmatch(
         r"pi-camp-manager-20270101-[0-9a-f]{4}", create["names"][0])
@@ -160,12 +160,49 @@ async def test_a_second_deploy_updates_without_a_second_manager(job):
     first = inventory(job)
     await run_deploy(fake, job, shell)
     again = inventory(job)
-    assert [m for m, p in writes(fake)].count("POST") == 6 + 0 and ("PUT", "/v2/firewalls/N") in (
+    assert [m for m, p in writes(fake)].count("POST") == 7 + 0 and ("PUT", "/v2/firewalls/N") in (
         writes(fake))
     assert len([d for d in fake.droplets.values() if MANAGER_TAG in d["tags"]]) == 1
     for key in ("manager_id", "manager_firewall_id", "worker_firewall_id", "worker_key_id",
                 "worker_key_name"):
         assert again[key] == first[key]
+
+
+async def test_a_missing_worker_tag_is_created_before_its_firewall(job):
+    """CAMP-1h: the worker firewall targets pi-camp-worker, which no droplet carried yet, and
+    DigitalOcean answers 422 to a firewall naming a tag that does not exist."""
+    fake = Fake()
+    fake.seed_production(40)
+    production = {i: list(d["tags"]) for i, d in fake.droplets.items()}
+    assert WORKER_TAG not in fake.tags
+    await run_deploy(fake, job)
+    assert [(m, p, b) for m, p, b in fake.bodies if "/tags" in p] == [
+        ("POST", "/v2/tags", {"name": WORKER_TAG})]
+    order = writes(fake)
+    assert order[-2:] == [("POST", "/v2/tags"), ("POST", "/v2/firewalls")]
+    assert inventory(job)["worker_firewall_id"] in fake.resources["firewall"]
+    assert {i: fake.droplets[i]["tags"] for i in production} == production
+    assert not fake.unlisted and not fake.deleted
+
+
+async def test_a_deploy_stopped_before_the_worker_firewall_continues_on_a_rerun(job):
+    """CAMP-1h: a rerun after the first run stopped at the worker tag finishes the deploy with
+    the same manager, manager firewall and worker key."""
+    fake = Fake()
+    fake.faults.append(Fault("POST", "/v2/tags", 422))
+    with pytest.raises(ApiError):
+        await run_deploy(fake, job)
+    partial = inventory(job)
+    assert "worker_firewall_id" not in partial and partial["manager_firewall_id"]
+    await run_deploy(fake, job)
+    again = inventory(job)
+    for key in ("manager_id", "manager_firewall_id"):
+        assert again[key] == partial[key]
+    assert again["worker_firewall_id"] in fake.resources["firewall"]
+    assert len(fake.resources["firewall"]) == 2 and WORKER_TAG in fake.tags
+    assert len([d for d in fake.droplets.values() if MANAGER_TAG in d["tags"]]) == 1
+    assert len([k for k in fake.resources["ssh_key"].values()
+                if k["name"].startswith("pi-camp-worker-")]) == 1
 
 
 async def test_a_deploy_never_runs_under_a_campaign_and_keeps_earlier_credentials(job):
