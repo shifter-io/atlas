@@ -34,10 +34,12 @@ from proxy_index.campaign import cli as campaign_cli
 from proxy_index.campaign import fanout
 from proxy_index.campaign import probe as probing
 from proxy_index.campaign.contracts import WORKER_TAG, audit_path, spec_path
+from proxy_index.campaign.deploy import toml_table
 from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError, ProbeInputs, reasons, step_result
 from proxy_index.providers.grammar import Grammar, load_grammar
 
+ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime.fromisoformat("2027-01-01T22:00:00+00:00")
 IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
@@ -98,10 +100,24 @@ class FakeProbeRemote:
         return self
 
 
-def world(tmp_path, networks=NETWORKS[:2]):
+PROBED = ("soax", "webshare", "iproyal")
+
+
+def world(tmp_path, networks=PROBED[:2]):
+    """A manager with a planned campaign: real census configs and 0600 credentials."""
     spec = make_spec(networks, ("lon1", "nyc3"))
     root = make_root(tmp_path, spec)
     spec_path(root).write_text(spec.to_json())
+    for network in networks:
+        config = ROOT / "configs" / f"{network}.toml"
+        (root / spec.manifests[network]).with_name("provider.toml").write_bytes(
+            config.read_bytes())
+        names = tomllib.loads(config.read_text())["credentials"]
+        credentials = tmp_path / "manager" / ".secrets" / "credentials" / f"{network}.toml"
+        credentials.write_bytes(toml_table(network, {
+            key.removesuffix("_env"): "acct9" if key == "account_env" else f"secret-{network}"
+            for key in names}))
+        credentials.chmod(0o600)
     return ProbeInputs(root, tmp_path / "manager" / "probes"), spec
 
 
@@ -183,8 +199,8 @@ async def test_the_probe_finds_each_networks_max_and_removes_its_worker(tmp_path
     fake.seed_production(60)
     production = set(fake.droplets)
     inputs, spec = world(tmp_path)
-    remote = FakeProbeRemote({("net00", 2000): summary(statuses={"429": 1250}),
-                              ("net00", 1500): summary(errors={"proxy_connect": 600})})
+    remote = FakeProbeRemote({("soax", 2000): summary(statuses={"429": 1250}),
+                              ("soax", 1500): summary(errors={"proxy_connect": 600})})
     result = await probed(fake, remote, inputs)
 
     [create] = fake.creates
@@ -197,19 +213,19 @@ async def test_the_probe_finds_each_networks_max_and_removes_its_worker(tmp_path
     assert set(fake.droplets) == production and result["worker_status"] == "destroyed"
     assert result["worker"]["assigned_at"] and "error" not in result
 
-    net00, net01 = result["networks"]["net00"], result["networks"]["net01"]
-    assert [s["concurrency"] for s in net00["steps"]] == [500, 2000, 1500, 1000]
-    assert [s["step_down"] for s in net00["steps"]] == [
+    soax, webshare = result["networks"]["soax"], result["networks"]["webshare"]
+    assert [s["concurrency"] for s in soax["steps"]] == [500, 2000, 1500, 1000]
+    assert [s["step_down"] for s in soax["steps"]] == [
         [], ["rate_limited", "success_drop"], ["proxy_connect"], []]
-    assert net00["max_concurrency"] == 1000 and net01["max_concurrency"] == 2000
-    assert [s["concurrency"] for s in net01["steps"]] == [500, 2000]
+    assert soax["max_concurrency"] == 1000 and webshare["max_concurrency"] == 2000
+    assert [s["concurrency"] for s in webshare["steps"]] == [500, 2000]
 
     folder = inputs.output / result["probe_id"]
     assert remote.folders == [folder]
     assert json.loads((folder / "probe-result.json").read_text()) == result
     table = (folder / "probe-result.md").read_text()
-    assert "| net00 | 1000 | `[testing] max_concurrency = 1000` |" in table
-    assert "| net00 | 2000 | 25000 | 95.0 | 5.0 |" in table and "rate_limited" in table
+    assert "| soax | 1000 | `[testing] max_concurrency = 1000` |" in table
+    assert "| soax | 2000 | 25000 | 95.0 | 5.0 |" in table and "rate_limited" in table
     audit = [json.loads(line) for line in audit_path(folder).read_text().splitlines()]
     assert audit[-1]["result"] == "deleted" and audit[-1].get("path") != "own_unassigned"
     written = "".join(p.read_text() for p in folder.rglob("*") if p.is_file())
@@ -218,7 +234,7 @@ async def test_the_probe_finds_each_networks_max_and_removes_its_worker(tmp_path
 
 async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path):
     fake = FakeDigitalOcean()
-    inputs, _ = world(tmp_path, NETWORKS[:1])
+    inputs, _ = world(tmp_path, PROBED[:1])
     remote = FakeProbeRemote({})
     await probed(fake, remote, replace(inputs, start=1000, country="DE"))
     (setup, payload, _), *steps = remote.calls
@@ -226,10 +242,11 @@ async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path)
         "/opt/proxy-index-worker", "/run/proxy-index-worker"]
     with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
         names = archive.getnames()
-        assert archive.extractfile("secrets/net00.toml").read() == b"password = 'secret-net00'\n"
+        assert archive.extractfile("secrets/soax.toml").read() == (
+            inputs.root.parents[1] / ".secrets" / "credentials" / "soax.toml").read_bytes()
         assert {m.mode for m in archive.getmembers()} == {0o600}
-    assert names == ["wheel/proxy_index-1.0-py3-none-any.whl", "probe/net00.toml",
-                     "secrets/net00.toml"]
+    assert names == ["wheel/proxy_index-1.0-py3-none-any.whl", "probe/soax.toml",
+                     "secrets/soax.toml"]
     commands = [command for command, stdin, _ in steps]
     assert all(stdin is None for _, stdin, _ in steps) and len(commands) == 2
     argv = commands[1]
@@ -238,38 +255,38 @@ async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path)
     assert argv[argv.index("--requests") + 1] == "25000"
     assert argv[argv.index("--param") + 1] == "country=DE"
     assert argv[argv.index("--target") + 1] == "generic_http"
-    assert argv[argv.index("--credentials-file") + 1] == "/run/proxy-index-worker/probe/net00.toml"
+    assert argv[argv.index("--credentials-file") + 1] == "/run/proxy-index-worker/probe/soax.toml"
     assert "secret" not in " ".join(argv)
 
 
 async def test_unusable_floor_run_failures_and_a_failing_floor(tmp_path):
     fake = FakeDigitalOcean()
-    inputs, _ = world(tmp_path, NETWORKS[:3])
+    inputs, _ = world(tmp_path, PROBED)
     remote = FakeProbeRemote({
-        ("net00", 500): summary(errors={"proxy_auth": 20_000}),
-        ("net01", 2000): RemoteError("probe net01 failed (exit 255)"),
-        ("net01", 1500): summary(statuses={"429": 2000}),
-        ("net01", 1000): summary(statuses={"429": 2000}),
-        ("net02", 500): summary(statuses={"429": 1000}),
-        **{("net02", c): summary(statuses={"429": 1000}) for c in (2000, 1500, 1000)},
+        ("soax", 500): summary(errors={"proxy_auth": 20_000}),
+        ("webshare", 2000): RemoteError("probe webshare failed (exit 255)"),
+        ("webshare", 1500): summary(statuses={"429": 2000}),
+        ("webshare", 1000): summary(statuses={"429": 2000}),
+        ("iproyal", 500): summary(statuses={"429": 1000}),
+        **{("iproyal", c): summary(statuses={"429": 1000}) for c in (2000, 1500, 1000)},
     })
     result = await probed(fake, remote, inputs)
-    net00, net01, net02 = (result["networks"][n] for n in NETWORKS[:3])
-    assert net00 == {"steps": [net00["steps"][0]], "max_concurrency": None,
+    soax, webshare, iproyal = (result["networks"][n] for n in PROBED)
+    assert soax == {"steps": [soax["steps"][0]], "max_concurrency": None,
                      "verdict": "unusable at the floor"}
-    assert net01["steps"][1] == {"concurrency": 2000, "requested": 25_000,
+    assert webshare["steps"][1] == {"concurrency": 2000, "requested": 25_000,
                                  "run_failed": "RemoteError", "step_down": ["run_failed"]}
-    assert net01["max_concurrency"] == 500 and "verdict" not in net01
-    assert net02["max_concurrency"] == 500
-    assert net02["verdict"] == "floor also fails: rate_limited"
+    assert webshare["max_concurrency"] == 500 and "verdict" not in webshare
+    assert iproyal["max_concurrency"] == 500
+    assert iproyal["verdict"] == "floor also fails: rate_limited"
     table = probing.markdown(result)
-    assert "| net00 | - | unusable at the floor |" in table
+    assert "| soax | - | unusable at the floor |" in table
     assert result["worker_status"] == "destroyed"
     for reply, error in ((b"not json\n", "JSONDecodeError"), (b"", "IndexError"),
                          (b'{"completed": 1}', "KeyError")):
-        bad = await probed(FakeDigitalOcean(), FakeProbeRemote({("net00", 500): reply}),
-                           replace(inputs, networks=("net00",)))
-        assert bad["networks"]["net00"]["steps"][0]["run_failed"] == error
+        bad = await probed(FakeDigitalOcean(), FakeProbeRemote({("soax", 500): reply}),
+                           replace(inputs, networks=("soax",)))
+        assert bad["networks"]["soax"]["steps"][0]["run_failed"] == error
 
 
 async def test_a_setup_or_ssh_failure_still_removes_the_worker(tmp_path):
@@ -379,8 +396,8 @@ async def test_bad_inputs_are_refused_before_anything_is_created(tmp_path, chang
     inputs, _ = world(tmp_path)
     with pytest.raises(ProbeError, match=message):
         await probed(fake, FakeProbeRemote({}), replace(inputs, **change))
-    (tmp_path / "manager" / ".secrets" / "credentials" / "net01.toml").unlink()
-    with pytest.raises(ProbeError, match="no credentials for net01"):
+    (tmp_path / "manager" / ".secrets" / "credentials" / "webshare.toml").unlink()
+    with pytest.raises(ProbeError, match="no credentials for webshare"):
         await probed(fake, FakeProbeRemote({}), inputs)
     assert fake.requests == [] and not inputs.output.exists()
 
@@ -427,8 +444,8 @@ async def test_the_ssh_remote_runs_one_fixed_command_with_stdin(tmp_path):
     assert await remote.run(DROPLET, ["python3", "-c", "x"], "probe setup",
                             stdin=b"tar") == b"ready\n"
     assert runner.calls[0][1] == b"tar" and runner.calls[0][0][-1] == "python3 -c x"
-    with pytest.raises(RemoteError, match=r"^probe net00 failed \(exit 3\)$"):
-        await remote.run(DROPLET, ["true"], "probe net00")
+    with pytest.raises(RemoteError, match=r"^probe soax failed \(exit 3\)$"):
+        await remote.run(DROPLET, ["true"], "probe soax")
 
 
 # The grammar field, the plan cap and the launch.
@@ -656,7 +673,7 @@ async def test_s1_a_signal_cancels_the_probe_and_the_worker_is_still_removed(tmp
                                                                             monkeypatch):
     class Cancelled(FakeProbeRemote):
         async def run(self, droplet, command, what, *, stdin=None, seconds=120):
-            if what == "probe net01":
+            if what == "probe webshare":
                 asyncio.current_task().cancel()
                 await asyncio.sleep(0)
             return await super().run(droplet, command, what, stdin=stdin, seconds=seconds)
@@ -674,7 +691,7 @@ async def test_s1_a_signal_cancels_the_probe_and_the_worker_is_still_removed(tmp
     outer = asyncio.current_task()
     result = await probed(fake, Cancelled({}), inputs)
     assert result["error"] == "cancelled by a signal" and result["worker_status"] == "destroyed"
-    assert list(result["networks"]) == ["net00", "net01"] and len(fake.deleted) == 1
+    assert list(result["networks"]) == ["soax", "webshare"] and len(fake.deleted) == 1
     assert json.loads((inputs.output / result["probe_id"] / "probe-result.json").read_text())[
         "worker_status"] == "destroyed"
 
@@ -725,3 +742,59 @@ async def test_s1_a_recovered_worker_the_project_never_confirms_is_removed_fail_
             "destroyed")
     audit = [json.loads(line) for line in audit_path(folder).read_text().splitlines()]
     assert audit[-1]["path"] == "own_unassigned" and len(fake.deleted) == 1
+
+
+async def test_m1_proxy_seller_gets_no_country_and_bad_configs_are_refused_early(tmp_path):
+    fake = FakeDigitalOcean()
+    inputs, spec = world(tmp_path / "a", ("proxy-seller", "soax"))
+    remote = FakeProbeRemote({})
+    result = await probed(fake, remote, replace(inputs, start=1000))
+    commands = {c[c.index("--provider") + 1]: c for c, _, what in remote.calls
+                if what.startswith("probe ") and what != "probe setup"}
+    assert "--param" not in commands["proxy-seller"]
+    assert commands["soax"][commands["soax"].index("--param") + 1] == "country=US"
+    assert result["networks"]["proxy-seller"]["max_concurrency"] == 1000
+    fake = FakeDigitalOcean()
+    inputs, _ = world(tmp_path / "b")
+    credentials = tmp_path / "b" / "manager" / ".secrets" / "credentials" / "webshare.toml"
+    credentials.chmod(0o644)
+    with pytest.raises(ProbeError, match="network webshare: ValueError: Credential file must"):
+        await probed(fake, FakeProbeRemote({}), inputs)
+    credentials.chmod(0o600)
+    with pytest.raises(ProbeError, match="network soax: ValueError: .*country"):
+        await probed(fake, FakeProbeRemote({}), replace(inputs, country="U1"))
+    assert fake.requests == []
+
+
+async def test_m1_m2_a_failed_floor_run_and_a_failing_floor_are_their_own_verdicts(tmp_path):
+    inputs, _ = world(tmp_path)
+    remote = FakeProbeRemote({
+        ("soax", 500): RemoteError("probe soax failed (exit 2)"),
+        **{("webshare", c): summary(statuses={"429": 1000}) for c in (500, 2000, 1500, 1000)}})
+    result = await probed(FakeDigitalOcean(), remote, inputs)
+    assert result["networks"]["soax"]["verdict"] == "run failed at the floor"
+    table = probing.markdown(result)
+    assert "| soax | - | run failed at the floor |" in table
+    assert "| webshare | 500 | floor also fails: rate_limited |" in table
+    assert "max_concurrency = 500" not in table
+
+
+def test_m7_a_real_run_summary_is_classified():
+    """m7: built by the runner's own RunSummary, so a schema change breaks this test."""
+    from proxy_index.models import RunSummary
+
+    real = RunSummary(
+        run_id="r", schema_version="1", framework_version="x", target={}, config={},
+        started_at="", finished_at="", duration_seconds=10.0, status="completed",
+        requested=1000, started=1000, completed=1000, cancelled=0, not_started=0,
+        successes=900, total_errors=100,
+        errors={"http_status": 40, "proxy_connect": 25, "timeout": 20, "tls": 15},
+        status_codes={"200": 900, "429": 30, "503": 10}, success_rate=0.9,
+        requests_per_second=100.0, unique_ips=850, pool_eligible=True,
+        latency_ms={"p50": 700, "p90": 1500, "p95": 1900, "p99": 3000},
+        latency_histogram={}, response_body_bytes=0, buckets=[]).to_dict()
+    found = step_result(1000, 1000, real)
+    assert (found["success_pct"], found["rate_limited_pct"], found["gateway_5xx_pct"],
+            found["proxy_connect_pct"], found["timeout_pct"], found["other_pct"]) == (
+        90.0, 3.0, 1.0, 2.5, 2.0, 1.5)
+    assert (found["rps"], found["latency_p50_ms"], found["latency_p95_ms"]) == (100.0, 700, 1900)

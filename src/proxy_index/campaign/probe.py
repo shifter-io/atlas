@@ -25,7 +25,8 @@ from typing import Any, Protocol
 
 from ..onboarding.files import atomic_bytes, atomic_json, private_dir
 from ..onboarding.manifest import timestamp
-from ..providers.grammar import MAX_CONCURRENCY
+from ..providers import load_provider
+from ..providers.grammar import MAX_CONCURRENCY, load_grammar
 from . import ops_api, scope
 from .contracts import (
     WORKER_ROOT,
@@ -153,15 +154,23 @@ def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
     return found
 
 
+def targeting(network: str, country: str) -> dict[str, str]:
+    """The country parameter, for a network whose grammar has a country flag (Proxy-Seller's
+    geography comes from its dashboard list, so it gets none)."""
+    return {"country": country} if "country" in load_grammar(network).flags else {}
+
+
 def run_command(network: str, concurrency: int, inputs: ProbeInputs) -> list[str]:
     """The fixed worker command for one step; every argument is public."""
     probe, secret = f"{WORKER_ROOT}/probe", f"{WORKER_SECRETS}/probe"
+    country = [arg for value in targeting(network, inputs.country).values()
+               for arg in ("--param", f"country={value}")]
     return ["sh", "-c", 'ulimit -n 65536 && exec "$0" "$@"', f"{WORKER_ROOT}/venv/bin/proxy-index",
             "run", "--target", "generic_http", "--requests", str(inputs.requests),
             "--concurrency", str(concurrency), "--timeout", str(TIMEOUT_SECONDS),
             "--provider-config", f"{probe}/{network}.toml",
             "--credentials-file", f"{secret}/{network}.toml",
-            "--param", f"country={inputs.country}", "--provider", network,
+            *country, "--provider", network,
             "--country", inputs.country.lower(), "--location", inputs.region,
             "--output", f"{probe}/results"]
 
@@ -173,8 +182,9 @@ def markdown(result: dict[str, Any]) -> str:
              f"{result['size']} worker in {result['region']}.", "",
              "| Network | Max | Grammar |", "|---|---|---|"]
     for network, found in result["networks"].items():
-        best = found.get("max_concurrency")
-        line = f"`[testing] max_concurrency = {best}`" if best else found.get("verdict", "")
+        best, verdict = found.get("max_concurrency"), found.get("verdict")
+        # A verdict (the floor also fails, or no maximum) replaces the grammar line.
+        line = verdict or f"`[testing] max_concurrency = {best}`"
         lines.append(f"| {network} | {best or '-'} | {line} |")
     lines += ["", "| Network | Concurrency | Completed | Success % | 429 % | 5xx % | Connect % "
               "| Timeout % | Other % | RPS | p50 ms | p95 ms | Step down |",
@@ -229,9 +239,18 @@ class Probe:
                     (not planned, "networks not planned"),
                     (not 1 <= i.floor <= i.start <= MAX_CONCURRENCY, "start or floor"),
                     (i.step < 1 or i.requests < 1, "step or requests")]
-        problems += [(not (self.files.credentials_dir / f"{n}.toml").is_file(),
-                      f"no credentials for {n}") for n in self.networks if planned]
         bad = [text for failed, text in problems if failed]
+        for network in self.networks if planned else ():
+            credentials = self.files.credentials_dir / f"{network}.toml"
+            if not credentials.is_file():
+                bad.append(f"no credentials for {network}")
+                continue
+            config = manifest_path(i.root, self.spec, network).parent / "provider.toml"
+            try:  # no network I/O: the config, credentials and parameters each step uses
+                load_provider(config, parameters=targeting(network, i.country),
+                              credentials_file=credentials)
+            except (OSError, ValueError) as error:
+                bad.append(f"network {network}: {type(error).__name__}: {error}")
         if bad:
             raise ProbeError(f"refused: {', '.join(bad)}")
 
@@ -357,7 +376,8 @@ class Probe:
         base["step_down"] = reasons(base, base)
         found["steps"].append(base)
         if base.get("run_failed") or base["success_pct"] < USABLE_PCT:
-            found.update(max_concurrency=None, verdict="unusable at the floor")
+            found.update(max_concurrency=None, verdict="run failed at the floor" if base.get(
+                "run_failed") else "unusable at the floor")
             return
         for concurrency in self.inputs.ladder():
             current = await self.step(droplet, network, concurrency)
