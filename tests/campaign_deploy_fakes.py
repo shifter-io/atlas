@@ -47,7 +47,12 @@ class Shell:
 
 
 class Fake(FakeDigitalOcean):
-    """Also records create bodies."""
+    """Also records create bodies; offers the manager sizes in lon1."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sizes += [{"slug": slug, "available": True, "regions": ["lon1", "fra1"]}
+                       for slug in ("s-8vcpu-16gb", "s-2vcpu-4gb")]
 
     async def _create(self, request):
         self.bodies.append(("POST", "/v2/droplets", await request.json()))
