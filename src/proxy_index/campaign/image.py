@@ -124,7 +124,7 @@ async def build(cloud: DigitalOcean, job: ImageJob, *, shell: Shell = run_shell,
     scope = ops_api.ops_scope(await cloud.project_id(PROJECT_NAME), current.started_at)
     steps = _Steps(cloud, job, current, scope, shell, sleep)
     sha256 = hashlib.sha256(job.wheel.read_bytes()).hexdigest()
-    key_id, key_created = await ops_api.ensure_ssh_key(
+    key_id, _, key_created = await ops_api.ensure_ssh_key(
         cloud, f"pi-camp-mac-{current.started_at:%Y%m%d}",
         job.mac_key.with_name(job.mac_key.name + ".pub").read_text())
     steps.note(wheel_sha256=sha256, mac_key_id=key_id, mac_key_created=key_created)

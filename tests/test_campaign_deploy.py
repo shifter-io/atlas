@@ -13,6 +13,7 @@ import stat
 import subprocess
 import tarfile
 import tomllib
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -187,22 +188,25 @@ async def test_a_missing_worker_tag_is_created_before_its_firewall(job):
 
 async def test_a_deploy_stopped_before_the_worker_firewall_continues_on_a_rerun(job):
     """CAMP-1h: a rerun after the first run stopped at the worker tag finishes the deploy with
-    the same manager, manager firewall and worker key."""
+    the same manager, manager firewall and worker key. m1: the rerun runs on a later day and
+    records the reused key's registered name, which `plan` looks the key up by."""
     fake = Fake()
     fake.faults.append(Fault("POST", "/v2/tags", 422))
     with pytest.raises(ApiError):
         await run_deploy(fake, job)
     partial = inventory(job)
     assert "worker_firewall_id" not in partial and partial["manager_firewall_id"]
-    await run_deploy(fake, job)
+    await run_deploy(fake, job, now=NOW + timedelta(days=1))
     again = inventory(job)
     for key in ("manager_id", "manager_firewall_id"):
         assert again[key] == partial[key]
     assert again["worker_firewall_id"] in fake.resources["firewall"]
     assert len(fake.resources["firewall"]) == 2 and WORKER_TAG in fake.tags
     assert len([d for d in fake.droplets.values() if MANAGER_TAG in d["tags"]]) == 1
-    assert len([k for k in fake.resources["ssh_key"].values()
-                if k["name"].startswith("pi-camp-worker-")]) == 1
+    [worker_key] = [k for k in fake.resources["ssh_key"].values()
+                    if k["name"].startswith("pi-camp-worker-")]
+    assert again["worker_key_name"] == worker_key["name"] == "pi-camp-worker-20270101"
+    assert str(worker_key["id"]) == again["worker_key_id"]
 
 
 async def test_a_deploy_never_runs_under_a_campaign_and_keeps_earlier_credentials(job):

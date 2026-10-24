@@ -221,7 +221,7 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
     if inventory.get("host") and inventory.get("campaigns"):
         await _refuse_while_running(Manager(inventory, shell), inventory["campaigns"])
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
-    mac_key_id, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
+    mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
     save(path, inventory, account=job.account, project_id=project_id, mac_key_id=mac_key_id,
          user="root",
          identity=str(job.mac_key), identity_file=str(job.mac_key),
@@ -237,11 +237,10 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
     await remote.put_secret("do-token", job.token().encode())
     for network, data in job.credentials.items():
         await remote.put_secret(f"credentials/{network}.toml", data)
-    name = f"pi-camp-worker-{now:%Y%m%d}"
-    key_id, created = await ops_api.ensure_ssh_key(cloud, name, worker_public)
+    key_id, key_name, _ = await ops_api.ensure_ssh_key(
+        cloud, f"pi-camp-worker-{now:%Y%m%d}", worker_public)
     rules = ops_api.worker_firewall(inventory["host"])
-    save(path, inventory, worker_key_id=key_id,
-         worker_key_name=name if created else inventory.get("worker_key_name", name),
+    save(path, inventory, worker_key_id=key_id, worker_key_name=key_name,
          worker_firewall_id=await ops_api.apply_firewall(
              cloud, scope, rules, inventory.get("worker_firewall_id")),
          wheel_sha256=digest(job.wheel), framework_version=job.wheel.name.split("-")[1],

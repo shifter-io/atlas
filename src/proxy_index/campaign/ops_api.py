@@ -34,13 +34,16 @@ def ops_scope(project_id: str, since: datetime, manager_id: str = "") -> Scope:
     return Scope("", "", project_id, manager_id, since - CLOCK_SKEW)
 
 
-async def ensure_ssh_key(cloud: DigitalOcean, name: str, public_key: str) -> tuple[str, bool]:
-    """(key id, created now): reuse our registered key with this public part, or add it."""
+async def ensure_ssh_key(cloud: DigitalOcean, name: str,
+                         public_key: str) -> tuple[str, str, bool]:
+    """(key id, its registered name, created now): reuse our registered key with this public
+    part (it keeps the name it was added with, perhaps on an earlier day), or add it."""
     wanted = public_key.split()[:2]
     for key in await cloud.ssh_keys():
         if str(key.get("public_key", "")).split()[:2] == wanted:
-            return str(key["id"]), False
-    return str((await cloud.create_ssh_key(name, " ".join(wanted)))["id"]), True
+            return str(key["id"]), str(key["name"]), False
+    added = await cloud.create_ssh_key(name, " ".join(wanted))
+    return str(added["id"]), name, True
 
 
 async def assign(cloud: DigitalOcean, scope: Scope, droplet: Droplet, audit: Path,

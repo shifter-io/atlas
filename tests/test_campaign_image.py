@@ -417,6 +417,8 @@ async def test_local_runners_and_key_matching():
     fake.add_resource("ssh_key", 7, name="pi-camp-worker-20270101", public_key="ssh-ed25519 X")
     async with running(fake) as cloud:
         assert await ops_api.ensure_ssh_key(cloud, "pi-camp-mac-20270101", PUBLIC_KEY) == (
-            str(max(int(i) for i in fake.resources["ssh_key"])), True)
+            str(max(int(i) for i in fake.resources["ssh_key"])), "pi-camp-mac-20270101", True)
+        assert await ops_api.ensure_ssh_key(cloud, "pi-camp-worker-20270202", "ssh-ed25519 X") == (
+            "7", "pi-camp-worker-20270101", False)
     [(_, _, body)] = fake.bodies
     assert body == {"name": "pi-camp-mac-20270101", "public_key": " ".join(PUBLIC_KEY.split()[:2])}
