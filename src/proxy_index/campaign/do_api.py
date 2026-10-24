@@ -14,7 +14,7 @@ import stat
 import subprocess
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -41,6 +41,8 @@ CREATE_FLAGS = ("monitoring", "with_droplet_agent", "ipv6")
 PER_MINUTE = 200
 BACKOFF = (1, 2, 4, 8)
 MAX_WAIT = 60.0
+HTTP_LOG = 200  # recent calls kept for diagnosis: method, path, status
+HTTP_TRACE = 30
 ID, UUID = r"[0-9]+", r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 PAGE = frozenset({"page", "per_page"})
 TAG = re.escape(RESOURCE_PREFIX) + r"[a-z0-9-]+"
@@ -237,6 +239,7 @@ class DigitalOcean:
         self._sent: deque[float] = deque()
         self._created: set[str] = set()
         self.ratelimit_remaining: int | None = None
+        self.http_log: deque[tuple[str, str, int | None]] = deque(maxlen=HTTP_LOG)
 
     @property
     def created_ids(self) -> frozenset[str]:
@@ -295,6 +298,7 @@ class DigitalOcean:
         try:
             async with self._session.request(method, self._base_url + path, params=params,
                                              json=body, headers=self._headers()) as response:
+                self.http_log.append((method, path, response.status))
                 remaining = response.headers.get("ratelimit-remaining", "")
                 if remaining.isdigit():
                     self.ratelimit_remaining = int(remaining)
@@ -306,7 +310,16 @@ class DigitalOcean:
                     raise ApiError(method, path, response.status)
                 return None, (await response.json() if response.status != 204 else {})
         except (aiohttp.ClientError, TimeoutError):
+            self.http_log.append((method, path, None))
             return 0, None
+
+    def http_trace(self, droplet_ids: Collection[str]) -> list[str]:
+        """The latest calls about these droplets: creates, project assignments and their own
+        paths, as "METHOD path status" ("lost" for no answer); never a header, body or address."""
+        ids = {str(i) for i in droplet_ids}
+        return [f"{method} {path} {status or 'lost'}" for method, path, status in self.http_log
+                if (method == "POST" and (path == "/v2/droplets" or path.endswith("/resources")))
+                or path.rsplit("/", 1)[-1] in ids][-HTTP_TRACE:]
 
     @staticmethod
     def _retry_after(headers) -> float:

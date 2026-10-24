@@ -3,9 +3,11 @@
 Names are persisted before the create and ids right after it. Only workers whose membership in
 project Proxy Index is confirmed are ever pushed (fail-closed). A create, assignment, boot, push
 or start failure gets a replacement in the same hour, up to `REPLACEMENTS_PER_CELL` per cell and
-only before HH:00 + `replace_until_minutes`; then the cell is `failed_ours` with a high alert.
-Every removal goes through `scope.guarded_delete`; a resumed launch and every replacement adopt
-their own names before they create anything, so nothing is created twice.
+only before `replace_until_minutes` past HH:00 or past a later launch; then the cell is
+`failed_ours` with a high alert. Every removal goes through `scope.guarded_delete`, that of a
+worker whose membership was never confirmed on the own-unassigned path. A resumed launch and
+every replacement adopt their own names before they create anything, so nothing is created
+twice.
 """
 
 from __future__ import annotations
@@ -156,13 +158,15 @@ class _Launch(HourWork):
         self.hosts = read_hosts(root, record.hour)
         self.listed, self.listed_at, self.list_lock = [], float("-inf"), asyncio.Lock()
         self.scheduled = moment(record.scheduled_at).timestamp()
-        self.replace_until = self.scheduled + spec.replace_until_minutes * 60
 
     async def run(self) -> None:
         record = self.record
         if record.state not in ("planned", "launching"):
             return
         record.state, record.fired_at = "launching", record.fired_at or self.now()
+        # The window opens at HH:00, or at a later launch (`tick --now`, a late timer).
+        self.replace_until = max(self.scheduled, moment(record.fired_at).timestamp()) + (
+            self.spec.replace_until_minutes * 60)
         if not record.droplets:
             self._plan_workers()
         self.save()
@@ -240,12 +244,14 @@ class _Launch(HourWork):
     async def _region(self, workers: list[DropletRecord]) -> None:
         """One region's workers. An unexpected error stays inside this region, no task outlives
         it, and every worker leaves it armed or in a final status (B1)."""
-        cause, unassigned = None, []
+        cause, detail, unassigned = None, None, []
         try:
             await self._create(workers)
             unassigned = await self._assign(workers)
         except Exception as error:
             cause = type(error).__name__
+            detail = scope.error_detail(
+                self.cloud, [w.droplet_id for w in workers if w.droplet_id], error)
         await asyncio.gather(*(self._bring_up(w) for w in workers
                                if w.status in ("assigned", "booting", "starting")),
                              *(self._replace(w) for w in unassigned),
@@ -253,6 +259,7 @@ class _Launch(HourWork):
         left = [w for w in workers if w.status in UP]
         for worker in left:
             self.alert("high", "launch_error", worker.name)
+            worker.error_detail = detail
             if worker.droplet_id is None:
                 worker.status, worker.error_class = "create_failed", cause
         await asyncio.gather(*(self._fail(w, "start_failed", cause) for w in left if w.droplet_id),
@@ -320,6 +327,7 @@ class _Launch(HourWork):
             await self._start(worker)
         except Exception as error:
             if worker.armed_at is None:  # an armed worker is never start_failed (m10)
+                worker.error_detail = scope.error_detail(self.cloud, [worker.droplet_id], error)
                 await self._fail(worker, "start_failed", type(error).__name__)
 
     async def _start(self, worker: DropletRecord) -> None:
@@ -413,16 +421,30 @@ class _Launch(HourWork):
         return buffer.getvalue()
 
     async def _fail(self, worker: DropletRecord, status: str, cause: str | None = None) -> None:
-        """Remove a failed worker through the guard, then apply the replacement rule."""
+        """Remove a failed worker through the guard, then apply the replacement rule. Our own
+        new worker whose membership was never confirmed takes the own-unassigned path: the
+        plain guard needs project membership and would refuse it, leaving it alive."""
         worker.status, worker.error_class = status, cause or status
         self.alert("high", status, worker.name)
-        await self.retire(worker)
+        if worker.assigned_at is None and worker.droplet_id in self.cloud.created_ids:
+            await self._unassigned(worker)
+        else:
+            await self.retire(worker)
         self.save()
         await self._replace(worker)
 
+    async def _unassigned(self, worker: DropletRecord) -> None:
+        records = {d.droplet_id: d for d in self.record.droplets if d.droplet_id}
+        await scope.remove_unassigned(self.cloud, self.scope, records, audit_path(self.root),
+                                      {worker.droplet_id: worker.error_detail})
+        if worker.status == "destroy_refused":
+            self.alert("high", "destroy_refused", worker.name)
+        elif worker.status == "destroyed":
+            self.add_hours(worker)
+
     async def _replace(self, worker: DropletRecord) -> None:
         """Replace a failed worker in the same hour: at most `REPLACEMENTS_PER_CELL` times per
-        cell, only before HH:00 + replace_until_minutes. Past either bound the cell is lost
+        cell, only before `replace_until`. Past either bound the cell is lost
         (`failed_ours`, from the newest record) with the high alert `cell_failed`."""
         tries = sum(d.name == worker.name for d in self.record.droplets)
         if tries > REPLACEMENTS_PER_CELL or self.clock.now() >= self.replace_until:

@@ -216,7 +216,8 @@ async def test_an_unconfirmed_assignment_is_never_pushed_and_is_replaced(tmp_pat
 
 
 async def test_ssh_never_ready_gets_its_replacements_before_the_cutoff(tmp_path):
-    """4: replacements before HH:15, none after; all removed through the guard."""
+    """4: replacements within 15 minutes of HH:00 or of a later launch (CAMP-1l), none after;
+    all removed through the guard."""
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
@@ -231,6 +232,11 @@ async def test_ssh_never_ready_gets_its_replacements_before_the_cutoff(tmp_path)
     late = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()
     fake = FakeDigitalOcean()
     record, *_ = await launched(tmp_path / "late", fake, spec, start=late,
+                                setup=lambda r: r.never_ready.add(name))
+    assert len(record.droplets) == tries  # a launch at HH:16 still has its own 15 minutes
+
+    closed = make_spec(NETWORKS[:1], REGIONS[:1], replace_until_minutes=0)
+    record, *_ = await launched(tmp_path / "closed", FakeDigitalOcean(), closed, start=late,
                                 setup=lambda r: r.never_ready.add(name))
     assert len(record.droplets) == 1 and record.droplets[0].status == "destroyed"
     assert "cell_failed" in {a["kind"] for a in record.alerts}
@@ -343,6 +349,10 @@ async def test_a_droplet_never_active_within_180_seconds_is_boot_failed(tmp_path
     record, root, remote, clock = await launched(tmp_path, fake, spec)
     assert {(d.status, d.error_class) for d in record.droplets} == {("destroyed", "boot_failed")}
     assert remote.pushes == [] and not launch.hosts_path(root, 0).exists()
+    # Confirmed in the project before it failed: the plain guard, never the own-unassigned mark.
+    assert all(d.assigned_at and d.assign_failed_at is None for d in record.droplets)
+    audit = [json.loads(line) for line in audit_path(root).read_text().splitlines()]
+    assert audit and {a["path"] for a in audit} == {"normal"}
     lists = [r for r in fake.requests if r[0] == "GET" and r[2].get("tag_name")]
     assert len(lists) <= 2 * (1 + launch.REPLACEMENTS_PER_CELL) * (
         launch.READY_LIMIT_SECONDS / launch.READY_POLL_SECONDS + 2)
@@ -595,7 +605,8 @@ async def test_b1_b_a_missing_credentials_file_fails_only_its_network(tmp_path):
 
 
 async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, monkeypatch):
-    """A created droplet whose assignment raised is handed to the guard, which may refuse."""
+    """A created droplet whose assignment raised is never confirmed: CAMP-1l removes it on the
+    own-unassigned path (the plain guard refused it, project=false, and left it alive)."""
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
 
@@ -604,9 +615,10 @@ async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, mo
 
     monkeypatch.setattr(launch.scope, "assign_and_verify_project", refuse)
     record, *_ = await launched(tmp_path, fake, spec)
-    assert [d.status for d in record.droplets] == ["destroy_refused"] * (
+    assert [d.status for d in record.droplets] == ["destroyed"] * (
         1 + launch.REPLACEMENTS_PER_CELL)
-    assert fake.deleted == [] and record.cells == {"net00/lon1": "failed_ours"}
+    assert len(fake.deleted) == 1 + launch.REPLACEMENTS_PER_CELL and not fake.droplets
+    assert record.cells == {"net00/lon1": "failed_ours"}
     assert {d.error_class for d in record.droplets} == {"OwnershipError"}
 
 

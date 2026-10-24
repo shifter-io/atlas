@@ -198,6 +198,9 @@ class DropletRecord:
     assign_failed_at: str | None = None
     # A replacement: the index, in its hour's `droplets`, of the worker it replaces.
     replaced_from: int | None = None
+    # Why it failed, for diagnosis (`scope.error_detail`): exception class, message without
+    # addresses or tokens, failed checks and the HTTP statuses of the calls about it.
+    error_detail: dict[str, Any] | None = None
 
 
 @dataclass

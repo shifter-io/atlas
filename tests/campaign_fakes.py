@@ -56,6 +56,8 @@ class FakeDigitalOcean:
         self.action_polls = 0  # each action answers "in-progress" this many times first
         self.failing_actions: set[str] = set()  # action types that end "errored"
         self.bodies: list[tuple[str, str, dict]] = []
+        # Eventual consistency just after a create: droplet id -> overrides, one per GET.
+        self.stale: dict[str, list[dict]] = {}
 
     def add(self, name, tags=(), project=PROD_PROJECT, created=CREATE_TIME, droplet_id=None,
             ip="203.0.113.10"):
@@ -278,6 +280,8 @@ class FakeDigitalOcean:
             found = store.get(request.match_info["id"])
             if found is None:
                 return web.json_response({"id": "not_found"}, status=404)
+            if kind == "droplet" and self.stale.get(request.match_info["id"]):
+                found = found | self.stale[request.match_info["id"]].pop(0)
             return web.json_response({kind: found})
 
         return get

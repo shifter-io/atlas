@@ -45,8 +45,10 @@ from proxy_index.campaign.scope import (
 from proxy_index.campaign.tick import read_alerts
 
 FIRST = "700001"  # the fake's first droplet id: the hour's only worker
-LATE = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()  # past HH:15: no replacement
+LATE = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()  # past HH:15
 TRIES = 5  # one `request` call: the first try and four backoff retries
+READS = 1 + len(scope.SETTLE_DELAYS)  # the fresh reads of our own new droplet (CAMP-1l)
+NO_WAIT = scope.Retry(delay=0, settle=(0.0,) * len(scope.SETTLE_DELAYS))
 SCOPE = Scope(CID, SID, CAMPAIGN_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
 OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
 NAME = f"pic-{SID}-h03-nyc3-shifter"
@@ -56,11 +58,16 @@ def audit_lines(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def nyc3_spec():
-    return make_spec(NETWORKS[:1], ("nyc3",))
+def nyc3_spec(**changes):
+    return make_spec(NETWORKS[:1], ("nyc3",), **changes)
 
 
-@pytest.mark.parametrize("failures", [TRIES, 3 * TRIES], ids=["transient", "persistent"])
+def no_replacement_spec():
+    """The replacement window counts from the launch (CAMP-1l): a zero window replaces none."""
+    return nyc3_spec(replace_until_minutes=0)
+
+
+@pytest.mark.parametrize("failures", [TRIES, READS * TRIES], ids=["transient", "persistent"])
 async def test_nyc3_a_failed_read_after_create_never_leaves_the_worker_alive(tmp_path, failures):
     """The c-4 sequence: created, then the assignment's fresh GET fails. Before CAMP-1k the
     error escaped, the worker became start_failed, the guard refused it (project=false) and it
@@ -93,7 +100,7 @@ async def test_a_restarted_collector_removes_an_unconfirmed_worker(tmp_path, pas
     fake = FakeDigitalOcean()
     fake.faults += [Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3),
                     Fault("DELETE", f"/v2/droplets/{FIRST}", 500, times=TRIES)]
-    spec = nyc3_spec()
+    spec = no_replacement_spec()
     _, root, remote, clock = await launched(tmp_path, fake, spec, start=LATE)
     record = launch.load_hour(root, 0)  # the ledger on disk, as a restarted process reads it
     [worker] = record.droplets
@@ -121,7 +128,7 @@ async def test_a_refused_removal_at_launch_is_alerted(tmp_path, monkeypatch):
     fake = FakeDigitalOcean()
     fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3))
     monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T23:00Z"))
-    record, *_ = await launched(tmp_path, fake, nyc3_spec(), start=LATE)
+    record, *_ = await launched(tmp_path, fake, no_replacement_spec(), start=LATE)
     assert [d.status for d in record.droplets] == ["destroy_refused"] and FIRST in fake.droplets
     assert [a["kind"] for a in record.alerts] == [
         "project_assign_failed", "destroy_refused", "cell_failed"]
@@ -134,7 +141,8 @@ async def created(cloud, name=NAME):
 
 
 async def test_a_persistent_read_error_is_unconfirmed_not_raised(tmp_path):
-    """Retried 3 times 5 s apart, then fail closed: assign_failed, marked and removed."""
+    """Read again over about 30 s (CAMP-1l), then fail closed: assign_failed, marked and
+    removed, with the read failures kept."""
     fake, audit, sleeps = FakeDigitalOcean(), tmp_path / "audit.jsonl", []
 
     async def sleep(seconds):
@@ -142,11 +150,13 @@ async def test_a_persistent_read_error_is_unconfirmed_not_raised(tmp_path):
 
     async with running(fake) as cloud:
         droplet, records = await created(cloud)
-        fake.faults.append(Fault("GET", f"/v2/droplets/{droplet.id}", 500, times=3 * TRIES))
+        fake.faults.append(Fault("GET", f"/v2/droplets/{droplet.id}", 500, times=READS * TRIES))
         confirmed, failed = await assign_and_verify_project(
             cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(sleep=sleep))
     record = records[droplet.id]
-    assert not confirmed and failed == {droplet.id} and sleeps == [5.0, 5.0]
+    assert not confirmed and failed == {droplet.id} and sleeps == list(scope.SETTLE_DELAYS)
+    assert sum(sleeps) == 30.0 and record.error_detail["failed"] == ["readable"]
+    assert record.error_detail["http"].count(f"GET /v2/droplets/{droplet.id} 500") == READS * TRIES
     assert record.status == "destroyed" and record.assign_failed_at
     assert not [r for r in fake.requests if r[0] == "POST" and "/projects/" in r[1]]
     assert audit_lines(audit)[-1]["path"] == "own_unassigned"
@@ -160,7 +170,7 @@ async def test_a_droplet_not_yet_readable_and_a_project_read_error_are_retried(t
         fake.faults += [Fault("GET", f"/v2/droplets/{droplet.id}", 404),
                         Fault("GET", f"/v2/projects/{CAMPAIGN_PROJECT}", 500, times=TRIES)]
         confirmed, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=scope.Retry(delay=0))
+            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=NO_WAIT)
     assert confirmed == {droplet.id} and not failed and records[droplet.id].status == "assigned"
     assert records[droplet.id].assign_failed_at is None
 
@@ -171,7 +181,7 @@ async def test_a_droplet_that_never_appears_ends_absent(tmp_path):
         droplet, records = await created(cloud)
         fake.droplets.pop(droplet.id)
         _, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=scope.Retry(delay=0))
+            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=NO_WAIT)
     assert failed == {droplet.id} and records[droplet.id].status == "destroyed"
     assert audit_lines(tmp_path / "a")[-1]["result"] == "absent"
 
@@ -200,13 +210,13 @@ async def test_the_mark_writer_refuses_an_id_it_did_not_create(tmp_path, monkeyp
     records = {lookalike: DropletRecord("shifter", "nyc3", 3, NAME, lookalike)}
 
     async def unreadable(*_args):
-        return False
+        return ["readable"]
 
     monkeypatch.setattr(scope, "_fresh_owned", unreadable)
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
             await assign_and_verify_project(cloud, SCOPE, [lookalike], records, tmp_path / "a",
-                                            retry=scope.Retry(attempts=1))
+                                            retry=NO_WAIT)
     assert refused.value.failed == ["own_create"] and records[lookalike].assign_failed_at is None
     assert records[lookalike].status == "requested" and not fake.deleted
 
@@ -216,7 +226,7 @@ async def test_reconcile_leaves_a_marked_worker_alone_unless_removable(tmp_path,
     """m2: a marked worker is retired only in assign_failed/destroy_failed/destroyed; a refused
     or live one is neither retried nor reported as foreign_tagged."""
     fake = FakeDigitalOcean()
-    spec = nyc3_spec()
+    spec = no_replacement_spec()
     _, root, _, _ = await launched(tmp_path, fake, spec, start=LATE)
     record = launch.load_hour(root, 0)
     [worker] = record.droplets
