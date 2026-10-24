@@ -18,6 +18,7 @@ from pathlib import Path
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, read_json
 from ..providers import load_provider
+from ..providers.grammar import load_grammar
 from ..regions import REGION_IDS
 from .contracts import NETWORK_RE, PROJECT_NAME, CampaignSpec, spec_path
 from .do_api import DigitalOcean
@@ -70,16 +71,29 @@ def parse_start(value: str, now: datetime) -> tuple[datetime, bool]:
     return begins.astimezone(UTC), False
 
 
+def census_config(configs: Path, network: str) -> Path:
+    """The run config a network's census rounds use: `<net>-onboarding.toml` when the network
+    has one (the strict-targeting config the 2026-10 onboarding servers ran), else `<net>.toml`."""
+    onboarding = configs / f"{network}-onboarding.toml"
+    return onboarding if onboarding.is_file() else configs / f"{network}.toml"
+
+
 def check_credentials(inputs: PlanInputs) -> None:
-    """Each network's public config names it and loads with its private credentials."""
+    """Each network's census config names it, loads with its private credentials and, when
+    the provider can fall back to a broader pool, turns on strict country targeting."""
     for network in inputs.networks:
-        config = inputs.configs / f"{network}.toml"
+        config = census_config(inputs.configs, network)
         try:
             with config.open("rb") as stream:
                 provider = tomllib.load(stream).get("provider")
             if provider != network:
                 raise ValueError("config names another provider")
-            load_provider(config, credentials_file=inputs.credentials)
+            proxy = load_provider(config, credentials_file=inputs.credentials)
+            parameters = proxy.public()["provider_config"]["parameters"]
+            if "strict" in load_grammar(network).flags and parameters.get("strict") is not True:
+                # Without it a country with no exits is answered from a broader pool, so its
+                # census never saturates instead of stopping as no_success.
+                raise ValueError(f"{config.name} must set strict = true")
         except (OSError, ValueError) as error:
             raise PlanError(f"network {network}: {type(error).__name__}: {error}") from None
 
@@ -110,10 +124,10 @@ async def check_cloud(cloud: DigitalOcean, inputs: PlanInputs, key_name: str) ->
 
 def _manifests(inputs: PlanInputs, begins: datetime, current: bool, root: Path,
                now: datetime) -> dict[str, str]:
-    """One v3 manifest per network, with its public run config beside it (SHA-bound)."""
+    """One v3 manifest per network, with its census run config beside it (SHA-bound)."""
     found = {}
     for network in inputs.networks:
-        config = inputs.configs / f"{network}.toml"
+        config = census_config(inputs.configs, network)
         path = manifest.create(
             config, PRODUCT, begins.isoformat(), root / "networks", now=now,
             execution_mode="ephemeral", grace_hours=inputs.grace_hours,

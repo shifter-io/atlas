@@ -52,7 +52,10 @@ from proxy_index.campaign.contracts import (
 )
 from proxy_index.campaign.do_api import ApiError, CreateError
 from proxy_index.campaign.planspec import PlanError, PlanInputs
+from proxy_index.models import RequestContext
 from proxy_index.onboarding import manifest
+from proxy_index.onboarding.files import digest
+from proxy_index.providers import load_provider
 from proxy_index.regions import REGION_IDS
 
 
@@ -566,10 +569,51 @@ def test_plan_writes_v3_manifests_and_a_valid_spec(plan_world):
     loaded = manifest.load(path)
     assert loaded["schema_version"] == 3 and loaded["settings"]["concurrency"] == 2000
     assert spec.manifests["shifter"].startswith("networks/shifter/residential/")
-    assert (path.parent / "provider.toml").read_bytes() == (ROOT / "configs/shifter.toml"
-                                                            ).read_bytes()
+    assert (path.parent / "provider.toml").read_bytes() == (
+        ROOT / "configs/shifter-onboarding.toml").read_bytes()
     assert "acct_9" not in "".join(p.read_text() for p in root.rglob("*") if p.is_file())
     assert not [m for m, *_ in fake.requests if m != "GET"]
+
+
+def test_plan_binds_the_strict_census_config_the_old_servers_ran(plan_world):
+    """CAMP-1i: without strict targeting Shifter answers a country it has no exits for (AS,
+    HM, NF, NU, UM, AQ) from a broader pool, so the census never saturates (O1: ~2M
+    requests per country, ~99% unique) instead of stopping as no_success at ~3.5k."""
+    fake, inputs = plan_world
+    root = Path(asyncio.run(run_plan(fake, inputs))["root"])
+    spec = CampaignSpec.from_json(spec_path(root).read_text())
+    bound = (root / spec.manifests["shifter"]).parent / "provider.toml"
+    assert manifest.load(bound.parent / "campaign.json")["provider_config_sha256"] == (
+        digest(bound))
+    # The census parameters of the 2026-10-05 servers' provider.toml (sha256 5f07819a...).
+    assert tomllib.loads(bound.read_text())["parameters"] == {"strict": True}
+    proxy = load_provider(bound, parameters={"country": "as"},
+                          credentials_file=inputs.credentials)
+    username = proxy.resolve(RequestContext("run", 0, 0)).username
+    assert username == "customer-acct_9-country-as-strict-true"
+
+
+def test_plan_refuses_a_census_config_without_strict_targeting(plan_world, tmp_path):
+    from dataclasses import replace
+
+    fake, inputs = plan_world
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    shutil.copy(ROOT / "configs/shifter.toml", configs / "shifter.toml")
+    with pytest.raises(PlanError, match="network shifter: .*strict = true"):
+        asyncio.run(run_plan(fake, replace(inputs, configs=configs)))
+    (configs / "shifter-onboarding.toml").write_text(
+        (ROOT / "configs/shifter-onboarding.toml").read_text().replace(
+            "strict = true", "strict = false"))
+    with pytest.raises(PlanError, match="network shifter: .*strict = true"):
+        asyncio.run(run_plan(fake, replace(inputs, configs=configs)))
+    assert not inputs.output.exists()
+
+
+def test_the_census_config_of_a_network_without_a_strict_flag_is_its_run_config():
+    configs = ROOT / "configs"
+    assert planspec.census_config(configs, "shifter") == configs / "shifter-onboarding.toml"
+    assert planspec.census_config(configs, "soax") == configs / "soax.toml"
 
 
 async def test_plan_now_hour_and_options(plan_world):
