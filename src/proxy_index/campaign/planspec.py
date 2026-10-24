@@ -81,6 +81,13 @@ def census_config(configs: Path, network: str) -> Path:
     return onboarding if onboarding.is_file() else configs / f"{network}.toml"
 
 
+def network_concurrency(network: str, requested: int) -> int:
+    """The concurrency a network's census runs at: the requested one, capped at the
+    `[testing] max_concurrency` its grammar records (measured by `campaign probe`)."""
+    ceiling = load_grammar(network).max_concurrency
+    return requested if ceiling is None else min(requested, ceiling)
+
+
 def check_credentials(inputs: PlanInputs) -> None:
     """Each network's census config names it, loads with its private credentials and, when
     the provider can fall back to a broader pool, turns on strict country targeting."""
@@ -134,7 +141,8 @@ def _manifests(inputs: PlanInputs, begins: datetime, current: bool, root: Path,
         path = manifest.create(
             config, PRODUCT, begins.isoformat(), root / "networks", now=now,
             execution_mode="ephemeral", grace_hours=inputs.grace_hours,
-            allow_current_hour=current, run_settings={"concurrency": inputs.concurrency})
+            allow_current_hour=current,
+            run_settings={"concurrency": network_concurrency(network, inputs.concurrency)})
         atomic_bytes(path.parent / "provider.toml", config.read_bytes())
         found[network] = path.relative_to(root).as_posix()
     return found
@@ -184,4 +192,6 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
     atomic_bytes(spec_path(root), spec.to_json().encode())
     return {"campaign_id": cid, "root": str(root), "starts_at": spec.starts_at,
             "networks": list(spec.networks), "regions": list(regions),
-            "concurrency": spec.concurrency, "synthetic": spec.synthetic}
+            "concurrency": spec.concurrency, "synthetic": spec.synthetic,
+            "concurrency_by_network": {n: network_concurrency(n, spec.concurrency)
+                                       for n in spec.networks}}

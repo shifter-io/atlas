@@ -194,6 +194,11 @@ class OpenSSHRemote:
             raise RemoteError(f"{what} failed (exit {code})")
         return b"" if sink else buffer.getvalue()
 
+    async def run(self, droplet: Droplet, command: list[str], what: str, *,
+                  stdin: bytes | None = None, seconds: float = 120) -> bytes:
+        """Run one fixed command (inputs on stdin only) and return its output."""
+        return await self._call(droplet, command, what, stdin=stdin, seconds=seconds)
+
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool:
         deadline = self._clock() + limit_seconds
         while True:

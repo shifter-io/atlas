@@ -26,6 +26,7 @@ KINDS = ("country", "name", "integer", "boolean", "choice", "token", "session")
 ALPHABETS = {"hex": "0123456789abcdef", "alnum": string.ascii_lowercase + string.digits,
              "digits": string.digits}
 HOST = re.compile(r"[A-Za-z0-9.-]+")
+MAX_CONCURRENCY = 5000  # the campaign spec's own concurrency bound
 
 
 def _range(value: Any, name: str) -> tuple[int, int]:
@@ -136,6 +137,9 @@ class Grammar:
     extra_flags: bool
     reserved: frozenset[str]
     test_protocol: NetworkProtocol = "default"  # [testing] protocol; see models.NetworkProtocol
+    # [testing] max_concurrency: the highest in-flight request count the network sustained
+    # from one worker (`campaign probe`); campaign plans cap their concurrency at it.
+    max_concurrency: int | None = None
 
     @classmethod
     def parse(cls, data: Mapping[str, Any]) -> Grammar:
@@ -154,7 +158,7 @@ class Grammar:
                         "rotating_ports"},
             "session": {"flag", "mode", "ports", "generate", "length", "no_session_policy",
                         "ttl_flag", "default_ttl_seconds"},
-            "testing": {"protocol"},
+            "testing": {"protocol", "max_concurrency"},
         }
         for table, keys in tables.items():
             if set(data.get(table, {})) - keys:
@@ -235,6 +239,10 @@ class Grammar:
         protocol = data.get("testing", {}).get("protocol", "default")
         if protocol not in NETWORK_PROTOCOLS:
             raise ValueError("Unknown grammar test protocol")
+        ceiling = data.get("testing", {}).get("max_concurrency")
+        if ceiling is not None and (type(ceiling) is not int
+                                    or not 1 <= ceiling <= MAX_CONCURRENCY):
+            raise ValueError(f"Grammar max_concurrency must be an integer 1-{MAX_CONCURRENCY}")
         return cls(
             id=provider, product=data.get("product", "residential"),
             version=str(data.get("version", "1")), target=cred["flags_in"],
@@ -266,7 +274,7 @@ class Grammar:
             reserved=frozenset(cred.get("reserved", ())) | {
                 flag.key for flag in flags.values()
             },
-            test_protocol=protocol,
+            test_protocol=protocol, max_concurrency=ceiling,
         )
 
 

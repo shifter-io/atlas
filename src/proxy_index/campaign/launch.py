@@ -186,23 +186,26 @@ class _Launch(HourWork):
         live = [d for r in earlier if r for d in r.droplets if d.status in LIVE]
         for network in spec.networks:
             manifest = read_json(manifest_path(self.root, spec, network))
-            if manifest["settings"]["concurrency"] != spec.concurrency:
-                raise ValueError("a manifest's concurrency differs from the campaign spec")
+            concurrency = manifest["settings"]["concurrency"]
+            # The plan caps a network at its grammar's max_concurrency, never above the spec.
+            if type(concurrency) is not int or not 1 <= concurrency <= spec.concurrency:
+                raise ValueError("a manifest's concurrency exceeds the campaign spec")
             countries = manifest["regions"]
             record.traffic[network] = dict.fromkeys(TRAFFIC_KEYS, 0)
             record.traffic[network]["countries_total"] = sum(
                 len(countries[r]) for r in spec.regions)
             for region in spec.regions:
                 record.droplets.append(self._worker(network, region, sum(
-                    d.network == network and d.region == region for d in live)))
+                    d.network == network and d.region == region for d in live), concurrency))
                 record.cells[cell_key(network, region)] = "pending"
 
-    def _worker(self, network: str, region: str, overlap: int) -> DropletRecord:
+    def _worker(self, network: str, region: str, overlap: int,
+                concurrency: int | None) -> DropletRecord:
         return DropletRecord(
             network, region, self.record.hour,
             droplet_name(self.spec.campaign_id, self.record.hour, region, network),
             size=self.spec.size_by_region[region], image_id=self.spec.image_by_region[region],
-            overlap=overlap, concurrency=self.spec.concurrency)
+            overlap=overlap, concurrency=concurrency)
 
     def _synthetic(self) -> None:
         now = self.now()
@@ -455,7 +458,7 @@ class _Launch(HourWork):
             {"replaced_from": [], "extra_delay_seconds": None})
         cell["replaced_from"].append({"droplet_id": worker.droplet_id, "status": worker.status,
                                       "error_class": worker.error_class})
-        fresh = self._worker(worker.network, worker.region, worker.overlap)
+        fresh = self._worker(worker.network, worker.region, worker.overlap, worker.concurrency)
         fresh.replaced_from = next(i for i, d in enumerate(self.record.droplets) if d is worker)
         self.record.droplets.append(fresh)
         self.save()
