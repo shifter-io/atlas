@@ -216,7 +216,8 @@ async def test_an_unconfirmed_assignment_is_never_pushed_and_is_replaced(tmp_pat
 
 
 async def test_ssh_never_ready_gets_its_replacements_before_the_cutoff(tmp_path):
-    """4: replacements before HH:15, none after; all removed through the guard."""
+    """4: replacements within 15 minutes of HH:00 or of a later launch (CAMP-1l), none after;
+    all removed through the guard."""
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
@@ -231,6 +232,11 @@ async def test_ssh_never_ready_gets_its_replacements_before_the_cutoff(tmp_path)
     late = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()
     fake = FakeDigitalOcean()
     record, *_ = await launched(tmp_path / "late", fake, spec, start=late,
+                                setup=lambda r: r.never_ready.add(name))
+    assert len(record.droplets) == tries  # a launch at HH:16 still has its own 15 minutes
+
+    closed = make_spec(NETWORKS[:1], REGIONS[:1], replace_until_minutes=0)
+    record, *_ = await launched(tmp_path / "closed", FakeDigitalOcean(), closed, start=late,
                                 setup=lambda r: r.never_ready.add(name))
     assert len(record.droplets) == 1 and record.droplets[0].status == "destroyed"
     assert "cell_failed" in {a["kind"] for a in record.alerts}

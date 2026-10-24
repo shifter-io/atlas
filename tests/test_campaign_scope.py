@@ -786,6 +786,7 @@ def test_scope_coverage_gate(tmp_path):
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", __file__,
          str(Path(__file__).with_name("test_campaign_api.py")),
          str(Path(__file__).with_name("test_campaign_unassigned.py")),
+         str(Path(__file__).with_name("test_campaign_assign_race.py")),
          "--cov=proxy_index.campaign.scope", "--cov=proxy_index.campaign.do_api",
          "--cov-branch", "--cov-fail-under=100", "--cov-report=term-missing"],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=240, check=False,
