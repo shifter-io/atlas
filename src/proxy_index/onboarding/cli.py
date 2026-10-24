@@ -14,7 +14,7 @@ from ..providers import load_provider
 from .export import export_campaign
 from .files import digest, read_json
 from .manifest import create, load
-from .rounds import execute_round, verify_round
+from .rounds import RoundRefused, execute_round, verify_round
 from .scheduler import execute, status, validate_state
 
 
@@ -158,9 +158,12 @@ async def _round(args):
 
 
 def _round_command(action, *arguments) -> int:
-    """Run an ephemeral-round command; our-side errors exit 1 with only the error type."""
+    """Run an ephemeral-round command; errors exit 1 with a refusal's fixed text, else the type."""
     try:
         return action(*arguments)
+    except RoundRefused as exc:
+        print(f"Round refused: {exc}", file=sys.stderr)
+        return 1
     except Exception as exc:
         print(f"Round command failed ({type(exc).__name__}).", file=sys.stderr)
         return 1

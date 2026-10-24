@@ -325,7 +325,8 @@ def test_round_cli_exit_codes_and_verify(live, capsys):
     assert main(["onboarding", "verify-round", *live.args]) == 0
     assert json.loads(capsys.readouterr().out)["complete"]
     assert main(["onboarding", "round", *live.args, *live.config]) == 1  # replay
-    assert "ValueError" in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "Round refused: This round already has a checkpoint; a replay is refused\n")
     (round_directory(live.path, "tor1", 0) / "pm/summary.json").unlink()
     assert main(["onboarding", "verify-round", *live.args]) == 3
     assert main(["onboarding", "verify-round", *live.args[:3], "lon1", "--round", "0"]) == 1
@@ -372,3 +373,46 @@ async def test_verify_round_flags_a_crashed_round_overlaps_and_foreign_queues(ep
         verify_round(ephemeral, "tor1", 12)
     with pytest.raises(ValueError, match="Unknown campaign region"):
         verify_round(ephemeral, "mars1", 12)
+
+
+def test_round_cli_prints_each_refusal_and_only_the_type_of_other_errors(live, tmp_path,
+                                                                         capsys):
+    live.patch(seconds=0.0)
+    hour = campaign.moment(campaign.load(live.path)["starts_at"])
+    later = make(tmp_path / "later", start=hour + timedelta(hours=1), now=datetime.now(UTC))
+    v1 = make(tmp_path / "v1", execution_mode="parallel")
+    folder = round_directory(live.path, "tor1", 0)
+
+    def refused(command, manifest, region="tor1", index=0):
+        args = ["--manifest", str(manifest), "--region", region, "--round", str(index)]
+        extra = live.config if command == "round" else []
+        assert main(["onboarding", command, *args, *extra]) == 1
+        return capsys.readouterr().err
+
+    assert refused("round", later, index=1) == (
+        "Round refused: A round may be armed at most 300 seconds before it is scheduled\n")
+    assert refused("verify-round", v1) == (
+        "Round refused: One-round execution requires an ephemeral (version 3) manifest\n")
+    assert refused("verify-round", live.path, "xx1") == "Round refused: Unknown campaign region\n"
+    assert refused("verify-round", live.path, index=24) == (
+        "Round refused: Round must be an hourly index from 0 to 23\n")
+    # Other errors can quote paths or values, so only their type is printed.
+    assert refused("verify-round", live.path) == "Round command failed (FileNotFoundError).\n"
+    assert main(["onboarding", "round", *live.args, *live.config]) == 0
+    saved = read_json(folder / "round.json")
+    (folder / "round.json").write_text(json.dumps(saved | {"campaign_id": "other"}))
+    assert refused("verify-round", live.path) == (
+        "Round refused: Round checkpoint does not match this campaign, region and round\n")
+    (folder / "round.json").write_text(json.dumps(saved | {"jobs": saved["jobs"][::-1]}))
+    assert refused("verify-round", live.path) == (
+        "Round refused: Round checkpoint country queue differs from the campaign\n")
+    changed = tmp_path / "changed.toml"
+    changed.write_text((ROOT / "configs/shifter.toml").read_text() + "\n# edited\n")
+    assert main(["onboarding", "round", *live.args, "--provider-config", str(changed)]) == 1
+    assert capsys.readouterr().err == "Round command failed (ValueError).\n"
+
+
+def test_onboarding_doc_examples_use_the_strict_configuration():
+    text = (ROOT / "docs/onboarding.html").read_text()
+    assert "configs/shifter.toml" not in text
+    assert text.count("configs/shifter-onboarding.toml") == 7
