@@ -627,6 +627,26 @@ async def test_plan_now_hour_and_options(plan_world):
     assert spec.concurrency == 2500 and spec.synthetic
 
 
+async def test_plan_records_the_worker_size_it_checked(plan_world):
+    """CAMP-1j: `--size` (default c-2) must be offered in every region and is the spec's size."""
+    from dataclasses import replace
+
+    fake, inputs = plan_world
+    fake.sizes.append({"slug": "c-4", "available": True, "regions": list(REGION_IDS)})
+    fake.sizes.append({"slug": "s-4vcpu-8gb", "available": True, "regions": ["lon1"]})
+    result = await run_plan(fake, replace(inputs, size="c-4", concurrency=2500))
+    spec = CampaignSpec.from_json(spec_path(Path(result["root"])).read_text())
+    assert spec.size_by_region == dict.fromkeys(REGION_IDS, "c-4") and spec.concurrency == 2500
+    with pytest.raises(PlanError, match="size s-4vcpu-8gb in fra1"):
+        await run_plan(fake, replace(inputs, size="s-4vcpu-8gb"))
+    with pytest.raises(PlanError, match="size c-32 in lon1"):
+        await run_plan(fake, replace(inputs, size="c-32"))
+    for bad in ("g-2vcpu-8gb", "gpu-h100x1-80gb", "m-2vcpu-16gb", "c-2;x", ""):
+        with pytest.raises(PlanError, match="--size"):
+            await run_plan(fake, replace(inputs, size=bad))
+    assert len(list(inputs.output.iterdir())) == 1
+
+
 @pytest.mark.parametrize("change, message", [
     ("table", "network shifter"), ("size", "size c-2 in syd1"), ("image", "image in syd1"),
     ("key", "ssh key"), ("recorded image", "not one recorded build"),
@@ -797,9 +817,16 @@ def test_the_plan_cli_prints_the_summary(monkeypatch, capsys):
 
     monkeypatch.setattr(campaign_cli, "_cloud", lambda account: Cloud())
     monkeypatch.setattr(planspec, "plan", fake_plan)
-    args = parse(["campaign", "plan", "--account", "leftclick", "--start", "now-hour",
-                  "--networks", "shifter", "--regions", "lon1", "--image", IMAGE,
-                  "--output", "out"])
+    args_list = ["campaign", "plan", "--account", "leftclick", "--start", "now-hour",
+                 "--networks", "shifter", "--regions", "lon1", "--image", IMAGE,
+                 "--output", "out"]
+    args = parse(args_list)
     assert campaign_cli.dispatch(args) == 0
     assert json.loads(capsys.readouterr().out) == {
         "campaign_id": CID, "networks": ["shifter"], "regions": ["lon1"]}
+    seen = []
+    monkeypatch.setattr(planspec, "plan", lambda cloud, inputs: seen.append(inputs.size)
+                        or fake_plan(cloud, inputs))
+    assert campaign_cli.dispatch(args) == 0
+    assert campaign_cli.dispatch(parse([*args_list, "--size", "c-4"])) == 0
+    assert seen == ["c-2", "c-4"]

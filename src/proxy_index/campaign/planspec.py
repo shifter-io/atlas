@@ -26,7 +26,9 @@ from .do_api import DigitalOcean
 ALL16 = ("byteful", "dataimpulse", "decodo", "evomi", "fleetproxy", "infatica", "iproyal",
          "massive", "nodemaven", "oxylabs", "proxy-cheap", "proxy-seller", "proxyempire",
          "rayobyte", "soax", "webshare")
-WORKER_SIZE = "c-2"
+WORKER_SIZE = "c-2"  # the default worker size
+# CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
+SIZE_RE = r"c2?-\d+(-intel)?|s-\d+vcpu-\d+gb(-amd|-intel)?"
 PRODUCT = "residential"
 
 
@@ -50,6 +52,7 @@ class PlanInputs:
     concurrency: int = 2000
     grace_hours: int = 48
     synthetic: bool = False
+    size: str = WORKER_SIZE
 
 
 def parse_networks(value: str) -> tuple[str, ...]:
@@ -109,11 +112,11 @@ def image_id(inputs: PlanInputs) -> str:
 async def check_cloud(cloud: DigitalOcean, inputs: PlanInputs, key_name: str) -> dict:
     """Read-only: the project id, the size and image per region, and the worker key id."""
     project_id = await cloud.project_id(PROJECT_NAME)
-    offered = (await cloud.sizes()).get(WORKER_SIZE, [])
+    offered = (await cloud.sizes()).get(inputs.size, [])
     snapshot = image_id(inputs)
     image = await cloud.image(snapshot) or {}
     keys = [str(k["id"]) for k in await cloud.ssh_keys() if k.get("name") == key_name]
-    problems = [f"size {WORKER_SIZE} in {r}" for r in inputs.regions if r not in offered]
+    problems = [f"size {inputs.size} in {r}" for r in inputs.regions if r not in offered]
     problems += [f"image in {r}" for r in inputs.regions if image.get("name") != inputs.image
                  or r not in image.get("regions", [])]
     problems += [] if len(keys) == 1 else [f"ssh key {key_name}"]
@@ -144,6 +147,8 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
     regions = tuple(r for r in REGION_IDS if r in inputs.regions)
     if set(inputs.regions) - set(regions) or not regions:
         raise PlanError("--regions must be campaign regions")
+    if not re.fullmatch(SIZE_RE, inputs.size):
+        raise PlanError("--size must be a CPU-Optimized or Basic droplet slug")
     manager = read_json(inputs.inventory)
     if not all(manager.get(key) for key in ("manager_id", "wheel_sha256", "framework_version")):
         raise PlanError("deploy the manager before planning (inventory incomplete)")
@@ -166,7 +171,7 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         project_id=found["project_id"], starts_at=begins.isoformat(),
         grace_hours=inputs.grace_hours, regions=regions, networks=inputs.networks,
         manifests=dict.fromkeys(inputs.networks, ""),
-        size_by_region=dict.fromkeys(regions, WORKER_SIZE),
+        size_by_region=dict.fromkeys(regions, inputs.size),
         image_by_region=dict.fromkeys(regions, found["image_id"]), image_name=inputs.image,
         wheel_sha256=manager["wheel_sha256"], framework_version=manager["framework_version"],
         ssh_key_id=found["ssh_key_id"], manager_droplet_id=str(manager["manager_id"]),
