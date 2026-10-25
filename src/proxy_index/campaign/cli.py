@@ -95,6 +95,8 @@ def _ops_parsers(actions) -> None:
     image.add_argument("--mac-key", type=Path,
                        default=Path("~/.ssh/proxy-index-campaign").expanduser())
     image.add_argument("--inventory", type=Path, default=SECRETS / "campaign-images.json")
+    image.add_argument("--mmdb", type=Path,
+                       help="DB-IP MMDB placed in the image for the run-time country check")
     guard = actions.add_parser("guard", help="The Mac's alert-only campaign watch (launchd)")
     guard.add_argument("guard_action", choices=["install", "remove", "status"])
     guard.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
@@ -139,7 +141,8 @@ async def limits(cloud, project_name: str, sizes: list[str]) -> dict:
 def _image(args) -> int:
     from .image import ImageJob, build, ensure_mac_key
 
-    job = ImageJob(args.wheel, args.requirements, ensure_mac_key(args.mac_key), args.inventory)
+    job = ImageJob(args.wheel, args.requirements, ensure_mac_key(args.mac_key), args.inventory,
+                   mmdb=args.mmdb)
 
     async def run() -> dict:
         async with _cloud(args.account) as cloud:

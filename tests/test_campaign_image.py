@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import plistlib
@@ -51,7 +52,7 @@ class Shell:
         self.calls, self.verdict, self.ready = [], verdict, ready
 
     async def __call__(self, argv, stdin):
-        self.calls.append((argv, stdin))
+        self.calls.append((argv, stdin.read_bytes() if isinstance(stdin, Path) else stdin))
         if argv[-1] == "true":
             return (0 if self.ready else 255), ""
         return (0 if self.verdict == "clean" else 1), f"apt output\n{self.verdict}\n"
@@ -125,6 +126,63 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
         "campaign-ops-audit.jsonl").read_text().splitlines()]
     assert [(a["kind"], a["result"]) for a in audit if a["result"] == "deleted"] == [
         ("droplet", "deleted"), ("ssh_key", "deleted")]
+
+
+class Reader:
+    """A fake maxminddb reader of the given database type."""
+
+    def __init__(self, database_type):
+        self.database_type = database_type
+
+    def metadata(self):
+        return type("Metadata", (), {"database_type": self.database_type,
+                                     "build_epoch": 1_757_808_000})()
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def mmdb(tmp_path, monkeypatch):
+    """A stand-in for the licensed DB-IP Location + ISP file (CTRY-2)."""
+    path = tmp_path / "databases" / "dbip-full-2027-01-01.mmdb"
+    path.parent.mkdir()
+    path.write_bytes(b"database bytes")
+    monkeypatch.setattr("maxminddb.open_database", lambda _path: Reader("DBIP-Location-ISP"))
+    return path
+
+
+async def test_the_image_carries_the_country_database_and_records_it(job, mmdb):
+    """CTRY-2: the MMDB rides in the provision tar and its name and SHA-256 are recorded."""
+    from dataclasses import replace
+
+    shell = Shell()
+    result = await run_build(FakeDigitalOcean(), replace(job, mmdb=mmdb), shell)
+    stdin = shell.calls[-1][1]
+    with tarfile.open(fileobj=io.BytesIO(stdin)) as archive:
+        assert archive.getnames() == ["worker-provision.sh", "requirements.txt", job.wheel.name,
+                                      mmdb.name]
+        assert archive.extractfile(mmdb.name).read() == b"database bytes"
+        assert archive.getmember(mmdb.name).mode == 0o600
+    assert result["state"] == "built" and result["mmdb_file"] == mmdb.name
+    assert result["mmdb_sha256"] == hashlib.sha256(b"database bytes").hexdigest()
+    assert inventory(job)["mmdb_sha256"] == result["mmdb_sha256"]
+
+
+@pytest.mark.parametrize(("name", "kind", "message"), [
+    ("dbip-full.mmdb", "GeoLite2-City", "not a DB-IP database"),
+    ("dbip-full.csv", "DBIP-Location-ISP", "must name a .mmdb file")])
+async def test_a_wrong_database_stops_the_build_before_any_cloud_write(
+        job, tmp_path, monkeypatch, name, kind, message):
+    from dataclasses import replace
+
+    path = tmp_path / name
+    path.write_bytes(b"x")
+    monkeypatch.setattr("maxminddb.open_database", lambda _path: Reader(kind))
+    fake = FakeDigitalOcean()
+    with pytest.raises(ValueError, match=message):
+        await run_build(fake, replace(job, mmdb=path))
+    assert writes(fake) == [] and not job.inventory.exists()
 
 
 async def test_an_existing_mac_key_is_reused_and_kept(job):
@@ -316,6 +374,11 @@ def test_provision_script_is_valid_pinned_and_secret_free():
     assert text.index("SSHD_EFFECTIVE=") < text.index("rm -f /etc/ssh/ssh_host_*")
     # m2: the build's login traces are emptied and checked.
     assert "/var/log/auth.log /var/log/wtmp" in text and "login trace" in text
+    # CTRY-2: at most one database, root-owned and world-readable in the fixed directory.
+    assert 'DB_DIR="$WORKER_ROOT/db-ip"' in text and "dirty: several databases" in text
+    assert 'chown root:root "$DB_DIR"/*.mmdb' in text and 'chmod 0644 "$DB_DIR"/*.mmdb' in text
+    assert text.index('mv "${databases[0]}"') < text.index('rm -rf "$HERE"')
+    assert 'reasons+=("database")' in text
     assert not SECRET.search(text) and not IPV4.search(text)
 
 
@@ -389,6 +452,12 @@ def test_image_and_guard_commands_are_wired(monkeypatch, capsys, job, tmp_path):
                           str(job.mac_key)]) == 0
     assert json.loads(capsys.readouterr().out) == {"state": "built"}
     assert seen["job"].inventory == Path(".secrets/campaign-images.json")
+    assert seen["job"].mmdb is None
+    assert main_cli.main(["campaign", "image", "build", "--account", "leftclick", "--wheel",
+                          str(job.wheel), "--requirements", str(job.requirements), "--mac-key",
+                          str(job.mac_key), "--mmdb", "db-ip/dbip-full.mmdb"]) == 0
+    capsys.readouterr()
+    assert seen["job"].mmdb == Path("db-ip/dbip-full.mmdb")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(guard, "install", lambda command, home: home / "agent.plist")
     monkeypatch.setattr(guard, "remove", lambda home: True)
@@ -410,8 +479,11 @@ class FakeCloud:
         return None
 
 
-async def test_local_runners_and_key_matching():
+async def test_local_runners_and_key_matching(tmp_path):
     assert await image.run_shell(["cat"], b"clean\n") == (0, "clean\n")
+    streamed = tmp_path / "payload.tar"
+    streamed.write_bytes(b"from a file\n")
+    assert await image.run_shell(["cat"], streamed) == (0, "from a file\n")
     assert guard._run(["true"]).returncode == 0
     fake = FakeDigitalOcean()
     fake.add_resource("ssh_key", 7, name="pi-camp-worker-20270101", public_key="ssh-ed25519 X")

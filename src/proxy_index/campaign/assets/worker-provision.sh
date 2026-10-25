@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Provision the CAMP-1 worker image on a fresh ubuntu-24-04-x64 builder, as root.
-# Inputs, next to this script: requirements.txt (hash-locked, from `uv export`) and one wheel.
+# Inputs, next to this script: requirements.txt (hash-locked, from `uv export`), one wheel and
+# at most one DB-IP MMDB (`image build --mmdb`), placed in $WORKER_ROOT/db-ip for the country check.
 # The last line of output is the hygiene verdict: "clean", or "dirty: <reasons>" and exit 1.
 # The image holds no keys, host keys, passwords or credentials.
 set -euo pipefail
@@ -9,6 +10,7 @@ UV_VERSION="0.12.10"
 UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
 UV_SHA256="173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b"
 WORKER_ROOT="/opt/proxy-index-worker"
+DB_DIR="$WORKER_ROOT/db-ip"
 MASKED="snapd.service snapd.socket apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-daily-upgrade.timer unattended-upgrades.service motd-news.service motd-news.timer"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -29,6 +31,14 @@ wheel="$(ls "$HERE"/proxy_index-*.whl)"
 uv pip install --python "$WORKER_ROOT/venv/bin/python" --no-deps "$wheel"
 sha256sum "$wheel" | cut -d' ' -f1 > "$WORKER_ROOT/wheel.sha256"
 "$WORKER_ROOT/venv/bin/proxy-index" --help > /dev/null
+mapfile -t databases < <(compgen -G "$HERE/*.mmdb" || true)
+if [ ${#databases[@]} -gt 1 ]; then echo "dirty: several databases"; exit 1; fi
+if [ ${#databases[@]} -eq 1 ]; then
+  install -d -m 0755 -o root -g root "$DB_DIR"
+  mv "${databases[0]}" "$DB_DIR/"
+  chown root:root "$DB_DIR"/*.mmdb
+  chmod 0644 "$DB_DIR"/*.mmdb
+fi
 
 # Quiet, predictable boots: no snaps, no background apt, no motd fetches; the clock stays synced.
 # shellcheck disable=SC2086
@@ -79,6 +89,7 @@ hygiene() {
     [ "$(systemctl is-enabled "$unit" 2>/dev/null || true)" = "masked" ] || reasons+=("$unit")
   done
   [ -x "$WORKER_ROOT/venv/bin/proxy-index" ] || reasons+=("venv")
+  [ "$(compgen -G "$DB_DIR/*.mmdb" | wc -l)" -eq "${#databases[@]}" ] || reasons+=("database")
   grep -qx "passwordauthentication no" <<< "$SSHD_EFFECTIVE" || reasons+=("sshd passwords")
   grep -qx "authenticationmethods publickey" <<< "$SSHD_EFFECTIVE" || reasons+=("sshd methods")
   for log in $LOGIN_LOGS; do

@@ -44,7 +44,7 @@ from .contracts import (
     spec_path,
 )
 from .do_api import CreateError, DigitalOcean
-from .fanout import INSTALL_WHEEL, RemoteError
+from .fanout import INSTALL_WHEEL, MMDB_DIR, RemoteError
 from .launch import CREATE_RETRY_SECONDS, READY_LIMIT_SECONDS, WorkerInputs, manifest_path
 
 REQUESTS, START, STEP, FLOOR = 25_000, 2000, 500, 500
@@ -183,13 +183,21 @@ def targeting(network: str, country: str) -> dict[str, str]:
     return {"country": country} if "country" in load_grammar(network).flags else {}
 
 
+def launcher(databases: str) -> str:
+    """The `sh -c` script of a step: raise the file limit, then run `"$0" "$@"`, adding
+    `--mmdb` when `databases` holds exactly one MMDB, so the run applies the country check."""
+    return ('ulimit -n 65536 || exit 1; n=0; for m in ' + databases + '/*.mmdb; do '
+            '[ -f "$m" ] && n=$((n + 1)) && f="$m"; done; '
+            'if [ "$n" = 1 ]; then set -- "$@" --mmdb "$f"; fi; exec "$0" "$@"')
+
+
 def run_command(network: str, concurrency: int, requests: int, country: str,
                 region: str) -> list[str]:
     """The fixed worker command for one step; every argument is public."""
     probe, secret = f"{WORKER_ROOT}/probe", f"{WORKER_SECRETS}/probe"
     parameters = [arg for value in targeting(network, country).values()
                   for arg in ("--param", f"country={value}")]
-    return ["sh", "-c", 'ulimit -n 65536 && exec "$0" "$@"', f"{WORKER_ROOT}/venv/bin/proxy-index",
+    return ["sh", "-c", launcher(MMDB_DIR), f"{WORKER_ROOT}/venv/bin/proxy-index",
             "run", "--target", "generic_http", "--requests", str(requests),
             "--concurrency", str(concurrency), "--timeout", str(TIMEOUT_SECONDS),
             "--answer-classes", "--provider-config", f"{probe}/{network}.toml",

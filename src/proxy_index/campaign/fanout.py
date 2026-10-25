@@ -27,6 +27,7 @@ ROUND_UNIT, SAMPLER_UNIT = "pi-camp-round", "pi-camp-sampler"
 JOURNAL_BYTES = 5_000_000
 OUTPUT_BYTES, PULL_BYTES = 16 << 20, 8 << 30  # caps on what one worker may send (m8)
 READY_POLL_SECONDS = 2.0
+MMDB_DIR = f"{WORKER_ROOT}/db-ip"  # the image's DB-IP database, if any (`image build --mmdb`)
 SOCKET_LIMIT = 104 - 17  # sun_path on macOS, less the suffix ssh adds while it binds
 Runner = Callable[[list[str], bytes | None, float, BinaryIO, int], Awaitable[int]]
 
@@ -55,6 +56,8 @@ os.write(fd, secret); os.close(fd)
 members = [m for m in archive.getmembers() if m.name.startswith(("run/", "wheel/"))]
 archive.extractall(root, members=members, filter="data")
 wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
+databases = sorted((root / "db-ip").glob("*.mmdb"))  # exactly one: the round's country check
+country_check = ["--mmdb", str(databases[0])] if len(databases) == 1 else []
 """ + INSTALL_WHEEL + r"""for _ in range(11):
     synced = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
                             capture_output=True, text=True).stdout.strip() == "yes"
@@ -75,7 +78,8 @@ subprocess.run(["systemd-run", "--unit=pi-camp-round", "--property=LimitNOFILE=6
                 str(root / "venv" / "bin" / "proxy-index"), "onboarding", "round",
                 "--manifest", str(run / "campaign.json"), "--region", region,
                 "--round", str(hour), "--provider-config", str(run / "provider.toml"),
-                "--credentials-file", str(secrets / "credentials.toml")], check=True)
+                "--credentials-file", str(secrets / "credentials.toml"), *country_check],
+               check=True)
 subprocess.run(["systemd-run", "--unit=pi-camp-sampler", "--property=Restart=no", python,
                 "-m", "proxy_index.campaign.sampler", "--interval", "1",
                 "--output", str(folder / "host-samples.jsonl")], check=True)
