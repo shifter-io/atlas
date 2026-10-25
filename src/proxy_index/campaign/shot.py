@@ -25,6 +25,7 @@ from typing import Any
 from ..onboarding.files import atomic_bytes, atomic_json, private_dir
 from ..onboarding.manifest import timestamp
 from ..onboarding.scheduler import Clock
+from ..providers.grammar import load_grammar
 from . import ops_api, scope
 from .contracts import (
     SIZE_RE,
@@ -65,7 +66,6 @@ REGION_COUNTRY = {"lon1": "GB", "fra1": "DE", "ams3": "NL", "nyc3": "US", "tor1"
                   "sgp1": "SG", "blr1": "IN", "syd1": "AU"}
 LEAD_SECONDS = 600.0  # from the shot's start to the common start time
 CREATE_BATCH = 10  # names per create call (DigitalOcean's limit)
-SETUP_FLOOR_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,24 @@ class ShotInputs:
 
     def size_for(self, network: str) -> str:
         return self.size_by_network.get(network, self.size)
+
+
+def list_country(network: str) -> bool:
+    """Whether the network has no free country choice: no country flag, or a preset one (only
+    its dashboard list's country loads), so its cells need `country_by_network`."""
+    flag = load_grammar(network).flags.get("country")
+    return flag is None or flag.preset
+
+
+def pending_outcome(worker: DropletRecord) -> str:
+    """The outcome of a cell that never ran, from its worker's status before the removal."""
+    if worker.assign_failed_at:
+        return "unconfirmed"
+    if worker.status == "create_failed":
+        return "create_failed"
+    if worker.droplet_id is None and worker.error_class is None:
+        return "not_created"
+    return "cancelled"  # stopped mid-way: by a signal or the shot's own error
 
 
 def cell_key(network: str, region: str) -> str:
@@ -139,6 +157,11 @@ class Shot:
             size=inputs.size_for(network), image_id=self.spec.image_by_region[region],
             concurrency=network_concurrency(network, self.spec.concurrency))
             for region in self.regions for network in self.networks]
+        if len({w.name for w in self.workers}) != len(self.workers):  # one record per name
+            raise ProbeError("refused: worker names repeated")
+        # A droplet a create or adopt returned that no worker record holds (a second one with
+        # a worker's name): recorded, removed through the guard and counted in workers_left.
+        self.unrecorded: list[DropletRecord] = []
         self.result: dict[str, Any] = {
             "shot_id": self.shot_id, "campaign_id": self.spec.campaign_id,
             # What `campaign shot --remove` needs to rebuild this scope in a later process.
@@ -146,6 +169,8 @@ class Shot:
                       "manager_droplet_id": self.scope.manager_droplet_id,
                       "created_at": self.scope.created_at.isoformat()},
             "requests": inputs.requests, "start_at": timestamp(self.start_at),
+            # Until the removal reports no worker left (a killed or crashed shot keeps it).
+            "recover": f"campaign shot --remove {self.folder}",
             "cells": {cell_key(w.network, w.region): {
                 "country": inputs.country(w.network, w.region), "size": w.size,
                 "concurrency": w.concurrency, "outcome": "pending"} for w in self.workers}}
@@ -155,7 +180,10 @@ class Shot:
         i = self.inputs
         unknown = set(self.regions) - set(self.spec.regions)
         sizes = {i.size_for(n) for n in self.networks}
-        problems = [(bool(unknown), "regions not planned"),
+        repeated = (len(set(self.regions)) != len(self.regions)
+                    or len(set(self.networks)) != len(self.networks))
+        problems = [(repeated, "regions or networks repeated"),
+                    (bool(unknown), "regions not planned"),
                     (not set(self.networks) <= set(self.spec.networks), "networks not planned"),
                     (any(r not in REGION_COUNTRY for r in self.regions), "region without a "
                      "country"),
@@ -164,6 +192,8 @@ class Shot:
                     (any(not re.fullmatch(SIZE_RE, s) for s in sizes), "size"),
                     (i.requests < 1 or i.lead_seconds < 0, "requests or lead")]
         bad = [text for failed, text in problems if failed]
+        bad += [f"{n} only loads its list's country: give --country-by-network {n}=<it>"
+                for n in self.networks if list_country(n) and n not in i.country_by_network]
         if not bad:
             for network in self.networks:
                 bad += network_problems(i.root, self.spec, self.files, network, [
@@ -178,6 +208,7 @@ class Shot:
         """The record, with each worker's name before its create and its id (never its
         address) right after."""
         self.result["workers"] = [asdict(w) for w in self.workers]
+        self.result["unrecorded"] = [asdict(w) for w in self.unrecorded]
         private_dir(self.folder)
         atomic_json(self.folder / "shot-result.json", self.result)
 
@@ -223,9 +254,11 @@ class Shot:
             groups.setdefault((worker.region, worker.size), []).append(worker)
         batches = [group[i:i + CREATE_BATCH] for group in groups.values()
                    for i in range(0, len(group), CREATE_BATCH)]
-        await asyncio.gather(*(self.create(batch) for batch in batches))
+        async with asyncio.TaskGroup() as group:  # an error cancels the other creates
+            for batch in batches:
+                group.create_task(self.create(batch))
         self.save()
-        records = {w.droplet_id: w for w in self.workers if w.droplet_id}
+        records = {w.droplet_id: w for w in self.workers + self.unrecorded if w.droplet_id}
         await scope.assign_and_verify_project(
             self.cloud, self.scope, list(records), records, audit_path(self.folder),
             retry=scope.Retry(sleep=self.clock.sleep, save=self.save))
@@ -252,14 +285,27 @@ class Shot:
                     break
                 await self.clock.sleep(wait)
                 found += await self.adopted(missing)
-        by_name = {d.name: d for d in found}
-        for worker in batch:
-            if worker.name in by_name:
-                worker.droplet_id, worker.error_class = by_name[worker.name].id, None
-            else:
-                worker.status = "create_failed"
-                worker.error_class = "create_uncertain" if uncertain else "create_failed"
+        self.take(batch, found, "create_uncertain" if uncertain else "create_failed")
         self.save()
+
+    def take(self, workers: list[DropletRecord], found: list[Droplet],
+             failed: str | None) -> None:
+        """Give each worker the first droplet with its name; every other droplet found is
+        recorded in `unrecorded` (never dropped). A worker with none gets `failed`."""
+        by_name: dict[str, list[Droplet]] = {}
+        for droplet in found:
+            if droplet.id not in {w.droplet_id for w in self.workers + self.unrecorded}:
+                by_name.setdefault(droplet.name, []).append(droplet)
+        for worker in workers:
+            if mine := by_name.get(worker.name):
+                worker.droplet_id, worker.error_class = mine.pop(0).id, None
+            elif failed:
+                worker.status, worker.error_class = "create_failed", failed
+        for droplet in (d for extra in by_name.values() for d in extra):
+            region, network = droplet.name.split("-h00-", 1)[1].split("-", 1)
+            self.unrecorded.append(DropletRecord(network, region, 0, droplet.name,
+                                                 droplet_id=droplet.id,
+                                                 error_class="unrecorded"))
 
     @staticmethod
     def missing(batch: list[DropletRecord], found: list[Droplet]) -> list[str]:
@@ -292,17 +338,25 @@ class Shot:
         not ready by then is `late` and never started. Any error stays with this worker."""
         cell = self.result["cells"][cell_key(worker.network, worker.region)]
         try:
+            await self.shoot(worker, droplet, cell)
+        except Exception as error:  # never a sibling's problem; a cancel still propagates
+            worker.error_class = type(error).__name__
+            cell["outcome"] = "failed" if worker.started_at else "setup_failed"
+
+    async def shoot(self, worker: DropletRecord, droplet: Droplet | None,
+                    cell: dict[str, Any]) -> None:
+        try:
             ready = droplet is not None and await self.remote.wait_ready(
                 droplet, max(self.start_at - self.clock.now(), 1.0))
-            if ready:
+            left = self.start_at - self.clock.now()
+            if ready and left > 0:  # credentials only go to a worker that can still start
                 worker.ssh_ready_at = self.now()
                 await set_up(self.remote, droplet, payload(
-                    self.inputs.root, self.spec, self.files, [worker.network]),
-                    max(self.start_at - self.clock.now(), SETUP_FLOOR_SECONDS))
+                    self.inputs.root, self.spec, self.files, [worker.network]), left)
                 worker.status, worker.armed_at = "armed", self.now()
         except (RemoteError, ProbeError) as error:
             worker.status, worker.error_class = "start_failed", type(error).__name__
-            cell["outcome"] = "setup_failed"
+            cell["outcome"] = "late" if self.clock.now() >= self.start_at else "setup_failed"
             return
         if worker.status != "armed" or self.clock.now() > self.start_at:
             cell["outcome"] = "late"  # reported, never started late
@@ -330,22 +384,26 @@ class Shot:
 
     async def cleanup(self) -> None:
         """Remove every created worker through the guard; report what is left."""
+        uncertain = [w for w in self.workers
+                     if w.droplet_id is None and w.error_class == "create_uncertain"]
+        if uncertain:  # one last look before reporting them
+            self.take(uncertain, await self.adopted([w.name for w in uncertain]), None)
         for worker in self.workers:
-            if worker.droplet_id is None and worker.error_class == "create_uncertain":
-                found = await self.adopted([worker.name])  # one last look before reporting
-                if found:
-                    worker.droplet_id, worker.error_class = found[0].id, None
+            cell = self.result["cells"][cell_key(worker.network, worker.region)]
+            if cell["outcome"] == "pending":
+                cell["outcome"] = pending_outcome(worker)
+        everyone = self.workers + self.unrecorded
         await asyncio.gather(*(release(self.cloud, self.scope, w, audit_path(self.folder),
                                        self.clock.sleep)
-                               for w in self.workers if w.droplet_id is not None))
-        left = [w.name for w in self.workers if w.error_class == "create_uncertain" or (
+                               for w in everyone if w.droplet_id is not None))
+        left = [w.name for w in everyone if w.error_class == "create_uncertain" or (
             w.droplet_id is not None and w.status != "destroyed")]
-        refused = [w.name for w in self.workers if w.status == "destroy_refused"]
+        refused = [w.name for w in everyone if w.status == "destroy_refused"]
         if refused:  # the owner's to decide: never retried by --remove
             self.result["destroy_refused"] = refused
         self.result["workers_left"] = len(left)
-        if left:
-            self.result["recover"] = f"campaign shot --remove {self.folder}"
+        if not left:
+            self.result.pop("recover", None)
         self.write()
 
 
@@ -358,7 +416,8 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
     try:
         result = json.loads(path.read_text())
         recorded = result["scope"]
-        workers = [DropletRecord(**raw) for raw in result["workers"]]
+        workers = [DropletRecord(**raw) for raw in result["workers"] + result.get(
+            "unrecorded", [])]
         shot_scope = Scope(result["shot_id"], short_id(result["shot_id"]),
                            recorded["project_id"], recorded["manager_droplet_id"],
                            datetime.fromisoformat(recorded["created_at"]))
@@ -369,7 +428,9 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
             await recover_worker(cloud, shot_scope, worker, audit_path(folder), sleep)
     finally:  # what was removed stays recorded, also when a later read fails
         left = sum(w.status not in ("destroyed", "absent") for w in workers)
-        result.update(workers=[asdict(w) for w in workers], workers_left=left,
+        count = len(result["workers"])
+        result.update(workers=[asdict(w) for w in workers[:count]],
+                      unrecorded=[asdict(w) for w in workers[count:]], workers_left=left,
                       recovered_at=timestamp(datetime.now(UTC).timestamp()))
         if not left:
             result.pop("recover", None)

@@ -430,11 +430,13 @@ def _shot(args) -> int:
     from .shot import ShotInputs, recover, shot
 
     secrets = MANAGER_ROOT / ".secrets"
+    regions = tuple(r.strip() for r in (args.regions or "").split(",") if r.strip())
     try:
+        if len(set(regions)) != len(regions):
+            raise ValueError("--regions must be distinct")
         inputs = ShotInputs(
             args.root, args.output or MANAGER_ROOT / "shots",
-            parse_networks(args.networks) if args.networks else (),
-            tuple(r.strip() for r in (args.regions or "").split(",") if r.strip()),
+            parse_networks(args.networks) if args.networks else (), regions,
             args.requests, args.size, parse_pairs(args.size_by_network),
             {n: c.upper() for n, c in parse_pairs(args.country_by_network).items()},
             args.lead_minutes * 60)
