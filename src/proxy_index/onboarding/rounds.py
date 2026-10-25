@@ -23,7 +23,7 @@ from .manifest import load, moment, settings, timestamp
 from .scheduler import Clock, JobContext, job_directory, peak_memory_mb, run_job
 
 EARLY_START_SECONDS = 300
-# "no_list": the provider has no list (login) for the country; complete with that reason.
+# "no_list": the provider has no login or no exits for the country; complete with that reason.
 TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list"}
 
 
@@ -121,7 +121,7 @@ async def execute_round(
     than 300 s before the round's ``scheduled_at``; an earlier start waits for it. A stop
     marks the active country ``interrupted`` and the rest ``not_started_deadline``; so does
     an error, which is re-raised after the checkpoint records ``failed``. A country whose
-    ``proxy_factory`` returns None (no provider list) is ``no_list``, without traffic.
+    ``proxy_factory`` returns None (no provider login or exits) is ``no_list``, without traffic.
     """
     manifest = _ephemeral(manifest_path, region, round_index)
     directory = manifest_path.parent / "regions" / region

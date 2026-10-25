@@ -178,8 +178,7 @@ def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
 
 
 def targeting(network: str, country: str) -> dict[str, str]:
-    """The country parameter, for a network whose grammar has a country flag (Proxy-Seller's
-    is a preset: only its dashboard list's country loads)."""
+    """The country parameter, for a network whose grammar has a country flag."""
     return {"country": country} if "country" in load_grammar(network).flags else {}
 
 

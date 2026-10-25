@@ -90,7 +90,8 @@ def register(commands):
 
 def _proxies(args, manifest: dict, *, no_list: bool = False) -> dict:
     """Check the provider configuration and every country's proxy before any traffic. With
-    ``no_list`` a country the provider has no list for maps to None (the round skips it)."""
+    ``no_list`` a country the provider has no login or no exits for maps to None (the round
+    skips it)."""
     if args.region not in manifest["regions"]:
         raise ValueError("Unknown campaign region")
     if digest(args.provider_config) != manifest["provider_config_sha256"]:
