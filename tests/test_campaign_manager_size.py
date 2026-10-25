@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from campaign_deploy_fakes import Fake, fast_assign, inventory, make_job, parse, run_deploy, writes
@@ -113,6 +114,10 @@ def test_the_cli_options():
     teardown = ["campaign", "manager", "teardown", "--after-collect", "c.json"]
     assert parse(teardown).keep_worker_assets is False
     assert parse([*teardown, "--keep-worker-assets"]).keep_worker_assets is True
+    # CAMP-1s: optional, so a manager that recorded no campaign can be torn down
+    assert parse(["campaign", "manager", "teardown"]).after_collect == []
+    assert parse([*teardown, "--after-collect", "d.json"]).after_collect == [
+        Path("c.json"), Path("d.json")]
 
 
 @pytest.mark.parametrize("flags, keep", [([], False), (["--keep-worker-assets"], True)])

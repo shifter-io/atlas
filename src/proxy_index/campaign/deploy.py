@@ -453,17 +453,28 @@ def _remove_agent() -> bool:
 
 
 def check_reports(inventory: dict, reports: list[Path]) -> None:
-    """Every recorded campaign needs a clean collect report (0 mismatches, missing, extra)."""
-    clean = set()
+    """Every recorded campaign needs a clean collect report (0 mismatches, missing, extra),
+    and every given report must be clean and for a recorded campaign. A manager that never
+    recorded a campaign needs no report."""
+    recorded, clean = inventory.get("campaigns", []), set()
     for path in reports:
         report = read_json(path)
         if report.get("clean") is not True or any(
                 report.get(key) for key in ("mismatches", "missing", "extra")):
             raise DeployError(f"collect report {path.name} is not clean")
+        if report.get("campaign_id") not in recorded:
+            raise DeployError(f"collect report {path.name} is for no recorded campaign")
         clean.add(report.get("campaign_id"))
-    missing = [cid for cid in inventory.get("campaigns", []) if cid not in clean]
-    if not reports or missing:
-        raise DeployError(f"teardown needs a clean collect report for {missing or 'a campaign'}")
+    missing = [cid for cid in recorded if cid not in clean]
+    if missing:
+        raise DeployError(f"teardown needs a clean collect report for {missing}")
+
+
+def known_hosts(path: Path, inventory: dict) -> Path:
+    """The manager's host-key file. `deploy` records it beside the inventory, so a relative
+    record is found there, never in the current directory (another manager's file)."""
+    recorded = Path(inventory["known_hosts"]).expanduser()
+    return recorded if recorded.is_absolute() else path.with_name(recorded.name)
 
 
 def _owned(inventory: dict, images: dict, keep_worker_assets: bool = False
@@ -487,7 +498,7 @@ async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shel
     (a removed droplet takes its disk, and its secrets, with it)."""
     if inventory.get("secrets_shredded") or await cloud.get(str(inventory["manager_id"])) is None:
         return
-    remote = Manager(inventory, shell)
+    remote = Manager(inventory | {"known_hosts": str(known_hosts(path, inventory))}, shell)
     units = [unit for cid in inventory.get("campaigns", []) for unit in unit_names(cid)]
     if units:
         await remote.run("systemctl disable --now " + " ".join(units), "stop units")
@@ -536,7 +547,7 @@ def _retire(path: Path, inventory: dict, done: dict) -> None:
     retired = {key: inventory.get(key) for key in RETIRED} | {"teardown": done}
     kept = [*inventory.get("kept_worker_key_ids", []), *filter(None, [
         inventory.get("worker_key_id")])]
-    Path(inventory["known_hosts"]).unlink(missing_ok=True)  # recorded before any manager
+    known_hosts(path, inventory).unlink(missing_ok=True)  # recorded before any manager
     for key in RESET:
         inventory.pop(key, None)
     save(path, inventory, kept_worker_key_ids=kept, retired_managers=[
