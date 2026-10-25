@@ -84,8 +84,9 @@ def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, li
     defective = {issue.split(":", 1)[0] for issue in result["issues"]
                  if issue not in labels and not issue.startswith("round is")}
     started = [j["started_at"] for j in state["jobs"] if j.get("started_at")]
-    completed = all(c["status"] == "completed" for c in countries)
-    finished = max(j["finished_at"] for j in state["jobs"]) if completed and started else None
+    completed = all(c["status"] in ("completed", "no_list") for c in countries)
+    finished = max(j["finished_at"] for j in state["jobs"]
+                   if j.get("finished_at")) if completed and started else None
     first = min(started, default=None)
     classes = [country_classes(c) for c in countries]
     return {

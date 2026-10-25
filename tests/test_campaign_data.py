@@ -322,6 +322,25 @@ def test_m1_a_failed_round_is_our_failure_with_its_data_verified(root):
     assert (row["cell"], row["jobs_ok"], row["observations"]) == ("failed_ours", 12, 24)
 
 
+def test_a_no_list_country_completes_its_cell_and_merges(root):
+    # A country the provider has no list for ran no traffic and is complete with that reason.
+    folder = round_directory(merge.manifest_path(root, "shifter"), "tor1", 0)
+    state = read_json(folder / "round.json")
+    job = state["jobs"][1]
+    assert job["country"] == "GL"
+    state["jobs"][1] = {key: job[key] for key in ("round", "country", "scheduled_at")} | {
+        "status": "no_list", "stop_reason": "no_list"}
+    atomic_json(folder / "round.json", state)
+    shutil.rmtree(folder / "gl")
+    row = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}[
+        "shifter", "tor1", 0]
+    assert (row["cell"], row["completed"], row["jobs_ok"], row["missing"]) == (
+        "complete", True, 2, 0)
+    assert row["finished"] == state["jobs"][2]["finished_at"]
+    finish_day(root)
+    merge.merge_network(root, "shifter")
+
+
 def test_m2_m3_merge_cli_names_the_cell_and_writes_no_network(root, capsys):
     finish_day(root)
     write_hour(root, 23, _cells("create_failed") | {("shifter", "tor1"): "collect_failed"})

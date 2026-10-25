@@ -18,6 +18,7 @@ from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.files import read_json
 from proxy_index.onboarding.rounds import execute_round, round_directory, verify_round
 from proxy_index.onboarding.scheduler import execute
+from proxy_index.providers import NoCountryList
 
 TOR1 = ["CA", "GL", "PM"]
 
@@ -238,6 +239,22 @@ async def test_verify_round_passes_without_ips(ephemeral):
     assert "203.0.113" not in json.dumps(report)
 
 
+async def test_a_country_without_a_provider_list_completes_as_no_list(ephemeral):
+    scheduled = campaign.moment(campaign.load(ephemeral)["rounds"][2]).timestamp()
+    clock, calls = Clock(scheduled), []
+    result = await execute_round(ephemeral, "tor1", 2,
+                                 lambda country: None if country == "GL" else Proxy(country),
+                                 clock=clock, run_country=census(clock, calls))
+    assert [c.country for c in calls] == ["CA", "PM"]
+    assert result["status"] == "completed"
+    assert [(j["status"], j["stop_reason"]) for j in result["jobs"]][1] == ("no_list", "no_list")
+    assert not (round_directory(ephemeral, "tor1", 2) / "gl").exists()
+    report = verify_round(ephemeral, "tor1", 2)
+    assert report["complete"] and report["issues"] == [] and report["rows"] == 4
+    assert (report["countries"][1]["status"], report["countries"][1]["requests"]) == (
+        "no_list", 0)
+
+
 @pytest.mark.parametrize("damage,issue", [
     ("tamper", "CA: failed verification (ValueError)"),
     ("meta", "CA: chunk without verified metadata"),
@@ -411,6 +428,23 @@ def test_round_cli_prints_each_refusal_and_only_the_type_of_other_errors(live, t
     changed.write_text((ROOT / "configs/shifter.toml").read_text() + "\n# edited\n")
     assert main(["onboarding", "round", *live.args, "--provider-config", str(changed)]) == 1
     assert capsys.readouterr().err == "Round command failed (ValueError).\n"
+
+
+def test_round_cli_skips_a_country_without_a_provider_list(live, monkeypatch, capsys):
+    real = onboarding_cli.load_provider
+
+    def load_provider(path, *, parameters, **kwargs):
+        if parameters["country"] == "gl":
+            raise NoCountryList("no shifter list for GL")
+        return real(path, parameters=parameters, **kwargs)
+
+    monkeypatch.setattr(onboarding_cli, "load_provider", load_provider)
+    live.patch(seconds=0.0)
+    assert main(["onboarding", "round", *live.args, *live.config]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "completed"
+    assert [c.country for c in live.calls] == ["CA", "PM"]
+    assert main(["onboarding", "verify-round", *live.args]) == 0
+    assert json.loads(capsys.readouterr().out)["countries"][1]["status"] == "no_list"
 
 
 def test_onboarding_doc_examples_use_the_strict_configuration():

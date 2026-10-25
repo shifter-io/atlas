@@ -23,7 +23,8 @@ from .manifest import load, moment, settings, timestamp
 from .scheduler import Clock, JobContext, job_directory, peak_memory_mb, run_job
 
 EARLY_START_SECONDS = 300
-TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline"}
+# "no_list": the provider has no list (login) for the country; complete with that reason.
+TERMINAL = {"completed", "interrupted", "failed", "not_started_deadline", "no_list"}
 
 
 class RoundDataError(ValueError):
@@ -119,7 +120,8 @@ async def execute_round(
     Refuses a non-ephemeral manifest, a replay (an existing ``round.json``) and a start more
     than 300 s before the round's ``scheduled_at``; an earlier start waits for it. A stop
     marks the active country ``interrupted`` and the rest ``not_started_deadline``; so does
-    an error, which is re-raised after the checkpoint records ``failed``.
+    an error, which is re-raised after the checkpoint records ``failed``. A country whose
+    ``proxy_factory`` returns None (no provider list) is ``no_list``, without traffic.
     """
     manifest = _ephemeral(manifest_path, region, round_index)
     directory = manifest_path.parent / "regions" / region
@@ -142,6 +144,10 @@ async def execute_round(
             for job in state["jobs"]:
                 if stop.is_set():
                     break
+                if proxy_factory(job["country"]) is None:
+                    job.update(status="no_list", stop_reason="no_list")
+                    save()
+                    continue
                 await run_job(context, job)
             state["status"] = "stopped" if stop.is_set() else "completed"
         except BaseException:
@@ -196,6 +202,8 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
     label = job["country"]
     if job["status"] == "not_started_deadline":
         return _country_entry(job, None), [f"{label}: not started"]
+    if job["status"] == "no_list":
+        return _country_entry(job, None), []
     try:
         measured = read_json(folder / "summary.json")["measurement"] or {}
         entry = _country_entry(job, measured)
@@ -221,8 +229,9 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
 def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
     """Verify one collected round without writing anything; the result holds no IPs.
 
-    ``complete`` is true when every country completed and its chunks (SHA-256, rows, time
-    bounds up to the country's ``finished_at``) and counters reconcile. A checkpoint that does
+    ``complete`` is true when every country completed (or has no provider list) and its
+    chunks (SHA-256, rows, time bounds up to the country's ``finished_at``) and counters
+    reconcile. A checkpoint that does
     not belong to this campaign, region and round raises ``RoundRefused``.
     """
     manifest = _ephemeral(manifest_path, region, round_index)
