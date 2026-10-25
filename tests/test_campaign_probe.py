@@ -138,7 +138,7 @@ def test_step_result_classifies_every_failure_as_a_share_of_completed_requests()
         "concurrency": 2000, "requested": 25_000, "completed": 20_000, "success_pct": 93.8,
         "rate_limited_pct": 2.5, "gateway_5xx_pct": 0.5, "proxy_connect_pct": 2.0,
         "timeout_pct": 1.0, "other_pct": 0.2, "rps": 900.0, "latency_p50_ms": 820,
-        "latency_p95_ms": 2400, "stop_reason": None}
+        "latency_p95_ms": 2400, "unique_ips": 24_000, "stop_reason": None}
     assert not IP.search(json.dumps(found))
     empty = step_result(500, 25_000, summary(0, successes=0) | {"latency_ms": None})
     assert empty["success_pct"] == 0.0 and empty["latency_p50_ms"] is None
