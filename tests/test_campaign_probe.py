@@ -471,7 +471,7 @@ def test_the_plan_caps_each_network_at_its_grammar_max(monkeypatch):
     assert planspec.network_concurrency("shifter", 2500) == 2000
     assert planspec.network_concurrency("shifter", 1200) == 1200
     assert planspec.network_concurrency("soax", 2500) == 500
-    assert planspec.network_concurrency("proxy-seller", 2500) == 2500  # nothing recorded
+    assert planspec.network_concurrency("proxy-seller", 2500) == 2000
 
 
 async def test_a_capped_manifest_launches_at_its_own_concurrency(tmp_path):
