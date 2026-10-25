@@ -730,3 +730,40 @@ async def test_ingest_reconciles_replacements_and_other_country(database, tmp_pa
     # The attempted total holds each replacement; the scope is the one without answer classes.
     assert metrics["requested"] == metrics["started"] == metrics["completed"] == 29
     assert metrics["unique_ips"] == summary.unique_ips
+
+
+async def test_ingest_counts_replacements_before_any_database_access(tmp_path):
+    """Runs without PostgreSQL: the counter checks precede every connection."""
+    from proxy_index.models import AnswerClasses, Outcome
+
+    class Answers(FakeTransport):
+        async def execute(self, target, *, context=None):
+            self.count += 1
+            if self.count % 3 == 0:
+                return Outcome(1, error="http_status", status=429)
+            return Outcome(1, ip=f"192.0.2.{self.count}" if self.count % 4 else
+                           f"198.51.100.{self.count}", status=200)
+
+    class Countries:
+        def lookup(self, address):
+            return {"country_code": "US" if address.startswith("192.0.2.") else "DE"}
+
+    sink = JsonSink(tmp_path / "results")
+    summary = await run(RunConfig(
+        "generic_http", ProxyConfig("http", "unused.invalid", 8080), requests=20,
+        concurrency=1, requested_country="US", provider="fixture", product="residential",
+        answer_classes=AnswerClasses(("429",), ())), sink, transport_factory=Answers,
+        enricher=Countries())
+    path = sink.directory / "summary.json"
+    saved = json.loads(path.read_text())
+    assert saved["requested"] == 20 and saved["started"] == 29 and saved["not_started"] == 0
+    # The counters reconcile with the 9 replacements: ingest gets as far as the IP artifact.
+    (sink.directory / "ips.jsonl.gz").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="IP artifact checksum"):
+        ingest(sink.directory, tmp_path / "unused.toml")
+    # Without the replacements the bounded run does not reconcile.
+    del saved["rate_limited"]
+    path.write_text(json.dumps(saved))
+    with pytest.raises(ValueError, match="Measurement counters do not reconcile"):
+        ingest(sink.directory, tmp_path / "unused.toml")
+    assert summary.other_country > 0
