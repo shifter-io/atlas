@@ -626,7 +626,6 @@ def test_plan_refuses_a_census_config_with_strict_targeting(plan_world, tmp_path
     assert not inputs.output.exists()
 
 
-@pytest.mark.xfail(strict=True, reason="needs RL-1's geonode max_concurrency")
 def test_plan_includes_geonode_at_500(plan_world):
     fake, inputs = plan_world
     result = asyncio.run(run_plan(fake, with_geonode(inputs)))
