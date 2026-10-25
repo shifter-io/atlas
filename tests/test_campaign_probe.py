@@ -835,7 +835,7 @@ async def test_s1_a_recovered_worker_the_project_never_confirms_is_removed_fail_
     assert audit[-1]["path"] == "own_unassigned" and len(fake.deleted) == 1
 
 
-async def test_m1_proxy_seller_gets_its_list_country_and_bad_configs_are_refused_early(tmp_path):
+async def test_m1_networks_get_the_probe_country_and_bad_configs_are_refused_early(tmp_path):
     fake = FakeDigitalOcean()
     inputs, spec = world(tmp_path / "a", ("proxy-seller", "soax"))
     remote = FakeProbeRemote({})

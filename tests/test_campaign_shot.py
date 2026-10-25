@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tomllib
 from dataclasses import replace
+from importlib import resources
 
 import pytest
 from aiohttp import web
@@ -32,6 +34,9 @@ from proxy_index.campaign.contracts import WORKER_TAG, audit_path
 from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError
 from proxy_index.campaign.shot import ShotInputs
+from proxy_index.providers.grammar import Grammar
+
+GRAMMARS = resources.files("proxy_index.providers").joinpath("grammars")
 
 START = NOW.timestamp() + shooting.LEAD_SECONDS
 SIZES = [{"slug": slug, "available": True, "regions": ["lon1", "nyc3"]}
@@ -371,7 +376,12 @@ async def test_s2_a_killed_shot_still_names_its_recovery(tmp_path, monkeypatch):
     assert "recover" not in json.loads((folder / "shot-result.json").read_text())
 
 
-async def test_m3_a_list_country_network_needs_its_country(tmp_path):
+async def test_m3_a_list_country_network_needs_its_country(tmp_path, monkeypatch):
+    # A network whose country is a preset (one dashboard list's country) loads only that one.
+    data = tomllib.loads(GRAMMARS.joinpath("proxy-seller.toml").read_text())
+    data["flags"]["country"] = {"kind": "country", "preset": True}
+    preset = Grammar.parse(data)
+    monkeypatch.setattr(shooting, "load_grammar", lambda network: preset)
     probe_inputs, _ = world(tmp_path, ("proxy-seller",))
     inputs = ShotInputs(probe_inputs.root, tmp_path / "shots", regions=("lon1",))
     clock = FakeClock(NOW.timestamp())

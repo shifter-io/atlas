@@ -35,6 +35,11 @@ HOST = re.compile(r"[A-Za-z0-9.-]+")
 MAX_CONCURRENCY = 5000  # the campaign spec's own concurrency bound
 
 
+class NoCountryList(ValueError):
+    """The provider has no login or no exits for the requested country (a census round records
+    it as no_list, without traffic); the message is fixed text, safe to print."""
+
+
 def _range(value: Any, name: str) -> tuple[int, int]:
     if (not isinstance(value, list) or len(value) != 2
             or not all(type(item) is int for item in value) or value[0] > value[1]):
@@ -63,6 +68,9 @@ class Flag:
     # Set on the provider's side (e.g. a dashboard list's geography) and never rendered: a
     # request may only repeat the value the config declares in `presets`.
     preset: bool = False
+    # Country flags only: the upper-case ISO codes the provider serves, when it publishes
+    # them; another country raises NoCountryList before traffic. Empty: not restricted.
+    countries: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -100,6 +108,8 @@ class Flag:
                 raise ValueError(f"Unsupported {label} value")
         elif pattern is None or not re.fullmatch(pattern, value):
             raise ValueError(f"Invalid {label} syntax")
+        if self.countries and value.upper() not in self.countries:
+            raise NoCountryList(f"no {provider.lower()} exits in {value.upper()}")
         return value
 
     def render(self, value: Any) -> str | None:
@@ -139,9 +149,9 @@ class Grammar:
     generate: str | None
     generate_length: int
     no_session_policy: str
-    # Port mode only: a session flag regenerated each time per-request slots wrap around the
-    # port range, so every pass over the ports starts a new session.
-    cycle_flag: str | None
+    # Port mode only: a session flag that carries the slot of sticky sessions (fixed,
+    # per_worker, per_run), for logins whose ports alone do not keep an exit.
+    slot_flag: str | None
     ttl: str | None
     ttl_seconds: int
     default_ttl_seconds: int | None
@@ -175,7 +185,7 @@ class Grammar:
             "gateway": {"host", "hosts", "default", "host_override", "ports", "port_override",
                         "rotating_ports"},
             "session": {"flag", "mode", "ports", "generate", "length", "no_session_policy",
-                        "cycle_flag",
+                        "slot_flag",
                         "ttl_flag", "default_ttl_seconds"},
             "testing": {"protocol", "max_concurrency", "rate_limit_statuses",
                         "rate_limit_connect", "no_inventory_statuses"},
@@ -201,7 +211,7 @@ class Grammar:
             kind = spec.pop("kind")
             if kind not in KINDS:
                 raise ValueError(f"Unknown grammar flag kind for {provider} {name}")
-            for key in ("requires", "conflicts", "choices"):
+            for key in ("requires", "conflicts", "choices", "countries"):
                 if key in spec:
                     spec[key] = tuple(spec[key])
             if "min" in spec:
@@ -217,6 +227,9 @@ class Grammar:
                 raise ValueError(f"Grammar {provider} {flag.name} references an unknown flag")
             if flag.kind != "session" and "session" in flag.requires + flag.conflicts:
                 raise ValueError("Use requires_session for flags that need a session")
+            if flag.countries and (flag.kind != "country" or not all(
+                    re.fullmatch(r"[A-Z]{2}", code) for code in flag.countries)):
+                raise ValueError(f"Grammar {provider} {flag.name} countries must be ISO codes")
             if flag.case not in (None, "lower", "upper") or type(flag.scale) is not int:
                 raise ValueError(f"Grammar {provider} {flag.name} has an invalid rendering")
             if flag.preset and (flag.format or flag.kind in ("session", "boolean")
@@ -244,10 +257,10 @@ class Grammar:
         mode = session.get("mode", "flag")
         if mode not in ("flag", "port") or (mode == "flag") != (session_flag is not None):
             raise ValueError("Grammar sessions use either a session flag or session ports")
-        cycle_flag = session.get("cycle_flag")
-        if cycle_flag is not None and (mode != "port" or cycle_flag not in flags
-                                       or flags[cycle_flag].kind != "session"):
-            raise ValueError("Grammar cycle_flag must name a session flag of a port grammar")
+        slot_flag = session.get("slot_flag")
+        if slot_flag is not None and (mode != "port" or slot_flag not in flags
+                                      or flags[slot_flag].kind != "session"):
+            raise ValueError("Grammar slot_flag must name a session flag of a port grammar")
         if session_flag is not None and flags[session_flag].kind != "session":
             raise ValueError("Grammar session flag must have kind session")
         generate = session.get("generate")
@@ -286,7 +299,7 @@ class Grammar:
             session_ports=(_range(session["ports"], "session ports") if mode == "port" else None),
             generate=generate if mode == "flag" else "digits",
             generate_length=session.get("length", 16), no_session_policy=policy,
-            cycle_flag=cycle_flag,
+            slot_flag=slot_flag,
             ttl=session.get("ttl_flag"), ttl_seconds=60,  # Canonical ttl is in minutes.
             default_ttl_seconds=session.get("default_ttl_seconds"),
             pools=MappingProxyType({
@@ -432,8 +445,8 @@ class GrammarProxy:
         if set(self.parameters) - set(g.flags) - ({"session"} if g.session_mode == "port"
                                                    else set()):
             raise ValueError(f"Unknown {name} parameter")
-        if g.cycle_flag in self.parameters:
-            raise ValueError(f"{name} {g.cycle_flag} is generated for each pass over the ports")
+        if g.slot_flag in self.parameters:
+            raise ValueError(f"{name} {g.slot_flag} is set from the session slot")
         params = {}
         for key, value in self.parameters.items():
             if value is None:
@@ -598,22 +611,17 @@ class GrammarProxy:
             chars[0] = "1"  # Avoid numbers that a gateway could parse differently.
         return "".join(chars)
 
-    def _cycle(self, g: Grammar, context: RequestContext) -> str:
-        """The session of the request's pass over the port range: new each time it wraps."""
-        low, high = g.session_ports
-        seed = f"{context.run_id}:cycle:{context.request_index // (high - low + 1)}".encode()
-        return hashlib.sha256(seed).hexdigest()[:g.generate_length]
-
     def resolve(self, context: RequestContext) -> ProxyConfig:
         g = load_grammar(self.provider)
         params = dict(self.parameters)
         port = self.port
         if self.session_policy in GENERATED:
             params[g.session or "session"] = self._generated(g, context)
-        if g.cycle_flag and self.session_policy == "per_request":
-            params[g.cycle_flag] = self._cycle(g, context)
         if g.session_mode == "port" and "session" in params:
-            port = g.session_ports[0] + params.pop("session")
+            slot = params.pop("session")
+            port = g.session_ports[0] + slot
+            if g.slot_flag and self.session_policy != "per_request":
+                params[g.slot_flag] = slot  # Sticky: the slot names the session too.
         pieces = [rendered for key, flag in g.flags.items()
                   if key in params and not flag.preset
                   if (rendered := flag.render(params[key])) is not None]

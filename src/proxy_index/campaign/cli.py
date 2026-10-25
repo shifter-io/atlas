@@ -417,7 +417,7 @@ def _shot_parsers(actions) -> None:
     found.add_argument("--requests", type=int, default=shot.REQUESTS)
     found.add_argument("--size", default=shot.SIZE)
     found.add_argument("--size-by-network", help="e.g. soax=c-2,proxy-cheap=c-2")
-    found.add_argument("--country-by-network", help="e.g. proxy-seller=US (default: per region)")
+    found.add_argument("--country-by-network", help="e.g. soax=US (default: per region)")
     found.add_argument("--lead-minutes", type=float, default=shot.LEAD_SECONDS / 60,
                        help="minutes from the shot's start to the common start time")
     found.add_argument("--output", type=Path, help="default: <manager>/shots")

@@ -10,13 +10,11 @@ password_env = "PROXY_SELLER_PASSWORD"
 
 [settings]
 scheme = "http" # http or socks5
-# The dashboard list's country. The login carries no geography, so a run may only ask for this
-# country (census rounds and probes pass one); a list per country needs its own login, given as
-# account_<cc>/password_<cc> in the credentials table (docs/providers.html#presets).
-presets = { country = "us" }
+# Credentials: the "API tool" login (one login for every country; a run picks the country
+# with --param country=XX). A dashboard list login ignores the country flag.
 # port = 10000
-# The grammar default is per_request: each request takes the next port (10000-10999) and each
-# pass over the range is a new session. Census rounds and probes use it; gateway keeps one port.
+# The grammar default is per_request: each request takes the next port (10000-10999) and a new
+# exit. Census rounds and probes use it; gateway keeps one port; sticky policies add `_s_<slot>`.
 # session_policy = "per_request" # gateway, fixed, per_request, per_worker, per_run
 
 [parameters]
