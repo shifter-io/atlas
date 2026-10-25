@@ -54,6 +54,9 @@ class Flag:
     requires_session: bool = False
     sticky_ports_only: bool = False
     scale: int = 1  # Rendered value multiplier, e.g. canonical minutes to native seconds.
+    # Set on the provider's side (e.g. a dashboard list's geography) and never rendered: a
+    # request may only repeat the value the config declares in `presets`.
+    preset: bool = False
 
     @property
     def key(self) -> str:
@@ -188,6 +191,8 @@ class Grammar:
                 spec["minimum"] = spec.pop("min")
             if "max" in spec:
                 spec["maximum"] = spec.pop("max")
+            if spec.get("preset"):
+                spec.setdefault("format", "")
             flags[name] = Flag(name=name, kind=kind, **spec)
         names = set(flags)
         for flag in flags.values():
@@ -197,6 +202,9 @@ class Grammar:
                 raise ValueError("Use requires_session for flags that need a session")
             if flag.case not in (None, "lower", "upper") or type(flag.scale) is not int:
                 raise ValueError(f"Grammar {provider} {flag.name} has an invalid rendering")
+            if flag.preset and (flag.format or flag.kind in ("session", "boolean")
+                                or flag.requires or flag.conflicts):
+                raise ValueError(f"Grammar {provider} {flag.name} cannot be a preset")
         ttl_flag = session.get("ttl_flag")
         if ttl_flag is not None and (ttl_flag not in flags or flags[ttl_flag].kind != "integer"):
             raise ValueError("Grammar ttl_flag must name an integer flag")
@@ -272,7 +280,7 @@ class Grammar:
             }),
             extra_flags=data.get("extra_flags", False),
             reserved=frozenset(cred.get("reserved", ())) | {
-                flag.key for flag in flags.values()
+                flag.key for flag in flags.values() if not flag.preset
             },
             test_protocol=protocol, max_concurrency=ceiling,
         )
@@ -323,12 +331,15 @@ class GrammarProxy:
     port: int | None = None
     session_policy: str | None = None
     pool: str | None = None
+    # Values of the grammar's preset flags, as configured on the provider's side.
+    presets: Mapping[str, Any] = field(default_factory=dict)
 
     def __reduce__(self):
         # Spawned HTTP workers rebuild the config through validation.
         return (_rebuild, (self.provider, self.account, self.password, dict(self.parameters),
                            dict(self.extra_flags), self.scheme, self.gateway, self.host,
-                           self.port, self.session_policy, self.pool))
+                           self.port, self.session_policy, self.pool,
+                           dict(self.presets)))
 
     @property
     def id(self) -> str:
@@ -379,6 +390,7 @@ class GrammarProxy:
                 params[key] = value
                 continue
             params[key] = g.flags[key].normalize(value, name)
+        params = self._presets(g, params, name)
         for key, flag in g.flags.items():
             if flag.kind == "boolean" and key in params and flag.render(params[key]) is None:
                 del params[key]
@@ -463,6 +475,23 @@ class GrammarProxy:
         if type(self.port) is not int or not 1 <= self.port <= 65535:
             raise ValueError(f"{name} port must be an integer between 1 and 65535")
 
+    def _presets(self, g: Grammar, params: dict[str, Any], name: str) -> dict[str, Any]:
+        """Fill preset flags from `presets` and refuse any other value: the credential
+        cannot change them, so a request for another value would be mislabelled."""
+        bound = {key for key, flag in g.flags.items() if flag.preset}
+        if not isinstance(self.presets, Mapping) or set(self.presets) - bound:
+            raise ValueError(f"{name} presets accept only: {', '.join(sorted(bound)) or 'none'}")
+        declared = {key: g.flags[key].normalize(value, name)
+                    for key, value in self.presets.items()}
+        object.__setattr__(self, "presets", MappingProxyType(declared))
+        for key in bound & set(params):
+            if key not in declared:
+                raise ValueError(f"{name} {key} is set on the provider's side; declare it in "
+                                 "the config's presets")
+            if params[key] != declared[key]:
+                raise ValueError(f"{name} {key} differs from the provider-side preset")
+        return declared | params
+
     def _check_delimiters(self, g: Grammar, value: str, name: str, key: str) -> None:
         # Values may contain the separator (e.g. hyphenated Shifter sids or Byteful's
         # new_york) but must not smuggle another flag into the credential.
@@ -520,7 +549,8 @@ class GrammarProxy:
             params[g.session or "session"] = self._generated(g, context)
         if g.session_mode == "port" and "session" in params:
             port = g.session_ports[0] + params.pop("session")
-        pieces = [rendered for key, flag in g.flags.items() if key in params
+        pieces = [rendered for key, flag in g.flags.items()
+                  if key in params and not flag.preset
                   if (rendered := flag.render(params[key])) is not None]
         pieces.extend(f"{key}{g.separator}{value}" for key, value in sorted(
             self.extra_flags.items()))

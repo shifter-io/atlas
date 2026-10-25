@@ -745,14 +745,14 @@ async def test_s1_a_recovered_worker_the_project_never_confirms_is_removed_fail_
     assert audit[-1]["path"] == "own_unassigned" and len(fake.deleted) == 1
 
 
-async def test_m1_proxy_seller_gets_no_country_and_bad_configs_are_refused_early(tmp_path):
+async def test_m1_proxy_seller_gets_its_list_country_and_bad_configs_are_refused_early(tmp_path):
     fake = FakeDigitalOcean()
     inputs, spec = world(tmp_path / "a", ("proxy-seller", "soax"))
     remote = FakeProbeRemote({})
     result = await probed(fake, remote, replace(inputs, start=1000))
     commands = {c[c.index("--provider") + 1]: c for c, _, what in remote.calls
                 if what.startswith("probe ") and what != "probe setup"}
-    assert "--param" not in commands["proxy-seller"]
+    assert commands["proxy-seller"][commands["proxy-seller"].index("--param") + 1] == "country=US"
     assert commands["soax"][commands["soax"].index("--param") + 1] == "country=US"
     assert result["networks"]["proxy-seller"]["max_concurrency"] == 1000
     fake = FakeDigitalOcean()
