@@ -863,6 +863,32 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
     start = json.loads((worker / "run/m-net00/regions/lon1/rounds/03/worker-start.json")
                        .read_text())
     assert start["ntp_synchronized"] is True and start["wheel_installed"] is False
+    assert "--mmdb" not in calls[2]  # no database in this image: no country check
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_the_round_gets_the_country_check_from_one_image_database(tmp_path, count):
+    """CTRY-2: the round runs with `--mmdb` only when the image holds exactly one MMDB."""
+    bin_dir, log = tmp_path / "bin", tmp_path / "calls.log"
+    bin_dir.mkdir()
+    for tool, out in (("uv", ""), ("systemd-run", ""), ("timedatectl", "yes")):
+        (bin_dir / tool).write_text(f"#!/bin/sh\necho \"{tool} $*\" >> {log}\necho {out}\n")
+        (bin_dir / tool).chmod(0o755)
+    worker = tmp_path / "worker"
+    (worker / "db-ip").mkdir(parents=True)
+    for index in range(count):
+        (worker / "db-ip" / f"dbip-{index}.mmdb").write_bytes(b"x")
+    payload = tar_bytes(member("run/m-net00/campaign.json", b"{}"),
+                        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
+                        member("secrets/credentials.toml", b""))
+    command = fanout.start_command("m-net00", "lon1", 0)
+    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    subprocess.run([sys.executable, "-c", command[2], str(worker), str(tmp_path / "secrets"),
+                    *command[5:]], input=payload, env=env, check=True)
+    [round_call] = [c for c in log.read_text().splitlines() if "onboarding round" in c]
+    database = f"--mmdb {worker / 'db-ip' / 'dbip-0.mmdb'}"
+    assert round_call.endswith(database) is (count == 1)
+    assert fanout.MMDB_DIR == f"{WORKER_ROOT}/db-ip"
 
 
 # --- worker sampler --------------------------------------------------------------------------

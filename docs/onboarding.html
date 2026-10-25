@@ -188,8 +188,9 @@ targeting answered <code>465</code> on every request). Neither is a real error: 
 <a href="#answer-classes">answer classes</a> an other-country exit and a no-IP status count
 toward the 50% stop rule like a duplicate, never as a unique IP for the country. Telling an
 other-country exit apart needs the exit country of each success, so the run needs an
-exit-country lookup (<code>--mmdb</code>); without one every success counts as in the requested
-country and an empty country does not saturate early. Timeouts, <code>5xx</code>, connect
+exit-country lookup (<code>--mmdb</code>; campaign workers carry it in their image, see
+<a href="campaign.html#image">Worker image</a>); without one every success counts as in the
+requested country and an empty country does not saturate early. Timeouts, <code>5xx</code>, connect
 refusals that are not rate limits and <code>407</code> stay real errors.</p>
 <p>The saved country code remains the requested country. Other-country exits are judged by the
 local geolocation database, which can disagree with the provider; reports show the

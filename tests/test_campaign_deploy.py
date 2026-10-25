@@ -541,7 +541,9 @@ def plan_world(tmp_path):
         "worker_key_name": "pi-camp-worker-20270101", "account": "leftclick",
         "project_id": CAMPAIGN_PROJECT, "credentials": ["shifter"]}))
     images = tmp_path / "campaign-images.json"
-    images.write_text(json.dumps({"builds": [{"snapshot_id": "9001", "snapshot_name": IMAGE}]}))
+    images.write_text(json.dumps({"builds": [{"snapshot_id": "9001", "snapshot_name": IMAGE,
+                                              "mmdb_file": "dbip-full.mmdb",
+                                              "mmdb_sha256": "cd" * 32}]}))
     fake = FakeDigitalOcean()
     fake.sizes = [{"slug": "c-2", "available": True, "regions": list(REGION_IDS)}]
     fake.images["9001"] = {"id": 9001, "name": IMAGE, "regions": list(REGION_IDS)}
@@ -648,6 +650,20 @@ async def test_plan_now_hour_and_options(plan_world):
     spec = CampaignSpec.from_json(spec_path(Path(result["root"])).read_text())
     assert spec.starts_at == "2027-01-01T21:00:00+00:00" and spec.regions == ("lon1", "syd1")
     assert spec.concurrency == 2500 and spec.synthetic
+
+
+async def test_a_campaign_plan_refuses_an_image_without_the_country_database(plan_world):
+    """CTRY-2: only a synthetic plan may use an image built without `--mmdb`."""
+    from dataclasses import replace
+
+    fake, inputs = plan_world
+    inputs.images.write_text(json.dumps({"builds": [{"snapshot_id": "9001",
+                                                     "snapshot_name": IMAGE}]}))
+    with pytest.raises(PlanError, match="no country database"):
+        await run_plan(fake, inputs)
+    assert not inputs.output.exists()
+    result = await run_plan(fake, replace(inputs, synthetic=True))
+    assert result["synthetic"] is True
 
 
 async def test_plan_records_the_worker_size_it_checked(plan_world):

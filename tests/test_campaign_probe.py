@@ -216,6 +216,24 @@ def test_run_command_counts_answered_requests():
     assert argv[argv.index("--provider-config") + 1].endswith("/probe/geonode.toml")
 
 
+@pytest.mark.parametrize("count", [0, 1, 2])
+def test_a_step_adds_the_country_check_only_with_one_image_database(tmp_path, count):
+    """CTRY-2: `--mmdb` is appended when the image holds exactly one MMDB."""
+    import subprocess
+
+    databases = tmp_path / "db-ip"
+    databases.mkdir()
+    for index in range(count):
+        (databases / f"dbip-{index}.mmdb").write_bytes(b"x")
+    reply = subprocess.run(["sh", "-c", probing.launcher(str(databases)), "printf", "%s\n",
+                            "run", "--answer-classes"], capture_output=True, text=True,
+                           check=True)
+    extra = ["--mmdb", str(databases / "dbip-0.mmdb")] if count == 1 else []
+    assert reply.stdout.splitlines() == ["run", "--answer-classes", *extra]
+    assert probing.run_command("soax", 500, 25_000, "US", "nyc3")[2] == probing.launcher(
+        "/opt/proxy-index-worker/db-ip")
+
+
 def test_the_step_down_rule():
     base = step_result(500, 25_000, summary(errors={"timeout": 100}))  # 0.4% timeouts
     assert reasons(base, base) == []
@@ -322,7 +340,7 @@ async def test_the_worker_gets_inputs_on_stdin_only_and_fixed_commands(tmp_path)
     commands = [command for command, stdin, _ in steps]
     assert all(stdin is None for _, stdin, _ in steps) and len(commands) == 2
     argv = commands[1]
-    assert argv[:3] == ["sh", "-c", 'ulimit -n 65536 && exec "$0" "$@"']
+    assert argv[:3] == ["sh", "-c", probing.launcher(fanout.MMDB_DIR)]
     assert argv[argv.index("--concurrency") + 1] == "1000"
     assert argv[argv.index("--requests") + 1] == "25000"
     assert argv[argv.index("--param") + 1] == "country=DE"

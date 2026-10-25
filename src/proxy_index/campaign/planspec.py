@@ -112,10 +112,15 @@ def check_credentials(inputs: PlanInputs) -> None:
 
 
 def image_id(inputs: PlanInputs) -> str:
-    found = {str(b["snapshot_id"]) for b in read_json(inputs.images).get("builds", [])
-             if b.get("snapshot_name") == inputs.image and b.get("snapshot_id")}
+    builds = [b for b in read_json(inputs.images).get("builds", [])
+              if b.get("snapshot_name") == inputs.image and b.get("snapshot_id")]
+    found = {str(b["snapshot_id"]) for b in builds}
     if len(found) != 1:
         raise PlanError(f"image {inputs.image} is not one recorded build")
+    if not inputs.synthetic and not all(b.get("mmdb_sha256") for b in builds):
+        # A campaign never runs without the run-time country check (CTRY-2).
+        raise PlanError(f"image {inputs.image} has no country database; rebuild it with "
+                        "`image build --mmdb`")
     return found.pop()
 
 
