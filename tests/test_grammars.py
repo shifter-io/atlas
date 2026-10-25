@@ -1,3 +1,5 @@
+import asyncio
+import itertools
 import json
 import pickle
 import re
@@ -123,7 +125,8 @@ def test_public_metadata_matches_storage_and_redacts(provider):
 @pytest.mark.parametrize("provider", sorted(GOLDEN))
 def test_rotation_never_sends_a_session(provider):
     params = {k: v for k, v in GOLDEN[provider][0].items() if k not in ("session", "ttl")}
-    p = proxy(provider, parameters=params)
+    generated = load_grammar(provider).no_session_policy not in ("rotate", "gateway")
+    p = proxy(provider, parameters=params, session_policy="gateway" if generated else None)
     first = p.resolve(RequestContext("one", 0, 0))
     assert all(p.resolve(RequestContext("one", i, 0)) == first for i in range(4))
     key = load_grammar(provider).flags.get("session")
@@ -155,7 +158,8 @@ def test_proxy_seller_takes_its_country_from_the_list_login(tmp_path):
     config = ROOT / "configs/proxy-seller.toml"
     seller = load_provider(config, credentials_file=path, parameters={"country": "US"})
     resolved = seller.resolve(CONTEXT)
-    assert (resolved.username, resolved.password, resolved.port) == ("fixture1", SECRET, 10000)
+    assert (resolved.password, resolved.port) == (SECRET, 10000)
+    assert re.fullmatch(r"fixture1_s_[0-9a-f]{16}", resolved.username)
     assert seller.public()["requested_country"] == "us"
     assert pickle.loads(pickle.dumps(seller)).public() == seller.public()
     for proxy_source in (seller, load_provider(config, credentials_file=path)):
@@ -166,6 +170,67 @@ def test_proxy_seller_takes_its_country_from_the_list_login(tmp_path):
     with pytest.raises(ValueError, match="requested_country label conflicts"):
         RunConfig("generic_http", load_provider(config, credentials_file=path),
                   requested_country="gb")
+
+
+def test_proxy_seller_cycles_its_ports_with_a_new_session_each_pass():
+    # Each request takes the next port of 10000-10999; after the last port the cycle starts
+    # again at the first with a new documented `_s_<id>` session. This is the default.
+    seller = proxy("proxy-seller", parameters={"country": "us"}, presets={"country": "us"})
+    assert seller.session_policy == "per_request"
+    resolved = [seller.resolve(RequestContext("run-one", i, i % 7)) for i in range(2500)]
+    assert [r.port for r in resolved] == [10000 + i % 1000 for i in range(2500)]
+    sessions = [r.username for r in resolved]
+    assert all(re.fullmatch(r"fixture1_s_[0-9a-f]{16}", name) for name in sessions)
+    assert [len(set(sessions[i:i + 1000])) for i in (0, 1000, 2000)] == [1, 1, 1]
+    assert len(set(sessions)) == 3
+    assert seller.resolve(RequestContext("run-two", 0, 0)).username != sessions[0]
+    assert pickle.loads(pickle.dumps(seller)).resolve(RequestContext("run-one", 1999, 0)) == (
+        resolved[1999])
+    fixed = proxy("proxy-seller", parameters={"session": 7}).resolve(CONTEXT)
+    assert (fixed.port, fixed.username) == (10007, "fixture1")
+    worker = proxy("proxy-seller", session_policy="per_worker").resolve(CONTEXT)
+    assert worker.username == "fixture1"
+    with pytest.raises(ValueError, match="generated for each pass"):
+        proxy("proxy-seller", parameters={"cycle": "abc"})
+
+
+async def test_proxy_seller_census_cycles_ports_until_half_the_requests_are_duplicates(tmp_path):
+    # A sticky list: each port keeps its exit whatever the session. The census rule (stop once
+    # completed > 2 x unique, from 1,000 completions) runs a full pass over the 1,000 ports, a
+    # second pass with a new session, and stops once half the requests repeat (at 2,001, the
+    # first request of the third pass; what is in flight then finishes).
+    from proxy_index import JsonSink, run
+    from proxy_index.models import Outcome
+
+    seen = []
+
+    class StickyList:
+        def __init__(self, config):
+            self.proxy = config.proxy
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def execute(self, target, *, context=None):
+            resolved = self.proxy.resolve(context)
+            seen.append((context.request_index, resolved.port, resolved.username))
+            await asyncio.sleep(0)
+            return Outcome(5.0, ip=f"10.0.{resolved.port % 1000 // 250}.{resolved.port % 250}",
+                           status=200)
+
+    seller = proxy("proxy-seller", parameters={"country": "us"}, presets={"country": "us"})
+    result = await run(RunConfig("generic_http", seller, requests=None, concurrency=50,
+                                 stop_rule="unique_ratio", requested_country="us"),
+                       JsonSink(tmp_path), transport_factory=StickyList)
+    assert result.stop_reason == "unique_ratio" and result.unique_ips == 1000
+    assert 2000 < result.completed <= 2050
+    seen.sort()
+    assert [port for _, port, _ in seen] == [10000 + i % 1000 for i in range(len(seen))]
+    passes = [len(list(group)) for _, group in itertools.groupby(name for *_, name in seen)]
+    assert passes == [1000, 1000, len(seen) - 2000]  # A new session for every pass.
 
 
 @pytest.mark.parametrize("provider,options", [
@@ -218,7 +283,8 @@ def test_provider_specific_mechanics():
     seller = proxy("proxy-seller", session_policy="per_request")
     ports = {seller.resolve(RequestContext("one", i, 0)).port for i in range(50)}
     assert len(ports) > 40 and all(10000 <= port <= 10999 for port in ports)
-    assert proxy("proxy-seller").session_policy == "gateway"
+    assert proxy("proxy-seller").session_policy == "per_request"
+    assert proxy("proxy-seller", session_policy="gateway").resolve(CONTEXT).port == 10000
     with pytest.raises(ValueError):
         GrammarProxy("soax", "unexpected", SECRET, parameters={"country": "us"})
     assert proxy("byteful", parameters={"country": "us", "city": "new york"}).resolve(
@@ -278,6 +344,8 @@ def test_run_configs_load_with_private_credentials(provider, tmp_path):
     {"flags": {"country": {"kind": "token", "format": "c-{}", "pattern": "["}}},
     {"session": {"flag": "session", "generate": "alnum", "length": 300}},
     {"flags": {"country": {"kind": "country", "format": "c-{}", "preset": True}}},
+    {"session": {"flag": "session", "cycle_flag": "session"}},  # Port grammars only.
+    {"session": {"flag": "session", "no_session_policy": "per_request"}},
 ])
 def test_grammar_schema_is_validated(change):
     data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
