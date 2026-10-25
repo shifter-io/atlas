@@ -227,8 +227,9 @@ async def test_rl1_configs_without_answer_classes_are_unchanged(tmp_path):
     assert "answer_classes" not in count.public()
     assert census(answer_classes=None).public()["census_rule_version"] == 2
     progress = []
+    first_limited = scripted(lambda n: limited() if n == 1 else ok("192.0.2.8"))
     result = await run(count, JsonSink(tmp_path), progress=progress.append,
-                       transport_factory=scripted(lambda n: limited() if n == 1 else ok("8.8.8.8")))
+                       transport_factory=first_limited)
     # Without answer classes a 429 is an ordinary answer: it consumes the request goal.
     assert result.completed == 100 and result.successes == 99
     saved = result.to_dict()
