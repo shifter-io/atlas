@@ -208,7 +208,7 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
     entry["unique_ips"] = unique
     issues = [] if job["status"] == "completed" else [f"{label}: {job['status']}"]
     # Other-country exits are successes, never observations.
-    if (entry["observations"] != measured.get("successes", 0) - entry["other_country"]
+    if (entry["observations"] + entry["other_country"] != measured.get("successes")
             or entry["observations"] != job.get("observations")
             or unique != measured.get("unique_ips")
             or measured.get("completed") != measured.get("successes", 0)
