@@ -133,6 +133,9 @@ class Grammar:
     generate: str | None
     generate_length: int
     no_session_policy: str
+    # Port mode only: a session flag regenerated each time per-request slots wrap around the
+    # port range, so every pass over the ports starts a new session.
+    cycle_flag: str | None
     ttl: str | None
     ttl_seconds: int
     default_ttl_seconds: int | None
@@ -160,6 +163,7 @@ class Grammar:
             "gateway": {"host", "hosts", "default", "host_override", "ports", "port_override",
                         "rotating_ports"},
             "session": {"flag", "mode", "ports", "generate", "length", "no_session_policy",
+                        "cycle_flag",
                         "ttl_flag", "default_ttl_seconds"},
             "testing": {"protocol", "max_concurrency"},
         }
@@ -227,14 +231,18 @@ class Grammar:
         mode = session.get("mode", "flag")
         if mode not in ("flag", "port") or (mode == "flag") != (session_flag is not None):
             raise ValueError("Grammar sessions use either a session flag or session ports")
+        cycle_flag = session.get("cycle_flag")
+        if cycle_flag is not None and (mode != "port" or cycle_flag not in flags
+                                       or flags[cycle_flag].kind != "session"):
+            raise ValueError("Grammar cycle_flag must name a session flag of a port grammar")
         if session_flag is not None and flags[session_flag].kind != "session":
             raise ValueError("Grammar session flag must have kind session")
         generate = session.get("generate")
         if generate not in (None, *ALPHABETS):
             raise ValueError("Unknown grammar session alphabet")
         policy = session.get("no_session_policy", "rotate")
-        if policy not in ("rotate", "gateway"):
-            raise ValueError("Grammar default must be rotate or gateway")
+        if policy not in ("rotate", "gateway", *(("per_request",) if mode == "port" else ())):
+            raise ValueError("Grammar default must be rotate or gateway (or per_request on ports)")
         hosts = dict(gateway.get("hosts", {}))
         default_host = gateway.get("default", "default")
         if "host" in gateway:
@@ -272,6 +280,7 @@ class Grammar:
             session_ports=(_range(session["ports"], "session ports") if mode == "port" else None),
             generate=generate if mode == "flag" else "digits",
             generate_length=session.get("length", 16), no_session_policy=policy,
+            cycle_flag=cycle_flag,
             ttl=session.get("ttl_flag"), ttl_seconds=60,  # Canonical ttl is in minutes.
             default_ttl_seconds=session.get("default_ttl_seconds"),
             pools=MappingProxyType({
@@ -379,6 +388,8 @@ class GrammarProxy:
         if set(self.parameters) - set(g.flags) - ({"session"} if g.session_mode == "port"
                                                    else set()):
             raise ValueError(f"Unknown {name} parameter")
+        if g.cycle_flag in self.parameters:
+            raise ValueError(f"{name} {g.cycle_flag} is generated for each pass over the ports")
         params = {}
         for key, value in self.parameters.items():
             if value is None:
@@ -419,9 +430,9 @@ class GrammarProxy:
             raise ValueError(f"{name} sessions cannot be generated; supply a session")
         if g.session is None and g.session_mode == "flag" and policy not in ("rotate", "gateway"):
             raise ValueError(f"{name} does not support sessions")
-        if policy == "gateway" and g.no_session_policy != "gateway" and not g.rotating_ports:
+        if policy == "gateway" and g.no_session_policy == "rotate" and not g.rotating_ports:
             raise ValueError(f"{name} rotates per request; use the rotate policy")
-        if policy == "rotate" and g.no_session_policy == "gateway" and not g.rotating_ports:
+        if policy == "rotate" and g.no_session_policy != "rotate" and not g.rotating_ports:
             raise ValueError(f"{name} rotation is configured by the provider, not per request")
         sticky = policy not in ("rotate", "gateway")
         if sticky and g.session is not None:
@@ -531,6 +542,8 @@ class GrammarProxy:
         number = int.from_bytes(digest.digest(), "big")
         if g.session_mode == "port":
             low, high = g.session_ports
+            if self.session_policy == "per_request":  # The next port, wrapping to the first.
+                return context.request_index % (high - low + 1)
             return number % (high - low + 1)
         alphabet = ALPHABETS[g.generate]
         chars = []
@@ -541,12 +554,20 @@ class GrammarProxy:
             chars[0] = "1"  # Avoid numbers that a gateway could parse differently.
         return "".join(chars)
 
+    def _cycle(self, g: Grammar, context: RequestContext) -> str:
+        """The session of the request's pass over the port range: new each time it wraps."""
+        low, high = g.session_ports
+        seed = f"{context.run_id}:cycle:{context.request_index // (high - low + 1)}".encode()
+        return hashlib.sha256(seed).hexdigest()[:g.generate_length]
+
     def resolve(self, context: RequestContext) -> ProxyConfig:
         g = load_grammar(self.provider)
         params = dict(self.parameters)
         port = self.port
         if self.session_policy in GENERATED:
             params[g.session or "session"] = self._generated(g, context)
+        if g.cycle_flag and self.session_policy == "per_request":
+            params[g.cycle_flag] = self._cycle(g, context)
         if g.session_mode == "port" and "session" in params:
             port = g.session_ports[0] + params.pop("session")
         pieces = [rendered for key, flag in g.flags.items()

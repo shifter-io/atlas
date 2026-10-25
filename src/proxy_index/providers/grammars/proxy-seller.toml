@@ -1,13 +1,17 @@
 # Proxy-Seller Residential. https://docs.proxy-seller.com/
-# List logins take geo and rotation from the dashboard list; username suffixes are refused
-# (407). Each port 10000-10999 is one exit slot, so sessions select ports. The list's country
-# is declared in the config (`presets`); a request for another country is refused.
+# List logins take geo and rotation from the dashboard list: `-country-` style suffixes are
+# refused (407), and the documented `_c_` geo suffix does not override the list. Each port
+# 10000-10999 is one exit slot ("each port maps to a distinct exit IP"), so sessions select
+# ports: per request, the next port, and each pass over the range carries a new `_s_<id>`
+# session (docs.proxy-seller.com/residential-proxy/api-tool). The list's country is declared
+# in the config (`presets`); a request for another country is refused.
 schema_version = 1
 id = "proxy-seller"
 
 [credential]
 flags_in = "username"
 username = "{account}"
+separator = "_"
 
 [account]
 pattern = "[A-Za-z0-9]+"
@@ -17,6 +21,10 @@ kind = "country"
 case = "lower"
 preset = true
 
+[flags.cycle]
+format = "s_{}"
+kind = "session"
+
 [gateway]
 host = "res.proxy-seller.com"
 ports = { http = 10000, socks5 = 10000 }
@@ -25,4 +33,5 @@ port_override = true
 [session]
 mode = "port"
 ports = [10000, 10999]
-no_session_policy = "gateway"
+no_session_policy = "per_request"
+cycle_flag = "cycle"

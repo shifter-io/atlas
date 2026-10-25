@@ -14,6 +14,8 @@ scheme = "http" # http or socks5
 # country (census rounds and probes pass one); a list per country needs its own login.
 presets = { country = "us" }
 # port = 10000
+# The grammar default is per_request: each request takes the next port (10000-10999) and each
+# pass over the range is a new session. Census rounds and probes use it; gateway keeps one port.
 # session_policy = "per_request" # gateway, fixed, per_request, per_worker, per_run
 
 [parameters]
