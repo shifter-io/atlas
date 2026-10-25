@@ -153,7 +153,7 @@ class Grammar:
     # from one worker (`campaign probe`); campaign plans cap their concurrency at it.
     max_concurrency: int | None = None
     # [testing] answer classes (answer_classes() below; 429 is implicit on every network):
-    # the network's own rate-limit statuses, whether gateway CONNECT refusals signal its rate
+    # the network's own rate-limit statuses, whether gateway connection refusals signal its rate
     # limit, and the statuses it sends when it has no exits in the requested country.
     rate_limit_statuses: tuple[int, ...] = ()
     rate_limit_connect: bool = False

@@ -118,9 +118,9 @@ class AnswerClasses:
     """A network's answer classes (see answers.py and docs/onboarding.html#answer-classes).
 
     ``rate_limits`` holds 3-digit HTTP statuses (400-599) and optionally ``"proxy_connect"``
-    (gateway CONNECT refusals); ``no_inventory`` holds the statuses a network sends when it
-    has no exits in the requested country. No duplicates, the sets are disjoint, and 429 is
-    never a no-IP status.
+    (gateway connection refusals, answers.REFUSALS); ``no_inventory`` holds the statuses a
+    network sends when it has no exits in the requested country. No duplicates, the sets are
+    disjoint, and 429 is never a no-IP status.
     """
 
     rate_limits: tuple[str, ...]

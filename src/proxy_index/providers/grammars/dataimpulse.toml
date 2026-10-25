@@ -68,6 +68,7 @@ default_ttl_seconds = 1800
 
 [testing]
 max_concurrency = 2000 # CONC-1 probe 2026-10-24: highest step that passed, one c-4 worker, US, 25,000 requests
-# 2026-10-25, eight workers at 2,000 on one account: 17-56% CONNECT refusals while successes
-# continued (0.7% for one worker alone), so a refusal soon after a success is a rate limit.
+# 2026-10-25, eight workers at 2,000 on one account: 17-56% refused or dropped gateway
+# connections while successes continued (0.7% for one worker alone), so a refusal soon after a
+# success is a rate limit (answers.py REFUSALS: errors proxy_connect and connection).
 rate_limit_connect = true
