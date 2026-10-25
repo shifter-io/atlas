@@ -1,5 +1,3 @@
-import asyncio
-import itertools
 import json
 import pickle
 import re
@@ -59,7 +57,8 @@ GOLDEN = {
     "proxy-cheap": ({"country": "US", "session": "12345678", "ttl": 10},
                     "thehub.proxy-cheap.com:8080", "fixture1",
                     SECRET + "_country-US_session-12345678_ttl-10"),
-    "proxy-seller": ({"session": 7}, "res.proxy-seller.com:10007", "fixture1", SECRET),
+    "proxy-seller": ({"country": "gb", "session": 7}, "res.proxy-seller.com:10007",
+                     "fixture1_c_GB_s_7", SECRET),
     "proxyempire": ({"country": "US", "session": "abc123", "ttl": 30}, "v2.proxyempire.io:5000",
                     "fixture1-country-us-sid-abc123-ttl-30m", SECRET),
     "rayobyte": ({"country": "us", "session": "abc123", "ttl": 30},
@@ -102,7 +101,8 @@ def test_generated_sessions_are_valid_scoped_and_pickle_safe(provider):
     configs = [restored.resolve(RequestContext("one", i, 0)) for i in range(8)]
     assert len({(c.username, c.password, c.port) for c in configs}) == 8
     assert restored.resolve(RequestContext("one", 3, 0)) == p.resolve(RequestContext("one", 3, 0))
-    assert restored.resolve(RequestContext("two", 0, 0)) != configs[0]
+    if load_grammar(provider).session_mode != "port":  # A port is taken by request index.
+        assert restored.resolve(RequestContext("two", 0, 0)) != configs[0]
     assert p.public() == restored.public()
     worker = proxy(provider, parameters=params, session_policy="per_worker")
     assert len({worker.resolve(RequestContext("one", i, i % 2)) for i in range(6)}) == 2
@@ -148,121 +148,52 @@ def test_proxy_cheap_renders_the_dashboard_credential_shape():
     assert all(re.fullmatch(shape, password) for password in passwords)
 
 
-def test_proxy_seller_takes_its_country_from_the_list_login(tmp_path):
-    # Proxy-Seller's geography is set on its dashboard list; the login carries none (any
-    # suffix is answered 407). Census rounds and probes still pass a country: it must match
-    # the list the config declares, and send the plain login.
+def test_proxy_seller_targets_every_served_country_with_one_login(tmp_path):
+    # One "API tool" login (PSL-4): `_c_<CC>` picks the country; a country Proxy-Seller does not
+    # serve raises NoCountryList before traffic (census rounds record no_list).
     path = tmp_path / "credentials.toml"
     path.write_text(f'["proxy-seller"]\naccount = "fixture1"\npassword = "{SECRET}"\n')
     path.chmod(0o600)
     config = ROOT / "configs/proxy-seller.toml"
-    seller = load_provider(config, credentials_file=path, parameters={"country": "US"})
+    seller = load_provider(config, credentials_file=path, parameters={"country": "gb"})
     resolved = seller.resolve(CONTEXT)
-    assert (resolved.password, resolved.port) == (SECRET, 10000)
-    assert re.fullmatch(r"fixture1_s_[0-9a-f]{16}", resolved.username)
-    assert seller.public()["requested_country"] == "us"
-    assert pickle.loads(pickle.dumps(seller)).public() == seller.public()
-    for proxy_source in (seller, load_provider(config, credentials_file=path)):
-        assert RunConfig("generic_http", proxy_source,
-                         requested_country="us").requested_country == "us"
-    with pytest.raises(ValueError, match="country differs from the provider-side preset"):
-        load_provider(config, credentials_file=path, parameters={"country": "gb"})
-    with pytest.raises(ValueError, match="requested_country label conflicts"):
-        RunConfig("generic_http", load_provider(config, credentials_file=path),
-                  requested_country="gb")
-
-
-def test_proxy_seller_takes_each_census_country_from_its_own_list_login(tmp_path):
-    # One dashboard list (login) per country (PSL-3): a requested country takes its own login
-    # and preset; the plain login stays the config's country; one without a list is refused.
-    path = tmp_path / "credentials.toml"
-    path.write_text(f'["proxy-seller"]\naccount = "fixture1"\npassword = "{SECRET}"\n'
-                    f'account_gb = "fixturegb"\npassword_gb = "{SECRET}-gb"\n')
-    path.chmod(0o600)
-    config = ROOT / "configs/proxy-seller.toml"
-    seller = load_provider(config, credentials_file=path, parameters={"country": "GB"})
-    resolved = seller.resolve(CONTEXT)
-    assert resolved.password == f"{SECRET}-gb"
-    assert re.fullmatch(r"fixturegb_s_[0-9a-f]{16}", resolved.username)
+    assert (resolved.username, resolved.password, resolved.port) == (
+        "fixture1_c_GB", SECRET, 10000)
     assert seller.public()["requested_country"] == "gb"
     assert pickle.loads(pickle.dumps(seller)).public() == seller.public()
-    for parameters in ({"country": "us"}, {}):
-        plain = load_provider(config, credentials_file=path, parameters=parameters)
-        assert plain.resolve(CONTEXT).username.startswith("fixture1_")
-        assert plain.resolve(CONTEXT).password == SECRET
-    with pytest.raises(NoCountryList, match="^no proxy-seller list for DE$"):
-        load_provider(config, credentials_file=path, parameters={"country": "de"})
+    assert RunConfig("generic_http", seller, requested_country="gb").requested_country == "gb"
+    for country in ("US", "tr", "ZA", "XK"):
+        load_provider(config, credentials_file=path, parameters={"country": country})
+    plain = load_provider(config, credentials_file=path)
+    assert plain.resolve(CONTEXT).username == "fixture1"
+    for country in ("kp", "AQ"):
+        with pytest.raises(NoCountryList, match=f"^no proxy-seller exits in {country.upper()}$"):
+            load_provider(config, credentials_file=path, parameters={"country": country})
+    # PSL-3's per-country list logins are gone: extra keys are refused as before.
     path.write_text(f'["proxy-seller"]\naccount = "fixture1"\npassword = "{SECRET}"\n'
-                    'account_gb = "fixturegb"\n')
-    with pytest.raises(ValueError, match="both account_<cc> and password_<cc>"):
+                    f'account_gb = "fixturegb"\npassword_gb = "{SECRET}-gb"\n')
+    with pytest.raises(ValueError, match="must match the provider configuration"):
         load_provider(config, credentials_file=path, parameters={"country": "gb"})
-    # A provider whose country is a free flag has no per-country logins.
-    path.write_text(f'[shifter]\naccount = "customer-a"\npassword = "{SECRET}"\n'
-                    f'account_gb = "customer-b"\npassword_gb = "{SECRET}"\n')
-    with pytest.raises(ValueError, match="need a preset country"):
-        load_provider(ROOT / "configs/shifter.toml", credentials_file=path,
-                      parameters={"country": "gb"})
 
 
-def test_proxy_seller_cycles_its_ports_with_a_new_session_each_pass():
-    # Each request takes the next port of 10000-10999; after the last port the cycle starts
-    # again at the first with a new documented `_s_<id>` session. This is the default.
-    seller = proxy("proxy-seller", parameters={"country": "us"}, presets={"country": "us"})
+def test_proxy_seller_rotates_ports_and_sticky_sessions_carry_their_slot():
+    # Per request (the default) takes the next port of 10000-10999 and sends no session, so each
+    # request gets a new exit; a port alone keeps no exit, so sticky sessions add `_s_<slot>`.
+    seller = proxy("proxy-seller", parameters={"country": "us"})
     assert seller.session_policy == "per_request"
     resolved = [seller.resolve(RequestContext("run-one", i, i % 7)) for i in range(2500)]
     assert [r.port for r in resolved] == [10000 + i % 1000 for i in range(2500)]
-    sessions = [r.username for r in resolved]
-    assert all(re.fullmatch(r"fixture1_s_[0-9a-f]{16}", name) for name in sessions)
-    assert [len(set(sessions[i:i + 1000])) for i in (0, 1000, 2000)] == [1, 1, 1]
-    assert len(set(sessions)) == 3
-    assert seller.resolve(RequestContext("run-two", 0, 0)).username != sessions[0]
+    assert {r.username for r in resolved} == {"fixture1_c_US"}
     assert pickle.loads(pickle.dumps(seller)).resolve(RequestContext("run-one", 1999, 0)) == (
         resolved[1999])
     fixed = proxy("proxy-seller", parameters={"session": 7}).resolve(CONTEXT)
-    assert (fixed.port, fixed.username) == (10007, "fixture1")
+    assert (fixed.port, fixed.username) == (10007, "fixture1_s_7")
     worker = proxy("proxy-seller", session_policy="per_worker").resolve(CONTEXT)
-    assert worker.username == "fixture1"
-    with pytest.raises(ValueError, match="generated for each pass"):
-        proxy("proxy-seller", parameters={"cycle": "abc"})
-
-
-async def test_proxy_seller_census_cycles_ports_until_half_the_requests_are_duplicates(tmp_path):
-    # A sticky list: each port keeps its exit whatever the session. The census rule (stop once
-    # completed > 2 x unique, from 1,000 completions) runs a full pass over the 1,000 ports, a
-    # second pass with a new session, and stops once half the requests repeat (at 2,001, the
-    # first request of the third pass; what is in flight then finishes).
-    from proxy_index import JsonSink, run
-    from proxy_index.models import Outcome
-
-    seen = []
-
-    class StickyList:
-        def __init__(self, config):
-            self.proxy = config.proxy
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def execute(self, target, *, context=None):
-            resolved = self.proxy.resolve(context)
-            seen.append((context.request_index, resolved.port, resolved.username))
-            await asyncio.sleep(0)
-            return Outcome(5.0, ip=f"10.0.{resolved.port % 1000 // 250}.{resolved.port % 250}",
-                           status=200)
-
-    seller = proxy("proxy-seller", parameters={"country": "us"}, presets={"country": "us"})
-    result = await run(RunConfig("generic_http", seller, requests=None, concurrency=50,
-                                 stop_rule="unique_ratio", requested_country="us"),
-                       JsonSink(tmp_path), transport_factory=StickyList)
-    assert result.stop_reason == "unique_ratio" and result.unique_ips == 1000
-    assert 2000 < result.completed <= 2050
-    seen.sort()
-    assert [port for _, port, _ in seen] == [10000 + i % 1000 for i in range(len(seen))]
-    passes = [len(list(group)) for _, group in itertools.groupby(name for *_, name in seen)]
-    assert passes == [1000, 1000, len(seen) - 2000]  # A new session for every pass.
+    assert worker.username == f"fixture1_s_{worker.port - 10000}"
+    assert proxy("proxy-seller", session_policy="gateway").resolve(CONTEXT).username == (
+        "fixture1")
+    with pytest.raises(ValueError, match="slot is set from the session slot"):
+        proxy("proxy-seller", parameters={"slot": "7"})
 
 
 @pytest.mark.parametrize("provider,options", [
@@ -279,7 +210,7 @@ async def test_proxy_seller_census_cycles_ports_until_half_the_requests_are_dupl
     ("webshare", {"parameters": {"session": "0123"}}),
     ("webshare", {"parameters": {"region": "texas"}}),
     ("proxy-seller", {"parameters": {"session": 1000}}),
-    ("proxy-seller", {"parameters": {"country": "us"}}),  # No list country declared.
+    ("proxy-seller", {"parameters": {"country": "kp"}}),  # Not served (NoCountryList).
     ("proxy-seller", {"presets": {"city": "x"}}),
     ("proxy-seller", {"presets": {"country": "usa"}}),
     ("massive", {"presets": {"country": "us"}}),
@@ -376,13 +307,21 @@ def test_run_configs_load_with_private_credentials(provider, tmp_path):
     {"flags": {"country": {"kind": "token", "format": "c-{}", "pattern": "["}}},
     {"session": {"flag": "session", "generate": "alnum", "length": 300}},
     {"flags": {"country": {"kind": "country", "format": "c-{}", "preset": True}}},
-    {"session": {"flag": "session", "cycle_flag": "session"}},  # Port grammars only.
+    {"session": {"flag": "session", "slot_flag": "session"}},  # Port grammars only.
     {"session": {"flag": "session", "no_session_policy": "per_request"}},
 ])
 def test_grammar_schema_is_validated(change):
     data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
     data.update(change)
     with pytest.raises(ValueError):
+        Grammar.parse(data)
+
+
+@pytest.mark.parametrize("flag,countries", [("country", ["us"]), ("region", ["US"])])
+def test_served_countries_are_upper_case_iso_codes_of_a_country_flag(flag, countries):
+    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data["flags"][flag]["countries"] = countries
+    with pytest.raises(ValueError, match="countries must be ISO codes"):
         Grammar.parse(data)
 
 

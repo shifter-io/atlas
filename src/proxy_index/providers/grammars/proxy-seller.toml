@@ -1,10 +1,9 @@
 # Proxy-Seller Residential. https://docs.proxy-seller.com/
-# List logins take geo and rotation from the dashboard list: `-country-` style suffixes are
-# refused (407), and the documented `_c_` geo suffix does not override the list. Each port
-# 10000-10999 is one exit slot ("each port maps to a distinct exit IP"), so sessions select
-# ports: per request, the next port, and each pass over the range carries a new `_s_<id>`
-# session (docs.proxy-seller.com/residential-proxy/api-tool). The list's country is declared
-# in the config (`presets`); a request for another country is refused.
+# One "API tool" login (PUT resident/list/tools) targets by username suffix: `_c_<CC>` picks the
+# country, `_s_<id>` keeps an exit (docs.proxy-seller.com/residential-proxy/api-tool). Dashboard
+# list logins ignore `_c_` and refuse `-country-` style flags (407), so use the API-tool login.
+# Without a session each request gets a new exit; per request takes the next port (10000-10999)
+# for concurrency. A port alone keeps no exit, so sticky sessions also carry `_s_<slot>`.
 schema_version = 1
 id = "proxy-seller"
 
@@ -17,11 +16,30 @@ separator = "_"
 pattern = "[A-Za-z0-9]+"
 
 [flags.country]
+format = "c_{}"
 kind = "country"
-case = "lower"
-preset = true
+case = "upper"
+# resident/geo, 2026-10-25: the countries Proxy-Seller serves; others are no_list.
+countries = [
+  "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AR", "AS", "AT", "AU", "AW", "AX", "AZ",
+  "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BM", "BN", "BO", "BQ", "BR", "BS",
+  "BT", "BW", "BY", "BZ", "CA", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN", "CO",
+  "CR", "CU", "CV", "CW", "CY", "CZ", "DE", "DJ", "DK", "DM", "DO", "DZ", "EC", "EE", "EG",
+  "ES", "ET", "FI", "FJ", "FK", "FM", "FO", "FR", "GA", "GB", "GD", "GE", "GF", "GG", "GH",
+  "GI", "GM", "GN", "GP", "GQ", "GR", "GT", "GU", "GW", "GY", "HK", "HN", "HR", "HT", "HU",
+  "ID", "IE", "IL", "IM", "IN", "IO", "IQ", "IR", "IS", "IT", "JE", "JM", "JO", "JP", "KE",
+  "KG", "KH", "KM", "KN", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS",
+  "LT", "LU", "LV", "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK", "ML", "MM", "MN",
+  "MO", "MP", "MQ", "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA", "NC", "NE",
+  "NG", "NI", "NL", "NO", "NP", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM",
+  "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW", "SA", "SB", "SC", "SD",
+  "SE", "SG", "SH", "SI", "SK", "SL", "SM", "SN", "SO", "SR", "SS", "ST", "SV", "SX", "SY",
+  "SZ", "TC", "TD", "TG", "TH", "TJ", "TL", "TM", "TN", "TO", "TR", "TT", "TW", "TZ", "UA",
+  "UG", "US", "UY", "UZ", "VC", "VE", "VG", "VI", "VN", "VU", "WF", "WS", "XK", "YE", "YT",
+  "ZA", "ZM", "ZW",
+]
 
-[flags.cycle]
+[flags.slot]
 format = "s_{}"
 kind = "session"
 
@@ -34,7 +52,7 @@ port_override = true
 mode = "port"
 ports = [10000, 10999]
 no_session_policy = "per_request"
-cycle_flag = "cycle"
+slot_flag = "slot"
 
 [testing]
 max_concurrency = 2000 # CONC-1 probe 2026-10-25: highest step that passed, one c-4 worker, US, per-request port rotation, 25,000 requests
