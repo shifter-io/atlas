@@ -145,6 +145,29 @@ def test_proxy_cheap_renders_the_dashboard_credential_shape():
     assert all(re.fullmatch(shape, password) for password in passwords)
 
 
+def test_proxy_seller_takes_its_country_from_the_list_login(tmp_path):
+    # Proxy-Seller's geography is set on its dashboard list; the login carries none (any
+    # suffix is answered 407). Census rounds and probes still pass a country: it must match
+    # the list the config declares, and send the plain login.
+    path = tmp_path / "credentials.toml"
+    path.write_text(f'["proxy-seller"]\naccount = "fixture1"\npassword = "{SECRET}"\n')
+    path.chmod(0o600)
+    config = ROOT / "configs/proxy-seller.toml"
+    seller = load_provider(config, credentials_file=path, parameters={"country": "US"})
+    resolved = seller.resolve(CONTEXT)
+    assert (resolved.username, resolved.password, resolved.port) == ("fixture1", SECRET, 10000)
+    assert seller.public()["requested_country"] == "us"
+    assert pickle.loads(pickle.dumps(seller)).public() == seller.public()
+    for proxy_source in (seller, load_provider(config, credentials_file=path)):
+        assert RunConfig("generic_http", proxy_source,
+                         requested_country="us").requested_country == "us"
+    with pytest.raises(ValueError, match="country differs from the provider-side preset"):
+        load_provider(config, credentials_file=path, parameters={"country": "gb"})
+    with pytest.raises(ValueError, match="requested_country label conflicts"):
+        RunConfig("generic_http", load_provider(config, credentials_file=path),
+                  requested_country="gb")
+
+
 @pytest.mark.parametrize("provider,options", [
     ("soax", {}),  # SOAX needs at least one targeting flag.
     ("soax", {"parameters": {"country": "us", "session": "has-dash"}}),
@@ -159,7 +182,10 @@ def test_proxy_cheap_renders_the_dashboard_credential_shape():
     ("webshare", {"parameters": {"session": "0123"}}),
     ("webshare", {"parameters": {"region": "texas"}}),
     ("proxy-seller", {"parameters": {"session": 1000}}),
-    ("proxy-seller", {"parameters": {"country": "us"}}),
+    ("proxy-seller", {"parameters": {"country": "us"}}),  # No list country declared.
+    ("proxy-seller", {"presets": {"city": "x"}}),
+    ("proxy-seller", {"presets": {"country": "usa"}}),
+    ("massive", {"presets": {"country": "us"}}),
     ("proxy-seller", {"session_policy": "rotate"}),
     ("rayobyte", {"parameters": {"ttl": 61}, "session_policy": "per_run"}),
     ("massive", {"parameters": {"city": "New York"}}),  # Geo keys require country.
@@ -251,6 +277,7 @@ def test_run_configs_load_with_private_credentials(provider, tmp_path):
     {"id": None},
     {"flags": {"country": {"kind": "token", "format": "c-{}", "pattern": "["}}},
     {"session": {"flag": "session", "generate": "alnum", "length": 300}},
+    {"flags": {"country": {"kind": "country", "format": "c-{}", "preset": True}}},
 ])
 def test_grammar_schema_is_validated(change):
     data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())

@@ -1,6 +1,7 @@
 # Proxy-Seller Residential. https://docs.proxy-seller.com/
-# List logins take geo and rotation from the dashboard list; username suffixes have no
-# effect. Each port 10000-10999 is one exit slot, so sessions select ports.
+# List logins take geo and rotation from the dashboard list; username suffixes are refused
+# (407). Each port 10000-10999 is one exit slot, so sessions select ports. The list's country
+# is declared in the config (`presets`); a request for another country is refused.
 schema_version = 1
 id = "proxy-seller"
 
@@ -10,6 +11,11 @@ username = "{account}"
 
 [account]
 pattern = "[A-Za-z0-9]+"
+
+[flags.country]
+kind = "country"
+case = "lower"
+preset = true
 
 [gateway]
 host = "res.proxy-seller.com"
