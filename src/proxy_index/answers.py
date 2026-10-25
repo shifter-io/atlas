@@ -4,8 +4,9 @@ Every answer stays in the raw counters. On top of them a run with ``RunConfig.an
 counts three classes:
 
 - *rate-limited*: a configured rate-limit status (429 on every network, plus the network's
-  own, such as Geonode's 469), or a gateway CONNECT refusal (``proxy_connect``) on a network
-  that signals rate limits that way, while the run had a success in the last
+  own, such as Geonode's 469), or a gateway connection refusal (error ``proxy_connect`` or
+  ``connection``, counted as the ``proxy_connect`` signal) on a network that signals rate
+  limits that way, while the run had a success in the last
   ``RECENT_SUCCESS_SECONDS``. A rate-limited answer never counts toward the goal: a count run
   replaces it, and the census sample excludes it.
 - *no-IP*: a status the network sends when it has no exits in the requested country (Geonode's
@@ -25,11 +26,17 @@ from typing import Any, Protocol
 from .models import Outcome, RunConfig
 from .stats import Counters
 
-# A CONNECT refusal counts as a rate limit only this soon after the run's latest success.
+# A gateway connection refusal counts as a rate limit only this soon after the run's latest
+# success.
 RECENT_SUCCESS_SECONDS = 120.0
 # Rate limits and no success for this long stop the run ('rate_limited').
 RATE_LIMIT_STOP_SECONDS = 120.0
 CONNECT = "proxy_connect"
+# The error codes of a gateway connection refusal, all counted under the CONNECT signal: the
+# gateway refuses the connection or a tunnel (proxy_connect), or accepts it and drops it before
+# answering (connection; a plain-HTTP request has no CONNECT, so this is how DataImpulse's
+# gateway refuses under its account connection limit).
+REFUSALS = frozenset({CONNECT, "connection"})
 
 
 class Lookup(Protocol):
@@ -64,7 +71,7 @@ class Answers:
             self.first = completed_at
         status = str(result.status) if result.status is not None else None
         signal = status if status in self.statuses else None
-        if signal is None and self.connect and result.error == CONNECT and (
+        if signal is None and self.connect and result.error in REFUSALS and (
                 self.last_success is not None
                 and completed_at - self.last_success < RECENT_SUCCESS_SECONDS):
             signal = CONNECT

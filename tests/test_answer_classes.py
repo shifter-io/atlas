@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from aiohttp import web
-from helpers import FakeTransport
+from helpers import FakeTransport, server
 
 from proxy_index import JsonSink, ProxyConfig, RunConfig, run
 from proxy_index import cli as cli_module
@@ -306,3 +306,54 @@ async def test_rl1_two_processes_share_one_answered_goal(tmp_path):
     assert result.stop_reason == "requests" and result.status_codes == counts
     assert result.successes == 30 and result.rate_limited == {"429": counts["429"]}
     assert result.completed == 30 + counts["429"] and counts["429"] > 0
+
+
+def dropping_gateway(served, *, after=0):
+    """A loopback HTTP gateway that drops every third connection after the first `after`, as
+    DataImpulse's gateway does under its account connection limit (plain HTTP has no CONNECT)."""
+
+    async def gateway(reader, writer):
+        served["connections"] += 1
+        if served["connections"] > after and served["connections"] % 3 == 0:
+            return  # accepted, then closed before any answer
+        await reader.readuntil(b"\r\n\r\n")
+        body = f"192.0.2.{served['connections'] % 250 + 1}\n".encode()
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
+        await writer.drain()
+
+    return gateway
+
+
+@pytest.mark.parametrize("processes", [1, 2])
+async def test_rl1b_dropped_gateway_connections_are_rate_limits_while_succeeding(
+        tmp_path, processes):
+    served = {"connections": 0}
+    async with server(dropping_gateway(served, after=6)) as port:
+        result = await run(RunConfig(
+            "generic_http", ProxyConfig("http", "127.0.0.1", port),
+            target_url="http://example.test/", requests=30, concurrency=6, processes=processes,
+            answer_classes=answer_classes("dataimpulse")), JsonSink(tmp_path))
+    dropped = result.errors.get("connection", 0)
+    assert dropped > 0 and result.errors == {"connection": dropped}
+    # Every drop came while successes continued: each is a rate limit, replaced by an answer.
+    assert result.rate_limited == {"429": 0, "proxy_connect": dropped}
+    assert result.successes == 30 and result.completed == 30 + dropped == served["connections"]
+    assert result.stop_reason == "requests"
+
+
+def test_rl1b_only_refused_or_dropped_connections_join_the_connect_signal():
+    def dropped(at):
+        return Outcome(1, error="connection", completed_at=at)
+
+    answers = Answers(config(answer_classes=answer_classes("dataimpulse")))
+    assert answers.add(dropped(0), 0) == "answer"  # before any success: a real error
+    answers.add(ok("192.0.2.1"), 1)
+    assert [answers.add(outcome, at) for outcome, at in (
+        (dropped(50), 50), (refused(60), 60), (Outcome(1, error="proxy_auth"), 70),
+        (Outcome(1, error="dns"), 80), (dropped(121), 121))] == [
+        "rate_limited", "rate_limited", "answer", "answer", "answer"]
+    assert answers.rate_limited == {"429": 0, "proxy_connect": 2}
+    # A network without rate_limit_connect keeps every dropped connection a real error.
+    plain = Answers(config(answer_classes=answer_classes("soax")))
+    plain.add(ok("192.0.2.1"), 0)
+    assert plain.add(dropped(1), 1) == "answer" and plain.excluded == 0
