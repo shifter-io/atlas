@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import RunConfig
+from ..providers.grammar import answer_classes
 from ..runner import run
 from .files import atomic_json, fingerprint, lock, read_json
 from .manifest import load, moment, regional_window, settings, timestamp
@@ -173,6 +174,16 @@ def _start_job(context: JobContext, job: dict) -> float:
     return began
 
 
+def _census_config(context: JobContext, proxy) -> RunConfig:
+    """One country's census run config; ``answer_classes`` come from the network's grammar."""
+    effective = dict(context.effective)
+    classes = (answer_classes(context.manifest["provider"])
+               if effective.pop("answer_classes", False) else None)
+    return RunConfig("generic_http", proxy, requests=None, stop_rule="unique_ratio",
+                     runner_location=context.region, target_url=context.manifest["target_url"],
+                     answer_classes=classes, **effective)
+
+
 async def _measure(context: JobContext, job: dict, writer: ObservationWriter, sink: SummarySink):
     """Run one country; return ``(summary, error)`` after the writer has been closed."""
     clock, stop, end, manifest = context.clock, context.stop, context.end, context.manifest
@@ -205,9 +216,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             or str(metadata.get("requested_country", "")).lower() != job["country"].lower()
         ):
             raise ValueError("Provider must target and label the configured country")
-        config = RunConfig("generic_http", proxy, requests=None, stop_rule="unique_ratio",
-                           runner_location=context.region, target_url=manifest["target_url"],
-                           **context.effective)
+        config = _census_config(context, proxy)
         summary = await context.run_country(
             config, sink, stop=country_stop, deadline=context.deadline, aggregate_ips=False,
             wall_clock=clock.now, observation_consumer=writer.observe, progress=progress,

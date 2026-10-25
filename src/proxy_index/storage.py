@@ -34,7 +34,7 @@ PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # and a pulse of the same product, target and country therefore share one pool.
 RUN_LENGTH = ("requests", "target_url", "stop_rule", "min_sample", "stall_seconds",
               "census_rule_version", "census_ratio_basis", "retry_http_469", "processes",
-              "execution_processes", "execution_backend", "worker_pids")
+              "execution_processes", "execution_backend", "worker_pids", "answer_classes")
 BUCKET_KEYS = (
     "bucket_start",
     "completed",
@@ -408,12 +408,12 @@ def ingest(directory, credentials_file, *, batch_id=None):
     if summary["schema_version"] != "1":
         raise ValueError("Unsupported measurement schema")
     requested, started, completed, successes = (
-        summary[name] for name in ("requested", "started", "completed", "successes")
-    )
-    # A census is unbounded: it requests nothing up front and stops on the unique-IP ratio.
-    attempted = started + summary["not_started"] if requested is None else requested
-    if (
-        not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
+        summary[name] for name in ("requested", "started", "completed", "successes"))
+    # A census is unbounded; a bounded run also attempted one replacement per rate limit.
+    attempted = (started + summary["not_started"] if requested is None
+                 else requested + sum(summary.get("rate_limited", {}).values()))
+    in_country = successes - summary.get("other_country", 0)  # other-country exits: no rows
+    if (not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
         or attempted != started + summary["not_started"]
         or started != completed + summary["cancelled"]
         or completed != successes + summary["total_errors"]
@@ -521,7 +521,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
         ).fetchone()
         if (
             rows != summary["artifacts"]["ips"]["rows"]
-            or observations != (successes if summary["pool_eligible"] else 0)
+            or observations != (in_country if summary["pool_eligible"] else 0)
             or unique != (summary["unique_ips"] or 0)
         ):
             raise ValueError("IP observations do not reconcile with the run")

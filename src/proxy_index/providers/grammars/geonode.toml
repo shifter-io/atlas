@@ -72,3 +72,8 @@ generate = "hex"
 length = 25
 ttl_flag = "ttl"
 no_session_policy = "gateway"
+
+[testing]
+max_concurrency = 500 # Owner decision 2026-10-25: the campaign value, to be confirmed by a campaign probe
+rate_limit_statuses = [469] # Geonode's request-rate limit; see docs/onboarding.html#geonode-469
+no_inventory_statuses = [465] # Strict targeting with no exits in the country: 465 on every request (2026-10-07 onboarding)
