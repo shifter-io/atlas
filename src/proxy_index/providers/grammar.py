@@ -474,7 +474,9 @@ class GrammarProxy:
             if set(flag.conflicts) & set(params):
                 raise ValueError(f"{name} cannot combine {key} with {flag.conflicts[0]}")
         for key, value in params.items():
-            if isinstance(value, str):
+            # A country is two letters, so it cannot carry a separator; ISO codes such as
+            # CC, CR or ST may still equal a flag key and are valid in the country slot.
+            if isinstance(value, str) and g.flags[key].kind != "country":
                 self._check_delimiters(g, value, name, key)
         session_key = g.session or "session"
         policy = self.session_policy or ("fixed" if session_key in params
