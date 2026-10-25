@@ -19,7 +19,7 @@ from .files import atomic_json, fingerprint, lock, read_json
 from .manifest import load, moment, regional_window, settings, timestamp
 from .writer import ObservationWriter, SummarySink
 
-# "no_list" (ephemeral rounds): the provider has no list for the country.
+# "no_list" (ephemeral rounds): the provider has no login or no exits for the country.
 TERMINAL = {"completed", "interrupted", "failed", "deadline", "not_started_deadline", "no_list"}
 
 
