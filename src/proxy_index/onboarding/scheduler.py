@@ -127,7 +127,7 @@ def status(state: dict, now: float | None = None) -> dict:
         "requests": sum(j.get("requests", 0) for j in jobs),
         "errors": sum(j.get("errors", 0) for j in jobs),
         "completed_countries": sum(j["status"] == "completed" for j in jobs),
-        "unfinished_countries": sum(j["status"] != "completed" for j in jobs),
+        "unfinished_countries": sum(j["status"] not in ("completed", "no_list") for j in jobs),
         "peak_memory_mb": state.get("peak_memory_mb"),
         "rounds": rounds,
         "updated_at": state.get("updated_at"),

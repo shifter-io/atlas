@@ -331,14 +331,24 @@ def test_a_no_list_country_completes_its_cell_and_merges(root):
     state["jobs"][1] = {key: job[key] for key in ("round", "country", "scheduled_at")} | {
         "status": "no_list", "stop_reason": "no_list"}
     atomic_json(folder / "round.json", state)
-    shutil.rmtree(folder / "gl")
+    shutil.move(folder / "gl", root.parent / "gl")
     row = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}[
         "shifter", "tor1", 0]
     assert (row["cell"], row["completed"], row["jobs_ok"], row["missing"]) == (
         "complete", True, 2, 0)
     assert row["finished"] == state["jobs"][2]["finished_at"]
     finish_day(root)
-    merge.merge_network(root, "shifter")
+    regions = {s["region"]: s for s in merge.merge_network(root, "shifter")}
+    path = merge.manifest_path(root, "shifter")
+    issues = export_campaign(path)["issues"]
+    # The same counts and export issues as when GL completed (no_list is not unfinished).
+    state["jobs"][1] = job
+    atomic_json(folder / "round.json", state)
+    shutil.move(root.parent / "gl", folder / "gl")
+    expected = {s["region"]: s for s in merge.merge_network(root, "shifter")}
+    assert regions["tor1"]["unfinished_countries"] == expected["tor1"]["unfinished_countries"]
+    assert regions["tor1"]["completed_countries"] == expected["tor1"]["completed_countries"] - 1
+    assert issues == [i for i in export_campaign(path)["issues"] if "GL" not in i]
 
 
 def test_m2_m3_merge_cli_names_the_cell_and_writes_no_network(root, capsys):

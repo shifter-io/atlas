@@ -439,6 +439,10 @@ def test_round_cli_skips_a_country_without_a_provider_list(live, monkeypatch, ca
         return real(path, parameters=parameters, **kwargs)
 
     monkeypatch.setattr(onboarding_cli, "load_provider", load_provider)
+    args = SimpleNamespace(region="tor1", provider_config=ROOT / "configs/shifter.toml",
+                           credentials_file=None)
+    with pytest.raises(NoCountryList):  # every other command still refuses the country
+        onboarding_cli._proxies(args, campaign.load(live.path))
     live.patch(seconds=0.0)
     assert main(["onboarding", "round", *live.args, *live.config]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
