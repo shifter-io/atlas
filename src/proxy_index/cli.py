@@ -6,17 +6,21 @@ import json
 import os
 import signal
 import sys
+from contextlib import nullcontext
 
 from .models import NETWORK_PROTOCOLS, ProxyConfig, RunConfig
 from .providers import load_provider
 from .providers import registry as providers
-from .providers.grammar import grammar_ids_by_protocol
+from .providers.grammar import answer_classes, grammar_ids_by_protocol
 from .runner import run
 from .sinks import JsonSink
 from .targets import registry
 
 
 async def _run(args: argparse.Namespace) -> int:
+    if args.answer_classes and not args.provider_config:
+        print("Run refused: --answer-classes needs --provider-config.", file=sys.stderr)
+        return 2
     if args.provider_config:
         params = {}
         for item in args.param:
@@ -53,6 +57,8 @@ async def _run(args: argparse.Namespace) -> int:
         requested_country=args.country,
         runner_location=args.location,
         target_url=args.url,
+        # The network's answer classes come from the grammar of the configured provider.
+        answer_classes=answer_classes(proxy.public()["provider"]) if args.answer_classes else None,
     )
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -65,7 +71,10 @@ async def _run(args: argparse.Namespace) -> int:
             pass
     sink = JsonSink(args.output)
     try:
-        summary = await run(config, sink, stop=stop)
+        from .enrichment import LocalEnricher
+
+        with (LocalEnricher(args.mmdb) if args.mmdb else nullcontext()) as enricher:
+            summary = await run(config, sink, stop=stop, enricher=enricher)
         print(f"Results: {sink.directory}", file=sys.stderr)
         if args.database_file:
             from .storage import ingest
@@ -124,6 +133,9 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_argument("--product")
     measure.add_argument("--country", help="Requested geography label; does not change credentials")
     measure.add_argument("--location", help="Runner location label")
+    measure.add_argument("--answer-classes", action="store_true",
+                         help="Replace rate-limited answers (needs --provider-config)")
+    measure.add_argument("--mmdb", help="Local MMDB: geo rows and the country check")
     enrich = commands.add_parser("enrich", help="Enrich an existing HTTP result using local MMDB")
     enrich.add_argument("directory")
     enrich.add_argument("--mmdb")

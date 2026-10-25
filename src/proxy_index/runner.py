@@ -14,6 +14,7 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from . import __version__
+from .answers import Answers
 from .models import RequestContext, RunConfig, RunSummary, protocol_of
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
@@ -105,6 +106,7 @@ async def run(
             wall_now() >= deadline or time.perf_counter() >= deadline_mono
         )
     totals = Counters()
+    answers = Answers(config, enricher if target.pool_eligible else None)
     buckets: dict[int, Counters] = {}
     # Only current-bucket observations (IPs and geo rows) and a lifetime
     # distinct-IP set are held.
@@ -178,12 +180,8 @@ async def run(
         return {
             "requests": totals.completed, "successes": totals.successes,
             "unique_ips": len(unique), **totals.verdicts(), **execution,
-        } | ({"census_requests": census_requests(),
-              "http_469_responses": totals.statuses["469"]} if config.retry_http_469 else {}
-             ) | ({"redirects": totals.redirects} if protocol == "mixed" else {})
-
-    def census_requests() -> int:
-        return totals.completed - (totals.statuses["469"] if config.retry_http_469 else 0)
+        } | answers.progress(totals) | ({"redirects": totals.redirects} if protocol == "mixed"
+                                         else {})
 
     async def report() -> None:
         assert progress is not None
@@ -202,7 +200,7 @@ async def run(
             await report()
 
     def may_start() -> bool:
-        return (not halted and (limit is None or started < limit)
+        return (not halted and (limit is None or answers.started(started) < limit)
                 and not (stop and stop.is_set()) and not expired())
 
     async def worker(transport: Transport, worker_index: int) -> None:
@@ -236,6 +234,9 @@ async def run(
             # Bucket by coordinator receipt; retain true observation timestamps.
             bucket = bucket_of(began_wall + time.perf_counter() - began)
             totals.add(result)
+            kind = answers.add(result, completed_at)
+            halted = halted or answers.halt(completed_at)
+            counted = kind == "answer" and result.ip and result.error is None
             if result.error is None:
                 last_success = max(last_success or completed_at, completed_at)
                 last_success_wall = max(last_success_wall or observed, observed)
@@ -252,7 +253,7 @@ async def run(
                 if key not in geo_rows:
                     geo_rows[key] = Counters()
                 geo_rows[key].add(result)
-            if target.pool_eligible and result.ip and result.error is None:
+            if target.pool_eligible and counted:
                 unique.add(result.ip)
                 if not aggregate_ips:
                     pass
@@ -263,11 +264,11 @@ async def run(
                     row[2] = max(row[2], observed)
                 else:
                     ip_rows[result.ip] = [1, observed, observed]
-            # Preserve every attempt, status, error and byte count. The opt-in
-            # retry policy excludes only 469s from sample-based stopping rules;
+            # Preserve every attempt, status, error and byte count. Answer classes (and the
+            # opt-in 469 policy) exclude rate limits from the sample and the request goal;
             # this worker then issues a replacement through the normal loop.
             if ratio_rule and not halted:
-                sample = census_requests()
+                sample = answers.sample(totals)
                 if not totals.successes and (
                     sample >= min(config.min_sample, NO_SUCCESS_REQUESTS)
                     or time.perf_counter() - began >= NO_SUCCESS_SECONDS
@@ -279,7 +280,7 @@ async def run(
                 elif (sample >= config.min_sample
                         and sample > 2 * len(unique)):
                     halted = "unique_ratio"
-            if observation_consumer is not None and result.ip and result.error is None:
+            if observation_consumer is not None and counted:
                 # A completed response must reach the writer even if a deadline
                 # cancels its worker during backpressure. The writer owns draining.
                 delivery = asyncio.ensure_future(observation_consumer(result.ip, observed))
@@ -332,7 +333,7 @@ async def run(
     except Exception as exc:
         status = "failed"
         failure = exc
-    reached = limit is not None and totals.completed >= limit
+    reached = limit is not None and answers.started(totals.completed) >= limit
     if stop and stop.is_set() and (started > totals.completed or not (reached or halted)):
         status = "cancelled"
     if expired() and status != "failed":
@@ -356,7 +357,7 @@ async def run(
         requested=limit, started=started, completed=totals.completed,
         cancelled=started - totals.completed,
         # An unbounded run has no unstarted remainder.
-        not_started=0 if limit is None else limit - started,
+        not_started=0 if limit is None else limit - answers.started(started),
         successes=totals.successes, total_errors=totals.errors.total(),
         errors=dict(totals.errors), status_codes=dict(totals.statuses),
         success_rate=totals.successes / totals.completed if totals.completed else None,
@@ -366,11 +367,9 @@ async def run(
         latency_histogram=totals.histogram.export(), response_body_bytes=totals.body_bytes,
         buckets=[{"bucket_start": iso(key), **value.export()}
                  for key, value in sorted(buckets.items())],
-        **totals.verdicts(), stop_reason=stop_reason,
+        **totals.verdicts(), **answers.summary(totals), stop_reason=stop_reason,
         outage_started_at=iso(last_success_wall)
         if stop_reason == "stalled" and last_success_wall is not None else None,
-        census_requests=census_requests() if config.retry_http_469 else None,
-        http_469_responses=totals.statuses["469"] if config.retry_http_469 else None,
         redirects=totals.redirects if protocol == "mixed" else None,
     )
     release = getattr(enricher, "release", None)

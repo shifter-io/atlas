@@ -619,3 +619,57 @@ async def test_runner_uses_campaign_clock_for_observation_timestamp():
     )
     assert result.completed == 1
     assert anchor <= observed[0] < anchor + 1
+
+
+def test_ephemeral_manifest_records_rule_4(tmp_path):
+    def plan(name, **options):
+        return campaign.load(campaign.create(
+            ROOT / "configs/shifter.toml", "residential", campaign.timestamp(START),
+            tmp_path / name, now=START - timedelta(hours=1), **options))
+
+    data = plan("rule-4", execution_mode="ephemeral")
+    assert data["settings"]["answer_classes"] is True and data["census_rule_version"] == 4
+    assert data["census_ratio_basis"] == "completed_requests_excluding_rate_limits"
+    off = plan("off", execution_mode="ephemeral", answer_classes=False)
+    assert "answer_classes" not in off["settings"] and off["census_rule_version"] == 2
+    retry = plan("retry", execution_mode="ephemeral", retry_http_469=True)
+    assert "answer_classes" not in retry["settings"] and retry["census_rule_version"] == 3
+    parallel = plan("parallel")
+    assert "answer_classes" not in parallel["settings"] and parallel["census_rule_version"] == 2
+    # A version 3 manifest written before rule 4 still validates under rule 2.
+    old = dict(data, settings={k: v for k, v in data["settings"].items() if k != "answer_classes"},
+               census_rule_version=2, census_ratio_basis="completed_requests")
+    assert campaign.validate(old) is old
+    with pytest.raises(ValueError, match="census rule"):
+        campaign.validate(dict(data, census_rule_version=2))
+
+
+def test_answer_classes_refused_outside_ephemeral_or_with_469(tmp_path):
+    def plan(**options):
+        return campaign.create(ROOT / "configs/shifter.toml", "residential",
+                               campaign.timestamp(START), tmp_path,
+                               now=START - timedelta(hours=1), **options)
+
+    for options, message in (
+        ({"answer_classes": True}, "ephemeral"),
+        ({"answer_classes": True, "execution_mode": "sequential",
+          "region_order": ["lon1", "fra1", "ams3", "nyc3", "tor1", "sgp1", "blr1", "syd1"]},
+         "ephemeral"),
+        ({"answer_classes": True, "retry_http_469": True, "execution_mode": "ephemeral"},
+         "retry_http_469"),
+        ({"answer_classes": "yes", "execution_mode": "ephemeral"}, "boolean"),
+        ({"run_settings": {"answer_classes": True}, "execution_mode": "ephemeral"}, "boolean"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            plan(**options)
+    assert not list(tmp_path.iterdir())
+    with pytest.raises(ValueError, match="retry_http_469"):
+        campaign.settings(campaign.DEFAULTS | {"answer_classes": True, "retry_http_469": True})
+    with pytest.raises(ValueError, match="boolean"):
+        campaign.settings(campaign.DEFAULTS | {"answer_classes": 1})
+    data = campaign.load(plan())
+    data["settings"]["answer_classes"] = True
+    data.update(census_rule_version=4,
+                census_ratio_basis="completed_requests_excluding_rate_limits")
+    with pytest.raises(ValueError, match="ephemeral"):
+        campaign.validate(data)

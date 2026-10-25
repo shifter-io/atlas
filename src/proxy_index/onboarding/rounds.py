@@ -159,6 +159,10 @@ def _country_entry(job: dict, measured: dict | None) -> dict:
         "country": job["country"], "status": job["status"],
         "stop_reason": job.get("stop_reason"), "requests": measured.get("completed", 0),
         "successes": measured.get("successes", 0), "errors": measured.get("total_errors", 0),
+        # Answer classes (answers.py); 0 for a measurement without them.
+        "rate_limited": sum((measured.get("rate_limited") or {}).values()),
+        "no_inventory": measured.get("no_inventory") or 0,
+        "other_country": measured.get("other_country") or 0,
         "observations": 0, "unique_ips": measured.get("unique_ips"),
         "bytes_up": measured.get("bytes_up", 0), "bytes_down": measured.get("bytes_down", 0),
         "duration_seconds": job.get("duration_seconds"),
@@ -203,7 +207,8 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
         return _country_entry(job, None), [f"{label}: {reason}"]
     entry["unique_ips"] = unique
     issues = [] if job["status"] == "completed" else [f"{label}: {job['status']}"]
-    if (entry["observations"] != measured.get("successes")
+    # Other-country exits are successes, never observations.
+    if (entry["observations"] + entry["other_country"] != measured.get("successes")
             or entry["observations"] != job.get("observations")
             or unique != measured.get("unique_ips")
             or measured.get("completed") != measured.get("successes", 0)
