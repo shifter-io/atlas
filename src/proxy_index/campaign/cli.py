@@ -224,7 +224,9 @@ def _plan_parsers(actions) -> None:
     stop.add_argument("campaign_id")
     allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
     teardown = steps.add_parser("teardown", help="Remove the manager and its resources")
-    teardown.add_argument("--after-collect", type=Path, action="append", required=True)
+    teardown.add_argument("--after-collect", type=Path, action="append", default=[],
+                          help="a clean collect report; one for every campaign the "
+                          "inventory records (none when it records no campaign)")
     teardown.add_argument("--keep-worker-assets", action="store_true",
                           help="remove only the manager and its firewall; keep the worker "
                           "snapshots, firewall and keys for the next manager (they can only "

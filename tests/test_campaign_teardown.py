@@ -27,6 +27,8 @@ from campaign_fakes import CAMPAIGN_PROJECT, Fault
 from proxy_index.campaign import deploy
 from proxy_index.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag
 
+OTHER_CID = "20270101t230000z-ffffffffffff"
+
 
 @pytest.fixture(autouse=True)
 def quick_assign(monkeypatch):
@@ -68,7 +70,7 @@ async def test_teardown_releases_only_through_the_guard_in_order(job, tmp_path):
     ([], "clean collect report"),
     ([{"clean": False}], "is not clean"),
     ([{"mismatches": ["a"]}], "is not clean"),
-    ([{"cid": "20270101t230000z-ffffffffffff"}], "clean collect report"),
+    ([{"cid": OTHER_CID}], "for no recorded campaign"),
 ])
 async def test_teardown_refuses_without_a_clean_report(job, tmp_path, reports, message):
     fake, _, images = await owned_world(job)
@@ -132,9 +134,60 @@ async def test_teardown_without_a_manager_or_campaign_units(job, tmp_path):
     shell = Shell()
     async with running(fake) as cloud:
         images.unlink()
-        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
-                                     shell=shell, remove_agent=lambda: True)
+        done = await deploy.teardown(cloud, job.inventory, [], shell=shell,
+                                     remove_agent=lambda: True)
     assert shell.commands() == [deploy.SHRED] and done["clean"] is True
+
+
+async def test_a_manager_that_never_recorded_a_campaign_needs_no_report(job, tmp_path):
+    """CAMP-1s: no `campaigns` key at all (a manager that never ran one) needs no report."""
+    fake, saved, _ = await owned_world(job)
+    saved.pop("campaigns")
+    deploy.save(job.inventory, saved)
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [], keep_worker_assets=True,
+                                     shell=Shell(), remove_agent=lambda: True)
+    assert done["clean"] is True and fake.deleted == [
+        ("droplet", saved["manager_id"]), ("firewall", saved["manager_firewall_id"])]
+
+
+@pytest.mark.parametrize("campaigns", [None, [], [CID]])
+async def test_a_report_for_an_unrecorded_campaign_is_refused(job, tmp_path, campaigns):
+    """CAMP-1s: a clean report proves nothing about this manager unless it records that
+    campaign, even when no campaign is recorded at all."""
+    fake, saved, _ = await owned_world(job)
+    if campaigns is None:
+        saved.pop("campaigns")
+    deploy.save(job.inventory, saved, **({} if campaigns is None else {"campaigns": campaigns}))
+    reports = [clean_report(tmp_path, cid) for cid in [*(campaigns or []), OTHER_CID]]
+    shell = Shell()
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match="for no recorded campaign"):
+            await deploy.teardown(cloud, job.inventory, reports, shell=shell)
+    assert shell.calls == [] and not fake.deleted
+
+
+async def test_the_host_key_file_is_found_beside_the_inventory_from_any_directory(
+        job, tmp_path, monkeypatch):
+    """CAMP-1s: a relative `known_hosts` record never reaches the current directory's file
+    (another manager's), neither for the shred step's SSH nor when the manager retires."""
+    fake, saved, _ = await owned_world(job)
+    deploy.save(job.inventory, saved, known_hosts="secrets/campaign-manager.known_hosts")
+    own = job.inventory.with_name("campaign-manager.known_hosts")
+    own.write_text("this manager's host key\n")
+    elsewhere = tmp_path / "elsewhere"
+    other = elsewhere / "secrets" / "campaign-manager.known_hosts"
+    other.parent.mkdir(parents=True)
+    other.write_text("another manager's host key\n")
+    monkeypatch.chdir(elsewhere)
+    shell = Shell()
+    async with running(fake) as cloud:
+        done = await deploy.teardown(cloud, job.inventory, [clean_report(tmp_path)],
+                                     keep_worker_assets=True, shell=shell,
+                                     remove_agent=lambda: True)
+    assert done["clean"] is True and not own.exists() and other.exists()
+    assert {f"UserKnownHostsFile={own}"} == {
+        arg for argv, _ in shell.calls for arg in argv if arg.startswith("UserKnownHosts")}
 
 
 
@@ -309,7 +362,9 @@ async def test_the_next_manager_reuses_the_worker_firewall_and_a_full_teardown_e
     fake.deleted.clear()
     shell = Shell()
     async with running(fake) as cloud:
-        done = await deploy.teardown(cloud, job.inventory, [report], shell=shell,
+        with pytest.raises(deploy.DeployError, match="for no recorded campaign"):
+            await deploy.teardown(cloud, job.inventory, [report], shell=shell)
+        done = await deploy.teardown(cloud, job.inventory, [], shell=shell,
                                      remove_agent=lambda: True)
     assert shell.commands()[-1] == deploy.SHRED
     assert fake.deleted == [
