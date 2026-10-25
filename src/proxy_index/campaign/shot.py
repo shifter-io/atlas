@@ -424,8 +424,9 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ProbeError(f"no shot record in that folder ({type(error).__name__})") from None
     try:
-        for worker in workers:
-            await recover_worker(cloud, shot_scope, worker, audit_path(folder), sleep)
+        for worker in list(workers):  # a second droplet with a name joins `unrecorded`
+            workers += await recover_worker(cloud, shot_scope, worker, audit_path(folder),
+                                            sleep)
     finally:  # what was removed stays recorded, also when a later read fails
         left = sum(w.status not in ("destroyed", "absent") for w in workers)
         count = len(result["workers"])

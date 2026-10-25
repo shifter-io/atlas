@@ -463,3 +463,33 @@ async def test_s1_worker_names_must_be_unique(tmp_path, monkeypatch):
     clock = FakeClock(NOW.timestamp())
     with pytest.raises(ProbeError, match="worker names repeated"):
         await fired(FakeDigitalOcean(), ShotRemote(clock), inputs, clock)
+
+
+async def test_s1r_remove_releases_every_droplet_with_the_name_when_no_id_is_recorded(
+        tmp_path, monkeypatch):
+    async def killed(self):  # killed during the create POST: no id was ever recorded
+        raise RuntimeError("killed")
+
+    monkeypatch.setattr(shooting.Shot, "cleanup", killed)
+    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
+    inputs, _ = shot_world(tmp_path, networks=("webshare",), regions=("lon1",),
+                           size_by_network={})
+    with pytest.raises(RuntimeError, match="killed"):
+        await fired(fake, ShotRemote(clock), inputs, clock)
+    [folder] = inputs.output.iterdir()
+    path = folder / "shot-result.json"
+    record = json.loads(path.read_text())
+    [worker] = record["workers"]
+    worker.update(droplet_id=None, status="requested", error_class="create_uncertain",
+                  assigned_at=None)
+    path.write_text(json.dumps(record))
+    first = fake.droplets[next(i for i, d in fake.droplets.items()
+                               if d["name"] == worker["name"])]
+    fake.add(first["name"], first["tags"], project=None)  # DigitalOcean made one too many
+    monkeypatch.undo()
+    async with running(fake) as cloud:
+        assert (await shooting.recover(cloud, folder))["workers_left"] == 0
+    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    record = json.loads(path.read_text())
+    assert [w["status"] for w in record["workers"] + record["unrecorded"]] == [
+        "destroyed", "destroyed"] and "recover" not in record
