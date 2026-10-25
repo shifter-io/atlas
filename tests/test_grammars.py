@@ -9,6 +9,7 @@ import pytest
 from proxy_index import GrammarProxy, RequestContext, RunConfig, load_provider
 from proxy_index.providers import NoCountryList, registry
 from proxy_index.providers.grammar import Grammar, grammar_ids, load_grammar
+from proxy_index.regions import load_countries
 from proxy_index.storage import ADAPTER
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -237,6 +238,28 @@ def test_invalid_configuration_fails_before_traffic(provider, options):
     with pytest.raises(ValueError) as exc:
         proxy(provider, **options)
     assert SECRET not in str(exc.value)
+
+
+@pytest.mark.parametrize("provider", sorted(GOLDEN))
+def test_every_country_code_loads_even_when_it_equals_a_flag_key(provider):
+    # Oxylabs' cc/st and DataImpulse's cr are also ISO codes (Cocos Islands, Sao Tome, Costa
+    # Rica); a census round refused its whole region over one such country.
+    if "country" not in load_grammar(provider).flags:
+        pytest.skip("no country flag")
+    for code in load_countries():
+        try:
+            proxy(provider, parameters={"country": code.lower()})
+        except NoCountryList:
+            continue
+
+
+def test_country_codes_equal_to_a_flag_key_render_in_the_country_slot():
+    for code, username in (("st", "customer-fixture1-cc-ST"), ("cc", "customer-fixture1-cc-CC")):
+        assert proxy("oxylabs", parameters={"country": code}).resolve(CONTEXT).username == username
+    assert proxy("dataimpulse", parameters={"country": "cr"}).resolve(CONTEXT).username == (
+        "fixture1__cr.cr")
+    with pytest.raises(ValueError, match="ambiguous flag delimiter"):  # Other kinds still refuse.
+        proxy("oxylabs", parameters={"country": "us", "city": "st"})
 
 
 def test_provider_specific_mechanics():
