@@ -57,7 +57,7 @@ def audit(manifest: dict, snapshot: dict, now: float) -> dict:
                 and moment(j['scheduled_at']).timestamp() + 3600 < now < end]
         if late:
             alerts.append({'region': region, 'issue': 'round_backlog', 'count': len(late)})
-        complete = sum(j['status'] == 'completed' for j in jobs)
+        complete = sum(j['status'] in ('completed', 'no_list') for j in jobs)
         if now > end + 30 and (state['status'] not in ('closed', 'completed')
                               or complete != len(jobs)):
             alerts.append({'region': region, 'issue': 'region_not_complete_at_deadline'})

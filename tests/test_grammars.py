@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from proxy_index import GrammarProxy, RequestContext, RunConfig, load_provider
-from proxy_index.providers import registry
+from proxy_index.providers import NoCountryList, registry
 from proxy_index.providers.grammar import Grammar, grammar_ids, load_grammar
 from proxy_index.storage import ADAPTER
 
@@ -170,6 +170,38 @@ def test_proxy_seller_takes_its_country_from_the_list_login(tmp_path):
     with pytest.raises(ValueError, match="requested_country label conflicts"):
         RunConfig("generic_http", load_provider(config, credentials_file=path),
                   requested_country="gb")
+
+
+def test_proxy_seller_takes_each_census_country_from_its_own_list_login(tmp_path):
+    # One dashboard list (login) per country (PSL-3): a requested country takes its own login
+    # and preset; the plain login stays the config's country; one without a list is refused.
+    path = tmp_path / "credentials.toml"
+    path.write_text(f'["proxy-seller"]\naccount = "fixture1"\npassword = "{SECRET}"\n'
+                    f'account_gb = "fixturegb"\npassword_gb = "{SECRET}-gb"\n')
+    path.chmod(0o600)
+    config = ROOT / "configs/proxy-seller.toml"
+    seller = load_provider(config, credentials_file=path, parameters={"country": "GB"})
+    resolved = seller.resolve(CONTEXT)
+    assert resolved.password == f"{SECRET}-gb"
+    assert re.fullmatch(r"fixturegb_s_[0-9a-f]{16}", resolved.username)
+    assert seller.public()["requested_country"] == "gb"
+    assert pickle.loads(pickle.dumps(seller)).public() == seller.public()
+    for parameters in ({"country": "us"}, {}):
+        plain = load_provider(config, credentials_file=path, parameters=parameters)
+        assert plain.resolve(CONTEXT).username.startswith("fixture1_")
+        assert plain.resolve(CONTEXT).password == SECRET
+    with pytest.raises(NoCountryList, match="^no proxy-seller list for DE$"):
+        load_provider(config, credentials_file=path, parameters={"country": "de"})
+    path.write_text(f'["proxy-seller"]\naccount = "fixture1"\npassword = "{SECRET}"\n'
+                    'account_gb = "fixturegb"\n')
+    with pytest.raises(ValueError, match="both account_<cc> and password_<cc>"):
+        load_provider(config, credentials_file=path, parameters={"country": "gb"})
+    # A provider whose country is a free flag has no per-country logins.
+    path.write_text(f'[shifter]\naccount = "customer-a"\npassword = "{SECRET}"\n'
+                    f'account_gb = "customer-b"\npassword_gb = "{SECRET}"\n')
+    with pytest.raises(ValueError, match="need a preset country"):
+        load_provider(ROOT / "configs/shifter.toml", credentials_file=path,
+                      parameters={"country": "gb"})
 
 
 def test_proxy_seller_cycles_its_ports_with_a_new_session_each_pass():

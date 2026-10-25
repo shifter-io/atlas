@@ -11,7 +11,8 @@ password_env = "PROXY_SELLER_PASSWORD"
 [settings]
 scheme = "http" # http or socks5
 # The dashboard list's country. The login carries no geography, so a run may only ask for this
-# country (census rounds and probes pass one); a list per country needs its own login.
+# country (census rounds and probes pass one); a list per country needs its own login, given as
+# account_<cc>/password_<cc> in the credentials table (docs/providers.html#presets).
 presets = { country = "us" }
 # port = 10000
 # The grammar default is per_request: each request takes the next port (10000-10999) and each

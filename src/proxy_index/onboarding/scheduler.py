@@ -19,7 +19,8 @@ from .files import atomic_json, fingerprint, lock, read_json
 from .manifest import load, moment, regional_window, settings, timestamp
 from .writer import ObservationWriter, SummarySink
 
-TERMINAL = {"completed", "interrupted", "failed", "deadline", "not_started_deadline"}
+# "no_list" (ephemeral rounds): the provider has no list for the country.
+TERMINAL = {"completed", "interrupted", "failed", "deadline", "not_started_deadline", "no_list"}
 
 
 class Clock:
@@ -95,7 +96,7 @@ def status(state: dict, now: float | None = None) -> dict:
         group = [j for j in jobs if j["round"] == index]
         starts = [j["started_at"] for j in group if j.get("started_at")]
         ends = [j["finished_at"] for j in group if j.get("finished_at")]
-        complete = all(j["status"] == "completed" for j in group)
+        complete = all(j["status"] in ("completed", "no_list") for j in group)
         rounds.append(
             {
                 "round": index,
@@ -126,7 +127,7 @@ def status(state: dict, now: float | None = None) -> dict:
         "requests": sum(j.get("requests", 0) for j in jobs),
         "errors": sum(j.get("errors", 0) for j in jobs),
         "completed_countries": sum(j["status"] == "completed" for j in jobs),
-        "unfinished_countries": sum(j["status"] != "completed" for j in jobs),
+        "unfinished_countries": sum(j["status"] not in ("completed", "no_list") for j in jobs),
         "peak_memory_mb": state.get("peak_memory_mb"),
         "rounds": rounds,
         "updated_at": state.get("updated_at"),

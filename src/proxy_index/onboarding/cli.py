@@ -11,7 +11,7 @@ import sys
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
-from ..providers import load_provider
+from ..providers import NoCountryList, load_provider
 from ..runner import run
 from .export import export_campaign
 from .files import digest, read_json
@@ -88,22 +88,29 @@ def register(commands):
     fleet.register(actions)
 
 
-def _proxies(args, manifest: dict) -> dict:
-    """Check the provider configuration and every country's proxy before any traffic."""
+def _proxies(args, manifest: dict, *, no_list: bool = False) -> dict:
+    """Check the provider configuration and every country's proxy before any traffic. With
+    ``no_list`` a country the provider has no list for maps to None (the round skips it)."""
     if args.region not in manifest["regions"]:
         raise ValueError("Unknown campaign region")
     if digest(args.provider_config) != manifest["provider_config_sha256"]:
         raise ValueError("Provider configuration differs from the campaign manifest")
     # Validate every country before arming. Loading adapters performs no network I/O.
-    proxies = {
-        country: load_provider(
-            args.provider_config,
-            parameters={"country": country.lower()},
-            credentials_file=args.credentials_file,
-        )
-        for country in manifest["regions"][args.region]
-    }
+    proxies = {}
+    for country in manifest["regions"][args.region]:
+        try:
+            proxies[country] = load_provider(
+                args.provider_config,
+                parameters={"country": country.lower()},
+                credentials_file=args.credentials_file,
+            )
+        except NoCountryList:
+            if not no_list:
+                raise
+            proxies[country] = None
     for country, proxy in proxies.items():
+        if proxy is None:
+            continue
         public = proxy.public()
         if (
             public.get("provider") != manifest["provider"]
@@ -154,7 +161,7 @@ async def _round(args):
     """Exit 0 when the round finished (any provider outcome), 130 when stopped."""
     from ..enrichment import LocalEnricher
 
-    proxies = _proxies(args, load(args.manifest))
+    proxies = _proxies(args, load(args.manifest), no_list=True)
     stop = asyncio.Event()
     with _signals(stop), (LocalEnricher(args.mmdb) if args.mmdb else nullcontext()) as enricher:
         # The round's census runs get the enricher, which turns on the country check.
