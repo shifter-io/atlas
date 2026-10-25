@@ -65,6 +65,7 @@ RESET = RETIRED + ("host", "mac_ipv4", "secrets_shredded", "campaign_id", "specs
                    "disabled", "credentials", "wheel_sha256", "deployed_at", "teardown")
 SHRED = (f"cd {BASE} && find .secrets -type f -exec shred -u {{}} + && rm -rf .secrets && "
          "test ! -e .secrets && echo shredded")
+PROBE = f"test -d {BASE} && echo present || echo absent"  # a deploy that stopped early has none
 
 
 class DeployError(RuntimeError):
@@ -493,18 +494,26 @@ def _owned(inventory: dict, images: dict, keep_worker_assets: bool = False
     return [(kind, str(rid)) for kind, rid in found if rid]
 
 
-async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shell) -> None:
+async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shell) -> str:
     """Stop the units and shred the secrets: once, and only while the manager still exists
-    (a removed droplet takes its disk, and its secrets, with it)."""
-    if inventory.get("secrets_shredded") or await cloud.get(str(inventory["manager_id"])) is None:
-        return
+    (a removed droplet takes its disk, and its secrets, with it). A manager whose deploy
+    stopped before it made the base directory holds no secrets; only the manager's own
+    `absent` answer skips the shred. Returns what it found, for the teardown record."""
+    if inventory.get("secrets_shredded"):
+        return "shredded earlier"
+    if await cloud.get(str(inventory["manager_id"])) is None:
+        return "manager gone"
     remote = Manager(inventory | {"known_hosts": str(known_hosts(path, inventory))}, shell)
     units = [unit for cid in inventory.get("campaigns", []) for unit in unit_names(cid)]
     if units:
         await remote.run("systemctl disable --now " + " ".join(units), "stop units")
+    if (await remote.run(PROBE, "find the base directory")).strip().splitlines()[-1:] == [
+            "absent"]:
+        return f"none: {BASE} does not exist"
     if (await remote.run(SHRED, "shred secrets")).strip().splitlines()[-1:] != ["shredded"]:
         raise DeployError("manager secrets were not shredded")
     save(path, inventory, secrets_shredded=True)
+    return "shredded"
 
 
 async def _release(cloud: DigitalOcean, inventory: dict, path: Path,
@@ -571,7 +580,7 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     check_reports(inventory, reports)
     if await cloud.list_tag(WORKER_TAG):
         raise DeployError("campaign workers are still alive")
-    await _silence(cloud, inventory, inventory_path, shell)
+    secrets = await _silence(cloud, inventory, inventory_path, shell)
     released = await _release(cloud, inventory, inventory_path, keep_worker_assets)
     tags = [tag for tag, _ in ROLES.values()] + [
         campaign_tag(c) for c in inventory.get("campaigns", [])]
@@ -579,9 +588,9 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     stray = [i for i in inventory.get("unassigned_managers", []) if await cloud.get(str(i))]
     clean = all(r["result"] in GONE for r in released) and not any(proof.values()) and not (
         stray)
-    done = {"released": released, "agent_removed": (remove_agent or _remove_agent)(),
-            "tag_counts": proof, "unassigned_managers": stray, "clean": clean,
-            "kept_worker_assets": keep_worker_assets}
+    done = {"secrets": secrets, "released": released,
+            "agent_removed": (remove_agent or _remove_agent)(), "tag_counts": proof,
+            "unassigned_managers": stray, "clean": clean, "kept_worker_assets": keep_worker_assets}
     save(inventory_path, inventory, teardown=done)
     if keep_worker_assets and clean:
         _retire(inventory_path, inventory, done)
