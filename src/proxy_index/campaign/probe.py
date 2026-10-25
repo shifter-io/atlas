@@ -17,7 +17,7 @@ import io
 import json
 import secrets
 import tarfile
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -130,7 +130,7 @@ def step_result(concurrency: int, requested: int, summary: dict[str, Any]) -> di
             **{f"{name}_pct": share(count) for name, count in classes.items()},
             "rps": round(summary["requests_per_second"], 1),
             "latency_p50_ms": latency.get("p50"), "latency_p95_ms": latency.get("p95"),
-            "stop_reason": summary.get("stop_reason")}
+            "unique_ips": summary.get("unique_ips"), "stop_reason": summary.get("stop_reason")}
 
 
 def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
@@ -160,19 +160,65 @@ def targeting(network: str, country: str) -> dict[str, str]:
     return {"country": country} if "country" in load_grammar(network).flags else {}
 
 
-def run_command(network: str, concurrency: int, inputs: ProbeInputs) -> list[str]:
+def run_command(network: str, concurrency: int, requests: int, country: str,
+                region: str) -> list[str]:
     """The fixed worker command for one step; every argument is public."""
     probe, secret = f"{WORKER_ROOT}/probe", f"{WORKER_SECRETS}/probe"
-    country = [arg for value in targeting(network, inputs.country).values()
-               for arg in ("--param", f"country={value}")]
+    parameters = [arg for value in targeting(network, country).values()
+                  for arg in ("--param", f"country={value}")]
     return ["sh", "-c", 'ulimit -n 65536 && exec "$0" "$@"', f"{WORKER_ROOT}/venv/bin/proxy-index",
-            "run", "--target", "generic_http", "--requests", str(inputs.requests),
+            "run", "--target", "generic_http", "--requests", str(requests),
             "--concurrency", str(concurrency), "--timeout", str(TIMEOUT_SECONDS),
             "--provider-config", f"{probe}/{network}.toml",
             "--credentials-file", f"{secret}/{network}.toml",
-            *country, "--provider", network,
-            "--country", inputs.country.lower(), "--location", inputs.region,
+            *parameters, "--provider", network,
+            "--country", country.lower(), "--location", region,
             "--output", f"{probe}/results"]
+
+
+def network_problems(root: Path, spec: CampaignSpec, files: WorkerInputs, network: str,
+                     countries: Collection[str]) -> list[str]:
+    """Why a network cannot be measured: no credentials, or its census config, credentials and
+    country parameter do not load (no network I/O)."""
+    credentials = files.credentials_dir / f"{network}.toml"
+    if not credentials.is_file():
+        return [f"no credentials for {network}"]
+    config = manifest_path(root, spec, network).parent / "provider.toml"
+    try:
+        for country in sorted(set(countries)):
+            load_provider(config, parameters=targeting(network, country),
+                          credentials_file=credentials)
+    except (OSError, ValueError) as error:
+        return [f"network {network}: {type(error).__name__}: {error}"]
+    return []
+
+
+def payload(root: Path, spec: CampaignSpec, files: WorkerInputs,
+            networks: Collection[str]) -> bytes:
+    """One tar for `SETUP_SCRIPT`: the wheel, each network's census config and credentials."""
+    entries = [(f"wheel/{files.wheel.name}", files.wheel.read_bytes())]
+    for network in networks:
+        config = manifest_path(root, spec, network).parent / "provider.toml"
+        entries += [(f"probe/{network}.toml", config.read_bytes()),
+                    (f"secrets/{network}.toml",
+                     (files.credentials_dir / f"{network}.toml").read_bytes())]
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in entries:
+            info = tarfile.TarInfo(name)
+            info.size, info.mode = len(data), 0o600
+            archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+async def set_up(remote: ProbeRemote, droplet: Droplet, data: bytes,
+                 seconds: float = 600) -> None:
+    """Install the wheel and write the configs and credentials on one worker."""
+    reply = await remote.run(droplet, ["python3", "-c", SETUP_SCRIPT, WORKER_ROOT,
+                                       WORKER_SECRETS], "probe setup", stdin=data,
+                             seconds=seconds)
+    if reply.decode(errors="replace").strip().splitlines()[-1:] != ["ready"]:
+        raise ProbeError("probe setup did not finish")
 
 
 def markdown(result: dict[str, Any]) -> str:
@@ -241,16 +287,7 @@ class Probe:
                     (i.step < 1 or i.requests < 1, "step or requests")]
         bad = [text for failed, text in problems if failed]
         for network in self.networks if planned else ():
-            credentials = self.files.credentials_dir / f"{network}.toml"
-            if not credentials.is_file():
-                bad.append(f"no credentials for {network}")
-                continue
-            config = manifest_path(i.root, self.spec, network).parent / "provider.toml"
-            try:  # no network I/O: the config, credentials and parameters each step uses
-                load_provider(config, parameters=targeting(network, i.country),
-                              credentials_file=credentials)
-            except (OSError, ValueError) as error:
-                bad.append(f"network {network}: {type(error).__name__}: {error}")
+            bad += network_problems(i.root, self.spec, self.files, network, [i.country])
         if bad:
             raise ProbeError(f"refused: {', '.join(bad)}")
 
@@ -346,28 +383,9 @@ class Probe:
         worker.status, worker.ssh_ready_at = "armed", timestamp(datetime.now(UTC).timestamp())
         return ready
 
-    def payload(self) -> bytes:
-        """One tar: the wheel, each network's census config and its credentials."""
-        files = [(f"wheel/{self.files.wheel.name}", self.files.wheel.read_bytes())]
-        for network in self.networks:
-            config = manifest_path(self.inputs.root, self.spec, network).parent / "provider.toml"
-            files += [(f"probe/{network}.toml", config.read_bytes()),
-                      (f"secrets/{network}.toml",
-                       (self.files.credentials_dir / f"{network}.toml").read_bytes())]
-        buffer = io.BytesIO()
-        with tarfile.open(fileobj=buffer, mode="w") as archive:
-            for name, data in files:
-                info = tarfile.TarInfo(name)
-                info.size, info.mode = len(data), 0o600
-                archive.addfile(info, io.BytesIO(data))
-        return buffer.getvalue()
-
     async def measure_all(self, droplet: Droplet) -> None:
-        reply = await self.remote.run(droplet, ["python3", "-c", SETUP_SCRIPT, WORKER_ROOT,
-                                                WORKER_SECRETS], "probe setup",
-                                      stdin=self.payload(), seconds=600)
-        if reply.decode(errors="replace").strip().splitlines()[-1:] != ["ready"]:
-            raise ProbeError("probe setup did not finish")
+        await set_up(self.remote, droplet,
+                     payload(self.inputs.root, self.spec, self.files, self.networks))
         for network in self.networks:
             self.result["networks"][network] = found = {"steps": []}
             await self.measure(droplet, network, found)
@@ -394,7 +412,8 @@ class Probe:
             found["verdict"] = "floor also fails: " + ", ".join(base["step_down"])
 
     async def step(self, droplet: Droplet, network: str, concurrency: int) -> dict[str, Any]:
-        command = run_command(network, concurrency, self.inputs)
+        i = self.inputs
+        command = run_command(network, concurrency, i.requests, i.country, i.region)
         try:
             reply = await self.remote.run(droplet, command, f"probe {network}",
                                           seconds=STEP_SECONDS)
@@ -450,6 +469,40 @@ async def release(cloud: DigitalOcean, probe_scope: Scope, worker: DropletRecord
         worker.status, worker.error_class = "destroy_failed", type(error).__name__
 
 
+async def recover_worker(cloud: DigitalOcean, run_scope: Scope, worker: DropletRecord,
+                         audit: Path, sleep: ops_api.Sleep) -> list[DropletRecord]:
+    """Find one recorded worker by its exact name under the run's hour tag (and, when an id is
+    recorded, only that id), then `release`; `absent` when never created or already gone.
+    Only a listing that answered may say "absent"; an unreadable one raises `ProbeError` and
+    changes nothing. With no id recorded, every droplet with the name is ours (the hour tag,
+    the exact name, adopted as our own create): the first becomes the worker, the others are
+    released too and returned, as `unrecorded` records, for the caller's record."""
+    if worker.status == "destroyed":
+        return []
+    extra: list[DropletRecord] = []
+    try:
+        if worker.droplet_id is None:
+            found = await cloud.adopt_uncertain([worker.name], hour_tag(run_scope.campaign_id, 0))
+            if found:
+                worker.droplet_id, worker.error_class = found[0].id, None
+            extra = [DropletRecord(worker.network, worker.region, worker.hour, worker.name,
+                                   droplet_id=d.id, size=worker.size, image_id=worker.image_id,
+                                   error_class="unrecorded") for d in found[1:]]
+            gone = not found
+        else:
+            gone = await adopt(cloud, worker, run_scope.campaign_id, strict=True) is None and (
+                await cloud.get(str(worker.droplet_id)) is None)
+    except Exception as error:
+        raise ProbeError(f"could not read the probe's droplets ({type(error).__name__}); "
+                         "nothing changed, run --remove again") from None
+    if gone:
+        worker.status = "absent"  # never created, or already gone
+        return []
+    for record in (worker, *extra):
+        await release(cloud, run_scope, record, audit, sleep)
+    return extra
+
+
 async def recover(cloud: DigitalOcean, folder: Path, *,
                   sleep: ops_api.Sleep = asyncio.sleep) -> dict[str, Any]:
     """`campaign probe --remove <folder>`: remove a probe's worker that its own run left.
@@ -467,24 +520,20 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
                             datetime.fromisoformat(recorded["created_at"]))
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ProbeError(f"no probe record in that folder ({type(error).__name__})") from None
-    if worker.status != "destroyed":
-        try:  # only a listing that answered may say "absent", or mark the droplet our own
-            found = await adopt(cloud, worker, result["probe_id"], strict=True)
-            gone = found is None and (worker.droplet_id is None or await cloud.get(
-                str(worker.droplet_id)) is None)
-        except Exception as error:
-            raise ProbeError(f"could not read the probe's droplets ({type(error).__name__}); "
-                             "nothing changed, run --remove again") from None
-        if gone:
-            worker.status = "absent"  # never created, or already gone
-        else:
-            await release(cloud, probe_scope, worker, audit_path(folder), sleep)
-    result.update(worker=asdict(worker), worker_status=worker.status,
+    # A second droplet with the worker's name (S1r) is kept under `unrecorded` until removed.
+    twins = [DropletRecord(**raw) for raw in result.get("unrecorded", [])]
+    for record in (worker, *twins):
+        twins += await recover_worker(cloud, probe_scope, record, audit_path(folder), sleep)
+    if twins:
+        result["unrecorded"] = [asdict(twin) for twin in twins]
+    status = next((t.status for t in twins if t.status not in ("destroyed", "absent")),
+                  worker.status)  # a twin still alive keeps the hint and the failure
+    result.update(worker=asdict(worker), worker_status=status,
                   recovered_at=timestamp(datetime.now(UTC).timestamp()))
-    if worker.status in ("destroyed", "absent"):
+    if status in ("destroyed", "absent"):
         result.pop("recover", None)
     atomic_json(path, result)
-    return {"probe_id": result["probe_id"], "worker_status": worker.status}
+    return {"probe_id": result["probe_id"], "worker_status": status}
 
 
 async def probe(cloud: DigitalOcean, remotes: Callable[[Path], ProbeRemote],

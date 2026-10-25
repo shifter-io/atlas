@@ -390,3 +390,88 @@ def _probe(args) -> int:
 
 PARSERS.append(_probe_parsers)
 HANDLERS.update(probe=_probe)
+
+
+def parse_pairs(value: str | None) -> dict[str, str]:
+    """`net=value,net=value` (for example `soax=c-2,proxy-cheap=c-2`)."""
+    pairs = [part.strip().split("=", 1) for part in (value or "").split(",") if part.strip()]
+    if any(len(pair) != 2 or not all(pair) for pair in pairs):
+        raise ValueError("expected network=value pairs")
+    return {network: setting for network, setting in pairs}
+
+
+def _shot_parsers(actions) -> None:
+    """SYNC-1: one fixed step per network and region, all started at one time (manager)."""
+    from . import shot
+
+    found = actions.add_parser("shot", help="One synchronized step per network and region")
+    what = found.add_mutually_exclusive_group(required=True)
+    what.add_argument("--root", type=Path, help="a planned campaign uploaded to this manager")
+    what.add_argument("--remove", type=Path, metavar="SHOT_FOLDER",
+                      help="remove the workers a stopped shot left (guarded)")
+    found.add_argument("--networks", help="comma-separated; default: the campaign's networks")
+    found.add_argument("--regions", help="comma-separated; default: the campaign's regions")
+    found.add_argument("--requests", type=int, default=shot.REQUESTS)
+    found.add_argument("--size", default=shot.SIZE)
+    found.add_argument("--size-by-network", help="e.g. soax=c-2,proxy-cheap=c-2")
+    found.add_argument("--country-by-network", help="e.g. proxy-seller=US (default: per region)")
+    found.add_argument("--lead-minutes", type=float, default=shot.LEAD_SECONDS / 60,
+                       help="minutes from the shot's start to the common start time")
+    found.add_argument("--output", type=Path, help="default: <manager>/shots")
+
+
+def _shot(args) -> int:
+    from .collector import MANAGER_ROOT
+    from .contracts import runtime_dir
+    from .do_api import DigitalOcean, file_token
+    from .fanout import OpenSSHRemote
+    from .planspec import PlanError, parse_networks
+    from .probe import ProbeError
+    from .shot import ShotInputs, recover, shot
+
+    secrets = MANAGER_ROOT / ".secrets"
+    regions = tuple(r.strip() for r in (args.regions or "").split(",") if r.strip())
+    try:
+        if len(set(regions)) != len(regions):
+            raise ValueError("--regions must be distinct")
+        inputs = ShotInputs(
+            args.root, args.output or MANAGER_ROOT / "shots",
+            parse_networks(args.networks) if args.networks else (), regions,
+            args.requests, args.size, parse_pairs(args.size_by_network),
+            {n: c.upper() for n, c in parse_pairs(args.country_by_network).items()},
+            args.lead_minutes * 60)
+    except (PlanError, ValueError) as exc:
+        print(f"Not fired: {exc}", file=sys.stderr)
+        return 3
+
+    async def run() -> dict:
+        cancel_on_signals()
+        async with DigitalOcean(file_token(secrets / "do-token")) as cloud:
+            if args.remove:
+                return await recover(cloud, args.remove)
+            return await shot(cloud, lambda folder: OpenSSHRemote(
+                secrets / "worker-key", runtime_dir(folder), 0), inputs)
+
+    try:
+        result = asyncio.run(run())
+    except ProbeError as exc:
+        print(f"Not fired: {exc}", file=sys.stderr)
+        return 3
+    except asyncio.CancelledError:  # stopped outside a shot run, e.g. during --remove
+        print("Interrupted: run `campaign shot --remove` again", file=sys.stderr)
+        return 3
+    print(json.dumps({k: v for k, v in result.items() if k not in ("workers", "cells")}
+                     | {"outcomes": _outcomes(result)}, indent=2))
+    return 0 if result["workers_left"] == 0 and "error" not in result else 3
+
+
+def _outcomes(result: dict) -> dict[str, int]:
+    """How many cells ended in each outcome (the full table is in the shot folder)."""
+    counts: dict[str, int] = {}
+    for cell in result.get("cells", {}).values():
+        counts[cell["outcome"]] = counts.get(cell["outcome"], 0) + 1
+    return counts
+
+
+PARSERS.append(_shot_parsers)
+HANDLERS.update(shot=_shot)

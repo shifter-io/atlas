@@ -138,7 +138,7 @@ def test_step_result_classifies_every_failure_as_a_share_of_completed_requests()
         "concurrency": 2000, "requested": 25_000, "completed": 20_000, "success_pct": 93.8,
         "rate_limited_pct": 2.5, "gateway_5xx_pct": 0.5, "proxy_connect_pct": 2.0,
         "timeout_pct": 1.0, "other_pct": 0.2, "rps": 900.0, "latency_p50_ms": 820,
-        "latency_p95_ms": 2400, "stop_reason": None}
+        "latency_p95_ms": 2400, "unique_ips": 24_000, "stop_reason": None}
     assert not IP.search(json.dumps(found))
     empty = step_result(500, 25_000, summary(0, successes=0) | {"latency_ms": None})
     assert empty["success_pct"] == 0.0 and empty["latency_p50_ms"] is None
@@ -876,3 +876,20 @@ async def test_s1r_a_signal_during_the_create_still_reports_the_worker(tmp_path,
         assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroyed")
     assert len(fake.deleted) == 1
+
+
+async def test_s1r_remove_releases_every_droplet_with_the_name_when_no_id_is_recorded(
+        tmp_path):
+    """SYNC-1 S1r: a record with no id and two droplets with its name never reads absent."""
+    fake = Hidden(3)  # the create's answer was lost and every look missed it
+    inputs, _ = world(tmp_path)
+    folder = inputs.output / (await probed(fake, FakeProbeRemote({}), inputs))["probe_id"]
+    [(rid, first)] = [(i, d) for i, d in fake.droplets.items() if d["name"].startswith("pic-")]
+    fake.add(first["name"], first["tags"], project=None)  # DigitalOcean made one too many
+    async with running(fake) as cloud:
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))[
+            "worker_status"] == "destroyed"
+    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
+    record = json.loads((folder / "probe-result.json").read_text())
+    assert record["worker"]["droplet_id"] == rid and "recover" not in record
+    assert [w["status"] for w in record["unrecorded"]] == ["destroyed"]
