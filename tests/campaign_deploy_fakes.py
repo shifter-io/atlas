@@ -40,6 +40,8 @@ class Shell:
         if command.endswith("manager-provision.sh"):
             code = 0 if self.verdict == "hardened" else 1
             return code, f"apt\nworker-key {WORKER_PUBLIC}\n{self.verdict}\n"
+        if command.startswith("test -d "):  # the base directory exists
+            return 0, "present\n"
         return 0, "shredded\n" if "shred -u" in command else ""
 
     def commands(self):
