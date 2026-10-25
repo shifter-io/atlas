@@ -1,4 +1,8 @@
-# Onboarding country census: strict targeting prevents broader-pool fallback.
+# Onboarding country census without strict targeting (owner decision 2026-10-25). The country
+# is still sent; a country without exits is answered from another country (O1 first run), and
+# the runner's answer classes count such exits like duplicates toward the 50% rule (the
+# country check needs an exit-country lookup on the workers). See
+# docs/onboarding.html#strict-targeting.
 # Never put account credentials in this file.
 schema_version = 1
 provider = "shifter"
@@ -19,7 +23,7 @@ gateway = "auto" # auto, fra, ams, lon, nyc, tor, sgp, blr, syd; port 443
 # region = "california"
 # city = "los_angeles"
 # asn = 7922
-strict = true
+strict = false # Sends no strict flag (Shifter documents only strict-true).
 # session = "example-session"
 # ttl = 2 # Minutes; requires a supplied or generated session
 

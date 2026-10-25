@@ -174,14 +174,27 @@ The first sample needs a subsequent sample to calculate CPU use. Network waiting
 cores idle even when work is correctly distributed; core utilization and throughput must
 be measured together. Injected custom execution adapters remain responsible for their own
 parallelism; all built-in HTTP targets use this process backend.</p></section>
-<section><h2>Strict country targeting for onboarding</h2>
-<p>Use <code>configs/shifter-onboarding.toml</code> for onboarding country campaigns.
-It sets <code>strict = true</code>, preventing Shifter from substituting a broader pool when
-no matching exit is available. Such requests fail and contribute to census termination;
-unsuccessful countries have no observation rows. Every assigned country is still attempted.</p>
-<p>The saved country code remains the requested country, not an independently verified geographic
-claim. Local geolocation databases can disagree with the provider. Each campaign freezes the
-provider configuration checksum, so distribute the exact same strict configuration to all nodes.</p>
+<section id="strict-targeting"><h2>Strict country targeting for onboarding</h2>
+<p>Shifter and Geonode run without strict targeting: <code>configs/shifter-onboarding.toml</code>
+and <code>configs/geonode-onboarding.toml</code>, like both networks' plain run configurations,
+set <code>strict = false</code> (owner decision, 25 October 2026).
+The requested country is still sent. Shifter then sends no strict flag; Geonode sends
+<code>-strict-off</code>. <code>campaign plan</code> refuses a census configuration for either
+network that does not set <code>strict = false</code>.</p>
+<p>A network with no exits in a country either answers from another country (Shifter without
+strict targeting answered American Samoa, Heard Island, Norfolk Island, Niue and others with
+about 99% unique addresses from a broader pool) or answers a no-IP status (Geonode with strict
+targeting answered <code>465</code> on every request). Neither is a real error: with
+<a href="#answer-classes">answer classes</a> an other-country exit and a no-IP status count
+toward the 50% stop rule like a duplicate, never as a unique IP for the country. Telling an
+other-country exit apart needs the exit country of each success, so the run needs an
+exit-country lookup (<code>--mmdb</code>); without one every success counts as in the requested
+country and an empty country does not saturate early. Timeouts, <code>5xx</code>, connect
+refusals that are not rate limits and <code>407</code> stay real errors.</p>
+<p>The saved country code remains the requested country. Other-country exits are judged by the
+local geolocation database, which can disagree with the provider; reports show the
+other-country share so disagreements stay visible. Each campaign freezes the provider
+configuration checksum, so distribute the exact same configuration to all nodes.</p>
 <p>For a single-round calibration, <code>scripts/onboarding-calibration.py</code> runs the normal
 scheduler and stops after the final country of its first round. Later rounds stay pending by
 design. <code>scripts/onboarding-verify-round.py</code> validates and combines that round's files.

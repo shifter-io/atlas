@@ -379,6 +379,76 @@ def test_a_tampered_chunk_is_caught(root):
     assert "shifter ams3 h00: NL: failed verification (ValueError)" in result["issues"]
 
 
+def rows_by_cell(result: dict) -> dict:
+    return {(r["net"], r["region"], r["round"]): r for r in result["rows"]}
+
+
+def test_completeness_splits_answer_classes(root, monkeypatch):
+    """CTRY-1: a round measured with answer classes (RL-1's country fields) shows rate limits,
+    no-IP answers and other-country exits apart from real errors and duplicates."""
+    plain = rows_by_cell(completeness.build(root))["shifter", "ams3", 0]
+    verify = completeness.verify_round
+
+    def classified(path, region, hour):
+        result = verify(path, region, hour)
+        if ("shifter" in path.parts, region, hour) == (True, "ams3", 0):
+            nl = next(c for c in result["countries"] if c["country"] == "NL")
+            nl |= {"rate_limited": 10, "no_inventory": 2, "other_country": 3}
+        return result
+
+    monkeypatch.setattr(completeness, "verify_round", classified)
+    result = completeness.build(root)
+    row = rows_by_cell(result)["shifter", "ams3", 0]
+    assert (row["rate_limited"], row["no_inventory"], row["other_country"]) == (10, 2, 3)
+    assert row["real_errors"] == plain["errors"] - 12 and row["errors"] == plain["errors"]
+    assert row["duplicates"] == plain["duplicates"] == row["observations"] - sum(
+        c["unique_ips"] for c in row["per_country"])
+    nl = next(c for c in row["per_country"] if c["country"] == "NL")
+    assert nl["answered"] == nl["requests"] - 10 and nl["real_errors"] == nl["requests"] - (
+        nl["successes"]) - 12
+    tsv = (root / "completeness" / "per-country.tsv").read_text().splitlines()
+    assert "shifter\tams3\t0\tNL\tcompleted\t" in "\n".join(tsv)
+    line = next(x.split("\t") for x in tsv if x.startswith("shifter\tams3\t0\tNL\t"))
+    assert dict(zip(completeness.COUNTRY_COLUMNS, line, strict=True))["rate_limited"] == "10"
+    tables = (root / "completeness" / "per-hour-tables.md").read_text()
+    section = tables.split("## Answer classes per network and region")[1]
+    ams3 = next(x for x in section.splitlines() if x.startswith("| shifter | ams3 |"))
+    requests = sum(r["requests"] for r in result["rows"]
+                   if r["net"] == "shifter" and r["region"] == "ams3" and r["requests"])
+    assert ams3.split(" | ")[2:6] == [str(requests), "10", str(requests - 10), str(
+        sum(r["real_errors"] for r in result["rows"] if (r["net"], r["region"]) == (
+            "shifter", "ams3") and r["requests"]))]
+
+
+def test_per_country_tsv(root):
+    result = completeness.build(root)
+    lines = (root / "completeness" / "per-country.tsv").read_text().splitlines()
+    assert lines[0].split("\t") == list(completeness.COUNTRY_COLUMNS)
+    entries = [(r, c) for r in result["rows"] for c in r.get("per_country", [])]
+    assert len(lines) == 1 + len(entries) and entries
+    row, country = entries[0]
+    assert lines[1].split("\t")[:7] == [row["net"], row["region"], str(row["round"]),
+                                       country["country"], country["status"],
+                                       country["stop_reason"] or "", str(country["requests"])]
+    assert not IPV4.search("\n".join(lines))
+
+
+def test_old_rounds_have_zero_answer_classes(root):
+    """Rounds measured before the answer classes count 0 rate limits, no-IP and other-country
+    answers; real errors are their errors; the TSV only appends the five columns."""
+    measured = [r for r in completeness.build(root)["rows"] if r["requests"] is not None]
+    assert measured and all(
+        (r["rate_limited"], r["no_inventory"], r["other_country"]) == (0, 0, 0)
+        and r["real_errors"] == r["errors"] for r in measured)
+    assert completeness.COLUMNS == completeness.DATA1_COLUMNS + (
+        "cell", "size", "start_lateness_s", "create_to_ready_s", "overlap", "bytes_up",
+        "bytes_down", "protocol", "rate_limited", "no_inventory", "other_country",
+        "duplicates", "real_errors")
+    old = {"net": "n", "region": "r", "round": 0, "requests": 5, "errors": 2, "cell": "partial",
+           "rate_limited": None, "real_errors": None}
+    assert completeness._mark(old | {"requests": None}) == "partial 0"
+
+
 def test_no_ipv4_in_any_output(root):
     finish_day(root)
     for network in NETWORKS:
@@ -386,7 +456,7 @@ def test_no_ipv4_in_any_output(root):
     completeness.build(root)
     outputs = [*root.glob("completeness/*"), *root.glob("ledger/*/hour.json"),
                *root.glob("networks/*/residential/*/regions/*/*.json")]
-    assert len(outputs) == 3 + 24 + 2 * 2 * 2
+    assert len(outputs) == 4 + 24 + 2 * 2 * 2
     assert not [p.name for p in outputs if IPV4.search(p.read_text())]
 
 
