@@ -18,7 +18,13 @@ from importlib import resources
 from types import MappingProxyType
 from typing import Any
 
-from ..models import NETWORK_PROTOCOLS, NetworkProtocol, ProxyConfig, RequestContext
+from ..models import (
+    NETWORK_PROTOCOLS,
+    AnswerClasses,
+    NetworkProtocol,
+    ProxyConfig,
+    RequestContext,
+)
 
 POLICIES = ("rotate", "gateway", "fixed", "per_request", "per_worker", "per_run")
 GENERATED = ("per_request", "per_worker", "per_run")
@@ -146,6 +152,12 @@ class Grammar:
     # [testing] max_concurrency: the highest in-flight request count the network sustained
     # from one worker (`campaign probe`); campaign plans cap their concurrency at it.
     max_concurrency: int | None = None
+    # [testing] answer classes (answer_classes() below; 429 is implicit on every network):
+    # the network's own rate-limit statuses, whether gateway CONNECT refusals signal its rate
+    # limit, and the statuses it sends when it has no exits in the requested country.
+    rate_limit_statuses: tuple[int, ...] = ()
+    rate_limit_connect: bool = False
+    no_inventory_statuses: tuple[int, ...] = ()
 
     @classmethod
     def parse(cls, data: Mapping[str, Any]) -> Grammar:
@@ -165,7 +177,8 @@ class Grammar:
             "session": {"flag", "mode", "ports", "generate", "length", "no_session_policy",
                         "cycle_flag",
                         "ttl_flag", "default_ttl_seconds"},
-            "testing": {"protocol", "max_concurrency"},
+            "testing": {"protocol", "max_concurrency", "rate_limit_statuses",
+                        "rate_limit_connect", "no_inventory_statuses"},
         }
         for table, keys in tables.items():
             if set(data.get(table, {})) - keys:
@@ -252,13 +265,6 @@ class Grammar:
         ports = dict(gateway["ports"])
         if set(ports) - {"http", "socks5"} or not ports:
             raise ValueError("Grammar ports are keyed by http or socks5")
-        protocol = data.get("testing", {}).get("protocol", "default")
-        if protocol not in NETWORK_PROTOCOLS:
-            raise ValueError("Unknown grammar test protocol")
-        ceiling = data.get("testing", {}).get("max_concurrency")
-        if ceiling is not None and (type(ceiling) is not int
-                                    or not 1 <= ceiling <= MAX_CONCURRENCY):
-            raise ValueError(f"Grammar max_concurrency must be an integer 1-{MAX_CONCURRENCY}")
         return cls(
             id=provider, product=data.get("product", "residential"),
             version=str(data.get("version", "1")), target=cred["flags_in"],
@@ -291,8 +297,37 @@ class Grammar:
             reserved=frozenset(cred.get("reserved", ())) | {
                 flag.key for flag in flags.values() if not flag.preset
             },
-            test_protocol=protocol, max_concurrency=ceiling,
+            **_testing(data.get("testing", {})),
         )
+
+
+def _statuses(testing: Mapping[str, Any], key: str) -> tuple[int, ...]:
+    values = testing.get(key, [])
+    if (not isinstance(values, list) or len(set(values)) != len(values)
+            or any(type(v) is not int or not 400 <= v <= 599 or v == 429 for v in values)):
+        raise ValueError(f"Grammar {key} must be distinct HTTP statuses 400-599 other than 429")
+    return tuple(values)
+
+
+def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
+    """The Grammar fields of the [testing] table: protocol, concurrency and answer classes."""
+    protocol = testing.get("protocol", "default")
+    if protocol not in NETWORK_PROTOCOLS:
+        raise ValueError("Unknown grammar test protocol")
+    ceiling = testing.get("max_concurrency")
+    if ceiling is not None and (type(ceiling) is not int
+                                or not 1 <= ceiling <= MAX_CONCURRENCY):
+        raise ValueError(f"Grammar max_concurrency must be an integer 1-{MAX_CONCURRENCY}")
+    limits, empty = _statuses(testing, "rate_limit_statuses"), _statuses(
+        testing, "no_inventory_statuses")
+    if set(limits) & set(empty):
+        raise ValueError("Grammar rate-limit and no-IP statuses must be disjoint")
+    connect = testing.get("rate_limit_connect", False)
+    if type(connect) is not bool:
+        raise ValueError("Grammar rate_limit_connect must be a boolean")
+    return {"test_protocol": protocol, "max_concurrency": ceiling,
+            "rate_limit_statuses": limits, "rate_limit_connect": connect,
+            "no_inventory_statuses": empty}
 
 
 @cache
@@ -306,6 +341,15 @@ def load_grammar(provider: str) -> Grammar:
     if grammar.id != provider:
         raise ValueError("Provider grammar ID does not match its file name")
     return grammar
+
+
+def answer_classes(provider: str) -> AnswerClasses:
+    """The network's answer classes: 429 plus its grammar's [testing] statuses."""
+    grammar = load_grammar(provider)
+    return AnswerClasses(
+        ("429", *map(str, grammar.rate_limit_statuses),
+         *(("proxy_connect",) if grammar.rate_limit_connect else ())),
+        tuple(map(str, grammar.no_inventory_statuses)))
 
 
 def grammar_ids() -> tuple[str, ...]:

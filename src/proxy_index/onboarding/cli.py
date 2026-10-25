@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import signal
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from ..providers import load_provider
+from ..runner import run
 from .export import export_campaign
 from .files import digest, read_json
 from .manifest import create, load
@@ -65,6 +67,8 @@ def register(commands):
         action.add_argument("--round", type=int, required=True)
     one.add_argument("--provider-config", type=Path, required=True)
     one.add_argument("--credentials-file", type=Path)
+    one.add_argument("--mmdb", type=Path,
+                     help="Local MMDB: other-country exits count like duplicates (rule 4)")
 
     probe = actions.add_parser("probe", help="Single-country census calibration")
     probe.add_argument("--provider-config", type=Path, required=True)
@@ -148,11 +152,15 @@ async def _run(args):
 
 async def _round(args):
     """Exit 0 when the round finished (any provider outcome), 130 when stopped."""
+    from ..enrichment import LocalEnricher
+
     proxies = _proxies(args, load(args.manifest))
     stop = asyncio.Event()
-    with _signals(stop):
+    with _signals(stop), (LocalEnricher(args.mmdb) if args.mmdb else nullcontext()) as enricher:
+        # The round's census runs get the enricher, which turns on the country check.
+        extra = {"run_country": functools.partial(run, enricher=enricher)} if enricher else {}
         result = await execute_round(args.manifest, args.region, args.round,
-                                     proxies.__getitem__, stop=stop)
+                                     proxies.__getitem__, stop=stop, **extra)
     print(json.dumps({key: result[key] for key in ("campaign_id", "region", "round", "status")}))
     return 130 if result["status"] == "stopped" else 0
 

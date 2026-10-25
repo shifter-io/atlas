@@ -34,7 +34,7 @@ PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # and a pulse of the same product, target and country therefore share one pool.
 RUN_LENGTH = ("requests", "target_url", "stop_rule", "min_sample", "stall_seconds",
               "census_rule_version", "census_ratio_basis", "retry_http_469", "processes",
-              "execution_processes", "execution_backend", "worker_pids")
+              "execution_processes", "execution_backend", "worker_pids", "answer_classes")
 BUCKET_KEYS = (
     "bucket_start",
     "completed",
@@ -411,7 +411,9 @@ def ingest(directory, credentials_file, *, batch_id=None):
         summary[name] for name in ("requested", "started", "completed", "successes")
     )
     # A census is unbounded: it requests nothing up front and stops on the unique-IP ratio.
-    attempted = started + summary["not_started"] if requested is None else requested
+    # A bounded run with answer classes also attempted a replacement for each rate limit.
+    replaced = sum((summary.get("rate_limited") or {}).values())
+    attempted = started + summary["not_started"] if requested is None else requested + replaced
     if (
         not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
         or attempted != started + summary["not_started"]
@@ -521,7 +523,8 @@ def ingest(directory, credentials_file, *, batch_id=None):
         ).fetchone()
         if (
             rows != summary["artifacts"]["ips"]["rows"]
-            or observations != (successes if summary["pool_eligible"] else 0)
+            or observations != (successes - (summary.get("other_country") or 0)
+                                if summary["pool_eligible"] else 0)
             or unique != (summary["unique_ips"] or 0)
         ):
             raise ValueError("IP observations do not reconcile with the run")

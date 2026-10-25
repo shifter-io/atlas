@@ -373,3 +373,41 @@ def test_migrated_providers_keep_session_ids_ports_and_ttl_metadata():
     assert lifetime.public()["provider_config"]["effective_ttl_seconds"] == 600
     city = proxy("geonode", parameters={"country": "us", "city": "Los Angeles"})
     assert city.resolve(CONTEXT).username.endswith("country-us-city-losangeles")
+
+
+def test_answer_classes_from_testing_table():
+    from proxy_index.models import AnswerClasses
+    from proxy_index.providers.grammar import answer_classes
+
+    assert answer_classes("geonode") == AnswerClasses(("429", "469"), ("465",))
+    assert answer_classes("dataimpulse") == AnswerClasses(("429", "proxy_connect"), ())
+    assert answer_classes("soax") == AnswerClasses(("429",), ())
+    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data["testing"] = {"rate_limit_statuses": [430, 599], "no_inventory_statuses": [400],
+                       "rate_limit_connect": False}
+    parsed = Grammar.parse(data)
+    assert (parsed.rate_limit_statuses, parsed.no_inventory_statuses) == ((430, 599), (400,))
+    assert parsed.rate_limit_connect is False
+
+
+@pytest.mark.parametrize("testing", [
+    {"rate_limit_statuses": [429]}, {"rate_limit_statuses": [399]},
+    {"rate_limit_statuses": [600]}, {"rate_limit_statuses": [469, 469]},
+    {"rate_limit_statuses": 469}, {"rate_limit_statuses": [True]},
+    {"rate_limit_statuses": ["469"]}, {"no_inventory_statuses": [429]},
+    {"rate_limit_statuses": [465], "no_inventory_statuses": [465]},
+    {"rate_limit_connect": 1}, {"rate_limit_connect": "yes"}, {"rate_limits": [469]},
+])
+def test_testing_table_rejects_bad_answer_classes(testing):
+    data = tomllib.loads((ROOT / "src/proxy_index/providers/grammars/massive.toml").read_text())
+    data["testing"] = testing
+    with pytest.raises(ValueError, match="Grammar|grammar"):
+        Grammar.parse(data)
+
+
+def test_geonode_campaign_concurrency_is_500():
+    from proxy_index.campaign.planspec import network_concurrency
+
+    assert load_grammar("geonode").max_concurrency == 500
+    assert network_concurrency("geonode", 2000) == 500
+    assert network_concurrency("geonode", 250) == 250

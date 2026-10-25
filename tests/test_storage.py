@@ -698,3 +698,35 @@ async def test_unrepresentable_runs_are_rejected(database, tmp_path):
         with pytest.raises(ValueError, match=message):
             ingest(directory, database)
     assert all(value == 0 for value in status(database)["counts"].values())
+
+
+async def test_ingest_reconciles_replacements_and_other_country(database, tmp_path):
+    from proxy_index.models import AnswerClasses, Outcome
+
+    class Answers(FakeTransport):
+        async def execute(self, target, *, context=None):
+            self.count += 1
+            if self.count % 3 == 0:
+                return Outcome(1, error="http_status", status=429)
+            # Every fourth exit is in another country than the requested one.
+            return Outcome(1, ip=f"192.0.2.{self.count}" if self.count % 4 else
+                           f"198.51.100.{self.count}", status=200)
+
+    class Countries:
+        def lookup(self, address):
+            return {"country_code": "US" if address.startswith("192.0.2.") else "DE"}
+
+    sink = JsonSink(tmp_path / "results")
+    summary = await run(RunConfig(
+        "generic_http", ProxyConfig("http", "unused.invalid", 8080), requests=20,
+        concurrency=4, requested_country="US", provider="fixture", product="residential",
+        answer_classes=AnswerClasses(("429",), ())), sink, transport_factory=Answers,
+        enricher=Countries())
+    assert summary.requested == 20 and summary.started == 29 and summary.not_started == 0
+    assert summary.rate_limited == {"429": 9} and summary.other_country > 0
+    assert summary.unique_ips == summary.successes - summary.other_country
+    assert ingest(sink.directory, database)["imported"]
+    metrics = status(database)["cached_scopes"][0]["metrics"]
+    # The attempted total holds each replacement; the scope is the one without answer classes.
+    assert metrics["requested"] == metrics["started"] == metrics["completed"] == 29
+    assert metrics["unique_ips"] == summary.unique_ips

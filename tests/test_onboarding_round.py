@@ -231,7 +231,8 @@ async def test_verify_round_passes_without_ips(ephemeral):
     assert report["complete"] and report["issues"] == [] and report["rows"] == 9
     first = report["countries"][0]
     assert first == {"country": "CA", "status": "completed", "stop_reason": "unique_ratio",
-                     "requests": 4, "successes": 3, "errors": 1, "observations": 3,
+                     "requests": 4, "successes": 3, "errors": 1, "rate_limited": 0,
+                     "no_inventory": 0, "other_country": 0, "observations": 3,
                      "unique_ips": 3, "bytes_up": 300, "bytes_down": 900,
                      "duration_seconds": 30.0}
     assert "203.0.113" not in json.dumps(report)
@@ -416,3 +417,54 @@ def test_onboarding_doc_examples_use_the_strict_configuration():
     text = (ROOT / "docs/onboarding.html").read_text()
     assert "configs/shifter.toml" not in text
     assert text.count("configs/shifter-onboarding.toml") == 7
+
+
+async def test_verify_round_reconciles_other_country_successes(ephemeral):
+    from proxy_index.providers.grammar import answer_classes
+
+    classes, shares = [], {"other_country": 3}
+    scheduled = campaign.moment(campaign.load(ephemeral)["rounds"][13]).timestamp()
+    clock = Clock(scheduled)
+
+    async def run_country(config, sink, *, observation_consumer, wall_clock, **kwargs):
+        classes.append(config.answer_classes)
+        for index in range(2):  # two in-country exits; three more exits were in other countries
+            await observation_consumer(f"203.0.113.{index + 1}", wall_clock())
+        clock.value += 30.0
+        return measurement(2, completed=9, successes=5, total_errors=4, no_inventory=1,
+                           rate_limited={"429": 2, "proxy_connect": 1}, **shares)
+
+    await execute_round(ephemeral, "tor1", 13, Proxy, clock=clock, run_country=run_country)
+    assert classes == [answer_classes("shifter")] * 3  # rule 4 from the network's grammar
+    report = verify_round(ephemeral, "tor1", 13)
+    assert report["complete"] and report["issues"] == [] and report["rows"] == 6
+    first = report["countries"][0]
+    assert (first["rate_limited"], first["no_inventory"], first["other_country"]) == (3, 1, 3)
+    assert first["observations"] == first["successes"] - first["other_country"] == 2
+    shares["other_country"] = 2
+    clock.value = campaign.moment(campaign.load(ephemeral)["rounds"][14]).timestamp()
+    await execute_round(ephemeral, "tor1", 14, Proxy, clock=clock, run_country=run_country)
+    assert "CA: measurements do not reconcile" in verify_round(ephemeral, "tor1", 14)["issues"]
+
+
+def test_round_cli_mmdb_gives_the_census_an_enricher(live, monkeypatch):
+    opened, given = [], []
+
+    class Enricher:
+        def __init__(self, path):
+            opened.append(str(path))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            opened.append("closed")
+
+    async def fake_round(*args, stop, run_country):
+        given.append(run_country.keywords["enricher"])
+        return {"campaign_id": "c", "region": "tor1", "round": 0, "status": "completed"}
+
+    monkeypatch.setattr("proxy_index.enrichment.LocalEnricher", Enricher)
+    monkeypatch.setattr(onboarding_cli, "execute_round", fake_round)
+    assert main(["onboarding", "round", *live.args, *live.config, "--mmdb", "db.mmdb"]) == 0
+    assert opened == ["db.mmdb", "closed"] and isinstance(given[0], Enricher)

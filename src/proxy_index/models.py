@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlsplit
@@ -100,6 +101,46 @@ class ProxyConfig:
 STOP_RULE_FIELDS = ("stop_rule", "min_sample", "stall_seconds")
 CENSUS_RULE_VERSION = 2
 CENSUS_RETRY_469_RULE_VERSION = 3
+CENSUS_ANSWER_CLASSES_RULE_VERSION = 4
+
+
+def census_rule(retry_http_469: bool, answer_classes: bool) -> tuple[int, str]:
+    """The census rule version and the basis of its unique-IP ratio."""
+    if answer_classes:
+        return CENSUS_ANSWER_CLASSES_RULE_VERSION, "completed_requests_excluding_rate_limits"
+    if retry_http_469:
+        return CENSUS_RETRY_469_RULE_VERSION, "completed_requests_excluding_http_469"
+    return CENSUS_RULE_VERSION, "completed_requests"
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerClasses:
+    """A network's answer classes (see answers.py and docs/onboarding.html#answer-classes).
+
+    ``rate_limits`` holds 3-digit HTTP statuses (400-599) and optionally ``"proxy_connect"``
+    (gateway CONNECT refusals); ``no_inventory`` holds the statuses a network sends when it
+    has no exits in the requested country. No duplicates, the sets are disjoint, and 429 is
+    never a no-IP status.
+    """
+
+    rate_limits: tuple[str, ...]
+    no_inventory: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        status = re.compile(r"[45][0-9][0-9]")
+        for name in ("rate_limits", "no_inventory"):
+            values = getattr(self, name)
+            if not isinstance(values, tuple) or len(set(values)) != len(values) or any(
+                    not isinstance(value, str) or (
+                        not status.fullmatch(value)
+                        and not (name == "rate_limits" and value == "proxy_connect"))
+                    for value in values):
+                raise ValueError(f"Answer class {name} must hold distinct HTTP statuses 400-599")
+        if set(self.rate_limits) & set(self.no_inventory) or "429" in self.no_inventory:
+            raise ValueError("Rate-limit and no-IP statuses must be disjoint (429 is a rate limit)")
+
+    def public(self) -> dict[str, list[str]]:
+        return {"rate_limits": list(self.rate_limits), "no_inventory": list(self.no_inventory)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,12 +171,22 @@ class RunConfig:
     # Opt-in census policy: keep 469 attempts in telemetry, but replace them
     # without consuming the unique-ratio sample. Explicit attempt/time caps remain.
     retry_http_469: bool = False
+    # Census rule 4 and count runs (answers.py): rate-limited answers are replaced and never
+    # count toward the goal; no-IP and other-country answers count like duplicates.
+    answer_classes: AnswerClasses | None = None
 
-    def __post_init__(self) -> None:
+    def _check_policies(self) -> None:
         if type(self.retry_http_469) is not bool:
             raise ValueError("retry_http_469 must be a boolean")
         if self.retry_http_469 and self.stop_rule != "unique_ratio":
             raise ValueError("HTTP 469 retries require the unique-ratio census rule")
+        if self.answer_classes is not None and not isinstance(self.answer_classes, AnswerClasses):
+            raise ValueError("answer_classes must be AnswerClasses")
+        if self.answer_classes is not None and self.retry_http_469:
+            raise ValueError("Answer classes replace retry_http_469; set only one")
+
+    def __post_init__(self) -> None:
+        self._check_policies()
         if type(self.processes) is not int or self.processes < 0:
             raise ValueError("processes must be a nonnegative integer (0 means automatic)")
         if self.target_url is not None:
@@ -185,18 +236,17 @@ class RunConfig:
     def public(self) -> dict[str, Any]:
         # The stop-rule fields are omitted for count runs, so they keep the
         # configuration (and storage scope hash) they had before stop rules.
+        version, basis = census_rule(self.retry_http_469, self.answer_classes is not None)
         return {
             name: getattr(self, name)
             for name in self.__dataclass_fields__
-            if name != "proxy"
+            if name not in ("proxy", "answer_classes")
             and not (name == "retry_http_469" and not self.retry_http_469)
             and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
-        } | self.proxy.public() | ({
-            "census_rule_version": (CENSUS_RETRY_469_RULE_VERSION if self.retry_http_469
-                                    else CENSUS_RULE_VERSION),
-            "census_ratio_basis": ("completed_requests_excluding_http_469"
-                                   if self.retry_http_469 else "completed_requests"),
-        } if self.stop_rule == "unique_ratio" else {})
+        } | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {}
+             ) | self.proxy.public() | ({
+                 "census_rule_version": version, "census_ratio_basis": basis,
+             } if self.stop_rule == "unique_ratio" else {})
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,12 +319,19 @@ class RunSummary:
     http_469_responses: int | None = None
     # Completed requests that followed an HTTP-to-HTTPS redirect; 'mixed' networks only.
     redirects: int | None = None
+    # Answer classes (RunConfig.answer_classes; answers.py), all kept in the raw counters too:
+    # completed answers per rate-limit signal, no-IP answers, and successes whose exit was in
+    # another country than the requested one (None unless the country check ran).
+    rate_limited: dict[str, int] | None = None
+    no_inventory: int | None = None
+    other_country: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         summary = asdict(self)
         if summary["outage_started_at"] is None:
             del summary["outage_started_at"]
-        for key in ("census_requests", "http_469_responses", "redirects"):
+        for key in ("census_requests", "http_469_responses", "redirects", "rate_limited",
+                    "no_inventory", "other_country"):
             if summary[key] is None:
                 del summary[key]
         return summary

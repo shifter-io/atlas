@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from .. import __version__
-from ..models import CENSUS_RETRY_469_RULE_VERSION, CENSUS_RULE_VERSION
+from ..models import census_rule
 from ..providers import registry
 from ..regions import REGION_IDS, load_countries, load_regions
 from ..targets import registry as targets
@@ -29,6 +29,8 @@ EPHEMERAL_CONCURRENCY = 2000
 GRACE_HOURS = (1, 168)
 # Ephemeral (version 3) round spacing in minutes; 60 (hourly) is the default and is not written.
 SLOT_MINUTES = (5, 6, 10, 12, 15, 20, 30, 60)
+# Optional run-policy settings; written only when true.
+POLICIES = ("retry_http_469", "answer_classes")
 
 
 def timestamp(value: float | datetime) -> str:
@@ -51,12 +53,14 @@ def slug(value: str) -> str:
 
 def settings(value: dict) -> dict:
     value = {"processes": 0} | value
-    retry = value.get("retry_http_469", False)
-    if type(retry) is not bool:
-        raise ValueError("retry_http_469 must be a boolean")
+    for key in POLICIES:
+        if type(value.get(key, False)) is not bool:
+            raise ValueError(f"{key} must be a boolean")
+    if value.get("retry_http_469") and value.get("answer_classes"):
+        raise ValueError("Answer classes replace retry_http_469; set only one")
     if type(value["processes"]) is not int or value["processes"] < 0:
         raise ValueError("processes must be a nonnegative integer")
-    if set(value) - {"retry_http_469"} != set(DEFAULTS):
+    if set(value) - set(POLICIES) != set(DEFAULTS):
         raise ValueError("Invalid onboarding settings")
     for key in ("concurrency", "min_sample"):
         if type(value[key]) is not int or value[key] <= 0:
@@ -75,6 +79,8 @@ class PlanOptions:
     execution_mode: str = "parallel"
     region_order: list[str] | None = None
     retry_http_469: bool = False
+    # Census rule 4 (answers.py); None turns it on for ephemeral plans without retry_http_469.
+    answer_classes: bool | None = None
     target_url: str | None = None
     run_settings: dict | None = None
     grace_hours: int = 48
@@ -107,7 +113,14 @@ def _run_settings(plan: PlanOptions) -> dict:
         effective["retry_http_469"] = True
     elif effective.get("retry_http_469"):
         raise ValueError("Enable retry_http_469 explicitly")
-    return effective
+    classes = plan.answer_classes
+    if classes is None:
+        classes = plan.execution_mode == "ephemeral" and not plan.retry_http_469
+    if type(classes) is not bool or effective.pop("answer_classes", False):
+        raise ValueError("answer_classes must be a boolean plan option")
+    if classes and plan.execution_mode != "ephemeral":
+        raise ValueError("Answer classes require an ephemeral campaign")
+    return settings(effective | ({"answer_classes": True} if classes else {}))
 
 
 def create(
@@ -138,7 +151,8 @@ def create(
     if (not isinstance(order, list) or len(order) != len(REGION_IDS)
             or set(order) != set(REGION_IDS)):
         raise ValueError("Region order must contain each region exactly once")
-    retry = plan.retry_http_469
+    effective = _run_settings(plan)
+    version, basis = census_rule(plan.retry_http_469, effective.get("answer_classes", False))
     manifest = {
         "schema_version": 1,
         "campaign_id": campaign_id,
@@ -150,12 +164,11 @@ def create(
         "ends_at": timestamp(begins + timedelta(hours=24)),
         "rounds": [timestamp(begins + timedelta(hours=i)) for i in range(24)],
         "regions": {region.slug: list(region.countries) for region in mapping.regions},
-        "settings": _run_settings(plan),
+        "settings": effective,
         "provider_config_sha256": digest(provider_config),
         "framework_version": __version__,
-        "census_rule_version": CENSUS_RETRY_469_RULE_VERSION if retry else CENSUS_RULE_VERSION,
-        "census_ratio_basis": ("completed_requests_excluding_http_469" if retry
-                               else "completed_requests"),
+        "census_rule_version": version,
+        "census_ratio_basis": basis,
     }
     if plan.execution_mode == "sequential":
         manifest.update(schema_version=2, execution_mode="sequential", region_order=order,
@@ -198,9 +211,9 @@ def regional_window(manifest: dict, region: str) -> dict:
 
 
 def validate(data: dict) -> dict:
-    retry = data.get("settings", {}).get("retry_http_469", False)
-    version = CENSUS_RETRY_469_RULE_VERSION if retry else CENSUS_RULE_VERSION
-    basis = "completed_requests_excluding_http_469" if retry else "completed_requests"
+    policy = data.get("settings", {})
+    version, basis = census_rule(policy.get("retry_http_469", False),
+                                 policy.get("answer_classes", False))
     if (
         data.get("schema_version") not in (1, 2, 3)
         or data.get("target") != "generic_http"
@@ -242,6 +255,8 @@ def validate(data: dict) -> dict:
     if len(codes) != len(set(codes)) or set(codes) != set(load_countries()):
         raise ValueError("Each configured country must occur exactly once")
     settings(data["settings"])
+    if data["settings"].get("answer_classes") and data["schema_version"] != 3:
+        raise ValueError("Answer classes require an ephemeral (version 3) manifest")
     # Validate custom destinations using the same constraints as the request runner.
     from ..models import ProxyConfig, RunConfig
 
