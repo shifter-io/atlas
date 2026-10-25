@@ -26,3 +26,6 @@ port_override = true
 mode = "port"
 ports = [10000, 10999]
 no_session_policy = "gateway"
+
+[testing]
+max_concurrency = 2000 # CONC-1 probe 2026-10-25: highest step that passed, one c-4 worker, US, per-request port rotation, 25,000 requests
