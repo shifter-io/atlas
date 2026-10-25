@@ -2,7 +2,9 @@
 
 Each pulled round is checked by `onboarding.rounds.verify_round` (chunk SHA-256, rows, time
 bounds and counter reconciliation); a cell without one is judged from the hour ledger. The
-outputs extend DATA-1's per-hour format with the campaign's columns.
+outputs extend DATA-1's per-hour format with the campaign's columns and the runner's answer
+classes (CTRY-1): rate limits, no-IP answers and other-country exits apart from real errors
+and duplicates, per cell and per country. Rounds measured before the classes count 0.
 """
 
 from __future__ import annotations
@@ -17,11 +19,21 @@ from .contracts import DropletRecord
 from .merge import HOURS, Ledger, cell_status, load_spec, manifest_path, read_ledger
 from .tick import slot_label
 
+# Answer classes: the runner's counts (`rate_limited`, `no_inventory`, `other_country`) and the
+# derived `duplicates` (in-country successes beyond the unique IPs) and `real_errors` (errors
+# that are neither rate limits nor no-IP answers).
+CLASSES = ("rate_limited", "no_inventory", "other_country", "duplicates", "real_errors")
+COUNTRY_COLUMNS = ("net", "region", "round", "country", "status", "stop_reason", "requests",
+                   "rate_limited", "answered", "successes", "unique_ips", "duplicates",
+                   "other_country", "no_inventory", "real_errors")
+CLASS_TOTALS = {"Requests": "requests", "Rate-limited": "rate_limited", "Answered": "answered",
+                "Real errors": "real_errors", "Duplicates": "duplicates",
+                "Other-country": "other_country", "No-IP": "no_inventory"}
 DATA1_COLUMNS = ("net", "region", "round", "scheduled", "started", "finished", "completed",
                  "delay", "duration", "countries", "jobs_ok", "missing", "dup", "badchunk",
                  "no_success", "requests", "errors", "observations")
 COLUMNS = DATA1_COLUMNS + ("cell", "size", "start_lateness_s", "create_to_ready_s", "overlap",
-                           "bytes_up", "bytes_down", "protocol")
+                           "bytes_up", "bytes_down", "protocol", *CLASSES)
 STATUSES = ("complete", "partial", "failed_ours", "uncollected", "running", "pending", "paused")
 MARKS = {"failed_ours": "✗ ours", "uncollected": "⚠ data", "running": "running", "pending": "·",
          "paused": "‖ paused"}
@@ -46,6 +58,20 @@ def _droplet_columns(droplets: list[DropletRecord] | None) -> dict:
             "overlap": last.overlap}
 
 
+def country_classes(country: dict) -> dict:
+    """One `verify_round` country entry's answer classes; 0 for fields it lacks."""
+    limited, missing = country.get("rate_limited", 0), country.get("no_inventory", 0)
+    return {
+        "country": country["country"], "status": country["status"],
+        "stop_reason": country["stop_reason"], "requests": country["requests"],
+        "rate_limited": limited, "answered": country["requests"] - limited,
+        "successes": country["successes"], "unique_ips": country["unique_ips"],
+        "duplicates": country["observations"] - (country["unique_ips"] or 0),
+        "other_country": country.get("other_country", 0), "no_inventory": missing,
+        "real_errors": country["errors"] - limited - missing,
+    }
+
+
 def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, list[str], bool]:
     """Measured columns, issues and completeness of one pulled round."""
     try:
@@ -61,6 +87,7 @@ def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, li
     completed = all(c["status"] == "completed" for c in countries)
     finished = max(j["finished_at"] for j in state["jobs"]) if completed and started else None
     first = min(started, default=None)
+    classes = [country_classes(c) for c in countries]
     return {
         "started": first, "finished": finished, "completed": completed,
         "delay": _seconds(state["scheduled_at"], first), "duration": _seconds(first, finished),
@@ -71,6 +98,7 @@ def _verified(path: Path, region: str, hour: int, state: dict) -> tuple[dict, li
         "no_success": sum(c["stop_reason"] == "no_success" for c in countries),
         **{key: sum(c[key] for c in countries)
            for key in ("requests", "errors", "observations", "bytes_up", "bytes_down")},
+        **{key: sum(c[key] for c in classes) for key in CLASSES}, "per_country": classes,
     }, result["issues"], result["complete"]
 
 
@@ -100,16 +128,23 @@ def _text(value) -> str:
     return "" if value is None else str(value)
 
 
-def render_tsv(rows: list[dict]) -> str:
-    lines = ["\t".join(COLUMNS)]
-    lines += ["\t".join(_text(row[key]) for key in COLUMNS) for row in rows]
+def render_tsv(rows: list[dict], columns: tuple[str, ...] = COLUMNS) -> str:
+    lines = ["\t".join(columns)]
+    lines += ["\t".join(_text(row[key]) for key in columns) for row in rows]
     return "\n".join(lines) + "\n"
+
+
+def country_rows(rows: list[dict]) -> list[dict]:
+    """The `per-country.tsv` rows (`COUNTRY_COLUMNS`): every verified country of every cell."""
+    return [{"net": r["net"], "region": r["region"], "round": r["round"]} | country
+            for r in rows for country in r.get("per_country", [])]
 
 
 def _mark(row: dict) -> str:
     if row["cell"] not in ("complete", "partial"):
         return MARKS[row["cell"]]
-    rate = round(100 * row["errors"] / row["requests"]) if row["requests"] else 0
+    answered = (row["requests"] or 0) - (row["rate_limited"] or 0)
+    rate = round(100 * row["real_errors"] / answered) if answered else 0
     return f"{'✓' if row['cell'] == 'complete' else 'partial'} {rate}"
 
 
@@ -120,8 +155,10 @@ def render_tables(result: dict, labels: list[str] | None = None) -> str:
     lines = [f"# Campaign {result['campaign_id']}: per-hour completeness", "",
              "Cell = that hour's round of one network in one region. ✓ complete and verified, "
              "`partial` some countries interrupted, failed or unverified (each followed by the "
-             "error rate %, errors / requests), ✗ ours = our side failed (create, assign, "
-             "boot, start, or the round failed or ended without closing), ⚠ data = the round "
+             "real-error rate % of answered requests: errors that are neither rate limits nor "
+             "no-IP answers / requests that were not rate-limited), ✗ ours = our side failed "
+             "(create, assign, boot, start, or the round failed or ended without closing), "
+             "⚠ data = the round "
              "ran but its data is not in the campaign root, `running` not finished, · not "
              "launched, ‖ paused = the network was paused for that hour (final, no data).", "",
              "| Network | " + " | ".join(STATUSES) + " | cells |",
@@ -137,7 +174,25 @@ def render_tables(result: dict, labels: list[str] | None = None) -> str:
             marks = [_mark(r) for r in result["rows"] if (r["net"], r["region"]) == (
                 network, region)]
             lines.append(f"| {region} | " + " | ".join(marks) + " |")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + _class_table(result["rows"])) + "\n"
+
+
+def _class_table(rows: list[dict]) -> list[str]:
+    """Answer classes summed over each network and region's measured slots."""
+    lines = ["", "## Answer classes per network and region", "",
+             "Sums over the measured slots. Rate-limited requests are not failures and do not "
+             "count toward a country's sample; duplicates, other-country exits and no-IP "
+             "answers count toward the 50% stop rule; real errors are the rest.", "",
+             "| Network | Region | " + " | ".join(CLASS_TOTALS) + " |",
+             "|---|---|" + "---|" * len(CLASS_TOTALS)]
+    for cell in dict.fromkeys((r["net"], r["region"]) for r in rows):
+        measured = [r for r in rows
+                    if (r["net"], r["region"]) == cell and r["requests"] is not None]
+        sums = {key: sum(r[key] for r in measured) for key in (*CLASSES, "requests")}
+        sums["answered"] = sums["requests"] - sums["rate_limited"]
+        lines.append(f"| {cell[0]} | {cell[1]} | "
+                     + " | ".join(str(sums[key]) for key in CLASS_TOTALS.values()) + " |")
+    return lines
 
 
 def _counts(rows: list[dict]) -> dict:
@@ -148,8 +203,9 @@ def _counts(rows: list[dict]) -> dict:
 def build(root: Path) -> dict:
     """Check every cell of the campaign at `root` and write `completeness/`.
 
-    Writes `completeness.json` (rows, issues, totals per network out of slots × regions and
-    overall), `per-hour-completeness.tsv` (`COLUMNS`, in order) and `per-hour-tables.md`.
+    Writes `completeness.json` (rows with their `per_country` answer classes, issues, totals
+    per network out of slots × regions and overall), `per-hour-completeness.tsv` (`COLUMNS`,
+    in order), `per-country.tsv` (`COUNTRY_COLUMNS`) and `per-hour-tables.md`.
     Reads only; a cell may be pending or running. Returns the JSON document.
     """
     spec = load_spec(root)
@@ -172,6 +228,8 @@ def build(root: Path) -> dict:
     folder = root / "completeness"
     atomic_json(folder / "completeness.json", result)
     atomic_bytes(folder / "per-hour-completeness.tsv", render_tsv(rows).encode())
+    atomic_bytes(folder / "per-country.tsv",
+                 render_tsv(country_rows(rows), COUNTRY_COLUMNS).encode())
     atomic_bytes(folder / "per-hour-tables.md", render_tables(
         result, [slot_label(spec, slot, short=True) for slot in range(spec.hours)]).encode())
     return result

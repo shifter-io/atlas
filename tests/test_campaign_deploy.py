@@ -578,39 +578,60 @@ def test_plan_writes_v3_manifests_and_a_valid_spec(plan_world):
     assert not [m for m, *_ in fake.requests if m != "GET"]
 
 
-def test_plan_binds_the_strict_census_config_the_old_servers_ran(plan_world):
-    """CAMP-1i: without strict targeting Shifter answers a country it has no exits for (AS,
-    HM, NF, NU, UM, AQ) from a broader pool, so the census never saturates (O1: ~2M
-    requests per country, ~99% unique) instead of stopping as no_success at ~3.5k."""
+def with_geonode(inputs):
+    """The plan world with Geonode's credentials beside Shifter's, planned together."""
+    from dataclasses import replace
+
+    with inputs.credentials.open("a") as stream:
+        stream.write(deploy.toml_table("geonode", {"account": "acct_9", "password": "p"}).decode())
+    data = json.loads(inputs.inventory.read_text())
+    inputs.inventory.write_text(json.dumps(data | {"credentials": ["shifter", "geonode"]}))
+    return replace(inputs, networks=("shifter", "geonode"))
+
+
+def test_plan_binds_the_non_strict_census_config(plan_world):
+    """CTRY-1 (owner decision 2026-10-25, reversing CAMP-1i): Shifter and Geonode census
+    configs turn strict targeting off and still send the country; an other-country exit or a
+    no-IP answer counts like a duplicate in the runner's answer classes."""
     fake, inputs = plan_world
+    inputs = with_geonode(inputs)
     root = Path(asyncio.run(run_plan(fake, inputs))["root"])
     spec = CampaignSpec.from_json(spec_path(root).read_text())
-    bound = (root / spec.manifests["shifter"]).parent / "provider.toml"
-    assert manifest.load(bound.parent / "campaign.json")["provider_config_sha256"] == (
-        digest(bound))
-    # The census parameters of the 2026-10-05 servers' provider.toml (sha256 5f07819a...).
-    assert tomllib.loads(bound.read_text())["parameters"] == {"strict": True}
-    proxy = load_provider(bound, parameters={"country": "as"},
-                          credentials_file=inputs.credentials)
-    username = proxy.resolve(RequestContext("run", 0, 0)).username
-    assert username == "customer-acct_9-country-as-strict-true"
+    names = {}
+    for network, country in (("shifter", "as"), ("geonode", "us")):
+        bound = (root / spec.manifests[network]).parent / "provider.toml"
+        assert manifest.load(bound.parent / "campaign.json")["provider_config_sha256"] == (
+            digest(bound))
+        assert tomllib.loads(bound.read_text())["parameters"] == {"strict": False}
+        proxy = load_provider(bound, parameters={"country": country},
+                              credentials_file=inputs.credentials)
+        names[network] = proxy.resolve(RequestContext("run", 0, 0)).username
+    assert names["shifter"] == "customer-acct_9-country-as"
+    assert names["geonode"].endswith("-country-us-strict-off")
 
 
-def test_plan_refuses_a_census_config_without_strict_targeting(plan_world, tmp_path):
+def test_plan_refuses_a_census_config_with_strict_targeting(plan_world, tmp_path):
     from dataclasses import replace
 
     fake, inputs = plan_world
     configs = tmp_path / "configs"
     configs.mkdir()
     shutil.copy(ROOT / "configs/shifter.toml", configs / "shifter.toml")
-    with pytest.raises(PlanError, match="network shifter: .*strict = true"):
-        asyncio.run(run_plan(fake, replace(inputs, configs=configs)))
-    (configs / "shifter-onboarding.toml").write_text(
-        (ROOT / "configs/shifter-onboarding.toml").read_text().replace(
-            "strict = true", "strict = false"))
-    with pytest.raises(PlanError, match="network shifter: .*strict = true"):
-        asyncio.run(run_plan(fake, replace(inputs, configs=configs)))
+    original = (ROOT / "configs/shifter-onboarding.toml").read_text()
+    for line in ("strict = true", "# strict = false"):
+        (configs / "shifter-onboarding.toml").write_text(
+            original.replace("strict = false", line, 1))
+        with pytest.raises(PlanError, match="network shifter: .*must set strict = false"):
+            asyncio.run(run_plan(fake, replace(inputs, configs=configs)))
     assert not inputs.output.exists()
+
+
+@pytest.mark.xfail(strict=True, reason="needs RL-1's geonode max_concurrency")
+def test_plan_includes_geonode_at_500(plan_world):
+    fake, inputs = plan_world
+    result = asyncio.run(run_plan(fake, with_geonode(inputs)))
+    assert result["networks"] == ["shifter", "geonode"]
+    assert result["concurrency_by_network"] == {"shifter": 2000, "geonode": 500}
 
 
 def test_the_census_config_of_a_network_without_a_strict_flag_is_its_run_config():

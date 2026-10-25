@@ -1,4 +1,4 @@
-# Hourly pool census: rotating residential IPs with strict country targeting.
+# Hourly pool census: rotating residential IPs, country sent without strict targeting.
 # Operational notice (2026-10-07): Geonode HTTP 469 is a rate-limit response.
 # Retrying at 2500 concurrency/server against checkip.amazonaws.com still produced
 # 91.45% HTTP 469 across eight bounded probes (including replacement attempts).
@@ -10,6 +10,10 @@
 # Limited networks can use --execution-mode sequential: 24 hours per region.
 # See docs/onboarding.html#geonode-469
 # for implementation availability, limits and the pre-campaign verification gate.
+# strict = false (owner decision 2026-10-25): the country is still sent. With strict on, a
+# country without exits answers 465 on every request; with it off the gateway may answer from
+# another country. The runner's answer classes count both like duplicates toward the 50% rule
+# (docs/onboarding.html#strict-targeting).
 schema_version = 1
 provider = "geonode"
 
@@ -24,4 +28,4 @@ port = 9000
 session_policy = "rotate"
 
 [parameters]
-strict = true # Geonode requires -strict-on. Each scheduled job supplies its own country.
+strict = false # Encodes as -strict-off. Each scheduled job supplies its own country.

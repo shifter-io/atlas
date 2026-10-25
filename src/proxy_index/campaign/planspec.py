@@ -77,7 +77,7 @@ def parse_start(value: str, now: datetime) -> tuple[datetime, bool]:
 
 def census_config(configs: Path, network: str) -> Path:
     """The run config a network's census rounds use: `<net>-onboarding.toml` when the network
-    has one (the strict-targeting config the 2026-10 onboarding servers ran), else `<net>.toml`."""
+    has one, else `<net>.toml`."""
     onboarding = configs / f"{network}-onboarding.toml"
     return onboarding if onboarding.is_file() else configs / f"{network}.toml"
 
@@ -91,20 +91,22 @@ def network_concurrency(network: str, requested: int) -> int:
 
 def check_credentials(inputs: PlanInputs) -> None:
     """Each network's census config names it, loads with its private credentials and, when
-    the provider can fall back to a broader pool, turns on strict country targeting."""
+    the provider has a strict-targeting flag, turns it off (CTRY-1, owner decision 2026-10-25,
+    reversing CAMP-1i): the country is still sent, and an answer from another country or a
+    no-IP status counts like a duplicate in the runner's answer classes."""
     for network in inputs.networks:
         config = census_config(inputs.configs, network)
         try:
             with config.open("rb") as stream:
-                provider = tomllib.load(stream).get("provider")
-            if provider != network:
+                data = tomllib.load(stream)
+            if data.get("provider") != network:
                 raise ValueError("config names another provider")
-            proxy = load_provider(config, credentials_file=inputs.credentials)
-            parameters = proxy.public()["provider_config"]["parameters"]
-            if "strict" in load_grammar(network).flags and parameters.get("strict") is not True:
-                # Without it a country with no exits is answered from a broader pool, so its
-                # census never saturates instead of stopping as no_success.
-                raise ValueError(f"{config.name} must set strict = true")
+            load_provider(config, credentials_file=inputs.credentials)
+            # Read from the file: a grammar may drop a false flag it does not render (Shifter).
+            strict = (data.get("parameters") or {}).get("strict")
+            if "strict" in load_grammar(network).flags and strict is not False:
+                # Explicit, so a census never runs on a provider default.
+                raise ValueError(f"{config.name} must set strict = false")
         except (OSError, ValueError) as error:
             raise PlanError(f"network {network}: {type(error).__name__}: {error}") from None
 

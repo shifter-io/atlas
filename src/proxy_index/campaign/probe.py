@@ -116,21 +116,44 @@ class ProbeInputs:
 
 def step_result(concurrency: int, requested: int, summary: dict[str, Any]) -> dict[str, Any]:
     """One run's counts as shares of its completed requests (a CONNECT answered 429 or 5xx is
-    counted under its status and under connect errors), throughput and success latency."""
+    counted under its status and under connect errors), throughput and success latency.
+
+    With the runner's answer classes (`--answer-classes`) the rate limits are the summary's
+    `rate_limited` signals (CONNECT refusals among them leave `proxy_connect`) and its no-IP
+    answers leave `other`; `answered` excludes the rate limits, and the real-error share is of
+    answered requests. A summary without those fields gives the shares it always gave."""
     done, statuses, errors = summary["completed"], summary["status_codes"], summary["errors"]
-    classes = {"rate_limited": sum(statuses.get(s, 0) for s in RATE_STATUSES),
+    limited = summary.get("rate_limited")
+    classes = {"rate_limited": sum(limited.values()) if limited is not None else
+               sum(statuses.get(s, 0) for s in RATE_STATUSES),
                "gateway_5xx": sum(statuses.get(s, 0) for s in GATEWAY_STATUSES),
-               "proxy_connect": sum(errors.get(e, 0) for e in CONNECT_ERRORS),
-               "timeout": errors.get("timeout", 0)}
+               "proxy_connect": sum(errors.get(e, 0) for e in CONNECT_ERRORS)
+               - (limited or {}).get("proxy_connect", 0),
+               "timeout": errors.get("timeout", 0),
+               "no_inventory": summary.get("no_inventory") or 0}
     classes["other"] = max(0, summary["total_errors"] - sum(classes.values()))
     share = (lambda n: round(100.0 * n / done, 3)) if done else (lambda n: 0.0)
+    answered = done - classes["rate_limited"] if limited is not None else done
     latency = summary.get("latency_ms") or {}
     return {"concurrency": concurrency, "requested": requested, "completed": done,
             "success_pct": share(summary["successes"]),
             **{f"{name}_pct": share(count) for name, count in classes.items()},
             "rps": round(summary["requests_per_second"], 1),
             "latency_p50_ms": latency.get("p50"), "latency_p95_ms": latency.get("p95"),
-            "unique_ips": summary.get("unique_ips"), "stop_reason": summary.get("stop_reason")}
+            "unique_ips": summary.get("unique_ips"), "stop_reason": summary.get("stop_reason"),
+            **answer_shares(summary, classes, answered, share)}
+
+
+def answer_shares(summary: dict[str, Any], classes: dict[str, int], answered: int,
+                  share: Callable[[int], float]) -> dict[str, Any]:
+    """The answer-class keys of `step_result`; None where the summary lacks their counts."""
+    other, unique = summary.get("other_country"), summary.get("unique_ips")
+    real = summary["total_errors"] - classes["rate_limited"] - classes["no_inventory"]
+    return {"answered": answered,
+            "other_country_pct": None if other is None else share(other),
+            "duplicates_pct": None if unique is None else share(
+                max(0, summary["successes"] - (other or 0) - unique)),
+            "real_error_pct": round(100.0 * max(0, real) / answered, 3) if answered else 0.0}
 
 
 def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
@@ -138,7 +161,7 @@ def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
     if step.get("run_failed"):
         return ["run_failed"]
     found = []
-    if step["completed"] < COMPLETE_SHARE * step["requested"]:
+    if step.get("answered", step["completed"]) < COMPLETE_SHARE * step["requested"]:
         found.append("incomplete")
     if step["rate_limited_pct"] > RATE_LIMIT_PCT:
         found.append("rate_limited")
@@ -169,7 +192,7 @@ def run_command(network: str, concurrency: int, requests: int, country: str,
     return ["sh", "-c", 'ulimit -n 65536 && exec "$0" "$@"', f"{WORKER_ROOT}/venv/bin/proxy-index",
             "run", "--target", "generic_http", "--requests", str(requests),
             "--concurrency", str(concurrency), "--timeout", str(TIMEOUT_SECONDS),
-            "--provider-config", f"{probe}/{network}.toml",
+            "--answer-classes", "--provider-config", f"{probe}/{network}.toml",
             "--credentials-file", f"{secret}/{network}.toml",
             *parameters, "--provider", network,
             "--country", country.lower(), "--location", region,
@@ -221,6 +244,17 @@ async def set_up(remote: ProbeRemote, droplet: Droplet, data: bytes,
         raise ProbeError("probe setup did not finish")
 
 
+# The answer-class columns of the probe and shot tables (from `step_result`).
+CLASS_COLUMNS = {"No-IP %": "no_inventory_pct", "Other-country %": "other_country_pct",
+                 "Duplicates %": "duplicates_pct", "Real errors % (answered)": "real_error_pct"}
+CLASS_HEADER = " | ".join(CLASS_COLUMNS)
+
+
+def class_cells(step: dict[str, Any]) -> list[Any]:
+    """A step's answer-class cells; "-" where it lacks one (a result written before them)."""
+    return ["-" if step.get(key) is None else step[key] for key in CLASS_COLUMNS.values()]
+
+
 def markdown(result: dict[str, Any]) -> str:
     """The owner's table: one row per step, the maximum and the grammar line per network."""
     lines = [f"# Concurrency probe {result['probe_id']}", "",
@@ -232,16 +266,16 @@ def markdown(result: dict[str, Any]) -> str:
         # A verdict (the floor also fails, or no maximum) replaces the grammar line.
         line = verdict or f"`[testing] max_concurrency = {best}`"
         lines.append(f"| {network} | {best or '-'} | {line} |")
-    lines += ["", "| Network | Concurrency | Completed | Success % | 429 % | 5xx % | Connect % "
-              "| Timeout % | Other % | RPS | p50 ms | p95 ms | Step down |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    lines += ["", "| Network | Concurrency | Completed | Success % | Rate-limited % | 5xx % "
+              f"| Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms | {CLASS_HEADER} "
+              "| Step down |", "|" + "---|" * 17]
     for network, found in result["networks"].items():
         for s in found["steps"]:
             cells = [s.get(k, "-") for k in (
                 "concurrency", "completed", "success_pct", "rate_limited_pct",
                 "gateway_5xx_pct", "proxy_connect_pct", "timeout_pct", "other_pct", "rps",
                 "latency_p50_ms", "latency_p95_ms")]
-            lines.append("| " + " | ".join(map(str, [network, *cells, ", ".join(
+            lines.append("| " + " | ".join(map(str, [network, *cells, *class_cells(s), ", ".join(
                 s.get("step_down", [])) or "-"])) + " |")
     return "\n".join(lines) + "\n"
 

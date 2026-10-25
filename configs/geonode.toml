@@ -10,6 +10,10 @@
 # Limited networks can use --execution-mode sequential: 24 hours per region.
 # See docs/onboarding.html#geonode-469
 # for implementation availability, limits and the pre-campaign verification gate.
+# strict = false (owner decision 2026-10-25): the country is still sent. With strict on, a
+# country without exits answers 465 on every request; with it off the gateway may answer from
+# another country. The runner's answer classes count both like duplicates toward the 50% rule
+# (docs/onboarding.html#strict-targeting).
 schema_version = 1
 provider = "geonode"
 
@@ -24,7 +28,7 @@ port = 10000 # Supplied sticky endpoint; rotating HTTP uses 9000.
 # session_policy = "per_request" # gateway, rotate, fixed, per_request, per_worker, per_run
 
 [parameters]
-strict = true # Encodes as -strict-on; the live gateway rejects bare -strict.
+strict = false # Encodes as -strict-off; the live gateway rejects bare -strict.
 # country = "us"
 # region = "california" # Sent as state-; exact provider token; requires country.
 # city = "losangeles" # Exact provider token; cannot combine with state.

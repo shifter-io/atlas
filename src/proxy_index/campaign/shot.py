@@ -46,11 +46,13 @@ from .fanout import READY_POLL_SECONDS, RemoteError
 from .launch import CREATE_RETRY_SECONDS, WorkerInputs
 from .planspec import network_concurrency
 from .probe import (
+    CLASS_HEADER,
     REQUESTS,
     SIZE,
     STEP_SECONDS,
     ProbeError,
     ProbeRemote,
+    class_cells,
     network_problems,
     payload,
     reasons,
@@ -115,16 +117,16 @@ def markdown(result: dict[str, Any]) -> str:
              f"{result['requests']} requests per worker, one step, started at "
              f"{result['start_at']}.", "",
              "| Network | Region | Country | Size | Concurrency | Outcome | Completed | Success % "
-             "| 429 % | 5xx % | Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms "
-             "| Unique IPs | Start lag s | Step down |",
-             "|" + "---|" * 19]
+             "| Rate-limited % | 5xx % | Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms "
+             f"| Unique IPs | {CLASS_HEADER} | Start lag s | Step down |",
+             "|" + "---|" * 23]
     for key, cell in result["cells"].items():
         step = cell.get("step") or {}
         cells = [*key.split("/"), cell["country"], cell["size"], cell["concurrency"],
                  cell["outcome"], *(step.get(k, "-") for k in (
                      "completed", "success_pct", "rate_limited_pct", "gateway_5xx_pct",
                      "proxy_connect_pct", "timeout_pct", "other_pct", "rps", "latency_p50_ms",
-                     "latency_p95_ms", "unique_ips")),
+                     "latency_p95_ms", "unique_ips")), *class_cells(step),
                  cell.get("start_lag_seconds", "-"), ", ".join(cell.get("step_down", [])) or "-"]
         lines.append("| " + " | ".join(map(str, cells)) + " |")
     return "\n".join(lines) + "\n"

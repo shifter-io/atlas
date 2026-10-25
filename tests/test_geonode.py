@@ -80,11 +80,11 @@ def test_spawn_safe_sessions_and_redaction(policy, distinct):
 
 def test_configs_and_future_campaign_preserve_all_hourly_country_jobs(tmp_path):
     p = load_provider(ROOT / "configs/geonode.toml", environ=ENV, parameters={"country": "us"})
-    assert p.port == 10000 and p.parameters["strict"] is True
+    assert p.port == 10000 and p.parameters["strict"] is False
     config = ROOT / "configs/geonode-onboarding.toml"
     rotating = load_provider(config, environ=ENV, parameters={"country": "de"})
     assert rotating.port == 9000 and rotating.session_policy == "rotate"
-    assert rotating.resolve(CONTEXT).username.endswith("country-de-strict-on")
+    assert rotating.resolve(CONTEXT).username.endswith("country-de-strict-off")
     start = datetime(2027, 1, 1, tzinfo=UTC)
     path = campaign.create(config, "residential", campaign.timestamp(start), tmp_path,
                            now=start - timedelta(hours=1))

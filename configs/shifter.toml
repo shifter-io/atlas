@@ -1,5 +1,8 @@
 # Shifter Residential. Never put account credentials in this file.
 # Credential grammar: src/proxy_index/providers/grammars/shifter.toml
+# strict = false (owner decision 2026-10-25): the country is still sent; a country without
+# exits is answered from another country, which the runner's answer classes count like a
+# duplicate (docs/onboarding.html#strict-targeting).
 schema_version = 1
 provider = "shifter"
 
@@ -19,7 +22,7 @@ gateway = "auto" # auto, fra, ams, lon, nyc, tor, sgp, blr, syd; port 443
 # region = "california"
 # city = "los_angeles"
 # asn = 7922
-# strict = true
+strict = false # Sends no strict flag (Shifter documents only strict-true).
 # session = "example-session"
 # ttl = 2 # Minutes; requires a supplied or generated session
 
