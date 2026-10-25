@@ -408,14 +408,12 @@ def ingest(directory, credentials_file, *, batch_id=None):
     if summary["schema_version"] != "1":
         raise ValueError("Unsupported measurement schema")
     requested, started, completed, successes = (
-        summary[name] for name in ("requested", "started", "completed", "successes")
-    )
-    # A census is unbounded: it requests nothing up front and stops on the unique-IP ratio.
-    # A bounded run with answer classes also attempted a replacement for each rate limit.
-    replaced = sum((summary.get("rate_limited") or {}).values())
-    attempted = started + summary["not_started"] if requested is None else requested + replaced
-    if (
-        not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
+        summary[name] for name in ("requested", "started", "completed", "successes"))
+    # A census is unbounded; a bounded run also attempted one replacement per rate limit.
+    attempted = (started + summary["not_started"] if requested is None
+                 else requested + sum(summary.get("rate_limited", {}).values()))
+    in_country = successes - summary.get("other_country", 0)  # other-country exits: no rows
+    if (not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
         or attempted != started + summary["not_started"]
         or started != completed + summary["cancelled"]
         or completed != successes + summary["total_errors"]
@@ -523,8 +521,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
         ).fetchone()
         if (
             rows != summary["artifacts"]["ips"]["rows"]
-            or observations != (successes - (summary.get("other_country") or 0)
-                                if summary["pool_eligible"] else 0)
+            or observations != (in_country if summary["pool_eligible"] else 0)
             or unique != (summary["unique_ips"] or 0)
         ):
             raise ValueError("IP observations do not reconcile with the run")
