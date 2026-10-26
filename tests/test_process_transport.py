@@ -102,23 +102,58 @@ async def test_stop_and_deadline_cancel_all_processes(gateway, tmp_path, operato
     proxy, state = gateway
     state["delay"] = .5
     stop = asyncio.Event()
+    # Spawning the workers can outlast any fixed deadline under load. The deadline
+    # passes only once six requests are in flight: the run's wall clock jumps then.
+    skew = [0]
 
     async def cancel():
         await state["six_started"].wait()
-        stop.set()
+        if operator:
+            stop.set()
+        else:
+            skew[0] = 3600
 
-    task = asyncio.create_task(cancel()) if operator else None
+    task = asyncio.create_task(cancel())
     result = await run(
         RunConfig("generic_http", proxy, requests=1000, concurrency=6, processes=2),
         JsonSink(tmp_path), stop=stop,
-        deadline=None if operator else time.time() + 1,
+        deadline=None if operator else time.time() + 3600,
+        wall_clock=lambda: time.time() + skew[0],
     )
-    if task:
-        await task
+    await task
     assert result.status == "cancelled"
     assert result.stop_reason == ("operator" if operator else "deadline")
     assert result.cancelled > 0
     gone(result.config["worker_pids"])
+
+
+class HangingTransport:
+    def __init__(self, config):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        pass
+
+    async def execute(self, target, *, context):
+        await asyncio.sleep(3600)
+
+
+async def test_workers_enforce_the_deadline_themselves():
+    config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1),
+                       concurrency=2, processes=2)
+    target = registry.get("generic_http")
+    # Spawn time decides whether a worker finds the deadline passed or times the
+    # request out in flight; both answer "expired", which cancels the request.
+    async with ProcessTransport(config, target, factory=HangingTransport,
+                                deadline=time.perf_counter() + .5) as transport:
+        pids = list(transport.pids)
+        for index in range(2):
+            with pytest.raises(asyncio.CancelledError):
+                await transport.execute(target, context=RequestContext("hang", index, index))
+    gone(pids)
 
 
 class CPUTransport:
