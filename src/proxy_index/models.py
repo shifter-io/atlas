@@ -325,6 +325,9 @@ class RunSummary:
     rate_limited: dict[str, int] | None = None
     no_inventory: int | None = None
     other_country: int | None = None
+    # Mean success latency (Histogram.mean); None with no successes. Summaries written
+    # before this field existed lack it: readers treat a missing key as unknown.
+    latency_mean_ms: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         summary = asdict(self)

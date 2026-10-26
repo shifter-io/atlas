@@ -364,6 +364,7 @@ async def run(
         requests_per_second=totals.completed / elapsed if elapsed else 0,
         unique_ips=len(unique) if target.pool_eligible else None,
         pool_eligible=target.pool_eligible, latency_ms=totals.histogram.percentiles(),
+        latency_mean_ms=totals.histogram.mean(),
         latency_histogram=totals.histogram.export(), response_body_bytes=totals.body_bytes,
         buckets=[{"bucket_start": iso(key), **value.export()}
                  for key, value in sorted(buckets.items())],

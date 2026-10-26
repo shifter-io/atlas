@@ -256,6 +256,27 @@ def _steps(bins):
     return [b - a for a, b in zip([0, *ms], ms, strict=False)], [n for _, n in bins]
 
 
+def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
+    """Add one run to a scope's cached metrics; histogram is the merged lifetime one."""
+    for name in ("requested", "started", "completed", "successes", "total_errors", "cancelled",
+                 "not_started", "response_body_bytes", "duration_seconds"):
+        value = attempted if name == "requested" else summary[name]
+        metrics[name] = metrics.get(name, 0) + value
+    metrics["runs"] = metrics.get("runs", 0) + 1
+    metrics["unique_ips"] = (
+        metrics.get("unique_ips", 0) + new_ips if summary["pool_eligible"] else None
+    )
+    for name in ("errors", "status_codes"):
+        counts = Counter(metrics.get(name, {}))
+        counts.update(summary[name])
+        metrics[name] = dict(counts)
+    metrics["latency_ms"] = histogram.percentiles()
+    metrics["latency_mean_ms"] = histogram.mean()
+    metrics["success_rate"] = (
+        metrics["successes"] / metrics["completed"] if metrics["completed"] else None
+    )
+
+
 def partition(conn, table, moment):
     """Create the monthly partition of a range-partitioned table that holds this UTC moment.
 
@@ -657,33 +678,9 @@ def ingest(directory, credentials_file, *, batch_id=None):
                 "UPDATE pool_stats SET unique_ips=unique_ips+%s WHERE pool_id=%s",
                 (pool_new, pool_id),
             )
-            for name in (
-                "requested",
-                "started",
-                "completed",
-                "successes",
-                "total_errors",
-                "cancelled",
-                "not_started",
-                "response_body_bytes",
-                "duration_seconds",
-            ):
-                value = attempted if name == "requested" else summary[name]
-                metrics[name] = metrics.get(name, 0) + value
-            metrics["runs"] = metrics.get("runs", 0) + 1
-            metrics["unique_ips"] = (
-                metrics.get("unique_ips", 0) + new_ips if summary["pool_eligible"] else None
-            )
-            for name in ("errors", "status_codes"):
-                counts = Counter(metrics.get(name, {}))
-                counts.update(summary[name])
-                metrics[name] = dict(counts)
             lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
             histogram.merge(Histogram(Counter(dict(lifetime))))
-            metrics["latency_ms"] = histogram.percentiles()
-            metrics["success_rate"] = (
-                metrics["successes"] / metrics["completed"] if metrics["completed"] else None
-            )
+            _add_run_metrics(metrics, summary, attempted, new_ips, histogram)
             conn.execute(
                 "UPDATE scope_stats SET metrics=%s,histogram_steps=%s,histogram_counts=%s,"
                 "updated_at=now() WHERE scope_id=%s",

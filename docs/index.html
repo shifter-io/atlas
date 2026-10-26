@@ -67,7 +67,7 @@ print(summary.to_dict())</pre>
 
 <section id="contract"><h2>3. Result contract</h2>
 <p>Each invocation creates a unique run directory. <code>summary.json</code> is written last and serves as the completion marker. Interrupted or failed runs are explicitly marked; a directory without a summary is incomplete.</p>
-<div class="grid"><div><h3>summary.json</h3><p>Schema/framework/target versions; sanitized configuration; UTC start/end; requested, started, completed, cancelled and not-started counts; successes, errors by category, HTTP statuses, body bytes, throughput, latency percentiles and exact HTTP unique IPs. Includes five-minute counters/histograms and the IP file checksum/row count.</p></div>
+<div class="grid"><div><h3>summary.json</h3><p>Schema/framework/target versions; sanitized configuration; UTC start/end; requested, started, completed, cancelled and not-started counts; successes, errors by category, HTTP statuses, body bytes, throughput, latency percentiles (<code>latency_ms</code>: p50, p90, p95, p99), mean success latency (<code>latency_mean_ms</code>, from the 1 ms histogram bins, to 0.1 ms; null with no successes; absent from summaries written before it existed, which readers treat as unknown) and exact HTTP unique IPs. Includes five-minute counters/histograms and the IP file checksum/row count.</p></div>
 <div><h3>ips.jsonl.gz</h3><p>One row per run × five-minute UTC bucket × normalized IP. Each row contains <code>schema_version</code>, <code>run_id</code>, <code>bucket_start</code>, <code>ip</code>, <code>count</code>, <code>first_seen</code> and <code>last_seen</code>. HTTPS produces an empty IP file and null <code>unique_ips</code>.</p></div></div>
 <h3>Definitions that downstream consumers must preserve</h3>
 <ul>

@@ -1,4 +1,5 @@
 import math
+from collections import Counter
 
 import pytest
 
@@ -47,6 +48,18 @@ def test_histogram_merge_and_nulls():
     assert left.export() == together.export()
     assert left.percentiles() == {"p50": 50, "p90": 90, "p95": 95, "p99": 99}
     assert bucket_of(601.1) == 600
+
+
+def test_histogram_mean_over_bins_and_merge():
+    assert Histogram().mean() is None
+    left, right = Histogram(), Histogram()
+    for value in (9.2, 10, 10.5):  # bins 10, 10, 11
+        left.add(value)
+    assert left.mean() == 10.3
+    right.add(400)
+    left.merge(right)
+    assert left.mean() == 107.8  # (10 + 10 + 11 + 400) / 4 = 107.75
+    assert Histogram(Counter({1: 2, 2: 1})).mean() == 1.3
 
 
 @pytest.mark.parametrize("key,value", [
