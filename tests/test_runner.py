@@ -25,6 +25,7 @@ async def test_summary_artifacts_and_exact_ip_counts(tmp_path):
     assert result.completed == result.started == result.successes == 10000
     assert result.unique_ips == 1
     assert result.latency_ms == dict.fromkeys(("p50", "p90", "p95", "p99"), 11)
+    assert result.latency_mean_ms == 11
     assert result.cancelled == result.not_started == result.total_errors == 0
     saved = json.loads((sink.directory / "summary.json").read_text())
     # JSON converts tuples in sparse histogram bins to arrays.
@@ -49,6 +50,7 @@ async def test_failed_requests_are_not_in_latency_or_ips(tmp_path):
     assert result.errors == {"timeout": 5}
     assert result.success_rate == .5
     assert result.latency_ms["p99"] == 2
+    assert result.latency_mean_ms == 2
     assert result.unique_ips == 1
 
 
@@ -510,7 +512,9 @@ async def test_summary_keeps_old_keys_and_adds_counters(tmp_path):
     sink = JsonSink(tmp_path)
     result = await run(config(requests=12, concurrency=1), sink, transport_factory=Mixed)
     saved = json.loads((sink.directory / "summary.json").read_text())
-    assert OLD_SUMMARY_KEYS | NEW_COUNTERS | {"stop_reason"} == set(saved)
+    assert OLD_SUMMARY_KEYS | NEW_COUNTERS | {"stop_reason", "latency_mean_ms"} == set(saved)
+    assert set(saved["latency_ms"]) == {"p50", "p90", "p95", "p99"}
+    assert saved["latency_mean_ms"] == 1
     assert set(saved["buckets"][0]) == OLD_BUCKET_KEYS | NEW_COUNTERS
     assert {k: saved[k] for k in NEW_COUNTERS} == {
         "challenges": 2, "blocks": 2, "timeouts": 2, "proxy_errors": 2,

@@ -57,6 +57,16 @@ class Histogram:
                     break
         return result
 
+    def mean(self) -> float | None:
+        """Mean latency in ms over the bins, rounded to 0.1 ms; None when empty.
+
+        Each bin is a 1 ms ceiling, so the result is at most 1 ms above the true mean.
+        """
+        total = self.counts.total()
+        if not total:
+            return None
+        return round(sum(value * count for value, count in self.counts.items()) / total, 1)
+
     def export(self) -> dict[str, Any]:
         return {"format": "ceil_ms_v1", "bins": sorted(self.counts.items())}
 

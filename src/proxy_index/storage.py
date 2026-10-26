@@ -681,6 +681,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
             lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
             histogram.merge(Histogram(Counter(dict(lifetime))))
             metrics["latency_ms"] = histogram.percentiles()
+            metrics["latency_mean_ms"] = histogram.mean()
             metrics["success_rate"] = (
                 metrics["successes"] / metrics["completed"] if metrics["completed"] else None
             )

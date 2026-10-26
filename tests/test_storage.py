@@ -141,6 +141,7 @@ async def test_import_history_cache_enrichment_and_replay(database, tmp_path):
     metrics = saved["cached_scopes"][0]["metrics"]
     assert metrics["runs"] == 2 and metrics["completed"] == metrics["successes"] == 5
     assert metrics["unique_ips"] == 1 and metrics["latency_ms"]["p99"] == 11
+    assert metrics["latency_mean_ms"] == 11
     with connect(database) as conn:
         assert conn.execute("SELECT country_counts FROM run_enrichments").fetchone()[0] == {
             "US": {"requests": 3, "unique_ips": 1}
