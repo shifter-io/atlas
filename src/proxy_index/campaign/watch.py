@@ -47,7 +47,8 @@ def utc_now() -> datetime:
 
 
 def ssh_fetch(inventory: dict, offset: int, seen: dict[str, str]) -> dict:
-    """One SSH call to the manager with the Mac key (key-only, known host required)."""
+    """One SSH call to the manager with the Mac key (key-only, known host required).
+    `known_hosts` must be the resolved path (`run_watch` resolves it beside the inventory)."""
     root = inventory.get("campaign_root") or (
         f"/opt/proxy-index-campaign/campaigns/{inventory['campaign_id']}")
     command = ["ssh", "-i", inventory["identity"], "-o", "BatchMode=yes",

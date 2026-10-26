@@ -257,7 +257,7 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
     save(path, inventory, account=job.account, project_id=project_id, mac_key_id=mac_key_id,
          manager_size=size, user="root",
          identity=str(job.mac_key), identity_file=str(job.mac_key),
-         known_hosts=str(path.with_name("campaign-manager.known_hosts")),
+         known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
          campaigns_root=f"{BASE}/campaigns")
     manager = await _ensure_manager(cloud, job, inventory, now, sleep)
     scope = manager_scope(inventory)

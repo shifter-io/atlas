@@ -117,3 +117,23 @@ def test_the_watch_uses_the_record_beside_the_inventory(checkout, recorded, monk
     io = watch.WatchIO(notify=lambda _text: None)
     watch.run_watch(recorded, checkout / "STATUS.md", checkout / "traffic", io=io, iterations=1)
     assert options(seen) == {own(checkout)}
+
+
+async def test_two_inventories_in_one_folder_keep_their_own_host_key_files(tmp_path, monkeypatch):
+    """F1: each inventory records `<stem>.known_hosts`, so retiring one manager never unlinks
+    the other's pinned key; the default inventory keeps `campaign-manager.known_hosts`."""
+    from dataclasses import replace
+
+    fast_assign(monkeypatch)
+    fake, first = Fake(), make_job(tmp_path)
+    second = replace(first, inventory=first.inventory.with_name("campaign-manager-b.json"))
+    for job in (first, second):
+        await run_deploy(fake, job)
+    files = [deploy.known_hosts(job.inventory, json.loads(job.inventory.read_text()))
+             for job in (first, second)]
+    assert [f.name for f in files] == ["campaign-manager.known_hosts",
+                                       "campaign-manager-b.known_hosts"]
+    for file in files:
+        file.write_text("pinned host key\n")
+    deploy._retire(second.inventory, json.loads(second.inventory.read_text()), {})
+    assert files[0].exists() and not files[1].exists()
