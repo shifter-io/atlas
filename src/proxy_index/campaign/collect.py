@@ -19,6 +19,7 @@ from pathlib import Path, PurePosixPath
 
 from ..onboarding.files import atomic_json, digest, private_dir, read_json
 from .contracts import short_id
+from .hostkeys import known_hosts, known_hosts_option
 
 MANIFEST = "ARCHIVE-MANIFEST.sha256"
 REPORT = "collect-report.json"
@@ -63,15 +64,16 @@ def load_inventory(path: Path) -> dict:
     return data
 
 
-def ssh_command(inventory: dict) -> list[str]:
+def ssh_command(inventory: dict, path: Path) -> list[str]:
     """The SSH prefix for one manager command; the host appears only in this argv.
 
-    With the inventory's ``known_hosts`` (written by ``manager deploy``) the manager's key is
-    checked strictly against that file; without it the user's own known-hosts file applies.
+    With the inventory's ``known_hosts`` (written by ``manager deploy``, found beside the
+    inventory at `path`) the manager's key is checked strictly against that file; without it
+    the user's own known-hosts file applies.
     """
     pinned = []
     if inventory.get("known_hosts"):
-        pinned = ["-o", f"UserKnownHostsFile={os.path.expanduser(inventory['known_hosts'])}",
+        pinned = ["-o", known_hosts_option(known_hosts(path, inventory)),
                   "-o", "StrictHostKeyChecking=yes"]
     return ["ssh", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=15",
             *pinned, "-i", os.path.expanduser(inventory["identity_file"]),
@@ -143,7 +145,7 @@ def collect(inventory: Path, cid: str, dest: Path, *, spawn: Spawn | None = None
     short_id(cid)
     server = load_inventory(inventory)
     if spawn is None:
-        prefix = ssh_command(server)
+        prefix = ssh_command(server, inventory)
 
         def spawn(command: str) -> subprocess.Popen:
             return subprocess.Popen([*prefix, command], stdout=subprocess.PIPE)

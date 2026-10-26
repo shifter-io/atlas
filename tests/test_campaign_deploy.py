@@ -51,6 +51,7 @@ from proxy_index.campaign.contracts import (
     spec_path,
 )
 from proxy_index.campaign.do_api import ApiError, CreateError
+from proxy_index.campaign.hostkeys import known_hosts_option
 from proxy_index.campaign.planspec import PlanError, PlanInputs
 from proxy_index.campaign.tick import timer_calendars
 from proxy_index.models import RequestContext
@@ -105,7 +106,7 @@ async def test_deploy_creates_a_hardened_manager_in_order(job):
         "cat > /opt/proxy-index-campaign/.secrets/credentials/shifter.toml.partial"]
     argv = shell.calls[0][0]
     assert "BatchMode=yes" in argv and argv[argv.index("-i") + 1] == str(job.mac_key)
-    assert f"UserKnownHostsFile={saved['known_hosts']}" in argv and argv[-2] == f"root@{MANAGER_IP}"
+    assert known_hosts_option(saved["known_hosts"]) in argv and argv[-2] == f"root@{MANAGER_IP}"
 
 
 async def test_the_token_travels_only_on_stdin(job, tmp_path, capsys, caplog):

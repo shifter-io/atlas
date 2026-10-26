@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from .hostkeys import known_hosts, known_hosts_option
+
 STALE = timedelta(minutes=3)
 TITLE = "Proxy Index campaign"
 # Runs on the manager: status.json, alerts after a byte offset, new or rewritten reports (by
@@ -50,7 +52,7 @@ def ssh_fetch(inventory: dict, offset: int, seen: dict[str, str]) -> dict:
         f"/opt/proxy-index-campaign/campaigns/{inventory['campaign_id']}")
     command = ["ssh", "-i", inventory["identity"], "-o", "BatchMode=yes",
                "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10",
-               "-o", f"UserKnownHostsFile={inventory['known_hosts']}",
+               "-o", known_hosts_option(inventory["known_hosts"]),
                "-o", "StrictHostKeyChecking=yes", f"root@{inventory['host']}",
                shlex.join(["python3", "-c", REMOTE_READ, root, str(offset),
                            ",".join(f"{n}:{h}" for n, h in sorted(seen.items())) or "-"])]
@@ -222,9 +224,12 @@ class Watch:
 
 def run_watch(inventory: Path, status_file: Path, traffic_dir: Path, *, interval: float = 60,
               io: WatchIO | None = None, iterations: int | None = None) -> str:
-    """Poll until the campaign is finished (or `iterations` passes); returns the last state."""
-    watch = Watch(json.loads(Path(inventory).read_text()), Path(status_file), Path(traffic_dir),
-                  io or WatchIO())
+    """Poll until the campaign is finished (or `iterations` passes); returns the last state.
+    The inventory's host-key file is resolved once, beside the inventory (`known_hosts`)."""
+    data = json.loads(Path(inventory).read_text())
+    if data.get("known_hosts"):
+        data["known_hosts"] = str(known_hosts(Path(inventory), data))
+    watch = Watch(data, Path(status_file), Path(traffic_dir), io or WatchIO())
     count = 0
     while True:
         state = watch.once()

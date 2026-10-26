@@ -26,6 +26,7 @@ from campaign_fakes import CAMPAIGN_PROJECT, Fault
 
 from proxy_index.campaign import deploy
 from proxy_index.campaign.contracts import MANAGER_TAG, WORKER_TAG, campaign_tag
+from proxy_index.campaign.hostkeys import known_hosts_option
 
 OTHER_CID = "20270101t230000z-ffffffffffff"
 
@@ -224,7 +225,7 @@ async def test_the_host_key_file_is_found_beside_the_inventory_from_any_director
                                      keep_worker_assets=True, shell=shell,
                                      remove_agent=lambda: True)
     assert done["clean"] is True and not own.exists() and other.exists()
-    assert {f"UserKnownHostsFile={own}"} == {
+    assert {known_hosts_option(own)} == {
         arg for argv, _ in shell.calls for arg in argv if arg.startswith("UserKnownHosts")}
 
 
