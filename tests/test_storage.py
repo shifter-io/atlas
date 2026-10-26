@@ -15,8 +15,10 @@ from psycopg.types.json import Jsonb
 from proxy_index import JsonSink, ProxyConfig, RunConfig, run
 from proxy_index.cli import main
 from proxy_index.providers.credentials import read_credentials
+from proxy_index.stats import Histogram
 from proxy_index.storage import (
     ENRICHMENT_FIELDS,
+    _add_run_metrics,
     _bucket,
     _profile,
     _steps,
@@ -768,3 +770,28 @@ async def test_ingest_counts_replacements_before_any_database_access(tmp_path):
     with pytest.raises(ValueError, match="Measurement counters do not reconcile"):
         ingest(sink.directory, tmp_path / "unused.toml")
     assert summary.other_country > 0
+
+
+def test_scope_metrics_add_runs_and_mean_latency():
+    """Cached scope metrics without Postgres: counters add up, latency comes from the merge."""
+    names = ("started", "completed", "successes", "total_errors", "cancelled", "not_started",
+             "response_body_bytes", "duration_seconds")
+    run = dict.fromkeys(names, 2) | {
+        "errors": {"timeout": 1}, "status_codes": {"200": 2}, "pool_eligible": True}
+    histogram = Histogram()
+    for value in (10, 11, 30):
+        histogram.add(value)
+    # Cached metrics from before latency_mean_ms existed gain it on the next run.
+    metrics = {"runs": 1, "requested": 3, "completed": 2, "successes": 1, "unique_ips": 4,
+               "errors": {"timeout": 2}, "latency_ms": {"p50": 1}}
+    _add_run_metrics(metrics, run, 3, 5, histogram)
+    assert metrics["runs"] == 2 and metrics["requested"] == 6 and metrics["unique_ips"] == 9
+    assert metrics["completed"] == 4 and metrics["success_rate"] == .75
+    assert metrics["errors"] == {"timeout": 3} and metrics["status_codes"] == {"200": 2}
+    assert set(metrics["latency_ms"]) == {"p50", "p90", "p95", "p99"}
+    assert metrics["latency_ms"]["p50"] == 11 and metrics["latency_mean_ms"] == 17
+    empty = {}
+    _add_run_metrics(empty, dict.fromkeys(names, 0) | {
+        "errors": {}, "status_codes": {}, "pool_eligible": False}, 0, 0, Histogram())
+    assert empty["unique_ips"] is None and empty["success_rate"] is None
+    assert empty["latency_mean_ms"] is None
