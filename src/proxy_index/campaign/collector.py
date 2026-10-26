@@ -57,6 +57,7 @@ MANAGER_ROOT = Path("/opt/proxy-index-campaign")
 HARVESTED = ("running", "harvesting")
 RECONCILE_HIGH_AFTER = 3  # consecutive failed reconciles before a high alert
 DISK_FLOOR_PCT, RATELIMIT_FLOOR, CREATE_FAIL_SHARE = 20.0, 500, 0.10
+BOOT_GRACE_SECONDS = 300  # NTP may not have synced yet right after a boot
 RemoteFactory = Callable[[int], Remote]
 
 
@@ -75,12 +76,21 @@ def ntp_synced() -> bool | None:
     return {"yes": True, "no": False}.get(reply.stdout.strip())
 
 
+def boot_uptime() -> float | None:
+    """Seconds since boot from `/proc/uptime`; None when it cannot be read."""
+    try:
+        return float(Path("/proc/uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 @dataclass
 class Pacing:
     interval: float = 30.0
     reconcile_every: float = 300.0
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     clock_synced: Callable[[], bool | None] = field(default_factory=lambda: ntp_synced)
+    uptime: Callable[[], float | None] = field(default_factory=lambda: boot_uptime)
     disk_usage: Callable[[Path], tuple] = field(default_factory=lambda: shutil.disk_usage)
 
 
@@ -273,10 +283,17 @@ class Collector:
                              hour=record.hour, failed=failed, total=len(record.droplets))
         remaining = self._ratelimit()
         checks = {"disk_low": self._disk_free_pct() < DISK_FLOOR_PCT,
-                  "clock_unsynced": self.pacing.clock_synced() is False,
+                  "clock_unsynced": self._clock_unsynced(),
                   "ratelimit_low": remaining is not None and remaining < RATELIMIT_FLOOR}
         for code in [code for code, raised in checks.items() if raised]:
             self.log.add(now, code, key=f"{code}-{stamp}")
+
+    def _clock_unsynced(self) -> bool:
+        """Unsynced past the boot grace; an unknown uptime gets no grace."""
+        if self.pacing.clock_synced() is not False:
+            return False
+        uptime = self.pacing.uptime()
+        return uptime is None or uptime >= BOOT_GRACE_SECONDS
 
     def _disk_free_pct(self) -> float:
         usage = self.pacing.disk_usage(self.root)
