@@ -7,6 +7,7 @@ the scope suite (seeded with production-like droplets) and a fake SSH remote.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import re
 import sys
@@ -733,9 +734,12 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
 
     modules = {"launch": {"launch_hour": launch_hour}, "harvest": {"harvest_hour": harvest_hour},
                "fanout": {"OpenSSHRemote": lambda *args: args}}
+    # Each fake keeps the real module's other names: parser setup imports probe and shot,
+    # which import from these modules, and must work when no earlier test loaded them.
     for name, values in modules.items():
-        monkeypatch.setitem(sys.modules, f"proxy_index.campaign.{name}",
-                            types.SimpleNamespace(**values))
+        real = importlib.import_module(f"proxy_index.campaign.{name}")
+        monkeypatch.setitem(sys.modules, real.__name__,
+                            types.SimpleNamespace(**(vars(real) | values)))
     monkeypatch.setattr("proxy_index.campaign.do_api.DigitalOcean", Client)
     monkeypatch.setattr(collector_module, "ntp_synced", lambda: True)
     assert main(["campaign", "network", "pause", "geonode", "--root", str(root)]) == 0

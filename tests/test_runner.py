@@ -333,9 +333,14 @@ async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monk
             clock[0] += 15  # each request times out after 15 s
             return Outcome(15000, error="timeout")
 
+    sink = JsonSink(tmp_path)
     result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=1),
-                       JsonSink(tmp_path), transport_factory=Hanging)
+                       sink, transport_factory=Hanging)
     assert result.stop_reason == "no_success" and result.completed == 40
+    # No success, no latency sample: the mean is unknown, never 0.
+    assert result.latency_mean_ms is None
+    saved = json.loads((sink.directory / "summary.json").read_text())
+    assert "latency_mean_ms" in saved and saved["latency_mean_ms"] is None
 
 
 async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):

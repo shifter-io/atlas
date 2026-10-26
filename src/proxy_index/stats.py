@@ -60,7 +60,8 @@ class Histogram:
     def mean(self) -> float | None:
         """Mean latency in ms over the bins, rounded to 0.1 ms; None when empty.
 
-        Each bin is a 1 ms ceiling, so the result is at most 1 ms above the true mean.
+        Each bin is the ceiling of the latency in ms, so with the 0.05 ms rounding the result
+        is under 1.05 ms above the true mean.
         """
         total = self.counts.total()
         if not total:
