@@ -550,7 +550,7 @@ async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tm
 
     cloud = types.SimpleNamespace(ratelimit_remaining=0)
     status = await collector_module.Collector(root, harvest, cloud, None, clock, Pacing(
-        clock_synced=lambda: False, disk_usage=disk(10))).pass_once()
+        clock_synced=lambda: False, uptime=lambda: 600.0, disk_usage=disk(10))).pass_once()
     codes = {(a["code"], a["level"]) for a in read_alerts(root)}
     assert {("auth_failed", "high"),
             ("create_failures", "high"), ("harvest_error", "info"), ("disk_low", "high"),
