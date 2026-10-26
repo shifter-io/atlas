@@ -44,6 +44,7 @@ from .contracts import (
     spec_path,
 )
 from .do_api import CreateError, DigitalOcean, TokenSource
+from .hostkeys import known_hosts, known_hosts_option
 from .image import BASE_IMAGE, SSH_TRIES, Shell, run_shell
 from .scope import Ledger, guarded_delete
 from .tick import timer_calendars
@@ -182,16 +183,18 @@ def _tar(entries: list[tuple[str, bytes, int]]) -> bytes:
 
 @dataclass
 class Manager:
-    """SSH to the manager as root with the Mac key and the manager's own known-hosts file."""
+    """SSH to the manager as root with the Mac key and the manager's own known-hosts file,
+    found beside the inventory at `path` (`known_hosts`)."""
 
     inventory: dict[str, Any]
+    path: Path
     shell: Shell = run_shell
 
     def argv(self, command: str) -> list[str]:
         inv = self.inventory
         return ["ssh", "-i", inv["identity"], "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
                 "-o", "StrictHostKeyChecking=accept-new", "-o",
-                f"UserKnownHostsFile={inv['known_hosts']}", "-o", "ConnectTimeout=10",
+                known_hosts_option(known_hosts(self.path, inv)), "-o", "ConnectTimeout=10",
                 f"root@{inv['host']}", command]
 
     async def run(self, command: str, what: str, stdin: bytes = b"") -> str:
@@ -248,20 +251,20 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
     project_id = await check_account(cloud, inventory, job.account)  # before any write
     size = await manager_size(cloud, inventory, job.size)
     if inventory.get("host") and inventory.get("campaigns"):
-        await _refuse_while_running(Manager(inventory, shell), inventory["campaigns"])
+        await _refuse_while_running(Manager(inventory, path, shell), inventory["campaigns"])
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
     mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
     save(path, inventory, account=job.account, project_id=project_id, mac_key_id=mac_key_id,
          manager_size=size, user="root",
          identity=str(job.mac_key), identity_file=str(job.mac_key),
-         known_hosts=str(path.with_name("campaign-manager.known_hosts")),
+         known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
          campaigns_root=f"{BASE}/campaigns")
     manager = await _ensure_manager(cloud, job, inventory, now, sleep)
     scope = manager_scope(inventory)
     rules = ops_api.manager_firewall(job.mac_ipv4, manager.id)
     save(path, inventory, mac_ipv4=job.mac_ipv4, manager_firewall_id=await ops_api.apply_firewall(
         cloud, scope, rules, inventory.get("manager_firewall_id")))
-    remote = Manager(inventory, shell)
+    remote = Manager(inventory, path, shell)
     worker_public = await _provision(remote, job, sleep)
     await remote.put_secret("do-token", job.token().encode())
     for network, data in job.credentials.items():
@@ -378,7 +381,7 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
             inventory.get("account"), inventory.get("project_id")):
         raise DeployError("the spec does not name the deployed manager, wheel and account")
     target = f"{BASE}/campaigns/{spec.campaign_id}"
-    await Manager(inventory, shell).run(
+    await Manager(inventory, inventory_path, shell).run(
         f"umask 077 && test ! -e {target} && mkdir {target} && "
         f"tar -x --no-same-owner -C {target}", "upload-spec (exists or failed)",
         spec_payload(root))
@@ -421,7 +424,8 @@ async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
     if dropins:
         command = ("umask 022 && tar -x --no-same-owner -C /etc/systemd/system && "
                    f"systemctl daemon-reload && {command}")
-    await Manager(inventory, shell).run(command, "enable", _tar(dropins) if dropins else b"")
+    await Manager(inventory, inventory_path, shell).run(command, "enable",
+                                                        _tar(dropins) if dropins else b"")
     return go | {"units": units}
 
 
@@ -431,7 +435,8 @@ async def disable(inventory_path: Path, cid: str, *, shell: Shell = run_shell,
     units, inventory = unit_names(cid), load_inventory(inventory_path)
     if cid not in inventory.get("campaigns", []):
         raise DeployError("campaign was never uploaded to the recorded manager")
-    await Manager(inventory, shell).run("systemctl disable --now " + " ".join(units), "disable")
+    await Manager(inventory, inventory_path, shell).run(
+        "systemctl disable --now " + " ".join(units), "disable")
     disabled = inventory.get("disabled", {}) | {cid: (now or datetime.now(UTC)).isoformat()}
     save(inventory_path, inventory, disabled=disabled)
     return {"campaign_id": cid, "units": units}
@@ -471,13 +476,6 @@ def check_reports(inventory: dict, reports: list[Path]) -> None:
         raise DeployError(f"teardown needs a clean collect report for {missing}")
 
 
-def known_hosts(path: Path, inventory: dict) -> Path:
-    """The manager's host-key file. `deploy` records it beside the inventory, so a relative
-    record is found there, never in the current directory (another manager's file)."""
-    recorded = Path(inventory["known_hosts"]).expanduser()
-    return recorded if recorded.is_absolute() else path.with_name(recorded.name)
-
-
 def _owned(inventory: dict, images: dict, keep_worker_assets: bool = False
            ) -> list[tuple[str, str]]:
     """(kind, id) in teardown order: manager, firewalls, the worker keys (the current one and
@@ -503,7 +501,7 @@ async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shel
         return "shredded earlier"
     if await cloud.get(str(inventory["manager_id"])) is None:
         return "manager gone"
-    remote = Manager(inventory | {"known_hosts": str(known_hosts(path, inventory))}, shell)
+    remote = Manager(inventory, path, shell)
     units = [unit for cid in inventory.get("campaigns", []) for unit in unit_names(cid)]
     if units:
         await remote.run("systemctl disable --now " + " ".join(units), "stop units")
