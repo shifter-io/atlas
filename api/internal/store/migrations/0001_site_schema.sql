@@ -1,5 +1,5 @@
 -- Site schema v1: catalog and editorial data the framework does not measure, owned by the site API
--- (github.com/ice-zeus/proxy-index-website/api). The framework's public schema is only ever read.
+-- (github.com/Zeus-Development/proxy-index-website/api). The framework's public schema is only ever read.
 --
 -- Every row carries is_demo. The four design fixtures (Nimbus, Kestrel, Orbitnode, Helix) are
 -- is_demo = true and `siteapi unseed-demo` deletes exactly those rows. Real providers are linked to

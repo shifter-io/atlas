@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 	"github.com/andybalholm/brotli"
-	"github.com/ice-zeus/proxy-index-website/api/internal/store"
 )
 
 func sptr(s string) *string { return &s }

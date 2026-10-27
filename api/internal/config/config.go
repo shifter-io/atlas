@@ -12,7 +12,7 @@ import (
 )
 
 // FrameworkFolder is the folder name of the framework checkout
-// (ice-zeus/proxy-index) inside the website folder.
+// (Zeus-Development/proxy-index) inside the website folder.
 const FrameworkFolder = "proxy-index"
 
 // Postgres is the [postgres] section of proxy-index/.secrets/*.toml.

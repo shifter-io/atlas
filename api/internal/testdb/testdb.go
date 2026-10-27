@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ice-zeus/proxy-index-website/api/internal/config"
-	"github.com/ice-zeus/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/config"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 

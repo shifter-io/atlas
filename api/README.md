@@ -21,7 +21,7 @@ seed and test input only.
 - Every response is precomputed and precompressed in memory. Requests never touch
   the database (except an uncommon `/v1/events` filter, see below).
 
-Module: `github.com/ice-zeus/proxy-index-website/api`, Go 1.27 (`/opt/homebrew/bin/go`).
+Module: `github.com/Zeus-Development/proxy-index-website/api`, Go 1.27 (`/opt/homebrew/bin/go`).
 
 ## Commands
 

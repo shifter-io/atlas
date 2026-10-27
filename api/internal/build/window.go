@@ -4,9 +4,9 @@ import (
 	"math"
 	"sort"
 
-	"github.com/ice-zeus/proxy-index-website/api/internal/jsnum"
-	"github.com/ice-zeus/proxy-index-website/api/internal/model"
-	"github.com/ice-zeus/proxy-index-website/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
 )
 
 const (

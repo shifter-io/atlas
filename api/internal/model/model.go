@@ -11,7 +11,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/ice-zeus/proxy-index-website/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
 )
 
 type Num = jsnum.Num
