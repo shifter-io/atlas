@@ -57,6 +57,8 @@ STOP_REASONS = {
     "run.",
     "stalled": "Stopped as stalled: it had successes, then none for the stall window (recorded "
     "as an outage).",
+    "rate_limited": "Stopped because the provider kept rate limiting the run with no success for "
+    "the rate-limit window (RATE_LIMIT_STOP_SECONDS, 120 s).",
     "requests": "Completed its fixed number of requests.",
     "operator": "Stopped by an operator (kill or skip).",
     "error": "Ended with an error: the node reported a failure or the run went silent.",

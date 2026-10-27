@@ -397,7 +397,7 @@ def test_v6_database_migrates_through_v7(databases):
 
 
 def load_v7(database):
-    """The v7 release's database: v6 plus migrate_v6_v7.sql and the exact v7 schema."""
+    """The v7 release's database: v6 plus migrate_v6_v7.sql and the v7 schema."""
     load_v6(database)
     schema = SCHEMA_V7.read_text()
     assert hashlib.sha256(schema.encode()).hexdigest() == V7_FIXTURE_SHA256

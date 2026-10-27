@@ -542,6 +542,12 @@ def test_rule_progress_and_text():
     assert report_html.rule_text(1200, 500, 1000).startswith("Stop rule met")
 
 
+def test_rate_limited_stop_reason_has_its_own_text():
+    text_ = report_html.stop_reason("rate_limited", "done")
+    assert "rate limiting" in text_ and "RATE_LIMIT_STOP_SECONDS" in text_ and "120 s" in text_
+    assert text_ != "Stopped: rate_limited."
+
+
 async def test_reports_job_writes_live_pages(database, db, tmp_path):
     from proxy_index.orchestrator.admin import views
 
