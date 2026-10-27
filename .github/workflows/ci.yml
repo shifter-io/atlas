@@ -9,9 +9,7 @@
 # requests run nothing until they are marked ready. A change only to docs/
 # (except docs/onboarding.html, which a test reads), LICENSE or Markdown outside
 # src/, tests/, scripts/ and configs/ (where Markdown can be a golden) runs only
-# the privacy and commit-message checks. Temporarily (CI-FMT-1), a change that is exactly
-# the pinned `ruff format` output of its merge base, with the same AST, skips the four
-# diff-based gates (complexity, limits, changed-line and critical-file coverage).
+# the privacy and commit-message checks.
 name: ci
 
 on:
@@ -137,33 +135,22 @@ jobs:
         if: env.CODE == 'true'
         run: uv build --out-dir "$RUNNER_TEMP/dist"
 
-      - name: Formatting-only change (CI-FMT-1, temporary)
-        if: env.CODE == 'true'
-        run: |
-          # Exactly the pinned `ruff format` output of the merge base, with the same AST, is a
-          # formatting-only change: the four diff-based gates below skip it. The attestor is read
-          # from the merge base, so a change cannot rewrite the rule that exempts it.
-          mb=$(git merge-base "$BASE" HEAD)
-          if git cat-file -e "$mb:scripts/ci/format_only.py" 2>/dev/null; then
-            git show "$mb:scripts/ci/format_only.py" > "$RUNNER_TEMP/format_only.py"
-            uv run --no-editable python "$RUNNER_TEMP/format_only.py" . "$BASE" HEAD | tee "$EV/format-only.txt"
-          else
-            echo "FORMAT_ONLY=false" | tee "$EV/format-only.txt"
-          fi
-          tail -n 1 "$EV/format-only.txt" | grep -xE 'FORMAT_ONLY=(true|false)' >> "$GITHUB_ENV"
-
       - name: ruff
         if: env.CODE == 'true'
         run: uv run --no-editable ruff check src tests scripts
 
+      - name: ruff format
+        if: env.CODE == 'true'
+        run: uv run --no-editable ruff format --check src tests scripts
+
       - name: Complexity of changed files (C901, hard limit 25)
-        if: env.CODE == 'true' && env.FORMAT_ONLY != 'true'
+        if: env.CODE == 'true'
         run: |
           git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
             | xargs -r uv run --no-editable ruff check --select C901 --config 'lint.mccabe.max-complexity = 25'
 
       - name: Source limits (file, function, parameters, nesting, change size)
-        if: env.CODE == 'true' && env.FORMAT_ONLY != 'true'
+        if: env.CODE == 'true'
         run: uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
 
       - name: Start a PostgreSQL for this job
@@ -187,13 +174,13 @@ jobs:
           fi
 
       - name: Changed lines covered (at least 85%)
-        if: env.CODE == 'true' && env.FORMAT_ONLY != 'true'
+        if: env.CODE == 'true'
         run: |
           uvx --from diff-cover==10.6.0 diff-cover "$EV/coverage.xml" --compare-branch="$BASE" \
             --fail-under=85 --json-report "$EV/diff-cover.json"
 
       - name: Critical campaign files (at least 90% of changed lines)
-        if: env.CODE == 'true' && env.FORMAT_ONLY != 'true'
+        if: env.CODE == 'true'
         run: |
           uv run --no-editable python - "$EV/diff-cover.json" <<'EOF'
           import json, sys
