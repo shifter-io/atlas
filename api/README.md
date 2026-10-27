@@ -191,6 +191,8 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
+CI's `api` job runs `gofmt`, `go vet` and `go test ./...` on every ready pull request (and `-race` on `main`); its database tests skip until CI gets PostgreSQL and the framework schema.
+
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema from `proxy-index/src/proxy_index/` (or
 `PG_TEST_FRAMEWORK_DIR`) and drop the database afterwards. `proxy_reviews` is never
