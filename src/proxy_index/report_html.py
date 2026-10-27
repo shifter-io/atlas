@@ -38,7 +38,7 @@ from .orchestrator.control import read_setting
 
 INDEX = "index.html"
 INDEX_LIMIT = 500
-TOP = 15
+TOP  = 15
 REFRESH_SECONDS = 30
 OPEN = ("scheduled", "running")
 OPEN_RUNS = ("queued", "running", "uploading")

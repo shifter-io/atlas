@@ -24,7 +24,7 @@ CREDENTIALS = {
     "geonode": {"username": "u", "password": "v"},
 }
 PLAN_CREDENTIALS = {"account": "customer-acct_9", "password": 'p"w'}
-CID = "20270101t230000z-0123456789ab"
+CID = '20270101t230000z-0123456789ab'
 IMAGE = "pi-camp-worker-0.9.5-0123456789ab-20270101"
 
 
