@@ -160,6 +160,7 @@ async def test_a_crash_between_the_mark_and_the_delete_keeps_the_mark_on_disk(tm
     assert (worker.status, worker.droplet_id) == ("assign_failed", FIRST)
     assert worker.assign_failed_at and FIRST in fake.droplets
     record, *_ = await launched(tmp_path, fake, spec, start=LATE, record=launch.load_hour(root, 0))
+    assert FIRST in fake.droplets and not fake.deleted  # the resumed launch left it alive
     async with running(fake) as cloud:
         collector = collector_module.Collector(
             root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing())
