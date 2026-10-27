@@ -414,7 +414,7 @@ class Probe:
         self.save()
         _, failed = await scope.assign_and_verify_project(
             self.cloud, self.scope, [droplet.id], {droplet.id: worker},
-            audit_path(self.folder), retry=scope.Retry(sleep=self.sleep))
+            audit_path(self.folder), retry=scope.Retry(sleep=self.sleep, save=self.save))
         self.save()
         if failed:
             raise ProbeError(f"worker not confirmed in the project ({worker.status})")

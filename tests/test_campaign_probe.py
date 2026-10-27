@@ -741,6 +741,42 @@ async def test_s1_a_marked_worker_whose_removal_failed_takes_the_own_unassigned_
     assert audit[-1]["path"] == "own_unassigned" and audit[-1]["result"] == "deleted"
 
 
+class Crash(BaseException):
+    """The probe process dying: nothing after it runs, only what is on disk survives."""
+
+
+async def test_a_crash_between_the_mark_and_the_delete_keeps_the_mark_on_disk(tmp_path,
+                                                                              monkeypatch):
+    """PROBE-SAVE-1 (CAMP-1r n2): the probe saved its record only after
+    `assign_and_verify_project` returned, which includes the delete. A crash in between left
+    the worker unmarked on disk. Now the mark is saved before the delete, and `--remove` in a
+    new process takes the own-unassigned path."""
+    fake = FakeDigitalOcean()
+    fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3))
+    inputs, _ = world(tmp_path)
+    real = probing.scope.guarded_delete
+
+    async def crash(*_args):
+        monkeypatch.setattr(probing.scope, "guarded_delete", real)
+        raise Crash
+
+    monkeypatch.setattr(probing.scope, "guarded_delete", crash)
+    async with running(fake) as cloud:
+        run = probing.Probe(cloud, FakeProbeRemote({}).factory, inputs, NOW, no_sleep)
+        with pytest.raises(Crash):
+            await run.create()
+    folder = inputs.output / run.probe_id
+    worker = json.loads((folder / "probe-result.json").read_text())["worker"]
+    assert (worker["status"], worker["assigned_at"]) == ("assign_failed", None)
+    assert worker["assign_failed_at"] and worker["droplet_id"] in fake.droplets
+    async with running(fake) as cloud:  # nothing in memory: the record is all it has
+        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+            "destroyed")
+    assert fake.deleted == [("droplet", worker["droplet_id"])]
+    audit = [json.loads(line) for line in audit_path(folder).read_text().splitlines()]
+    assert audit[-1]["path"] == "own_unassigned" and audit[-1]["result"] == "deleted"
+
+
 async def test_s1_recovery_never_touches_a_droplet_the_record_does_not_own(tmp_path):
     fake = FakeDigitalOcean()
     fake.seed_production(20)
