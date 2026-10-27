@@ -1,0 +1,2 @@
+# Whole-tree `ruff format` reformat (CI-FMT-1B); use: git config blame.ignoreRevsFile .git-blame-ignore-revs
+730177786241396f1ebbefe0a474c4babddcde76

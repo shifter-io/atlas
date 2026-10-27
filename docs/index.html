@@ -243,6 +243,7 @@ GET /v1/snapshots/ID/runs</pre>
 
 <section id="test"><h2>7. Validate locally and on the Mac Mini</h2>
 <pre>uv run --no-editable ruff check src tests scripts
+uv run --no-editable ruff format --check src tests scripts
 uv run --no-editable pytest --cov=proxy_index --cov-branch
 uv run --no-editable python scripts/benchmark.py
 
