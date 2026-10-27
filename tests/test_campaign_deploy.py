@@ -906,11 +906,11 @@ async def test_enable_installs_quarter_slot_timer_dropins(deployed, tmp_path):
     assert {m.mode for m in archive.getmembers()} == {0o644}
     calendars = timer_calendars(15, 90)
     assert dropins == {
-        f"proxy-index-campaign-{name}@{CID}.timer.d/slots.conf":
+        f"proxy-index-campaign-{name}@{CID}.timer.d/slots.conf": (
             f"# CAMP-1: campaign {CID} has a slot every 15 minutes.\n[Unit]\n"
             f"Description=Proxy Index campaign %i: {role} every 15 min at "
             f"{calendars[name].removeprefix('*-*-* ')}\n[Timer]\n"
-            f"OnCalendar=\nOnCalendar={calendars[name]}\n"
+            f"OnCalendar=\nOnCalendar={calendars[name]}\n")
         for name, role in (("tick", "launch"), ("watchdog-armed", "watchdog (armed)"),
                            ("watchdog-fired", "watchdog (fired)"))}
     assert "launch every 15 min at *:13,28,43,58:30" in dropins[

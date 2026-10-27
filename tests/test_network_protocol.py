@@ -101,7 +101,9 @@ def test_https_only_refuses_other_plain_http_targets():
     (302, "https://ip-info.com:443/other", "https://ip-info.com:443/other"),
     (301, "http://ip-info.com/myip", None),
     (301, "https://elsewhere.test/myip", None),
-    (301, "https://user:pw@ip-info.com/myip", None),
+    # Credentials refuse the upgrade; the upper-case host (urlsplit lowercases it, so it is
+    # the same host) keeps this test data from reading as an e-mail address.
+    (301, "https://user:pw@IP-INFO.COM/myip", None),
     (301, "/myip", None),
     (301, None, None),
     (200, "https://ip-info.com/myip", None),
