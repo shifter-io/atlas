@@ -164,9 +164,16 @@ class Database:
             log.exception("batch close hook %s failed for batches %s", name, batch_ids)
 
     async def drain(self) -> None:
-        """Wait for the close hooks already started (tests, shutdown)."""
+        """Wait for the close hooks already started, and any they start (tests, shutdown).
+
+        Finished hooks are dropped here, not left to their done callbacks: a hook that finished
+        in the current loop step still has its callback queued, and on Python 3.12 gather()
+        over finished tasks returns without yielding, so the callback would never run and the
+        loop would spin forever.
+        """
         while self._hooks:
-            await asyncio.gather(*list(self._hooks), return_exceptions=True)
+            await asyncio.gather(*self._hooks, return_exceptions=True)
+            self._hooks.difference_update([task for task in self._hooks if task.done()])
 
     async def close(self) -> None:
         await self.drain()
