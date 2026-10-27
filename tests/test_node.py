@@ -463,6 +463,50 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
     assert os.listdir(tmp_path / "alpha") == os.listdir(tmp_path / "beta") == []
 
 
+async def kill_open_runs(db):
+    """The operator kill these tests use: every batch and run becomes 'killed'.
+
+    It writes through the async pool. The orchestrator under test shares this event loop, and
+    its transactions hold row locks across awaits (a progress post holds its batch_runs row
+    until its coroutine gets the loop back to commit). A blocking connection waiting for such
+    a lock blocks the loop, so the holder never commits and the wait never ends.
+    """
+    async with db.transaction() as conn:
+        await conn.execute("UPDATE test_batches SET status='killed',finished_at=now()")
+        await conn.execute("UPDATE batch_runs SET status='killed',finished_at=now()")
+
+
+async def test_operator_kill_waits_for_a_transaction_on_the_same_loop(
+    database, orchestrator, monkeypatch
+):
+    db, _ = orchestrator
+    now = datetime.now(UTC)
+    prepare(database, ("DE",), DE=now.time())
+    async with db.connection() as conn:
+        await put_setting(conn, "census.lead_seconds", 0)
+    issue_token(database, provider="fixture", product="alpha", region="fra1")
+    await batches.census_plan(db, now)
+    assert query(database, "SELECT count(*) FROM test_batches") == [(1,)]
+    # A kill that blocks the loop fails with LockNotAvailable after 5 s instead of hanging
+    # until the pytest timeout.
+    monkeypatch.setenv("PGOPTIONS", "-c lock_timeout=5s")
+    locked = asyncio.Event()
+
+    async def orchestrator_transaction():
+        async with db.transaction() as conn:
+            await conn.execute("SELECT 1 FROM test_batches FOR UPDATE")
+            locked.set()
+            # The lock is released only when this coroutine runs again.
+            await asyncio.sleep(0.2)
+
+    holder = asyncio.create_task(orchestrator_transaction())
+    await asyncio.wait_for(locked.wait(), 10)
+    await asyncio.wait_for(kill_open_runs(db), 10)
+    await holder
+    statuses = query(database, "SELECT DISTINCT status FROM test_batches")
+    assert statuses == [("killed",)]
+
+
 async def test_operator_kill_stops_and_discards_the_run(database, orchestrator, tmp_path):
     db, base = orchestrator
     now = datetime.now(UTC)
@@ -487,9 +531,7 @@ async def test_operator_kill_stops_and_discards_the_run(database, orchestrator, 
                     and query(database, "SELECT requests>0 FROM batch_runs") == [(True,)]
                 )
             )
-            with connect(database) as conn:
-                conn.execute("UPDATE test_batches SET status='killed',finished_at=now()")
-                conn.execute("UPDATE batch_runs SET status='killed',finished_at=now()")
+            await kill_open_runs(db)
             await wait_for(lambda: not agent.active)
         finally:
             stop.set()
