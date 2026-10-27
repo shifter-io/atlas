@@ -50,11 +50,9 @@ KIND_LABELS = {
     "load": "Test #2 · Load (latency under load)",
 }
 STOP_REASONS = {
-    "unique_ratio": "Stopped on the unique-IP rule: after the minimum sample, "
-    "unique IPs fell below "
-    "50% of the run’s recorded ratio basis (all completed requests for census v2).",
-    "no_success": "Stopped because nothing succeeded in the first requests or seconds of the "
-    "run.",
+    "unique_ratio": "Stopped on the unique-IP rule: after the minimum sample, unique IPs fell "
+    "below 50% of the run’s recorded ratio basis (all completed requests for census v2).",
+    "no_success": "Stopped because nothing succeeded in the first requests or seconds of the run.",
     "stalled": "Stopped as stalled: it had successes, then none for the stall window (recorded "
     "as an outage).",
     "rate_limited": "Stopped because the provider kept rate limiting the run with no success for "
