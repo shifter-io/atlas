@@ -172,7 +172,7 @@ async def test_plain_http_estimate_matches_the_wire():
         async with HttpTransport(RunConfig("generic_http", proxy)) as transport:
             outcome = await transport.execute(registry.get("generic_http"))
     assert outcome.verdict == "ok"
-    sent = (b"HTTP/1.1 200 Test\r\nContent-Length: 8\r\nLocation: http://localhost/must-not-"
+    sent = (b"HTTP/1.1 200 Test\r\nContent-Length: 12\r\nLocation: http://localhost/must-not-"
             b"follow\r\nConnection: close\r\n\r\n203.0.113.8\n")
     # Kernel counters on Linux, a sized estimate elsewhere: both are exact here.
     assert outcome.bytes_exact == bytes_io.LINUX
