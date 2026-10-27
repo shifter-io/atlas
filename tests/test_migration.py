@@ -7,8 +7,10 @@ float timeout, rate, custom URL, an unknown config key and a non-canonical bucke
 builds (ready and ranked, then expired and retained scores, then an unpublished draft).
 fixtures/schema_v5.sql is the exact v5 schema (storage.V5_CHECKSUM) and fixtures/calculated_v2.sql
 the exact calculated v2 schema (store.V2_CHECKSUM); load_v5 builds a v5 database from the same dump
-the way the v5 release migrated it; fixtures/schema_v6.sql and schema_v7.sql are the exact v6 and
-v7 schemas (storage.V6_CHECKSUM, V7_CHECKSUM). Every path ends at schema v8 with calculated v5.
+the way the v5 release migrated it; fixtures/schema_v6.sql and schema_v7.sql are the v6 and v7
+schemas except for one SQL comment each that the rename (#3) changed, so their own checksums are
+V6_FIXTURE_SHA256 and V7_FIXTURE_SHA256, while the loaders record storage.V6_CHECKSUM and
+V7_CHECKSUM as a real v6 or v7 database does. Every path ends at schema v8 with calculated v5.
 """
 
 import gzip
@@ -48,6 +50,11 @@ FIXTURE = Path(__file__).parent / "fixtures/database_v4.sql.gz"
 SCHEMA_V5 = Path(__file__).parent / "fixtures/schema_v5.sql"
 SCHEMA_V6 = Path(__file__).parent / "fixtures/schema_v6.sql"
 SCHEMA_V7 = Path(__file__).parent / "fixtures/schema_v7.sql"
+# The fixtures' own SHA-256: the shipped v6 and v7 schemas except for one SQL comment that the
+# rename (#3) changed. A real v6 or v7 database records storage.V6_CHECKSUM or V7_CHECKSUM, which
+# the loaders below still insert into schema_versions.
+V6_FIXTURE_SHA256 = "6af11b950a40157784afffcb428f4f2d9d9ce7ac9d34562644383d6150f40d02"
+V7_FIXTURE_SHA256 = "4968de7d7b7bbae34518df9653e1f225ee6b9e6aa37c9c5f00ba9fd997ed0887"
 CALCULATED_V2 = Path(__file__).parent / "fixtures/calculated_v2.sql"
 CALCULATED_V3 = Path(__file__).parent / "fixtures/calculated_v3.sql"
 CALCULATED_V4 = Path(__file__).parent / "fixtures/calculated_v4.sql"
@@ -325,7 +332,7 @@ def load_v6_calculated_v2(database):
     """A v6 base schema whose calculated layer is still v2 (a v6 development database)."""
     load_v5(database)
     schema = SCHEMA_V6.read_text()
-    assert hashlib.sha256(schema.encode()).hexdigest() == V6_CHECKSUM
+    assert hashlib.sha256(schema.encode()).hexdigest() == V6_FIXTURE_SHA256
     with connect(database) as conn:
         conn.execute((SOURCE / "migrate_v5_v6.sql").read_text())
         conn.execute(schema)
@@ -393,7 +400,7 @@ def load_v7(database):
     """The v7 release's database: v6 plus migrate_v6_v7.sql and the exact v7 schema."""
     load_v6(database)
     schema = SCHEMA_V7.read_text()
-    assert hashlib.sha256(schema.encode()).hexdigest() == V7_CHECKSUM
+    assert hashlib.sha256(schema.encode()).hexdigest() == V7_FIXTURE_SHA256
     with connect(database) as conn:
         conn.execute((SOURCE / "migrate_v6_v7.sql").read_text())
         conn.execute(schema)

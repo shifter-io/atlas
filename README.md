@@ -60,6 +60,8 @@ guide for initialization on a new machine and the schema.
 Tests: `uv run --no-editable pytest`;
 real database tests: `PG_TEST_ADMIN_FILE=.secrets/postgres-admin.toml uv run --no-editable pytest`;
 scale benchmark: `uv run --no-editable python scripts/benchmark.py`.
+CI (`.github/workflows/ci.yml`) runs this whole Tier 1, database tests included, on the
+shared self-hosted CI pool for every ready pull request and every push to `main`.
 All source changes are maintained locally; `scripts/test-remote.sh` uploads a
 dedicated copy to the Mac Mini and downloads evidence. See the HTML guide.
 

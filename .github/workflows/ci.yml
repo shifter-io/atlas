@@ -1,0 +1,211 @@
+# The framework's Tier 1 (CAMP-1 PLAN §17), on every ready pull request, every
+# push to main and owner dispatches.
+#
+# Runs on the shared CI pool: self-hosted runners labelled ci-light. Pinned
+# tools (uv, CPython, PostgreSQL), the uv cache and the virtualenv persist under
+# $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each run. A job-started
+# hook on the servers refuses every job except the owner's pull requests from
+# this repository's own branches, pushes to main and owner dispatches. Draft pull
+# requests run nothing until they are marked ready. A change only to docs/
+# (except docs/onboarding.html, which a test reads), LICENSE or Markdown outside
+# src/, tests/, scripts/ and configs/ (where Markdown can be a golden) runs only
+# the privacy and commit-message checks.
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: 0.12.10
+  UV_SHA256: 173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b
+  PYTHON_VERSION: 3.12.14
+  PG_VERSION: 17.11.1
+  PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
+
+jobs:
+  tier1:
+    name: tier1
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: [self-hosted, ci-light]
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The exact head that merges (merges are up to date and head-pinned),
+          # with full history for the diff-based checks.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: What changed
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          # A dispatch has no "before": compare with the parent.
+          case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
+          files=$(git diff --name-only --no-renames "$BASE...HEAD")
+          code=false
+          while IFS= read -r f; do
+            case "$f" in
+              # docs/onboarding.html: tests/test_onboarding_round.py reads it; Markdown
+              # under these trees can be a golden (tests/fixtures/campaign-data/*.md).
+              docs/onboarding.html|src/*|tests/*|scripts/*|configs/*) code=true ;;
+              docs/*|*.md|LICENSE) ;;
+              *) code=true ;;
+            esac
+          done <<< "$files"
+          [ -n "$files" ] || code=true
+          mkdir -p "$RUNNER_TEMP/ev"
+          printf 'BASE=%s\nCODE=%s\nEV=%s\n' "$BASE" "$code" "$RUNNER_TEMP/ev" | tee -a "$GITHUB_ENV"
+
+      - name: Privacy (no local paths, emails, private keys, tokens or real IPs added)
+        run: |
+          git diff "$BASE...HEAD" \
+            | grep -nE '(^\+.*(/User[s]/|@[a-z0-9.-]+\.(com|io)|BEGIN [A-Z ]*PRIVATE|dop_v[1]_))|(^\+.*\b([0-9]{1,3}\.){3}[0-9]{1,3}\b)' \
+            | grep -vE '\b(127\.0\.0\.1|0\.0\.0\.0|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)' \
+            | cut -d: -f1 > "$EV/privacy.txt" || true
+          if [ -s "$EV/privacy.txt" ]; then
+            # Line numbers in `git diff BASE...HEAD` only, never the matching text.
+            echo "privacy: $(wc -l < "$EV/privacy.txt") added lines match, at diff lines $(paste -sd, "$EV/privacy.txt")"
+            exit 1
+          fi
+
+      - name: No AI attribution in commit messages (GLOBAL 2)
+        run: |
+          # Attribution trailers and footers only: a message may name a file such as CLAUDE.md.
+          pattern='co-authored-by:.*(claude|anthropic|openai|copilot|cursor)|generated with|noreply@anthropic'
+          if git log --format=%B "$BASE..HEAD" | grep -iqE "$pattern"; then
+            echo "a commit message carries AI attribution"; exit 1
+          fi
+
+      - name: Pinned uv, CPython and PostgreSQL in the server cache
+        if: env.CODE == 'true'
+        run: |
+          tools=$CI_CACHE_DIR/proxy-index/tools
+          mkdir -p "$tools"
+          # Download, verify and unpack once; a finished directory is renamed into
+          # place, so a half-written one is never used. A failed fetch removes its
+          # temporary directory before failing the step.
+          fetch() {
+            [ -e "$3/.complete" ] && return 0
+            tmp=$(mktemp -d "$tools/.tmp.XXXXXX")
+            if curl -fsSL --retry 3 -o "$tmp/a.tgz" "$1" \
+                && echo "$2  $tmp/a.tgz" | sha256sum -c --quiet - \
+                && mkdir "$tmp/x" && tar -C "$tmp/x" --strip-components=1 -xzf "$tmp/a.tgz" \
+                && touch "$tmp/x/.complete"; then
+              mv -T "$tmp/x" "$3" 2>/dev/null || true
+              rm -rf "$tmp"
+            else
+              rm -rf "$tmp"
+              return 1
+            fi
+          }
+          fetch "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv-$UV_VERSION"
+          fetch "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql-$PG_VERSION"
+          echo "$tools/uv-$UV_VERSION" >> "$GITHUB_PATH"
+          {
+            echo "PG_BIN=$tools/postgresql-$PG_VERSION/bin"
+            echo "UV_CACHE_DIR=$CI_CACHE_DIR/proxy-index/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$tools/python"
+            echo "UV_PROJECT_ENVIRONMENT=$CI_CACHE_DIR/proxy-index/venv/tier1"
+          } >> "$GITHUB_ENV"
+
+      - name: uv sync (locked)
+        if: env.CODE == 'true'
+        # The virtualenv persists across runs, and uv rebuilds the project only when
+        # pyproject.toml changes; reinstall it so scripts (the benchmark,
+        # postgres_local.py) import this head's code, not an earlier build.
+        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
+
+      - name: Build the wheel and sdist
+        if: env.CODE == 'true'
+        run: uv build --out-dir "$RUNNER_TEMP/dist"
+
+      - name: ruff
+        if: env.CODE == 'true'
+        run: uv run --no-editable ruff check src tests scripts
+
+      - name: Complexity of changed files (C901, hard limit 25)
+        if: env.CODE == 'true'
+        run: |
+          git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
+            | xargs -r uv run --no-editable ruff check --select C901 --config 'lint.mccabe.max-complexity = 25'
+
+      - name: Source limits (file, function, parameters, nesting, change size)
+        if: env.CODE == 'true'
+        run: uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
+
+      - name: Start a PostgreSQL for this job
+        if: env.CODE == 'true'
+        run: |
+          port=$(uv run --no-editable python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port"
+          echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
+
+      - name: pytest (every test, database tests included, branch coverage)
+        if: env.CODE == 'true'
+        env:
+          COVERAGE_FILE: ${{ runner.temp }}/ev/.coverage
+        run: |
+          uv run --no-editable pytest -p no:cacheprovider -rs --cov=proxy_index --cov-branch \
+            --cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json" \
+            --junitxml="$EV/junit.xml" | tee "$EV/pytest.log"
+          # The database is what this job adds; its tests must never skip quietly.
+          if grep -q 'Set PG_TEST_ADMIN_FILE' "$EV/pytest.log"; then
+            echo "database tests were skipped"; exit 1
+          fi
+
+      - name: Changed lines covered (at least 85%)
+        if: env.CODE == 'true'
+        run: |
+          uvx --from diff-cover==10.6.0 diff-cover "$EV/coverage.xml" --compare-branch="$BASE" \
+            --fail-under=85 --json-report "$EV/diff-cover.json"
+
+      - name: Critical campaign files (at least 90% of changed lines)
+        if: env.CODE == 'true'
+        run: |
+          uv run --no-editable python - "$EV/diff-cover.json" <<'EOF'
+          import json, sys
+          critical = tuple(f"campaign/{name}.py" for name in (
+              "scope", "do_api", "launch", "harvest", "tick", "collector", "deploy", "ops_api"))
+          stats = json.load(open(sys.argv[1]))["src_stats"]
+          low = [f for f in stats if f.endswith(critical) and stats[f]["percent_covered"] < 90]
+          print("critical files under 90%:", low)
+          sys.exit(bool(low))
+          EOF
+
+      - name: Delete and project paths fully covered (lines and branches)
+        if: env.CODE == 'true'
+        run: >-
+          uv run --no-editable python scripts/ci/coverage_gate.py "$EV/coverage.json" .
+          src/proxy_index/campaign/scope.py
+          'src/proxy_index/campaign/do_api.py:DigitalOcean.request,DigitalOcean.create,DigitalOcean.get,DigitalOcean.list_tag,DigitalOcean.assign_project,DigitalOcean.project_droplet_ids'
+
+      - name: Campaign scope suite on its own (CAMP-1 Tier 1 step 6)
+        if: env.CODE == 'true'
+        run: uv run --no-editable pytest -p no:cacheprovider tests/test_campaign_scope.py -q
+
+      - name: Scale benchmark
+        if: env.CODE == 'true'
+        run: uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
+
+      - name: Stop PostgreSQL
+        if: always() && env.PG_BIN != ''
+        run: |
+          data=.state/postgres/data
+          [ -f "$data/postmaster.pid" ] || exit 0
+          "$PG_BIN/pg_ctl" -D "$data" stop -m fast
