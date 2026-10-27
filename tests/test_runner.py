@@ -606,7 +606,7 @@ async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
             self.count += 1
             # Requests 1-6 land in the 0:00 bucket, 7-12 in 5:00.
             clock[0] = 0 if self.count <= 6 else 20
-            ip = ["10.0.0.2", "10.0.0.4", "10.0.0.3", "10.0.0.99", None, None][
+            ip = ["192.0.2.2", "192.0.2.4", "192.0.2.3", "192.0.2.99", None, None][
                 (self.count - 1) % 6]
             if ip is None:
                 return Outcome(9, error="timeout" if self.count % 2 else "challenge",

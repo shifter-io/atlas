@@ -132,6 +132,6 @@ async def test_http_and_https_auth_and_timestamped_observations(tmp_path, tls):
     assert len(observations) == 12 and all(t > 0 for _, t in observations)
     assert all(b"Proxy-Authorization" not in h for h in origin_headers)
     with gzip.open(sink.directory / "ips.jsonl.gz", "rt") as stream:
-        assert all(json.loads(line)["ip"] == "8.8.8.8" for line in stream)
+        assert all(json.loads(line)["ip"] == "203.0.113.8" for line in stream)
     summary = (sink.directory / "summary.json").read_text()
     assert "private-password" not in summary and "fixture_account" not in summary

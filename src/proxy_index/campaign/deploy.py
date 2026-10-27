@@ -89,11 +89,15 @@ def timer_dropins(cid: str, spec: dict) -> list[tuple[str, bytes, int]]:
     found = timer_calendars(slot, spec.get("create_lead_seconds", 90))
     roles = {"tick": "launch", "watchdog-armed": "watchdog (armed)",
              "watchdog-fired": "watchdog (fired)"}
-    return [(f"proxy-index-campaign-{name}@{cid}.timer.d/slots.conf",
-             f"# CAMP-1: campaign {cid} has a slot every {slot} minutes.\n[Unit]\n"
-             f"Description=Proxy Index campaign %i: {roles[name]} every {slot} min at "
-             f"{calendar.removeprefix('*-*-* ')}\n[Timer]\nOnCalendar=\nOnCalendar={calendar}\n"
-             .encode(), 0o644) for name, calendar in found.items()]
+    dropins = []
+    for name, calendar in found.items():
+        text = (f"# CAMP-1: campaign {cid} has a slot every {slot} minutes.\n[Unit]\n"
+                f"Description=Proxy Index campaign %i: {roles[name]} every {slot} min at "
+                f"{calendar.removeprefix('*-*-* ')}\n[Timer]\n"
+                f"OnCalendar=\nOnCalendar={calendar}\n")
+        dropins.append((f"proxy-index-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(),
+                        0o644))
+    return dropins
 
 
 def load_inventory(path: Path) -> dict[str, Any]:
