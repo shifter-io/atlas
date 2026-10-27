@@ -41,11 +41,14 @@ async def test_a_smaller_offered_size_creates_the_manager_with_it(job):
     assert inventory(job)["manager_size"] == result["manager_size"] == "s-2vcpu-4gb"
 
 
-@pytest.mark.parametrize("size, regions", [
-    ("s-2vcpu-4gb", ["fra1"]),  # offered, but not in lon1
-    ("s-1vcpu-1gb", ["lon1"]),  # listed in lon1, but not available
-    ("s-64vcpu-9gb", None),  # not a size at all
-])
+@pytest.mark.parametrize(
+    "size, regions",
+    [
+        ("s-2vcpu-4gb", ["fra1"]),  # offered, but not in lon1
+        ("s-1vcpu-1gb", ["lon1"]),  # listed in lon1, but not available
+        ("s-64vcpu-9gb", None),  # not a size at all
+    ],
+)
 async def test_a_size_not_offered_in_lon1_is_refused_before_any_write(job, size, regions):
     fake = Fake()
     if regions is not None:
@@ -61,7 +64,8 @@ async def test_a_recorded_manager_keeps_its_size_on_a_rerun(job):
     for size in (None, "s-2vcpu-4gb"):
         await run_deploy(fake, replace(job, size=size))
     assert created_sizes(fake) == ["s-2vcpu-4gb"] and inventory(job)["manager_size"] == (
-        "s-2vcpu-4gb")
+        "s-2vcpu-4gb"
+    )
     posts = len(writes(fake))
     with pytest.raises(deploy.DeployError, match="tear it down with --keep-worker-assets"):
         await run_deploy(fake, replace(job, size="s-8vcpu-16gb"))
@@ -107,8 +111,17 @@ async def test_a_rerun_after_a_failed_create_keeps_the_size_it_asked_for(job):
 
 
 def test_the_cli_options():
-    common = ["campaign", "manager", "deploy", "--account", "leftclick", "--wheel", "w.whl",
-              "--requirements", "r.txt"]
+    common = [
+        "campaign",
+        "manager",
+        "deploy",
+        "--account",
+        "leftclick",
+        "--wheel",
+        "w.whl",
+        "--requirements",
+        "r.txt",
+    ]
     assert parse(common).size is None
     assert parse([*common, "--size", "s-2vcpu-4gb"]).size == "s-2vcpu-4gb"
     teardown = ["campaign", "manager", "teardown", "--after-collect", "c.json"]
@@ -117,7 +130,9 @@ def test_the_cli_options():
     # CAMP-1s: optional, so a manager that recorded no campaign can be torn down
     assert parse(["campaign", "manager", "teardown"]).after_collect == []
     assert parse([*teardown, "--after-collect", "d.json"]).after_collect == [
-        Path("c.json"), Path("d.json")]
+        Path("c.json"),
+        Path("d.json"),
+    ]
 
 
 @pytest.mark.parametrize("flags, keep", [([], False), (["--keep-worker-assets"], True)])
@@ -143,6 +158,16 @@ def test_the_teardown_cli_passes_the_keep_flag(monkeypatch, tmp_path, flags, kee
 
     monkeypatch.setattr(deploy, "teardown", teardown)
     monkeypatch.setattr(campaign_cli, "_cloud", NoCloud)
-    args = parse(["campaign", "manager", "teardown", "--after-collect", "r.json", *flags,
-                  "--inventory", str(recorded)])
+    args = parse(
+        [
+            "campaign",
+            "manager",
+            "teardown",
+            "--after-collect",
+            "r.json",
+            *flags,
+            "--inventory",
+            str(recorded),
+        ]
+    )
     assert campaign_cli.dispatch(args) == 0 and seen == [{"keep_worker_assets": keep}]

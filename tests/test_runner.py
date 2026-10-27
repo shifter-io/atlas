@@ -19,8 +19,9 @@ def config(**kwargs):
 
 async def test_summary_artifacts_and_exact_ip_counts(tmp_path):
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=10000, concurrency=31), sink,
-                       transport_factory=FakeTransport)
+    result = await run(
+        config(requests=10000, concurrency=31), sink, transport_factory=FakeTransport
+    )
     assert result.status == "completed"
     assert result.completed == result.started == result.successes == 10000
     assert result.unique_ips == 1
@@ -48,7 +49,7 @@ async def test_failed_requests_are_not_in_latency_or_ips(tmp_path):
 
     result = await run(config(requests=10), JsonSink(tmp_path), transport_factory=Mixed)
     assert result.errors == {"timeout": 5}
-    assert result.success_rate == .5
+    assert result.success_rate == 0.5
     assert result.latency_ms["p99"] == 2
     assert result.latency_mean_ms == 2
     assert result.unique_ips == 1
@@ -105,10 +106,13 @@ async def test_rate_pacing(tmp_path):
             starts.append(asyncio.get_running_loop().time())
             return await super().execute(target, context=context)
 
-    await run(config(requests=5, concurrency=3, requests_per_second=20),
-              JsonSink(tmp_path), transport_factory=Timed)
+    await run(
+        config(requests=5, concurrency=3, requests_per_second=20),
+        JsonSink(tmp_path),
+        transport_factory=Timed,
+    )
     assert len(starts) == 5
-    assert starts[-1] - starts[0] >= .18
+    assert starts[-1] - starts[0] >= 0.18
 
 
 async def test_bucket_boundary_is_not_run_start_time(tmp_path, monkeypatch):
@@ -185,21 +189,49 @@ async def test_bucket_export_does_not_block_request_execution(tmp_path, monkeypa
             await asyncio.sleep(0)
             return Outcome(2, ip="8.8.8.8", status=200)
 
-    result = await run(config(requests=3, concurrency=1), WaitingSink(tmp_path),
-                       transport_factory=Advancing)
+    result = await run(
+        config(requests=3, concurrency=1), WaitingSink(tmp_path), transport_factory=Advancing
+    )
     assert result.successes == 3
 
 
 OLD_SUMMARY_KEYS = {
-    "run_id", "schema_version", "framework_version", "target", "config", "started_at",
-    "finished_at", "duration_seconds", "status", "requested", "started", "completed",
-    "cancelled", "not_started", "successes", "total_errors", "errors", "status_codes",
-    "success_rate", "requests_per_second", "unique_ips", "pool_eligible", "latency_ms",
-    "latency_histogram", "response_body_bytes", "buckets", "artifacts",
+    "run_id",
+    "schema_version",
+    "framework_version",
+    "target",
+    "config",
+    "started_at",
+    "finished_at",
+    "duration_seconds",
+    "status",
+    "requested",
+    "started",
+    "completed",
+    "cancelled",
+    "not_started",
+    "successes",
+    "total_errors",
+    "errors",
+    "status_codes",
+    "success_rate",
+    "requests_per_second",
+    "unique_ips",
+    "pool_eligible",
+    "latency_ms",
+    "latency_histogram",
+    "response_body_bytes",
+    "buckets",
+    "artifacts",
 }
 OLD_BUCKET_KEYS = {
-    "bucket_start", "completed", "successes", "errors", "status_codes",
-    "response_body_bytes", "latency_histogram",
+    "bucket_start",
+    "completed",
+    "successes",
+    "errors",
+    "status_codes",
+    "response_body_bytes",
+    "latency_histogram",
 }
 NEW_COUNTERS = {"challenges", "blocks", "timeouts", "proxy_errors", "bytes_up", "bytes_down"}
 
@@ -250,13 +282,16 @@ class PoolTransport(FakeTransport):
         return outcome
 
 
-@pytest.mark.parametrize("scenario,address,fail_every", [
-    ("low_diversity", random_pool(20), 0),
-    ("low_diversity", random_pool(20), 7),
-    ("low_diversity", random_pool(20), 2),
-    ("high_diversity", random_pool(1500), 0),
-    ("early_duplicates", early_duplicates, 3),
-])
+@pytest.mark.parametrize(
+    "scenario,address,fail_every",
+    [
+        ("low_diversity", random_pool(20), 0),
+        ("low_diversity", random_pool(20), 7),
+        ("low_diversity", random_pool(20), 2),
+        ("high_diversity", random_pool(1500), 0),
+        ("early_duplicates", early_duplicates, 3),
+    ],
+)
 async def test_unique_ratio_after_the_warm_up_sample(tmp_path, scenario, address, fail_every):
     transports = []
 
@@ -264,11 +299,17 @@ async def test_unique_ratio_after_the_warm_up_sample(tmp_path, scenario, address
         transports.append(PoolTransport(cfg, address=address, fail_every=fail_every))
         return transports[0]
 
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=50),
-                       JsonSink(tmp_path), transport_factory=factory)
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=50),
+        JsonSink(tmp_path),
+        transport_factory=factory,
+    )
     trace = transports[0].trace
-    first = next(index for index, (ok, unique, _, done) in enumerate(trace)
-                 if done >= 1000 and done > 2 * unique)
+    first = next(
+        index
+        for index, (ok, unique, _, done) in enumerate(trace)
+        if done >= 1000 and done > 2 * unique
+    )
     ok, unique, in_flight, done = trace[first]
     # Before the warm-up sample nothing stops the run, whatever the ratio.
     assert all(n < 1000 or n <= 2 * u for s, u, _, n in trace[:first])
@@ -303,8 +344,11 @@ async def test_min_sample_is_configurable(tmp_path):
         transports.append(PoolTransport(cfg, address=random_pool(3)))
         return transports[0]
 
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=1,
-                              min_sample=10), JsonSink(tmp_path), transport_factory=factory)
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=1, min_sample=10),
+        JsonSink(tmp_path),
+        transport_factory=factory,
+    )
     assert result.completed == 10 and result.stop_reason == "unique_ratio"
 
 
@@ -314,8 +358,11 @@ async def test_census_without_any_success_stops_after_1000_completions(tmp_path)
             self.count += 1
             return Outcome(1, error="proxy_connect")
 
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=10),
-                       JsonSink(tmp_path), transport_factory=Failing)
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=10),
+        JsonSink(tmp_path),
+        transport_factory=Failing,
+    )
     assert result.stop_reason == "no_success" and result.status == "completed"
     assert 1000 <= result.completed < 1010 and result.completed == result.started
     assert result.successes == 0 and result.proxy_errors == result.completed
@@ -334,8 +381,11 @@ async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monk
             return Outcome(15000, error="timeout")
 
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=1),
-                       sink, transport_factory=Hanging)
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=1),
+        sink,
+        transport_factory=Hanging,
+    )
     assert result.stop_reason == "no_success" and result.completed == 40
     # No success, no latency sample: the mean is unknown, never 0.
     assert result.latency_mean_ms is None
@@ -355,8 +405,11 @@ async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):
                 return Outcome(1, error="timeout")
             return Outcome(1, ip=f"10.0.{self.count}.1", status=200)
 
-    result = await run(config(requests=60, stop_rule="unique_ratio", concurrency=1),
-                       JsonSink(tmp_path), transport_factory=LateStart)
+    result = await run(
+        config(requests=60, stop_rule="unique_ratio", concurrency=1),
+        JsonSink(tmp_path),
+        transport_factory=LateStart,
+    )
     # 37 distinct successes, then failures only: neither the ratio nor the
     # guard fires, so the request cap ends the run.
     assert result.stop_reason == "requests" and result.completed == 60
@@ -384,8 +437,11 @@ def clocked(monkeypatch, successes, *, step=15):
 
 async def test_census_that_goes_down_stops_as_stalled(tmp_path, monkeypatch):
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=1), sink,
-                       transport_factory=clocked(monkeypatch, 10))
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=1),
+        sink,
+        transport_factory=clocked(monkeypatch, 10),
+    )
     # Ten successes (the last at 150 s), then failures until 600 s passed without one.
     assert result.stop_reason == "stalled" and result.status == "completed"
     assert result.completed == 10 + 40 and result.successes == 10
@@ -405,25 +461,30 @@ async def test_census_that_goes_down_stops_as_stalled(tmp_path, monkeypatch):
 
 
 async def test_stall_seconds_is_configurable(tmp_path, monkeypatch):
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=1,
-                              stall_seconds=60), JsonSink(tmp_path),
-                       transport_factory=clocked(monkeypatch, 10))
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=1, stall_seconds=60),
+        JsonSink(tmp_path),
+        transport_factory=clocked(monkeypatch, 10),
+    )
     assert result.stop_reason == "stalled" and result.completed == 10 + 4
 
 
 async def test_no_stall_before_the_first_success(tmp_path, monkeypatch):
     # Never a success: the no_success guard (10 minutes) ends it, not the stall rule.
-    result = await run(config(requests=None, stop_rule="unique_ratio", concurrency=1,
-                              stall_seconds=30), JsonSink(tmp_path),
-                       transport_factory=clocked(monkeypatch, 0))
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio", concurrency=1, stall_seconds=30),
+        JsonSink(tmp_path),
+        transport_factory=clocked(monkeypatch, 0),
+    )
     assert result.stop_reason == "no_success" and result.completed == 40
     assert result.outage_started_at is None
 
 
 async def test_count_runs_never_stall(tmp_path, monkeypatch):
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=60, concurrency=1), sink,
-                       transport_factory=clocked(monkeypatch, 1))
+    result = await run(
+        config(requests=60, concurrency=1), sink, transport_factory=clocked(monkeypatch, 1)
+    )
     assert result.stop_reason == "requests" and result.completed == 60
     saved = json.loads((sink.directory / "summary.json").read_text())
     assert "outage_started_at" not in saved and "stall_seconds" not in saved["config"]
@@ -437,10 +498,11 @@ def test_stall_seconds_validation():
 
 
 async def test_unique_ratio_still_honours_a_request_cap(tmp_path):
-    result = await run(config(requests=30, stop_rule="unique_ratio", concurrency=5),
-                       JsonSink(tmp_path),
-                       transport_factory=lambda cfg: PoolTransport(
-                           cfg, address=random_pool(10_000)))
+    result = await run(
+        config(requests=30, stop_rule="unique_ratio", concurrency=5),
+        JsonSink(tmp_path),
+        transport_factory=lambda cfg: PoolTransport(cfg, address=random_pool(10_000)),
+    )
     assert result.completed == 30 and result.stop_reason == "requests"
     assert result.requested == 30 and result.not_started == 0
 
@@ -452,8 +514,9 @@ async def test_count_rule_stops_at_n(tmp_path):
         transports.append(PoolTransport(cfg, address=random_pool(2)))
         return transports[0]
 
-    result = await run(config(requests=100, concurrency=25), JsonSink(tmp_path),
-                       transport_factory=factory)
+    result = await run(
+        config(requests=100, concurrency=25), JsonSink(tmp_path), transport_factory=factory
+    )
     assert result.completed == result.started == transports[0].count == 100
     assert result.stop_reason == "requests" and result.status == "completed"
     # The default rule is not written, so count runs keep their old configuration.
@@ -475,8 +538,9 @@ def test_stop_rule_validation():
 async def test_unique_ratio_requires_a_pool_target(tmp_path):
     targets = TargetRegistry()
     targets.register(EchoIpTarget("no_ips", "http://example.test/", pool_eligible=False))
-    cfg = RunConfig("no_ips", ProxyConfig("http", "localhost", 8080), requests=None,
-                    stop_rule="unique_ratio")
+    cfg = RunConfig(
+        "no_ips", ProxyConfig("http", "localhost", 8080), requests=None, stop_rule="unique_ratio"
+    )
     with pytest.raises(ValueError, match="pool-eligible"):
         await run(cfg, JsonSink(tmp_path), targets=targets, transport_factory=FakeTransport)
 
@@ -484,8 +548,12 @@ async def test_unique_ratio_requires_a_pool_target(tmp_path):
 async def test_operator_stop_reason(tmp_path):
     stop = asyncio.Event()
     stop.set()
-    result = await run(config(requests=None, stop_rule="unique_ratio"), JsonSink(tmp_path),
-                       stop=stop, transport_factory=FakeTransport)
+    result = await run(
+        config(requests=None, stop_rule="unique_ratio"),
+        JsonSink(tmp_path),
+        stop=stop,
+        transport_factory=FakeTransport,
+    )
     assert result.stop_reason == "operator" and result.status == "cancelled"
     assert result.requested is None and result.not_started == 0
 
@@ -522,8 +590,12 @@ async def test_summary_keeps_old_keys_and_adds_counters(tmp_path):
     assert saved["latency_mean_ms"] == 1
     assert set(saved["buckets"][0]) == OLD_BUCKET_KEYS | NEW_COUNTERS
     assert {k: saved[k] for k in NEW_COUNTERS} == {
-        "challenges": 2, "blocks": 2, "timeouts": 2, "proxy_errors": 2,
-        "bytes_up": 40, "bytes_down": 1840,
+        "challenges": 2,
+        "blocks": 2,
+        "timeouts": 2,
+        "proxy_errors": 2,
+        "bytes_up": 40,
+        "bytes_down": 1840,
     }
     assert result.successes == 2 and result.total_errors == 10
     assert result.completed == result.successes + result.total_errors
@@ -535,25 +607,45 @@ async def test_progress_is_throttled_and_final(tmp_path):
 
     class Slow(FakeTransport):
         async def execute(self, target, *, context=None):
-            await asyncio.sleep(.004)
+            await asyncio.sleep(0.004)
             return await super().execute(target, context=context)
 
     async def progress(counters):
         calls.append((asyncio.get_running_loop().time(), counters))
 
-    result = await run(config(requests=60, concurrency=2), JsonSink(tmp_path),
-                       transport_factory=Slow, progress=progress, progress_interval=.03)
+    result = await run(
+        config(requests=60, concurrency=2),
+        JsonSink(tmp_path),
+        transport_factory=Slow,
+        progress=progress,
+        progress_interval=0.03,
+    )
     assert len(calls) >= 3
-    assert set(calls[0][1]) == {"requests", "successes", "unique_ips", *NEW_COUNTERS,
-                                 "execution_backend", "execution_processes"}
+    assert set(calls[0][1]) == {
+        "requests",
+        "successes",
+        "unique_ips",
+        *NEW_COUNTERS,
+        "execution_backend",
+        "execution_processes",
+    }
     times = [at for at, _ in calls[:-1]]
-    assert all(b - a >= .025 for a, b in zip(times, times[1:], strict=False))
+    assert all(b - a >= 0.025 for a, b in zip(times, times[1:], strict=False))
     requests = [c["requests"] for _, c in calls]
     assert requests == sorted(requests)
-    assert calls[-1][1] == {"requests": 60, "successes": 60, "unique_ips": 1,
-                            "challenges": 0, "blocks": 0, "timeouts": 0, "proxy_errors": 0,
-                            "bytes_up": 0, "bytes_down": 0,
-                            "execution_backend": "inline", "execution_processes": 1}
+    assert calls[-1][1] == {
+        "requests": 60,
+        "successes": 60,
+        "unique_ips": 1,
+        "challenges": 0,
+        "blocks": 0,
+        "timeouts": 0,
+        "proxy_errors": 0,
+        "bytes_up": 0,
+        "bytes_down": 0,
+        "execution_backend": "inline",
+        "execution_processes": 1,
+    }
     assert result.completed == 60
 
 
@@ -561,17 +653,32 @@ async def test_progress_failure_does_not_end_the_run(tmp_path):
     def progress(counters):
         raise ConnectionError("orchestrator unreachable")
 
-    result = await run(config(requests=5), JsonSink(tmp_path), transport_factory=FakeTransport,
-                       progress=progress, progress_interval=.001)
+    result = await run(
+        config(requests=5),
+        JsonSink(tmp_path),
+        transport_factory=FakeTransport,
+        progress=progress,
+        progress_interval=0.001,
+    )
     assert result.completed == 5 and result.status == "completed"
     with pytest.raises(ValueError):
-        await run(config(requests=5), JsonSink(tmp_path), transport_factory=FakeTransport,
-                  progress=progress, progress_interval=0)
+        await run(
+            config(requests=5),
+            JsonSink(tmp_path),
+            transport_factory=FakeTransport,
+            progress=progress,
+            progress_interval=0,
+        )
 
 
 class Enricher:
-    release = {"file": "fixture.mmdb", "sha256": "ab" * 32, "database_type": "DBIP-Full",
-               "build_epoch": 1000, "built_at": "1970-01-01T00:16:40+00:00"}
+    release = {
+        "file": "fixture.mmdb",
+        "sha256": "ab" * 32,
+        "database_type": "DBIP-Full",
+        "build_epoch": 1000,
+        "built_at": "1970-01-01T00:16:40+00:00",
+    }
 
     def __init__(self):
         self.lookups = 0
@@ -580,17 +687,23 @@ class Enricher:
         self.lookups += 1
         last = int(address.rsplit(".", 1)[1])
         if last == 99:
-            return {"matched": False, **dict.fromkeys(
-                (*LOCATION_FIELDS, *NETWORK_FIELDS))}
+            return {"matched": False, **dict.fromkeys((*LOCATION_FIELDS, *NETWORK_FIELDS))}
         german = last % 2 == 0
         return {
-            "matched": True, "country_code": "DE" if german else "FR",
-            "country": "Germany" if german else "France", "region_code": None,
-            "region": None, "city": "Berlin" if german else "Paris",
-            "latitude": 52.5 if german else 48.9, "longitude": 13.4 if german else 2.35,
-            "isp": "Telekom" if german else "Orange", "organization": None,
-            "asn": 3320 if german else 3215, "asn_organization": "DTAG" if german else "Orange",
-            "connection_type": "Cable/DSL", "usage_type": "residential",
+            "matched": True,
+            "country_code": "DE" if german else "FR",
+            "country": "Germany" if german else "France",
+            "region_code": None,
+            "region": None,
+            "city": "Berlin" if german else "Paris",
+            "latitude": 52.5 if german else 48.9,
+            "longitude": 13.4 if german else 2.35,
+            "isp": "Telekom" if german else "Orange",
+            "organization": None,
+            "asn": 3320 if german else 3215,
+            "asn_organization": "DTAG" if german else "Orange",
+            "connection_type": "Cable/DSL",
+            "usage_type": "residential",
         }
 
 
@@ -607,16 +720,17 @@ async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
             # Requests 1-6 land in the 0:00 bucket, 7-12 in 5:00.
             clock[0] = 0 if self.count <= 6 else 20
             ip = ["192.0.2.2", "192.0.2.4", "192.0.2.3", "192.0.2.99", None, None][
-                (self.count - 1) % 6]
+                (self.count - 1) % 6
+            ]
             if ip is None:
-                return Outcome(9, error="timeout" if self.count % 2 else "challenge",
-                               bytes_up=5)
+                return Outcome(9, error="timeout" if self.count % 2 else "challenge", bytes_up=5)
             return Outcome(self.count, ip=ip, status=200, bytes_up=10, bytes_down=30)
 
     enricher = Enricher()
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=12, concurrency=1), sink, transport_factory=Script,
-                       enricher=enricher)
+    result = await run(
+        config(requests=12, concurrency=1), sink, transport_factory=Script, enricher=enricher
+    )
     artifact = result.artifacts["geo"]
     path = sink.directory / artifact["file"]
     assert artifact["file"] == "geo.jsonl.gz" and artifact["release"] == Enricher.release
@@ -635,12 +749,21 @@ async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
     german = [r for r in rows if r["location"] and r["location"]["country_code"] == "DE"]
     assert len(german) == 2 and all(r["completed"] == 2 for r in german)
     assert german[0]["location"] == {
-        "country_code": "DE", "country": "Germany", "region_code": None, "region": None,
-        "city": "Berlin", "latitude": 52.5, "longitude": 13.4,
+        "country_code": "DE",
+        "country": "Germany",
+        "region_code": None,
+        "region": None,
+        "city": "Berlin",
+        "latitude": 52.5,
+        "longitude": 13.4,
     }
     assert german[0]["network"] == {
-        "isp": "Telekom", "organization": None, "asn": 3320, "asn_organization": "DTAG",
-        "connection_type": "Cable/DSL", "usage_type": "residential",
+        "isp": "Telekom",
+        "organization": None,
+        "asn": 3320,
+        "asn_organization": "DTAG",
+        "connection_type": "Cable/DSL",
+        "usage_type": "residential",
     }
     assert german[0]["latency_histogram"] == {"format": "ceil_ms_v1", "bins": [[1, 1], [2, 1]]}
     unknown = [r for r in rows if r["location"] is None]
@@ -649,8 +772,17 @@ async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
     assert sum(r["challenges"] + r["timeouts"] for r in unknown) == 4
     assert [len(r["latency_histogram"]["bins"]) for r in unknown] == [1, 1]
     assert set(rows[0]) == {
-        "bucket_start", "location", "network", "completed", "successes", "challenges",
-        "blocks", "timeouts", "bytes_up", "bytes_down", "latency_histogram",
+        "bucket_start",
+        "location",
+        "network",
+        "completed",
+        "successes",
+        "challenges",
+        "blocks",
+        "timeouts",
+        "bytes_up",
+        "bytes_down",
+        "latency_histogram",
     }
 
 
@@ -658,8 +790,9 @@ async def test_geo_artifact_exists_without_traffic(tmp_path):
     stop = asyncio.Event()
     stop.set()
     sink = JsonSink(tmp_path)
-    result = await run(config(), sink, stop=stop, transport_factory=FakeTransport,
-                       enricher=Enricher())
+    result = await run(
+        config(), sink, stop=stop, transport_factory=FakeTransport, enricher=Enricher()
+    )
     assert result.artifacts["geo"]["rows"] == 0
     assert (sink.directory / "geo.jsonl.gz").exists()
     assert not list(sink.directory.glob("*.partial"))
@@ -673,7 +806,11 @@ async def test_geo_with_the_local_dbip_database(tmp_path):
     except (ValueError, FileNotFoundError):
         pytest.skip("No local DB-IP database")
     with LocalEnricher() as enricher:
-        result = await run(config(requests=3), JsonSink(tmp_path),
-                           transport_factory=FakeTransport, enricher=enricher)
+        result = await run(
+            config(requests=3),
+            JsonSink(tmp_path),
+            transport_factory=FakeTransport,
+            enricher=enricher,
+        )
     assert result.artifacts["geo"]["rows"] == 1
     assert result.artifacts["geo"]["release"]["sha256"] == enricher.release["sha256"]

@@ -70,8 +70,16 @@ def mapping(**patterns):
 
 
 SLUGS = ["syd1", "blr1", "tor1", "sgp1", "ams3", "fra1", "lon1", "nyc3"]
-NAMES = {"AU": "Australia", "IN": "India", "CA": "Canada", "SG": "Singapore", "NO": "Norway",
-         "DE": "Germany", "GB": "United Kingdom", "US": "United States"}
+NAMES = {
+    "AU": "Australia",
+    "IN": "India",
+    "CA": "Canada",
+    "SG": "Singapore",
+    "NO": "Norway",
+    "DE": "Germany",
+    "GB": "United Kingdom",
+    "US": "United States",
+}
 
 
 def valid():

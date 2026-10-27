@@ -56,8 +56,13 @@ OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
 NAME = f"pic-{SID}-h03-lon1-shifter"
 SNAPSHOT = "pi-camp-worker-0.9.5-0123456789ab-20270101"
 PROD_FIREWALL = "33333333-3333-4333-8333-000000000099"
-FIREWALL_RULES = {"name": "pi-camp-x", "inbound_rules": [], "outbound_rules": [], "tags": [],
-                  "droplet_ids": []}
+FIREWALL_RULES = {
+    "name": "pi-camp-x",
+    "inbound_rules": [],
+    "outbound_rules": [],
+    "tags": [],
+    "droplet_ids": [],
+}
 # Near-misses: (key, name, tags, project, created, failing check, role).
 NEAR_MISSES = [
     ("untagged", "web-legacy", [], PROD_PROJECT, None, "tags", "worker"),
@@ -66,32 +71,68 @@ NEAR_MISSES = [
     ("ours_in_other_project", NAME, OURS, PROD_PROJECT, None, "project", "worker"),
     ("ours_in_no_project", NAME, OURS, None, None, "project", "worker"),
     ("worker_without_campaign_tag", NAME, [WORKER_TAG], CAMPAIGN_PROJECT, None, "tags", "worker"),
-    ("other_campaign", f"pic-{OTHER_SID}-h03-lon1-shifter",
-     [WORKER_TAG, f"pi-camp-{OTHER_SID}"], CAMPAIGN_PROJECT, None, "tags", "worker"),
-    ("other_campaign_name", f"pic-{OTHER_SID}-h03-lon1-shifter", OURS, CAMPAIGN_PROJECT, None,
-     "name", "worker"),
+    (
+        "other_campaign",
+        f"pic-{OTHER_SID}-h03-lon1-shifter",
+        [WORKER_TAG, f"pi-camp-{OTHER_SID}"],
+        CAMPAIGN_PROJECT,
+        None,
+        "tags",
+        "worker",
+    ),
+    (
+        "other_campaign_name",
+        f"pic-{OTHER_SID}-h03-lon1-shifter",
+        OURS,
+        CAMPAIGN_PROJECT,
+        None,
+        "name",
+        "worker",
+    ),
     ("bad_name", "pic-01234567-lon1", OURS, CAMPAIGN_PROJECT, None, "name", "worker"),
-    ("worker_tagged_manager", NAME, [*OURS, MANAGER_TAG], CAMPAIGN_PROJECT, None, "tags",
-     "worker"),
+    ("worker_tagged_manager", NAME, [*OURS, MANAGER_TAG], CAMPAIGN_PROJECT, None, "tags", "worker"),
     ("created_before_spec", NAME, OURS, CAMPAIGN_PROJECT, EARLY_TIME, "created_after", "worker"),
-    ("foreign_manager", "pi-camp-manager-20270101-ee99", [MANAGER_TAG], CAMPAIGN_PROJECT, None,
-     "not_manager", "manager"),
-    ("foreign_builder", "pi-camp-builder-20270101-ee99", [BUILDER_TAG], PROD_PROJECT, None,
-     "project", "builder"),
+    (
+        "foreign_manager",
+        "pi-camp-manager-20270101-ee99",
+        [MANAGER_TAG],
+        CAMPAIGN_PROJECT,
+        None,
+        "not_manager",
+        "manager",
+    ),
+    (
+        "foreign_builder",
+        "pi-camp-builder-20270101-ee99",
+        [BUILDER_TAG],
+        PROD_PROJECT,
+        None,
+        "project",
+        "builder",
+    ),
 ]
 
 
 def seeded():
     fake = FakeDigitalOcean()
     fake.seed_production()
-    near = {key: fake.add(name, tags, project=project, created=created or CREATE_TIME)
-            for key, name, tags, project, created, _, _ in NEAR_MISSES}
-    near["manager"] = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG],
-                               project=CAMPAIGN_PROJECT, droplet_id=MANAGER_ID)
-    near["builder"] = fake.add("pi-camp-builder-20270101-cd34", [BUILDER_TAG],
-                               project=CAMPAIGN_PROJECT)
-    owned = {fake.add(f"pic-{SID}-h03-{region}-shifter", OURS, project=CAMPAIGN_PROJECT)
-             for region in ("lon1", "fra1", "syd1")}
+    near = {
+        key: fake.add(name, tags, project=project, created=created or CREATE_TIME)
+        for key, name, tags, project, created, _, _ in NEAR_MISSES
+    }
+    near["manager"] = fake.add(
+        "pi-camp-manager-20270101-ab12",
+        [MANAGER_TAG],
+        project=CAMPAIGN_PROJECT,
+        droplet_id=MANAGER_ID,
+    )
+    near["builder"] = fake.add(
+        "pi-camp-builder-20270101-cd34", [BUILDER_TAG], project=CAMPAIGN_PROJECT
+    )
+    owned = {
+        fake.add(f"pic-{SID}-h03-{region}-shifter", OURS, project=CAMPAIGN_PROJECT)
+        for region in ("lon1", "fra1", "syd1")
+    }
     return fake, near, owned
 
 
@@ -104,8 +145,9 @@ def audit_lines(path):
 
 
 async def created_worker(cloud, name=NAME):
-    [droplet] = await cloud.create([name], region="lon1", size="c-2", image="1", tags=OURS,
-                                   ssh_keys=["9"])
+    [droplet] = await cloud.create(
+        [name], region="lon1", size="c-2", image="1", tags=OURS, ssh_keys=["9"]
+    )
     return droplet, {droplet.id: DropletRecord("shifter", "lon1", 3, name, droplet.id)}
 
 
@@ -119,8 +161,18 @@ async def test_every_destructive_path_over_the_whole_account_deletes_only_ours(t
         for role, role_scope in (("worker", SCOPE), ("manager", early), ("builder", SCOPE)):
             for droplet_id in sorted(everything):
                 try:
-                    if await guarded_delete(cloud, "droplet", droplet_id, role_scope,
-                                            droplets(everything), audit, role) == "deleted":
+                    if (
+                        await guarded_delete(
+                            cloud,
+                            "droplet",
+                            droplet_id,
+                            role_scope,
+                            droplets(everything),
+                            audit,
+                            role,
+                        )
+                        == "deleted"
+                    ):
                         results[role].add(droplet_id)
                 except OwnershipError:
                     pass
@@ -144,8 +196,9 @@ async def test_each_near_miss_is_refused_and_audited(tmp_path, variant):
     target, audit = near[variant[0]], tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "droplet", target, SCOPE, droplets({target}), audit,
-                                 variant[-1])
+            await guarded_delete(
+                cloud, "droplet", target, SCOPE, droplets({target}), audit, variant[-1]
+            )
     assert variant[-2] in refused.value.failed
     assert target in fake.droplets and not fake.deleted
     [line] = audit_lines(audit)
@@ -158,11 +211,24 @@ async def test_worker_delete_never_targets_the_manager_even_with_worker_markers(
     fake.add(NAME, OURS, project=CAMPAIGN_PROJECT, droplet_id=MANAGER_ID)
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "droplet", MANAGER_ID, SCOPE, droplets({MANAGER_ID}),
-                                 tmp_path / "audit.jsonl")
+            await guarded_delete(
+                cloud,
+                "droplet",
+                MANAGER_ID,
+                SCOPE,
+                droplets({MANAGER_ID}),
+                tmp_path / "audit.jsonl",
+            )
         with pytest.raises(OwnershipError) as as_manager:
-            await guarded_delete(cloud, "droplet", MANAGER_ID, SCOPE, droplets({MANAGER_ID}),
-                                 tmp_path / "audit.jsonl", "manager")
+            await guarded_delete(
+                cloud,
+                "droplet",
+                MANAGER_ID,
+                SCOPE,
+                droplets({MANAGER_ID}),
+                tmp_path / "audit.jsonl",
+                "manager",
+            )
     assert refused.value.failed == ["not_manager"]
     assert "tags" in as_manager.value.failed and not fake.deleted
 
@@ -172,8 +238,14 @@ async def test_an_unrecorded_owned_droplet_is_refused(tmp_path):
     target = sorted(owned)[0]
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "droplet", target, SCOPE, droplets(owned - {target}),
-                                 tmp_path / "audit.jsonl")
+            await guarded_delete(
+                cloud,
+                "droplet",
+                target,
+                SCOPE,
+                droplets(owned - {target}),
+                tmp_path / "audit.jsonl",
+            )
     assert refused.value.failed == ["recorded"] and target in fake.droplets
 
 
@@ -204,16 +276,19 @@ async def test_a_project_id_that_is_not_proxy_index_refuses_every_delete(tmp_pat
     wrong = Scope(CID, SID, PROD_PROJECT, MANAGER_ID, datetime.fromisoformat(SPEC_TIME))
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "droplet", target, wrong, droplets({target}),
-                                 tmp_path / "audit.jsonl")
+            await guarded_delete(
+                cloud, "droplet", target, wrong, droplets({target}), tmp_path / "audit.jsonl"
+            )
     assert refused.value.failed == ["project_id"] and target in fake.droplets
 
 
 async def test_an_absent_droplet_is_audited_and_not_deleted(tmp_path):
     fake, audit = FakeDigitalOcean(), tmp_path / "audit.jsonl"
     async with running(fake) as cloud:
-        assert await guarded_delete(cloud, "droplet", "123", SCOPE, droplets({"123"}),
-                                    audit) == "absent"
+        assert (
+            await guarded_delete(cloud, "droplet", "123", SCOPE, droplets({"123"}), audit)
+            == "absent"
+        )
     assert audit_lines(audit)[0]["result"] == "absent" and not fake.deleted
 
 
@@ -229,7 +304,8 @@ async def test_api_errors_are_audited_and_raised(tmp_path, method):
     line = audit_lines(audit)[-1]
     assert line["result"] == "failed" and line["http"] == 403 and target in fake.droplets
     assert [x["result"] for x in audit_lines(audit)] == (
-        ["failed"] if method == "GET" else ["attempt", "failed"])
+        ["failed"] if method == "GET" else ["attempt", "failed"]
+    )
 
 
 async def test_unexpected_errors_are_audited_too(tmp_path):
@@ -255,11 +331,15 @@ FIREWALL = "33333333-3333-4333-8333-333333333333"
         ("ssh_key", "41", {"name": "pi-camp-worker-20270101"}, False, "recorded"),
         ("snapshot", "42", {"name": "pi-camp-worker-0.9.5-abc-20270101"}, True, None),
         ("snapshot", "42", {"name": "prod-backup"}, True, "name"),
-        ("firewall", FIREWALL, {"name": "pi-camp-worker-fw", "tags": [WORKER_TAG],
-                                "droplet_ids": [7]}, True, None),
+        (
+            "firewall",
+            FIREWALL,
+            {"name": "pi-camp-worker-fw", "tags": [WORKER_TAG], "droplet_ids": [7]},
+            True,
+            None,
+        ),
         ("firewall", FIREWALL, {"name": "pi-camp-worker-fw", "tags": ["prod"]}, True, "targets"),
-        ("firewall", FIREWALL, {"name": "pi-camp-worker-fw", "droplet_ids": [8]}, True,
-         "targets"),
+        ("firewall", FIREWALL, {"name": "pi-camp-worker-fw", "droplet_ids": [8]}, True, "targets"),
     ],
 )
 async def test_keys_firewalls_and_snapshots_need_a_record_and_our_prefix(
@@ -285,8 +365,9 @@ async def test_recorded_ids_are_per_kind(tmp_path):
     fake.add_resource("ssh_key", "700001", name="pi-camp-worker-20270101")
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "ssh_key", "700001", SCOPE, droplets({"700001"}),
-                                 tmp_path / "audit.jsonl")
+            await guarded_delete(
+                cloud, "ssh_key", "700001", SCOPE, droplets({"700001"}), tmp_path / "audit.jsonl"
+            )
     assert refused.value.failed == ["recorded"] and not fake.deleted
 
 
@@ -294,8 +375,7 @@ async def test_unknown_kind_or_role_is_rejected(tmp_path):
     async with running(FakeDigitalOcean()) as cloud:
         for kind, role in (("volume", "worker"), ("droplet", "admin")):
             with pytest.raises(ValueError):
-                await guarded_delete(cloud, kind, "1", SCOPE, droplets({"1"}), tmp_path / "a",
-                                     role)
+                await guarded_delete(cloud, kind, "1", SCOPE, droplets({"1"}), tmp_path / "a", role)
 
 
 @pytest.mark.parametrize("method", ["DELETE", "delete", "Delete", "dElEtE"])
@@ -370,8 +450,14 @@ async def test_raw_writes_never_reach_a_production_droplet_or_firewall(token):
     which only its ownership-checking methods pass; the scope guard's token does not do."""
     fake = FakeDigitalOcean()
     production = fake.add("prod-node-0001", ["prod"])
-    fake.add_resource("firewall", PROD_FIREWALL, name="prod-fw", tags=["prod"],
-                      droplet_ids=[int(production)], inbound_rules=[{"protocol": "tcp"}])
+    fake.add_resource(
+        "firewall",
+        PROD_FIREWALL,
+        name="prod-fw",
+        tags=["prod"],
+        droplet_ids=[int(production)],
+        inbound_rules=[{"protocol": "tcp"}],
+    )
     guard = scope._GUARD if token == "scope" else token
     writes = [
         ("POST", f"/v2/droplets/{production}/actions", {"type": "power_off"}),
@@ -393,10 +479,13 @@ async def test_assignment_is_confirmed_on_the_first_try(tmp_path):
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
-        confirmed, failed = await assign_and_verify_project(cloud, SCOPE, [droplet.id], records,
-                                                            tmp_path / "a.jsonl")
+        confirmed, failed = await assign_and_verify_project(
+            cloud, SCOPE, [droplet.id], records, tmp_path / "a.jsonl"
+        )
         assert await assign_and_verify_project(cloud, SCOPE, [], {}, tmp_path / "a.jsonl") == (
-            frozenset(), frozenset())
+            frozenset(),
+            frozenset(),
+        )
     assert confirmed == {droplet.id} and not failed
     assert records[droplet.id].status == "assigned" and records[droplet.id].assigned_at
     assert droplet.id in fake.projects[CAMPAIGN_PROJECT]
@@ -411,12 +500,18 @@ async def test_assignment_is_confirmed_after_errors_and_a_lagging_project(tmp_pa
 
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
-        fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 500,
-                                 times=5))
+        fake.faults.append(
+            Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 500, times=5)
+        )
         fake.assign_delay = 1
         confirmed, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, tmp_path / "a.jsonl",
-            retry=scope.Retry(sleep=sleep))
+            cloud,
+            SCOPE,
+            [droplet.id],
+            records,
+            tmp_path / "a.jsonl",
+            retry=scope.Retry(sleep=sleep),
+        )
     assert confirmed == {droplet.id} and not failed and sleeps == [5.0, 5.0]
     assert scope.ASSIGN_RETRY == scope.Retry(3, 5.0)
 
@@ -428,7 +523,8 @@ async def test_never_confirmed_is_assign_failed_and_destroyed_through_own_unassi
         droplet, records = await created_worker(cloud)
         fake.assign_delay = 99
         confirmed, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(delay=0))
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(delay=0)
+        )
     assert not confirmed and failed == {droplet.id} and droplet.id not in fake.droplets
     record = records[droplet.id]
     assert record.status == "destroyed" and record.error_class == "project_assign_failed"
@@ -454,7 +550,8 @@ async def test_the_mark_is_saved_before_the_delete(tmp_path, save_fails):
 
         fake.assign_delay = 99
         _, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(delay=0, save=save))
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(delay=0, save=save)
+        )
     assert seen == [("assign_failed", True, [])] and failed == {droplet.id}
     assert records[droplet.id].status == "destroyed" and droplet.id not in fake.droplets
 
@@ -465,8 +562,10 @@ def test_settling_refusal_reads_only_the_latest_audit_line_of_the_droplet(tmp_pa
     assert not scope.settling_refusal(audit, "7")  # no audit yet
 
     def write(*entries):
-        audit.write_text("".join(json.dumps({"kind": "droplet", "id": "7"} | e) + "\n"
-                                 for e in entries) + '{"kind": "drop')  # cut short by a crash
+        audit.write_text(
+            "".join(json.dumps({"kind": "droplet", "id": "7"} | e) + "\n" for e in entries)
+            + '{"kind": "drop'
+        )  # cut short by a crash
 
     def refused(*failed):
         checks = dict.fromkeys(["recorded", "tags", "name", "not_manager", "project"], True)
@@ -474,9 +573,14 @@ def test_settling_refusal_reads_only_the_latest_audit_line_of_the_droplet(tmp_pa
 
     write({"result": "deleted"})
     assert not scope.settling_refusal(audit, "8")  # no line of this droplet
-    for failed, retried in ((["tags"], True), (["name", "project"], True),
-                            (["created_after", "project"], True), (["project"], False),
-                            (["tags", "not_manager"], False), (["recorded", "tags"], False)):
+    for failed, retried in (
+        (["tags"], True),
+        (["name", "project"], True),
+        (["created_after", "project"], True),
+        (["project"], False),
+        (["tags", "not_manager"], False),
+        (["recorded", "tags"], False),
+    ):
         write(refused(*failed), {"id": "8", "result": "deleted"})
         assert scope.settling_refusal(audit, "7") is retried, failed
     write(refused("tags"), {"result": "deleted"}, {"kind": "ssh_key", **refused("tags")})
@@ -488,8 +592,9 @@ async def test_a_late_arrival_is_destroyed_through_the_normal_path(tmp_path):
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
         fake.assign_delay = 2  # arrives on the guard's own re-read
-        _, failed = await assign_and_verify_project(cloud, SCOPE, [droplet.id], records, audit,
-                                                    retry=scope.Retry(attempts=2, delay=0))
+        _, failed = await assign_and_verify_project(
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(attempts=2, delay=0)
+        )
     assert failed == {droplet.id} and audit_lines(audit)[-1]["path"] == "normal"
     assert records[droplet.id].status == "destroyed"
 
@@ -501,18 +606,28 @@ async def test_the_own_unassigned_path_needs_every_condition(tmp_path, monkeypat
         droplet, records = await created_worker(cloud)
         if case == "not_our_create":  # a lookalike: our markers, recorded, but never marked
             droplet_id = fake.add(f"pic-{SID}-h03-fra1-shifter", OURS)
-            records = {droplet_id: DropletRecord("shifter", "fra1", 3, "x", droplet_id,
-                                                 status="assign_failed")}
+            records = {
+                droplet_id: DropletRecord(
+                    "shifter", "fra1", 3, "x", droplet_id, status="assign_failed"
+                )
+            }
         else:
             droplet_id = droplet.id
             records[droplet_id].status = "assign_failed"  # set by hand, not by the function
             if case == "too_old":
                 records[droplet_id].assign_failed_at = SPEC_TIME
-                monkeypatch.setattr(scope, "utcnow",
-                                    lambda: datetime.fromisoformat("2027-01-01T22:29:00Z"))
+                monkeypatch.setattr(
+                    scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T22:29:00Z")
+                )
         with pytest.raises(OwnershipError) as refused:
-            await guarded_delete(cloud, "droplet", droplet_id, SCOPE,
-                                 Ledger({"droplet": {droplet_id}}, records), audit)
+            await guarded_delete(
+                cloud,
+                "droplet",
+                droplet_id,
+                SCOPE,
+                Ledger({"droplet": {droplet_id}}, records),
+                audit,
+            )
     assert refused.value.failed == ["project"] and droplet_id in fake.droplets
     assert audit_lines(audit)[-1]["path"] == "normal"
 
@@ -526,12 +641,14 @@ async def test_a_refused_or_failed_destroy_is_recorded(tmp_path, monkeypatch):
         fake.assign_delay = 99
         fake.faults.append(Fault("DELETE", f"/v2/droplets/{second.id}", 403))
         monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T22:00Z"))
-        _, failed = await assign_and_verify_project(cloud, SCOPE, [first.id, second.id], records,
-                                                    audit, retry=scope.Retry(attempts=1))
+        _, failed = await assign_and_verify_project(
+            cloud, SCOPE, [first.id, second.id], records, audit, retry=scope.Retry(attempts=1)
+        )
         monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-02T00:00Z"))
         third, more = await created_worker(cloud, f"pic-{SID}-h03-syd1-shifter")
-        await assign_and_verify_project(cloud, SCOPE, [third.id], more, audit,
-                                        retry=scope.Retry(attempts=1))
+        await assign_and_verify_project(
+            cloud, SCOPE, [third.id], more, audit, retry=scope.Retry(attempts=1)
+        )
     assert failed == {first.id, second.id}
     assert records[first.id].status == "destroyed"
     assert records[second.id].status == "destroy_failed" and second.id in fake.droplets
@@ -554,8 +671,9 @@ async def test_an_unexpected_destroy_error_does_not_stop_the_other_destroys(tmp_
 
         monkeypatch.setattr(scope, "parse_droplet", parse_or_fail)
         fake.assign_delay = 99
-        _, failed = await assign_and_verify_project(cloud, SCOPE, [first.id, second.id], records,
-                                                    audit, retry=scope.Retry(attempts=1))
+        _, failed = await assign_and_verify_project(
+            cloud, SCOPE, [first.id, second.id], records, audit, retry=scope.Retry(attempts=1)
+        )
     other = max(first.id, second.id)
     assert failed == {first.id, second.id}
     assert records[broken].status == "destroy_failed" and broken in fake.droplets
@@ -570,13 +688,19 @@ async def test_assignment_refuses_foreign_or_spoofed_ids_before_any_post(tmp_pat
     lookalike = fake.add(f"pic-{SID}-h03-ams3-shifter", OURS)  # ours by markers, not our create
     async with running(fake) as cloud:
         droplet, records = await created_worker(cloud)
-        spoofed = records | {i: DropletRecord("shifter", "lon1", 3, NAME, i)
-                             for i in (production, lookalike)}
-        cases = [([droplet.id, production], spoofed, {"own_create", "tags", "name"}),
-                 ([lookalike], spoofed, {"own_create"}),
-                 ([droplet.id], {}, {"recorded"}),
-                 (["999999"], {"999999": DropletRecord("s", "lon1", 3, NAME, "999999")},
-                  {"own_create", "exists"})]
+        spoofed = records | {
+            i: DropletRecord("shifter", "lon1", 3, NAME, i) for i in (production, lookalike)
+        }
+        cases = [
+            ([droplet.id, production], spoofed, {"own_create", "tags", "name"}),
+            ([lookalike], spoofed, {"own_create"}),
+            ([droplet.id], {}, {"recorded"}),
+            (
+                ["999999"],
+                {"999999": DropletRecord("s", "lon1", 3, NAME, "999999")},
+                {"own_create", "exists"},
+            ),
+        ]
         for ids, ledger, failed in cases:
             before = [r for r in fake.requests if r[0] == "POST"]
             with pytest.raises(OwnershipError) as refused:
@@ -592,8 +716,16 @@ async def test_assignment_refuses_foreign_or_spoofed_ids_before_any_post(tmp_pat
 
 
 def test_scope_for_builds_the_campaign_scope():
-    spec = type("Spec", (), {"campaign_id": CID, "project_id": CAMPAIGN_PROJECT,
-                             "manager_droplet_id": int(MANAGER_ID), "created_at": SPEC_TIME})
+    spec = type(
+        "Spec",
+        (),
+        {
+            "campaign_id": CID,
+            "project_id": CAMPAIGN_PROJECT,
+            "manager_droplet_id": int(MANAGER_ID),
+            "created_at": SPEC_TIME,
+        },
+    )
     assert scope.scope_for(spec) == SCOPE
 
 
@@ -608,22 +740,34 @@ def _call_name(node):
 
 def _strings(tree):
     """String constants that are not docstrings."""
-    docs = {id(node.body[0].value) for node in ast.walk(tree)
-            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.body and isinstance(node.body[0], ast.Expr)
-            and isinstance(node.body[0].value, ast.Constant)}
-    return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
-            and isinstance(n.value, str) and id(n) not in docs]
+    docs = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    return [
+        n.value
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs
+    ]
 
 
 def _writes(tree, attribute):
     """An assignment to `<x>.attribute` (also in a tuple), or `attribute=` passed to a call."""
     kinds = ast.Assign | ast.AugAssign | ast.AnnAssign
-    targets = [n for node in ast.walk(tree) if isinstance(node, kinds)
-               for t in getattr(node, "targets", [getattr(node, "target", None)])
-               for n in ast.walk(t)]
+    targets = [
+        n
+        for node in ast.walk(tree)
+        if isinstance(node, kinds)
+        for t in getattr(node, "targets", [getattr(node, "target", None)])
+        for n in ast.walk(t)
+    ]
     return any(isinstance(n, ast.Attribute) and n.attr == attribute for n in targets) or any(
-        keyword.arg == attribute for call in _calls(tree) for keyword in call.keywords)
+        keyword.arg == attribute for call in _calls(tree) for keyword in call.keywords
+    )
 
 
 def _names(tree):
@@ -642,8 +786,14 @@ DELETE_WORD = re.compile(r"(?<![\w-])delete(?![\w-])", re.IGNORECASE)
 
 PRIVATE_STATE = {"_GUARD", "_OWNED", "_created", "_projects", "_named", "_assign_failed"}
 TABLES = {"ALLOWED", "PATHS", "BODIES", "OWNED_WRITES"}
-PATCHABLE = TABLES | {"monotonic", "utcnow", "require_guard", "check_allowed",
-                      "OWN_UNASSIGNED_SECONDS", "PROJECT_CACHE_SECONDS"}
+PATCHABLE = TABLES | {
+    "monotonic",
+    "utcnow",
+    "require_guard",
+    "check_allowed",
+    "OWN_UNASSIGNED_SECONDS",
+    "PROJECT_CACHE_SECONDS",
+}
 MUTATORS = {"update", "setdefault", "pop", "popitem", "clear", "__setitem__", "__delitem__"}
 
 
@@ -666,20 +816,33 @@ def tampering(source: str, reflective: bool) -> list[str]:
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Attribute) and node.attr in PRIVATE_STATE | {"__dict__"}:
             found.append(f"private {node.attr}")
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and (
-                node.value in PRIVATE_STATE or node.value.startswith("_GU")):
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and (node.value in PRIVATE_STATE or node.value.startswith("_GU"))
+        ):
             found.append(f"private name {node.value!r}")
         elif isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
             found += [f"patches {t}" for t in _target_names(node) if t in PATCHABLE]
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and (
-                node.func.attr in MUTATORS) and _call_name(
-                ast.Call(func=node.func.value, args=[], keywords=[])) in TABLES:
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and (node.func.attr in MUTATORS)
+            and _call_name(ast.Call(func=node.func.value, args=[], keywords=[])) in TABLES
+        ):
             found.append(f"mutates {node.func.attr}")
-        elif reflective and isinstance(node, ast.Call) and _call_name(node) in {
-                "vars", "setattr", "delattr", "globals"}:
+        elif (
+            reflective
+            and isinstance(node, ast.Call)
+            and _call_name(node) in {"vars", "setattr", "delattr", "globals"}
+        ):
             found.append(f"reflection {_call_name(node)}")
-        elif reflective and isinstance(node, ast.Call) and _call_name(node) == "getattr" and not (
-                isinstance(node.args[0], ast.Name) and node.args[0].id == "self"):
+        elif (
+            reflective
+            and isinstance(node, ast.Call)
+            and _call_name(node) == "getattr"
+            and not (isinstance(node.args[0], ast.Name) and node.args[0].id == "self")
+        ):
             found.append("reflection getattr")
     return found
 
@@ -690,8 +853,7 @@ def scan_violations(source: str, name: str) -> list[str]:
     strings, names, found = _strings(tree), _names(tree), []
     if not guarded and any(DELETE_WORD.search(v) for v in strings):
         found.append("delete word")
-    if not guarded and names & {"_GUARD", "_OWNED", "request", "_attempt", "_session",
-                                  "aiohttp"}:
+    if not guarded and names & {"_GUARD", "_OWNED", "request", "_attempt", "_session", "aiohttp"}:
         found.append("raw client access")
     if re.search(r"/v2/tags/[^\n]*resources", source):  # CAMP-1h: never tag or untag
         found.append("tag resources")
@@ -702,7 +864,8 @@ def scan_violations(source: str, name: str) -> list[str]:
     for call in _calls(tree):
         call_name = _call_name(call).lower()
         if call_name != "guarded_delete" and any(
-                word in call_name for word in ("delete", "destroy", "remove_droplet")):
+            word in call_name for word in ("delete", "destroy", "remove_droplet")
+        ):
             found.append(f"call {call_name}")
         if name != "scope.py" and call_name == "assign_project":
             found.append("assign_project outside scope.py")
@@ -711,54 +874,68 @@ def scan_violations(source: str, name: str) -> list[str]:
 
 def side_doors(source: str) -> list[str]:
     """Ways around the client from any module or script (m4)."""
-    private = {"_GUARD", "_OWNED", "_attempt", "_session", "_created", "_assign_failed",
-               "_named"}
+    private = {"_GUARD", "_OWNED", "_attempt", "_session", "_created", "_assign_failed", "_named"}
     tree, found = ast.parse(source), []
     if "api.digitalocean.com" in source or re.search(r"\bdoctl\b", source):
         found.append("direct API or doctl")
-    imports = [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
-               and (n.module or "").endswith(("do_api", "scope"))]
+    imports = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and (n.module or "").endswith(("do_api", "scope"))
+    ]
     if {a.name for n in imports for a in n.names} & private or _names(tree) & {
-            "_GUARD", "_OWNED", "_assign_failed"}:
+        "_GUARD",
+        "_OWNED",
+        "_assign_failed",
+    }:
         found.append("private client name")
     return found + tampering(source, reflective=False)
 
 
-@pytest.mark.parametrize("source", [
-    'await cloud.request("delete", "/v2/droplets", params={"tag_name": "prod"})',
-    'await cloud._session.request("Delete", url)',
-    'run(["doctl", "compute", "droplet", "delete", "1"])',
-    'await cloud.assign_project(pid, ids, guard=token)',
-    'import aiohttp',
-    'record.status = "assign_failed"',
-    'worker.assign_failed_at = now',
-    'DropletRecord("n", "lon1", 3, NAME, "1", assign_failed_at="x")',
-    'await cloud.destroy(droplet)',
-])
+@pytest.mark.parametrize(
+    "source",
+    [
+        'await cloud.request("delete", "/v2/droplets", params={"tag_name": "prod"})',
+        'await cloud._session.request("Delete", url)',
+        'run(["doctl", "compute", "droplet", "delete", "1"])',
+        "await cloud.assign_project(pid, ids, guard=token)",
+        "import aiohttp",
+        'record.status = "assign_failed"',
+        "worker.assign_failed_at = now",
+        'DropletRecord("n", "lon1", 3, NAME, "1", assign_failed_at="x")',
+        "await cloud.destroy(droplet)",
+    ],
+)
 def test_the_scans_catch_known_bypasses(source):
     """B1 and m4: each of these passed the 53ca3ea scan."""
     assert scan_violations(source, "launch.py")
-    assert side_doors('URL = "https://api.digitalocean.com/v2"') and side_doors(
-        "from proxy_index.campaign.scope import _GUARD") and side_doors("x = ['doctl']")
+    assert (
+        side_doors('URL = "https://api.digitalocean.com/v2"')
+        and side_doors("from proxy_index.campaign.scope import _GUARD")
+        and side_doors("x = ['doctl']")
+    )
     assert side_doors("from proxy_index.campaign.do_api import _OWNED")
 
 
-@pytest.mark.parametrize("source", [
-    'do_api.ALLOWED[("POST", "/v2/droplets/1/actions")] = (frozenset(), False)',
-    'do_api.ALLOWED.update({})',
-    'scope.PATHS["volume"] = "/v2/volumes/{}"',
-    'cloud._created.add("123")',
-    'getattr(cloud, "_created")',
-    'scope._projects[cloud] = {"p": (0, {"1"})}',
-    'scope._named[cloud] = {"p"}',
-    'scope.monotonic = lambda: 0.0',
-    'token = vars(scope)["_GU" + "ARD"]',
-    'del scope.PATHS',
-    'await cloud.request("POST", "/v2/firewalls", body=rules, guard=do_api._OWNED)',
-    'token = vars(do_api)["_OWNED"]',
-    'do_api.OWNED_WRITES = {}',
-    'do_api.BODIES.clear()',
-])
+@pytest.mark.parametrize(
+    "source",
+    [
+        'do_api.ALLOWED[("POST", "/v2/droplets/1/actions")] = (frozenset(), False)',
+        "do_api.ALLOWED.update({})",
+        'scope.PATHS["volume"] = "/v2/volumes/{}"',
+        'cloud._created.add("123")',
+        'getattr(cloud, "_created")',
+        'scope._projects[cloud] = {"p": (0, {"1"})}',
+        'scope._named[cloud] = {"p"}',
+        "scope.monotonic = lambda: 0.0",
+        'token = vars(scope)["_GU" + "ARD"]',
+        "del scope.PATHS",
+        'await cloud.request("POST", "/v2/firewalls", body=rules, guard=do_api._OWNED)',
+        'token = vars(do_api)["_OWNED"]',
+        "do_api.OWNED_WRITES = {}",
+        "do_api.BODIES.clear()",
+    ],
+)
 def test_the_scans_catch_tampering_with_private_state(source):
     """r1: each of these passed both scans at the reviewed head."""
     assert scan_violations(source, "launch.py") and side_doors(source)
@@ -767,8 +944,10 @@ def test_the_scans_catch_tampering_with_private_state(source):
 @pytest.mark.parametrize("name", ["do_api.py", "scope.py", "launch.py"])
 def test_the_scan_refuses_tagging_resources_even_in_the_guarded_pair(name):
     """CAMP-1h: tags are read and created only; nothing may put one on or off a resource."""
-    for source in ('PATH = f"/v2/tags/{tag}/resources"',
-                   'await self._session.request("DELETE", "/v2/tags/" + tag + "/resources")'):
+    for source in (
+        'PATH = f"/v2/tags/{tag}/resources"',
+        'await self._session.request("DELETE", "/v2/tags/" + tag + "/resources")',
+    ):
         assert "tag resources" in scan_violations(source, name)
 
 
@@ -776,21 +955,30 @@ def test_tags_are_only_read_and_created_behind_the_token():
     """CAMP-1h: exactly these two tag calls, both needing the client's own token."""
     tag_calls = {key for key in do_api.ALLOWED if "/tags" in key[1]}
     assert tag_calls == {("GET", f"/v2/tags/{do_api.TAG}"), ("POST", "/v2/tags")}
-    assert all(do_api._lookup(do_api.OWNED_WRITES, m, p) for m, p in (
-        ("GET", "/v2/tags/pi-camp-worker"), ("POST", "/v2/tags")))
-    for method, path in (("GET", "/v2/tags"), ("GET", "/v2/tags/prod"),
-                         ("GET", "/v2/tags/pi-camp-worker/resources"),
-                         ("POST", "/v2/tags/pi-camp-worker/resources"),
-                         ("DELETE", "/v2/tags/pi-camp-worker/resources"),
-                         ("DELETE", "/v2/tags/pi-camp-worker"), ("PUT", "/v2/tags/pi-camp-x")):
+    assert all(
+        do_api._lookup(do_api.OWNED_WRITES, m, p)
+        for m, p in (("GET", "/v2/tags/pi-camp-worker"), ("POST", "/v2/tags"))
+    )
+    for method, path in (
+        ("GET", "/v2/tags"),
+        ("GET", "/v2/tags/prod"),
+        ("GET", "/v2/tags/pi-camp-worker/resources"),
+        ("POST", "/v2/tags/pi-camp-worker/resources"),
+        ("DELETE", "/v2/tags/pi-camp-worker/resources"),
+        ("DELETE", "/v2/tags/pi-camp-worker"),
+        ("PUT", "/v2/tags/pi-camp-x"),
+    ):
         with pytest.raises(ScopeError):
             do_api.check_allowed(method, path, None, do_api._OWNED, {"resources": []})
 
 
 def test_the_tables_are_read_only():
-    for table, key in ((do_api.ALLOWED, ("POST", "/v2/droplets/1/actions")),
-                       (scope.PATHS, "volume"), (do_api.BODIES, ("PUT", "/v2/x")),
-                       (do_api.OWNED_WRITES, ("PUT", "/v2/x"))):
+    for table, key in (
+        (do_api.ALLOWED, ("POST", "/v2/droplets/1/actions")),
+        (scope.PATHS, "volume"),
+        (do_api.BODIES, ("PUT", "/v2/x")),
+        (do_api.OWNED_WRITES, ("PUT", "/v2/x")),
+    ):
         with pytest.raises(TypeError):
             table[key] = None
 
@@ -803,8 +991,11 @@ def test_static_scan_allows_delete_only_behind_the_guard():
         assert scan_violations(path.read_text(), path.name) == [], path.name
     scope_text = (CAMPAIGN_SRC / "scope.py").read_text()
     assert "tag_name" not in scope_text
-    deletes = [c for c in _calls(ast.parse(scope_text)) if any(
-        isinstance(a, ast.Constant) and str(a.value).upper() == "DELETE" for a in c.args)]
+    deletes = [
+        c
+        for c in _calls(ast.parse(scope_text))
+        if any(isinstance(a, ast.Constant) and str(a.value).upper() == "DELETE" for a in c.args)
+    ]
     assert len(deletes) == 1 and {k.arg for k in deletes[0].keywords} == {"guard"}
 
 
@@ -817,8 +1008,11 @@ def test_static_scan_of_all_sources_finds_no_side_door():
 def test_cloud_and_client_expose_no_delete():
     for owner in (contracts.Cloud, do_api.DigitalOcean):
         public = [name for name in dir(owner) if not name.startswith("_")]
-        assert not [name for name in public if any(
-            word in name.lower() for word in ("delete", "destroy", "remove", "purge"))]
+        assert not [
+            name
+            for name in public
+            if any(word in name.lower() for word in ("delete", "destroy", "remove", "purge"))
+        ]
 
 
 def test_scope_coverage_gate(tmp_path):
@@ -828,12 +1022,28 @@ def test_scope_coverage_gate(tmp_path):
     env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE"))}
     env.update(CAMPAIGN_SCOPE_GATE="inner", COVERAGE_FILE=str(tmp_path / ".coverage"))
     run = subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", __file__,
-         str(Path(__file__).with_name("test_campaign_api.py")),
-         str(Path(__file__).with_name("test_campaign_unassigned.py")),
-         str(Path(__file__).with_name("test_campaign_assign_race.py")),
-         "--cov=proxy_index.campaign.scope", "--cov=proxy_index.campaign.do_api",
-         "--cov-branch", "--cov-fail-under=100", "--cov-report=term-missing"],
-        cwd=ROOT, env=env, capture_output=True, text=True, timeout=240, check=False,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-p",
+            "no:cacheprovider",
+            "-q",
+            __file__,
+            str(Path(__file__).with_name("test_campaign_api.py")),
+            str(Path(__file__).with_name("test_campaign_unassigned.py")),
+            str(Path(__file__).with_name("test_campaign_assign_race.py")),
+            "--cov=proxy_index.campaign.scope",
+            "--cov=proxy_index.campaign.do_api",
+            "--cov-branch",
+            "--cov-fail-under=100",
+            "--cov-report=term-missing",
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
     )
     assert run.returncode == 0, run.stdout[-3000:]

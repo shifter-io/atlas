@@ -130,8 +130,9 @@ def rule_progress(completed: int, unique_ips: int, min_sample: int) -> dict[str,
     }
 
 
-def rule_text(completed: int, unique_ips: int, min_sample: int,
-              basis: str = "completed requests") -> str:
+def rule_text(
+    completed: int, unique_ips: int, min_sample: int, basis: str = "completed requests"
+) -> str:
     rule = rule_progress(completed, unique_ips, min_sample)
     if rule["met"]:
         return (
@@ -149,8 +150,7 @@ def rule_text(completed: int, unique_ips: int, min_sample: int,
     else:
         gap = (rule["share"] - STOP_SHARE) * 100
         share = (
-            f"unique share {pct(unique_ips, completed)}, {gap:.1f} points above the 50% "
-            "stop line"
+            f"unique share {pct(unique_ips, completed)}, {gap:.1f} points above the 50% stop line"
             if gap >= 0
             else f"unique share {pct(unique_ips, completed)}, already below the 50% stop line"
         )
@@ -219,7 +219,7 @@ code{font-size:12px}
 def page(title: str, body: str, *, refresh: int | None = None) -> str:
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
     return (
-        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f'<meta name="robots" content="noindex">{meta}<title>{esc(title)}</title>'
         f"<style>{CSS}</style></head><body><main>{body}</main></body></html>\n"
@@ -254,10 +254,14 @@ def table(headers: list[str], rows: Iterable[list[str]], numeric: set[int] | Non
 
 
 def cards(items: list[tuple[str, str]]) -> str:
-    return '<div class="cards">' + "".join(
-        f'<div class="card"><b>{value}</b><span>{esc(label)}</span></div>'
-        for label, value in items
-    ) + "</div>"
+    return (
+        '<div class="cards">'
+        + "".join(
+            f'<div class="card"><b>{value}</b><span>{esc(label)}</span></div>'
+            for label, value in items
+        )
+        + "</div>"
+    )
 
 
 def timeline(buckets: list[dict[str, Any]]) -> str:
@@ -433,8 +437,8 @@ def batch_data(conn: psycopg.Connection, batch_id: int) -> dict[str, Any] | None
     for run in runs:
         pid = run["product_id"]
         run.update(latency.get((pid,), {"p50": None, "p90": None, "p99": None}))
-        run["new_ips"] = new_ips[(pid,)]["new_ips"] if (pid,) in new_ips else (
-            0 if run["run_key"] else None
+        run["new_ips"] = (
+            new_ips[(pid,)]["new_ips"] if (pid,) in new_ips else (0 if run["run_key"] else None)
         )
         run["timeline"] = timelines.get(pid, [])
         run["cities"] = [
@@ -462,9 +466,7 @@ def batch_data(conn: psycopg.Connection, batch_id: int) -> dict[str, Any] | None
     return batch
 
 
-def index_data(
-    conn: psycopg.Connection, now: datetime, limit: int = INDEX_LIMIT
-) -> dict[str, Any]:
+def index_data(conn: psycopg.Connection, now: datetime, limit: int = INDEX_LIMIT) -> dict[str, Any]:
     from .orchestrator.batches import census_every, next_slot
     from .orchestrator.control import state
 
@@ -532,8 +534,7 @@ def index_data(
             {"now": now},
         ).fetchall()
     pulse_next = [
-        row
-        | {"next_at": next_slot(timedelta(minutes=row["pulse_interval_minutes"]), now)}
+        row | {"next_at": next_slot(timedelta(minutes=row["pulse_interval_minutes"]), now)}
         for row in conn.execute(
             "SELECT target_id,pulse_interval_minutes,pulse_requests FROM targets "
             "WHERE pulse_enabled ORDER BY sort_order,target_id"
@@ -558,8 +559,11 @@ def index_data(
     }
     stored = {(row["country_code"], row["provider"], row["product"]) for row in unique}
     unique = sorted(
-        [row | {"live": live_unique.get(key)} for row in unique
-         for key in [(row["country_code"], row["provider"], row["product"])]]
+        [
+            row | {"live": live_unique.get(key)}
+            for row in unique
+            for key in [(row["country_code"], row["provider"], row["product"])]
+        ]
         + [
             {"country_code": c, "provider": p, "product": n, "ips": None, "live": ips}
             for (c, p, n), ips in live_unique.items()
@@ -571,9 +575,7 @@ def index_data(
         "SELECT n.node_id,r.slug AS region,n.provider,n.product,n.status,n.last_heartbeat "
         "FROM nodes n JOIN runner_regions r ON r.region_id=n.region_id ORDER BY 3,4,2"
     ).fetchall()
-    enabled = conn.execute(
-        "SELECT count(*)::int AS n FROM countries WHERE enabled"
-    ).fetchone()["n"]
+    enabled = conn.execute("SELECT count(*)::int AS n FROM countries WHERE enabled").fetchone()["n"]
     return {
         "now": now,
         "counts": counts,
@@ -640,9 +642,23 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
     )
     summary = table(
         [
-            "Product", "Status", "Requests", "Successes", "Success rate", "Unique IPs",
-            "Unique share", "New IPs", "Challenges", "Hard blocks", "Timeouts", "Proxy errors",
-            "p50", "p90", "p99", "MB up", "MB down",
+            "Product",
+            "Status",
+            "Requests",
+            "Successes",
+            "Success rate",
+            "Unique IPs",
+            "Unique share",
+            "New IPs",
+            "Challenges",
+            "Hard blocks",
+            "Timeouts",
+            "Proxy errors",
+            "p50",
+            "p90",
+            "p99",
+            "MB up",
+            "MB down",
         ],
         (
             [
@@ -679,10 +695,12 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
         )
         running = r["status"] in OPEN_RUNS
         version = str(r.get("node_version") or "0.0.0").split(".")
-        modern_node = (len(version) >= 2 and all(v.isdigit() for v in version[:2])
-                       and tuple(map(int, version[:2])) >= (0, 9))
-        completed_basis = (str(r.get("census_rule_version")) == "2"
-                           or (running and modern_node))
+        modern_node = (
+            len(version) >= 2
+            and all(v.isdigit() for v in version[:2])
+            and tuple(map(int, version[:2])) >= (0, 9)
+        )
+        completed_basis = str(r.get("census_rule_version")) == "2" or (running and modern_node)
         denominator = r["requests"] if completed_basis else r["successes"]
         basis = "completed requests" if completed_basis else "successes"
         if running and batch["kind"] == "census":
@@ -703,11 +721,7 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
                     "Elapsed" if running else "Run time",
                     esc(duration(span(r["started_at"], r["finished_at"], now))),
                 ),
-                *(
-                    [("Last progress", esc(when(r["last_progress_at"])))]
-                    if running
-                    else []
-                ),
+                *([("Last progress", esc(when(r["last_progress_at"])))] if running else []),
                 ("Unique share", pct(r["unique_ips"], r["successes"])),
                 ("Node", esc(f"#{r['node_id']} {r['host'] or ''}" if r["node_id"] else "–")),
                 ("Unique IPs", num(r["unique_ips"])),
@@ -915,8 +929,17 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
     shown = f"latest {num(data['limit'])}" if len(data["batches"]) >= data["limit"] else "all"
     body += f"<h2>Batches ({shown}, newest first)</h2>" + table(
         [
-            "Batch", "Test", "Country", "Target", "Scheduled", "Status", "Requests",
-            "Unique IPs", "Success rate", "p50", "Duration",
+            "Batch",
+            "Test",
+            "Country",
+            "Target",
+            "Scheduled",
+            "Status",
+            "Requests",
+            "Unique IPs",
+            "Success rate",
+            "p50",
+            "Duration",
         ],
         rows,
         numeric={6, 7, 8, 9, 10},

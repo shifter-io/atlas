@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 async def test_calibration_stops_before_second_round_even_when_first_overruns(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     root = ROOT
     spec = importlib.util.spec_from_file_location(
@@ -20,8 +21,13 @@ async def test_calibration_stops_before_second_round_even_when_first_overruns(
     )
     driver = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(driver)
-    path = manifest.create(root / "configs/shifter.toml", "residential", manifest.timestamp(START),
-                           tmp_path, now=START - timedelta(hours=1))
+    path = manifest.create(
+        root / "configs/shifter.toml",
+        "residential",
+        manifest.timestamp(START),
+        tmp_path,
+        now=START - timedelta(hours=1),
+    )
     clock = Clock(START.timestamp())
     calls = []
 
@@ -35,8 +41,9 @@ async def test_calibration_stops_before_second_round_even_when_first_overruns(
 
     monkeypatch.setattr(driver, "run", measured)
     monkeypatch.setattr(driver, "execute", scheduled)
-    monkeypatch.setattr(driver, "load_provider", lambda _, parameters, **kw: Proxy(
-        parameters["country"]))
+    monkeypatch.setattr(
+        driver, "load_provider", lambda _, parameters, **kw: Proxy(parameters["country"])
+    )
     monkeypatch.setattr(driver.asyncio.get_running_loop(), "add_signal_handler", lambda *a: None)
     result = await driver.calibrate(path, "tor1", root / "configs/shifter.toml", None)
     assert calls == ["ca", "gl", "pm"]

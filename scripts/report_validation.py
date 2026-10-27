@@ -1,4 +1,5 @@
 """Render existing test evidence as a standalone HTML report."""
+
 from __future__ import annotations
 
 import argparse
@@ -21,13 +22,15 @@ def report(root: Path) -> Path:
     rows = "".join(
         f"<tr><td>{html.escape(key)}</td><td>{html.escape(str(value))}</td></tr>"
         for key, value in (
-            ("Successful simulated requests", f'{benchmark["requests"]:,}'),
-            ("Exact distinct IPs exported", f'{benchmark["unique_ips"]:,}'),
-            ("Configured / peak concurrency",
-             f'{benchmark["concurrency"]} / {benchmark["peak_in_flight"]}'),
-            ("Wall time including export", f'{benchmark["wall_seconds_including_export"]:.2f} s'),
-            ("Peak process memory", f'{benchmark["peak_rss_mib"]:.1f} MiB'),
-            ("Environment", f'{benchmark["python"]} · {benchmark["platform"]}'),
+            ("Successful simulated requests", f"{benchmark['requests']:,}"),
+            ("Exact distinct IPs exported", f"{benchmark['unique_ips']:,}"),
+            (
+                "Configured / peak concurrency",
+                f"{benchmark['concurrency']} / {benchmark['peak_in_flight']}",
+            ),
+            ("Wall time including export", f"{benchmark['wall_seconds_including_export']:.2f} s"),
+            ("Peak process memory", f"{benchmark['peak_rss_mib']:.1f} MiB"),
+            ("Environment", f"{benchmark['python']} · {benchmark['platform']}"),
         )
     )
     content = f"""<!doctype html><html lang="en"><meta charset="utf-8">
@@ -59,13 +62,13 @@ responses, timeouts, exact IP counts, cancellation and process signals, histogra
 bucket transitions, background export, output integrity and local MMDB enrichment.
 Shifter tests verify optional flags, configuration overrides, session policies, per-request
 credential isolation across both targets/transports, status preservation and secret redaction.</p>
-<h2>{benchmark['requests']:,}-request scale check</h2><table>{rows}</table>
+<h2>{benchmark["requests"]:,}-request scale check</h2><table>{rows}</table>
 <p class="note">This benchmark uses simulated responses and real aggregation/compressed file
 output. It measures processing capacity and memory, not network or provider performance.
 No benchmark traffic was sent to the Amazon endpoints.</p>
-<h2>Local database</h2><p><code>{html.escape(database['file'])}</code><br>
-{html.escape(database['database_type'])}<br>Built {html.escape(database['built_at'])}</p>
-<p>SHA-256: <code>{html.escape(database['sha256'])}</code></p>
+<h2>Local database</h2><p><code>{html.escape(database["file"])}</code><br>
+{html.escape(database["database_type"])}<br>Built {html.escape(database["built_at"])}</p>
+<p>SHA-256: <code>{html.escape(database["sha256"])}</code></p>
 <p>The source and project copy have matching checksums. Local IPv4/IPv6 lookups and a
 simulated-run → real-MMDB enrichment check passed. Database files are excluded from packages.</p>
 <h2>Remaining verification</h2><p>Mac Mini tests were not run: the discovered SSH endpoint

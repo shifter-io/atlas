@@ -5,6 +5,7 @@ custom separators, port-selected sessions). A grammar file describes those rules
 module validates parameters against it and resolves per-request proxy credentials
 without I/O or shared mutable state. Grammars live in ``providers/grammars/<id>.toml``.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -29,8 +30,11 @@ from ..models import (
 POLICIES = ("rotate", "gateway", "fixed", "per_request", "per_worker", "per_run")
 GENERATED = ("per_request", "per_worker", "per_run")
 KINDS = ("country", "name", "integer", "boolean", "choice", "token", "session")
-ALPHABETS = {"hex": "0123456789abcdef", "alnum": string.ascii_lowercase + string.digits,
-             "digits": string.digits}
+ALPHABETS = {
+    "hex": "0123456789abcdef",
+    "alnum": string.ascii_lowercase + string.digits,
+    "digits": string.digits,
+}
 HOST = re.compile(r"[A-Za-z0-9.-]+")
 MAX_CONCURRENCY = 5000  # the campaign spec's own concurrency bound
 
@@ -41,8 +45,12 @@ class NoCountryList(ValueError):
 
 
 def _range(value: Any, name: str) -> tuple[int, int]:
-    if (not isinstance(value, list) or len(value) != 2
-            or not all(type(item) is int for item in value) or value[0] > value[1]):
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or not all(type(item) is int for item in value)
+        or value[0] > value[1]
+    ):
         raise ValueError(f"Grammar {name} must be an inclusive [low, high] integer range")
     return value[0], value[1]
 
@@ -101,7 +109,9 @@ class Flag:
         elif self.case == "upper":
             value = value.upper()
         pattern = self.pattern or {
-            "country": r"[A-Za-z]{2}", "name": r"[A-Za-z0-9_]+", "session": r"[A-Za-z0-9]+",
+            "country": r"[A-Za-z]{2}",
+            "name": r"[A-Za-z0-9_]+",
+            "session": r"[A-Za-z0-9]+",
         }.get(self.kind)
         if self.kind == "choice":
             if value not in self.choices:
@@ -179,23 +189,63 @@ class Grammar:
     @classmethod
     def _parse(cls, data: Mapping[str, Any]) -> Grammar:
         tables = {
-            "credential": {"flags_in", "username", "password", "flagged", "first_separator",
-                           "separator", "rotation_suffix", "reserved"},
+            "credential": {
+                "flags_in",
+                "username",
+                "password",
+                "flagged",
+                "first_separator",
+                "separator",
+                "rotation_suffix",
+                "reserved",
+            },
             "account": {"required", "pattern", "strip_prefixes"},
-            "gateway": {"host", "hosts", "default", "host_override", "ports", "port_override",
-                        "rotating_ports"},
-            "session": {"flag", "mode", "ports", "generate", "length", "no_session_policy",
-                        "slot_flag",
-                        "ttl_flag", "default_ttl_seconds"},
-            "testing": {"protocol", "max_concurrency", "rate_limit_statuses",
-                        "rate_limit_connect", "no_inventory_statuses"},
+            "gateway": {
+                "host",
+                "hosts",
+                "default",
+                "host_override",
+                "ports",
+                "port_override",
+                "rotating_ports",
+            },
+            "session": {
+                "flag",
+                "mode",
+                "ports",
+                "generate",
+                "length",
+                "no_session_policy",
+                "slot_flag",
+                "ttl_flag",
+                "default_ttl_seconds",
+            },
+            "testing": {
+                "protocol",
+                "max_concurrency",
+                "rate_limit_statuses",
+                "rate_limit_connect",
+                "no_inventory_statuses",
+            },
         }
         for table, keys in tables.items():
             if set(data.get(table, {})) - keys:
                 raise ValueError(f"Unknown keys in grammar table {table}")
-        allowed = {"schema_version", "id", "product", "version", "docs", "credential",
-                   "account", "gateway", "flags", "session", "pools", "extra_flags",
-                   "testing"}
+        allowed = {
+            "schema_version",
+            "id",
+            "product",
+            "version",
+            "docs",
+            "credential",
+            "account",
+            "gateway",
+            "flags",
+            "session",
+            "pools",
+            "extra_flags",
+            "testing",
+        }
         if set(data) - allowed or data.get("schema_version") != 1:
             raise ValueError("Unsupported provider grammar schema")
         provider = data["id"]
@@ -227,13 +277,19 @@ class Grammar:
                 raise ValueError(f"Grammar {provider} {flag.name} references an unknown flag")
             if flag.kind != "session" and "session" in flag.requires + flag.conflicts:
                 raise ValueError("Use requires_session for flags that need a session")
-            if flag.countries and (flag.kind != "country" or not all(
-                    re.fullmatch(r"[A-Z]{2}", code) for code in flag.countries)):
+            if flag.countries and (
+                flag.kind != "country"
+                or not all(re.fullmatch(r"[A-Z]{2}", code) for code in flag.countries)
+            ):
                 raise ValueError(f"Grammar {provider} {flag.name} countries must be ISO codes")
             if flag.case not in (None, "lower", "upper") or type(flag.scale) is not int:
                 raise ValueError(f"Grammar {provider} {flag.name} has an invalid rendering")
-            if flag.preset and (flag.format or flag.kind in ("session", "boolean")
-                                or flag.requires or flag.conflicts):
+            if flag.preset and (
+                flag.format
+                or flag.kind in ("session", "boolean")
+                or flag.requires
+                or flag.conflicts
+            ):
                 raise ValueError(f"Grammar {provider} {flag.name} cannot be a preset")
         ttl_flag = session.get("ttl_flag")
         if ttl_flag is not None and (ttl_flag not in flags or flags[ttl_flag].kind != "integer"):
@@ -258,8 +314,9 @@ class Grammar:
         if mode not in ("flag", "port") or (mode == "flag") != (session_flag is not None):
             raise ValueError("Grammar sessions use either a session flag or session ports")
         slot_flag = session.get("slot_flag")
-        if slot_flag is not None and (mode != "port" or slot_flag not in flags
-                                      or flags[slot_flag].kind != "session"):
+        if slot_flag is not None and (
+            mode != "port" or slot_flag not in flags or flags[slot_flag].kind != "session"
+        ):
             raise ValueError("Grammar slot_flag must name a session flag of a port grammar")
         if session_flag is not None and flags[session_flag].kind != "session":
             raise ValueError("Grammar session flag must have kind session")
@@ -279,45 +336,61 @@ class Grammar:
         if set(ports) - {"http", "socks5"} or not ports:
             raise ValueError("Grammar ports are keyed by http or socks5")
         return cls(
-            id=provider, product=data.get("product", "residential"),
-            version=str(data.get("version", "1")), target=cred["flags_in"],
-            username=cred.get("username", "{account}"), password=cred.get("password", "{password}"),
-            flagged=cred.get("flagged"), first_separator=cred.get("first_separator",
-                                                                cred.get("separator", "-")),
-            separator=cred.get("separator", "-"), rotation_suffix=cred.get("rotation_suffix"),
+            id=provider,
+            product=data.get("product", "residential"),
+            version=str(data.get("version", "1")),
+            target=cred["flags_in"],
+            username=cred.get("username", "{account}"),
+            password=cred.get("password", "{password}"),
+            flagged=cred.get("flagged"),
+            first_separator=cred.get("first_separator", cred.get("separator", "-")),
+            separator=cred.get("separator", "-"),
+            rotation_suffix=cred.get("rotation_suffix"),
             account_required=account.get("required", True),
             account_pattern=account.get("pattern", r"[A-Za-z0-9_]+"),
             strip_prefixes=tuple(account.get("strip_prefixes", ())),
-            hosts=MappingProxyType(hosts), default_host=default_host,
+            hosts=MappingProxyType(hosts),
+            default_host=default_host,
             host_override=gateway.get("host_override", False),
-            ports=MappingProxyType(ports), port_override=gateway.get("port_override", False),
-            rotating_ports=MappingProxyType({
-                scheme: _range(value, "rotating_ports")
-                for scheme, value in gateway.get("rotating_ports", {}).items()
-            }),
-            flags=MappingProxyType(flags), session=session_flag, session_mode=mode,
+            ports=MappingProxyType(ports),
+            port_override=gateway.get("port_override", False),
+            rotating_ports=MappingProxyType(
+                {
+                    scheme: _range(value, "rotating_ports")
+                    for scheme, value in gateway.get("rotating_ports", {}).items()
+                }
+            ),
+            flags=MappingProxyType(flags),
+            session=session_flag,
+            session_mode=mode,
             session_ports=(_range(session["ports"], "session ports") if mode == "port" else None),
             generate=generate if mode == "flag" else "digits",
-            generate_length=session.get("length", 16), no_session_policy=policy,
+            generate_length=session.get("length", 16),
+            no_session_policy=policy,
             slot_flag=slot_flag,
-            ttl=session.get("ttl_flag"), ttl_seconds=60,  # Canonical ttl is in minutes.
+            ttl=session.get("ttl_flag"),
+            ttl_seconds=60,  # Canonical ttl is in minutes.
             default_ttl_seconds=session.get("default_ttl_seconds"),
-            pools=MappingProxyType({
-                name: frozenset(rule.get("forbid", ()))
-                for name, rule in data.get("pools", {}).items()
-            }),
+            pools=MappingProxyType(
+                {
+                    name: frozenset(rule.get("forbid", ()))
+                    for name, rule in data.get("pools", {}).items()
+                }
+            ),
             extra_flags=data.get("extra_flags", False),
-            reserved=frozenset(cred.get("reserved", ())) | {
-                flag.key for flag in flags.values() if not flag.preset
-            },
+            reserved=frozenset(cred.get("reserved", ()))
+            | {flag.key for flag in flags.values() if not flag.preset},
             **_testing(data.get("testing", {})),
         )
 
 
 def _statuses(testing: Mapping[str, Any], key: str) -> tuple[int, ...]:
     values = testing.get(key, [])
-    if (not isinstance(values, list) or len(set(values)) != len(values)
-            or any(type(v) is not int or not 400 <= v <= 599 or v == 429 for v in values)):
+    if (
+        not isinstance(values, list)
+        or len(set(values)) != len(values)
+        or any(type(v) is not int or not 400 <= v <= 599 or v == 429 for v in values)
+    ):
         raise ValueError(f"Grammar {key} must be distinct HTTP statuses 400-599 other than 429")
     return tuple(values)
 
@@ -328,19 +401,24 @@ def _testing(testing: Mapping[str, Any]) -> dict[str, Any]:
     if protocol not in NETWORK_PROTOCOLS:
         raise ValueError("Unknown grammar test protocol")
     ceiling = testing.get("max_concurrency")
-    if ceiling is not None and (type(ceiling) is not int
-                                or not 1 <= ceiling <= MAX_CONCURRENCY):
+    if ceiling is not None and (type(ceiling) is not int or not 1 <= ceiling <= MAX_CONCURRENCY):
         raise ValueError(f"Grammar max_concurrency must be an integer 1-{MAX_CONCURRENCY}")
-    limits, empty = _statuses(testing, "rate_limit_statuses"), _statuses(
-        testing, "no_inventory_statuses")
+    limits, empty = (
+        _statuses(testing, "rate_limit_statuses"),
+        _statuses(testing, "no_inventory_statuses"),
+    )
     if set(limits) & set(empty):
         raise ValueError("Grammar rate-limit and no-IP statuses must be disjoint")
     connect = testing.get("rate_limit_connect", False)
     if type(connect) is not bool:
         raise ValueError("Grammar rate_limit_connect must be a boolean")
-    return {"test_protocol": protocol, "max_concurrency": ceiling,
-            "rate_limit_statuses": limits, "rate_limit_connect": connect,
-            "no_inventory_statuses": empty}
+    return {
+        "test_protocol": protocol,
+        "max_concurrency": ceiling,
+        "rate_limit_statuses": limits,
+        "rate_limit_connect": connect,
+        "no_inventory_statuses": empty,
+    }
 
 
 @cache
@@ -360,15 +438,24 @@ def answer_classes(provider: str) -> AnswerClasses:
     """The network's answer classes: 429 plus its grammar's [testing] statuses."""
     grammar = load_grammar(provider)
     return AnswerClasses(
-        ("429", *map(str, grammar.rate_limit_statuses),
-         *(("proxy_connect",) if grammar.rate_limit_connect else ())),
-        tuple(map(str, grammar.no_inventory_statuses)))
+        (
+            "429",
+            *map(str, grammar.rate_limit_statuses),
+            *(("proxy_connect",) if grammar.rate_limit_connect else ()),
+        ),
+        tuple(map(str, grammar.no_inventory_statuses)),
+    )
 
 
 def grammar_ids() -> tuple[str, ...]:
     root = resources.files(__package__).joinpath("grammars")
-    return tuple(sorted(item.name.removesuffix(".toml") for item in root.iterdir()
-                        if item.name.endswith(".toml")))
+    return tuple(
+        sorted(
+            item.name.removesuffix(".toml")
+            for item in root.iterdir()
+            if item.name.endswith(".toml")
+        )
+    )
 
 
 def grammar_ids_by_protocol(protocol: NetworkProtocol) -> tuple[str, ...]:
@@ -402,10 +489,23 @@ class GrammarProxy:
 
     def __reduce__(self):
         # Spawned HTTP workers rebuild the config through validation.
-        return (_rebuild, (self.provider, self.account, self.password, dict(self.parameters),
-                           dict(self.extra_flags), self.scheme, self.gateway, self.host,
-                           self.port, self.session_policy, self.pool,
-                           dict(self.presets)))
+        return (
+            _rebuild,
+            (
+                self.provider,
+                self.account,
+                self.password,
+                dict(self.parameters),
+                dict(self.extra_flags),
+                self.scheme,
+                self.gateway,
+                self.host,
+                self.port,
+                self.session_policy,
+                self.pool,
+                dict(self.presets),
+            ),
+        )
 
     @property
     def id(self) -> str:
@@ -442,8 +542,11 @@ class GrammarProxy:
         self._gateway(g, name)
         if not isinstance(self.parameters, Mapping) or not isinstance(self.extra_flags, Mapping):
             raise ValueError(f"{name} parameters and extra_flags must be mappings")
-        if set(self.parameters) - set(g.flags) - ({"session"} if g.session_mode == "port"
-                                                   else set()):
+        if (
+            set(self.parameters)
+            - set(g.flags)
+            - ({"session"} if g.session_mode == "port" else set())
+        ):
             raise ValueError(f"Unknown {name} parameter")
         if g.slot_flag in self.parameters:
             raise ValueError(f"{name} {g.slot_flag} is set from the session slot")
@@ -477,12 +580,12 @@ class GrammarProxy:
             # A two-letter country cannot carry a separator; ISO codes such as CC, CR or ST
             # may still equal a flag key and are valid in the country slot. Checked here, not
             # assumed, so a grammar that widens a country pattern keeps the guard.
-            if isinstance(value, str) and not (g.flags[key].kind == "country"
-                                               and re.fullmatch(r"[A-Za-z]{2}", value)):
+            if isinstance(value, str) and not (
+                g.flags[key].kind == "country" and re.fullmatch(r"[A-Za-z]{2}", value)
+            ):
                 self._check_delimiters(g, value, name, key)
         session_key = g.session or "session"
-        policy = self.session_policy or ("fixed" if session_key in params
-                                          else g.no_session_policy)
+        policy = self.session_policy or ("fixed" if session_key in params else g.no_session_policy)
         if policy not in POLICIES:
             raise ValueError(f"Unknown {name} session policy")
         if (policy == "fixed") != (session_key in params):
@@ -505,10 +608,14 @@ class GrammarProxy:
         rotating = g.rotating_ports.get(self.scheme)
         if rotating is not None:
             on_rotating = rotating[0] <= self.port <= rotating[1]
-            if on_rotating and (sticky or any(
-                g.flags[k].requires_session or g.flags[k].sticky_ports_only
-                for k in params if k in g.flags
-            )):
+            if on_rotating and (
+                sticky
+                or any(
+                    g.flags[k].requires_session or g.flags[k].sticky_ports_only
+                    for k in params
+                    if k in g.flags
+                )
+            ):
                 raise ValueError(f"{name} sessions require a sticky gateway port")
             if policy == "rotate" and not on_rotating:
                 raise ValueError(f"{name} rotation requires a rotating gateway port")
@@ -530,8 +637,10 @@ class GrammarProxy:
             if g.hosts.get(self.gateway) != self.host:
                 raise ValueError(f"Choose either a named {name} gateway or a host")
         elif self.host is not None:
-            if not g.host_override or not isinstance(self.host, str) or not HOST.fullmatch(
-                self.host
+            if (
+                not g.host_override
+                or not isinstance(self.host, str)
+                or not HOST.fullmatch(self.host)
             ):
                 raise ValueError(f"Invalid {name} gateway host")
         else:
@@ -553,13 +662,14 @@ class GrammarProxy:
         bound = {key for key, flag in g.flags.items() if flag.preset}
         if not isinstance(self.presets, Mapping) or set(self.presets) - bound:
             raise ValueError(f"{name} presets accept only: {', '.join(sorted(bound)) or 'none'}")
-        declared = {key: g.flags[key].normalize(value, name)
-                    for key, value in self.presets.items()}
+        declared = {key: g.flags[key].normalize(value, name) for key, value in self.presets.items()}
         object.__setattr__(self, "presets", MappingProxyType(declared))
         for key in bound & set(params):
             if key not in declared:
-                raise ValueError(f"{name} {key} is set on the provider's side; declare it in "
-                                 "the config's presets")
+                raise ValueError(
+                    f"{name} {key} is set on the provider's side; declare it in "
+                    "the config's presets"
+                )
             if params[key] != declared[key]:
                 raise ValueError(f"{name} {key} differs from the provider-side preset")
         return declared | params
@@ -576,8 +686,13 @@ class GrammarProxy:
             raise ValueError(f"Unsupported {name} extra flags; use documented parameters")
         extras = {}
         for key, value in self.extra_flags.items():
-            if (not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", key)
-                    or key in g.flags or key in g.reserved or key in ("account", "password")):
+            if (
+                not isinstance(key, str)
+                or not re.fullmatch(r"[a-z][a-z0-9_]*", key)
+                or key in g.flags
+                or key in g.reserved
+                or key in ("account", "password")
+            ):
                 raise ValueError(f"Invalid or reserved {name} extra flag name")
             if value is None:
                 continue
@@ -587,19 +702,27 @@ class GrammarProxy:
                 raise ValueError(f"Invalid {name} extra flag value")
             self._check_delimiters(g, value, name, key)
             session = str(params.get(g.session or "", ""))
-            if any(re.search(rf"(?:^|{re.escape(g.separator)}){key}(?:{re.escape(g.separator)}|$)",
-                             item.lower()) for item in (self.account or "", session)):
+            if any(
+                re.search(
+                    rf"(?:^|{re.escape(g.separator)}){key}(?:{re.escape(g.separator)}|$)",
+                    item.lower(),
+                )
+                for item in (self.account or "", session)
+            ):
                 raise ValueError(f"{name} extra flag conflicts with an authentication token")
             extras[key] = value
         return extras
 
     def _generated(self, g: Grammar, context: RequestContext) -> str | int:
-        scope = {"per_request": context.request_index, "per_worker": context.worker_index,
-                 "per_run": 0}[self.session_policy]
+        scope = {
+            "per_request": context.request_index,
+            "per_worker": context.worker_index,
+            "per_run": 0,
+        }[self.session_policy]
         seed = f"{context.run_id}:{self.session_policy}:{scope}".encode()
         digest = hashlib.sha256(seed)
         if g.session_mode == "flag" and g.generate == "hex":
-            return digest.hexdigest()[:g.generate_length]  # Stable with earlier releases.
+            return digest.hexdigest()[: g.generate_length]  # Stable with earlier releases.
         number = int.from_bytes(digest.digest(), "big")
         if g.session_mode == "port":
             low, high = g.session_ports
@@ -626,11 +749,15 @@ class GrammarProxy:
             port = g.session_ports[0] + slot
             if g.slot_flag and self.session_policy != "per_request":
                 params[g.slot_flag] = slot  # Sticky: the slot names the session too.
-        pieces = [rendered for key, flag in g.flags.items()
-                  if key in params and not flag.preset
-                  if (rendered := flag.render(params[key])) is not None]
-        pieces.extend(f"{key}{g.separator}{value}" for key, value in sorted(
-            self.extra_flags.items()))
+        pieces = [
+            rendered
+            for key, flag in g.flags.items()
+            if key in params and not flag.preset
+            if (rendered := flag.render(params[key])) is not None
+        ]
+        pieces.extend(
+            f"{key}{g.separator}{value}" for key, value in sorted(self.extra_flags.items())
+        )
         if g.rotation_suffix and self.session_policy == "rotate":
             pieces.append(g.rotation_suffix)
         fields = {"account": self.account or "", "password": self.password}
@@ -656,14 +783,19 @@ class GrammarProxy:
         if ttl is None and self.session_policy not in ("rotate", "gateway"):
             ttl = g.default_ttl_seconds
         return {
-            "proxy_protocol": self.scheme, "provider": self.provider, "product": g.product,
+            "proxy_protocol": self.scheme,
+            "provider": self.provider,
+            "product": g.product,
             "requested_country": (
                 self.parameters["country"].lower() if "country" in self.parameters else None
             ),
             "provider_config": {
-                "adapter": self.provider, "version": g.version,
-                "gateway": {"host": self.host, "port": self.port}, "pool": self.pool,
-                "parameters": params, "session_policy": self.session_policy,
+                "adapter": self.provider,
+                "version": g.version,
+                "gateway": {"host": self.host, "port": self.port},
+                "pool": self.pool,
+                "parameters": params,
+                "session_policy": self.session_policy,
                 "effective_ttl_seconds": ttl,
                 # Future flags may contain credentials. Values are private by default.
                 "extra_flags": dict.fromkeys(self.extra_flags, "[redacted]"),

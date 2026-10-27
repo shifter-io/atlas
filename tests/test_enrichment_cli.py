@@ -39,8 +39,12 @@ def fake_database(tmp_path, monkeypatch):
                 "country": {"iso_code": "US", "names": {"en": "United States"}},
                 "subdivisions": [{"iso_code": "CA", "names": {"en": "California"}}],
                 "city": {"names": {"en": "Mountain View"}},
-                "traits": {"autonomous_system_number": 15169, "isp": "Google",
-                           "user_type": "hosting", "connection_type": "Corporate"},
+                "traits": {
+                    "autonomous_system_number": 15169,
+                    "isp": "Google",
+                    "user_type": "hosting",
+                    "connection_type": "Corporate",
+                },
             }
 
     reader = Reader()
@@ -67,8 +71,11 @@ def test_mmdb_mapping_cache_and_unknown(fake_database):
 async def test_enrichment_preserves_original_and_versions_output(tmp_path, fake_database):
     database, _ = fake_database
     sink = JsonSink(tmp_path / "runs")
-    await run(RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
-              sink, transport_factory=FakeTransport)
+    await run(
+        RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
+        sink,
+        transport_factory=FakeTransport,
+    )
     summary_before = (sink.directory / "summary.json").read_bytes()
     report = enrich_run(sink.directory, database)
     assert report["rows"] == 1 and report["unmatched_rows"] == 0
@@ -118,16 +125,28 @@ def test_real_local_mmdb_when_present():
 
 @pytest.mark.parametrize("interrupt", [False, True])
 async def test_cli_process_and_signal(tmp_path, interrupt):
-    gateway = Gateway(auth=True, delay=.2 if interrupt else 0)
+    gateway = Gateway(auth=True, delay=0.2 if interrupt else 0)
     async with server(gateway) as port:
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "proxy_index.cli", "run", "--target", "generic_http",
-            "--requests", "10", "--concurrency", "2", "--output", str(tmp_path),
-            env=os.environ | {
+            sys.executable,
+            "-m",
+            "proxy_index.cli",
+            "run",
+            "--target",
+            "generic_http",
+            "--requests",
+            "10",
+            "--concurrency",
+            "2",
+            "--output",
+            str(tmp_path),
+            env=os.environ
+            | {
                 "PROXY_URL": f"http://test:secret@127.0.0.1:{port}",
                 "PYTHONPATH": str(Path(__file__).parents[1] / "src"),
             },
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         if interrupt:
             async with asyncio.timeout(5):

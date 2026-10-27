@@ -14,18 +14,34 @@ CI = Path(__file__).resolve().parent.parent / "scripts" / "ci"
 
 
 def run(script, *args):
-    return subprocess.run([sys.executable, str(CI / script), *map(str, args)],
-                          capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, str(CI / script), *map(str, args)], capture_output=True, text=True
+    )
 
 
 def git(repo, *args):
-    subprocess.run(["git", "-C", str(repo), "-c", "user.name=ci", "-c",
-                    "user.email=ci@example.invalid", *args], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=ci",
+            "-c",
+            "user.email=ci@example.invalid",
+            *args,
+        ],
+        check=True,
+        capture_output=True,
+    )
 
 
 def function(name, body_lines):
-    return f"def {name}():\n" + "".join(f"    x{i} = {i}\n" for i in range(body_lines - 1)) \
+    return (
+        f"def {name}():\n"
+        + "".join(f"    x{i} = {i}\n" for i in range(body_lines - 1))
         + "    return 0\n"
+    )
 
 
 def repo_with(tmp_path, base, head):
@@ -87,8 +103,12 @@ def test_coverage_gate_passes_complete_targets_and_needs_branch_data(tmp_path):
     complete = run("coverage_gate.py", report, tmp_path, "src/m.py", "src/m.py:f,g")
     assert complete.returncode == 0
     assert "RESULT PASS (0 failing targets)" in complete.stdout
-    no_branches = run("coverage_gate.py", coverage(tmp_path, {"missing_lines": []}, branch=False),
-                      tmp_path, "src/m.py")
+    no_branches = run(
+        "coverage_gate.py",
+        coverage(tmp_path, {"missing_lines": []}, branch=False),
+        tmp_path,
+        "src/m.py",
+    )
     assert no_branches.returncode == 1
     assert "has no branch coverage" in no_branches.stdout
 
@@ -98,8 +118,9 @@ UGLY = "def f( a,b ):\n    x = {'a':1}\n    return a+b\n"
 
 def ruff_format(repo, source, path="src/m.py"):
     command = [sys.executable, "-m", "ruff", "format", "--stdin-filename", path, "-"]
-    return subprocess.run(command, input=source, cwd=repo, capture_output=True, text=True,
-                          check=True).stdout
+    return subprocess.run(
+        command, input=source, cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
 
 
 def write(path, text):
@@ -131,8 +152,9 @@ def formatted(repo, path="src/m.py", replace=("", "")):
 
 def test_format_only_attests_the_exact_ruff_output_of_the_base(tmp_path):
     out = attested(tmp_path, formatted)
-    base = subprocess.run(["git", "-C", tmp_path, "rev-parse", "base"], capture_output=True,
-                          text=True, check=True).stdout.strip()
+    base = subprocess.run(
+        ["git", "-C", tmp_path, "rev-parse", "base"], capture_output=True, text=True, check=True
+    ).stdout.strip()
     ok, version, verdict = out.splitlines()
     assert (ok, verdict) == ("OK src/m.py", "FORMAT_ONLY=true")
     assert version.startswith("ruff ") and version.endswith(f", base {base}, 1 files")
@@ -143,26 +165,52 @@ def renamed(repo):
     git(repo, "mv", "src/m.py", "src/k.py")
 
 
-@pytest.mark.parametrize("change,reason", [
-    (lambda repo: formatted(repo, replace=('"a": 1', '"a": 2')),
-     "NOT src/m.py: not the ruff format output of the base"),
-    (lambda repo: formatted(repo, replace=("\n    return", "\n\n    return")),
-     "NOT src/m.py: not the ruff format output of the base"),
-    (lambda repo: (formatted(repo), write(repo / "pyproject.toml", "[tool.ruff]\n")),
-     "NOT pyproject.toml: not a .py file under src/, tests/ or scripts/"),
-    (lambda repo: (formatted(repo), write(repo / "src" / "n.py", "x = 1\n")),
-     "NOT src/n.py: status A"),
-    (lambda repo: (repo / "src" / "m.py").unlink(), "NOT src/m.py: status D"),
-    (renamed, "NOT src/k.py: status A"),
-    (lambda repo: formatted(repo, "docs/x.py"),
-     "NOT docs/x.py: not a .py file under src/, tests/ or scripts/"),
-    (lambda repo: (formatted(repo), (repo / "src" / "m.py").chmod(0o755)),
-     "NOT src/m.py: mode 100644 -> 100755"),
-    (lambda repo: None, "NOT: no changed file\nruff "),
-], ids=["literal", "blank-line", "pyproject", "added", "deleted", "renamed", "outside",
-        "mode", "empty"])
+@pytest.mark.parametrize(
+    "change,reason",
+    [
+        (
+            lambda repo: formatted(repo, replace=('"a": 1', '"a": 2')),
+            "NOT src/m.py: not the ruff format output of the base",
+        ),
+        (
+            lambda repo: formatted(repo, replace=("\n    return", "\n\n    return")),
+            "NOT src/m.py: not the ruff format output of the base",
+        ),
+        (
+            lambda repo: (formatted(repo), write(repo / "pyproject.toml", "[tool.ruff]\n")),
+            "NOT pyproject.toml: not a .py file under src/, tests/ or scripts/",
+        ),
+        (
+            lambda repo: (formatted(repo), write(repo / "src" / "n.py", "x = 1\n")),
+            "NOT src/n.py: status A",
+        ),
+        (lambda repo: (repo / "src" / "m.py").unlink(), "NOT src/m.py: status D"),
+        (renamed, "NOT src/k.py: status A"),
+        (
+            lambda repo: formatted(repo, "docs/x.py"),
+            "NOT docs/x.py: not a .py file under src/, tests/ or scripts/",
+        ),
+        (
+            lambda repo: (formatted(repo), (repo / "src" / "m.py").chmod(0o755)),
+            "NOT src/m.py: mode 100644 -> 100755",
+        ),
+        (lambda repo: None, "NOT: no changed file\nruff "),
+    ],
+    ids=[
+        "literal",
+        "blank-line",
+        "pyproject",
+        "added",
+        "deleted",
+        "renamed",
+        "outside",
+        "mode",
+        "empty",
+    ],
+)
 def test_format_only_refuses_anything_but_the_ruff_output_of_modified_files(
-        tmp_path, change, reason):
+    tmp_path, change, reason
+):
     out = attested(tmp_path, change)
     assert reason in out
     assert out.endswith("\nFORMAT_ONLY=false\n")
@@ -208,19 +256,23 @@ def attestor():
     return module
 
 
-@pytest.mark.parametrize("before,after,same", [
-    ("del (a, b)\n", "del a, b\n", True),
-    ('x = u"x"\n', 'x = "x"\n', True),
-    ('def f():\n    """  a\n      b  """\n', 'def f():\n    """a\n    b"""\n', True),
-    ('x = "a b"\n', 'x = "a  b"\n', False),
-    ("x = 1\n", "x = 2\n", False),
-])
+@pytest.mark.parametrize(
+    "before,after,same",
+    [
+        ("del (a, b)\n", "del a, b\n", True),
+        ('x = u"x"\n', 'x = "x"\n', True),
+        ('def f():\n    """  a\n      b  """\n', 'def f():\n    """a\n    b"""\n', True),
+        ('x = "a b"\n', 'x = "a  b"\n', False),
+        ("x = 1\n", "x = 2\n", False),
+    ],
+)
 def test_format_only_compares_asts_after_blacks_normalisations(attestor, before, after, same):
     assert (attestor.normal_ast(before) == attestor.normal_ast(after)) is same
 
 
-def test_format_only_refuses_equal_bytes_with_a_different_ast(tmp_path, attestor, monkeypatch,
-                                                              capsys):
+def test_format_only_refuses_equal_bytes_with_a_different_ast(
+    tmp_path, attestor, monkeypatch, capsys
+):
     """Rule 4 holds on its own: a formatter that changed a value is caught by the AST check."""
     monkeypatch.setattr(attestor, "RUFF", [sys.executable, "-c", FAKE_RUFF])
     attested(tmp_path, lambda repo: write(repo / "src" / "m.py", "x = 2\n"), "x = 1\n")

@@ -39,8 +39,11 @@ def busy(now: tuple[int, int, int], before: tuple[int, int, int]) -> tuple[float
 
 
 def memory_used_pct(meminfo_text: str) -> float:
-    values = {line.split(":")[0]: int(line.split()[1]) for line in meminfo_text.splitlines()
-              if ":" in line and len(line.split()) > 1}
+    values = {
+        line.split(":")[0]: int(line.split()[1])
+        for line in meminfo_text.splitlines()
+        if ":" in line and len(line.split()) > 1
+    }
     return 100 * (1 - values["MemAvailable"] / values["MemTotal"])
 
 
@@ -65,12 +68,16 @@ def sample(proc: Path, cgroup: Path, before: Ticks) -> tuple[dict | None, Ticks]
     rss = round_rss_mb(proc, cgroup)
     if rss is None:
         return None, ticks
-    line: dict = {"time": time.time(), "rss_mb": round(rss, 1),
-                  "load1": float((proc / "loadavg").read_text().split()[0]),
-                  "mem_used_pct": round(memory_used_pct((proc / "meminfo").read_text()), 1)}
+    line: dict = {
+        "time": time.time(),
+        "rss_mb": round(rss, 1),
+        "load1": float((proc / "loadavg").read_text().split()[0]),
+        "mem_used_pct": round(memory_used_pct((proc / "meminfo").read_text()), 1),
+    }
     if "cpu" in before and "cpu" in ticks:
-        line["cpu_pct"], line["steal_pct"] = (round(v, 1) for v in busy(ticks["cpu"],
-                                                                         before["cpu"]))
+        line["cpu_pct"], line["steal_pct"] = (
+            round(v, 1) for v in busy(ticks["cpu"], before["cpu"])
+        )
         cores = [busy(ticks[n], before[n])[0] for n in ticks if n != "cpu" and n in before]
         line["core_max_pct"] = round(max(cores, default=0.0), 1)
     return line, ticks
@@ -98,17 +105,25 @@ def summarize(path: Path, since: float | None = None) -> dict[str, float | None]
         pass
 
     def values(key):
-        return [float(item[key]) for item in lines if isinstance(item.get(key), (int, float))
-                and (since is None or item.get("time", since) >= since)]
+        return [
+            float(item[key])
+            for item in lines
+            if isinstance(item.get(key), (int, float))
+            and (since is None or item.get("time", since) >= since)
+        ]
 
     cpu = values("cpu_pct")
-    return {"cpu_p50_pct": percentile(cpu, 0.5), "cpu_p95_pct": percentile(cpu, 0.95),
-            "cpu_max_pct": max(cpu, default=None), "cpu_peak_pct": max(cpu, default=None),
-            "cpu_core_max_pct": max(values("core_max_pct"), default=None),
-            "steal_p95_pct": percentile(values("steal_pct"), 0.95),
-            "load1_p95": percentile(values("load1"), 0.95),
-            "mem_used_max_pct": max(values("mem_used_pct"), default=None),
-            "rss_peak_mb": max(values("rss_mb"), default=None)}
+    return {
+        "cpu_p50_pct": percentile(cpu, 0.5),
+        "cpu_p95_pct": percentile(cpu, 0.95),
+        "cpu_max_pct": max(cpu, default=None),
+        "cpu_peak_pct": max(cpu, default=None),
+        "cpu_core_max_pct": max(values("core_max_pct"), default=None),
+        "steal_p95_pct": percentile(values("steal_pct"), 0.95),
+        "load1_p95": percentile(values("load1"), 0.95),
+        "mem_used_max_pct": max(values("mem_used_pct"), default=None),
+        "rss_peak_mb": max(values("rss_mb"), default=None),
+    }
 
 
 def main(argv: list[str] | None = None, *, sleep=time.sleep) -> int:

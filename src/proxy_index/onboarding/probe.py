@@ -36,8 +36,8 @@ async def execute_probe(
     if mapping.region_of(country) != region:
         raise ValueError("Country does not belong to the requested runner region")
     effective = settings(
-        DEFAULTS | {"concurrency": concurrency, "timeout_seconds": request_timeout,
-                    "processes": processes}
+        DEFAULTS
+        | {"concurrency": concurrency, "timeout_seconds": request_timeout, "processes": processes}
     )
     if not math.isfinite(max_seconds) or max_seconds <= 0:
         raise ValueError("max_seconds must be finite and positive")

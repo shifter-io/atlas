@@ -64,8 +64,11 @@ def due_at(spec: CampaignSpec, slot: int) -> datetime:
 
 def load_hour(root: Path, spec: CampaignSpec, slot: int) -> HourRecord:
     path = hour_path(root, slot)
-    return (HourRecord.from_dict(read_json(path)) if path.exists()
-            else HourRecord(spec.campaign_id, slot, scheduled_at(spec, slot).isoformat()))
+    return (
+        HourRecord.from_dict(read_json(path))
+        if path.exists()
+        else HourRecord(spec.campaign_id, slot, scheduled_at(spec, slot).isoformat())
+    )
 
 
 def load_hours(root: Path, spec: CampaignSpec) -> dict[int, HourRecord]:
@@ -93,12 +96,20 @@ class AlertLog:
     def _pairs(self) -> set[tuple[str, str]]:
         size = self.path.stat().st_size if self.path.exists() else 0
         if size != self.size:
-            self.size, self.raised = size, {(str(item.get("code")), str(item.get("key")))
-                                            for item in read_alerts(self.root)}
+            self.size, self.raised = (
+                size,
+                {(str(item.get("code")), str(item.get("key"))) for item in read_alerts(self.root)},
+            )
         return self.raised
 
-    def add(self, now: datetime, code: str, level: str = "high", key: str | None = None,
-            **details: object) -> bool:
+    def add(
+        self,
+        now: datetime,
+        code: str,
+        level: str = "high",
+        key: str | None = None,
+        **details: object,
+    ) -> bool:
         """Append one alert unless (code, key) was raised before. No IPs."""
         key = key or code
         if (code, key) in self._pairs():
@@ -116,8 +127,14 @@ class AlertLog:
         return True
 
 
-def alert(root: Path, now: datetime, code: str, level: str = "high", key: str | None = None,
-          **details: object) -> bool:
+def alert(
+    root: Path,
+    now: datetime,
+    code: str,
+    level: str = "high",
+    key: str | None = None,
+    **details: object,
+) -> bool:
     """One alert from a short-lived caller (tick, watchdog)."""
     return AlertLog(root).add(now, code, level, key, **details)
 
@@ -142,37 +159,48 @@ def set_paused(root: Path, network: str, paused: bool) -> list[str]:
 
 def active_spec(spec: CampaignSpec, paused: list[str]) -> CampaignSpec:
     networks = tuple(net for net in spec.networks if net not in paused)
-    return replace(spec, networks=networks,
-                   manifests={net: spec.manifests[net] for net in networks})
+    return replace(
+        spec, networks=networks, manifests={net: spec.manifests[net] for net in networks}
+    )
 
 
 def timer_calendars(slot_minutes: int, lead_seconds: int) -> dict[str, str]:
     """OnCalendar per timer: the tick `lead_seconds` before each slot, the watchdog's `armed`
     check 30 s and its `fired` check 120 s after it (hourly: *:58:30, *:00:30, *:02:00)."""
+
     def calendar(offset: int) -> str:
         moments = sorted((start * 60 + offset) % 3600 for start in range(0, 60, slot_minutes))
         minutes = ",".join(f"{m // 60:02d}" for m in moments)
         return f"*-*-* *:{minutes}:{moments[0] % 60:02d}"
-    return {"tick": calendar(-lead_seconds), "watchdog-armed": calendar(30),
-            "watchdog-fired": calendar(120)}
+
+    return {
+        "tick": calendar(-lead_seconds),
+        "watchdog-armed": calendar(30),
+        "watchdog-fired": calendar(120),
+    }
 
 
 def _systemctl(*args: str) -> None:
     subprocess.run(["systemctl", *args], check=True, capture_output=True, timeout=30)
 
 
-def _due_slots(root: Path, spec: CampaignSpec, now: datetime, slot: int | None,
-               now_mode: bool) -> list[int]:
+def _due_slots(
+    root: Path, spec: CampaignSpec, now: datetime, slot: int | None, now_mode: bool
+) -> list[int]:
     if now_mode:
         if slot is None or not 0 <= slot < spec.hours:
             raise ValueError("--now needs a slot of this campaign")
         return [slot] if load_hour(root, spec, slot).state in LAUNCHABLE else []
-    return [k for k in range(spec.hours) if due_at(spec, k) <= now + DUE_TOLERANCE
-            and load_hour(root, spec, k).state in LAUNCHABLE]
+    return [
+        k
+        for k in range(spec.hours)
+        if due_at(spec, k) <= now + DUE_TOLERANCE and load_hour(root, spec, k).state in LAUNCHABLE
+    ]
 
 
-async def _launch(root: Path, spec: CampaignSpec, slot: int, launcher: HourLauncher,
-                  clock: Clock, now_mode: bool) -> None:
+async def _launch(
+    root: Path, spec: CampaignSpec, slot: int, launcher: HourLauncher, clock: Clock, now_mode: bool
+) -> None:
     record = load_hour(root, spec, slot)
     paused = paused_networks(root)
     if record.state == "planned":
@@ -184,8 +212,14 @@ async def _launch(root: Path, spec: CampaignSpec, slot: int, launcher: HourLaunc
         record.state, record.paused_networks = "launching", paused
         save_hour(root, record)
         if delay > LATE_SECONDS and not now_mode:
-            alert(root, now, "late_launch", key=f"h{slot:02d}", hour=slot,
-                  launch_delay_seconds=record.launch_delay_seconds)
+            alert(
+                root,
+                now,
+                "late_launch",
+                key=f"h{slot:02d}",
+                hour=slot,
+                launch_delay_seconds=record.launch_delay_seconds,
+            )
     elif record.paused_networks != paused:  # a resumed slot launches with the current overlay
         record.paused_networks = paused
         save_hour(root, record)
@@ -212,9 +246,15 @@ def _disable(spec: CampaignSpec, root: Path, disable_timer: Callable[[], None] |
         alert(root, utc_now(), "timer_disable_failed", "info", error=type(error).__name__)
 
 
-async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now,
-                   now_mode: bool = False, slot: int | None = None,
-                   disable_timer: Callable[[], None] | None = None) -> list[int]:
+async def run_tick(
+    root: Path,
+    *,
+    launcher: HourLauncher,
+    clock: Clock = utc_now,
+    now_mode: bool = False,
+    slot: int | None = None,
+    disable_timer: Callable[[], None] | None = None,
+) -> list[int]:
     """Launch every due slot still `planned` (or resume a crashed `launching` one), at once,
     under `flock(ledger/.lock)`; `now_mode` launches only `slot`, immediately. Returns them."""
     lock = root / "ledger" / ".lock"
@@ -226,7 +266,8 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
         slots = _due_slots(root, spec, clock(), slot, now_mode)
         results = await asyncio.gather(
             *(_launch(root, spec, k, launcher, clock, now_mode) for k in slots),
-            return_exceptions=True)
+            return_exceptions=True,
+        )
         if not now_mode:
             _disable(spec, root, disable_timer)
         failures = [result for result in results if isinstance(result, BaseException)]
@@ -237,9 +278,14 @@ async def run_tick(root: Path, *, launcher: HourLauncher, clock: Clock = utc_now
         os.close(fd)
 
 
-def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
-                 start_tick: Callable[[], None] | None = None,
-                 timer_enabled: Callable[[], bool] | None = None) -> str | None:
+def run_watchdog(
+    root: Path,
+    *,
+    check: str,
+    clock: Clock = utc_now,
+    start_tick: Callable[[], None] | None = None,
+    timer_enabled: Callable[[], bool] | None = None,
+) -> str | None:
     """30 s after a slot starts (`armed`, *:00:30 hourly) its workers are armed; 120 s after
     (`fired`, *:02:00) it fired. An enabled timer also gets the tick started; a disabled one
     (the operator's) only the alarm (S7)."""
@@ -248,17 +294,32 @@ def run_watchdog(root: Path, *, check: str, clock: Clock = utc_now,
     if not 0 <= slot < spec.hours:
         return None
     unit = f"proxy-index-campaign-tick@{spec.campaign_id}"
-    enabled = timer_enabled or (lambda: subprocess.run(
-        ["systemctl", "is-enabled", f"{unit}.timer"], capture_output=True, text=True,
-        timeout=30).stdout.strip() == "enabled")
+    enabled = timer_enabled or (
+        lambda: (
+            subprocess.run(
+                ["systemctl", "is-enabled", f"{unit}.timer"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+            == "enabled"
+        )
+    )
     record = load_hour(root, spec, slot)
     if _on_time(record, check):
         return None
     timer = enabled()
     if not timer and record.state != "planned":
         return None
-    alert(root, now, "missed_launch", key=f"h{slot:02d}-{check}", hour=slot, check=check,
-          timer="enabled" if timer else "disabled")
+    alert(
+        root,
+        now,
+        "missed_launch",
+        key=f"h{slot:02d}-{check}",
+        hour=slot,
+        check=check,
+        timer="enabled" if timer else "disabled",
+    )
     if timer:
         (start_tick or (lambda: _systemctl("start", "--no-block", f"{unit}.service")))()
     return "missed_launch"
@@ -270,7 +331,8 @@ def _on_time(record: HourRecord, check: str) -> bool:
         return record.fired_at is not None
     armed = any(d.status in ("armed", "running") for d in record.droplets)
     return record.state in ("running", "harvesting", *FINAL) or (
-        record.state == "launching" and record.fired_at is not None and armed)
+        record.state == "launching" and record.fired_at is not None and armed
+    )
 
 
 def _tick_command(args) -> int:
@@ -303,12 +365,14 @@ def _network_command(args) -> int:
 
 def register(subcommands, handlers: dict) -> None:
     tick = subcommands.add_parser(
-        "tick", help="Launch every due slot (systemd timer; hourly default *:58:30)")
+        "tick", help="Launch every due slot (systemd timer; hourly default *:58:30)"
+    )
     tick.add_argument("--root", required=True)
     tick.add_argument("--slot", type=int)
     tick.add_argument("--now", action="store_true", help="launch --slot immediately (dry run)")
     watchdog = subcommands.add_parser(
-        "watchdog", help="Missed-slot alarm (hourly default *:00:30, *:02:00)")
+        "watchdog", help="Missed-slot alarm (hourly default *:00:30, *:02:00)"
+    )
     watchdog.add_argument("--root", required=True)
     watchdog.add_argument("--check", choices=("armed", "fired"), required=True)
     network = subcommands.add_parser("network", help="Pause or resume a network from next hour")

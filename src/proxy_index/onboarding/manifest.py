@@ -97,15 +97,17 @@ def _start(start: str, now: datetime | None, plan: PlanOptions) -> datetime:
     if begins.minute or begins.second or begins.microsecond:
         raise ValueError("Campaign start must be a whole UTC hour")
     current = now or datetime.now(UTC)
-    if begins <= current and not (plan.allow_current_hour
-                                  and current < begins + timedelta(hours=1)):
+    if begins <= current and not (
+        plan.allow_current_hour and current < begins + timedelta(hours=1)
+    ):
         raise ValueError("Campaign start must be in the future")
     return begins
 
 
 def _run_settings(plan: PlanOptions) -> dict:
-    base = DEFAULTS | ({"concurrency": EPHEMERAL_CONCURRENCY}
-                       if plan.execution_mode == "ephemeral" else {})
+    base = DEFAULTS | (
+        {"concurrency": EPHEMERAL_CONCURRENCY} if plan.execution_mode == "ephemeral" else {}
+    )
     effective = settings(base | (plan.run_settings or {}))
     if type(plan.retry_http_469) is not bool:
         raise ValueError("retry_http_469 must be a boolean")
@@ -124,7 +126,12 @@ def _run_settings(plan: PlanOptions) -> dict:
 
 
 def create(
-    provider_config: Path, product: str, start: str, output: Path, *, now: datetime | None = None,
+    provider_config: Path,
+    product: str,
+    start: str,
+    output: Path,
+    *,
+    now: datetime | None = None,
     **options,
 ) -> Path:
     """Write a frozen campaign manifest; ``options`` are the :class:`PlanOptions` fields.
@@ -146,10 +153,14 @@ def create(
         raise ValueError("A registered provider adapter and version 1 configuration are required")
     campaign_id = f"{begins.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}".lower()
     mapping = load_regions()
-    order = plan.region_order if plan.region_order is not None else [
-        r.slug for r in mapping.regions]
-    if (not isinstance(order, list) or len(order) != len(REGION_IDS)
-            or set(order) != set(REGION_IDS)):
+    order = (
+        plan.region_order if plan.region_order is not None else [r.slug for r in mapping.regions]
+    )
+    if (
+        not isinstance(order, list)
+        or len(order) != len(REGION_IDS)
+        or set(order) != set(REGION_IDS)
+    ):
         raise ValueError("Region order must contain each region exactly once")
     effective = _run_settings(plan)
     version, basis = census_rule(plan.retry_http_469, effective.get("answer_classes", False))
@@ -171,17 +182,21 @@ def create(
         "census_ratio_basis": basis,
     }
     if plan.execution_mode == "sequential":
-        manifest.update(schema_version=2, execution_mode="sequential", region_order=order,
-                        ends_at=timestamp(begins + timedelta(days=len(order))))
+        manifest.update(
+            schema_version=2,
+            execution_mode="sequential",
+            region_order=order,
+            ends_at=timestamp(begins + timedelta(days=len(order))),
+        )
     elif plan.execution_mode == "ephemeral":
-        manifest.update(schema_version=3, execution_mode="ephemeral",
-                        grace_hours=plan.grace_hours)
+        manifest.update(schema_version=3, execution_mode="ephemeral", grace_hours=plan.grace_hours)
         if plan.slot_minutes != 60:
             manifest["slot_minutes"] = plan.slot_minutes
         slot = timedelta(minutes=slot_minutes(manifest))
         manifest["rounds"] = [timestamp(begins + i * slot) for i in range(24)]
-        manifest["ends_at"] = timestamp(begins + 24 * slot
-                                        + timedelta(hours=ephemeral_grace(manifest)))
+        manifest["ends_at"] = timestamp(
+            begins + 24 * slot + timedelta(hours=ephemeral_grace(manifest))
+        )
     validate(manifest)
     directory = output / provider / product / campaign_id
     private_dir(directory.parent)
@@ -201,19 +216,29 @@ def regional_window(manifest: dict, region: str) -> dict:
         raise ValueError("Unknown campaign region")
     if manifest.get("execution_mode") == "ephemeral":
         # Every region shares the campaign window, including its grace bound.
-        return {"starts_at": manifest["starts_at"], "ends_at": manifest["ends_at"],
-                "rounds": list(manifest["rounds"])}
-    offset = (manifest["region_order"].index(region)
-              if manifest.get("execution_mode", "parallel") == "sequential" else 0)
+        return {
+            "starts_at": manifest["starts_at"],
+            "ends_at": manifest["ends_at"],
+            "rounds": list(manifest["rounds"]),
+        }
+    offset = (
+        manifest["region_order"].index(region)
+        if manifest.get("execution_mode", "parallel") == "sequential"
+        else 0
+    )
     start = moment(manifest["starts_at"]) + timedelta(days=offset)
-    return {"starts_at": timestamp(start), "ends_at": timestamp(start + timedelta(days=1)),
-            "rounds": [timestamp(start + timedelta(hours=i)) for i in range(24)]}
+    return {
+        "starts_at": timestamp(start),
+        "ends_at": timestamp(start + timedelta(days=1)),
+        "rounds": [timestamp(start + timedelta(hours=i)) for i in range(24)],
+    }
 
 
 def validate(data: dict) -> dict:
     policy = data.get("settings", {})
-    version, basis = census_rule(policy.get("retry_http_469", False),
-                                 policy.get("answer_classes", False))
+    version, basis = census_rule(
+        policy.get("retry_http_469", False), policy.get("answer_classes", False)
+    )
     if (
         data.get("schema_version") not in (1, 2, 3)
         or data.get("target") != "generic_http"
@@ -226,20 +251,25 @@ def validate(data: dict) -> dict:
     if not re.fullmatch(r"[0-9a-f]{64}", data["provider_config_sha256"]):
         raise ValueError("Invalid provider configuration checksum")
     mode = data.get("execution_mode", "parallel")
-    if (data["schema_version"] == 1 and (mode != "parallel" or "region_order" in data)):
+    if data["schema_version"] == 1 and (mode != "parallel" or "region_order" in data):
         raise ValueError("Sequential schedules require manifest version 2")
     if data["schema_version"] == 2:
         order = data.get("region_order")
-        if (mode != "sequential" or not isinstance(order, list)
-                or len(order) != len(REGION_IDS) or set(order) != set(REGION_IDS)):
+        if (
+            mode != "sequential"
+            or not isinstance(order, list)
+            or len(order) != len(REGION_IDS)
+            or set(order) != set(REGION_IDS)
+        ):
             raise ValueError("Sequential schedule requires each region exactly once")
     start, end = moment(data["starts_at"]), moment(data["ends_at"])
     slot = timedelta(minutes=slot_minutes(data))  # one hour but in an ephemeral manifest
     span = 24 * slot * (len(REGION_IDS) if mode == "sequential" else 1)
     span += timedelta(hours=ephemeral_grace(data) if data["schema_version"] == 3 else 0)
     if start.minute or start.second or start.microsecond or end - start != span:
-        raise ValueError("Campaign duration must give each region exactly 24 rounds "
-                         "slot_minutes apart")
+        raise ValueError(
+            "Campaign duration must give each region exactly 24 rounds slot_minutes apart"
+        )
     if data["rounds"] != [timestamp(start + i * slot) for i in range(24)]:
         raise ValueError("Campaign must contain exactly 24 rounds slot_minutes apart")
     regions = data["regions"]
@@ -260,8 +290,7 @@ def validate(data: dict) -> dict:
     # Validate custom destinations using the same constraints as the request runner.
     from ..models import ProxyConfig, RunConfig
 
-    RunConfig("generic_http", ProxyConfig("http", "localhost", 8080),
-              target_url=data["target_url"])
+    RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), target_url=data["target_url"])
     return data
 
 

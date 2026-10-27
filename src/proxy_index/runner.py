@@ -1,4 +1,5 @@
 """Bounded worker pool callable by scripts, future rules or schedulers."""
+
 from __future__ import annotations
 
 import asyncio
@@ -86,13 +87,12 @@ async def run(
         raise ValueError("The unique-ratio stop rule requires a pool-eligible target")
     if progress is not None and (
         type(progress_interval) not in (int, float)
-        or not math.isfinite(progress_interval) or progress_interval <= 0
+        or not math.isfinite(progress_interval)
+        or progress_interval <= 0
     ):
         raise ValueError("progress_interval must be finite and positive")
     limit = config.requests
-    if deadline is not None and (
-        type(deadline) not in (int, float) or not math.isfinite(deadline)
-    ):
+    if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
         raise ValueError("deadline must be a finite Unix timestamp")
     ratio_rule = config.stop_rule == "unique_ratio"
     sink = result_sink if result_sink is not None else JsonSink()
@@ -105,6 +105,7 @@ async def run(
         return deadline is not None and (
             wall_now() >= deadline or time.perf_counter() >= deadline_mono
         )
+
     totals = Counters()
     answers = Answers(config, enricher if target.pool_eligible else None)
     buckets: dict[int, Counters] = {}
@@ -128,8 +129,10 @@ async def run(
     watcher: asyncio.Task | None = None
     ticker: asyncio.Task | None = None
     parallel = transport_factory is HttpTransport and process_count(config) > 1
-    execution = {"execution_processes": process_count(config) if parallel else 1,
-                 "execution_backend": "multiprocess" if parallel else "inline"}
+    execution = {
+        "execution_processes": process_count(config) if parallel else 1,
+        "execution_backend": "multiprocess" if parallel else "inline",
+    }
     sink.start(run_id)
     writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ip-export")
     pending: deque[Future] = deque()
@@ -142,11 +145,17 @@ async def run(
         # Bound temporary serialization memory for large distinct-IP sets.
         rows: list[dict[str, Any]] = []
         for address, (count, first, last) in observations.items():
-            rows.append({
-                "schema_version": "1", "run_id": run_id, "ip": address,
-                "bucket_start": iso(bucket), "count": count,
-                "first_seen": iso(first), "last_seen": iso(last),
-            })
+            rows.append(
+                {
+                    "schema_version": "1",
+                    "run_id": run_id,
+                    "ip": address,
+                    "bucket_start": iso(bucket),
+                    "count": count,
+                    "first_seen": iso(first),
+                    "last_seen": iso(last),
+                }
+            )
             if len(rows) == 1000:
                 sink.observations(rows)
                 rows = []
@@ -156,13 +165,16 @@ async def run(
             return
         rows = []
         for (location, network), counters in geo.items():
-            rows.append({
-                "bucket_start": iso(bucket),
-                "location": dict(zip(LOCATION_FIELDS, location, strict=True))
-                if location else None,
-                "network": dict(zip(NETWORK_FIELDS, network, strict=True)) if network else None,
-                **counters.export_geo(),
-            })
+            rows.append(
+                {
+                    "bucket_start": iso(bucket),
+                    "location": dict(zip(LOCATION_FIELDS, location, strict=True))
+                    if location
+                    else None,
+                    "network": dict(zip(NETWORK_FIELDS, network, strict=True)) if network else None,
+                    **counters.export_geo(),
+                }
+            )
             if len(rows) == 1000:
                 sink.geo(rows)
                 rows = []
@@ -177,11 +189,17 @@ async def run(
             ip_rows, geo_rows = {}, {}
 
     def snapshot() -> dict[str, Any]:
-        return {
-            "requests": totals.completed, "successes": totals.successes,
-            "unique_ips": len(unique), **totals.verdicts(), **execution,
-        } | answers.progress(totals) | ({"redirects": totals.redirects} if protocol == "mixed"
-                                         else {})
+        return (
+            {
+                "requests": totals.completed,
+                "successes": totals.successes,
+                "unique_ips": len(unique),
+                **totals.verdicts(),
+                **execution,
+            }
+            | answers.progress(totals)
+            | ({"redirects": totals.redirects} if protocol == "mixed" else {})
+        )
 
     async def report() -> None:
         assert progress is not None
@@ -200,8 +218,12 @@ async def run(
             await report()
 
     def may_start() -> bool:
-        return (not halted and (limit is None or answers.started(started) < limit)
-                and not (stop and stop.is_set()) and not expired())
+        return (
+            not halted
+            and (limit is None or answers.started(started) < limit)
+            and not (stop and stop.is_set())
+            and not expired()
+        )
 
     async def worker(transport: Transport, worker_index: int) -> None:
         nonlocal started, next_start, current_bucket, halted, last_success, last_success_wall
@@ -227,8 +249,9 @@ async def run(
                 raise asyncio.CancelledError
             # Anchor UTC to the monotonic clock: a clock adjustment cannot
             # reopen an already flushed bucket or reverse first/last seen.
-            completed_at = (result.completed_at if result.completed_at is not None
-                            else time.perf_counter())
+            completed_at = (
+                result.completed_at if result.completed_at is not None else time.perf_counter()
+            )
             observed = began_wall + (completed_at - began)
             # IPC from independent processes may arrive slightly out of order.
             # Bucket by coordinator receipt; retain true observation timestamps.
@@ -274,11 +297,12 @@ async def run(
                     or time.perf_counter() - began >= NO_SUCCESS_SECONDS
                 ):
                     halted = "no_success"
-                elif (last_success is not None
-                        and time.perf_counter() - last_success >= config.stall_seconds):
+                elif (
+                    last_success is not None
+                    and time.perf_counter() - last_success >= config.stall_seconds
+                ):
                     halted = "stalled"
-                elif (sample >= config.min_sample
-                        and sample > 2 * len(unique)):
+                elif sample >= config.min_sample and sample > 2 * len(unique):
                     halted = "unique_ratio"
             if observation_consumer is not None and counted:
                 # A completed response must reach the writer even if a deadline
@@ -308,14 +332,20 @@ async def run(
             engine.abort()
 
     try:
-        engine = (ProcessTransport(config, target, deadline=deadline_mono)
-                  if parallel else transport_factory(config))
+        engine = (
+            ProcessTransport(config, target, deadline=deadline_mono)
+            if parallel
+            else transport_factory(config)
+        )
         async with engine as transport:
             if parallel:
                 execution["worker_pids"] = list(transport.pids)
-            workers = [asyncio.create_task(worker(transport, index)) for index in range(
-                config.concurrency if limit is None else min(config.concurrency, limit)
-            )]
+            workers = [
+                asyncio.create_task(worker(transport, index))
+                for index in range(
+                    config.concurrency if limit is None else min(config.concurrency, limit)
+                )
+            ]
             if stop or deadline is not None:
                 watcher = asyncio.create_task(watch_stop())
             if progress is not None:
@@ -349,28 +379,47 @@ async def run(
         stop_reason = "requests"
     elapsed = time.perf_counter() - began
     summary = RunSummary(
-        run_id=run_id, schema_version="1", framework_version=__version__,
-        target={"id": target.id, "version": target.version,
-                "url": target.build_request().url, "engine": target.engine},
-        config=config.public() | execution, started_at=iso(began_wall),
-        finished_at=iso(began_wall + elapsed), duration_seconds=elapsed, status=status,
-        requested=limit, started=started, completed=totals.completed,
+        run_id=run_id,
+        schema_version="1",
+        framework_version=__version__,
+        target={
+            "id": target.id,
+            "version": target.version,
+            "url": target.build_request().url,
+            "engine": target.engine,
+        },
+        config=config.public() | execution,
+        started_at=iso(began_wall),
+        finished_at=iso(began_wall + elapsed),
+        duration_seconds=elapsed,
+        status=status,
+        requested=limit,
+        started=started,
+        completed=totals.completed,
         cancelled=started - totals.completed,
         # An unbounded run has no unstarted remainder.
         not_started=0 if limit is None else limit - answers.started(started),
-        successes=totals.successes, total_errors=totals.errors.total(),
-        errors=dict(totals.errors), status_codes=dict(totals.statuses),
+        successes=totals.successes,
+        total_errors=totals.errors.total(),
+        errors=dict(totals.errors),
+        status_codes=dict(totals.statuses),
         success_rate=totals.successes / totals.completed if totals.completed else None,
         requests_per_second=totals.completed / elapsed if elapsed else 0,
         unique_ips=len(unique) if target.pool_eligible else None,
-        pool_eligible=target.pool_eligible, latency_ms=totals.histogram.percentiles(),
+        pool_eligible=target.pool_eligible,
+        latency_ms=totals.histogram.percentiles(),
         latency_mean_ms=totals.histogram.mean(),
-        latency_histogram=totals.histogram.export(), response_body_bytes=totals.body_bytes,
-        buckets=[{"bucket_start": iso(key), **value.export()}
-                 for key, value in sorted(buckets.items())],
-        **totals.verdicts(), **answers.summary(totals), stop_reason=stop_reason,
+        latency_histogram=totals.histogram.export(),
+        response_body_bytes=totals.body_bytes,
+        buckets=[
+            {"bucket_start": iso(key), **value.export()} for key, value in sorted(buckets.items())
+        ],
+        **totals.verdicts(),
+        **answers.summary(totals),
+        stop_reason=stop_reason,
         outage_started_at=iso(last_success_wall)
-        if stop_reason == "stalled" and last_success_wall is not None else None,
+        if stop_reason == "stalled" and last_success_wall is not None
+        else None,
         redirects=totals.redirects if protocol == "mixed" else None,
     )
     release = getattr(enricher, "release", None)

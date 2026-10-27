@@ -1,4 +1,5 @@
 """Reproducible simulated scale test. Does not contact public proxy/target hosts."""
+
 from __future__ import annotations
 
 import argparse
@@ -35,13 +36,21 @@ class SyntheticTransport:
         self.peak = max(self.peak, self.active)
         await asyncio.sleep(0)
         self.active -= 1
-        return Outcome((index % 100) + .1, ip=str(ipaddress.IPv4Address(0x0B000000 + index)),
-                       status=200, response_body_bytes=16)
+        return Outcome(
+            (index % 100) + 0.1,
+            ip=str(ipaddress.IPv4Address(0x0B000000 + index)),
+            status=200,
+            response_body_bytes=16,
+        )
 
 
 async def benchmark(requests, concurrency, output):
-    config = RunConfig("generic_http", ProxyConfig("http", "unused.invalid", 8080),
-                       requests=requests, concurrency=concurrency)
+    config = RunConfig(
+        "generic_http",
+        ProxyConfig("http", "unused.invalid", 8080),
+        requests=requests,
+        concurrency=concurrency,
+    )
     transport = SyntheticTransport(config)
     sink = JsonSink(output)
     start = time.perf_counter()
@@ -60,12 +69,17 @@ async def benchmark(requests, concurrency, output):
     assert summary.latency_ms == {"p50": 50, "p90": 90, "p95": 95, "p99": 99}
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     report = {
-        "mode": "simulated; no network I/O", "requests": requests, "unique_ips": rows,
-        "concurrency": concurrency, "peak_in_flight": transport.peak,
+        "mode": "simulated; no network I/O",
+        "requests": requests,
+        "unique_ips": rows,
+        "concurrency": concurrency,
+        "peak_in_flight": transport.peak,
         "wall_seconds_including_export": elapsed,
         "peak_rss_mib": rss / (1024**2 if platform.system() == "Darwin" else 1024),
-        "python": platform.python_version(), "platform": platform.platform(),
-        "run_directory": str(sink.directory), "passed": True,
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "run_directory": str(sink.directory),
+        "passed": True,
     }
     (Path(output) / "benchmark.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))

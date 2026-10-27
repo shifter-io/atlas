@@ -25,9 +25,14 @@ TOR1 = ["CA", "GL", "PM"]
 
 def make(tmp_path, **kwargs):
     kwargs.setdefault("now", START - timedelta(hours=1))
-    return campaign.create(ROOT / "configs/shifter.toml", "residential",
-                           campaign.timestamp(kwargs.pop("start", START)), tmp_path / "networks",
-                           execution_mode=kwargs.pop("execution_mode", "ephemeral"), **kwargs)
+    return campaign.create(
+        ROOT / "configs/shifter.toml",
+        "residential",
+        campaign.timestamp(kwargs.pop("start", START)),
+        tmp_path / "networks",
+        execution_mode=kwargs.pop("execution_mode", "ephemeral"),
+        **kwargs,
+    )
 
 
 @pytest.fixture
@@ -36,20 +41,39 @@ def ephemeral(tmp_path):
 
 
 def measurement(rows, **extra):
-    values = dict(status="completed", stop_reason="unique_ratio", completed=rows + 1,
-                  successes=rows, total_errors=1, unique_ips=rows, cancelled=0,
-                  bytes_up=100 * rows, bytes_down=300 * rows) | extra
+    values = (
+        dict(
+            status="completed",
+            stop_reason="unique_ratio",
+            completed=rows + 1,
+            successes=rows,
+            total_errors=1,
+            unique_ips=rows,
+            cancelled=0,
+            bytes_up=100 * rows,
+            bytes_down=300 * rows,
+        )
+        | extra
+    )
     return SimpleNamespace(**values, to_dict=lambda: dict(values))
 
 
 def census(clock, calls, *, rows=2, seconds=30.0, special=None):
     """A fake runner that writes ``rows`` observations and takes ``seconds`` per country."""
 
-    async def run_country(config, sink, *, stop, deadline, observation_consumer, wall_clock,
-                          **kwargs):
+    async def run_country(
+        config, sink, *, stop, deadline, observation_consumer, wall_clock, **kwargs
+    ):
         country = config.proxy.public()["requested_country"].upper()
-        calls.append(SimpleNamespace(country=country, at=clock.now(), deadline=deadline,
-                                     concurrency=config.concurrency, requests=config.requests))
+        calls.append(
+            SimpleNamespace(
+                country=country,
+                at=clock.now(),
+                deadline=deadline,
+                concurrency=config.concurrency,
+                requests=config.requests,
+            )
+        )
         if special and country in special:
             return await special[country](stop)
         for index in range(rows):
@@ -65,23 +89,35 @@ async def run_round(manifest, index=3, *, clock=None, calls=None, **kwargs):
     clock = clock or Clock(scheduled)
     calls = [] if calls is None else calls
     stop = kwargs.pop("stop", None)
-    result = await execute_round(manifest, "tor1", index, Proxy, clock=clock, stop=stop,
-                                 run_country=census(clock, calls, **kwargs))
+    result = await execute_round(
+        manifest,
+        "tor1",
+        index,
+        Proxy,
+        clock=clock,
+        stop=stop,
+        run_country=census(clock, calls, **kwargs),
+    )
     return result, calls
 
 
 def test_v3_manifest_window_grace_and_ephemeral_concurrency(ephemeral, tmp_path):
     data = campaign.load(ephemeral)
     assert (data["schema_version"], data["execution_mode"], data["grace_hours"]) == (
-        3, "ephemeral", 48)
+        3,
+        "ephemeral",
+        48,
+    )
     assert campaign.moment(data["ends_at"]) - START == timedelta(hours=72)
     assert len(data["rounds"]) == 24 and data["rounds"][0] == data["starts_at"]
     assert data["settings"]["concurrency"] == campaign.EPHEMERAL_CONCURRENCY == 2000
     window = campaign.regional_window(data, "syd1")
-    assert window == {"starts_at": data["starts_at"], "ends_at": data["ends_at"],
-                      "rounds": data["rounds"]}
-    tuned = campaign.load(make(tmp_path / "b", grace_hours=1,
-                               run_settings={"concurrency": 2500}))
+    assert window == {
+        "starts_at": data["starts_at"],
+        "ends_at": data["ends_at"],
+        "rounds": data["rounds"],
+    }
+    tuned = campaign.load(make(tmp_path / "b", grace_hours=1, run_settings={"concurrency": 2500}))
     assert tuned["settings"]["concurrency"] == 2500
     assert campaign.moment(tuned["ends_at"]) - START == timedelta(hours=25)
     assert campaign.load(make(tmp_path / "c", grace_hours=168))["grace_hours"] == 168
@@ -90,10 +126,16 @@ def test_v3_manifest_window_grace_and_ephemeral_concurrency(ephemeral, tmp_path)
             make(tmp_path / "d", grace_hours=grace)
 
 
-@pytest.mark.parametrize("change", [
-    {"grace_hours": 0}, {"grace_hours": None}, {"execution_mode": "parallel"},
-    {"region_order": ["lon1"]}, {"ends_at": "2027-01-04T21:00:00.000Z"},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"grace_hours": 0},
+        {"grace_hours": None},
+        {"execution_mode": "parallel"},
+        {"region_order": ["lon1"]},
+        {"ends_at": "2027-01-04T21:00:00.000Z"},
+    ],
+)
 def test_v3_validation_rejects_tampering(ephemeral, change):
     data = deepcopy(campaign.load(ephemeral)) | change
     with pytest.raises(ValueError):
@@ -130,16 +172,33 @@ async def test_round_runs_only_its_countries_in_order_with_round_layout(ephemera
     data = campaign.load(ephemeral)
     assert [c.country for c in calls] == TOR1
     assert calls[0].at == campaign.moment(data["rounds"][3]).timestamp()
-    assert all(c.deadline is None and c.requests is None and c.concurrency == 2000
-               for c in calls)
+    assert all(c.deadline is None and c.requests is None and c.concurrency == 2000 for c in calls)
     folder = round_directory(ephemeral, "tor1", 3)
     saved = read_json(folder / "round.json")
     assert saved == result
-    assert set(saved) == {"schema_version", "kind", "campaign_id", "region", "round",
-                          "scheduled_at", "campaign_sha256", "settings", "status", "active",
-                          "progress", "jobs", "pid", "updated_at", "peak_memory_mb"}
+    assert set(saved) == {
+        "schema_version",
+        "kind",
+        "campaign_id",
+        "region",
+        "round",
+        "scheduled_at",
+        "campaign_sha256",
+        "settings",
+        "status",
+        "active",
+        "progress",
+        "jobs",
+        "pid",
+        "updated_at",
+        "peak_memory_mb",
+    }
     assert (saved["kind"], saved["round"], saved["status"], saved["active"]) == (
-        "round", 3, "completed", None)
+        "round",
+        3,
+        "completed",
+        None,
+    )
     assert saved["scheduled_at"] == data["rounds"][3] and saved["pid"] == os.getpid()
     assert [j["status"] for j in saved["jobs"]] == ["completed"] * 3
     assert {p.name for p in folder.iterdir()} == {"round.json", "ca", "gl", "pm"}
@@ -170,13 +229,15 @@ async def test_stop_interrupts_the_active_country_and_skips_the_rest(ephemeral):
     async def stopped(country_stop):
         stop.set()
         await country_stop.wait()
-        return measurement(0, status="stopped", stop_reason="stopped", completed=0,
-                           total_errors=0)
+        return measurement(0, status="stopped", stop_reason="stopped", completed=0, total_errors=0)
 
     result, calls = await run_round(ephemeral, 1, stop=stop, special={"GL": stopped})
     assert result["status"] == "stopped"
     assert [j["status"] for j in result["jobs"]] == [
-        "completed", "interrupted", "not_started_deadline"]
+        "completed",
+        "interrupted",
+        "not_started_deadline",
+    ]
     report = verify_round(ephemeral, "tor1", 1)
     assert not report["complete"]
     assert report["issues"] == ["GL: interrupted", "PM: not started"]
@@ -231,36 +292,54 @@ async def test_verify_round_passes_without_ips(ephemeral):
     report = verify_round(ephemeral, "tor1", 8)
     assert report["complete"] and report["issues"] == [] and report["rows"] == 9
     first = report["countries"][0]
-    assert first == {"country": "CA", "status": "completed", "stop_reason": "unique_ratio",
-                     "requests": 4, "successes": 3, "errors": 1, "rate_limited": 0,
-                     "no_inventory": 0, "other_country": 0, "observations": 3,
-                     "unique_ips": 3, "bytes_up": 300, "bytes_down": 900,
-                     "duration_seconds": 30.0}
+    assert first == {
+        "country": "CA",
+        "status": "completed",
+        "stop_reason": "unique_ratio",
+        "requests": 4,
+        "successes": 3,
+        "errors": 1,
+        "rate_limited": 0,
+        "no_inventory": 0,
+        "other_country": 0,
+        "observations": 3,
+        "unique_ips": 3,
+        "bytes_up": 300,
+        "bytes_down": 900,
+        "duration_seconds": 30.0,
+    }
     assert "203.0.113" not in json.dumps(report)
 
 
 async def test_a_country_without_a_provider_list_completes_as_no_list(ephemeral):
     scheduled = campaign.moment(campaign.load(ephemeral)["rounds"][2]).timestamp()
     clock, calls = Clock(scheduled), []
-    result = await execute_round(ephemeral, "tor1", 2,
-                                 lambda country: None if country == "GL" else Proxy(country),
-                                 clock=clock, run_country=census(clock, calls))
+    result = await execute_round(
+        ephemeral,
+        "tor1",
+        2,
+        lambda country: None if country == "GL" else Proxy(country),
+        clock=clock,
+        run_country=census(clock, calls),
+    )
     assert [c.country for c in calls] == ["CA", "PM"]
     assert result["status"] == "completed"
     assert [(j["status"], j["stop_reason"]) for j in result["jobs"]][1] == ("no_list", "no_list")
     assert not (round_directory(ephemeral, "tor1", 2) / "gl").exists()
     report = verify_round(ephemeral, "tor1", 2)
     assert report["complete"] and report["issues"] == [] and report["rows"] == 4
-    assert (report["countries"][1]["status"], report["countries"][1]["requests"]) == (
-        "no_list", 0)
+    assert (report["countries"][1]["status"], report["countries"][1]["requests"]) == ("no_list", 0)
 
 
-@pytest.mark.parametrize("damage,issue", [
-    ("tamper", "CA: failed verification (ValueError)"),
-    ("meta", "CA: chunk without verified metadata"),
-    ("partial", "CA: unfinished chunk"),
-    ("summary", "CA: failed verification (FileNotFoundError)"),
-])
+@pytest.mark.parametrize(
+    "damage,issue",
+    [
+        ("tamper", "CA: failed verification (ValueError)"),
+        ("meta", "CA: chunk without verified metadata"),
+        ("partial", "CA: unfinished chunk"),
+        ("summary", "CA: failed verification (FileNotFoundError)"),
+    ],
+)
 async def test_verify_round_reports_damaged_country_data(ephemeral, damage, issue):
     await run_round(ephemeral, 9)
     folder = round_directory(ephemeral, "tor1", 9) / "ca"
@@ -292,17 +371,38 @@ async def test_verify_round_rejects_a_foreign_checkpoint(ephemeral, tmp_path):
     target = round_directory(other, "tor1", 11)
     target.mkdir(parents=True)
     (target / "round.json").write_bytes(
-        (round_directory(ephemeral, "tor1", 11) / "round.json").read_bytes())
+        (round_directory(ephemeral, "tor1", 11) / "round.json").read_bytes()
+    )
     with pytest.raises(ValueError, match="does not match"):
         verify_round(other, "tor1", 11)
 
 
 def test_plan_cli_writes_an_ephemeral_manifest(tmp_path, capsys):
     start = "2099-01-01T00:00:00Z"
-    base = ["onboarding", "plan", "--provider-config", str(ROOT / "configs/shifter.toml"),
-            "--product", "residential", "--start", start]
-    assert main([*base, "--output", str(tmp_path / "a"), "--execution-mode", "ephemeral",
-                 "--grace-hours", "2"]) == 0
+    base = [
+        "onboarding",
+        "plan",
+        "--provider-config",
+        str(ROOT / "configs/shifter.toml"),
+        "--product",
+        "residential",
+        "--start",
+        start,
+    ]
+    assert (
+        main(
+            [
+                *base,
+                "--output",
+                str(tmp_path / "a"),
+                "--execution-mode",
+                "ephemeral",
+                "--grace-hours",
+                "2",
+            ]
+        )
+        == 0
+    )
     data = campaign.load(campaign.Path(capsys.readouterr().out.strip()))
     assert (data["schema_version"], data["grace_hours"]) == (3, 2)
     assert data["settings"]["concurrency"] == 2000
@@ -327,12 +427,22 @@ def live(tmp_path, monkeypatch):
 
     def patch(**kwargs):
         clock = RealClock(0)
-        monkeypatch.setattr(onboarding_cli, "execute_round", functools.partial(
-            execute_round, clock=clock, run_country=census(clock, calls, **kwargs)))
+        monkeypatch.setattr(
+            onboarding_cli,
+            "execute_round",
+            functools.partial(
+                execute_round, clock=clock, run_country=census(clock, calls, **kwargs)
+            ),
+        )
 
     args = ["--manifest", str(path), "--region", "tor1", "--round", "0"]
-    return SimpleNamespace(path=path, calls=calls, patch=patch, args=args,
-                           config=["--provider-config", str(ROOT / "configs/shifter.toml")])
+    return SimpleNamespace(
+        path=path,
+        calls=calls,
+        patch=patch,
+        args=args,
+        config=["--provider-config", str(ROOT / "configs/shifter.toml")],
+    )
 
 
 def test_round_cli_exit_codes_and_verify(live, capsys):
@@ -344,7 +454,8 @@ def test_round_cli_exit_codes_and_verify(live, capsys):
     assert json.loads(capsys.readouterr().out)["complete"]
     assert main(["onboarding", "round", *live.args, *live.config]) == 1  # replay
     assert capsys.readouterr().err == (
-        "Round refused: This round already has a checkpoint; a replay is refused\n")
+        "Round refused: This round already has a checkpoint; a replay is refused\n"
+    )
     (round_directory(live.path, "tor1", 0) / "pm/summary.json").unlink()
     assert main(["onboarding", "verify-round", *live.args]) == 3
     assert main(["onboarding", "verify-round", *live.args[:3], "lon1", "--round", "0"]) == 1
@@ -360,7 +471,10 @@ def test_round_cli_signal_stops_with_130(live, capsys):
     assert main(["onboarding", "round", *live.args, *live.config]) == 130
     saved = read_json(round_directory(live.path, "tor1", 0) / "round.json")
     assert [j["status"] for j in saved["jobs"]] == [
-        "interrupted", "not_started_deadline", "not_started_deadline"]
+        "interrupted",
+        "not_started_deadline",
+        "not_started_deadline",
+    ]
 
 
 def test_round_cli_refuses_a_changed_provider_config_before_traffic(live, tmp_path):
@@ -382,8 +496,11 @@ async def test_verify_round_flags_a_crashed_round_overlaps_and_foreign_queues(ep
     crashed["jobs"][1]["started_at"] = crashed["jobs"][0]["started_at"]
     path.write_text(json.dumps(crashed))
     issues = verify_round(ephemeral, "tor1", 12)["issues"]
-    assert issues[:3] == ["round is running", "GL: overlaps the previous country",
-                          "GL: failed verification (ValueError)"]
+    assert issues[:3] == [
+        "round is running",
+        "GL: overlaps the previous country",
+        "GL: failed verification (ValueError)",
+    ]
     assert issues[-1] == "PM: running"
     saved["jobs"].reverse()
     path.write_text(json.dumps(saved))
@@ -393,8 +510,7 @@ async def test_verify_round_flags_a_crashed_round_overlaps_and_foreign_queues(ep
         verify_round(ephemeral, "mars1", 12)
 
 
-def test_round_cli_prints_each_refusal_and_only_the_type_of_other_errors(live, tmp_path,
-                                                                         capsys):
+def test_round_cli_prints_each_refusal_and_only_the_type_of_other_errors(live, tmp_path, capsys):
     live.patch(seconds=0.0)
     hour = campaign.moment(campaign.load(live.path)["starts_at"])
     later = make(tmp_path / "later", start=hour + timedelta(hours=1), now=datetime.now(UTC))
@@ -408,22 +524,27 @@ def test_round_cli_prints_each_refusal_and_only_the_type_of_other_errors(live, t
         return capsys.readouterr().err
 
     assert refused("round", later, index=1) == (
-        "Round refused: A round may be armed at most 300 seconds before it is scheduled\n")
+        "Round refused: A round may be armed at most 300 seconds before it is scheduled\n"
+    )
     assert refused("verify-round", v1) == (
-        "Round refused: One-round execution requires an ephemeral (version 3) manifest\n")
+        "Round refused: One-round execution requires an ephemeral (version 3) manifest\n"
+    )
     assert refused("verify-round", live.path, "xx1") == "Round refused: Unknown campaign region\n"
     assert refused("verify-round", live.path, index=24) == (
-        "Round refused: Round must be an hourly index from 0 to 23\n")
+        "Round refused: Round must be an hourly index from 0 to 23\n"
+    )
     # Other errors can quote paths or values, so only their type is printed.
     assert refused("verify-round", live.path) == "Round command failed (FileNotFoundError).\n"
     assert main(["onboarding", "round", *live.args, *live.config]) == 0
     saved = read_json(folder / "round.json")
     (folder / "round.json").write_text(json.dumps(saved | {"campaign_id": "other"}))
     assert refused("verify-round", live.path) == (
-        "Round refused: Round checkpoint does not match this campaign, region and round\n")
+        "Round refused: Round checkpoint does not match this campaign, region and round\n"
+    )
     (folder / "round.json").write_text(json.dumps(saved | {"jobs": saved["jobs"][::-1]}))
     assert refused("verify-round", live.path) == (
-        "Round refused: Round checkpoint country queue differs from the campaign\n")
+        "Round refused: Round checkpoint country queue differs from the campaign\n"
+    )
     changed = tmp_path / "changed.toml"
     changed.write_text((ROOT / "configs/shifter.toml").read_text() + "\n# edited\n")
     assert main(["onboarding", "round", *live.args, "--provider-config", str(changed)]) == 1
@@ -439,8 +560,9 @@ def test_round_cli_skips_a_country_without_a_provider_list(live, monkeypatch, ca
         return real(path, parameters=parameters, **kwargs)
 
     monkeypatch.setattr(onboarding_cli, "load_provider", load_provider)
-    args = SimpleNamespace(region="tor1", provider_config=ROOT / "configs/shifter.toml",
-                           credentials_file=None)
+    args = SimpleNamespace(
+        region="tor1", provider_config=ROOT / "configs/shifter.toml", credentials_file=None
+    )
     with pytest.raises(NoCountryList):  # every other command still refuses the country
         onboarding_cli._proxies(args, campaign.load(live.path))
     live.patch(seconds=0.0)
@@ -469,8 +591,15 @@ async def test_verify_round_reconciles_other_country_successes(ephemeral):
         for index in range(2):  # two in-country exits; three more exits were in other countries
             await observation_consumer(f"203.0.113.{index + 1}", wall_clock())
         clock.value += 30.0
-        return measurement(2, completed=9, successes=5, total_errors=4, no_inventory=1,
-                           rate_limited={"429": 2, "proxy_connect": 1}, **shares)
+        return measurement(
+            2,
+            completed=9,
+            successes=5,
+            total_errors=4,
+            no_inventory=1,
+            rate_limited={"429": 2, "proxy_connect": 1},
+            **shares,
+        )
 
     await execute_round(ephemeral, "tor1", 13, Proxy, clock=clock, run_country=run_country)
     assert classes == [answer_classes("shifter")] * 3  # rule 4 from the network's grammar

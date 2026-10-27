@@ -1,4 +1,5 @@
 """HTTP and SOCKS5 adapters. Request failures expose codes, never credentials."""
+
 from __future__ import annotations
 
 import asyncio
@@ -58,7 +59,10 @@ class Transport(Protocol):
     async def __aenter__(self) -> Transport: ...
     async def __aexit__(self, *args: object) -> None: ...
     async def execute(
-        self, target: Target, *, context: RequestContext | None = None,
+        self,
+        target: Target,
+        *,
+        context: RequestContext | None = None,
     ) -> Outcome: ...
 
 
@@ -89,16 +93,25 @@ class HttpTransport:
             options["ssl"] = self.ssl_context
         if proxy is not None and proxy.scheme == "socks5":
             connector = _TapProxyConnector(
-                proxy_type=ProxyType.SOCKS5, host=proxy.host, port=proxy.port,
-                username=proxy.username, password=proxy.password, rdns=True, **options,
+                proxy_type=ProxyType.SOCKS5,
+                host=proxy.host,
+                port=proxy.port,
+                username=proxy.username,
+                password=proxy.password,
+                rdns=True,
+                **options,
             )
         else:
             connector = _TapTCPConnector(**options)
         session = aiohttp.ClientSession(
-            connector=connector, timeout=aiohttp.ClientTimeout(
-                total=self.config.timeout_seconds, ceil_threshold=float("inf"),
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(
+                total=self.config.timeout_seconds,
+                ceil_threshold=float("inf"),
             ),
-            cookie_jar=aiohttp.DummyCookieJar(), auto_decompress=False, trust_env=False,
+            cookie_jar=aiohttp.DummyCookieJar(),
+            auto_decompress=False,
+            trust_env=False,
             skip_auto_headers={"User-Agent", "Accept", "Accept-Encoding"},
         )
         # aiohttp retries idempotent requests once on disconnect, even on fresh
@@ -132,15 +145,21 @@ class HttpTransport:
         remaining = max(0.0, self.config.timeout_seconds - first.latency_ms / 1000)
         second, _ = await self._attempt(target, replace(spec, url=upgrade), proxy, remaining)
         return replace(
-            second, latency_ms=first.latency_ms + second.latency_ms,
+            second,
+            latency_ms=first.latency_ms + second.latency_ms,
             response_body_bytes=first.response_body_bytes + second.response_body_bytes,
             bytes_up=first.bytes_up + second.bytes_up,
             bytes_down=first.bytes_down + second.bytes_down,
-            bytes_exact=first.bytes_exact and second.bytes_exact, redirected=True,
+            bytes_exact=first.bytes_exact and second.bytes_exact,
+            redirected=True,
         )
 
     async def _attempt(
-        self, target: Target, spec: RequestSpec, proxy: ProxyConfig, budget: float,
+        self,
+        target: Target,
+        spec: RequestSpec,
+        proxy: ProxyConfig,
+        budget: float,
     ) -> tuple[Outcome, str | None]:
         """One request; returns its outcome and any redirect Location header."""
         kwargs = _proxy_kwargs(spec, proxy)
@@ -157,7 +176,11 @@ class HttpTransport:
             # Outer timeout also bounds SOCKS negotiation and all body reads.
             async with asyncio.timeout(budget):
                 async with session.request(
-                    spec.method, spec.url, data=spec.body, allow_redirects=False, **kwargs,
+                    spec.method,
+                    spec.url,
+                    data=spec.body,
+                    allow_redirects=False,
+                    **kwargs,
                 ) as response:
                     status = response.status
                     location = response.headers.get("Location")
@@ -195,8 +218,13 @@ class HttpTransport:
             counted = ByteCount(0, 0, exact=False)
         return Outcome(
             latency_ms=latency_ms,
-            ip=exit_ip, error=error, status=status, response_body_bytes=len(raw),
-            verdict=verdict, bytes_up=counted.up, bytes_down=counted.down,
+            ip=exit_ip,
+            error=error,
+            status=status,
+            response_body_bytes=len(raw),
+            verdict=verdict,
+            bytes_up=counted.up,
+            bytes_down=counted.down,
             bytes_exact=counted.exact,
         ), location
 
@@ -216,15 +244,21 @@ def _proxy_kwargs(spec: RequestSpec, proxy: ProxyConfig) -> dict[str, Any]:
 
 
 def _assess(
-    target: Target, spec: RequestSpec, status: int, raw: bytes,
+    target: Target,
+    spec: RequestSpec,
+    status: int,
+    raw: bytes,
 ) -> tuple[str | None, str | None, str]:
     """(error, exit IP, verdict) for a received response body."""
     if len(raw) > spec.max_body_bytes:
         # Too large to assess, but a challenge page announces
         # itself in its first few hundred bytes.
         sniffed = sniff_body(raw) if status == 200 else None
-        return (BODY_CODES[sniffed] if sniffed else "body_too_large", None,
-                sniffed or failed_response(status, raw))
+        return (
+            BODY_CODES[sniffed] if sniffed else "body_too_large",
+            None,
+            sniffed or failed_response(status, raw),
+        )
     assessment = target.assess(status, raw)
     verdict = assessment.verdict
     if verdict is None:
@@ -240,8 +274,9 @@ def _classify(exc: Exception) -> tuple[str, str, int | None] | None:
         # How a CONNECT-tunnelled request surfaces a gateway status.
         error = "proxy_auth" if exc.status == 407 else "proxy_connect"
         return error, Verdict.PROXY_ERROR, exc.status
-    if isinstance(exc, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError,
-                        ssl.SSLError)):
+    if isinstance(
+        exc, (aiohttp.ClientConnectorCertificateError, aiohttp.ClientSSLError, ssl.SSLError)
+    ):
         return "tls", Verdict.ERROR, None
     if isinstance(exc, aiohttp.ClientConnectorDNSError):
         # The gateway's name did not resolve: the proxy side failed.
@@ -275,9 +310,13 @@ def _https_upgrade(url: str, status: int | None, location: str | None) -> str | 
         return None
     try:
         source, destination = urlsplit(url), urlsplit(location)
-        if (destination.scheme.lower() != "https" or destination.hostname is None
-                or destination.hostname != source.hostname or destination.username is not None
-                or destination.password is not None):
+        if (
+            destination.scheme.lower() != "https"
+            or destination.hostname is None
+            or destination.hostname != source.hostname
+            or destination.username is not None
+            or destination.password is not None
+        ):
             return None
         return destination._replace(fragment="").geturl()
     except ValueError:
@@ -285,7 +324,11 @@ def _https_upgrade(url: str, status: int | None, location: str | None) -> str | 
 
 
 def _estimate(
-    spec: RequestSpec, response: aiohttp.ClientResponse, proxy: ProxyConfig, body: int, tls: bool,
+    spec: RequestSpec,
+    response: aiohttp.ClientResponse,
+    proxy: ProxyConfig,
+    body: int,
+    tls: bool,
 ) -> ByteCount:
     """Wire-size estimate from what was actually sent and received."""
     info = response.request_info
@@ -298,12 +341,15 @@ def _estimate(
     version = response.version
     status_line = len(
         f"HTTP/{version.major}.{version.minor} {response.status} {response.reason or ''}\r\n"
-        if version is not None else f"HTTP/1.1 {response.status} {response.reason or ''}\r\n"
+        if version is not None
+        else f"HTTP/1.1 {response.status} {response.reason or ''}\r\n"
     )
     extra_up = extra_down = 0
     if proxy.scheme == "socks5":
         extra_up, extra_down = bytes_io.socks5_handshake(
-            username=proxy.username, password=proxy.password, host=url.host or "",
+            username=proxy.username,
+            password=proxy.password,
+            host=url.host or "",
         )
     elif tls and proxy.username is not None:
         # The credential rides on the CONNECT, outside the request headers.

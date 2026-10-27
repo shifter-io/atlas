@@ -24,8 +24,11 @@ WORKER_NAME_RE = r"^pic-[0-9a-f]{8}-h[0-9]{2}-[a-z0-9]+-[a-z0-9-]+$"
 MANAGER_NAME_RE = r"^pi-camp-manager-[0-9]{8}-[0-9a-f]{4}$"
 BUILDER_NAME_RE = r"^pi-camp-builder-[0-9]{8}-[0-9a-f]{4}$"
 # Droplet role -> (role tag, name pattern); a droplet carries exactly one role tag.
-ROLES = {"worker": (WORKER_TAG, WORKER_NAME_RE), "manager": (MANAGER_TAG, MANAGER_NAME_RE),
-         "builder": (BUILDER_TAG, BUILDER_NAME_RE)}
+ROLES = {
+    "worker": (WORKER_TAG, WORKER_NAME_RE),
+    "manager": (MANAGER_TAG, MANAGER_NAME_RE),
+    "builder": (BUILDER_TAG, BUILDER_NAME_RE),
+}
 CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
 # CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
@@ -36,9 +39,22 @@ WORKER_SECRETS = "/run/proxy-index-worker"
 HourState = Literal["planned", "launching", "running", "harvesting", "done", "failed"]
 CellStatus = Literal["pending", "running", "complete", "partial", "failed_ours", "paused"]
 DropletStatus = Literal[
-    "requested", "create_failed", "assign_failed", "assigned", "booting", "boot_failed", "starting",
-    "start_failed", "armed", "running", "finished", "collected", "collect_failed",
-    "destroyed", "destroy_refused", "destroy_failed",
+    "requested",
+    "create_failed",
+    "assign_failed",
+    "assigned",
+    "booting",
+    "boot_failed",
+    "starting",
+    "start_failed",
+    "armed",
+    "running",
+    "finished",
+    "collected",
+    "collect_failed",
+    "destroyed",
+    "destroy_refused",
+    "destroy_failed",
 ]
 
 
@@ -129,18 +145,34 @@ class CampaignSpec:
             (not self.networks or len(set(self.networks)) != len(self.networks), "networks"),
             (any(not re.fullmatch(NETWORK_RE, n) for n in self.networks), "network names"),
             (set(self.manifests) != set(self.networks), "manifests"),
-            (set(self.size_by_region) != set(self.regions)
-             or any(not isinstance(size, str) or not re.fullmatch(SIZE_RE, size)
-                    for size in self.size_by_region.values()), "size_by_region"),
+            (
+                set(self.size_by_region) != set(self.regions)
+                or any(
+                    not isinstance(size, str) or not re.fullmatch(SIZE_RE, size)
+                    for size in self.size_by_region.values()
+                ),
+                "size_by_region",
+            ),
             (set(self.image_by_region) != set(self.regions), "image_by_region"),
             (not re.fullmatch(r"[0-9a-f]{64}", self.wheel_sha256), "wheel_sha256"),
-            (self.create_lead_seconds <= 0 or self.replace_until_minutes < 0
-             or self.create_lead_seconds >= self.slot_minutes * 60
-             or self.replace_until_minutes > self.slot_minutes, "timing"),
+            (
+                self.create_lead_seconds <= 0
+                or self.replace_until_minutes < 0
+                or self.create_lead_seconds >= self.slot_minutes * 60
+                or self.replace_until_minutes > self.slot_minutes,
+                "timing",
+            ),
             (not 1 <= self.concurrency <= 5000, "concurrency"),
         ]
-        integers = ("hours", "grace_hours", "create_lead_seconds", "replace_until_minutes",
-                    "concurrency", "schema_version", "slot_minutes")
+        integers = (
+            "hours",
+            "grace_hours",
+            "create_lead_seconds",
+            "replace_until_minutes",
+            "concurrency",
+            "schema_version",
+            "slot_minutes",
+        )
         problems += [(type(getattr(self, name)) is not int, name) for name in integers]
         bad = [name for failed, name in problems if failed]
         if bad:
@@ -272,10 +304,20 @@ class Scope:
 class Cloud(Protocol):
     """Read and create operations only. Deletes exist solely in `scope.guarded_delete`."""
 
-    async def create(self, names: list[str], *, region: str, size: str, image: str,
-                     tags: list[str], ssh_keys: list[str], **flags: bool) -> list[Droplet]: ...
-    async def assign_project(self, project_id: str, droplet_ids: list[str], *,
-                             guard: object) -> None: ...
+    async def create(
+        self,
+        names: list[str],
+        *,
+        region: str,
+        size: str,
+        image: str,
+        tags: list[str],
+        ssh_keys: list[str],
+        **flags: bool,
+    ) -> list[Droplet]: ...
+    async def assign_project(
+        self, project_id: str, droplet_ids: list[str], *, guard: object
+    ) -> None: ...
     async def get(self, droplet_id: str) -> Droplet | None: ...
     async def list_tag(self, tag: str) -> list[Droplet]: ...
     async def project_droplet_ids(self, project_id: str) -> frozenset[str]: ...

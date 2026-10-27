@@ -63,14 +63,21 @@ RemoteFactory = Callable[[int], Remote]
 
 def live(record: DropletRecord) -> bool:
     """The droplet may still exist: created and not yet destroyed."""
-    return (record.droplet_id is not None and record.destroyed_at is None
-            and record.status not in ("destroyed", "create_failed"))
+    return (
+        record.droplet_id is not None
+        and record.destroyed_at is None
+        and record.status not in ("destroyed", "create_failed")
+    )
 
 
 def ntp_synced() -> bool | None:
     try:
-        reply = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
-                               capture_output=True, text=True, timeout=10)
+        reply = subprocess.run(
+            ["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
     except (OSError, subprocess.SubprocessError):
         return None
     return {"yes": True, "no": False}.get(reply.stdout.strip())
@@ -118,9 +125,14 @@ class Collector:
             if record.state in HARVESTED:
                 hours[slot] = await self._harvest(spec, record)
         now = self.clock()
-        if not spec.synthetic and self.cloud is not None and (
+        if (
+            not spec.synthetic
+            and self.cloud is not None
+            and (
                 self.reconciled_at is None
-                or (now - self.reconciled_at).total_seconds() >= self.pacing.reconcile_every):
+                or (now - self.reconciled_at).total_seconds() >= self.pacing.reconcile_every
+            )
+        ):
             await self._reconcile_safely(spec, hours, now)
         for record in hours.values():
             self._finalize(record)
@@ -133,9 +145,14 @@ class Collector:
         try:
             record = await self.harvester(spec, record, self.root)
         except Exception as error:  # one hour's failure never stops the others
-            self.log.add(self.clock(), "harvest_error", "info",
-                         key=f"h{record.hour:02d}-{type(error).__name__}", hour=record.hour,
-                         error=type(error).__name__)
+            self.log.add(
+                self.clock(),
+                "harvest_error",
+                "info",
+                key=f"h{record.hour:02d}-{type(error).__name__}",
+                hour=record.hour,
+                error=type(error).__name__,
+            )
             return record
         save_hour(self.root, record)
         return record
@@ -149,8 +166,9 @@ class Collector:
         record.report_path = path.relative_to(self.root).as_posix()
         save_hour(self.root, record)
 
-    async def _reconcile_safely(self, spec: CampaignSpec, hours: dict[int, HourRecord],
-                                now: datetime) -> None:
+    async def _reconcile_safely(
+        self, spec: CampaignSpec, hours: dict[int, HourRecord], now: datetime
+    ) -> None:
         """S3: a failed reconcile is alerted; harvests, reports and status go on."""
         self.reconciled_at = now
         try:
@@ -160,11 +178,20 @@ class Collector:
             if self.reconcile_failures == 1:  # r1: keyed by the streak, so every outage alerts
                 self.failing_since = now.strftime("%Y%m%dT%H%M")
             streak = self.failing_since
-            self.log.add(now, "reconcile_error", "info", key=f"{streak}-{type(error).__name__}",
-                         error=type(error).__name__)
+            self.log.add(
+                now,
+                "reconcile_error",
+                "info",
+                key=f"{streak}-{type(error).__name__}",
+                error=type(error).__name__,
+            )
             if self.reconcile_failures >= RECONCILE_HIGH_AFTER:
-                self.log.add(now, "reconcile_error", key=f"{streak}-persistent",
-                             failures=self.reconcile_failures)
+                self.log.add(
+                    now,
+                    "reconcile_error",
+                    key=f"{streak}-persistent",
+                    failures=self.reconcile_failures,
+                )
             return
         self.reconcile_failures = 0
 
@@ -172,8 +199,12 @@ class Collector:
         """Section 9: adopt unrecorded owned droplets, retire `destroyed` ones that remain, and
         retire our own workers whose project assignment was never confirmed (CAMP-1k, CAMP-1r)."""
         scope = scope_for(spec)
-        known = {d.droplet_id: (record, d) for record in hours.values() for d in record.droplets
-                 if d.droplet_id}
+        known = {
+            d.droplet_id: (record, d)
+            for record in hours.values()
+            for d in record.droplets
+            if d.droplet_id
+        }
         found = await self.cloud.list_tag(campaign_tag(spec.campaign_id))
         members = await self.cloud.project_droplet_ids(spec.project_id)
         self.unreachable = set()
@@ -184,10 +215,18 @@ class Collector:
                 continue  # the tick owns a launching hour; its creates may not be recorded yet
             entry = known.get(droplet.id)
             stray = entry is not None and entry[1].assign_failed_at is not None
-            if hour not in hours or not all(checks.values()) or (
-                    droplet.id not in members and not stray):
-                self.log.add(self.clock(), "foreign_tagged", key=droplet.id,
-                             droplet_id=droplet.id, name=droplet.name)
+            if (
+                hour not in hours
+                or not all(checks.values())
+                or (droplet.id not in members and not stray)
+            ):
+                self.log.add(
+                    self.clock(),
+                    "foreign_tagged",
+                    key=droplet.id,
+                    droplet_id=droplet.id,
+                    name=droplet.name,
+                )
             elif entry is None:
                 await self._adopt(scope, hours[hour], droplet, hours)
             elif self._retry(*entry) or (stray and self._own_retry(entry[1], droplet)):
@@ -198,7 +237,8 @@ class Collector:
         """`destroyed` but still listed, or `destroy_failed` in a final hour (S5; before that the
         harvester retries it)."""
         return drop.status == "destroyed" or (
-            drop.status == "destroy_failed" and record.state in FINAL)
+            drop.status == "destroy_failed" and record.state in FINAL
+        )
 
     def _own_retry(self, drop: DropletRecord, droplet: Droplet) -> bool:
         """Our own marked worker goes to the guard again: in a status a later process may hand
@@ -207,8 +247,11 @@ class Collector:
         if drop.status in UNASSIGNED_REMOVABLE:
             return True
         young = (self.clock() - droplet.created_at).total_seconds() <= OWN_UNASSIGNED_SECONDS
-        return (drop.status == "destroy_refused" and young
-                and settling_refusal(audit_path(self.root), drop.droplet_id))
+        return (
+            drop.status == "destroy_refused"
+            and young
+            and settling_refusal(audit_path(self.root), drop.droplet_id)
+        )
 
     async def _adopt(self, scope, record: HourRecord, droplet: Droplet, hours) -> None:
         _, _, _, region, network = droplet.name.split("-", 4)
@@ -219,15 +262,35 @@ class Collector:
         active = "assignment" in inspected
         if "error" in inspected or (active and not self._host(record.hour, droplet)):
             self.unreachable.add(droplet.id)  # still alive: the campaign is not finished
-            self.log.add(self.clock(), "orphan_unreachable", "info", key=droplet.id,
-                         droplet_id=droplet.id, name=droplet.name)
+            self.log.add(
+                self.clock(),
+                "orphan_unreachable",
+                "info",
+                key=droplet.id,
+                droplet_id=droplet.id,
+                name=droplet.name,
+            )
             return
-        drop = DropletRecord(network, region, record.hour, droplet.name, droplet.id,
-                             size=droplet.size, status="running",
-                             requested_at=droplet.created_at.isoformat())
+        drop = DropletRecord(
+            network,
+            region,
+            record.hour,
+            droplet.name,
+            droplet.id,
+            size=droplet.size,
+            status="running",
+            requested_at=droplet.created_at.isoformat(),
+        )
         record.droplets.append(drop)
-        self.log.add(self.clock(), "orphan_adopted", "info", key=droplet.id,
-                     droplet_id=droplet.id, name=droplet.name, active=active)
+        self.log.add(
+            self.clock(),
+            "orphan_adopted",
+            "info",
+            key=droplet.id,
+            droplet_id=droplet.id,
+            name=droplet.name,
+            active=active,
+        )
         if active:  # an active-run marker: harvest it normally
             if record.state in FINAL:
                 record.state, record.report_path = "harvesting", None
@@ -254,18 +317,28 @@ class Collector:
         known = {d.droplet_id: d for r in hours.values() for d in r.droplets if d.droplet_id}
         ledger = Ledger({"droplet": list(known)}, known)
         try:
-            await guarded_delete(self.cloud, "droplet", drop.droplet_id, scope, ledger,
-                                 audit_path(self.root))
+            await guarded_delete(
+                self.cloud, "droplet", drop.droplet_id, scope, ledger, audit_path(self.root)
+            )
             drop.status, drop.destroyed_at = "destroyed", self.clock().isoformat()
         except OwnershipError:
             drop.status = "destroy_refused"
-            self.log.add(self.clock(), "destroy_refused", key=drop.droplet_id,
-                         droplet_id=drop.droplet_id, name=drop.name)
+            self.log.add(
+                self.clock(),
+                "destroy_refused",
+                key=drop.droplet_id,
+                droplet_id=drop.droplet_id,
+                name=drop.name,
+            )
         except Exception as error:  # audited by the guard; retried at the next reconcile
             drop.status = "destroy_failed"
-            self.log.add(self.clock(), "destroy_failed", "info",
-                         key=f"{drop.droplet_id}-{type(error).__name__}",
-                         droplet_id=drop.droplet_id)
+            self.log.add(
+                self.clock(),
+                "destroy_failed",
+                "info",
+                key=f"{drop.droplet_id}-{type(error).__name__}",
+                droplet_id=drop.droplet_id,
+            )
         save_hour(self.root, record)
 
     def _alerts(self, spec: CampaignSpec, hours: dict[int, HourRecord], now: datetime) -> None:
@@ -274,17 +347,30 @@ class Collector:
             for item in record.alerts:  # launch and harvest alerts, mirrored once each
                 code = str(item.get("code") or item.get("kind") or "hour_alert")  # S2
                 name = item.get("name")
-                self.log.add(now, code, str(item.get("level", "info")),
-                             key=f"h{record.hour:02d}-{code}-{name or fingerprint(item)[:16]}",
-                             hour=record.hour, **({"name": name} if name else {}))
+                self.log.add(
+                    now,
+                    code,
+                    str(item.get("level", "info")),
+                    key=f"h{record.hour:02d}-{code}-{name or fingerprint(item)[:16]}",
+                    hour=record.hour,
+                    **({"name": name} if name else {}),
+                )
             failed = sum(d.status == "create_failed" for d in record.droplets)
             if record.droplets and failed > CREATE_FAIL_SHARE * len(record.droplets):
-                self.log.add(now, "create_failures", key=f"h{record.hour:02d}",
-                             hour=record.hour, failed=failed, total=len(record.droplets))
+                self.log.add(
+                    now,
+                    "create_failures",
+                    key=f"h{record.hour:02d}",
+                    hour=record.hour,
+                    failed=failed,
+                    total=len(record.droplets),
+                )
         remaining = self._ratelimit()
-        checks = {"disk_low": self._disk_free_pct() < DISK_FLOOR_PCT,
-                  "clock_unsynced": self._clock_unsynced(),
-                  "ratelimit_low": remaining is not None and remaining < RATELIMIT_FLOOR}
+        checks = {
+            "disk_low": self._disk_free_pct() < DISK_FLOOR_PCT,
+            "clock_unsynced": self._clock_unsynced(),
+            "ratelimit_low": remaining is not None and remaining < RATELIMIT_FLOOR,
+        }
         for code in [code for code, raised in checks.items() if raised]:
             self.log.add(now, code, key=f"{code}-{stamp}")
 
@@ -303,20 +389,29 @@ class Collector:
         return None if self.cloud is None else self.cloud.ratelimit_remaining
 
     def _status(self, spec: CampaignSpec, hours: dict[int, HourRecord], now: datetime) -> dict:
-        rows = [{"hour": slot, "state": record.state,
-                 "launch_delay_seconds": record.launch_delay_seconds,
-                 "cells": dict(Counter(record.cells.values())),
-                 "live_workers": sum(map(live, record.droplets))}
-                for slot, record in sorted(hours.items())]
+        rows = [
+            {
+                "hour": slot,
+                "state": record.state,
+                "launch_delay_seconds": record.launch_delay_seconds,
+                "cells": dict(Counter(record.cells.values())),
+                "live_workers": sum(map(live, record.droplets)),
+            }
+            for slot, record in sorted(hours.items())
+        ]
         planned = [slot for slot, record in hours.items() if record.state == "planned"]
         workers = sum(row["live_workers"] for row in rows) + len(self.unreachable)
         return {
-            "campaign_id": spec.campaign_id, "now": now.isoformat(),
+            "campaign_id": spec.campaign_id,
+            "now": now.isoformat(),
             "next_launch_at": due_at(spec, min(planned)).isoformat() if planned else None,
-            "hours": rows, "live_workers": workers,
+            "hours": rows,
+            "live_workers": workers,
             "alerts_open": sum(item.get("level") == "high" for item in read_alerts(self.root)),
-            "traffic_latest": latest_summary(hours), "ratelimit_remaining": self._ratelimit(),
-            "disk_free_pct": self._disk_free_pct(), "clock_synced": self.pacing.clock_synced(),
+            "traffic_latest": latest_summary(hours),
+            "ratelimit_remaining": self._ratelimit(),
+            "disk_free_pct": self._disk_free_pct(),
+            "clock_synced": self.pacing.clock_synced(),
             "finished": workers == 0 and all(r.state in FINAL for r in hours.values()),
         }
 
@@ -324,13 +419,23 @@ class Collector:
 def settled(status: dict) -> bool:
     """`--until-done`: every launched hour is final and no worker is left (the dry run)."""
     launched = [row for row in status["hours"] if row["state"] != "planned"]
-    return bool(launched) and status["live_workers"] == 0 and all(
-        row["state"] in FINAL for row in launched)
+    return (
+        bool(launched)
+        and status["live_workers"] == 0
+        and all(row["state"] in FINAL for row in launched)
+    )
 
 
-async def run_collector(root: Path, *, harvester: Harvester, cloud: Cloud | None,
-                        remote_factory: RemoteFactory | None, clock: Clock = utc_now,
-                        until_done: bool = False, pacing: Pacing | None = None) -> dict:
+async def run_collector(
+    root: Path,
+    *,
+    harvester: Harvester,
+    cloud: Cloud | None,
+    remote_factory: RemoteFactory | None,
+    clock: Clock = utc_now,
+    until_done: bool = False,
+    pacing: Pacing | None = None,
+) -> dict:
     """Loop until every hour is final and no worker is alive (or, `until_done`, `settled`)."""
     pacing = pacing or Pacing()
     collector = Collector(root, harvester, cloud, remote_factory, clock, pacing)
@@ -364,8 +469,13 @@ def _collector_command(args) -> int:
 
     async def main() -> dict:
         try:
-            return await run_collector(root, harvester=harvester, cloud=cloud,
-                                       remote_factory=remote_factory, until_done=args.until_done)
+            return await run_collector(
+                root,
+                harvester=harvester,
+                cloud=cloud,
+                remote_factory=remote_factory,
+                until_done=args.until_done,
+            )
         finally:
             await cloud.close()
 
@@ -377,6 +487,7 @@ def _collector_command(args) -> int:
 def register(subcommands, handlers: dict) -> None:
     collector = subcommands.add_parser("collector", help="Harvest, finalize and reconcile (daemon)")
     collector.add_argument("--root", required=True)
-    collector.add_argument("--until-done", action="store_true",
-                           help="exit once every launched hour is final (dry run)")
+    collector.add_argument(
+        "--until-done", action="store_true", help="exit once every launched hour is final (dry run)"
+    )
     handlers.update(collector=_collector_command)

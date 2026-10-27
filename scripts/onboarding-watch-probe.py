@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Save private per-probe telemetry from the local fleet monitor; no proxy traffic."""
+
 import argparse
 import json
 import os
@@ -25,19 +26,28 @@ def main():
                 node = next(n for n in snapshot["servers"] if n["region"] == launch["region"])
                 if node.get("assignment", {}).get("unit") == unit:
                     sample = {
-                        "collected_at": previous, "collected_epoch": snapshot["collected_epoch"],
+                        "collected_at": previous,
+                        "collected_epoch": snapshot["collected_epoch"],
                         "node": node,
                     }
                     stream.write(json.dumps(sample) + "\n")
                     stream.flush()
-                    print(json.dumps({
-                        "at": previous, "health": node["health"],
-                        "elapsed": node.get("elapsed_seconds"), "requests": node.get("requests"),
-                        "unique": node.get("unique_ips"), "errors": node.get("errors"),
-                        "rate": node.get("requests_per_second"),
-                        "cores": node.get("core_cpu_pct"),
-                        "workers": node.get("processes"),
-                    }), flush=True)
+                    print(
+                        json.dumps(
+                            {
+                                "at": previous,
+                                "health": node["health"],
+                                "elapsed": node.get("elapsed_seconds"),
+                                "requests": node.get("requests"),
+                                "unique": node.get("unique_ips"),
+                                "errors": node.get("errors"),
+                                "rate": node.get("requests_per_second"),
+                                "cores": node.get("core_cpu_pct"),
+                                "workers": node.get("processes"),
+                            }
+                        ),
+                        flush=True,
+                    )
                     state = node.get("state", {}).get("status")
                     if state in ("completed", "failed", "cancelled", "stopped"):
                         return 0 if state == "completed" else 1

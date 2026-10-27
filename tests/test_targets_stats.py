@@ -9,11 +9,20 @@ from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, Histogr
 from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
 
 
-@pytest.mark.parametrize("body,expected", [
-    (b"203.0.113.8\n", "203.0.113.8"), (b" 2001:4860:4860::8888 \r\n", "2001:4860:4860::8888"),
-    (b"", None), (b"192.0.2.999", None), (b"192.0.2.004", None), (b"fe80::1%eth0", None),
-    (b"203.0.113.8\n198.51.100.1", None), (b"<html>203.0.113.8</html>", None), (b"\xff", None),
-])
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        (b"203.0.113.8\n", "203.0.113.8"),
+        (b" 2001:4860:4860::8888 \r\n", "2001:4860:4860::8888"),
+        (b"", None),
+        (b"192.0.2.999", None),
+        (b"192.0.2.004", None),
+        (b"fe80::1%eth0", None),
+        (b"203.0.113.8\n198.51.100.1", None),
+        (b"<html>203.0.113.8</html>", None),
+        (b"\xff", None),
+    ],
+)
 def test_ip_parser(body, expected):
     result = registry.get("generic_http").assess(200, body)
     assert result.ip == expected
@@ -42,8 +51,8 @@ def test_histogram_merge_and_nulls():
     left, right, together = Histogram(), Histogram(), Histogram()
     assert left.percentiles() == dict.fromkeys(("p50", "p90", "p95", "p99"))
     for value in range(1, 101):
-        (left if value <= 30 else right).add(value - .2)
-        together.add(value - .2)
+        (left if value <= 30 else right).add(value - 0.2)
+        together.add(value - 0.2)
     left.merge(right)
     assert left.export() == together.export()
     assert left.percentiles() == {"p50": 50, "p90": 90, "p95": 95, "p99": 99}
@@ -62,11 +71,18 @@ def test_histogram_mean_over_bins_and_merge():
     assert Histogram(Counter({1: 2, 2: 1})).mean() == 1.3
 
 
-@pytest.mark.parametrize("key,value", [
-    ("requests", 0), ("requests", True), ("concurrency", -2),
-    ("timeout_seconds", 0), ("timeout_seconds", math.inf), ("timeout_seconds", None),
-    ("requests_per_second", math.nan),
-])
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("requests", 0),
+        ("requests", True),
+        ("concurrency", -2),
+        ("timeout_seconds", 0),
+        ("timeout_seconds", math.inf),
+        ("timeout_seconds", None),
+        ("requests_per_second", math.nan),
+    ],
+)
 def test_config_validation(key, value):
     with pytest.raises(ValueError):
         RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), **{key: value})
@@ -84,10 +100,17 @@ def test_credentials_are_not_in_repr_or_public_config():
         ProxyConfig.from_url("http://localhost:0")
 
 
-@pytest.mark.parametrize("status,verdict", [
-    (201, "error"), (301, "error"), (403, "block"), (429, "block"), (500, "error"),
-    (502, "proxy_error"),
-])
+@pytest.mark.parametrize(
+    "status,verdict",
+    [
+        (201, "error"),
+        (301, "error"),
+        (403, "block"),
+        (429, "block"),
+        (500, "error"),
+        (502, "proxy_error"),
+    ],
+)
 def test_status_verdict(status, verdict):
     assert registry.get("generic_http").assess(status, b"203.0.113.8").verdict == verdict
 
@@ -106,16 +129,30 @@ def test_counters_track_verdicts_and_bytes():
     exported = counters.export()
     assert exported["completed"] == 6 and exported["successes"] == 1
     assert {k: exported[k] for k in ("challenges", "blocks", "timeouts", "proxy_errors")} == {
-        "challenges": 1, "blocks": 1, "timeouts": 1, "proxy_errors": 1,
+        "challenges": 1,
+        "blocks": 1,
+        "timeouts": 1,
+        "proxy_errors": 1,
     }
     assert (exported["bytes_up"], exported["bytes_down"]) == (290, 4350)
-    assert exported["errors"] == {"challenge": 1, "http_status": 1, "timeout": 1,
-                                  "proxy_connect": 1, "invalid_body": 1}
+    assert exported["errors"] == {
+        "challenge": 1,
+        "http_status": 1,
+        "timeout": 1,
+        "proxy_connect": 1,
+        "invalid_body": 1,
+    }
     # Only successes enter the latency histogram.
     assert exported["latency_histogram"]["bins"] == [(5, 1)]
     assert set(counters.export_geo()) == {
-        "completed", "successes", "challenges", "blocks", "timeouts", "bytes_up",
-        "bytes_down", "latency_histogram",
+        "completed",
+        "successes",
+        "challenges",
+        "blocks",
+        "timeouts",
+        "bytes_up",
+        "bytes_down",
+        "latency_histogram",
     }
 
 

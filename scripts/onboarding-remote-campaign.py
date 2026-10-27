@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Distribute one frozen manifest and arm one explicitly selected region."""
+
 import argparse
 import json
 import os
@@ -27,37 +28,74 @@ def main():
     server = json.loads(args.inventory.read_text())["servers"][args.region]
     root = server["root"]
     target = server.get("user", "root") + "@" + server["host"]
-    options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "IdentitiesOnly=yes",
-               "-i", os.path.expanduser(server["identity_file"])]
-    relative = (Path("onboarding-networks") / manifest["provider"] / manifest["product"] /
-                manifest["campaign_id"])
+    options = [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-i",
+        os.path.expanduser(server["identity_file"]),
+    ]
+    relative = (
+        Path("onboarding-networks")
+        / manifest["provider"]
+        / manifest["product"]
+        / manifest["campaign_id"]
+    )
     directory = str(Path(root) / relative)
 
     def remote(command):
         subprocess.run(["ssh", *options, target, command], check=True)
 
     remote("umask 077\nmkdir -p " + shlex.quote(directory))
-    subprocess.run(["scp", *options, str(args.manifest),
-                    target + ":" + shlex.quote(directory + "/campaign.json")], check=True)
+    subprocess.run(
+        [
+            "scp",
+            *options,
+            str(args.manifest),
+            target + ":" + shlex.quote(directory + "/campaign.json"),
+        ],
+        check=True,
+    )
     unit = "proxy-index-onboarding-" + manifest["campaign_id"] + "-" + args.region
     base = [root + "/venv/bin/proxy-index", "onboarding", "run"]
     if args.calibration:
         driver = Path(__file__).with_name("onboarding-calibration.py")
-        subprocess.run(["scp", *options, str(driver),
-                        target + ":" + shlex.quote(root + "/tools/onboarding-calibration.py")],
-                       check=True)
+        subprocess.run(
+            [
+                "scp",
+                *options,
+                str(driver),
+                target + ":" + shlex.quote(root + "/tools/onboarding-calibration.py"),
+            ],
+            check=True,
+        )
         base = [root + "/venv/bin/python", root + "/tools/onboarding-calibration.py"]
-    command = ["systemd-run", "--unit=" + unit, "--property=LimitNOFILE=65536",
-               "--property=UMask=0077", "--property=Restart=no",
-               "--property=WorkingDirectory=" + root, "--property=RemainAfterExit=yes",
-               "--property=RuntimeMaxSec=" + str(int(
-                   moment(window["ends_at"]).timestamp() - datetime.now(UTC).timestamp() + 600)),
-               *base, "--manifest", directory + "/campaign.json", "--region", args.region,
-               "--provider-config", root + "/configs/provider.toml",
-               "--credentials-file", root + "/.secrets/credentials.toml"]
+    command = [
+        "systemd-run",
+        "--unit=" + unit,
+        "--property=LimitNOFILE=65536",
+        "--property=UMask=0077",
+        "--property=Restart=no",
+        "--property=WorkingDirectory=" + root,
+        "--property=RemainAfterExit=yes",
+        "--property=RuntimeMaxSec="
+        + str(int(moment(window["ends_at"]).timestamp() - datetime.now(UTC).timestamp() + 600)),
+        *base,
+        "--manifest",
+        directory + "/campaign.json",
+        "--region",
+        args.region,
+        "--provider-config",
+        root + "/configs/provider.toml",
+        "--credentials-file",
+        root + "/.secrets/credentials.toml",
+    ]
     # Refuse to replace a live regional assignment, and verify the installed build
     # and configuration before any new service can issue traffic.
-    check = '''import json,pathlib,subprocess,sys
+    check = """import json,pathlib,subprocess,sys
 from proxy_index import __version__
 from proxy_index.onboarding.files import digest,atomic_json
 from proxy_index.onboarding.manifest import load
@@ -76,20 +114,36 @@ if marker.exists():
  terminal=('completed','closed','stopped','failed','cancelled')
  assert not state.exists() or json.loads(state.read_text())['status'] in terminal, \
      'A regional run is already active'
-'''
-    remote(shlex.join([root + "/venv/bin/python", "-c", check, root,
-                       directory + "/campaign.json"]))
+"""
+    remote(shlex.join([root + "/venv/bin/python", "-c", check, root, directory + "/campaign.json"]))
     remote(shlex.join(command))
-    marker = {"kind": "calibration" if args.calibration else "campaign", "region": args.region,
-              "unit": unit + ".service",
-              "state_path": str(relative / "regions" / args.region / "state.json")}
-    save = ("import json,sys;from pathlib import Path;"
-            "from proxy_index.onboarding.files import atomic_json;"
-            "atomic_json(Path(sys.argv[1]),json.loads(sys.argv[2]))")
-    remote(shlex.join([root + "/venv/bin/python", "-c", save, root + "/active-run.json",
-                       json.dumps(marker)]))
-    print(json.dumps({"region": args.region, "unit": unit, "remote_directory": directory,
-                      "manifest": str(args.manifest), "calibration": args.calibration}))
+    marker = {
+        "kind": "calibration" if args.calibration else "campaign",
+        "region": args.region,
+        "unit": unit + ".service",
+        "state_path": str(relative / "regions" / args.region / "state.json"),
+    }
+    save = (
+        "import json,sys;from pathlib import Path;"
+        "from proxy_index.onboarding.files import atomic_json;"
+        "atomic_json(Path(sys.argv[1]),json.loads(sys.argv[2]))"
+    )
+    remote(
+        shlex.join(
+            [root + "/venv/bin/python", "-c", save, root + "/active-run.json", json.dumps(marker)]
+        )
+    )
+    print(
+        json.dumps(
+            {
+                "region": args.region,
+                "unit": unit,
+                "remote_directory": directory,
+                "manifest": str(args.manifest),
+                "calibration": args.calibration,
+            }
+        )
+    )
 
 
 if __name__ == "__main__":

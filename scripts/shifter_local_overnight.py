@@ -55,16 +55,23 @@ class LocalAgent(NodeAgent):
                 self.db, self.identity, body["batch_id"], body["counters"]
             ) or {"stop": True}
         if path == "/v1/failed":
-            return {"status": await batches.fail_run(
-                self.db, self.identity, body["batch_id"], body["error"]
-            )}
+            return {
+                "status": await batches.fail_run(
+                    self.db, self.identity, body["batch_id"], body["error"]
+                )
+            }
         if path == "/v1/heartbeat":
             async with self.db.connection() as conn:
                 await conn.execute(
                     "UPDATE nodes SET status='online',last_heartbeat=now(),version=%s,"
                     "open_conns=%s,req_per_s=%s,rss_mb=%s WHERE node_id=%s",
-                    (__version__, body["open_conns"], body["req_per_s"], body["rss_mb"],
-                     self.node_id),
+                    (
+                        __version__,
+                        body["open_conns"],
+                        body["req_per_s"],
+                        body["rss_mb"],
+                        self.node_id,
+                    ),
                 )
             return {"ok": True}
         raise ValueError("Unsupported local node operation")
@@ -81,14 +88,19 @@ class LocalAgent(NodeAgent):
                 status = await batches.finish_run(
                     self.db, self.identity, batch_id, summary, imported["run_key"]
                 )
-                LOG.info("stored batch=%s status=%s requests=%s successes=%s",
-                         batch_id, status, summary["completed"], summary["successes"])
+                LOG.info(
+                    "stored batch=%s status=%s requests=%s successes=%s",
+                    batch_id,
+                    status,
+                    summary["completed"],
+                    summary["successes"],
+                )
                 return {"status": status, "run_key": imported["run_key"]}
             except (OSError, storage.psycopg.OperationalError) as exc:
                 LOG.warning("ingest retry batch=%s error=%s", batch_id, type(exc).__name__)
                 if attempt == 7:
                     raise
-                await asyncio.sleep(min(2 ** attempt, 60))
+                await asyncio.sleep(min(2**attempt, 60))
 
 
 async def collect(args, state, folder, stop):
@@ -116,9 +128,10 @@ async def collect(args, state, folder, stop):
             "status='online',last_heartbeat=now() RETURNING node_id",
             (region, socket.gethostname(), hashlib.sha256(secrets.token_bytes(32)).hexdigest()),
         ).fetchone()[0]
-        countries = [r[0].strip() for r in conn.execute(
-            "SELECT country_code FROM countries ORDER BY country_code"
-        )]
+        countries = [
+            r[0].strip()
+            for r in conn.execute("SELECT country_code FROM countries ORDER BY country_code")
+        ]
         # Create monthly partitions before the two lanes can race their first writes.
         for table in ("test_events", "run_buckets", "ip_observations", "run_geo_buckets"):
             storage.partition(conn, table, now())
@@ -128,9 +141,14 @@ async def collect(args, state, folder, stop):
             "WHERE target_id IN ('generic_http','generic_https')"
         )
         # This controller owns planning: the production fan-out planners must remain off.
-        write_settings(conn, {"scheduler.census_enabled": False,
-                              "scheduler.pulse_enabled": False,
-                              "reports.dir": str(ROOT / "reports/shifter-local")})
+        write_settings(
+            conn,
+            {
+                "scheduler.census_enabled": False,
+                "scheduler.pulse_enabled": False,
+                "reports.dir": str(ROOT / "reports/shifter-local"),
+            },
+        )
     db = Database(database_file)
     scheduler = Scheduler(db)
     register_jobs(scheduler, db, database_file, ROOT / "configs/methodology.toml")
@@ -145,10 +163,18 @@ async def collect(args, state, folder, stop):
     until = datetime.fromisoformat(state["pulse_until"])
     census_slot = datetime.fromisoformat(state["started_at"])
     with LocalEnricher() as enricher:
-        agent = LocalAgent("", "", provider="shifter", product="residential",
-                           region="local-mac", proxy_factory=factory,
-                           work_dir=ROOT / "results/shifter-local", enricher=enricher,
-                           mmdb=enricher.path, progress_interval=15)
+        agent = LocalAgent(
+            "",
+            "",
+            provider="shifter",
+            product="residential",
+            region="local-mac",
+            proxy_factory=factory,
+            work_dir=ROOT / "results/shifter-local",
+            enricher=enricher,
+            mmdb=enricher.path,
+            progress_interval=15,
+        )
         agent.db, agent.node_id = db, node
         agent.identity = {"node_id": node, "product_id": product}
         heartbeat = asyncio.create_task(agent._heartbeats(stop))
@@ -164,25 +190,34 @@ async def collect(args, state, folder, stop):
             if stop.is_set():
                 return
             async with db.transaction() as conn:
-                row = await (await conn.execute(
-                    "INSERT INTO test_batches(kind,country_code,region_id,target_id,"
-                    "scheduled_for,start_at) VALUES (%s,%s,%s,%s,%s,now()) "
-                    "ON CONFLICT DO NOTHING RETURNING batch_id",
-                    (kind, country, region, target, slot),
-                )).fetchone()
+                row = await (
+                    await conn.execute(
+                        "INSERT INTO test_batches(kind,country_code,region_id,target_id,"
+                        "scheduled_for,start_at) VALUES (%s,%s,%s,%s,%s,now()) "
+                        "ON CONFLICT DO NOTHING RETURNING batch_id",
+                        (kind, country, region, target, slot),
+                    )
+                ).fetchone()
                 if row is None:
                     return
                 batch_id = row["batch_id"]
                 await conn.execute(
                     "INSERT INTO batch_runs(batch_id,product_id,node_id,status) "
-                    "VALUES (%s,%s,%s,'running')", (batch_id, product, node)
+                    "VALUES (%s,%s,%s,'running')",
+                    (batch_id, product, node),
                 )
             full = kind == "census" and args.census_requests == 0
-            assignment = {"batch_id": batch_id, "kind": kind, "country_code": country,
-                          "target_id": target, "timeout_ms": 15000, "concurrency": 100,
-                          "requests": None if full else 100,
-                          "stop_rule": "unique_ratio" if full else "count",
-                          "start_at": now().isoformat()}
+            assignment = {
+                "batch_id": batch_id,
+                "kind": kind,
+                "country_code": country,
+                "target_id": target,
+                "timeout_ms": 15000,
+                "concurrency": 100,
+                "requests": None if full else 100,
+                "stop_rule": "unique_ratio" if full else "count",
+                "start_at": now().isoformat(),
+            }
             active = Active(assignment)
             agent.active[batch_id] = active
             await agent.execute(active)
@@ -253,12 +288,20 @@ async def main(args, folder):
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     path = folder / "state.json"
-    state = json.loads(path.read_text()) if path.exists() else {
-        "started_at": now().isoformat(), "pulse_until": args.until,
-        "census_requests": args.census_requests, "concurrency": 100,
-        "pulse_requests": 100, "pulse_interval_minutes": 30,
-        "origin": "local-mac", "database": "proxy_reviews",
-    }
+    state = (
+        json.loads(path.read_text())
+        if path.exists()
+        else {
+            "started_at": now().isoformat(),
+            "pulse_until": args.until,
+            "census_requests": args.census_requests,
+            "concurrency": 100,
+            "pulse_requests": 100,
+            "pulse_interval_minutes": 30,
+            "origin": "local-mac",
+            "database": "proxy_reviews",
+        }
+    )
     if state["census_requests"] != args.census_requests:
         raise ValueError("Census settings differ from the saved run")
     save(path, state)
@@ -268,8 +311,13 @@ async def main(args, folder):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--until", required=True, help="ISO timestamp: stop starting pulse sweeps")
-    parser.add_argument("--census-requests", type=int, choices=(0, 100), default=100,
-                        help="100 for bounded sampling; 0 for the full unique-ratio census")
+    parser.add_argument(
+        "--census-requests",
+        type=int,
+        choices=(0, 100),
+        default=100,
+        help="100 for bounded sampling; 0 for the full unique-ratio census",
+    )
     args = parser.parse_args()
     if datetime.fromisoformat(args.until).tzinfo is None:
         parser.error("--until must include a timezone")

@@ -84,8 +84,7 @@ def quick_assign(monkeypatch):
 
 def writes(fake):
     """Mutating requests in order, with ids collapsed."""
-    return [(m, re.sub(r"/[0-9a-f-]{6,}", "/N", p)) for m, p, _, _ in fake.requests
-            if m != "GET"]
+    return [(m, re.sub(r"/[0-9a-f-]{6,}", "/N", p)) for m, p, _, _ in fake.requests if m != "GET"]
 
 
 def inventory(job):
@@ -103,14 +102,20 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     result = await run_build(fake, job, shell)
     others = [r for r in REGION_IDS if r != "lon1"]
     assert writes(fake) == [
-        ("POST", "/v2/account/keys"), ("POST", "/v2/droplets"),
-        ("POST", "/v2/projects/N/resources"), ("POST", "/v2/droplets/N/actions"),
-        ("POST", "/v2/droplets/N/actions"), *[("POST", "/v2/images/N/actions")] * 7,
-        ("DELETE", "/v2/droplets/N"), ("DELETE", "/v2/account/keys/N")]
+        ("POST", "/v2/account/keys"),
+        ("POST", "/v2/droplets"),
+        ("POST", "/v2/projects/N/resources"),
+        ("POST", "/v2/droplets/N/actions"),
+        ("POST", "/v2/droplets/N/actions"),
+        *[("POST", "/v2/images/N/actions")] * 7,
+        ("DELETE", "/v2/droplets/N"),
+        ("DELETE", "/v2/account/keys/N"),
+    ]
     actions = [b for _, p, b in fake.bodies if "/actions" in p]
     assert [b["type"] for b in actions[:2]] == ["shutdown", "snapshot"]
     assert actions[1]["name"] == "pi-camp-worker-0.9.5-" + result["wheel_sha256"][:12] + (
-        "-20270101")
+        "-20270101"
+    )
     assert [b["region"] for b in actions[2:]] == others  # exactly the 7 other regions
     assert result["state"] == "built" and result["regions"] == sorted(REGION_IDS)
     assert result["leftovers"] == [] and result["mac_key_created"] is True
@@ -122,10 +127,14 @@ async def test_build_runs_every_step_in_order_and_leaves_only_the_snapshot(job):
     assert argv[-1].endswith("bash /root/pi-camp-build/worker-provision.sh")
     names = tarfile.open(fileobj=io.BytesIO(stdin)).getnames()
     assert names == ["worker-provision.sh", "requirements.txt", job.wheel.name]
-    audit = [json.loads(line) for line in job.inventory.with_name(
-        "campaign-ops-audit.jsonl").read_text().splitlines()]
+    audit = [
+        json.loads(line)
+        for line in job.inventory.with_name("campaign-ops-audit.jsonl").read_text().splitlines()
+    ]
     assert [(a["kind"], a["result"]) for a in audit if a["result"] == "deleted"] == [
-        ("droplet", "deleted"), ("ssh_key", "deleted")]
+        ("droplet", "deleted"),
+        ("ssh_key", "deleted"),
+    ]
 
 
 class Reader:
@@ -135,8 +144,9 @@ class Reader:
         self.database_type = database_type
 
     def metadata(self):
-        return type("Metadata", (), {"database_type": self.database_type,
-                                     "build_epoch": 1_757_808_000})()
+        return type(
+            "Metadata", (), {"database_type": self.database_type, "build_epoch": 1_757_808_000}
+        )()
 
     def close(self):
         pass
@@ -160,8 +170,12 @@ async def test_the_image_carries_the_country_database_and_records_it(job, mmdb):
     result = await run_build(FakeDigitalOcean(), replace(job, mmdb=mmdb), shell)
     stdin = shell.calls[-1][1]
     with tarfile.open(fileobj=io.BytesIO(stdin)) as archive:
-        assert archive.getnames() == ["worker-provision.sh", "requirements.txt", job.wheel.name,
-                                      mmdb.name]
+        assert archive.getnames() == [
+            "worker-provision.sh",
+            "requirements.txt",
+            job.wheel.name,
+            mmdb.name,
+        ]
         assert archive.extractfile(mmdb.name).read() == b"database bytes"
         assert archive.getmember(mmdb.name).mode == 0o600
     assert result["state"] == "built" and result["mmdb_file"] == mmdb.name
@@ -169,11 +183,16 @@ async def test_the_image_carries_the_country_database_and_records_it(job, mmdb):
     assert inventory(job)["mmdb_sha256"] == result["mmdb_sha256"]
 
 
-@pytest.mark.parametrize(("name", "kind", "message"), [
-    ("dbip-full.mmdb", "GeoLite2-City", "not a DB-IP database"),
-    ("dbip-full.csv", "DBIP-Location-ISP", "must name a .mmdb file")])
+@pytest.mark.parametrize(
+    ("name", "kind", "message"),
+    [
+        ("dbip-full.mmdb", "GeoLite2-City", "not a DB-IP database"),
+        ("dbip-full.csv", "DBIP-Location-ISP", "must name a .mmdb file"),
+    ],
+)
 async def test_a_wrong_database_stops_the_build_before_any_cloud_write(
-        job, tmp_path, monkeypatch, name, kind, message):
+    job, tmp_path, monkeypatch, name, kind, message
+):
     from dataclasses import replace
 
     path = tmp_path / name
@@ -187,8 +206,12 @@ async def test_a_wrong_database_stops_the_build_before_any_cloud_write(
 
 async def test_an_existing_mac_key_is_reused_and_kept(job):
     fake = FakeDigitalOcean()
-    fake.add_resource("ssh_key", 41, name="pi-camp-mac-20261230", public_key=PUBLIC_KEY.rsplit(
-        " ", 1)[0] + " other-comment")
+    fake.add_resource(
+        "ssh_key",
+        41,
+        name="pi-camp-mac-20261230",
+        public_key=PUBLIC_KEY.rsplit(" ", 1)[0] + " other-comment",
+    )
     result = await run_build(fake, job)
     assert result["mac_key_id"] == "41" and result["mac_key_created"] is False
     assert "41" in fake.resources["ssh_key"] and not fake.droplets
@@ -208,7 +231,8 @@ def never_active(fake):
 STAGES = {
     "create": lambda fake: fake.faults.append(Fault("POST", "/v2/droplets", 422)),
     "assign": lambda fake: fake.faults.append(
-        Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 422, times=3)),
+        Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 422, times=3)
+    ),
     "active": never_active,
     "shutdown": lambda fake: fake.failing_actions.add("shutdown"),
     "snapshot": lambda fake: fake.failing_actions.add("snapshot"),
@@ -221,8 +245,9 @@ async def test_a_failure_at_any_step_still_removes_the_builder_through_the_guard
     fake = FakeDigitalOcean()
     fake.action_polls = 1
     STAGES.get(stage, lambda fake: None)(fake)
-    shell = Shell(verdict="dirty: host keys" if stage == "hygiene" else "clean",
-                  ready=stage != "ssh")
+    shell = Shell(
+        verdict="dirty: host keys" if stage == "hygiene" else "clean", ready=stage != "ssh"
+    )
     with pytest.raises(Exception) as raised:
         await run_build(fake, job, shell)
     entry = inventory(job)
@@ -274,20 +299,37 @@ async def test_a_builder_the_guard_cannot_remove_is_reported_as_left_over(job):
 
 async def test_snapshot_and_transfer_helpers_check_what_they_find():
     fake = FakeDigitalOcean()
-    fake.images["12"] = {"id": 12, "name": "pi-camp-worker-0.9.5-0123456789ab-20270101",
-                         "regions": ["lon1", "fra1"], "droplet": ""}
+    fake.images["12"] = {
+        "id": 12,
+        "name": "pi-camp-worker-0.9.5-0123456789ab-20270101",
+        "regions": ["lon1", "fra1"],
+        "droplet": "",
+    }
     async with running(fake) as cloud:
-        [builder] = await cloud.create(["pi-camp-builder-20270101-ab12"], region="lon1",
-                                       size="s-1vcpu-1gb", image="x", tags=[BUILDER_TAG],
-                                       ssh_keys=["9"])
-        fake.images["13"] = {"id": 13, "name": "pi-camp-worker-1-0123456789ab-20270101",
-                             "regions": [], "droplet": builder.id}
+        [builder] = await cloud.create(
+            ["pi-camp-builder-20270101-ab12"],
+            region="lon1",
+            size="s-1vcpu-1gb",
+            image="x",
+            tags=[BUILDER_TAG],
+            ssh_keys=["9"],
+        )
+        fake.images["13"] = {
+            "id": 13,
+            "name": "pi-camp-worker-1-0123456789ab-20270101",
+            "regions": [],
+            "droplet": builder.id,
+        }
         fake.move(builder.id)
         with pytest.raises(ops_api.OpsError, match="expected one snapshot"):
-            await ops_api.snapshot(cloud, SCOPE, builder.id,
-                                   "pi-camp-worker-1-0123456789ab-20270101", no_sleep)
+            await ops_api.snapshot(
+                cloud, SCOPE, builder.id, "pi-camp-worker-1-0123456789ab-20270101", no_sleep
+            )
         assert await ops_api.transfer(cloud, "12", ["lon1", "fra1", "ams3"], no_sleep) == [
-            "ams3", "fra1", "lon1"]
+            "ams3",
+            "fra1",
+            "lon1",
+        ]
         fake.failing_actions.add("transfer")
         with pytest.raises(ops_api.OpsError):
             await ops_api.transfer(cloud, "12", ["syd1"], no_sleep)
@@ -298,13 +340,19 @@ async def test_snapshot_and_transfer_helpers_check_what_they_find():
         with pytest.raises(ops_api.OpsError, match="gone"):
             await ops_api.wait_droplet(cloud, builder.id, "active", no_sleep)
     assert [b["region"] for _, p, b in fake.bodies if p.startswith("/v2/images")] == [
-        "ams3", "syd1"]
+        "ams3",
+        "syd1",
+    ]
 
 
 async def test_transfer_reports_regions_the_snapshot_never_reached():
     fake = FakeDigitalOcean()
-    fake.images["12"] = {"id": 12, "name": "pi-camp-worker-0.9.5-0123456789ab-20270101",
-                         "regions": ["lon1"], "droplet": ""}
+    fake.images["12"] = {
+        "id": 12,
+        "name": "pi-camp-worker-0.9.5-0123456789ab-20270101",
+        "regions": ["lon1"],
+        "droplet": "",
+    }
     original = fake._image_action
 
     async def lost(request):
@@ -322,9 +370,14 @@ async def test_polling_gives_up_after_its_limit():
     fake = FakeDigitalOcean()
     fake.action_polls = 99
     async with running(fake) as cloud:
-        [builder] = await cloud.create(["pi-camp-builder-20270101-ab12"], region="lon1",
-                                       size="s-1vcpu-1gb", image="x", tags=[BUILDER_TAG],
-                                       ssh_keys=["9"])
+        [builder] = await cloud.create(
+            ["pi-camp-builder-20270101-ab12"],
+            region="lon1",
+            size="s-1vcpu-1gb",
+            image="x",
+            tags=[BUILDER_TAG],
+            ssh_keys=["9"],
+        )
         fake.move(builder.id)
         action = await cloud.droplet_action(builder.id, "shutdown", CAMPAIGN_PROJECT)
         with pytest.raises(ops_api.OpsError, match="timed out"):
@@ -333,28 +386,46 @@ async def test_polling_gives_up_after_its_limit():
 
 def test_firewall_rules_are_exact():
     everywhere = {"addresses": ["0.0.0.0/0", "::/0"]}
-    outbound = [{"protocol": "tcp", "ports": "all", "destinations": everywhere},
-                {"protocol": "udp", "ports": "all", "destinations": everywhere},
-                {"protocol": "icmp", "destinations": everywhere}]
+    outbound = [
+        {"protocol": "tcp", "ports": "all", "destinations": everywhere},
+        {"protocol": "udp", "ports": "all", "destinations": everywhere},
+        {"protocol": "icmp", "destinations": everywhere},
+    ]
     assert ops_api.worker_firewall("198.51.100.7") == {
-        "name": "pi-camp-worker-fw", "outbound_rules": outbound, "tags": [WORKER_TAG],
-        "droplet_ids": [], "inbound_rules": [
-            {"protocol": "tcp", "ports": "22", "sources": {"addresses": ["198.51.100.7/32"]}}]}
+        "name": "pi-camp-worker-fw",
+        "outbound_rules": outbound,
+        "tags": [WORKER_TAG],
+        "droplet_ids": [],
+        "inbound_rules": [
+            {"protocol": "tcp", "ports": "22", "sources": {"addresses": ["198.51.100.7/32"]}}
+        ],
+    }
     assert ops_api.manager_firewall("203.0.113.5", MANAGER_ID) == {
-        "name": "pi-camp-manager-fw", "outbound_rules": outbound, "tags": [],
-        "droplet_ids": [int(MANAGER_ID)], "inbound_rules": [
-            {"protocol": "tcp", "ports": "22", "sources": {"addresses": ["203.0.113.5/32"]}}]}
+        "name": "pi-camp-manager-fw",
+        "outbound_rules": outbound,
+        "tags": [],
+        "droplet_ids": [int(MANAGER_ID)],
+        "inbound_rules": [
+            {"protocol": "tcp", "ports": "22", "sources": {"addresses": ["203.0.113.5/32"]}}
+        ],
+    }
 
 
 async def test_firewalls_are_created_then_replaced_on_campaign_droplets_only():
     fake = FakeDigitalOcean()
-    manager = fake.add("pi-camp-manager-20270101-ab12", [MANAGER_TAG], droplet_id=MANAGER_ID,
-                       project=CAMPAIGN_PROJECT)
+    manager = fake.add(
+        "pi-camp-manager-20270101-ab12",
+        [MANAGER_TAG],
+        droplet_id=MANAGER_ID,
+        project=CAMPAIGN_PROJECT,
+    )
     async with running(fake) as cloud:
         firewall_id = await ops_api.apply_firewall(
-            cloud, SCOPE, ops_api.manager_firewall("203.0.113.5", manager))
+            cloud, SCOPE, ops_api.manager_firewall("203.0.113.5", manager)
+        )
         again = await ops_api.apply_firewall(
-            cloud, SCOPE, ops_api.manager_firewall("203.0.113.6", manager), firewall_id)
+            cloud, SCOPE, ops_api.manager_firewall("203.0.113.6", manager), firewall_id
+        )
     assert again == firewall_id
     stored = fake.resources["firewall"][firewall_id]
     assert stored["inbound_rules"][0]["sources"] == {"addresses": ["203.0.113.6/32"]}
@@ -383,8 +454,9 @@ def test_provision_script_is_valid_pinned_and_secret_free():
 
 
 def test_launchd_plist_renders_without_tokens_or_addresses(tmp_path):
-    command = guard.watch_command(tmp_path / "inv.json", tmp_path / "STATUS.md",
-                                  tmp_path / "traffic")
+    command = guard.watch_command(
+        tmp_path / "inv.json", tmp_path / "STATUS.md", tmp_path / "traffic"
+    )
     rendered = guard.render(command, tmp_path)
     agent = plistlib.loads(rendered)
     assert agent["Label"] == guard.LABEL and agent["ProgramArguments"] == command
@@ -403,31 +475,43 @@ def test_guard_installs_reports_and_removes_the_agent(tmp_path):
         calls.append(argv)
         loaded = argv[1] == "print" and len(calls) < 4
         out = "\tstate = running\n\tlast exit code = 0\n\t\tnested = x\n" if loaded else ""
-        return subprocess.CompletedProcess(argv, 0 if argv[1] != "print" or loaded else 113,
-                                           out, "")
+        return subprocess.CompletedProcess(
+            argv, 0 if argv[1] != "print" or loaded else 113, out, ""
+        )
 
     path = guard.install(["/bin/echo"], tmp_path, run)
     assert path == guard.plist_path(tmp_path) and stat.S_IMODE(path.stat().st_mode) == 0o644
     assert stat.S_IMODE(guard.logs_dir(tmp_path).stat().st_mode) == 0o700
     assert [c[1] for c in calls] == ["bootout", "bootstrap"] and calls[1][3] == str(path)
-    assert guard.status(tmp_path, run) == {"installed": True, "loaded": True,
-                                           "state": "running", "last_exit_code": "0"}
+    assert guard.status(tmp_path, run) == {
+        "installed": True,
+        "loaded": True,
+        "state": "running",
+        "last_exit_code": "0",
+    }
     assert guard.remove(tmp_path, run) is True and not path.exists()
     assert guard.status(tmp_path, run)["loaded"] is False
     assert guard.remove(tmp_path, run) is False
     with pytest.raises(RuntimeError):
-        guard.install(["/bin/echo"], tmp_path, lambda argv: subprocess.CompletedProcess(
-            argv, 5, "", ""))
+        guard.install(
+            ["/bin/echo"], tmp_path, lambda argv: subprocess.CompletedProcess(argv, 5, "", "")
+        )
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is needed to build the wheel")
 def test_the_wheel_carries_the_assets(tmp_path):
-    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(tmp_path), "--quiet"], cwd=ROOT,
-                   check=True, timeout=240)
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path), "--quiet"],
+        cwd=ROOT,
+        check=True,
+        timeout=240,
+    )
     [wheel] = tmp_path.glob("*.whl")
     names = zipfile.ZipFile(wheel).namelist()
-    assert {"proxy_index/campaign/assets/worker-provision.sh",
-            "proxy_index/campaign/assets/launchd-watch.plist"} <= set(names)
+    assert {
+        "proxy_index/campaign/assets/worker-provision.sh",
+        "proxy_index/campaign/assets/launchd-watch.plist",
+    } <= set(names)
 
 
 def test_mac_key_is_created_once_without_a_host_name(tmp_path):
@@ -447,15 +531,47 @@ def test_image_and_guard_commands_are_wired(monkeypatch, capsys, job, tmp_path):
 
     monkeypatch.setattr(image, "build", fake_build)
     monkeypatch.setattr(campaign_cli, "_cloud", lambda account: FakeCloud())
-    assert main_cli.main(["campaign", "image", "build", "--account", "leftclick", "--wheel",
-                          str(job.wheel), "--requirements", str(job.requirements), "--mac-key",
-                          str(job.mac_key)]) == 0
+    assert (
+        main_cli.main(
+            [
+                "campaign",
+                "image",
+                "build",
+                "--account",
+                "leftclick",
+                "--wheel",
+                str(job.wheel),
+                "--requirements",
+                str(job.requirements),
+                "--mac-key",
+                str(job.mac_key),
+            ]
+        )
+        == 0
+    )
     assert json.loads(capsys.readouterr().out) == {"state": "built"}
     assert seen["job"].inventory == Path(".secrets/campaign-images.json")
     assert seen["job"].mmdb is None
-    assert main_cli.main(["campaign", "image", "build", "--account", "leftclick", "--wheel",
-                          str(job.wheel), "--requirements", str(job.requirements), "--mac-key",
-                          str(job.mac_key), "--mmdb", "db-ip/dbip-full.mmdb"]) == 0
+    assert (
+        main_cli.main(
+            [
+                "campaign",
+                "image",
+                "build",
+                "--account",
+                "leftclick",
+                "--wheel",
+                str(job.wheel),
+                "--requirements",
+                str(job.requirements),
+                "--mac-key",
+                str(job.mac_key),
+                "--mmdb",
+                "db-ip/dbip-full.mmdb",
+            ]
+        )
+        == 0
+    )
     capsys.readouterr()
     assert seen["job"].mmdb == Path("db-ip/dbip-full.mmdb")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -464,10 +580,17 @@ def test_image_and_guard_commands_are_wired(monkeypatch, capsys, job, tmp_path):
     monkeypatch.setattr(guard, "status", lambda home: {"loaded": False})
     with pytest.raises(SystemExit):
         main_cli.main(["campaign", "guard", "install"])
-    for action, expected in (("install", {"installed": str(tmp_path / "agent.plist")}),
-                             ("remove", {"removed": True}), ("status", {"loaded": False})):
-        assert main_cli.main(["campaign", "guard", action, "--status-file", "S.md",
-                              "--traffic-dir", "traffic"]) == 0
+    for action, expected in (
+        ("install", {"installed": str(tmp_path / "agent.plist")}),
+        ("remove", {"removed": True}),
+        ("status", {"loaded": False}),
+    ):
+        assert (
+            main_cli.main(
+                ["campaign", "guard", action, "--status-file", "S.md", "--traffic-dir", "traffic"]
+            )
+            == 0
+        )
         assert json.loads(capsys.readouterr().out) == expected
 
 
@@ -489,8 +612,14 @@ async def test_local_runners_and_key_matching(tmp_path):
     fake.add_resource("ssh_key", 7, name="pi-camp-worker-20270101", public_key="ssh-ed25519 X")
     async with running(fake) as cloud:
         assert await ops_api.ensure_ssh_key(cloud, "pi-camp-mac-20270101", PUBLIC_KEY) == (
-            str(max(int(i) for i in fake.resources["ssh_key"])), "pi-camp-mac-20270101", True)
+            str(max(int(i) for i in fake.resources["ssh_key"])),
+            "pi-camp-mac-20270101",
+            True,
+        )
         assert await ops_api.ensure_ssh_key(cloud, "pi-camp-worker-20270202", "ssh-ed25519 X") == (
-            "7", "pi-camp-worker-20270101", False)
+            "7",
+            "pi-camp-worker-20270101",
+            False,
+        )
     [(_, _, body)] = fake.bodies
     assert body == {"name": "pi-camp-mac-20270101", "public_key": " ".join(PUBLIC_KEY.split()[:2])}

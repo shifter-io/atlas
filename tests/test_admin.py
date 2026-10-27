@@ -551,7 +551,9 @@ async def test_scheduler_switch_action(database, db, admin):
     prepare(database, ("DE",))
     issue_token(database, provider="alpha", product="res", region="fra1")
     assert await post(admin, "/schedule/scheduler", {"pulse": False}) == {
-        "census": True, "pulse": False, "census_every_minutes": None,
+        "census": True,
+        "pulse": False,
+        "census_every_minutes": None,
     }
     assert (await get(admin, "/schedule"))["scheduler"]["pulse"] is False
     assert (await batches.pulse_plan(db))["skipped"] == "pulse scheduler is off"

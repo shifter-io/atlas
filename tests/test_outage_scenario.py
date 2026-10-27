@@ -71,20 +71,34 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
         # The last slot carries artifacts (they ran just now): both pulses and the load wave.
         last = {
             (kind, target): batch(conn, kind, slots[47], target=target)
-            for kind, target in (("pulse", "generic_http"), ("pulse", "generic_https"),
-                                 ("load", "generic_http"))
+            for kind, target in (
+                ("pulse", "generic_http"),
+                ("pulse", "generic_https"),
+                ("load", "generic_http"),
+            )
         }
     for (kind, target), batch_id in last.items():
         directory = await measurement(
-            tmp_path, provider="alpha", target=target, requested_country="de", requests=40,
+            tmp_path,
+            provider="alpha",
+            target=target,
+            requested_country="de",
+            requests=40,
             concurrency=1000 if kind == "load" else 25,
         )
         if target == "generic_http":
             enrichment(directory, attributes=GERMANY)
         key = ingest(directory, database, batch_id=batch_id)["run_key"]
         with connect(database) as conn:
-            batch_run(conn, batch_id, alpha, slots[47] + timedelta(minutes=1), run_key=key,
-                      requests=40, successes=40)
+            batch_run(
+                conn,
+                batch_id,
+                alpha,
+                slots[47] + timedelta(minutes=1),
+                run_key=key,
+                requests=40,
+                successes=40,
+            )
     census_at = slots[41] + timedelta(minutes=5)
     with connect(database) as conn:
         for i, at in enumerate(slots[:47]):
@@ -92,8 +106,9 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
                 if i in (43, 44) and target == "generic_http":
                     continue  # these finish through the orchestrator below
                 b = batch(conn, "pulse", at, target=target)
-                batch_run(conn, b, alpha, at + timedelta(minutes=1),
-                          successes=0 if i in DOWN else 100)
+                batch_run(
+                    conn, b, alpha, at + timedelta(minutes=1), successes=0 if i in DOWN else 100
+                )
                 if i == 41 and target == "generic_https":
                     # Our node shut down mid-run: not the provider's, so not a slot at all,
                     # and the requests it had counted are not invented as failures.
@@ -103,8 +118,15 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
                         (b,),
                     )
         census = batch(conn, "census", census_at, minutes=15)
-        batch_run(conn, census, alpha, census_at + timedelta(minutes=15), requests=5000,
-                  successes=0, stop_reason="no_success")
+        batch_run(
+            conn,
+            census,
+            alpha,
+            census_at + timedelta(minutes=15),
+            requests=5000,
+            successes=0,
+            stop_reason="no_success",
+        )
         # It ran from 18:35 to 19:02, over the (down) pulses of 19:00.
         conn.execute(
             "UPDATE batch_runs SET started_at=%s,finished_at=%s WHERE batch_id=%s",
@@ -112,8 +134,15 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
         )
         # A healthy census over the pulses of slot 10.
         healthy = batch(conn, "census", slots[10] - timedelta(minutes=5))
-        batch_run(conn, healthy, alpha, slots[10] + timedelta(seconds=90), requests=5000,
-                  successes=4900, stop_reason="unique_ratio")
+        batch_run(
+            conn,
+            healthy,
+            alpha,
+            slots[10] + timedelta(seconds=90),
+            requests=5000,
+            successes=4900,
+            stop_reason="unique_ratio",
+        )
         # The two pulses the orchestrator still has running on alpha's node.
         running = {}
         for i in (43, 44):
@@ -123,17 +152,28 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
                 "VALUES (%s,%s,%s,'running',%s)",
                 (running[i], alpha, node["node_id"], slots[i]),
             )
-            conn.execute("UPDATE test_batches SET finished_at=NULL WHERE batch_id=%s",
-                         (running[i],))
+            conn.execute(
+                "UPDATE test_batches SET finished_at=NULL WHERE batch_id=%s", (running[i],)
+            )
     db = Database(database)
     try:
         # The tape runs every minute; replay it slot by slot, finishing 43 and 44 on time.
         for i, at in enumerate(slots):
             if i in running:
-                summary = {"status": "completed", "completed": 100, "successes": 100,
-                           "stop_reason": "requests"}
-                await batches.finish_run(db, {"node_id": node["node_id"]}, running[i],
-                                         summary, None, at + timedelta(minutes=1))
+                summary = {
+                    "status": "completed",
+                    "completed": 100,
+                    "successes": 100,
+                    "stop_reason": "requests",
+                }
+                await batches.finish_run(
+                    db,
+                    {"node_id": node["node_id"]},
+                    running[i],
+                    summary,
+                    None,
+                    at + timedelta(minutes=1),
+                )
             with connect(database) as conn:
                 detect(conn, at + timedelta(minutes=4))
     finally:
@@ -145,10 +185,13 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
         retries = conn.execute(
             "SELECT retry_of,scheduled_for FROM test_batches WHERE retry_of IS NOT NULL"
         ).fetchall()
-        tape = [r[0] for r in conn.execute(
-            "SELECT kind FROM test_events WHERE kind IN ('down','recovered','census_retry') "
-            "ORDER BY event_id"
-        )]
+        tape = [
+            r[0]
+            for r in conn.execute(
+                "SELECT kind FROM test_events WHERE kind IN ('down','recovered','census_retry') "
+                "ORDER BY event_id"
+            )
+        ]
     # Outage recorded: from the last healthy pulse (17:31) to the first healthy one (19:30).
     assert outages == [("pulse", slots[39] + timedelta(minutes=1), slots[43])]
     # The rerun is planned as the pulse finishes; the tape marks the recovery a minute later.
@@ -190,7 +233,9 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     http = w["targets"]["generic_http"]["metrics"]
     assert http["coverage_slots"] == {"due": 48, "filled": 48, "down": 3}
     assert w["targets"]["generic_https"]["metrics"]["coverage_slots"] == {
-        "due": 47, "filled": 47, "down": 2,
+        "due": 47,
+        "filled": 47,
+        "down": 2,
     }
     # Pulses during a census still count for uptime and slots.
     assert http["uptime"] == pytest.approx(45 / 48)
@@ -221,8 +266,14 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
     (region,) = w["latency"]["regions"]
     assert region["region"] == "fra1" and region["reference"]["country"] == "DE"
     assert region["chosen"] == [
-        {"day": slots[47].date().isoformat(), "country": "DE", "basis": "default",
-         "p50_ms": None, "successes": None, "candidates": 0}
+        {
+            "day": slots[47].date().isoformat(),
+            "country": "DE",
+            "basis": "default",
+            "p50_ms": None,
+            "successes": None,
+            "candidates": 0,
+        }
     ]
     assert region["factors"]["slots"] == 1
     # Latency is generic_http's alone: the load slot gives its light-load latency its own

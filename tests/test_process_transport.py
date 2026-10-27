@@ -1,4 +1,5 @@
 """Real spawned processes and loopback HTTP only; never paid proxy traffic."""
+
 import asyncio
 import os
 import pickle
@@ -20,8 +21,14 @@ from proxy_index.targets import registry
 
 @pytest.fixture
 async def gateway():
-    state = {"six_started": asyncio.Event(), "active": 0, "peak": 0, "requests": 0,
-             "delay": .005, "status": 200}
+    state = {
+        "six_started": asyncio.Event(),
+        "active": 0,
+        "peak": 0,
+        "requests": 0,
+        "delay": 0.005,
+        "status": 200,
+    }
 
     async def echo(request):
         state["requests"] += 1
@@ -54,7 +61,11 @@ def gone(pids):
 
 @pytest.mark.parametrize("concurrency,processes,requests", [(7, 3, 101), (2500, 4, 5000)])
 async def test_real_http_workers_share_count_concurrency_and_uniqueness(
-    gateway, tmp_path, concurrency, processes, requests,
+    gateway,
+    tmp_path,
+    concurrency,
+    processes,
+    requests,
 ):
     proxy, state = gateway
     observations = []
@@ -69,8 +80,14 @@ async def test_real_http_workers_share_count_concurrency_and_uniqueness(
     async def observe(ip, at):
         observations.append((ip, at))
 
-    config = RunConfig("generic_http", proxy, requests=requests, concurrency=concurrency,
-                       processes=processes, requests_per_second=rate)
+    config = RunConfig(
+        "generic_http",
+        proxy,
+        requests=requests,
+        concurrency=concurrency,
+        processes=processes,
+        requests_per_second=rate,
+    )
     result = await run(config, JsonSink(tmp_path), observation_consumer=observe)
     assert result.completed == result.started == state["requests"] == requests
     assert result.successes == requests and result.unique_ips == 1
@@ -88,8 +105,16 @@ async def test_census_is_global_and_errors_are_completions(gateway, tmp_path, st
     proxy, state = gateway
     state["status"] = status
     result = await run(
-        RunConfig("generic_http", proxy, requests=None, concurrency=12, processes=3,
-                  stop_rule="unique_ratio", min_sample=60), JsonSink(tmp_path),
+        RunConfig(
+            "generic_http",
+            proxy,
+            requests=None,
+            concurrency=12,
+            processes=3,
+            stop_rule="unique_ratio",
+            min_sample=60,
+        ),
+        JsonSink(tmp_path),
     )
     assert 60 <= result.completed <= 71
     assert result.stop_reason == reason
@@ -100,7 +125,7 @@ async def test_census_is_global_and_errors_are_completions(gateway, tmp_path, st
 @pytest.mark.parametrize("operator", [True, False])
 async def test_stop_and_deadline_cancel_all_processes(gateway, tmp_path, operator):
     proxy, state = gateway
-    state["delay"] = .5
+    state["delay"] = 0.5
     stop = asyncio.Event()
     # Spawning the workers can outlast any fixed deadline under load. The deadline
     # passes only once six requests are in flight: the run's wall clock jumps then.
@@ -116,7 +141,8 @@ async def test_stop_and_deadline_cancel_all_processes(gateway, tmp_path, operato
     task = asyncio.create_task(cancel())
     result = await run(
         RunConfig("generic_http", proxy, requests=1000, concurrency=6, processes=2),
-        JsonSink(tmp_path), stop=stop,
+        JsonSink(tmp_path),
+        stop=stop,
         deadline=None if operator else time.time() + 3600,
         wall_clock=lambda: time.time() + skew[0],
     )
@@ -142,13 +168,15 @@ class HangingTransport:
 
 
 async def test_workers_enforce_the_deadline_themselves():
-    config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1),
-                       concurrency=2, processes=2)
+    config = RunConfig(
+        "generic_http", ProxyConfig("http", "localhost", 1), concurrency=2, processes=2
+    )
     target = registry.get("generic_http")
     # Spawn time decides whether a worker finds the deadline passed or times the
     # request out in flight; both answer "expired", which cancels the request.
-    async with ProcessTransport(config, target, factory=HangingTransport,
-                                deadline=time.perf_counter() + .5) as transport:
+    async with ProcessTransport(
+        config, target, factory=HangingTransport, deadline=time.perf_counter() + 0.5
+    ) as transport:
         pids = list(transport.pids)
         for index in range(2):
             with pytest.raises(asyncio.CancelledError):
@@ -168,29 +196,32 @@ class CPUTransport:
 
     async def execute(self, target, *, context):
         started = time.process_time()
-        while time.process_time() - started < .2:
+        while time.process_time() - started < 0.2:
             sum(i * i for i in range(1000))
-        return Outcome(latency_ms=(time.process_time() - started) * 1000,
-                       ip=f"10.0.0.{context.worker_index + 1}")
+        return Outcome(
+            latency_ms=(time.process_time() - started) * 1000,
+            ip=f"10.0.0.{context.worker_index + 1}",
+        )
 
 
 async def test_independent_interpreters_execute_cpu_work_and_worker_crash_is_fatal():
-    config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1),
-                       concurrency=4, processes=4)
+    config = RunConfig(
+        "generic_http", ProxyConfig("http", "localhost", 1), concurrency=4, processes=4
+    )
     target = registry.get("generic_http")
     async with ProcessTransport(config, target, factory=CPUTransport) as transport:
         pids = list(transport.pids)
         assert len(set(pids)) == 4 and os.getpid() not in pids
-        results = await asyncio.gather(*(
-            transport.execute(target, context=RequestContext("cpu", i, i)) for i in range(4)
-        ))
+        results = await asyncio.gather(
+            *(transport.execute(target, context=RequestContext("cpu", i, i)) for i in range(4))
+        )
         assert len({r.ip for r in results}) == 4
         assert all(r.latency_ms >= 200 and r.completed_at for r in results)
         transport.children[0].kill()
         with pytest.raises(RuntimeError, match="worker"):
-            await asyncio.wait_for(transport.execute(
-                target, context=RequestContext("cpu", 4, 0)
-            ), 5)
+            await asyncio.wait_for(
+                transport.execute(target, context=RequestContext("cpu", 4, 0)), 5
+            )
     gone(pids)
 
 
@@ -231,11 +262,17 @@ async def test_https_tunnels_use_process_backend(tmp_path, monkeypatch, scheme):
 
     gateway = Gateway(scheme, auth=True)
     async with server(origin, tls=tls) as origin_port, server(gateway) as port:
-        result = await run(RunConfig(
-            "generic_https", ProxyConfig(scheme, "127.0.0.1", port, "test", "secret"),
-            target_url=f"https://localhost:{origin_port}/", requests=20,
-            concurrency=4, processes=2,
-        ), JsonSink(tmp_path / "results"))
+        result = await run(
+            RunConfig(
+                "generic_https",
+                ProxyConfig(scheme, "127.0.0.1", port, "test", "secret"),
+                target_url=f"https://localhost:{origin_port}/",
+                requests=20,
+                concurrency=4,
+                processes=2,
+            ),
+            JsonSink(tmp_path / "results"),
+        )
     assert result.successes == 20 and result.unique_ips == 1
     assert result.config["execution_processes"] == 2
     assert gateway.connections == 20

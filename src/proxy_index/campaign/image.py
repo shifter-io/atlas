@@ -41,13 +41,19 @@ async def run_shell(argv: list[str], stdin: bytes | Path) -> tuple[int, str]:
     if isinstance(stdin, Path):  # the payload with a database is too large to hold in memory
         with stdin.open("rb") as source:
             process = await asyncio.create_subprocess_exec(
-                *argv, stdin=source, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL)
+                *argv,
+                stdin=source,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
             out, _ = await process.communicate()
     else:
         process = await asyncio.create_subprocess_exec(
-            *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL)
+            *argv,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
         out, _ = await process.communicate(stdin)
     return process.returncode or 0, out.decode(errors="replace")
 
@@ -83,10 +89,12 @@ def record(job: ImageJob, build: Build, **values: Any) -> None:
     build.values.update(values)
     private_dir(job.inventory.parent)
     current = json.loads(job.inventory.read_text()) if job.inventory.exists() else {}
-    builds = [b for b in current.get("builds", []) if b["started_at"] != build.started_at
-              .isoformat()]
-    builds.append({"started_at": build.started_at.isoformat(), "state": build.state,
-                   **build.values})
+    builds = [
+        b for b in current.get("builds", []) if b["started_at"] != build.started_at.isoformat()
+    ]
+    builds.append(
+        {"started_at": build.started_at.isoformat(), "state": build.state, **build.values}
+    )
     temporary = job.inventory.with_suffix(".tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
@@ -110,9 +118,11 @@ def payload(job: ImageJob, destination: Path) -> Path:
     when given, the MMDB (streamed from disk, never held in memory)."""
     script = files("proxy_index.campaign").joinpath("assets", "worker-provision.sh")
     with tarfile.open(destination, mode="w") as archive:
-        for name, data in (("worker-provision.sh", script.read_bytes()),
-                           ("requirements.txt", job.requirements.read_bytes()),
-                           (job.wheel.name, job.wheel.read_bytes())):
+        for name, data in (
+            ("worker-provision.sh", script.read_bytes()),
+            ("requirements.txt", job.requirements.read_bytes()),
+            (job.wheel.name, job.wheel.read_bytes()),
+        ):
             info = tarfile.TarInfo(name)
             info.size, info.mode = len(data), 0o700 if name.endswith(".sh") else 0o600
             archive.addfile(info, io.BytesIO(data))
@@ -125,29 +135,51 @@ def payload(job: ImageJob, destination: Path) -> Path:
     return destination
 
 
-async def provision(shell: Shell, job: ImageJob, address: str, runtime: Path,
-                    sleep: ops_api.Sleep) -> None:
+async def provision(
+    shell: Shell, job: ImageJob, address: str, runtime: Path, sleep: ops_api.Sleep
+) -> None:
     """Wait for SSH, push the inputs and run the provision script; it must end with `clean`."""
     known_hosts = runtime / "known_hosts"
-    ssh = ["ssh", "-i", str(job.mac_key), "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
-           "-o", "StrictHostKeyChecking=accept-new", "-o", f"UserKnownHostsFile={known_hosts}",
-           "-o", "ConnectTimeout=10", f"root@{address}"]
+    ssh = [
+        "ssh",
+        "-i",
+        str(job.mac_key),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        f"UserKnownHostsFile={known_hosts}",
+        "-o",
+        "ConnectTimeout=10",
+        f"root@{address}",
+    ]
     for _ in range(SSH_TRIES):
         if (await shell([*ssh, "true"], b""))[0] == 0:
             break
         await sleep(ops_api.POLL_SECONDS)
     else:
         raise ops_api.OpsError("builder SSH never became ready")
-    command = (f"mkdir -m 700 {REMOTE_DIR} && tar -x -C {REMOTE_DIR} && "
-               f"bash {REMOTE_DIR}/worker-provision.sh")
+    command = (
+        f"mkdir -m 700 {REMOTE_DIR} && tar -x -C {REMOTE_DIR} && "
+        f"bash {REMOTE_DIR}/worker-provision.sh"
+    )
     code, out = await shell([*ssh, command], payload(job, runtime / "payload.tar"))
     verdict = (out.strip().splitlines() or [""])[-1]
     if code != 0 or verdict != "clean":
         raise ops_api.OpsError(f"provision failed ({code}): {verdict[:200]}")
 
 
-async def build(cloud: DigitalOcean, job: ImageJob, *, shell: Shell = run_shell,
-                sleep: ops_api.Sleep = asyncio.sleep, now: datetime | None = None) -> dict:
+async def build(
+    cloud: DigitalOcean,
+    job: ImageJob,
+    *,
+    shell: Shell = run_shell,
+    sleep: ops_api.Sleep = asyncio.sleep,
+    now: datetime | None = None,
+) -> dict:
     """Run the whole build; returns the inventory entry. The builder never outlives it."""
     current = Build(now or datetime.now(UTC))
     scope = ops_api.ops_scope(await cloud.project_id(PROJECT_NAME), current.started_at)
@@ -155,14 +187,18 @@ async def build(cloud: DigitalOcean, job: ImageJob, *, shell: Shell = run_shell,
     sha256 = hashlib.sha256(job.wheel.read_bytes()).hexdigest()
     country_database = database(job.mmdb) if job.mmdb else {}  # checked before any cloud write
     key_id, _, key_created = await ops_api.ensure_ssh_key(
-        cloud, f"pi-camp-mac-{current.started_at:%Y%m%d}",
-        job.mac_key.with_name(job.mac_key.name + ".pub").read_text())
-    steps.note(wheel_sha256=sha256, mac_key_id=key_id, mac_key_created=key_created,
-               **country_database)
+        cloud,
+        f"pi-camp-mac-{current.started_at:%Y%m%d}",
+        job.mac_key.with_name(job.mac_key.name + ".pub").read_text(),
+    )
+    steps.note(
+        wheel_sha256=sha256, mac_key_id=key_id, mac_key_created=key_created, **country_database
+    )
     try:
         builder = await steps.create_builder(key_id)
-        await steps.provision_and_snapshot(builder,
-                                           snapshot_name(job.wheel, sha256, current.started_at))
+        await steps.provision_and_snapshot(
+            builder, snapshot_name(job.wheel, sha256, current.started_at)
+        )
         current.state = "built"
     except Exception as error:
         current.state = "failed"
@@ -197,11 +233,17 @@ class _Steps:
         self.note(builder_name=name)
         try:
             [builder] = await self.cloud.create(
-                [name], region=BUILD_REGION, size=BUILDER_SIZE, image=BASE_IMAGE,
-                tags=[BUILDER_TAG], ssh_keys=[key_id])
+                [name],
+                region=BUILD_REGION,
+                size=BUILDER_SIZE,
+                image=BASE_IMAGE,
+                tags=[BUILDER_TAG],
+                ssh_keys=[key_id],
+            )
         except CreateError as error:
-            adopted = await self.cloud.adopt_uncertain([name], BUILDER_TAG) if (
-                error.uncertain) else []
+            adopted = (
+                await self.cloud.adopt_uncertain([name], BUILDER_TAG) if (error.uncertain) else []
+            )
             if not adopted:
                 self.unresolved = name if error.uncertain else None
                 raise
@@ -218,8 +260,9 @@ class _Steps:
             await provision(self.shell, self.job, ready.public_ipv4, Path(runtime), sleep)
         image = await ops_api.snapshot(cloud, self.scope, builder.id, name, sleep)
         self.note(snapshot_id=str(image["id"]), snapshot_name=name)
-        self.note(regions=await ops_api.transfer(cloud, str(image["id"]), list(self.job.regions),
-                                                 sleep))
+        self.note(
+            regions=await ops_api.transfer(cloud, str(image["id"]), list(self.job.regions), sleep)
+        )
 
     async def cleanup(self, key_id: str | None) -> None:
         """Remove the builder, then the key made for this build; record what stayed behind."""
@@ -241,6 +284,8 @@ def ensure_mac_key(path: Path) -> Path:
     """The Mac's campaign key (ed25519, no passphrase prompt, no host name in its comment)."""
     if not path.exists():
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pi-camp-mac",
-                        "-f", str(path)], check=True)
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "pi-camp-mac", "-f", str(path)],
+            check=True,
+        )
     return path

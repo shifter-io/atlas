@@ -56,7 +56,8 @@ async def test_deploy_ssh_quotes_a_host_key_path_with_a_space(checkout, monkeypa
     shell = Shell()
     await run_deploy(Fake(), job, shell)
     assert shell.calls and options(argv for argv, _ in shell.calls) == {
-        quoted(job.inventory.with_name("campaign-manager.known_hosts"))}
+        quoted(job.inventory.with_name("campaign-manager.known_hosts"))
+    }
 
 
 @pytest.fixture
@@ -64,10 +65,20 @@ def recorded(checkout):
     """A deployed inventory with the relative record, named by a relative path from `/`-like
     elsewhere (as `--inventory` may be given)."""
     path = checkout / ".secrets" / "campaign-manager.json"
-    deploy.save(path, {}, manager_id="500001", host=MANAGER_IP, user="root", identity="k",
-                identity_file="k", known_hosts=RECORD, project_id=CAMPAIGN_PROJECT,
-                campaigns=[CID], campaign_id=CID, specs={CID: {
-                    "starts_at": "2027-01-01T23:00:00+00:00", "synthetic": True}})
+    deploy.save(
+        path,
+        {},
+        manager_id="500001",
+        host=MANAGER_IP,
+        user="root",
+        identity="k",
+        identity_file="k",
+        known_hosts=RECORD,
+        project_id=CAMPAIGN_PROJECT,
+        campaigns=[CID],
+        campaign_id=CID,
+        specs={CID: {"starts_at": "2027-01-01T23:00:00+00:00", "synthetic": True}},
+    )
     return Path(os.path.relpath(path))
 
 
@@ -83,8 +94,13 @@ async def test_enable_and_disable_use_the_record_beside_the_inventory(checkout, 
 async def test_upload_spec_uses_the_record_beside_the_inventory(checkout, recorded):
     from test_campaign_deploy import planned_root
 
-    deploy.save(recorded, json.loads(recorded.read_text()), campaigns=[],
-                wheel_sha256="ab" * 32, account="leftclick")
+    deploy.save(
+        recorded,
+        json.loads(recorded.read_text()),
+        campaigns=[],
+        wheel_sha256="ab" * 32,
+        account="leftclick",
+    )
     shell = Shell()
     await deploy.upload_spec(recorded, planned_root(checkout), shell=shell)
     assert len(shell.calls) == 1 and options(argv for argv, _ in shell.calls) == {own(checkout)}
@@ -110,8 +126,9 @@ def test_the_watch_uses_the_record_beside_the_inventory(checkout, recorded, monk
 
     def run(argv, **_kwargs):
         seen.append(argv)
-        return types.SimpleNamespace(stdout=json.dumps(
-            {"status": None, "alerts": [], "offset": 0, "reports": {}, "tsv": ""}))
+        return types.SimpleNamespace(
+            stdout=json.dumps({"status": None, "alerts": [], "offset": 0, "reports": {}, "tsv": ""})
+        )
 
     monkeypatch.setattr(watch.subprocess, "run", run)
     io = watch.WatchIO(notify=lambda _text: None)
@@ -129,10 +146,14 @@ async def test_two_inventories_in_one_folder_keep_their_own_host_key_files(tmp_p
     second = replace(first, inventory=first.inventory.with_name("campaign-manager-b.json"))
     for job in (first, second):
         await run_deploy(fake, job)
-    files = [deploy.known_hosts(job.inventory, json.loads(job.inventory.read_text()))
-             for job in (first, second)]
-    assert [f.name for f in files] == ["campaign-manager.known_hosts",
-                                       "campaign-manager-b.known_hosts"]
+    files = [
+        deploy.known_hosts(job.inventory, json.loads(job.inventory.read_text()))
+        for job in (first, second)
+    ]
+    assert [f.name for f in files] == [
+        "campaign-manager.known_hosts",
+        "campaign-manager-b.known_hosts",
+    ]
     for file in files:
         file.write_text("pinned host key\n")
     deploy._retire(second.inventory, json.loads(second.inventory.read_text()), {})

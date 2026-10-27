@@ -19,9 +19,11 @@ NOW = datetime(2027, 1, 1, 21, 55, tzinfo=UTC)
 MAC_IP, OTHER_IP, MANAGER_IP = "198.51.100.7", "198.51.100.8", "203.0.113.10"
 MAC_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMacKeyForTests pi-camp-mac"
 WORKER_PUBLIC = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIWorkerKeyForTests"
-CREDENTIALS = {"shifter": {"account": "customer-a\"b\\c", "password": "p\tw"},
-               "geonode": {"username": "u", "password": "v"}}
-PLAN_CREDENTIALS = {"account": "customer-acct_9", "password": "p\"w"}
+CREDENTIALS = {
+    "shifter": {"account": 'customer-a"b\\c', "password": "p\tw"},
+    "geonode": {"username": "u", "password": "v"},
+}
+PLAN_CREDENTIALS = {"account": "customer-acct_9", "password": 'p"w'}
 CID = "20270101t230000z-0123456789ab"
 IMAGE = "pi-camp-worker-0.9.5-0123456789ab-20270101"
 
@@ -53,12 +55,15 @@ class Fake(FakeDigitalOcean):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.sizes += [{"slug": slug, "available": True, "regions": ["lon1", "fra1"]}
-                       for slug in ("s-8vcpu-16gb", "s-2vcpu-4gb")]
+        self.sizes += [
+            {"slug": slug, "available": True, "regions": ["lon1", "fra1"]}
+            for slug in ("s-8vcpu-16gb", "s-2vcpu-4gb")
+        ]
 
     async def _create(self, request):
         self.bodies.append(("POST", "/v2/droplets", await request.json()))
         return await super()._create(request)
+
 
 OTHER_TEAM_PROJECT = "44444444-4444-4444-8444-444444444444"
 
@@ -91,12 +96,19 @@ def make_job(tmp_path, account="leftclick"):
     key.write_text("private part, never read by deploy\n")
     key.with_name(key.name + ".pub").write_text(MAC_PUBLIC + "\n")
     credentials = tmp_path / "credentials.toml"
-    credentials.write_text("".join(
-        deploy.toml_table(n, v).decode() for n, v in CREDENTIALS.items()))
-    return deploy.DeployJob(account, wheel, requirements, key,
-                            tmp_path / "secrets" / "campaign-manager.json",
-                            deploy.credential_files(credentials, ("shifter",)), MAC_IP,
-                            lambda: TOKEN)
+    credentials.write_text(
+        "".join(deploy.toml_table(n, v).decode() for n, v in CREDENTIALS.items())
+    )
+    return deploy.DeployJob(
+        account,
+        wheel,
+        requirements,
+        key,
+        tmp_path / "secrets" / "campaign-manager.json",
+        deploy.credential_files(credentials, ("shifter",)),
+        MAC_IP,
+        lambda: TOKEN,
+    )
 
 
 async def run_deploy(fake, job, shell=None, now=NOW):
@@ -116,9 +128,7 @@ def inventory(job):
 
 
 def writes(fake):
-    return [(m, re.sub(r"/[0-9a-f-]{6,}", "/N", p)) for m, p, _, _ in fake.requests
-            if m != "GET"]
-
+    return [(m, re.sub(r"/[0-9a-f-]{6,}", "/N", p)) for m, p, _, _ in fake.requests if m != "GET"]
 
 
 async def owned_world(job):
@@ -131,14 +141,26 @@ async def owned_world(job):
     fake.add_resource("snapshot", 9001, name=IMAGE)
     fake.add_resource("snapshot", 9002, name="prod-backup")
     images = job.inventory.with_name("campaign-images.json")
-    images.write_text(json.dumps({"builds": [{"snapshot_id": "9001", "snapshot_name": IMAGE},
-                                             {"state": "failed"}]}))
+    images.write_text(
+        json.dumps(
+            {"builds": [{"snapshot_id": "9001", "snapshot_name": IMAGE}, {"state": "failed"}]}
+        )
+    )
     return fake, saved, images
 
 
 def clean_report(tmp_path, cid=CID, **changes):
     path = tmp_path / f"collect-{cid}-{len(changes)}.json"
-    path.write_text(json.dumps({"campaign_id": cid, "clean": True, "mismatches": [],
-                                "missing": [], "extra": [], **changes}))
+    path.write_text(
+        json.dumps(
+            {
+                "campaign_id": cid,
+                "clean": True,
+                "mismatches": [],
+                "missing": [],
+                "extra": [],
+                **changes,
+            }
+        )
+    )
     return path
-

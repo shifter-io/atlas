@@ -1,4 +1,5 @@
 """Streaming artifacts: the summary is the commit marker for a finished run."""
+
 from __future__ import annotations
 
 import gzip
@@ -78,7 +79,9 @@ class JsonSink:
         artifacts = {"ips": self._publish("ips", self._stream, self._rows)}
         if self._geo_stream is not None:
             artifacts["geo"] = given.get("geo", {}) | self._publish(
-                "geo", self._geo_stream, self._geo_rows,
+                "geo",
+                self._geo_stream,
+                self._geo_rows,
             )
         summary.artifacts = artifacts
         temporary = self.directory / "summary.json.partial"

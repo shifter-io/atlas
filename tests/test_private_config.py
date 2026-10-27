@@ -22,8 +22,11 @@ def private_file(tmp_path, text='[shifter]\naccount="fixture"\npassword="private
 
 def test_file_credentials_override_environment_and_do_not_escape(tmp_path):
     path = private_file(tmp_path)
-    proxy = load_provider(CONFIG, credentials_file=path,
-                          environ={"SHIFTER_ACCOUNT": "wrong", "SHIFTER_PASSWORD": "wrong"})
+    proxy = load_provider(
+        CONFIG,
+        credentials_file=path,
+        environ={"SHIFTER_ACCOUNT": "wrong", "SHIFTER_PASSWORD": "wrong"},
+    )
     assert proxy.account == "fixture" and proxy.password == "private-secret"
     text = json.dumps(RunConfig("generic_http", proxy).public()) + repr(proxy)
     assert "private-secret" not in text and str(path) not in text
@@ -42,27 +45,35 @@ def test_credentials_refuse_shared_permissions_and_symlinks(tmp_path):
         read_credentials(link, "shifter")
 
 
-@pytest.mark.parametrize("text", [
-    '[other]\naccount="fixture"\npassword="secret"',
-    '[shifter]\naccount="fixture"',
-    '[shifter]\naccount="fixture"\npassword=""',
-    '[shifter]\naccount="fixture"\npassword=123',
-    '[shifter]\naccount="fixture"\npassword="secret"\nextra="secret"',
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[other]\naccount="fixture"\npassword="secret"',
+        '[shifter]\naccount="fixture"',
+        '[shifter]\naccount="fixture"\npassword=""',
+        '[shifter]\naccount="fixture"\npassword=123',
+        '[shifter]\naccount="fixture"\npassword="secret"\nextra="secret"',
+    ],
+)
 def test_private_credential_schema(tmp_path, text):
     with pytest.raises(ValueError):
         load_provider(CONFIG, credentials_file=private_file(tmp_path, text))
 
 
-@pytest.mark.parametrize("target,url", [
-    ("generic_http", "https://example.test/"), ("generic_https", "http://example.test/"),
-    ("generic_http", "http://user:secret@example.test/"),
-    ("generic_http", "http://example.test/#fragment"),
-    ("generic_http", "http://example.test:0/"),
-    ("generic_http", "http://example.test:invalid/"),
-    ("generic_http", "http://example.test/\r\n"),
-    ("generic_http", "http:///"), ("generic_http", 123),
-])
+@pytest.mark.parametrize(
+    "target,url",
+    [
+        ("generic_http", "https://example.test/"),
+        ("generic_https", "http://example.test/"),
+        ("generic_http", "http://user:secret@example.test/"),
+        ("generic_http", "http://example.test/#fragment"),
+        ("generic_http", "http://example.test:0/"),
+        ("generic_http", "http://example.test:invalid/"),
+        ("generic_http", "http://example.test/\r\n"),
+        ("generic_http", "http:///"),
+        ("generic_http", 123),
+    ],
+)
 def test_url_override_validation(target, url):
     with pytest.raises(ValueError) as exc:
         RunConfig(target, ProxyConfig("http", "localhost", 8080), target_url=url)
@@ -80,9 +91,14 @@ async def test_url_override_is_per_run_and_recorded(tmp_path, target, scheme):
             return await super().execute(target, context=context)
 
     url = f"{scheme}://example.test/custom?format=plain"
-    config = RunConfig(target, ProxyConfig("http", "localhost", 8080), requests=2,
-                       target_url=url.upper().replace("EXAMPLE.TEST/CUSTOM?FORMAT=PLAIN",
-                                                      "example.test/custom?format=plain"))
+    config = RunConfig(
+        target,
+        ProxyConfig("http", "localhost", 8080),
+        requests=2,
+        target_url=url.upper().replace(
+            "EXAMPLE.TEST/CUSTOM?FORMAT=PLAIN", "example.test/custom?format=plain"
+        ),
+    )
     summary = await run(config, JsonSink(tmp_path), transport_factory=InspectTransport)
     assert received == [url, url]
     assert summary.target["url"] == summary.config["target_url"] == url
@@ -92,8 +108,12 @@ async def test_url_override_is_per_run_and_recorded(tmp_path, target, scheme):
 async def test_custom_http_url_reaches_gateway(tmp_path):
     gateway = Gateway()
     async with server(gateway) as port:
-        config = RunConfig("generic_http", ProxyConfig("http", "127.0.0.1", port), requests=1,
-                           target_url="http://example.test/echo?plain=1")
+        config = RunConfig(
+            "generic_http",
+            ProxyConfig("http", "127.0.0.1", port),
+            requests=1,
+            target_url="http://example.test/echo?plain=1",
+        )
         summary = await run(config, JsonSink(tmp_path))
     assert summary.successes == 1
     assert b"GET http://example.test/echo?plain=1 HTTP/1.1" in gateway.requests[0]
@@ -115,7 +135,21 @@ def test_cli_uses_private_file_and_url(tmp_path, monkeypatch, capsys):
         return Summary()
 
     monkeypatch.setattr("proxy_index.cli.run", fake_run)
-    assert main(["run", "--target", "generic_http", "--provider-config", str(CONFIG),
-                 "--credentials-file", str(path), "--url", "http://example.test/ip"]) == 0
+    assert (
+        main(
+            [
+                "run",
+                "--target",
+                "generic_http",
+                "--provider-config",
+                str(CONFIG),
+                "--credentials-file",
+                str(path),
+                "--url",
+                "http://example.test/ip",
+            ]
+        )
+        == 0
+    )
     output = capsys.readouterr()
     assert "private-secret" not in output.out + output.err

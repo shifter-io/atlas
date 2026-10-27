@@ -64,13 +64,23 @@ OURS = [WORKER_TAG, f"pi-camp-{SID}", f"pi-camp-{SID}-h03"]
 
 def make_spec(**changes) -> CampaignSpec:
     base = CampaignSpec(
-        campaign_id=CID, created_at=SPEC_TIME, account="leftclick", project_id=CAMPAIGN_PROJECT,
-        starts_at=START.isoformat(), grace_hours=48, regions=("lon1", "nyc3"),
-        networks=("shifter", "geonode"), manifests={"shifter": "a.json", "geonode": "b.json"},
+        campaign_id=CID,
+        created_at=SPEC_TIME,
+        account="leftclick",
+        project_id=CAMPAIGN_PROJECT,
+        starts_at=START.isoformat(),
+        grace_hours=48,
+        regions=("lon1", "nyc3"),
+        networks=("shifter", "geonode"),
+        manifests={"shifter": "a.json", "geonode": "b.json"},
         size_by_region={"lon1": "c-2", "nyc3": "c-2"},
-        image_by_region={"lon1": "11", "nyc3": "12"}, image_name="pi-camp-worker-0.9.5",
-        wheel_sha256="a" * 64, framework_version="0.9.5", ssh_key_id="9",
-        manager_droplet_id=MANAGER_ID)
+        image_by_region={"lon1": "11", "nyc3": "12"},
+        image_name="pi-camp-worker-0.9.5",
+        wheel_sha256="a" * 64,
+        framework_version="0.9.5",
+        ssh_key_id="9",
+        manager_droplet_id=MANAGER_ID,
+    )
     return replace(base, **changes)
 
 
@@ -90,17 +100,25 @@ class Clock:
 
 
 def worker(network, region, hour, **values) -> DropletRecord:
-    return DropletRecord(network, region, hour, f"pic-{SID}-h{hour:02d}-{region}-{network}",
-                         **values)
+    return DropletRecord(
+        network, region, hour, f"pic-{SID}-h{hour:02d}-{region}-{network}", **values
+    )
 
 
 def fake_launcher(clock, calls):
     async def launch(spec, record, root):
         calls.append((record.hour, clock(), spec.networks))
-        record.droplets = [worker(net, region, record.hour, droplet_id=f"9{record.hour:02d}{i}",
-                                  status="armed", requested_at=clock().isoformat())
-                           for i, (net, region) in enumerate(
-                               (n, r) for n in spec.networks for r in spec.regions)]
+        record.droplets = [
+            worker(
+                net,
+                region,
+                record.hour,
+                droplet_id=f"9{record.hour:02d}{i}",
+                status="armed",
+                requested_at=clock().isoformat(),
+            )
+            for i, (net, region) in enumerate((n, r) for n in spec.networks for r in spec.regions)
+        ]
         record.state = "running"
         return record
 
@@ -116,11 +134,16 @@ async def test_every_slot_launches_at_5830_exactly_once_in_order(tmp_path):
     for slot in range(24):
         clock.now = START + timedelta(hours=slot) - timedelta(seconds=90)
         assert clock.now.strftime("%M:%S") == "58:30"
-        assert await run_tick(root, launcher=launcher, clock=clock,
-                              disable_timer=lambda: disabled.append(1)) == [slot]
+        assert await run_tick(
+            root, launcher=launcher, clock=clock, disable_timer=lambda: disabled.append(1)
+        ) == [slot]
         clock.now += timedelta(seconds=10)
-        assert await run_tick(root, launcher=launcher, clock=clock,
-                              disable_timer=lambda: disabled.append(1)) == []
+        assert (
+            await run_tick(
+                root, launcher=launcher, clock=clock, disable_timer=lambda: disabled.append(1)
+            )
+            == []
+        )
         assert load_hour(root, make_spec(), slot).launch_delay_seconds == 0
     assert [slot for slot, _, _ in calls] == list(range(24))
     assert disabled == [1, 1]  # the slot-23 tick and the later one; then the timer is gone
@@ -135,7 +158,11 @@ async def test_a_late_timer_launches_every_missed_slot_with_its_delay(tmp_path):
     delays = [load_hour(root, make_spec(), k).launch_delay_seconds for k in range(4)]
     assert delays == [11400.0, 7800.0, 4200.0, 600.0]
     assert [a["key"] for a in read_alerts(root) if a["code"] == "late_launch"] == [
-        "h00", "h01", "h02", "h03"]
+        "h00",
+        "h01",
+        "h02",
+        "h03",
+    ]
     assert load_hour(root, make_spec(), 4).state == "planned"
 
 
@@ -168,8 +195,10 @@ def test_concurrent_ticks_are_serialized_by_the_lock(tmp_path):
         active[0] -= 1
         return await inner(spec, record, root)
 
-    threads = [threading.Thread(target=lambda: asyncio.run(
-        run_tick(root, launcher=slow, clock=clock))) for _ in range(2)]
+    threads = [
+        threading.Thread(target=lambda: asyncio.run(run_tick(root, launcher=slow, clock=clock)))
+        for _ in range(2)
+    ]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -180,11 +209,21 @@ def test_concurrent_ticks_are_serialized_by_the_lock(tmp_path):
 async def test_now_mode_launches_only_the_given_slot_and_keeps_the_timer(tmp_path):
     root, calls = make_root(tmp_path), []
     clock = Clock(START + timedelta(minutes=7))
-    assert await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock,
-                          now_mode=True, slot=0, disable_timer=lambda: 1 / 0) == [0]
+    assert await run_tick(
+        root,
+        launcher=fake_launcher(clock, calls),
+        clock=clock,
+        now_mode=True,
+        slot=0,
+        disable_timer=lambda: 1 / 0,
+    ) == [0]
     assert read_alerts(root) == []  # a dry run "now" is not a late launch
-    assert await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock,
-                          now_mode=True, slot=0) == []
+    assert (
+        await run_tick(
+            root, launcher=fake_launcher(clock, calls), clock=clock, now_mode=True, slot=0
+        )
+        == []
+    )
     with pytest.raises(ValueError):
         await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock, now_mode=True)
 
@@ -197,7 +236,8 @@ async def test_pause_and_resume_change_only_later_hours(tmp_path):
     await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock)
     assert calls[-1][2] == ("geonode",)
     assert load_hour(root, make_spec(), 0).alerts == [
-        {"code": "network_paused", "level": "info", "networks": ["shifter"]}]
+        {"code": "network_paused", "level": "info", "networks": ["shifter"]}
+    ]
     assert set_paused(root, "shifter", False) == []
     clock.now = due_at(make_spec(), 1)
     await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock)
@@ -208,7 +248,10 @@ async def test_pause_and_resume_change_only_later_hours(tmp_path):
     await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock)
     assert len(calls) == 2 and load_hour(root, make_spec(), 2).state == "done"
     assert [load_hour(root, make_spec(), k).paused_networks for k in range(3)] == [
-        ["shifter"], [], ["geonode", "shifter"]]
+        ["shifter"],
+        [],
+        ["geonode", "shifter"],
+    ]
     with pytest.raises(ValueError):
         set_paused(root, "unknown", True)
 
@@ -238,8 +281,13 @@ def test_the_watchdog_raises_missed_launch_and_starts_the_tick(tmp_path):
     clock = Clock(START + timedelta(seconds=30))
 
     def check(kind, enabled=True):
-        return run_watchdog(root, check=kind, clock=clock, start_tick=lambda: started.append(1),
-                            timer_enabled=lambda: enabled)
+        return run_watchdog(
+            root,
+            check=kind,
+            clock=clock,
+            start_tick=lambda: started.append(1),
+            timer_enabled=lambda: enabled,
+        )
 
     assert check("armed") == "missed_launch" and started == [1]
     assert check("armed") == "missed_launch" and len(read_alerts(root)) == 1  # one alert
@@ -271,7 +319,11 @@ def finishing_harvester(clock, finish_on: dict[int, int]):
         stamp = clock().isoformat()
         for drop in record.droplets:
             drop.status, drop.finished_at, drop.collected_at, drop.destroyed_at = (
-                "destroyed", stamp, stamp, stamp)
+                "destroyed",
+                stamp,
+                stamp,
+                stamp,
+            )
             drop.bytes_up, drop.bytes_down, drop.requests, drop.successes = 10**8, 4 * 10**8, 50, 45
             drop.errors = 5
         record.state = "done"
@@ -283,10 +335,20 @@ def finishing_harvester(clock, finish_on: dict[int, int]):
 
 def running_hour(root, hour, clock):
     record = HourRecord(CID, hour, (START + timedelta(hours=hour)).isoformat(), state="running")
-    record.droplets = [worker(net, region, hour, droplet_id=f"8{hour}{i}", status="running",
-                              requested_at=clock().isoformat(), started_at=clock().isoformat())
-                       for i, (net, region) in enumerate(
-                           [("shifter", "lon1"), ("shifter", "nyc3"), ("geonode", "lon1")])]
+    record.droplets = [
+        worker(
+            net,
+            region,
+            hour,
+            droplet_id=f"8{hour}{i}",
+            status="running",
+            requested_at=clock().isoformat(),
+            started_at=clock().isoformat(),
+        )
+        for i, (net, region) in enumerate(
+            [("shifter", "lon1"), ("shifter", "nyc3"), ("geonode", "lon1")]
+        )
+    ]
     save_hour(root, record)
 
 
@@ -311,22 +373,38 @@ async def test_the_collector_finalizes_overlapping_hours_independently(tmp_path)
 
     async def recorded(spec, record, root):
         result = await harvest(spec, record, root)
-        seen.append((record.hour, (root / "reports/traffic/hour-01.md").exists(),
-                     (root / "reports/traffic/hour-00.md").exists()))
+        seen.append(
+            (
+                record.hour,
+                (root / "reports/traffic/hour-01.md").exists(),
+                (root / "reports/traffic/hour-00.md").exists(),
+            )
+        )
         return result
 
     harvest = finishing_harvester(clock, {0: 3, 1: 1})
-    status = await run_collector(root, harvester=recorded, cloud=None, remote_factory=None,
-                                 clock=clock, until_done=True, pacing=pacing(clock))
+    status = await run_collector(
+        root,
+        harvester=recorded,
+        cloud=None,
+        remote_factory=None,
+        clock=clock,
+        until_done=True,
+        pacing=pacing(clock),
+    )
     assert seen[:2] == [(0, False, False), (1, False, False)]
     assert seen[2] == (0, True, False)  # hour 1 was reported while hour 0 still ran
     assert settled(status) and not status["finished"]
     hours = {row["hour"]: row for row in status["hours"]}
     assert hours[0]["state"] == hours[1]["state"] == "done" and hours[2]["state"] == "planned"
     assert hours[0]["cells"] == {"complete": 3} and status["live_workers"] == 0
-    assert status["traffic_latest"] == {"hour": 1, "path": "reports/traffic/hour-01.md",
-                                        "total_bytes": 15 * 10**8, "top_network": "shifter",
-                                        "top_bytes": 10**9}
+    assert status["traffic_latest"] == {
+        "hour": 1,
+        "path": "reports/traffic/hour-01.md",
+        "total_bytes": 15 * 10**8,
+        "top_network": "shifter",
+        "top_bytes": 10**9,
+    }
     assert status["next_launch_at"] == due_at(make_spec(), 2).isoformat()
     assert len((root / "reports/traffic.tsv").read_text().splitlines()) == 1 + 4
 
@@ -335,8 +413,14 @@ async def test_the_daemon_exits_only_when_every_hour_is_final(tmp_path):
     root, clock = make_root(tmp_path, synthetic=True), Clock(START + timedelta(hours=25))
     for hour in range(24):
         running_hour(root, hour, clock)
-    status = await run_collector(root, harvester=finishing_harvester(clock, dict.fromkeys(
-        range(24), 2)), cloud=None, remote_factory=None, clock=clock, pacing=pacing(clock))
+    status = await run_collector(
+        root,
+        harvester=finishing_harvester(clock, dict.fromkeys(range(24), 2)),
+        cloud=None,
+        remote_factory=None,
+        clock=clock,
+        pacing=pacing(clock),
+    )
     assert status["finished"] and status["next_launch_at"] is None
 
 
@@ -375,32 +459,104 @@ def report_fixture(root):
     def at(minutes):
         return (datetime.fromisoformat(base) + timedelta(minutes=minutes)).isoformat()
 
-    cpu = {"cpu_p50_pct": 30.0, "cpu_p95_pct": 60.0, "cpu_max_pct": 80.0, "load1_p95": 1.5,
-           "mem_used_max_pct": 30.0, "concurrency": 2000}
-    hot = cpu | {"cpu_p50_pct": 41.0, "cpu_p95_pct": 71.0, "cpu_max_pct": 93.0, "load1_p95": 1.9,
-                 "mem_used_max_pct": 38.0}
+    cpu = {
+        "cpu_p50_pct": 30.0,
+        "cpu_p95_pct": 60.0,
+        "cpu_max_pct": 80.0,
+        "load1_p95": 1.5,
+        "mem_used_max_pct": 30.0,
+        "concurrency": 2000,
+    }
+    hot = cpu | {
+        "cpu_p50_pct": 41.0,
+        "cpu_p95_pct": 71.0,
+        "cpu_max_pct": 93.0,
+        "load1_p95": 1.9,
+        "mem_used_max_pct": 38.0,
+    }
     done = {"status": "destroyed", "requested_at": base, "started_at": at(1.5)}
     drops = [
-        worker("shifter", "lon1", 3, droplet_id="1", bytes_up=10**8, bytes_down=9 * 10**8,
-               requests=300, successes=297, errors=3, finished_at=at(61.5), collected_at=at(62),
-               destroyed_at=at(90), start_lateness_seconds=0.2, **done, **cpu | hot),
-        worker("shifter", "nyc3", 3, droplet_id="2", bytes_up=2 * 10**8, bytes_down=18 * 10**8,
-               requests=400, successes=396, errors=4, finished_at=at(91.5), collected_at=at(92),
-               destroyed_at=at(90), start_lateness_seconds=1.4, **done, **cpu),
-        worker("geonode", "lon1", 3, droplet_id="3", bytes_up=2 * 10**8, bytes_down=10**9,
-               requests=300, successes=270, errors=30, finished_at=at(121.5), collected_at=at(122),
-               destroyed_at=at(150), **done, **cpu | hot),
+        worker(
+            "shifter",
+            "lon1",
+            3,
+            droplet_id="1",
+            bytes_up=10**8,
+            bytes_down=9 * 10**8,
+            requests=300,
+            successes=297,
+            errors=3,
+            finished_at=at(61.5),
+            collected_at=at(62),
+            destroyed_at=at(90),
+            start_lateness_seconds=0.2,
+            **done,
+            **cpu | hot,
+        ),
+        worker(
+            "shifter",
+            "nyc3",
+            3,
+            droplet_id="2",
+            bytes_up=2 * 10**8,
+            bytes_down=18 * 10**8,
+            requests=400,
+            successes=396,
+            errors=4,
+            finished_at=at(91.5),
+            collected_at=at(92),
+            destroyed_at=at(90),
+            start_lateness_seconds=1.4,
+            **done,
+            **cpu,
+        ),
+        worker(
+            "geonode",
+            "lon1",
+            3,
+            droplet_id="3",
+            bytes_up=2 * 10**8,
+            bytes_down=10**9,
+            requests=300,
+            successes=270,
+            errors=30,
+            finished_at=at(121.5),
+            collected_at=at(122),
+            destroyed_at=at(150),
+            **done,
+            **cpu | hot,
+        ),
     ]
-    record = HourRecord(CID, 3, "2027-01-02T01:00:00+00:00", state="done", droplets=drops,
-                        launch_delay_seconds=0.4,
-                        traffic={"shifter": {"countries_done": 50, "countries_total": 50,
-                                             "worker_hours": 3.0},
-                                 "geonode": {"countries_done": 20, "countries_total": 25,
-                                             "worker_hours": 2.5}})
+    record = HourRecord(
+        CID,
+        3,
+        "2027-01-02T01:00:00+00:00",
+        state="done",
+        droplets=drops,
+        launch_delay_seconds=0.4,
+        traffic={
+            "shifter": {"countries_done": 50, "countries_total": 50, "worker_hours": 3.0},
+            "geonode": {"countries_done": 20, "countries_total": 25, "worker_hours": 2.5},
+        },
+    )
     save_hour(root, record)
-    earlier = HourRecord(CID, 2, "2027-01-02T00:00:00+00:00", state="done", droplets=[
-        worker("shifter", "lon1", 2, droplet_id="4", bytes_up=5 * 10**8, bytes_down=5 * 10**8,
-               collected_at=base)])
+    earlier = HourRecord(
+        CID,
+        2,
+        "2027-01-02T00:00:00+00:00",
+        state="done",
+        droplets=[
+            worker(
+                "shifter",
+                "lon1",
+                2,
+                droplet_id="4",
+                bytes_up=5 * 10**8,
+                bytes_down=5 * 10**8,
+                collected_at=base,
+            )
+        ],
+    )
     save_hour(root, earlier)
     return record
 
@@ -418,7 +574,8 @@ def test_the_traffic_report_totals_equal_the_sum_of_the_records(tmp_path):
         "countries_total\tregions_done\tworker_hours",
         "02\tshifter\t500000000\t500000000\t0\t0\t0\t0\t0\t0\t0.000",
         "03\tgeonode\t200000000\t1000000000\t300\t270\t30\t20\t25\t1\t2.500",
-        "03\tshifter\t300000000\t2700000000\t700\t693\t7\t50\t50\t2\t3.000"]
+        "03\tshifter\t300000000\t2700000000\t700\t693\t7\t50\t50\t2\t3.000",
+    ]
 
 
 def test_an_hour_without_samples_or_traffic_still_reports(tmp_path):
@@ -430,11 +587,16 @@ def test_an_hour_without_samples_or_traffic_still_reports(tmp_path):
 
 def install_host_map(monkeypatch):
     """CAMP-1c's host-map helpers (`launch.hosts_path`, `launch.read_hosts`), same format."""
+
     def path(root, hour):
         return root / ".runtime" / f"hosts-{hour:02d}.json"
 
-    hosts = types.SimpleNamespace(hosts_path=path, read_hosts=lambda root, hour: (
-        json.loads(path(root, hour).read_text()) if path(root, hour).exists() else {}))
+    hosts = types.SimpleNamespace(
+        hosts_path=path,
+        read_hosts=lambda root, hour: (
+            json.loads(path(root, hour).read_text()) if path(root, hour).exists() else {}
+        ),
+    )
     monkeypatch.setitem(sys.modules, "proxy_index.campaign.launch", hosts)
     return hosts
 
@@ -452,7 +614,8 @@ class FakeRemote:
 
 # 7 and 11: orphan reconcile over the production-like fake account; no IPv4 anywhere.
 async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplets(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     install_host_map(monkeypatch)
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=4))
     fake = FakeDigitalOcean()
@@ -465,24 +628,34 @@ async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplet
     foreign = fake.add(name.format("ams3", "shifter"), OURS, project=PROD_PROJECT)
     bad_name = fake.add(f"pic-{SID}-oops", OURS, project=CAMPAIGN_PROJECT)
     beyond = fake.add(f"pic-{SID}-h30-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
-    launching = fake.add(f"pic-{SID}-h04-lon1-shifter", [*OURS[:2], f"pi-camp-{SID}-h04"],
-                         project=None)
-    record = HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
-                        report_path="reports/traffic/hour-03.md", droplets=[
-                            worker("shifter", "lon1", 3, droplet_id=gone, status="destroyed")])
+    launching = fake.add(
+        f"pic-{SID}-h04-lon1-shifter", [*OURS[:2], f"pi-camp-{SID}-h04"], project=None
+    )
+    record = HourRecord(
+        CID,
+        3,
+        (START + timedelta(hours=3)).isoformat(),
+        state="done",
+        report_path="reports/traffic/hour-03.md",
+        droplets=[worker("shifter", "lon1", 3, droplet_id=gone, status="destroyed")],
+    )
     save_hour(root, record)
-    save_hour(root, HourRecord(CID, 4, (START + timedelta(hours=4)).isoformat(),
-                               state="launching"))
-    remote = FakeRemote({name.format("nyc3", "shifter"): {"installed": True},
-                         name.format("lon1", "geonode"): {"assignment": {"kind": "round"}},
-                         name.format("nyc3", "geonode"): OSError("ssh down")})
+    save_hour(root, HourRecord(CID, 4, (START + timedelta(hours=4)).isoformat(), state="launching"))
+    remote = FakeRemote(
+        {
+            name.format("nyc3", "shifter"): {"installed": True},
+            name.format("lon1", "geonode"): {"assignment": {"kind": "round"}},
+            name.format("nyc3", "geonode"): OSError("ssh down"),
+        }
+    )
 
     async def harvest(spec, record, root):
         return record
 
     async with running(fake) as cloud:
         status = await collector_module.Collector(
-            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)).pass_once()
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)
+        ).pass_once()
     assert sorted(fake.deleted) == sorted([("droplet", gone), ("droplet", idle)])
     assert {foreign, bad_name, beyond, launching, active, silent} <= set(fake.droplets)
     hour = load_hour(root, make_spec(), 3)
@@ -491,17 +664,22 @@ async def test_orphan_reconcile_adopts_retires_and_never_touches_foreign_droplet
     assert by_id[active].status == "running" and hour.state == "harvesting"
     assert silent not in by_id and hour.report_path is None
     codes = {(a["code"], a["key"]) for a in read_alerts(root)}
-    assert {("foreign_tagged", foreign), ("foreign_tagged", bad_name), ("foreign_tagged", beyond),
-            ("orphan_unreachable", silent), ("orphan_adopted", idle)} <= codes
+    assert {
+        ("foreign_tagged", foreign),
+        ("foreign_tagged", bad_name),
+        ("foreign_tagged", beyond),
+        ("orphan_unreachable", silent),
+        ("orphan_adopted", idle),
+    } <= codes
     audit = [json.loads(line) for line in audit_path(root).read_text().splitlines()]
     assert [a["result"] for a in audit] == ["attempt", "deleted", "attempt", "deleted"]
     assert status["ratelimit_remaining"] == 4321
     late = fake.add(name.format("ams3", "geonode"), OURS, project=CAMPAIGN_PROJECT)
     remote.answers[name.format("ams3", "geonode")] = {"assignment": {"kind": "round"}}
     async with running(fake) as cloud:  # known droplets are left alone; a non-final hour stays
-        await collector_module.Collector(root, harvest, cloud, lambda hour: remote, clock,
-                                         pacing(clock)).reconcile(
-            make_spec(), tick_module.load_hours(root, make_spec()))
+        await collector_module.Collector(
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)
+        ).reconcile(make_spec(), tick_module.load_hours(root, make_spec()))
     hour = load_hour(root, make_spec(), 3)
     assert hour.state == "harvesting" and late in {d.droplet_id for d in hour.droplets}
     assert len(fake.deleted) == 2
@@ -514,8 +692,16 @@ async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monk
     fake = FakeDigitalOcean()
     first = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=PROD_PROJECT)
     second = fake.add(f"pic-{SID}-h03-nyc3-shifter", [WORKER_TAG], project=PROD_PROJECT)
-    save_hour(root, HourRecord(CID, 3, START.isoformat(), state="running", droplets=[
-        worker("shifter", "lon1", 3, droplet_id=first, status="destroyed")]))
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            3,
+            START.isoformat(),
+            state="running",
+            droplets=[worker("shifter", "lon1", 3, droplet_id=first, status="destroyed")],
+        ),
+    )
     async with running(fake) as cloud:
         collector = collector_module.Collector(root, None, cloud, None, clock, pacing(clock))
         spec = make_spec(project_id=PROD_PROJECT)
@@ -537,10 +723,17 @@ async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monk
 async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tmp_path):
     root = make_root(tmp_path, synthetic=True)
     clock = Clock(START + timedelta(hours=12, minutes=1))
-    record = HourRecord(CID, 0, START.isoformat(), state="running", alerts=[
-        {"code": "auth_failed", "level": "high", "network": "shifter"}], droplets=[
-        worker("shifter", "lon1", 0, droplet_id="1", status="running"),
-        worker("shifter", "nyc3", 0, droplet_id=None, status="create_failed")])
+    record = HourRecord(
+        CID,
+        0,
+        START.isoformat(),
+        state="running",
+        alerts=[{"code": "auth_failed", "level": "high", "network": "shifter"}],
+        droplets=[
+            worker("shifter", "lon1", 0, droplet_id="1", status="running"),
+            worker("shifter", "nyc3", 0, droplet_id=None, status="create_failed"),
+        ],
+    )
     save_hour(root, record)
     save_hour(root, HourRecord(CID, 1, START.isoformat(), state="running"))
 
@@ -550,12 +743,23 @@ async def test_collector_alerts_for_record_alerts_errors_and_the_manager_host(tm
         return record
 
     cloud = types.SimpleNamespace(ratelimit_remaining=0)
-    status = await collector_module.Collector(root, harvest, cloud, None, clock, Pacing(
-        clock_synced=lambda: False, uptime=lambda: 600.0, disk_usage=disk(10))).pass_once()
+    status = await collector_module.Collector(
+        root,
+        harvest,
+        cloud,
+        None,
+        clock,
+        Pacing(clock_synced=lambda: False, uptime=lambda: 600.0, disk_usage=disk(10)),
+    ).pass_once()
     codes = {(a["code"], a["level"]) for a in read_alerts(root)}
-    assert {("auth_failed", "high"),
-            ("create_failures", "high"), ("harvest_error", "info"), ("disk_low", "high"),
-            ("clock_unsynced", "high"), ("ratelimit_low", "high")} == codes
+    assert {
+        ("auth_failed", "high"),
+        ("create_failures", "high"),
+        ("harvest_error", "info"),
+        ("disk_low", "high"),
+        ("clock_unsynced", "high"),
+        ("ratelimit_low", "high"),
+    } == codes
     assert status["alerts_open"] == 5 and status["disk_free_pct"] == 10.0
     assert status["clock_synced"] is False and status["live_workers"] == 1
 
@@ -584,8 +788,10 @@ def test_the_default_systemd_hooks(tmp_path, monkeypatch):
     clock = Clock(START + timedelta(seconds=30))
     assert run_watchdog(root, check="armed", clock=clock) == "missed_launch"
     unit = f"proxy-index-campaign-tick@{CID}"
-    assert commands == [["systemctl", "is-enabled", f"{unit}.timer"],
-                        ["systemctl", "start", "--no-block", f"{unit}.service"]]
+    assert commands == [
+        ["systemctl", "is-enabled", f"{unit}.timer"],
+        ["systemctl", "start", "--no-block", f"{unit}.service"],
+    ]
     for slot in range(24):
         save_hour(root, HourRecord(CID, slot, START.isoformat(), state="running"))
     asyncio.run(run_tick(root, launcher=None, clock=clock))
@@ -594,19 +800,32 @@ def test_the_default_systemd_hooks(tmp_path, monkeypatch):
 
 # 10: the watch writes the states, copies reports and notifies (faked SSH and notifications).
 def watch_data(now, *, reports=None, alerts=(), finished=False, offset=0):
-    status = {"now": now.isoformat(), "live_workers": 16, "finished": finished,
-              "hours": [{"hour": 0, "state": "done"}, {"hour": 1, "state": "running"}]}
+    status = {
+        "now": now.isoformat(),
+        "live_workers": 16,
+        "finished": finished,
+        "hours": [{"hour": 0, "state": "done"}, {"hour": 1, "state": "running"}],
+    }
     tsv = "hour\tnetwork\tbytes_up\tbytes_down\n00\tshifter\t1000000000\t2000000000\n"
-    return {"status": status, "alerts": [json.dumps(a) for a in alerts], "offset": offset,
-            "reports": reports or {}, "tsv": tsv}
+    return {
+        "status": status,
+        "alerts": [json.dumps(a) for a in alerts],
+        "offset": offset,
+        "reports": reports or {},
+        "tsv": tsv,
+    }
 
 
 def test_the_watch_writes_states_copies_reports_and_notifies(tmp_path):
     clock, notes, replies = Clock(START), [], []
     status_file, traffic = tmp_path / "campaign.status.md", tmp_path / "traffic"
     status_file.write_text("State: active\n\nOperator notes stay.\n")
-    io = WatchIO(fetch=lambda inv, offset, seen: replies.pop(0), notify=notes.append,
-                 clock=clock, sleep=lambda _s: None)
+    io = WatchIO(
+        fetch=lambda inv, offset, seen: replies.pop(0),
+        notify=notes.append,
+        clock=clock,
+        sleep=lambda _s: None,
+    )
     replies.append(watch_data(START, reports={"hour-00.md": "# hour 0\n"}, offset=10))
     watch = Watch({"host": "manager"}, status_file, traffic, io)
     assert watch.once() == "active"
@@ -632,8 +851,12 @@ def test_run_watch_stops_when_finished(tmp_path):
     inventory = tmp_path / "inventory.json"
     inventory.write_text(json.dumps({"host": "manager", "campaign_id": CID}))
     replies = [watch_data(START), watch_data(START, finished=True)]
-    io = WatchIO(fetch=lambda *a: replies.pop(0), notify=lambda _t: None, clock=Clock(START),
-                 sleep=lambda _s: None)
+    io = WatchIO(
+        fetch=lambda *a: replies.pop(0),
+        notify=lambda _t: None,
+        clock=Clock(START),
+        sleep=lambda _s: None,
+    )
     assert run_watch(inventory, tmp_path / "s.md", tmp_path / "t", io=io) == "finished"
     assert report_message("hour-05.md", {}) == "CAMP-1 hour 05: 0.00 GB"
 
@@ -648,8 +871,12 @@ def test_ssh_fetch_and_notify_build_safe_commands(monkeypatch):
         return types.SimpleNamespace(stdout=json.dumps({"ok": True}))
 
     monkeypatch.setattr(watch.subprocess, "run", run)
-    inventory = {"host": "manager.example", "identity": "id_mac", "known_hosts": "kh",
-                 "campaign_id": CID}
+    inventory = {
+        "host": "manager.example",
+        "identity": "id_mac",
+        "known_hosts": "kh",
+        "campaign_id": CID,
+    }
     assert watch.ssh_fetch(inventory, 5, {}) == {"ok": True}
     assert calls[0][:3] == ["ssh", "-i", "id_mac"] and "StrictHostKeyChecking=yes" in calls[0]
     assert calls[0][-1].endswith(f"/opt/proxy-index-campaign/campaigns/{CID} 5 -")
@@ -672,8 +899,12 @@ def test_the_remote_reader_returns_new_and_rewritten_reports(tmp_path):
     (tmp_path / "alerts.jsonl").write_text('{"code": "a"}\n{"code": "b"}\n')
 
     def read(offset, seen):
-        out = subprocess.run([sys.executable, "-c", watch.REMOTE_READ, str(tmp_path),
-                              str(offset), seen], capture_output=True, text=True, check=True)
+        out = subprocess.run(
+            [sys.executable, "-c", watch.REMOTE_READ, str(tmp_path), str(offset), seen],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
         return json.loads(out.stdout)
 
     first = read(0, "-")
@@ -689,18 +920,25 @@ def test_the_watch_acknowledges_alerts_and_survives_bad_lines(tmp_path):
     """w1: only unacknowledged high alerts block; w2: a bad line never repeats notifications."""
     clock, notes, replies = Clock(START), [], []
     status_file, traffic = tmp_path / "campaign.status.md", tmp_path / "traffic"
-    io = WatchIO(fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock,
-                 sleep=lambda _s: None)
+    io = WatchIO(
+        fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock, sleep=lambda _s: None
+    )
     high = json.dumps({"code": "missed_launch", "level": "high", "key": "h01-armed"})
-    replies.append(watch_data(START, reports={"hour-00.md": "# hour 0\n"}, offset=10)
-                   | {"alerts": ["not json", "[1]", high]})
+    replies.append(
+        watch_data(START, reports={"hour-00.md": "# hour 0\n"}, offset=10)
+        | {"alerts": ["not json", "[1]", high]}
+    )
     assert Watch({}, status_file, traffic, io).once() == "blocked"
-    assert notes[1:] == ["CAMP-1 alert watch_parse_error: skipped a malformed alert line",
-                         "CAMP-1 alert missed_launch (h01-armed)"]
+    assert notes[1:] == [
+        "CAMP-1 alert watch_parse_error: skipped a malformed alert line",
+        "CAMP-1 alert missed_launch (h01-armed)",
+    ]
     assert "Alerts: 1 high (1 new)" in status_file.read_text()
     assert acknowledge(status_file) == 1
-    replies.append(watch_data(START, reports={"hour-00.md": "# hour 0, rewritten\n"},
-                              offset=20) | {"alerts": ["also bad"]})
+    replies.append(
+        watch_data(START, reports={"hour-00.md": "# hour 0, rewritten\n"}, offset=20)
+        | {"alerts": ["also bad"]}
+    )
     watch = Watch({}, status_file, traffic, io)
     assert watch.once() == "active" and "Alerts: 1 high (0 new)" in status_file.read_text()
     assert (traffic / "hour-00.md").read_text() == "# hour 0, rewritten\n"
@@ -732,14 +970,18 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
         async def close(self):
             created["closed"] = True
 
-    modules = {"launch": {"launch_hour": launch_hour}, "harvest": {"harvest_hour": harvest_hour},
-               "fanout": {"OpenSSHRemote": lambda *args: args}}
+    modules = {
+        "launch": {"launch_hour": launch_hour},
+        "harvest": {"harvest_hour": harvest_hour},
+        "fanout": {"OpenSSHRemote": lambda *args: args},
+    }
     # Each fake keeps the real module's other names: parser setup imports probe and shot,
     # which import from these modules, and must work when no earlier test loaded them.
     for name, values in modules.items():
         real = importlib.import_module(f"proxy_index.campaign.{name}")
-        monkeypatch.setitem(sys.modules, real.__name__,
-                            types.SimpleNamespace(**(vars(real) | values)))
+        monkeypatch.setitem(
+            sys.modules, real.__name__, types.SimpleNamespace(**(vars(real) | values))
+        )
     monkeypatch.setattr("proxy_index.campaign.do_api.DigitalOcean", Client)
     monkeypatch.setattr(collector_module, "ntp_synced", lambda: True)
     assert main(["campaign", "network", "pause", "geonode", "--root", str(root)]) == 0
@@ -748,17 +990,51 @@ def test_the_campaign_commands(tmp_path, monkeypatch, capsys):
     assert main(["campaign", "collector", "--root", str(root), "--until-done"]) == 0
     assert main(["campaign", "watchdog", "--root", str(root), "--check", "fired"]) == 0
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert lines == [{"paused": ["geonode"]}, {"launched": [0]},
-                     {"finished": False, "live_workers": 0}, {"alert": None}]
+    assert lines == [
+        {"paused": ["geonode"]},
+        {"launched": [0]},
+        {"finished": False, "live_workers": 0},
+        {"alert": None},
+    ]
     inventory = tmp_path / "inventory.json"
     inventory.write_text("{}")
-    monkeypatch.setattr("proxy_index.campaign.watch.ssh_fetch",
-                        lambda *a: watch_data(datetime.now(UTC), finished=True))
+    monkeypatch.setattr(
+        "proxy_index.campaign.watch.ssh_fetch",
+        lambda *a: watch_data(datetime.now(UTC), finished=True),
+    )
     monkeypatch.setattr("proxy_index.campaign.watch.notify", lambda _text: None)
-    assert main(["campaign", "watch", "--inventory", str(inventory), "--status-file",
-                 str(tmp_path / "s.md"), "--traffic-dir", str(tmp_path / "t"), "--once"]) == 0
-    assert main(["campaign", "watch", "--inventory", str(inventory), "--status-file",
-                 str(tmp_path / "s.md"), "--traffic-dir", str(tmp_path / "t"), "--ack"]) == 0
+    assert (
+        main(
+            [
+                "campaign",
+                "watch",
+                "--inventory",
+                str(inventory),
+                "--status-file",
+                str(tmp_path / "s.md"),
+                "--traffic-dir",
+                str(tmp_path / "t"),
+                "--once",
+            ]
+        )
+        == 0
+    )
+    assert (
+        main(
+            [
+                "campaign",
+                "watch",
+                "--inventory",
+                str(inventory),
+                "--status-file",
+                str(tmp_path / "s.md"),
+                "--traffic-dir",
+                str(tmp_path / "t"),
+                "--ack",
+            ]
+        )
+        == 0
+    )
     assert json.loads(capsys.readouterr().out.splitlines()[-1]) == {"acked": 0}
 
 
@@ -768,13 +1044,16 @@ def test_s1_the_armed_watchdog_accepts_a_launching_hour_with_armed_workers(tmp_p
     clock = Clock(START + timedelta(seconds=30))
     record = load_hour(root, make_spec(), 0)
     record.state, record.fired_at = "launching", due_at(make_spec(), 0).isoformat()
-    record.droplets = [worker("shifter", "lon1", 0, droplet_id="1", status="armed"),
-                       worker("shifter", "nyc3", 0, droplet_id="2", status="booting")]
+    record.droplets = [
+        worker("shifter", "lon1", 0, droplet_id="1", status="armed"),
+        worker("shifter", "nyc3", 0, droplet_id="2", status="booting"),
+    ]
     save_hour(root, record)
 
     def check():
-        return run_watchdog(root, check="armed", clock=clock, start_tick=lambda: None,
-                            timer_enabled=lambda: True)
+        return run_watchdog(
+            root, check="armed", clock=clock, start_tick=lambda: None, timer_enabled=lambda: True
+        )
 
     assert check() is None and read_alerts(root) == []
     record.droplets[0].status = "booting"
@@ -785,16 +1064,26 @@ def test_s1_the_armed_watchdog_accepts_a_launching_hour_with_armed_workers(tmp_p
 async def test_s2_launcher_and_harvester_alerts_keep_their_kind_and_name(tmp_path):
     root, clock = make_root(tmp_path, synthetic=True), Clock(START + timedelta(hours=1))
     name = f"pic-{SID}-h00-lon1-shifter"
-    save_hour(root, HourRecord(CID, 0, START.isoformat(), state="running", alerts=[
-        {"time": START.isoformat(), "level": "high", "kind": "auth_failed", "name": name},
-        {"time": START.isoformat(), "level": "info", "kind": "round_long_3h", "name": name}]))
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            0,
+            START.isoformat(),
+            state="running",
+            alerts=[
+                {"time": START.isoformat(), "level": "high", "kind": "auth_failed", "name": name},
+                {"time": START.isoformat(), "level": "info", "kind": "round_long_3h", "name": name},
+            ],
+        ),
+    )
 
     async def harvest(spec, record, root):
         return record
 
-    await collector_module.Collector(root, harvest, None, None, clock,
-                                     Pacing(clock_synced=lambda: True,
-                                            disk_usage=disk(50))).pass_once()
+    await collector_module.Collector(
+        root, harvest, None, None, clock, Pacing(clock_synced=lambda: True, disk_usage=disk(50))
+    ).pass_once()
     mirrored = {(a["code"], a["level"], a.get("name")) for a in read_alerts(root)}
     assert mirrored == {("auth_failed", "high", name), ("round_long_3h", "info", name)}
 
@@ -812,27 +1101,61 @@ async def test_s3_a_reconcile_error_never_stops_reports_or_status(tmp_path):
     async def harvest(spec, record, root):
         return record
 
-    collector = collector_module.Collector(root, harvest, Broken(), None, clock,
-                                           pacing(clock))
+    collector = collector_module.Collector(root, harvest, Broken(), None, clock, pacing(clock))
     for _ in range(3):
         status = await collector.pass_once()
         collector.reconciled_at = None
     assert (root / "reports/traffic/hour-00.md").exists() and status_path(root).exists()
     assert status["hours"][0]["state"] == "done"
     assert {(a["code"], a["level"]) for a in read_alerts(root)} == {
-        ("reconcile_error", "info"), ("reconcile_error", "high")}
+        ("reconcile_error", "info"),
+        ("reconcile_error", "high"),
+    }
 
 
 def test_s4_cumulative_gb_counts_every_hour_collected_so_far(tmp_path):
     root = make_root(tmp_path)
     late = START + timedelta(hours=2)
-    save_hour(root, HourRecord(CID, 0, START.isoformat(), state="done", droplets=[
-        worker("shifter", "lon1", 0, droplet_id="1", bytes_up=10**9, bytes_down=10**9,
-               collected_at=late.isoformat())]))
-    save_hour(root, HourRecord(CID, 1, (START + timedelta(hours=1)).isoformat(), state="done",
-                               droplets=[worker("shifter", "lon1", 1, droplet_id="2",
-                                                bytes_up=10**9, bytes_down=2 * 10**9,
-                                                collected_at=late.isoformat())]))
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            0,
+            START.isoformat(),
+            state="done",
+            droplets=[
+                worker(
+                    "shifter",
+                    "lon1",
+                    0,
+                    droplet_id="1",
+                    bytes_up=10**9,
+                    bytes_down=10**9,
+                    collected_at=late.isoformat(),
+                )
+            ],
+        ),
+    )
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            1,
+            (START + timedelta(hours=1)).isoformat(),
+            state="done",
+            droplets=[
+                worker(
+                    "shifter",
+                    "lon1",
+                    1,
+                    droplet_id="2",
+                    bytes_up=10**9,
+                    bytes_down=2 * 10**9,
+                    collected_at=late.isoformat(),
+                )
+            ],
+        ),
+    )
     text = write_traffic_report(root, 0).read_text()
     assert "| shifter | 1.000 | 1.000 | 2.000 |" in text
     assert text.split("| shifter |")[1].splitlines()[0].endswith("| 5.000 |")
@@ -843,10 +1166,17 @@ async def test_s5_failed_retires_are_retried_and_unreachable_orphans_keep_it_ali
     fake = FakeDigitalOcean()
     stuck = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
     lost = fake.add(f"pic-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
-    save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
-                               report_path="reports/traffic/hour-03.md", droplets=[
-                                   worker("shifter", "lon1", 3, droplet_id=stuck,
-                                          status="destroy_failed")]))
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            3,
+            (START + timedelta(hours=3)).isoformat(),
+            state="done",
+            report_path="reports/traffic/hour-03.md",
+            droplets=[worker("shifter", "lon1", 3, droplet_id=stuck, status="destroy_failed")],
+        ),
+    )
     remote = FakeRemote({f"pic-{SID}-h03-nyc3-shifter": OSError("ssh down")})
 
     async def harvest(spec, record, root):
@@ -854,7 +1184,8 @@ async def test_s5_failed_retires_are_retried_and_unreachable_orphans_keep_it_ali
 
     async with running(fake) as cloud:
         status = await collector_module.Collector(
-            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)).pass_once()
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)
+        ).pass_once()
     assert fake.deleted == [("droplet", stuck)] and lost in fake.droplets
     assert load_hour(root, make_spec(), 3).droplets[0].status == "destroyed"
     assert status["live_workers"] == 1 and not status["finished"]
@@ -865,16 +1196,25 @@ async def test_s6_an_adopted_active_orphan_gets_its_host_map_entry(tmp_path, mon
     hosts = install_host_map(monkeypatch)
     fake = FakeDigitalOcean()
     active = fake.add(f"pic-{SID}-h03-lon1-shifter", OURS, project=CAMPAIGN_PROJECT)
-    save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
-                               report_path="reports/traffic/hour-03.md"))
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            3,
+            (START + timedelta(hours=3)).isoformat(),
+            state="done",
+            report_path="reports/traffic/hour-03.md",
+        ),
+    )
     remote = FakeRemote({f"pic-{SID}-h03-lon1-shifter": {"assignment": {"kind": "round"}}})
 
     async def harvest(spec, record, root):
         return record
 
     async with running(fake) as cloud:
-        await collector_module.Collector(root, harvest, cloud, lambda hour: remote, clock,
-                                         pacing(clock)).pass_once()
+        await collector_module.Collector(
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)
+        ).pass_once()
     assert hosts.read_hosts(root, 3) == {active: "203.0.113.10"}
     assert not IPV4.search(hour_path(root, 3).read_text())
 
@@ -882,8 +1222,14 @@ async def test_s6_an_adopted_active_orphan_gets_its_host_map_entry(tmp_path, mon
 async def test_s7_the_timer_stays_while_any_slot_is_planned_or_launching(tmp_path):
     root, calls, disabled = make_root(tmp_path), [], []
     clock = Clock(START + timedelta(hours=23, minutes=5))
-    assert await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock,
-                          now_mode=True, slot=23, disable_timer=lambda: disabled.append(1)) == [23]
+    assert await run_tick(
+        root,
+        launcher=fake_launcher(clock, calls),
+        clock=clock,
+        now_mode=True,
+        slot=23,
+        disable_timer=lambda: disabled.append(1),
+    ) == [23]
     assert disabled == []
     inner = fake_launcher(clock, calls)
 
@@ -893,8 +1239,9 @@ async def test_s7_the_timer_stays_while_any_slot_is_planned_or_launching(tmp_pat
         return await inner(spec, record, root)
 
     with pytest.raises(RuntimeError):
-        await run_tick(root, launcher=fail_22, clock=clock,
-                       disable_timer=lambda: disabled.append(1))
+        await run_tick(
+            root, launcher=fail_22, clock=clock, disable_timer=lambda: disabled.append(1)
+        )
     assert load_hour(root, make_spec(), 22).state == "launching" and disabled == []
     await run_tick(root, launcher=inner, clock=clock, disable_timer=lambda: disabled.append(1))
     assert disabled == [1]
@@ -903,8 +1250,16 @@ async def test_s7_the_timer_stays_while_any_slot_is_planned_or_launching(tmp_pat
 def test_s7_the_watchdog_alarms_when_the_timer_is_off_but_a_due_slot_is_planned(tmp_path):
     root, started = make_root(tmp_path), []
     clock = Clock(START + timedelta(hours=2, seconds=30))
-    assert run_watchdog(root, check="armed", clock=clock, start_tick=lambda: started.append(1),
-                        timer_enabled=lambda: False) == "missed_launch"
+    assert (
+        run_watchdog(
+            root,
+            check="armed",
+            clock=clock,
+            start_tick=lambda: started.append(1),
+            timer_enabled=lambda: False,
+        )
+        == "missed_launch"
+    )
     assert started == []  # a disabled timer is the operator's; only the alarm is raised
 
 
@@ -965,7 +1320,8 @@ async def test_r1_every_reconcile_outage_alerts_again(tmp_path):
 
 @pytest.mark.parametrize("case", ["no_ipv4", "no_launcher"])
 async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
-        tmp_path, monkeypatch, case):
+    tmp_path, monkeypatch, case
+):
     root, clock = make_root(tmp_path), Clock(START + timedelta(hours=5))
     if case == "no_ipv4":
         install_host_map(monkeypatch)
@@ -973,13 +1329,21 @@ async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
         monkeypatch.setitem(sys.modules, "proxy_index.campaign.launch", None)
     fake = FakeDigitalOcean()
     name = f"pic-{SID}-h03-lon1-shifter"
-    active = fake.add(name, OURS, project=CAMPAIGN_PROJECT,
-                      ip=None if case == "no_ipv4" else "203.0.113.10")
+    active = fake.add(
+        name, OURS, project=CAMPAIGN_PROJECT, ip=None if case == "no_ipv4" else "203.0.113.10"
+    )
     stuck = fake.add(f"pic-{SID}-h03-nyc3-shifter", OURS, project=CAMPAIGN_PROJECT)
-    save_hour(root, HourRecord(CID, 3, (START + timedelta(hours=3)).isoformat(), state="done",
-                               report_path="reports/traffic/hour-03.md", droplets=[
-                                   worker("shifter", "nyc3", 3, droplet_id=stuck,
-                                          status="destroyed")]))
+    save_hour(
+        root,
+        HourRecord(
+            CID,
+            3,
+            (START + timedelta(hours=3)).isoformat(),
+            state="done",
+            report_path="reports/traffic/hour-03.md",
+            droplets=[worker("shifter", "nyc3", 3, droplet_id=stuck, status="destroyed")],
+        ),
+    )
     remote = FakeRemote({name: {"assignment": {"kind": "round"}}})
 
     async def harvest(spec, record, root):
@@ -987,7 +1351,8 @@ async def test_r2_r4_an_active_orphan_without_a_host_entry_stays_unreachable(
 
     async with running(fake) as cloud:
         status = await collector_module.Collector(
-            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)).pass_once()
+            root, harvest, cloud, lambda hour: remote, clock, pacing(clock)
+        ).pass_once()
     hour = load_hour(root, make_spec(), 3)
     assert active not in {d.droplet_id for d in hour.droplets} and hour.state == "done"
     assert fake.deleted == [("droplet", stuck)]  # the rest of the reconcile still ran
@@ -1000,16 +1365,23 @@ def test_w1b_an_ack_reaches_the_long_running_watch(tmp_path):
     clock, notes = Clock(START), []
     status_file = tmp_path / "campaign.status.md"
     high = json.dumps({"code": "missed_launch", "level": "high", "key": "h01-armed"})
-    replies = [watch_data(START, offset=10) | {"alerts": [high]},
-               watch_data(START, offset=10), watch_data(START, offset=10),
-               watch_data(START, offset=20) | {"alerts": [high.replace("h01", "h02")]}]
-    watch = Watch({}, status_file, tmp_path / "traffic", WatchIO(
-        fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock,
-        sleep=lambda _s: None))
+    replies = [
+        watch_data(START, offset=10) | {"alerts": [high]},
+        watch_data(START, offset=10),
+        watch_data(START, offset=10),
+        watch_data(START, offset=20) | {"alerts": [high.replace("h01", "h02")]},
+    ]
+    watch = Watch(
+        {},
+        status_file,
+        tmp_path / "traffic",
+        WatchIO(
+            fetch=lambda *a: replies.pop(0), notify=notes.append, clock=clock, sleep=lambda _s: None
+        ),
+    )
     assert watch.once() == "blocked"
     assert acknowledge(status_file) == 1
     assert watch.once() == "active" and watch.once() == "active"  # the same, long-lived watch
     assert "Alerts: 1 high (0 new)" in status_file.read_text()
     assert watch.once() == "blocked"  # a later high alert blocks again
     assert "Alerts: 2 high (1 new)" in status_file.read_text()
-

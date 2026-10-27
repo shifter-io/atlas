@@ -52,7 +52,12 @@ PLACE = ("country_code", "country", "region_code", "region", "city")
 NETWORK = ("asn", "name", "usage_type")
 # Payload breakdown name -> calculated_breakdowns dimension code.
 BREAKDOWNS = {
-    "country": "c", "region": "r", "city": "g", "asn": "a", "country_asn": "x", "city_asn": "y",
+    "country": "c",
+    "region": "r",
+    "city": "g",
+    "asn": "a",
+    "country_asn": "x",
+    "city_asn": "y",
 }
 OUTCOMES = ("challenges", "blocks", "bytes_up", "bytes_down")
 EVIDENCE_RANGES = {
@@ -473,8 +478,14 @@ def time_slots(rows, pulses=()):
     def slot(key):
         return slots.setdefault(
             key,
-            {"completed": 0, "successes": 0, "all_completed": 0, "all_successes": 0,
-             "light": defaultdict(Counter), "light_successes": Counter()},
+            {
+                "completed": 0,
+                "successes": 0,
+                "all_completed": 0,
+                "all_successes": 0,
+                "light": defaultdict(Counter),
+                "light_successes": Counter(),
+            },
         )
 
     def add(s, completed, successes, clean):
@@ -551,9 +562,8 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
         "success": len(rates),
         "down": sum(v == 0 for v in rates),
         "skipped_during_census": sum(
-            v is None and s["all_completed"] > 0 for v, s in zip(
-                votes.values(), slots.values(), strict=True
-            )
+            v is None and s["all_completed"] > 0
+            for v, s in zip(votes.values(), slots.values(), strict=True)
         ),
         "latency": len({key for key, *_ in voting}),
         "latency_targets": sorted({t for _, t, _ in voting}, key=str),
@@ -923,8 +933,18 @@ def outage_list(outages, since, end, limit=50):
 
 
 def series(
-    rows, observations, start, end, hours, *, outages=(), tested=(),
-    latency_target=None, minimum=1, factors=None, excluded=None,
+    rows,
+    observations,
+    start,
+    end,
+    hours,
+    *,
+    outages=(),
+    tested=(),
+    latency_target=None,
+    minimum=1,
+    factors=None,
+    excluded=None,
 ):
     """Request history plus outage-time availability at the same bucket resolution.
 
@@ -961,9 +981,15 @@ def series(
                 "successes": m["successes"],
                 "success_rate": m["success_rate"],
                 "latency_ms": timing["latency_ms"],
-                **({"latency_under_load_ms": under_load(
-                    latency_rows, factors or {}, minimum, excluded
-                )["ms"]} if latency_target else {}),
+                **(
+                    {
+                        "latency_under_load_ms": under_load(
+                            latency_rows, factors or {}, minimum, excluded
+                        )["ms"]
+                    }
+                    if latency_target
+                    else {}
+                ),
                 "unique_ips": len(seen[t]) if buckets[t] else None,
                 "uptime": availability["value"],
             }
@@ -1059,8 +1085,13 @@ def product_inputs(p, prices, config, kind, measured_uptime=None, evidence=None)
         clean, reason=None if clean is not None else "No exit IP has a DB-IP usage type"
     )
     if kind == "datacenter" and seen:
-        inputs["dcAsns"] = {"value": clean, "state": "ready", "reason": None, "inputs": None,
-                            "fixed": 100.0}
+        inputs["dcAsns"] = {
+            "value": clean,
+            "state": "ready",
+            "reason": None,
+            "inputs": None,
+            "fixed": 100.0,
+        }
     accuracy = p["geo_accuracy"]
     inputs["authenticity"] = component(
         100 * accuracy if accuracy is not None else None,

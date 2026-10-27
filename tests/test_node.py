@@ -24,16 +24,31 @@ pytest_plugins = ["test_storage"]
 
 SHIFTER = Path(__file__).resolve().parents[1] / "configs" / "shifter.toml"
 BERLIN = {
-    "matched": True, "country_code": "DE", "country": "Germany", "region_code": "BE",
-    "region": "Berlin", "city": "Berlin", "latitude": 52.52, "longitude": 13.4,
-    "isp": "Telekom", "organization": None, "asn": 3320, "asn_organization": "DTAG",
-    "connection_type": "Cable/DSL", "usage_type": "residential",
+    "matched": True,
+    "country_code": "DE",
+    "country": "Germany",
+    "region_code": "BE",
+    "region": "Berlin",
+    "city": "Berlin",
+    "latitude": 52.52,
+    "longitude": 13.4,
+    "isp": "Telekom",
+    "organization": None,
+    "asn": 3320,
+    "asn_organization": "DTAG",
+    "connection_type": "Cable/DSL",
+    "usage_type": "residential",
 }
 
 
 class GeoEnricher:
-    release = {"file": "fixture.mmdb", "sha256": "cd" * 32, "database_type": "DBIP-Full",
-               "build_epoch": 1000, "built_at": "1970-01-01T00:16:40+00:00"}
+    release = {
+        "file": "fixture.mmdb",
+        "sha256": "cd" * 32,
+        "database_type": "DBIP-Full",
+        "build_epoch": 1000,
+        "built_at": "1970-01-01T00:16:40+00:00",
+    }
 
     def lookup(self, address):
         return dict(BERLIN)
@@ -55,11 +70,21 @@ class RotatingGateway(Gateway):
 
 def assignment(**overrides):
     return {
-        "batch_id": 7, "kind": "pulse", "product_id": 1, "provider": "shifter",
-        "product": "residential", "country_code": "DE", "region": "fra1",
-        "target_id": "generic_https", "target_url": "https://ip-info.com/myip",
-        "timeout_ms": 9000, "concurrency": 25, "stop_rule": "count", "requests": 100,
-        "min_sample": None, "start_at": datetime.now(UTC).isoformat(),
+        "batch_id": 7,
+        "kind": "pulse",
+        "product_id": 1,
+        "provider": "shifter",
+        "product": "residential",
+        "country_code": "DE",
+        "region": "fra1",
+        "target_id": "generic_https",
+        "target_url": "https://ip-info.com/myip",
+        "timeout_ms": 9000,
+        "concurrency": 25,
+        "stop_rule": "count",
+        "requests": 100,
+        "min_sample": None,
+        "start_at": datetime.now(UTC).isoformat(),
     } | overrides
 
 
@@ -84,8 +109,15 @@ def test_config_targets_the_country_with_rotating_sessions(tmp_path, monkeypatch
     monkeypatch.setenv("SHIFTER_ACCOUNT", "acct")
     monkeypatch.setenv("SHIFTER_PASSWORD", "secret")
     factory = provider_factory(SHIFTER)
-    agent = NodeAgent("http://orchestrator", "t", provider="shifter", product="residential",
-                      region="fra1", proxy_factory=factory, work_dir=tmp_path)
+    agent = NodeAgent(
+        "http://orchestrator",
+        "t",
+        provider="shifter",
+        product="residential",
+        region="fra1",
+        proxy_factory=factory,
+        work_dir=tmp_path,
+    )
     config = agent.config(assignment())
     assert config.requested_country == "de" and config.runner_location == "fra1"
     assert config.target_url is None  # the registry's own URL is not an override
@@ -96,17 +128,33 @@ def test_config_targets_the_country_with_rotating_sessions(tmp_path, monkeypatch
     assert "country-de" in proxy.username and "sid-" not in proxy.username
     assert "secret" not in repr(config)
 
-    census = agent.config(assignment(kind="census", target_id="generic_http", requests=None,
-                                     stop_rule="unique_ratio", min_sample=50, concurrency=1000,
-                                     target_url="http://127.0.0.1:9/ip"))
+    census = agent.config(
+        assignment(
+            kind="census",
+            target_id="generic_http",
+            requests=None,
+            stop_rule="unique_ratio",
+            min_sample=50,
+            concurrency=1000,
+            target_url="http://127.0.0.1:9/ip",
+        )
+    )
     assert census.requests is None and census.min_sample == 50
     assert census.target_url == "http://127.0.0.1:9/ip"
     with pytest.raises(ValueError, match="label conflicts"):
-        NodeAgent("http://o", "t", provider="shifter", product="datacenter", region="fra1",
-                  proxy_factory=factory, work_dir=tmp_path).config(assignment())
+        NodeAgent(
+            "http://o",
+            "t",
+            provider="shifter",
+            product="datacenter",
+            region="fra1",
+            proxy_factory=factory,
+            work_dir=tmp_path,
+        ).config(assignment())
     with pytest.raises(ValueError, match="--region or --host-name"):
-        NodeAgent("http://o", "t", provider="x", product="y", proxy_factory=factory,
-                  work_dir=tmp_path)
+        NodeAgent(
+            "http://o", "t", provider="x", product="y", proxy_factory=factory, work_dir=tmp_path
+        )
 
 
 async def stub_orchestrator(handlers):
@@ -135,8 +183,16 @@ async def test_upload_retries_transient_failures_and_cleans_up(tmp_path, monkeyp
         return web.json_response({"ok": True, "status": "done"})
 
     test_server, calls = await stub_orchestrator({"/v1/results": results})
-    agent = NodeAgent(str(test_server.make_url("")), "tok", provider="p", product="q",
-                      region="fra1", proxy_factory=None, work_dir=tmp_path, upload_backoff=0.01)
+    agent = NodeAgent(
+        str(test_server.make_url("")),
+        "tok",
+        provider="p",
+        product="q",
+        region="fra1",
+        proxy_factory=None,
+        work_dir=tmp_path,
+        upload_backoff=0.01,
+    )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "summary.json").write_text("{}")
@@ -169,8 +225,16 @@ async def test_rejections_are_final_and_shutdown_reports_failure(tmp_path):
         return web.json_response({"ok": True, "status": "failed"})
 
     test_server, calls = await stub_orchestrator({"/v1/results": results, "/v1/failed": failed})
-    agent = NodeAgent(str(test_server.make_url("")), "tok", provider="p", product="q",
-                      region="fra1", proxy_factory=None, work_dir=tmp_path, upload_backoff=0.01)
+    agent = NodeAgent(
+        str(test_server.make_url("")),
+        "tok",
+        provider="p",
+        product="q",
+        region="fra1",
+        proxy_factory=None,
+        work_dir=tmp_path,
+        upload_backoff=0.01,
+    )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "summary.json").write_text("{}")
@@ -214,12 +278,22 @@ async def test_a_target_known_only_to_the_database_runs_as_an_echo_target(tmp_pa
     gateway = RotatingGateway(lambda n: f"10.0.1.{n % 4 + 1}")
     async with server(gateway) as port:
         agent = NodeAgent(
-            str(test_server.make_url("")), "tok", provider="fixture", product="alpha",
-            region="fra1", proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
-            work_dir=tmp_path, progress_interval=0.05, upload_backoff=0.01,
+            str(test_server.make_url("")),
+            "tok",
+            provider="fixture",
+            product="alpha",
+            region="fra1",
+            proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
+            work_dir=tmp_path,
+            progress_interval=0.05,
+            upload_backoff=0.01,
         )
-        work = assignment(target_id="generic_http_b", target_url="http://127.0.0.1:9/ip",
-                          requests=6, concurrency=2)
+        work = assignment(
+            target_id="generic_http_b",
+            target_url="http://127.0.0.1:9/ip",
+            requests=6,
+            concurrency=2,
+        )
         target = agent.targets(work).get("generic_http_b")
         assert target == EchoIpTarget("generic_http_b", "http://127.0.0.1:9/ip", True)
         config = agent.config(work)
@@ -259,10 +333,19 @@ async def orchestrator(database):
 def agents_for(base, tokens, port, tmp_path, **options):
     return [
         NodeAgent(
-            base, token["token"], provider="fixture", product=token["product"], region="fra1",
+            base,
+            token["token"],
+            provider="fixture",
+            product=token["product"],
+            region="fra1",
             proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
-            work_dir=tmp_path / token["product"], enricher=GeoEnricher(), poll_interval=0.1,
-            heartbeat_interval=0.2, progress_interval=0.05, upload_backoff=0.05, **options,
+            work_dir=tmp_path / token["product"],
+            enricher=GeoEnricher(),
+            poll_interval=0.1,
+            heartbeat_interval=0.2,
+            progress_interval=0.05,
+            upload_backoff=0.05,
+            **options,
         )
         for token in tokens
     ]
@@ -278,8 +361,12 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
             "pulse_enabled=(target_id='generic_http')"
         )
     async with db.connection() as conn:
-        for key, value in (("census.lead_seconds", 1), ("pulse.lead_seconds", 1),
-                           ("census.min_sample", 30), ("load.delay_seconds", 1)):
+        for key, value in (
+            ("census.lead_seconds", 1),
+            ("pulse.lead_seconds", 1),
+            ("census.min_sample", 30),
+            ("load.delay_seconds", 1),
+        ):
             await put_setting(conn, key, value)
     tokens = [
         issue_token(database, provider="fixture", product=product, region="fra1")
@@ -294,9 +381,15 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
         agents = agents_for(base, tokens, port, tmp_path)
         tasks = [asyncio.create_task(agent.run(stop)) for agent in agents]
         try:
-            await wait_for(lambda: query(
-                database, "SELECT count(*) FROM test_batches WHERE status IN "
-                          "('scheduled','running')")[0][0] == 0)
+            await wait_for(
+                lambda: (
+                    query(
+                        database,
+                        "SELECT count(*) FROM test_batches WHERE status IN ('scheduled','running')",
+                    )[0][0]
+                    == 0
+                )
+            )
         finally:
             stop.set()
             await asyncio.gather(*tasks)
@@ -315,15 +408,18 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
     load = [run for run in runs if run[0] == "load"]
     # census_concurrency requests at once, counted like a pulse.
     assert [(r[1], r[2], r[3], r[4]) for r in load] == [
-        ("alpha", "done", "requests", 4), ("beta", "done", "requests", 4),
+        ("alpha", "done", "requests", 4),
+        ("beta", "done", "requests", 4),
     ]
     assert [(r[1], r[2], r[3], r[6], r[7]) for r in census] == [
-        ("alpha", "done", "unique_ratio", 10, True), ("beta", "done", "unique_ratio", 10, True),
+        ("alpha", "done", "unique_ratio", 10, True),
+        ("beta", "done", "unique_ratio", 10, True),
     ]
     # Stopped at the first success past the 30-success sample; in-flight requests finish.
     assert all(30 <= r[5] <= 33 and r[4] == r[5] for r in census)
     assert [(r[1], r[2], r[3], r[4], r[7]) for r in pulse] == [
-        ("alpha", "done", "requests", 12, True), ("beta", "done", "requests", 12, True),
+        ("alpha", "done", "requests", 12, True),
+        ("beta", "done", "requests", 12, True),
     ]
     census_keys = sorted(r[8] for r in census)
     geo = query(
@@ -338,15 +434,23 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
     linked = query(database, "SELECT count(*) FROM test_runs WHERE batch_id IS NOT NULL")
     assert linked == [(6,)]
     # Both products started the same census at the same scheduled instant.
-    started = query(database, "SELECT r.started_at FROM batch_runs r JOIN test_batches b "
-                              "USING(batch_id) WHERE b.kind='census'")
+    started = query(
+        database,
+        "SELECT r.started_at FROM batch_runs r JOIN test_batches b "
+        "USING(batch_id) WHERE b.kind='census'",
+    )
     assert abs((started[0][0] - started[1][0]).total_seconds()) < 1.0
-    events = query(database, "SELECT e.kind,p.name,e.country_code,e.signal,e.data "
-                             "FROM test_events e JOIN products p USING(product_id) "
-                             "ORDER BY e.kind,p.name")
+    events = query(
+        database,
+        "SELECT e.kind,p.name,e.country_code,e.signal,e.data "
+        "FROM test_events e JOIN products p USING(product_id) "
+        "ORDER BY e.kind,p.name",
+    )
     assert [e[:4] for e in events] == [
-        ("census_finished", "alpha", "DE", 1), ("census_finished", "beta", "DE", 1),
-        ("census_started", "alpha", "DE", 0), ("census_started", "beta", "DE", 0),
+        ("census_finished", "alpha", "DE", 1),
+        ("census_finished", "beta", "DE", 1),
+        ("census_started", "alpha", "DE", 0),
+        ("census_started", "beta", "DE", 0),
     ]
     for _, _, _, _, data in events[:2]:
         assert data["unique_ips"] == 10 and data["region"] == "fra1"
@@ -377,8 +481,12 @@ async def test_operator_kill_stops_and_discards_the_run(database, orchestrator, 
         task = asyncio.create_task(agent.run(stop))
         try:
             # Kill only once a progress post has recorded requests for the run.
-            await wait_for(lambda: gateway.served > 20 and query(
-                database, "SELECT requests>0 FROM batch_runs") == [(True,)])
+            await wait_for(
+                lambda: (
+                    gateway.served > 20
+                    and query(database, "SELECT requests>0 FROM batch_runs") == [(True,)]
+                )
+            )
             with connect(database) as conn:
                 conn.execute("UPDATE test_batches SET status='killed',finished_at=now()")
                 conn.execute("UPDATE batch_runs SET status='killed',finished_at=now()")

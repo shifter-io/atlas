@@ -74,14 +74,16 @@ def cpu_usage(data: dict, previous: dict) -> dict:
     for process in data.get("processes", []):
         before = old.get(process["pid"], {})
         if elapsed > 0 and before.get("start_ticks") == process.get("start_ticks"):
-            process["cpu_pct"] = round(max(0, process["cpu_seconds"]
-                                          - before["cpu_seconds"]) / elapsed * 100, 1)
+            process["cpu_pct"] = round(
+                max(0, process["cpu_seconds"] - before["cpu_seconds"]) / elapsed * 100, 1
+            )
     cores = {}
     for name, ticks in data.get("core_ticks", {}).items():
         before = previous.get("core_ticks", {}).get(name)
         if before and ticks["total"] > before["total"]:
-            cores[name] = round(100 * (1 - (ticks["idle"] - before["idle"]) /
-                                      (ticks["total"] - before["total"])), 1)
+            cores[name] = round(
+                100 * (1 - (ticks["idle"] - before["idle"]) / (ticks["total"] - before["total"])), 1
+            )
     data["core_cpu_pct"] = cores
     return data
 
@@ -310,8 +312,9 @@ async def collect(inventory: Path, output: Path) -> dict:
     result = {
         "collected_at": timestamp(now),
         "collected_epoch": now,
-        "servers": [classify(cpu_usage(value, old.get(value["region"], {})), now)
-                    for value in values],
+        "servers": [
+            classify(cpu_usage(value, old.get(value["region"], {})), now) for value in values
+        ],
     }
     atomic_json(output / "snapshot.json", result)
     atomic_bytes(output / "index.html", render(result))

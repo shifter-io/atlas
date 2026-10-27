@@ -55,7 +55,8 @@ def round_ended(info: dict) -> tuple[bool, int | None]:
     service = info.get("service") or {}
     active, sub = service.get("ActiveState"), service.get("SubState")
     if active in ("activating", "deactivating", "reloading") or (
-            active == "active" and sub != "exited"):
+        active == "active" and sub != "exited"
+    ):
         return False, None
     code = int(service.get("ExecMainStatus") or 1)
     if (info.get("state") or {}).get("status") not in ROUND_DONE:
@@ -63,9 +64,15 @@ def round_ended(info: dict) -> tuple[bool, int | None]:
     return True, code
 
 
-async def harvest_hour(spec: CampaignSpec, record: HourRecord, root: Path, *,
-                       cloud: DigitalOcean | None, remote_factory: RemoteFactory | None,
-                       clock: Clock | None = None) -> HourRecord:
+async def harvest_hour(
+    spec: CampaignSpec,
+    record: HourRecord,
+    root: Path,
+    *,
+    cloud: DigitalOcean | None,
+    remote_factory: RemoteFactory | None,
+    clock: Clock | None = None,
+) -> HourRecord:
     """One pass over the live workers of a launched hour; safe to repeat every 30 s."""
     with lock(hour_path(root, record.hour).parent / ".lock"):
         await _Harvest(spec, record, root, cloud, remote_factory, clock or Clock()).run()
@@ -100,13 +107,21 @@ class _Harvest(HourWork):
             if self.spec.synthetic:
                 self._synthetic(worker)
                 return
-            droplet = Droplet(worker.droplet_id, worker.name, worker.region, worker.size,
-                              "active", moment(worker.requested_at or self.record.scheduled_at),
-                              (), public_ipv4=self.hosts.get(str(worker.droplet_id)))
+            droplet = Droplet(
+                worker.droplet_id,
+                worker.name,
+                worker.region,
+                worker.size,
+                "active",
+                moment(worker.requested_at or self.record.scheduled_at),
+                (),
+                public_ipv4=self.hosts.get(str(worker.droplet_id)),
+            )
             if worker.status in ("armed", "running") and not await self._watch(worker, droplet):
                 return
             if worker.status in ("finished", "collect_failed") and not await self._collect(
-                    worker, droplet):
+                worker, droplet
+            ):
                 return
             await self.retire(worker)
         except Exception as error:
@@ -117,7 +132,8 @@ class _Harvest(HourWork):
 
     def _synthetic(self, worker: DropletRecord) -> None:
         if self.clock.now() < moment(self.record.scheduled_at).timestamp() + (
-                SYNTHETIC_MINUTES * 60):
+            SYNTHETIC_MINUTES * 60
+        ):
             return
         now = self.now()
         worker.started_at = worker.started_at or self.record.scheduled_at
@@ -144,12 +160,14 @@ class _Harvest(HourWork):
         return ended
 
     def _progress(self, worker: DropletRecord, state: dict) -> None:
-        started = next((j["started_at"] for j in state.get("jobs", []) if j.get("started_at")),
-                       None)
+        started = next(
+            (j["started_at"] for j in state.get("jobs", []) if j.get("started_at")), None
+        )
         if started and not worker.started_at:
             worker.status, worker.started_at = "running", started
             worker.start_lateness_seconds = round(
-                moment(started).timestamp() - moment(self.record.scheduled_at).timestamp(), 3)
+                moment(started).timestamp() - moment(self.record.scheduled_at).timestamp(), 3
+            )
         if worker.started_at:
             age = self.clock.now() - moment(worker.started_at).timestamp()
             for limit, level, kind in LONG_ROUND:
@@ -160,13 +178,16 @@ class _Harvest(HourWork):
         """Pull, verify, journal and record; a failure keeps the worker and re-pulls later."""
         memo, now = self.memo.setdefault(str(worker.droplet_id), {}), self.clock.now()
         if worker.status == "collect_failed" and now - memo.get("last_pull", 0) < (
-                PULL_RETRY_SECONDS):  # the memo may predate a restart (m7)
+            PULL_RETRY_SECONDS
+        ):  # the memo may predate a restart (m7)
             return False
         memo["last_pull"] = now
         manifest = manifest_path(self.root, self.spec, worker.network)
         local = round_directory(manifest, worker.region, worker.hour)
-        remote = (f"{WORKER_ROOT}/run/{manifest.parent.name}/regions/{worker.region}"
-                  f"/rounds/{worker.hour:02d}")
+        remote = (
+            f"{WORKER_ROOT}/run/{manifest.parent.name}/regions/{worker.region}"
+            f"/rounds/{worker.hour:02d}"
+        )
         try:
             await self.remote.pull(droplet, remote, local)
             result = self._verify(manifest, worker)
@@ -176,8 +197,10 @@ class _Harvest(HourWork):
                 self.alert("high", "collect_failed", worker.name)
             return False
         try:
-            await self.remote.journal(droplet, logs_dir(self.root, worker.hour)
-                                      / f"{worker.network}-{worker.region}.journal.txt")
+            await self.remote.journal(
+                droplet,
+                logs_dir(self.root, worker.hour) / f"{worker.network}-{worker.region}.journal.txt",
+            )
         except Exception:
             self.alert("info", "journal_failed", worker.name)
         self._account(worker, result, local)
@@ -192,8 +215,11 @@ class _Harvest(HourWork):
             if worker.exit_code in STOPPED_OK:
                 raise
             return None  # a failed unit may leave no checkpoint; its data is partial anyway
-        explained = {f"{c['country']}: {status}" for c in result["countries"]
-                     for status in (c["status"], "not started")}
+        explained = {
+            f"{c['country']}: {status}"
+            for c in result["countries"]
+            for status in (c["status"], "not started")
+        }
         if worker.exit_code in STOPPED_OK and set(result["issues"]) - explained:
             raise RoundDataError("round data does not verify")
         return result
@@ -206,22 +232,34 @@ class _Harvest(HourWork):
         worker.errors = sum(c["errors"] for c in countries)
         worker.bytes_up = sum(c["bytes_up"] for c in countries)
         worker.bytes_down = sum(c["bytes_down"] for c in countries)
-        cpu = sampler.summarize(local / "host-samples.jsonl", since=moment(
-            worker.started_at).timestamp() if worker.started_at else None)
+        cpu = sampler.summarize(
+            local / "host-samples.jsonl",
+            since=moment(worker.started_at).timestamp() if worker.started_at else None,
+        )
         worker.cpu_p50_pct, worker.cpu_p95_pct = cpu["cpu_p50_pct"], cpu["cpu_p95_pct"]
         worker.cpu_max_pct, worker.cpu_peak_pct = cpu["cpu_max_pct"], cpu["cpu_peak_pct"]
-        worker.cpu_core_max_pct, worker.steal_p95_pct = (cpu["cpu_core_max_pct"],
-                                                         cpu["steal_p95_pct"])
+        worker.cpu_core_max_pct, worker.steal_p95_pct = (
+            cpu["cpu_core_max_pct"],
+            cpu["steal_p95_pct"],
+        )
         worker.load1_p95, worker.mem_used_max_pct = cpu["load1_p95"], cpu["mem_used_max_pct"]
         worker.rss_peak_mb = cpu["rss_peak_mb"]
         ok = worker.exit_code in STOPPED_OK
         worker.error_class = None if ok else "round_failed"
         self.record.cells[cell_key(worker.network, worker.region)] = (
-            "complete" if ok and worker.exit_code == 0 and result and result["complete"]
-            else "partial" if ok else "failed_ours")
+            "complete"
+            if ok and worker.exit_code == 0 and result and result["complete"]
+            else "partial"
+            if ok
+            else "failed_ours"
+        )
         traffic = self.record.traffic[worker.network]
-        for key, value in (("requests", worker.requests), ("successes", worker.successes),
-                           ("errors", worker.errors), ("bytes_up", worker.bytes_up),
-                           ("bytes_down", worker.bytes_down), ("countries_done", sum(
-                               c["status"] == "completed" for c in countries))):
+        for key, value in (
+            ("requests", worker.requests),
+            ("successes", worker.successes),
+            ("errors", worker.errors),
+            ("bytes_up", worker.bytes_up),
+            ("bytes_down", worker.bytes_down),
+            ("countries_done", sum(c["status"] == "completed" for c in countries)),
+        ):
             traffic[key] += value

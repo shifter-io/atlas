@@ -1,4 +1,5 @@
 """Provider extension point and portable, secret-free TOML configuration loading."""
+
 from __future__ import annotations
 
 import os
@@ -38,8 +39,11 @@ for _provider in grammar_ids():
 
 
 def load_provider(
-    path: str | Path, *, parameters: Mapping[str, Any] | None = None,
-    session_policy: str | None = None, providers: ProviderRegistry = registry,
+    path: str | Path,
+    *,
+    parameters: Mapping[str, Any] | None = None,
+    session_policy: str | None = None,
+    providers: ProviderRegistry = registry,
     environ: Mapping[str, str] | None = None,
     credentials_file: str | Path | None = None,
 ) -> ProxySource:
@@ -52,8 +56,10 @@ def load_provider(
     with Path(path).open("rb") as stream:
         data = tomllib.load(stream)
     allowed = {"schema_version", "provider", "credentials", "settings", "parameters", "extra_flags"}
-    if set(data) - allowed or type(data.get("schema_version")) is not int or (
-        data["schema_version"] != 1
+    if (
+        set(data) - allowed
+        or type(data.get("schema_version")) is not int
+        or (data["schema_version"] != 1)
     ):
         raise ValueError("Unsupported provider configuration schema")
     credentials = data.get("credentials", {})
@@ -65,13 +71,18 @@ def load_provider(
     if any(key in settings for key in ("account", "password", "parameters", "extra_flags")):
         raise ValueError("Use the dedicated credentials and parameters configuration sections")
     env = os.environ if environ is None else environ
-    private = (read_credentials(credentials_file, data.get("provider"))
-               if credentials_file is not None else None)
+    private = (
+        read_credentials(credentials_file, data.get("provider"))
+        if credentials_file is not None
+        else None
+    )
     options = dict(settings)
     credential_names = set()
     for key, env_name in credentials.items():
-        if not key.endswith("_env") or not isinstance(env_name, str) or not re.fullmatch(
-            r"[A-Za-z_][A-Za-z0-9_]*", env_name
+        if (
+            not key.endswith("_env")
+            or not isinstance(env_name, str)
+            or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", env_name)
         ):
             raise ValueError("Credentials must reference environment variable names")
         name = key.removesuffix("_env")
@@ -88,9 +99,18 @@ def load_provider(
     if session_policy is not None:
         options["session_policy"] = session_policy
     return providers.create(
-        data.get("provider"), parameters=params, extra_flags=extras, **options,
+        data.get("provider"),
+        parameters=params,
+        extra_flags=extras,
+        **options,
     )
 
 
-__all__ = ["GrammarProxy", "NoCountryList", "ProviderRegistry", "load_grammar", "load_provider",
-           "registry"]
+__all__ = [
+    "GrammarProxy",
+    "NoCountryList",
+    "ProviderRegistry",
+    "load_grammar",
+    "load_provider",
+    "registry",
+]

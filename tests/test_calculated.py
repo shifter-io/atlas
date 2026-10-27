@@ -117,7 +117,9 @@ async def test_calculation_publication_and_api(database, tmp_path):
     assert first["products"][0]["windows"]["24h"]["pool"]["unique_ips"] <= 10
     assert first["products"][0]["windows"]["24h"]["scores"]["balanced"]["score"] is None
     assert first["products"][0]["windows"]["24h"]["overlap"] == {
-        "exclusive_share": 1, "shared_share": 0, "compared_products": 0,
+        "exclusive_share": 1,
+        "shared_share": 0,
+        "compared_products": 0,
     }
     assert calculate(database, POLICY, as_of=end)["snapshot_id"] == first["snapshot_id"]
     # A late imported second provider revises the same cutoff, including overlap.
@@ -137,7 +139,9 @@ async def test_calculation_publication_and_api(database, tmp_path):
     empty = calculate(database, POLICY, as_of=end + timedelta(days=31))
     assert empty["products"][0]["windows"]["30d"]["metrics"]["completed"] == 0
     assert empty["products"][0]["windows"]["30d"]["overlap"] == {
-        "exclusive_share": None, "shared_share": None, "compared_products": 0,
+        "exclusive_share": None,
+        "shared_share": None,
+        "compared_products": 0,
     }
     # API still serves after removing access to raw facts from the read path.
     async with TestClient(TestServer(app(database))) as client:
@@ -307,7 +311,14 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     unloaded = build(
         [x for x in r if x["run_key"] not in loads],
         [x for x in b if x["run_key"] not in loads],
-        o, e, c, digest(c), now, 5, None, None,
+        o,
+        e,
+        c,
+        digest(c),
+        now,
+        5,
+        None,
+        None,
     )
     window = unloaded["products"][0]["windows"]["24h"]
     assert window["scores"]["balanced"]["score"] is None
@@ -560,7 +571,9 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
     for window in alone["products"][0]["windows"].values():
         assert window["pool"]["unique_ips"] == 1
         assert window["overlap"] == {
-            "exclusive_share": 1, "shared_share": 0, "compared_products": 0,
+            "exclusive_share": 1,
+            "shared_share": 0,
+            "compared_products": 0,
         }
 
     c, now, r, b, o, e = ready_inputs()
@@ -569,7 +582,9 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
     partial = build(r, b, first_observations, e, c, digest(c), now, 2, None, None)
     first, second = partial["products"]
     assert first["windows"]["30d"]["overlap"] == {
-        "exclusive_share": 1, "shared_share": 0, "compared_products": 0,
+        "exclusive_share": 1,
+        "shared_share": 0,
+        "compared_products": 0,
     }
     assert second["windows"]["30d"]["overlap"]["exclusive_share"] is None
 
@@ -577,7 +592,9 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
     compared = build(r, b, o, e, c, digest(c), now, 3, None, None)
     for product in compared["products"]:
         assert product["windows"]["30d"]["overlap"] == {
-            "exclusive_share": 0, "shared_share": 1, "compared_products": 1,
+            "exclusive_share": 0,
+            "shared_share": 1,
+            "compared_products": 1,
         }
 
 

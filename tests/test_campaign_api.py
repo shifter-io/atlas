@@ -64,8 +64,9 @@ async def test_create_splits_into_batches_of_ten_and_sends_every_option():
 
     fake._create = capture
     async with running(fake) as cloud:
-        created = await cloud.create(names, region="lon1", size="c-2", image="11", tags=OURS,
-                                     ssh_keys=["9"], monitoring=True)
+        created = await cloud.create(
+            names, region="lon1", size="c-2", image="11", tags=OURS, ssh_keys=["9"], monitoring=True
+        )
     assert [len(b["names"]) for b in bodies] == [10, 6] and len(created) == 16
     assert bodies[0]["ssh_keys"] == ["9"] and bodies[0]["monitoring"] is True
     assert bodies[0]["with_droplet_agent"] is False and bodies[0]["ipv6"] is False
@@ -74,8 +75,15 @@ async def test_create_splits_into_batches_of_ten_and_sends_every_option():
 async def test_create_refuses_unknown_flags():
     async with running(FakeDigitalOcean()) as cloud:
         with pytest.raises(ScopeError):
-            await cloud.create([f"pic-{SID}-h03-lon1-x"], region="lon1", size="c-2", image="1",
-                               tags=OURS, ssh_keys=["9"], backups=True)
+            await cloud.create(
+                [f"pic-{SID}-h03-lon1-x"],
+                region="lon1",
+                size="c-2",
+                image="1",
+                tags=OURS,
+                ssh_keys=["9"],
+                backups=True,
+            )
 
 
 @pytest.mark.parametrize(
@@ -96,17 +104,23 @@ async def test_create_refuses_anything_without_all_markers(names, tags, keys):
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
         with pytest.raises(ScopeError):
-            await cloud.create(names, region="lon1", size="c-2", image="1", tags=tags,
-                               ssh_keys=keys)
+            await cloud.create(
+                names, region="lon1", size="c-2", image="1", tags=tags, ssh_keys=keys
+            )
     assert not fake.requests
 
 
 async def test_manager_and_builder_create_and_project_assignment_body():
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
-        [manager] = await cloud.create(["pi-camp-manager-20270101-ab12"], region="lon1",
-                                       size="s-8vcpu-16gb", image="1", tags=[MANAGER_TAG],
-                                       ssh_keys=["9"])
+        [manager] = await cloud.create(
+            ["pi-camp-manager-20270101-ab12"],
+            region="lon1",
+            size="s-8vcpu-16gb",
+            image="1",
+            tags=[MANAGER_TAG],
+            ssh_keys=["9"],
+        )
         await cloud.assign_project(CAMPAIGN_PROJECT, [manager.id], guard=scope._GUARD)
         assert await cloud.project_droplet_ids(CAMPAIGN_PROJECT) == {manager.id}
         assert await cloud.project_id("Proxy Index") == CAMPAIGN_PROJECT
@@ -181,8 +195,9 @@ async def test_a_partial_create_keeps_the_droplets_already_created():
     fake._create = second_fails
     async with running(fake) as cloud:
         with pytest.raises(do_api.CreateError) as stopped:
-            await cloud.create(names, region="lon1", size="c-2", image="1", tags=OURS,
-                               ssh_keys=["9"])
+            await cloud.create(
+                names, region="lon1", size="c-2", image="1", tags=OURS, ssh_keys=["9"]
+            )
     error = stopped.value
     assert [d.name for d in error.created] == names[:10] and error.pending == names[10:]
     assert not error.uncertain and error.status == 422
@@ -197,8 +212,9 @@ async def test_an_uncertain_create_is_never_retried_and_can_be_adopted():
     name = f"pic-{SID}-h03-lon1-shifter"
     async with running(fake) as cloud:
         with pytest.raises(do_api.CreateError) as stopped:
-            await cloud.create([name], region="lon1", size="c-2", image="1", tags=OURS,
-                               ssh_keys=["9"])
+            await cloud.create(
+                [name], region="lon1", size="c-2", image="1", tags=OURS, ssh_keys=["9"]
+            )
         assert stopped.value.uncertain and stopped.value.pending == [name]
         assert not stopped.value.created and not cloud.created_ids
         [adopted] = await cloud.adopt_uncertain([name], OURS[2])
@@ -228,8 +244,7 @@ async def test_pagination_without_a_total_is_an_error():
 async def test_errors_after_retries_or_on_4xx_carry_no_token(caplog):
     caplog.set_level(logging.DEBUG)
     fake, slept = FakeDigitalOcean(), []
-    fake.faults += [Fault("GET", "/v2/account", 500, times=5),
-                    Fault("POST", "/v2/droplets", 422)]
+    fake.faults += [Fault("GET", "/v2/account", 500, times=5), Fault("POST", "/v2/droplets", 422)]
 
     async def sleep(seconds):
         slept.append(seconds)
@@ -238,10 +253,23 @@ async def test_errors_after_retries_or_on_4xx_carry_no_token(caplog):
         with pytest.raises(ApiError) as exhausted:
             await cloud.account()
         with pytest.raises(ApiError) as rejected:
-            await cloud.create([f"pic-{SID}-h03-lon1-x"], region="lon1", size="c-2",
-                               image="1", tags=OURS, ssh_keys=["9"])
-        text = " ".join([repr(cloud), str(exhausted.value), str(rejected.value),
-                         repr(exhausted.value.__context__), caplog.text])
+            await cloud.create(
+                [f"pic-{SID}-h03-lon1-x"],
+                region="lon1",
+                size="c-2",
+                image="1",
+                tags=OURS,
+                ssh_keys=["9"],
+            )
+        text = " ".join(
+            [
+                repr(cloud),
+                str(exhausted.value),
+                str(rejected.value),
+                repr(exhausted.value.__context__),
+                caplog.text,
+            ]
+        )
     assert slept == [1, 2, 4, 8] and rejected.value.status == 422
     assert TOKEN not in text and "Bearer" not in text
     assert exhausted.value.__cause__ is None and rejected.value.__cause__ is None
@@ -267,8 +295,9 @@ async def test_the_limiter_allows_at_most_the_configured_requests_per_minute():
         slept.append(seconds)
         now[0] += seconds
 
-    async with running(FakeDigitalOcean(), sleep=sleep, clock=lambda: now[0],
-                       per_minute=2) as cloud:
+    async with running(
+        FakeDigitalOcean(), sleep=sleep, clock=lambda: now[0], per_minute=2
+    ) as cloud:
         for _ in range(3):
             await cloud.account()
             now[0] += 1
@@ -295,8 +324,14 @@ def test_token_sources_read_memory_only_and_refuse_loose_files(tmp_path, monkeyp
 
     def run(command, **_):
         calls.append(command)
-        found = type("Done", (), {"returncode": 0 if len(calls) == 1 else 44,
-                                  "stdout": TOKEN + "\n" if len(calls) == 1 else ""})
+        found = type(
+            "Done",
+            (),
+            {
+                "returncode": 0 if len(calls) == 1 else 44,
+                "stdout": TOKEN + "\n" if len(calls) == 1 else "",
+            },
+        )
         return found
 
     monkeypatch.setattr(do_api.subprocess, "run", run)
@@ -304,8 +339,15 @@ def test_token_sources_read_memory_only_and_refuse_loose_files(tmp_path, monkeyp
     assert read() == TOKEN
     with pytest.raises(TokenError) as missing:
         read()
-    assert calls[0] == ["security", "find-generic-password", "-s", "Leftclick DigitalOcean",
-                        "-a", "team: Leftclick", "-w"]
+    assert calls[0] == [
+        "security",
+        "find-generic-password",
+        "-s",
+        "Leftclick DigitalOcean",
+        "-a",
+        "team: Leftclick",
+        "-w",
+    ]
     assert TOKEN not in str(missing.value)
 
 
@@ -347,31 +389,39 @@ def test_campaign_limits_command_is_wired(monkeypatch, capsys):
     assert isinstance(seen["cloud"], do_api.DigitalOcean)
 
 
-RULES = {"name": "pi-camp-worker-fw", "inbound_rules": [], "outbound_rules": [],
-         "tags": [WORKER_TAG], "droplet_ids": []}
+RULES = {
+    "name": "pi-camp-worker-fw",
+    "inbound_rules": [],
+    "outbound_rules": [],
+    "tags": [WORKER_TAG],
+    "droplet_ids": [],
+}
 
 
-@pytest.mark.parametrize(("method", "path", "body"), [
-    ("POST", "/v2/account/keys", {"name": "owner-laptop", "public_key": "ssh-ed25519 AAAA"}),
-    ("POST", "/v2/account/keys", {"name": "pi-camp-mac-1", "public_key": "k", "extra": 1}),
-    ("POST", "/v2/droplets/700001/actions", {"type": "rebuild", "image": "x"}),
-    ("POST", "/v2/droplets/700001/actions", {"type": "restore"}),
-    ("POST", "/v2/droplets/700001/actions", {"type": "snapshot", "name": "prod-backup"}),
-    ("POST", "/v2/droplets/700001/actions", {"type": "power_off", "force": True}),
-    ("POST", "/v2/droplets/700001/actions", None),
-    ("POST", "/v2/images/700001/actions", {"type": "transfer", "region": "mars1"}),
-    ("POST", "/v2/images/700001/actions", {"type": "convert", "region": "lon1"}),
-    ("POST", "/v2/firewalls", {**RULES, "name": "prod-fw"}),
-    ("POST", "/v2/firewalls", {**RULES, "tags": ["prod"]}),
-    ("POST", "/v2/firewalls", {**RULES, "tags": ["pi-camp-other"]}),
-    ("POST", "/v2/firewalls", {**RULES, "droplet_ids": ["all"]}),
-    ("POST", "/v2/firewalls", {**RULES, "load_balancer_uids": ["x"]}),
-    ("PUT", f"/v2/firewalls/{FIREWALL}", {**RULES, "name": "default"}),
-    ("POST", "/v2/tags", {"name": "prod"}),
-    ("POST", "/v2/tags", {"name": "pi-camp-Worker"}),
-    ("POST", "/v2/tags", {"name": WORKER_TAG, "resources": [{"resource_id": "1"}]}),
-    ("POST", "/v2/tags", None),
-])
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("POST", "/v2/account/keys", {"name": "owner-laptop", "public_key": "ssh-ed25519 AAAA"}),
+        ("POST", "/v2/account/keys", {"name": "pi-camp-mac-1", "public_key": "k", "extra": 1}),
+        ("POST", "/v2/droplets/700001/actions", {"type": "rebuild", "image": "x"}),
+        ("POST", "/v2/droplets/700001/actions", {"type": "restore"}),
+        ("POST", "/v2/droplets/700001/actions", {"type": "snapshot", "name": "prod-backup"}),
+        ("POST", "/v2/droplets/700001/actions", {"type": "power_off", "force": True}),
+        ("POST", "/v2/droplets/700001/actions", None),
+        ("POST", "/v2/images/700001/actions", {"type": "transfer", "region": "mars1"}),
+        ("POST", "/v2/images/700001/actions", {"type": "convert", "region": "lon1"}),
+        ("POST", "/v2/firewalls", {**RULES, "name": "prod-fw"}),
+        ("POST", "/v2/firewalls", {**RULES, "tags": ["prod"]}),
+        ("POST", "/v2/firewalls", {**RULES, "tags": ["pi-camp-other"]}),
+        ("POST", "/v2/firewalls", {**RULES, "droplet_ids": ["all"]}),
+        ("POST", "/v2/firewalls", {**RULES, "load_balancer_uids": ["x"]}),
+        ("PUT", f"/v2/firewalls/{FIREWALL}", {**RULES, "name": "default"}),
+        ("POST", "/v2/tags", {"name": "prod"}),
+        ("POST", "/v2/tags", {"name": "pi-camp-Worker"}),
+        ("POST", "/v2/tags", {"name": WORKER_TAG, "resources": [{"resource_id": "1"}]}),
+        ("POST", "/v2/tags", None),
+    ],
+)
 async def test_operation_bodies_outside_our_scope_are_refused_before_the_network(
     method, path, body
 ):
@@ -389,8 +439,9 @@ async def test_ssh_keys_lists_only_ours_and_adds_one():
     async with running(fake) as cloud:
         assert [k["id"] for k in await cloud.ssh_keys()] == [2]
         added = await cloud.create_ssh_key("pi-camp-worker-20270101", "ssh-ed25519 CCCC")
-    assert added["name"] == "pi-camp-worker-20270101" and str(added["id"]) in fake.resources[
-        "ssh_key"]
+    assert (
+        added["name"] == "pi-camp-worker-20270101" and str(added["id"]) in fake.resources["ssh_key"]
+    )
 
 
 async def test_droplet_actions_run_only_on_a_builder_this_client_created():
@@ -398,11 +449,27 @@ async def test_droplet_actions_run_only_on_a_builder_this_client_created():
     production = fake.add("prod-node-0001", ["prod"])
     foreign = fake.add("pi-camp-builder-20270101-ee99", [BUILDER_TAG])
     async with running(fake) as cloud:
-        [worker] = await cloud.create([f"pic-{SID}-h03-lon1-shifter"], region="lon1",
-                                      size="c-2", image="1", tags=OURS, ssh_keys=["9"])
-        [builder, renamed, gone] = [(await cloud.create(
-            [f"pi-camp-builder-20270101-ab1{i}"], region="lon1", size="s-1vcpu-1gb",
-            image="ubuntu-24-04-x64", tags=[BUILDER_TAG], ssh_keys=["9"]))[0] for i in range(3)]
+        [worker] = await cloud.create(
+            [f"pic-{SID}-h03-lon1-shifter"],
+            region="lon1",
+            size="c-2",
+            image="1",
+            tags=OURS,
+            ssh_keys=["9"],
+        )
+        [builder, renamed, gone] = [
+            (
+                await cloud.create(
+                    [f"pi-camp-builder-20270101-ab1{i}"],
+                    region="lon1",
+                    size="s-1vcpu-1gb",
+                    image="ubuntu-24-04-x64",
+                    tags=[BUILDER_TAG],
+                    ssh_keys=["9"],
+                )
+            )[0]
+            for i in range(3)
+        ]
         fake.droplets[renamed.id]["name"] = "prod-node-0002"
         fake.droplets.pop(gone.id)
         for target in (production, foreign, worker.id, renamed.id, gone.id, builder.id):
@@ -451,8 +518,9 @@ async def test_firewalls_attach_only_to_campaign_droplets():
         fake.move(production)
         for target in (production, "999", manager):  # the manager is not in Proxy Index yet
             with pytest.raises(ScopeError):
-                await cloud.create_firewall({**RULES, "tags": [], "droplet_ids": [int(target)]},
-                                            CAMPAIGN_PROJECT)
+                await cloud.create_firewall(
+                    {**RULES, "tags": [], "droplet_ids": [int(target)]}, CAMPAIGN_PROJECT
+                )
         for firewall_id in (FIREWALL, "33333333-3333-4333-8333-999999999999"):
             with pytest.raises(ScopeError):
                 await cloud.update_firewall(firewall_id, RULES, CAMPAIGN_PROJECT)
@@ -461,14 +529,20 @@ async def test_firewalls_attach_only_to_campaign_droplets():
         fake.move(manager)
         with pytest.raises(ScopeError):  # not the project named Proxy Index
             await cloud.create_firewall({**RULES, "droplet_ids": [int(manager)]}, PROD_PROJECT)
-        created = await cloud.create_firewall({**RULES, "droplet_ids": [int(manager)]},
-                                              CAMPAIGN_PROJECT)
-        updated = await cloud.update_firewall(created["id"], {**RULES, "droplet_ids": []},
-                                              CAMPAIGN_PROJECT)
+        created = await cloud.create_firewall(
+            {**RULES, "droplet_ids": [int(manager)]}, CAMPAIGN_PROJECT
+        )
+        updated = await cloud.update_firewall(
+            created["id"], {**RULES, "droplet_ids": []}, CAMPAIGN_PROJECT
+        )
     assert [(m, p) for m, p, _ in fake.bodies] == [
-        ("POST", "/v2/tags"), ("POST", "/v2/firewalls"), ("PUT", f"/v2/firewalls/{created['id']}")]
+        ("POST", "/v2/tags"),
+        ("POST", "/v2/firewalls"),
+        ("PUT", f"/v2/firewalls/{created['id']}"),
+    ]
     assert updated["droplet_ids"] == [] and fake.resources["firewall"][FIREWALL]["name"] == (
-        "prod-fw")
+        "prod-fw"
+    )
 
 
 async def test_a_firewall_tag_is_created_only_when_missing_and_only_ours():
@@ -487,9 +561,11 @@ async def test_a_firewall_tag_is_created_only_when_missing_and_only_ours():
             await cloud.create_firewall(RULES, CAMPAIGN_PROJECT)
         assert WORKER_TAG not in fake.tags and not fake.resources["firewall"]
         created = await cloud.create_firewall(RULES, CAMPAIGN_PROJECT)
-        await cloud.update_firewall(created["id"], {**RULES, "tags": [WORKER_TAG, MANAGER_TAG]},
-                                    CAMPAIGN_PROJECT)
+        await cloud.update_firewall(
+            created["id"], {**RULES, "tags": [WORKER_TAG, MANAGER_TAG]}, CAMPAIGN_PROJECT
+        )
     assert [b for b in fake.bodies if b[1] == "/v2/tags"] == [
-        ("POST", "/v2/tags", {"name": WORKER_TAG})]
+        ("POST", "/v2/tags", {"name": WORKER_TAG})
+    ]
     assert fake.resources["firewall"][created["id"]]["tags"] == [WORKER_TAG, MANAGER_TAG]
     assert not fake.unlisted and fake.droplets[manager]["tags"] == [MANAGER_TAG]  # untouched

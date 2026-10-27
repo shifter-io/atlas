@@ -46,8 +46,11 @@ class Proxy:
         self.provider, self.country = provider, country.lower()
 
     def public(self):
-        return {"provider": self.provider, "product": "residential",
-                "requested_country": self.country}
+        return {
+            "provider": self.provider,
+            "product": "residential",
+            "requested_country": self.country,
+        }
 
     def resolve(self, context):
         return ProxyConfig("http", "localhost", 8080)
@@ -55,44 +58,68 @@ class Proxy:
 
 def _spec(manifests: dict) -> CampaignSpec:
     return CampaignSpec(
-        campaign_id=CID, created_at="2027-01-01T21:00:00+00:00", account="leftclick",
-        project_id="project-1", starts_at=campaign.timestamp(START), grace_hours=48,
-        regions=REGIONS, networks=NETWORKS, manifests=manifests,
+        campaign_id=CID,
+        created_at="2027-01-01T21:00:00+00:00",
+        account="leftclick",
+        project_id="project-1",
+        starts_at=campaign.timestamp(START),
+        grace_hours=48,
+        regions=REGIONS,
+        networks=NETWORKS,
+        manifests=manifests,
         size_by_region=dict.fromkeys(REGIONS, "c-2"),
-        image_by_region=dict.fromkeys(REGIONS, "image-1"), image_name="pi-camp-worker-test",
-        wheel_sha256="0" * 64, framework_version="test", ssh_key_id="key-1",
-        manager_droplet_id="manager-1")
+        image_by_region=dict.fromkeys(REGIONS, "image-1"),
+        image_name="pi-camp-worker-test",
+        wheel_sha256="0" * 64,
+        framework_version="test",
+        ssh_key_id="key-1",
+        manager_droplet_id="manager-1",
+    )
 
 
 async def _round(path: Path, network: str, region: str, hour: int) -> None:
     scheduled = campaign.moment(campaign.load(path)["rounds"][hour]).timestamp()
     clock, stop, special = Clock(scheduled), asyncio.Event(), {}
     if (network, region, hour) == STOPPED:
+
         async def stopped(country_stop):
             stop.set()
             await country_stop.wait()
-            return measurement(0, status="stopped", stop_reason="stopped", completed=0,
-                               total_errors=0)
+            return measurement(
+                0, status="stopped", stop_reason="stopped", completed=0, total_errors=0
+            )
+
         special["GL"] = stopped
     rows = 3 if network == "geonode" else 2
-    await execute_round(path, region, hour, lambda c: Proxy(network, c), clock=clock, stop=stop,
-                        run_country=census(clock, [], rows=rows, special=special))
+    await execute_round(
+        path,
+        region,
+        hour,
+        lambda c: Proxy(network, c),
+        clock=clock,
+        stop=stop,
+        run_country=census(clock, [], rows=rows, special=special),
+    )
 
 
 def _droplet(network, region, hour, status, **extra) -> DropletRecord:
     scheduled = START + timedelta(hours=hour)
-    values = {"droplet_id": f"{hour}{len(network)}{len(region)}", "size": "c-2",
-              "status": status,
-              "requested_at": campaign.timestamp(scheduled - timedelta(seconds=90)),
-              "ssh_ready_at": campaign.timestamp(scheduled - timedelta(seconds=40)),
-              "start_lateness_seconds": 0.25} | extra
+    values = {
+        "droplet_id": f"{hour}{len(network)}{len(region)}",
+        "size": "c-2",
+        "status": status,
+        "requested_at": campaign.timestamp(scheduled - timedelta(seconds=90)),
+        "ssh_ready_at": campaign.timestamp(scheduled - timedelta(seconds=40)),
+        "start_lateness_seconds": 0.25,
+    } | extra
     if status.endswith("_failed"):  # a failed worker was never ready and never started
         values |= {"ssh_ready_at": None, "start_lateness_seconds": None}
     else:  # a worker that got this far armed and started its round
-        values = {"armed_at": values["ssh_ready_at"],
-                  "started_at": campaign.timestamp(scheduled)} | values
-    return DropletRecord(network, region, hour, droplet_name(CID, hour, region, network),
-                         **values)
+        values = {
+            "armed_at": values["ssh_ready_at"],
+            "started_at": campaign.timestamp(scheduled),
+        } | values
+    return DropletRecord(network, region, hour, droplet_name(CID, hour, region, network), **values)
 
 
 def write_hour(root: Path, hour: int, statuses: dict, paused: tuple[str, ...] = ()) -> None:
@@ -107,8 +134,14 @@ def write_hour(root: Path, hour: int, statuses: dict, paused: tuple[str, ...] = 
             item, extra = item if isinstance(item, tuple) else (item, {})
             overlap = 1 if (network, region, hour) == STOPPED else 0
             droplets.append(_droplet(network, region, hour, item, overlap=overlap, **extra))
-    record = HourRecord(CID, hour, campaign.timestamp(START + timedelta(hours=hour)),
-                        state="done", droplets=droplets, paused_networks=list(paused))
+    record = HourRecord(
+        CID,
+        hour,
+        campaign.timestamp(START + timedelta(hours=hour)),
+        state="done",
+        droplets=droplets,
+        paused_networks=list(paused),
+    )
     atomic_json(hour_path(root, hour), record.to_dict())
 
 
@@ -124,8 +157,13 @@ def built(tmp_path_factory):
     for network in NETWORKS:
         config = ROOT / "configs" / f"{network}.toml"
         paths[network] = campaign.create(
-            config, "residential", campaign.timestamp(START), root / "networks",
-            execution_mode="ephemeral", now=START - timedelta(hours=1))
+            config,
+            "residential",
+            campaign.timestamp(START),
+            root / "networks",
+            execution_mode="ephemeral",
+            now=START - timedelta(hours=1),
+        )
     spec_path(root).write_text(_spec({n: p.parent.name for n, p in paths.items()}).to_json())
     for hour in range(3):
         for network in NETWORKS:
@@ -154,8 +192,7 @@ def test_merge_refuses_unfinished_cells_and_writes_nothing(root):
     with pytest.raises(merge.CampaignNotFinished, match="geonode ams3 h03 is pending"):
         merge.merge_network(root, "geonode")
     finish_day(root)
-    write_hour(root, 23, _cells("create_failed") | {("shifter", "tor1"): ["boot_failed",
-                                                                        "armed"]})
+    write_hour(root, 23, _cells("create_failed") | {("shifter", "tor1"): ["boot_failed", "armed"]})
     with pytest.raises(merge.CampaignNotFinished, match="shifter tor1 h23 is running"):
         merge.merge_network(root, "shifter")
     assert not list(root.glob("networks/*/residential/*/regions/*/state.json"))
@@ -174,9 +211,11 @@ def test_merge_then_validate_and_export_pass(root):
             state = read_json(path.parent / "regions" / region / "state.json")
             validate_state(state, manifest, region)
             assert state["status"] == "closed" and len(state["jobs"]) == 24 * len(
-                manifest["regions"][region])
+                manifest["regions"][region]
+            )
             assert read_json(path.parent / "regions" / region / "summary.json")["status"] == (
-                "closed")
+                "closed"
+            )
         exported = export_campaign(path)
         rows = 3 if network == "geonode" else 2
         jobs = sum(len(manifest["regions"][r]) for r in REGIONS) * 3
@@ -206,8 +245,13 @@ def test_merge_refuses_a_running_round_and_a_foreign_manifest(root):
     shutil.rmtree(root / "networks" / "geonode")
     with pytest.raises(ValueError, match="exactly one campaign manifest"):
         merge.merge_network(root, "geonode")
-    campaign.create(ROOT / "configs/geonode.toml", "residential", campaign.timestamp(START),
-                    root / "networks", now=START - timedelta(hours=1))
+    campaign.create(
+        ROOT / "configs/geonode.toml",
+        "residential",
+        campaign.timestamp(START),
+        root / "networks",
+        now=START - timedelta(hours=1),
+    )
     with pytest.raises(ValueError, match="version 3"):
         merge.merge_network(root, "geonode")
 
@@ -224,12 +268,20 @@ def kill_round(root: Path, network: str, region: str, hour: int) -> None:
     folder = round_directory(merge.manifest_path(root, network), region, hour)
     state = read_json(folder / "round.json")
     last = state["jobs"][-1]
-    for key in ("finished_at", "observations", "duration_seconds", "requests", "errors",
-                "stop_reason"):
+    for key in (
+        "finished_at",
+        "observations",
+        "duration_seconds",
+        "requests",
+        "errors",
+        "stop_reason",
+    ):
         last.pop(key)
     last["status"] = "running"
-    state.update(status="running", active={"round": hour, "country": last["country"],
-                                           "started_at": last["started_at"]})
+    state.update(
+        status="running",
+        active={"round": hour, "country": last["country"], "started_at": last["started_at"]},
+    )
     atomic_json(folder / "round.json", state)
     (folder / last["country"].lower() / "summary.json").unlink()
 
@@ -238,8 +290,10 @@ def test_b1_a_collect_failed_cell_refuses_the_merge(root):
     finish_day(root)
     path = unpull(root, "geonode", "tor1", 1)
     write_hour(root, 1, _cells("destroyed") | {("geonode", "tor1"): "collect_failed"})
-    with pytest.raises(merge.CampaignNotFinished,
-                       match=r"geonode tor1 h01: data waits on a kept worker \(collect_failed\)"):
+    with pytest.raises(
+        merge.CampaignNotFinished,
+        match=r"geonode tor1 h01: data waits on a kept worker \(collect_failed\)",
+    ):
         merge.merge_network(root, "geonode")
     assert not list(path.parent.glob("regions/*/state.json"))
 
@@ -249,17 +303,26 @@ def test_b1_a_started_worker_without_its_round_refuses_the_merge(root, status):
     finish_day(root)
     path = unpull(root, "geonode", "tor1", 1)
     write_hour(root, 1, _cells("destroyed") | {("geonode", "tor1"): status})
-    with pytest.raises(merge.RoundDataMissing,
-                       match="geonode tor1 h01: round ran; data not collected"):
+    with pytest.raises(
+        merge.RoundDataMissing, match="geonode tor1 h01: round ran; data not collected"
+    ):
         merge.merge_network(root, "geonode")
     assert not list(path.parent.glob("regions/*/state.json"))
 
 
-@pytest.mark.parametrize("status", [
-    "create_failed", "assign_failed", "boot_failed", "start_failed",
-    *[(s, {"armed_at": None, "started_at": None})
-      for s in ("destroyed", "destroy_refused", "destroy_failed")],
-])
+@pytest.mark.parametrize(
+    "status",
+    [
+        "create_failed",
+        "assign_failed",
+        "boot_failed",
+        "start_failed",
+        *[
+            (s, {"armed_at": None, "started_at": None})
+            for s in ("destroyed", "destroy_refused", "destroy_failed")
+        ],
+    ],
+)
 def test_b1_never_started_workers_still_merge_as_not_started(root, status):
     finish_day(root)
     path = unpull(root, "geonode", "tor1", 1)
@@ -290,7 +353,10 @@ def test_b2_a_killed_round_merges_with_its_jobs_closed(root):
     path = merge.manifest_path(root, "shifter")
     state = read_json(path.parent / "regions/tor1/state.json")
     assert [j["status"] for j in state["jobs"] if j["round"] == 0] == [
-        "completed", "completed", "failed"]
+        "completed",
+        "completed",
+        "failed",
+    ]
     assert export_campaign(path)["rows"] > 0
 
 
@@ -309,7 +375,11 @@ def test_b2_completeness_verifies_a_killed_round_as_failed_ours(root):
     result = completeness.build(root)
     row = {(r["net"], r["region"], r["round"]): r for r in result["rows"]}["shifter", "tor1", 0]
     assert (row["cell"], row["jobs_ok"], row["observations"], row["requests"]) == (
-        "failed_ours", 2, 4, 6)
+        "failed_ours",
+        2,
+        4,
+        6,
+    )
     assert "shifter tor1 h00: round ended without closing" in result["issues"]
     assert "shifter tor1 h00: PM: running" in result["issues"]
 
@@ -318,7 +388,8 @@ def test_m1_a_failed_round_is_our_failure_with_its_data_verified(root):
     path = round_directory(merge.manifest_path(root, "shifter"), "ams3", 1) / "round.json"
     atomic_json(path, read_json(path) | {"status": "failed"})
     row = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}[
-        "shifter", "ams3", 1]
+        "shifter", "ams3", 1
+    ]
     assert (row["cell"], row["jobs_ok"], row["observations"]) == ("failed_ours", 12, 24)
 
 
@@ -329,13 +400,20 @@ def test_a_no_list_country_completes_its_cell_and_merges(root):
     job = state["jobs"][1]
     assert job["country"] == "GL"
     state["jobs"][1] = {key: job[key] for key in ("round", "country", "scheduled_at")} | {
-        "status": "no_list", "stop_reason": "no_list"}
+        "status": "no_list",
+        "stop_reason": "no_list",
+    }
     atomic_json(folder / "round.json", state)
     shutil.move(folder / "gl", root.parent / "gl")
     row = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}[
-        "shifter", "tor1", 0]
+        "shifter", "tor1", 0
+    ]
     assert (row["cell"], row["completed"], row["jobs_ok"], row["missing"]) == (
-        "complete", True, 2, 0)
+        "complete",
+        True,
+        2,
+        0,
+    )
     assert row["finished"] == state["jobs"][2]["finished_at"]
     finish_day(root)
     regions = {s["region"]: s for s in merge.merge_network(root, "shifter")}
@@ -356,7 +434,8 @@ def test_m2_m3_merge_cli_names_the_cell_and_writes_no_network(root, capsys):
     write_hour(root, 23, _cells("create_failed") | {("shifter", "tor1"): "collect_failed"})
     assert main(["campaign", "merge", "--root", str(root)]) == 3
     assert capsys.readouterr().err.strip() == (
-        "Not merged: shifter tor1 h23: data waits on a kept worker (collect_failed)")
+        "Not merged: shifter tor1 h23: data waits on a kept worker (collect_failed)"
+    )
     assert not list(root.glob("networks/*/residential/*/regions/*/state.json"))
     finish_day(root)
     assert main(["campaign", "merge", "--root", str(root)]) == 0
@@ -373,11 +452,20 @@ def test_completeness_golden_tsv_and_tables(root, capsys):
     for name in ("per-hour-completeness.tsv", "per-hour-tables.md"):
         assert (folder / name).read_text() == (GOLDEN / name).read_text(), name
     assert result["cells"] == 2 * 2 * 24 and result["networks"]["shifter"]["cells"] == 48
-    assert result["totals"] == {"complete": 9, "partial": 1, "failed_ours": 85,
-                                "uncollected": 0, "running": 1, "pending": 0, "paused": 0,
-                                "cells": 96}
-    assert result["issues"] == ["shifter tor1 h01: GL: interrupted",
-                                "shifter tor1 h01: PM: not started"]
+    assert result["totals"] == {
+        "complete": 9,
+        "partial": 1,
+        "failed_ours": 85,
+        "uncollected": 0,
+        "running": 1,
+        "pending": 0,
+        "paused": 0,
+        "cells": 96,
+    }
+    assert result["issues"] == [
+        "shifter tor1 h01: GL: interrupted",
+        "shifter tor1 h01: PM: not started",
+    ]
     assert read_json(folder / "completeness.json") == result
     assert main(["campaign", "completeness", "--root", str(root)]) == 3
     assert json.loads(capsys.readouterr().out)["totals"]["complete"] == 9
@@ -399,8 +487,7 @@ def test_a_tampered_chunk_is_caught(root):
     path.write_text("{}")
     rows = {(r["net"], r["region"], r["round"]): r for r in completeness.build(root)["rows"]}
     tampered = rows["shifter", "ams3", 0]
-    assert (tampered["cell"], tampered["badchunk"], tampered["completed"]) == (
-        "partial", 1, True)
+    assert (tampered["cell"], tampered["badchunk"], tampered["completed"]) == ("partial", 1, True)
     assert rows["geonode", "tor1", 1]["cell"] == "failed_ours"
     path.write_text(json.dumps({"status": "completed"}))
     result = completeness.build(root)
@@ -430,11 +517,16 @@ def test_completeness_splits_answer_classes(root, monkeypatch):
     row = rows_by_cell(result)["shifter", "ams3", 0]
     assert (row["rate_limited"], row["no_inventory"], row["other_country"]) == (10, 2, 3)
     assert row["real_errors"] == plain["errors"] - 12 and row["errors"] == plain["errors"]
-    assert row["duplicates"] == plain["duplicates"] == row["observations"] - sum(
-        c["unique_ips"] for c in row["per_country"])
+    assert (
+        row["duplicates"]
+        == plain["duplicates"]
+        == row["observations"] - sum(c["unique_ips"] for c in row["per_country"])
+    )
     nl = next(c for c in row["per_country"] if c["country"] == "NL")
-    assert nl["answered"] == nl["requests"] - 10 and nl["real_errors"] == nl["requests"] - (
-        nl["successes"]) - 12
+    assert (
+        nl["answered"] == nl["requests"] - 10
+        and nl["real_errors"] == nl["requests"] - (nl["successes"]) - 12
+    )
     tsv = (root / "completeness" / "per-country.tsv").read_text().splitlines()
     assert "shifter\tams3\t0\tNL\tcompleted\t" in "\n".join(tsv)
     line = next(x.split("\t") for x in tsv if x.startswith("shifter\tams3\t0\tNL\t"))
@@ -442,11 +534,23 @@ def test_completeness_splits_answer_classes(root, monkeypatch):
     tables = (root / "completeness" / "per-hour-tables.md").read_text()
     section = tables.split("## Answer classes per network and region")[1]
     ams3 = next(x for x in section.splitlines() if x.startswith("| shifter | ams3 |"))
-    requests = sum(r["requests"] for r in result["rows"]
-                   if r["net"] == "shifter" and r["region"] == "ams3" and r["requests"])
-    assert ams3.split(" | ")[2:6] == [str(requests), "10", str(requests - 10), str(
-        sum(r["real_errors"] for r in result["rows"] if (r["net"], r["region"]) == (
-            "shifter", "ams3") and r["requests"]))]
+    requests = sum(
+        r["requests"]
+        for r in result["rows"]
+        if r["net"] == "shifter" and r["region"] == "ams3" and r["requests"]
+    )
+    assert ams3.split(" | ")[2:6] == [
+        str(requests),
+        "10",
+        str(requests - 10),
+        str(
+            sum(
+                r["real_errors"]
+                for r in result["rows"]
+                if (r["net"], r["region"]) == ("shifter", "ams3") and r["requests"]
+            )
+        ),
+    ]
 
 
 def test_per_country_tsv(root):
@@ -456,9 +560,15 @@ def test_per_country_tsv(root):
     entries = [(r, c) for r in result["rows"] for c in r.get("per_country", [])]
     assert len(lines) == 1 + len(entries) and entries
     row, country = entries[0]
-    assert lines[1].split("\t")[:7] == [row["net"], row["region"], str(row["round"]),
-                                       country["country"], country["status"],
-                                       country["stop_reason"] or "", str(country["requests"])]
+    assert lines[1].split("\t")[:7] == [
+        row["net"],
+        row["region"],
+        str(row["round"]),
+        country["country"],
+        country["status"],
+        country["stop_reason"] or "",
+        str(country["requests"]),
+    ]
     assert not IPV4.search("\n".join(lines))
 
 
@@ -468,13 +578,34 @@ def test_old_rounds_have_zero_answer_classes(root):
     measured = [r for r in completeness.build(root)["rows"] if r["requests"] is not None]
     assert measured and all(
         (r["rate_limited"], r["no_inventory"], r["other_country"]) == (0, 0, 0)
-        and r["real_errors"] == r["errors"] for r in measured)
+        and r["real_errors"] == r["errors"]
+        for r in measured
+    )
     assert completeness.COLUMNS == completeness.DATA1_COLUMNS + (
-        "cell", "size", "start_lateness_s", "create_to_ready_s", "overlap", "bytes_up",
-        "bytes_down", "protocol", "rate_limited", "no_inventory", "other_country",
-        "duplicates", "real_errors")
-    old = {"net": "n", "region": "r", "round": 0, "requests": 5, "errors": 2, "cell": "partial",
-           "rate_limited": None, "real_errors": None}
+        "cell",
+        "size",
+        "start_lateness_s",
+        "create_to_ready_s",
+        "overlap",
+        "bytes_up",
+        "bytes_down",
+        "protocol",
+        "rate_limited",
+        "no_inventory",
+        "other_country",
+        "duplicates",
+        "real_errors",
+    )
+    old = {
+        "net": "n",
+        "region": "r",
+        "round": 0,
+        "requests": 5,
+        "errors": 2,
+        "cell": "partial",
+        "rate_limited": None,
+        "real_errors": None,
+    }
     assert completeness._mark(old | {"requests": None}) == "partial 0"
 
 
@@ -483,13 +614,17 @@ def test_no_ipv4_in_any_output(root):
     for network in NETWORKS:
         merge.merge_network(root, network)
     completeness.build(root)
-    outputs = [*root.glob("completeness/*"), *root.glob("ledger/*/hour.json"),
-               *root.glob("networks/*/residential/*/regions/*/*.json")]
+    outputs = [
+        *root.glob("completeness/*"),
+        *root.glob("ledger/*/hour.json"),
+        *root.glob("networks/*/residential/*/regions/*/*.json"),
+    ]
     assert len(outputs) == 4 + 24 + 2 * 2 * 2
     assert not [p.name for p in outputs if IPV4.search(p.read_text())]
 
 
 # Collect: the "manager" is a local directory and commands run in a local shell.
+
 
 def roomy(path):
     return shutil._ntuple_diskusage(10**12, 10**11, 9 * 10**11)
@@ -504,8 +639,11 @@ def manager(root, tmp_path, monkeypatch):
     (remote / ".runtime").mkdir(mode=0o700)
     (remote / ".runtime" / "hosts-00.json").write_text('{"700001": "203.0.113.10"}')
     inventory = tmp_path / "campaign-manager.json"
-    inventory.write_text(json.dumps({"host": "192.0.2.10", "identity_file": "~/.ssh/k",
-                                     "campaigns_root": str(campaigns)}))
+    inventory.write_text(
+        json.dumps(
+            {"host": "192.0.2.10", "identity_file": "~/.ssh/k", "campaigns_root": str(campaigns)}
+        )
+    )
     return remote, inventory
 
 
@@ -523,6 +661,7 @@ def local_shell(before_tar=None):
         if command.startswith("tar ") and before_tar:
             before_tar()
         return sh(command, stdout=subprocess.PIPE)
+
     return spawn
 
 
@@ -551,7 +690,10 @@ def test_collect_detects_a_change_a_missing_and_an_extra_file(manager, tmp_path)
     report = collector.collect(inventory, CID, tmp_path / "a", spawn=local_shell(tamper))
     assert not report["clean"]
     assert (report["mismatches"], report["missing"], report["extra"]) == (
-        ["status.json"], ["campaign-spec.json"], ["alerts.jsonl"])
+        ["status.json"],
+        ["campaign-spec.json"],
+        ["alerts.jsonl"],
+    )
 
 
 def test_collect_refuses_unsafe_or_failed_transfers(manager, tmp_path, monkeypatch):
@@ -560,18 +702,24 @@ def test_collect_refuses_unsafe_or_failed_transfers(manager, tmp_path, monkeypat
     def replace_manifest():
         (remote / collector.MANIFEST).write_text("")
 
-    report = collector.collect(inventory, CID, tmp_path / "a", spawn=local_shell(
-        replace_manifest))
+    report = collector.collect(inventory, CID, tmp_path / "a", spawn=local_shell(replace_manifest))
     assert report["mismatches"] == [collector.MANIFEST] and not report["clean"]
     (remote / "link").symlink_to("/etc/hosts")
     with pytest.raises(RuntimeError, match="manifest failed"):
         collector.collect(inventory, CID, tmp_path / "b", spawn=local_shell())
     (remote / "link").unlink()
     with pytest.raises(RuntimeError, match="stream failed"):
-        collector.collect(inventory, CID, tmp_path / "c", spawn=lambda c: sh(
-            c + (" ; exit 2" if c.startswith("tar") else ""), stdout=subprocess.PIPE))
-    monkeypatch.setattr(collector.shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(
-        100, 90, 10))
+        collector.collect(
+            inventory,
+            CID,
+            tmp_path / "c",
+            spawn=lambda c: sh(
+                c + (" ; exit 2" if c.startswith("tar") else ""), stdout=subprocess.PIPE
+            ),
+        )
+    monkeypatch.setattr(
+        collector.shutil, "disk_usage", lambda p: shutil._ntuple_diskusage(100, 90, 10)
+    )
     with pytest.raises(ValueError, match="disk space"):
         collector.collect(inventory, CID, tmp_path / "d", spawn=local_shell())
     with pytest.raises(ValueError, match="campaign id"):
@@ -588,23 +736,49 @@ def test_collect_cli_uses_ssh_from_the_inventory(manager, tmp_path, monkeypatch,
 
     monkeypatch.setattr(collector.subprocess, "Popen", popen)
     dest = tmp_path / "archive"
-    assert main(["campaign", "collect", "--inventory", str(inventory), "--campaign-id", CID,
-                 "--dest", str(dest)]) == 0
+    assert (
+        main(
+            [
+                "campaign",
+                "collect",
+                "--inventory",
+                str(inventory),
+                "--campaign-id",
+                CID,
+                "--dest",
+                str(dest),
+            ]
+        )
+        == 0
+    )
     assert json.loads(capsys.readouterr().out)["clean"] is True
     assert commands[0][:-1] == [
-        "ssh", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=15",
-        "-i", str(Path("~/.ssh/k").expanduser()), "root@192.0.2.10"]
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "-i",
+        str(Path("~/.ssh/k").expanduser()),
+        "root@192.0.2.10",
+    ]
     (dest / "campaign-spec.json").write_text("{}")
-    report = collector.verify_tree(dest, collector.parse_manifest(
-        (dest / collector.MANIFEST).read_text() + "size 1\n")[0])
+    report = collector.verify_tree(
+        dest, collector.parse_manifest((dest / collector.MANIFEST).read_text() + "size 1\n")[0]
+    )
     assert report["mismatches"] == ["campaign-spec.json"] and not report["clean"]
 
 
 @pytest.mark.parametrize("free, ok", [(3000, True), (2999, False), (1249, False)])
 def test_free_space_keeps_a_fifth_of_the_disk_and_a_quarter_spare(monkeypatch, free, ok):
     # 1,000 bytes on a 10,000-byte disk: 2,000 must stay free afterwards (and 1,250 spare).
-    monkeypatch.setattr(collector.shutil, "disk_usage",
-                        lambda p: shutil._ntuple_diskusage(10000, 10000 - free, free))
+    monkeypatch.setattr(
+        collector.shutil,
+        "disk_usage",
+        lambda p: shutil._ntuple_diskusage(10000, 10000 - free, free),
+    )
     if ok:
         collector.check_space(Path("."), 1000)
     else:
@@ -612,11 +786,14 @@ def test_free_space_keeps_a_fifth_of_the_disk_and_a_quarter_spare(monkeypatch, f
             collector.check_space(Path("."), 1000)
 
 
-@pytest.mark.parametrize("data, message", [
-    ({"host": "manager.example"}, "does not appear to be an IPv4 or IPv6 address"),
-    ({"host": "192.0.2.10", "user": "Root"}, "SSH user"),
-    ({"host": "192.0.2.10", "campaigns_root": "relative"}, "absolute"),
-])
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        ({"host": "manager.example"}, "does not appear to be an IPv4 or IPv6 address"),
+        ({"host": "192.0.2.10", "user": "Root"}, "SSH user"),
+        ({"host": "192.0.2.10", "campaigns_root": "relative"}, "absolute"),
+    ],
+)
 def test_inventory_validation(tmp_path, data, message):
     path = tmp_path / "inventory.json"
     path.write_text(json.dumps(data))
@@ -642,8 +819,9 @@ def test_a_compressed_spec_checks_and_merges_only_its_slots(root):
     tables = (root / "completeness" / "per-hour-tables.md").read_text()
     assert "| Region | h00 | h01 | h02 |\n|---|---|---|---|" in tables
     merge.merge_network(root, "shifter")
-    state = read_json(merge.manifest_path(root, "shifter").parent / "regions" / "ams3"
-                      / "state.json")
+    state = read_json(
+        merge.manifest_path(root, "shifter").parent / "regions" / "ams3" / "state.json"
+    )
     assert {j["status"] for j in state["jobs"] if j["round"] >= 3} == {"not_started_deadline"}
     assert {j["round"] for j in state["jobs"]} == set(range(24))
 
@@ -654,8 +832,9 @@ def test_a_network_paused_for_an_hour_merges_with_paused_cells(root, capsys):
     finish_day(root)
     for region in REGIONS:
         unpull(root, "geonode", region, 1)
-    write_hour(root, 1, {("shifter", region): "destroyed" for region in REGIONS},
-               paused=("geonode",))
+    write_hour(
+        root, 1, {("shifter", region): "destroyed" for region in REGIONS}, paused=("geonode",)
+    )
     result = completeness.build(root)
     rows = {(r["net"], r["region"], r["round"]): r for r in result["rows"]}
     assert rows["geonode", "ams3", 1]["cell"] == rows["geonode", "tor1", 1]["cell"] == "paused"

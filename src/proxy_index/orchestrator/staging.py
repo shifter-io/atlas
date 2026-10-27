@@ -180,14 +180,10 @@ def init(
     schema = storage.initialize(staging_file) | initialize_calculated(staging_file)
     seeded = storage.seed(staging_file)
     reports_dir = (
-        str(Path(profile["reports_dir"]).expanduser().resolve())
-        if profile["reports_dir"]
-        else None
+        str(Path(profile["reports_dir"]).expanduser().resolve()) if profile["reports_dir"] else None
     )
     methodology = (
-        str(Path(profile["methodology"]).expanduser().resolve())
-        if profile["methodology"]
-        else None
+        str(Path(profile["methodology"]).expanduser().resolve()) if profile["methodology"] else None
     )
     with storage.connect(staging_file) as conn:
         known = {

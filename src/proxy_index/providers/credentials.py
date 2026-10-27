@@ -1,4 +1,5 @@
 """Read local credential TOML without exporting secrets into the process environment."""
+
 from __future__ import annotations
 
 import os
@@ -20,8 +21,10 @@ def read_credentials(path: str | Path, provider: str) -> dict[str, str]:
             raise ValueError("Credential file must be owned by the current user with mode 600")
         data = tomllib.load(stream)
     credentials = data.get(provider)
-    if not isinstance(credentials, dict) or not credentials or not all(
-        isinstance(value, str) and value for value in credentials.values()
+    if (
+        not isinstance(credentials, dict)
+        or not credentials
+        or not all(isinstance(value, str) and value for value in credentials.values())
     ):
         raise ValueError("Credential file requires a provider table with nonempty string values")
     return credentials
