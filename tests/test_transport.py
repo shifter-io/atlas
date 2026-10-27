@@ -16,8 +16,9 @@ def config(port, *, scheme="http", **kwargs):
 
 
 @pytest.mark.parametrize("status,body,error", [
-    (200, b"8.8.8.8\n", None), (200, b"2001:4860:4860::8888\n", None),
-    (200, b"8.8.8.8 garbage", "invalid_body"), (200, b"8.8.8.8" + b" " * 600, "body_too_large"),
+    (200, b"203.0.113.8\n", None), (200, b"2001:4860:4860::8888\n", None),
+    (200, b"203.0.113.8 garbage", "invalid_body"),
+    (200, b"203.0.113.8" + b" " * 600, "body_too_large"),
     (302, b"", "http_status"), (403, b"denied", "http_status"),
     (429, b"limited", "http_status"), (500, b"bad", "http_status"),
     (403, b"x" * 1000, "body_too_large"),
@@ -185,7 +186,7 @@ async def test_custom_target_controls_method_headers_and_success(tmp_path):
 
         def assess(self, status, body):
             assert status == 201
-            return Assessment(ip="8.8.8.8")
+            return Assessment(ip="203.0.113.8")
 
     targets = TargetRegistry()
     targets.register(Custom())

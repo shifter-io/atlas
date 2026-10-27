@@ -45,7 +45,7 @@ def test_classify_status(status, verdict):
 @pytest.mark.parametrize("body,verdict", [
     (CLOUDFLARE, Verdict.CHALLENGE), ("Please verify you are human", Verdict.CHALLENGE),
     (b"<div class='g-recaptcha'>", Verdict.CHALLENGE), (BLOCKED, Verdict.BLOCK),
-    ("You have been BLOCKED", Verdict.BLOCK), (b"8.8.8.8\n", None), (b"", None),
+    ("You have been BLOCKED", Verdict.BLOCK), (b"203.0.113.8\n", None), (b"", None),
     # Markers past the first 4 KB are not looked at.
     (b" " * 5000 + b"captcha", None), (b"\xff\xfe captcha", Verdict.CHALLENGE),
 ])
@@ -60,7 +60,7 @@ def test_every_challenge_marker_is_lower_case():
 @pytest.mark.parametrize("status,body,verdict", [
     (403, CLOUDFLARE, Verdict.CHALLENGE), (503, CLOUDFLARE, Verdict.CHALLENGE),
     (403, b"nope", Verdict.BLOCK), (200, BLOCKED, Verdict.BLOCK),
-    (200, b"garbage", Verdict.ERROR), (201, b"8.8.8.8", Verdict.ERROR),
+    (200, b"garbage", Verdict.ERROR), (201, b"203.0.113.8", Verdict.ERROR),
     (302, b"", Verdict.ERROR), (502, CLOUDFLARE, Verdict.PROXY_ERROR),
     (503, b"", Verdict.PROXY_ERROR), (504, b"Gateway Timeout", Verdict.PROXY_ERROR),
     (503, BLOCKED, Verdict.BLOCK), (500, b"oops", Verdict.ERROR), (404, b"", Verdict.ERROR),
@@ -77,12 +77,12 @@ def test_failed_response(status, body, verdict):
 ])
 def test_default_verdict_from_error_code(error, verdict):
     assert from_error(error) == verdict
-    assert Outcome(1, error=error, ip=None if error else "8.8.8.8").verdict == verdict
+    assert Outcome(1, error=error, ip=None if error else "203.0.113.8").verdict == verdict
 
 
 def test_outcome_rejects_inconsistent_verdicts():
     with pytest.raises(ValueError):
-        Outcome(1, ip="8.8.8.8", verdict="block")
+        Outcome(1, ip="203.0.113.8", verdict="block")
     with pytest.raises(ValueError):
         Outcome(1, error="http_status", verdict="ok")
     with pytest.raises(ValueError):
@@ -100,10 +100,10 @@ def test_gateway_code():
 
 
 @pytest.mark.parametrize("status,body,error,verdict", [
-    (200, b"8.8.8.8\n", None, "ok"),
+    (200, b"203.0.113.8\n", None, "ok"),
     (200, CLOUDFLARE, "challenge", "challenge"),
     (200, BLOCKED, "blocked", "block"),
-    (200, b"<html>8.8.8.8</html>", "invalid_body", "error"),
+    (200, b"<html>203.0.113.8</html>", "invalid_body", "error"),
     (403, b"", "http_status", "block"),
     (403, CLOUDFLARE, "http_status", "challenge"),
     (407, b"", "proxy_auth", "proxy_error"),
@@ -173,7 +173,7 @@ async def test_plain_http_estimate_matches_the_wire():
             outcome = await transport.execute(registry.get("generic_http"))
     assert outcome.verdict == "ok"
     sent = (b"HTTP/1.1 200 Test\r\nContent-Length: 8\r\nLocation: http://localhost/must-not-"
-            b"follow\r\nConnection: close\r\n\r\n8.8.8.8\n")
+            b"follow\r\nConnection: close\r\n\r\n203.0.113.8\n")
     # Kernel counters on Linux, a sized estimate elsewhere: both are exact here.
     assert outcome.bytes_exact == bytes_io.LINUX
     assert outcome.bytes_up == len(gateway.requests[0])

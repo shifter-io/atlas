@@ -50,7 +50,7 @@ async def pipe(reader, writer):
 class Gateway:
     """Minimal loopback gateways: no public hosts or credentials are contacted."""
 
-    def __init__(self, scheme="http", *, auth=False, body=b"8.8.8.8\n", status=200,
+    def __init__(self, scheme="http", *, auth=False, body=b"203.0.113.8\n", status=200,
                  disconnect=False, delay=0, fragmented=False):
         self.scheme = scheme
         self.auth = auth

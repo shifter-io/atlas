@@ -10,9 +10,9 @@ from proxy_index.targets import EchoIpTarget, TargetRegistry, registry
 
 
 @pytest.mark.parametrize("body,expected", [
-    (b"8.8.8.8\n", "8.8.8.8"), (b" 2001:4860:4860::8888 \r\n", "2001:4860:4860::8888"),
-    (b"", None), (b"1.2.3.999", None), (b"001.2.3.4", None), (b"fe80::1%eth0", None),
-    (b"8.8.8.8\n1.1.1.1", None), (b"<html>8.8.8.8</html>", None), (b"\xff", None),
+    (b"203.0.113.8\n", "203.0.113.8"), (b" 2001:4860:4860::8888 \r\n", "2001:4860:4860::8888"),
+    (b"", None), (b"192.0.2.999", None), (b"192.0.2.004", None), (b"fe80::1%eth0", None),
+    (b"203.0.113.8\n198.51.100.1", None), (b"<html>203.0.113.8</html>", None), (b"\xff", None),
 ])
 def test_ip_parser(body, expected):
     result = registry.get("generic_http").assess(200, body)
@@ -22,7 +22,7 @@ def test_ip_parser(body, expected):
 
 @pytest.mark.parametrize("status", [201, 301, 403, 429, 500, 502])
 def test_status(status):
-    assert registry.get("generic_http").assess(status, b"8.8.8.8").error == "http_status"
+    assert registry.get("generic_http").assess(status, b"203.0.113.8").error == "http_status"
 
 
 def test_registry_extension():
@@ -89,13 +89,13 @@ def test_credentials_are_not_in_repr_or_public_config():
     (502, "proxy_error"),
 ])
 def test_status_verdict(status, verdict):
-    assert registry.get("generic_http").assess(status, b"8.8.8.8").verdict == verdict
+    assert registry.get("generic_http").assess(status, b"203.0.113.8").verdict == verdict
 
 
 def test_counters_track_verdicts_and_bytes():
     counters = Counters()
     for outcome in (
-        Outcome(4.2, ip="8.8.8.8", status=200, bytes_up=100, bytes_down=300, bytes_exact=True),
+        Outcome(4.2, ip="203.0.113.8", status=200, bytes_up=100, bytes_down=300, bytes_exact=True),
         Outcome(9, error="challenge", status=200, bytes_up=100, bytes_down=4000),
         Outcome(9, error="http_status", status=403, verdict="block", bytes_up=90, bytes_down=50),
         Outcome(15000, error="timeout"),
