@@ -6,8 +6,9 @@
 # $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each run. A job-started
 # hook on the servers refuses every job except the owner's pull requests from
 # this repository's own branches, pushes to main and owner dispatches. Draft pull
-# requests run nothing until they are marked ready. A change only to Markdown,
-# LICENSE or docs/ (except docs/onboarding.html, which a test reads) runs only
+# requests run nothing until they are marked ready. A change only to docs/
+# (except docs/onboarding.html, which a test reads), LICENSE or Markdown outside
+# src/, tests/, scripts/ and configs/ (where Markdown can be a golden) runs only
 # the privacy and commit-message checks.
 name: ci
 
@@ -60,7 +61,9 @@ jobs:
           code=false
           while IFS= read -r f; do
             case "$f" in
-              docs/onboarding.html) code=true ;;  # tests/test_onboarding_round.py reads it
+              # docs/onboarding.html: tests/test_onboarding_round.py reads it; Markdown
+              # under these trees can be a golden (tests/fixtures/campaign-data/*.md).
+              docs/onboarding.html|src/*|tests/*|scripts/*|configs/*) code=true ;;
               docs/*|*.md|LICENSE) ;;
               *) code=true ;;
             esac
@@ -83,7 +86,9 @@ jobs:
 
       - name: No AI attribution in commit messages (GLOBAL 2)
         run: |
-          if git log --format=%B "$BASE..HEAD" | grep -iqE 'co-authored-by|claude|generated with'; then
+          # Attribution trailers and footers only: a message may name a file such as CLAUDE.md.
+          pattern='co-authored-by:.*(claude|anthropic|openai|copilot|cursor)|generated with|noreply@anthropic'
+          if git log --format=%B "$BASE..HEAD" | grep -iqE "$pattern"; then
             echo "a commit message carries AI attribution"; exit 1
           fi
 
@@ -93,15 +98,21 @@ jobs:
           tools=$CI_CACHE_DIR/proxy-index/tools
           mkdir -p "$tools"
           # Download, verify and unpack once; a finished directory is renamed into
-          # place, so a half-written one is never used.
+          # place, so a half-written one is never used. A failed fetch removes its
+          # temporary directory before failing the step.
           fetch() {
             [ -e "$3/.complete" ] && return 0
             tmp=$(mktemp -d "$tools/.tmp.XXXXXX")
-            curl -fsSL --retry 3 -o "$tmp/a.tgz" "$1"
-            echo "$2  $tmp/a.tgz" | sha256sum -c --quiet -
-            mkdir "$tmp/x" && tar -C "$tmp/x" --strip-components=1 -xzf "$tmp/a.tgz" && touch "$tmp/x/.complete"
-            mv -T "$tmp/x" "$3" 2>/dev/null || true
-            rm -rf "$tmp"
+            if curl -fsSL --retry 3 -o "$tmp/a.tgz" "$1" \
+                && echo "$2  $tmp/a.tgz" | sha256sum -c --quiet - \
+                && mkdir "$tmp/x" && tar -C "$tmp/x" --strip-components=1 -xzf "$tmp/a.tgz" \
+                && touch "$tmp/x/.complete"; then
+              mv -T "$tmp/x" "$3" 2>/dev/null || true
+              rm -rf "$tmp"
+            else
+              rm -rf "$tmp"
+              return 1
+            fi
           }
           fetch "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv-$UV_VERSION"
           fetch "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql-$PG_VERSION"
@@ -115,7 +126,10 @@ jobs:
 
       - name: uv sync (locked)
         if: env.CODE == 'true'
-        run: uv sync --locked --no-editable --python "$PYTHON_VERSION"
+        # The virtualenv persists across runs, and uv rebuilds the project only when
+        # pyproject.toml changes; reinstall it so scripts (the benchmark,
+        # postgres_local.py) import this head's code, not an earlier build.
+        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
 
       - name: Build the wheel and sdist
         if: env.CODE == 'true'
