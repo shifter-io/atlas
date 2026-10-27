@@ -235,9 +235,7 @@ def events(path=None):
             raise ValueError(f"Invalid event setting {key}")
     if result["latency_spike_ratio"] <= 1 or result["pulse_latency_ratio"] <= 1:
         raise ValueError("Latency ratios must exceed one")
-    result["hosting_usage_types"] = _usage_types(
-        HOSTING_USAGE_TYPES if usage is None else usage
-    )
+    result["hosting_usage_types"] = _usage_types(HOSTING_USAGE_TYPES if usage is None else usage)
     return result
 
 

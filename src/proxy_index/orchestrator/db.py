@@ -31,9 +31,7 @@ log = logging.getLogger(__name__)
 
 CloseHook = Callable[[list[int]], Awaitable[None]]
 # Batch ids closed inside a connection's open transaction, keyed weakly by the connection.
-_CLOSED: weakref.WeakKeyDictionary[psycopg.AsyncConnection, list[int]] = (
-    weakref.WeakKeyDictionary()
-)
+_CLOSED: weakref.WeakKeyDictionary[psycopg.AsyncConnection, list[int]] = weakref.WeakKeyDictionary()
 
 DEFAULTS: dict[str, Any] = {
     # Seconds between a census slot and the synchronized start every node waits for.
@@ -198,6 +196,7 @@ class Database:
             for query in captured:
                 await conn.execute(query)
         self._partitions.add(key)
+
 
 async def setting(conn: psycopg.AsyncConnection, key: str) -> Any:
     """An operator setting from the settings table, else the built-in default."""

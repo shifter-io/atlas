@@ -3,6 +3,7 @@
 Private inherited socket pairs carry bounded request/result messages. Workers
 never schedule replacement requests, count unique IPs, or write result files.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,11 +20,14 @@ from .transport import HttpTransport
 
 
 def process_count(config):
-    available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (
-        os.cpu_count() or 1
+    available = (
+        len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
     )
-    return min(config.processes or available, config.concurrency,
-               config.requests if config.requests is not None else config.concurrency)
+    return min(
+        config.processes or available,
+        config.concurrency,
+        config.requests if config.requests is not None else config.concurrency,
+    )
 
 
 async def receive(reader):
@@ -53,12 +57,12 @@ async def _serve(sock, config, target, factory, deadline):
                     if deadline is not None and time.perf_counter() >= deadline:
                         send(writer, ("expired", context.request_index))
                     else:
-                        remaining = (max(0, deadline - time.perf_counter())
-                                     if deadline is not None else None)
+                        remaining = (
+                            max(0, deadline - time.perf_counter()) if deadline is not None else None
+                        )
                         async with asyncio.timeout(remaining):
                             result = await transport.execute(target, context=context)
-                        send(writer, ("result", context.request_index,
-                                      result, time.perf_counter()))
+                        send(writer, ("result", context.request_index, result, time.perf_counter()))
                 await writer.drain()
             except TimeoutError:
                 send(writer, ("expired", context.request_index))
@@ -131,9 +135,16 @@ class ProcessTransport:
                 child.setblocking(False)
                 slots = (self.config.concurrency + self.count - 1 - index) // self.count
                 process = context.Process(
-                    target=_entry, name=f"http-worker-{index}", daemon=True,
-                    args=(child, replace(self.config, concurrency=slots, processes=1),
-                          self.target, self.factory, self.deadline),
+                    target=_entry,
+                    name=f"http-worker-{index}",
+                    daemon=True,
+                    args=(
+                        child,
+                        replace(self.config, concurrency=slots, processes=1),
+                        self.target,
+                        self.factory,
+                        self.deadline,
+                    ),
                 )
                 try:
                     process.start()

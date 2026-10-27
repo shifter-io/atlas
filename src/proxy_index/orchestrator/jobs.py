@@ -100,9 +100,7 @@ async def retention(db: Database, now: datetime | None = None) -> dict[str, Any]
             if end <= cutoff:
                 await conn.execute(sql.SQL("DROP TABLE {}").format(sql.Identifier(row["relname"])))
                 dropped.append(row["relname"])
-        events = (
-            await conn.execute("DELETE FROM test_events WHERE at<%s", (cutoff,))
-        ).rowcount
+        events = (await conn.execute("DELETE FROM test_events WHERE at<%s", (cutoff,))).rowcount
         jobs = (
             await conn.execute(
                 "DELETE FROM job_runs WHERE started_at<%s AND status<>'running'",
@@ -123,9 +121,7 @@ async def write_reports(db: Database, batch_ids: list[int]) -> dict[str, Any] | 
         from .. import report_html
 
         async with _report_lock(db):
-            return await asyncio.to_thread(
-                report_html.write, db.credentials_file, out, batch_ids
-            )
+            return await asyncio.to_thread(report_html.write, db.credentials_file, out, batch_ids)
     except Exception:  # noqa: BLE001
         log.exception("could not write the HTML reports for batches %s", batch_ids)
         return None

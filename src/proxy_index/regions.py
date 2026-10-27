@@ -189,8 +189,13 @@ TARGET_TYPES = {
     "pulse_concurrency": int,
     "sort_order": int,
 }
-POSITIVE = ("timeout_ms", "census_concurrency", "pulse_interval_minutes", "pulse_requests",
-            "pulse_concurrency")
+POSITIVE = (
+    "timeout_ms",
+    "census_concurrency",
+    "pulse_interval_minutes",
+    "pulse_requests",
+    "pulse_concurrency",
+)
 
 
 def load_targets(path: str | Path | None = None) -> list[dict[str, Any]]:

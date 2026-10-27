@@ -98,8 +98,10 @@ async def test_a_restarted_collector_removes_an_unconfirmed_worker(tmp_path, pas
     """The launch could not confirm the assignment and its guarded removal failed; the next
     process (a new client, no in-memory proof) removes it through the own-unassigned path."""
     fake = FakeDigitalOcean()
-    fake.faults += [Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3),
-                    Fault("DELETE", f"/v2/droplets/{FIRST}", 500, times=TRIES)]
+    fake.faults += [
+        Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3),
+        Fault("DELETE", f"/v2/droplets/{FIRST}", 500, times=TRIES),
+    ]
     spec = no_replacement_spec()
     _, root, remote, clock = await launched(tmp_path, fake, spec, start=LATE)
     record = launch.load_hour(root, 0)  # the ledger on disk, as a restarted process reads it
@@ -110,11 +112,13 @@ async def test_a_restarted_collector_removes_an_unconfirmed_worker(tmp_path, pas
         assert cloud.created_ids == frozenset()
         if pass_ == "reconcile":
             collector = collector_module.Collector(
-                root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing())
+                root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing()
+            )
             await collector.reconcile(spec, {0: record})
         else:
-            await harvest.harvest_hour(spec, record, root, cloud=cloud,
-                                       remote_factory=lambda hour: remote, clock=clock)
+            await harvest.harvest_hour(
+                spec, record, root, cloud=cloud, remote_factory=lambda hour: remote, clock=clock
+            )
     assert worker.status == "destroyed" and FIRST not in fake.droplets
     last = audit_lines(audit_path(root))[-1]
     assert (last["path"], last["result"]) == ("own_unassigned", "deleted")
@@ -131,15 +135,19 @@ async def test_a_refused_removal_at_launch_is_alerted(tmp_path, monkeypatch):
     record, *_ = await launched(tmp_path, fake, no_replacement_spec(), start=LATE)
     assert [d.status for d in record.droplets] == ["destroy_refused"] and FIRST in fake.droplets
     assert [a["kind"] for a in record.alerts] == [
-        "project_assign_failed", "destroy_refused", "cell_failed"]
+        "project_assign_failed",
+        "destroy_refused",
+        "cell_failed",
+    ]
 
 
 class Crash(BaseException):
     """The manager process dying: nothing after it runs, only what is on disk survives."""
 
 
-async def test_a_crash_between_the_mark_and_the_delete_keeps_the_mark_on_disk(tmp_path,
-                                                                              monkeypatch):
+async def test_a_crash_between_the_mark_and_the_delete_keeps_the_mark_on_disk(
+    tmp_path, monkeypatch
+):
     """CAMP-1r (a): the launch saved the hour only after `assign_and_verify_project` returned,
     which includes the delete. A crash in between left the worker `requested` and unmarked on
     disk: the resumed launch refused it (not this client's create) and it stayed alive. Now the
@@ -163,7 +171,8 @@ async def test_a_crash_between_the_mark_and_the_delete_keeps_the_mark_on_disk(tm
     assert FIRST in fake.droplets and not fake.deleted  # the resumed launch left it alive
     async with running(fake) as cloud:
         collector = collector_module.Collector(
-            root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing())
+            root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing()
+        )
         await collector.reconcile(spec, {0: record})
     assert record.droplets[0].status == "destroyed" and FIRST not in fake.droplets
     assert audit_lines(audit_path(root))[-1]["path"] == "own_unassigned"
@@ -187,8 +196,13 @@ async def test_a_refusal_while_the_create_settles_is_retried_by_reconcile(tmp_pa
     created_at = datetime.fromisoformat(fake.droplets[FIRST]["created_at"])
     async with running(fake) as cloud:
         collector = collector_module.Collector(
-            root, None, cloud, None, lambda: created_at.replace(minute=59),
-            collector_module.Pacing())
+            root,
+            None,
+            cloud,
+            None,
+            lambda: created_at.replace(minute=59),
+            collector_module.Pacing(),
+        )
         await collector.reconcile(spec, {0: record})
     assert worker.status == "destroyed" and fake.deleted == [("droplet", FIRST)]
     last = audit_lines(audit_path(root))[-1]
@@ -212,15 +226,17 @@ async def test_reconcile_keeps_a_final_refusal_final(tmp_path, case):
         audit_path(root).write_text("".join(json.dumps(line) + "\n" for line in lines))
     async with running(fake) as cloud:
         collector = collector_module.Collector(
-            root, None, cloud, None, lambda: now, collector_module.Pacing())
+            root, None, cloud, None, lambda: now, collector_module.Pacing()
+        )
         await collector.reconcile(spec, {0: record})
     assert record.droplets[0].status == "destroy_refused" and FIRST in fake.droplets
     assert not fake.deleted
 
 
 async def created(cloud, name=NAME):
-    [droplet] = await cloud.create([name], region="nyc3", size="c-4", image="1", tags=OURS,
-                                   ssh_keys=["9"])
+    [droplet] = await cloud.create(
+        [name], region="nyc3", size="c-4", image="1", tags=OURS, ssh_keys=["9"]
+    )
     return droplet, {droplet.id: DropletRecord("shifter", "nyc3", 3, name, droplet.id)}
 
 
@@ -236,7 +252,8 @@ async def test_a_persistent_read_error_is_unconfirmed_not_raised(tmp_path):
         droplet, records = await created(cloud)
         fake.faults.append(Fault("GET", f"/v2/droplets/{droplet.id}", 500, times=READS * TRIES))
         confirmed, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(sleep=sleep))
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(sleep=sleep)
+        )
     record = records[droplet.id]
     assert not confirmed and failed == {droplet.id} and sleeps == list(scope.SETTLE_DELAYS)
     assert sum(sleeps) == 30.0 and record.error_detail["failed"] == ["readable"]
@@ -251,10 +268,13 @@ async def test_a_droplet_not_yet_readable_and_a_project_read_error_are_retried(t
     fake = FakeDigitalOcean()
     async with running(fake) as cloud:
         droplet, records = await created(cloud)
-        fake.faults += [Fault("GET", f"/v2/droplets/{droplet.id}", 404),
-                        Fault("GET", f"/v2/projects/{CAMPAIGN_PROJECT}", 500, times=TRIES)]
+        fake.faults += [
+            Fault("GET", f"/v2/droplets/{droplet.id}", 404),
+            Fault("GET", f"/v2/projects/{CAMPAIGN_PROJECT}", 500, times=TRIES),
+        ]
         confirmed, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=NO_WAIT)
+            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=NO_WAIT
+        )
     assert confirmed == {droplet.id} and not failed and records[droplet.id].status == "assigned"
     assert records[droplet.id].assign_failed_at is None
 
@@ -265,7 +285,8 @@ async def test_a_droplet_that_never_appears_ends_absent(tmp_path):
         droplet, records = await created(cloud)
         fake.droplets.pop(droplet.id)
         _, failed = await assign_and_verify_project(
-            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=NO_WAIT)
+            cloud, SCOPE, [droplet.id], records, tmp_path / "a", retry=NO_WAIT
+        )
     assert failed == {droplet.id} and records[droplet.id].status == "destroyed"
     assert audit_lines(tmp_path / "a")[-1]["result"] == "absent"
 
@@ -280,8 +301,9 @@ async def test_an_unreadable_foreign_id_is_refused_before_any_post(tmp_path, fai
     records = {lookalike: DropletRecord("shifter", "nyc3", 3, NAME, lookalike)}
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await assign_and_verify_project(cloud, SCOPE, [lookalike], records, tmp_path / "a",
-                                            retry=scope.Retry(delay=0))
+            await assign_and_verify_project(
+                cloud, SCOPE, [lookalike], records, tmp_path / "a", retry=scope.Retry(delay=0)
+            )
     assert refused.value.failed == ["own_create"] and lookalike in fake.droplets
     assert records[lookalike].assign_failed_at is None and not fake.deleted
     assert not [r for r in fake.requests if r[0] == "POST"]
@@ -299,8 +321,9 @@ async def test_the_mark_writer_refuses_an_id_it_did_not_create(tmp_path, monkeyp
     monkeypatch.setattr(scope, "_fresh_owned", unreadable)
     async with running(fake) as cloud:
         with pytest.raises(OwnershipError) as refused:
-            await assign_and_verify_project(cloud, SCOPE, [lookalike], records, tmp_path / "a",
-                                            retry=NO_WAIT)
+            await assign_and_verify_project(
+                cloud, SCOPE, [lookalike], records, tmp_path / "a", retry=NO_WAIT
+            )
     assert refused.value.failed == ["own_create"] and records[lookalike].assign_failed_at is None
     assert records[lookalike].status == "requested" and not fake.deleted
 
@@ -315,12 +338,20 @@ async def test_reconcile_leaves_a_marked_worker_alone_unless_removable(tmp_path,
     record = launch.load_hour(root, 0)
     [worker] = record.droplets
     stray = fake.add(worker.name, fake.droplets[worker.droplet_id]["tags"], project=None)
-    marked = DropletRecord(worker.network, worker.region, 0, worker.name, stray,
-                           status=status, assign_failed_at=SPEC_TIME)
+    marked = DropletRecord(
+        worker.network,
+        worker.region,
+        0,
+        worker.name,
+        stray,
+        status=status,
+        assign_failed_at=SPEC_TIME,
+    )
     record.droplets.append(marked)
     async with running(fake) as cloud:
         collector = collector_module.Collector(
-            root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing())
+            root, None, cloud, None, lambda: datetime.now(UTC), collector_module.Pacing()
+        )
         await collector.reconcile(spec, {0: record})
     assert stray in fake.droplets and marked.status == status and not fake.deleted
     assert "foreign_tagged" not in {a["code"] for a in read_alerts(root)}
@@ -333,13 +364,15 @@ async def test_the_ledger_mark_survives_a_new_client(tmp_path):
     async with running(fake) as cloud:
         droplet, records = await created(cloud)
         fake.faults.append(Fault("DELETE", f"/v2/droplets/{droplet.id}", 500, times=TRIES))
-        await assign_and_verify_project(cloud, SCOPE, [droplet.id], records, audit,
-                                        retry=scope.Retry(delay=0))
+        await assign_and_verify_project(
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(delay=0)
+        )
     assert records[droplet.id].status == "destroy_failed"
     reloaded = {droplet.id: DropletRecord(**json.loads(json.dumps(vars(records[droplet.id]))))}
     async with running(fake) as cloud:
-        result = await guarded_delete(cloud, "droplet", droplet.id, SCOPE,
-                                      Ledger({"droplet": [droplet.id]}, reloaded), audit)
+        result = await guarded_delete(
+            cloud, "droplet", droplet.id, SCOPE, Ledger({"droplet": [droplet.id]}, reloaded), audit
+        )
     assert result == "deleted" and droplet.id not in fake.droplets
     assert audit_lines(audit)[-1]["path"] == "own_unassigned"
 
@@ -352,16 +385,26 @@ def lookalikes(fake, ours_id):
         found[key] = fake.add(NAME, OURS, project=project)
     found["other_name"] = fake.add(f"pic-{SID}-h03-nyc3-geonode", OURS, project=None)
     records = {
-        "default_project": DropletRecord("shifter", "nyc3", 3, NAME, found["default_project"],
-                                         status="assign_failed"),  # set by hand, not by scope
-        "no_project": DropletRecord("shifter", "nyc3", 3, NAME, found["no_project"],
-                                    status="running"),  # an adopted orphan's record
+        "default_project": DropletRecord(
+            "shifter", "nyc3", 3, NAME, found["default_project"], status="assign_failed"
+        ),  # set by hand, not by scope
+        "no_project": DropletRecord(
+            "shifter", "nyc3", 3, NAME, found["no_project"], status="running"
+        ),  # an adopted orphan's record
         # Our own marked record under the lookalike's id: the name differs (exact name check).
-        "other_name": DropletRecord("shifter", "nyc3", 3, NAME, found["other_name"],
-                                    status="assign_failed", assign_failed_at=SPEC_TIME),
+        "other_name": DropletRecord(
+            "shifter",
+            "nyc3",
+            3,
+            NAME,
+            found["other_name"],
+            status="assign_failed",
+            assign_failed_at=SPEC_TIME,
+        ),
     }
     return found, {found[key]: record for key, record in records.items()} | {
-        ours_id: DropletRecord("shifter", "nyc3", 3, NAME, ours_id)}
+        ours_id: DropletRecord("shifter", "nyc3", 3, NAME, ours_id)
+    }
 
 
 @pytest.mark.parametrize("fresh_client", [False, True], ids=["same_process", "restarted"])
@@ -389,20 +432,37 @@ async def test_an_old_mark_or_a_lost_record_is_refused(tmp_path, monkeypatch):
         droplet, records = await created(cloud)
         fake.assign_delay = 99
         fake.faults.append(Fault("DELETE", f"/v2/droplets/{droplet.id}", 500, times=TRIES))
-        await assign_and_verify_project(cloud, SCOPE, [droplet.id], records, audit,
-                                        retry=scope.Retry(attempts=1))
+        await assign_and_verify_project(
+            cloud, SCOPE, [droplet.id], records, audit, retry=scope.Retry(attempts=1)
+        )
         with pytest.raises(OwnershipError):  # recorded id, but no record to carry the mark
-            await guarded_delete(cloud, "droplet", droplet.id, SCOPE,
-                                 Ledger({"droplet": [droplet.id]}), audit)
+            await guarded_delete(
+                cloud, "droplet", droplet.id, SCOPE, Ledger({"droplet": [droplet.id]}), audit
+            )
         monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat("2027-01-01T22:29Z"))
         with pytest.raises(OwnershipError):
-            await guarded_delete(cloud, "droplet", droplet.id, SCOPE,
-                                 Ledger({"droplet": [droplet.id]}, records), audit)
+            await guarded_delete(
+                cloud,
+                "droplet",
+                droplet.id,
+                SCOPE,
+                Ledger({"droplet": [droplet.id]}, records),
+                audit,
+            )
     assert droplet.id in fake.droplets
 
 
 def test_an_hour_written_before_the_mark_still_loads():
-    assert HourRecord.from_dict(
-        {"campaign_id": CID, "hour": 0, "scheduled_at": SPEC_TIME,
-         "droplets": [{"network": "n", "region": "nyc3", "hour": 0, "name": NAME}]}
-    ).droplets[0].assign_failed_at is None
+    assert (
+        HourRecord.from_dict(
+            {
+                "campaign_id": CID,
+                "hour": 0,
+                "scheduled_at": SPEC_TIME,
+                "droplets": [{"network": "n", "region": "nyc3", "hour": 0, "name": NAME}],
+            }
+        )
+        .droplets[0]
+        .assign_failed_at
+        is None
+    )

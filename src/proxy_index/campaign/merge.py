@@ -27,12 +27,13 @@ from .contracts import (
 
 HOURS = 24
 # Droplet states that can still produce or hold a round that is not pulled yet.
-LIVE = frozenset({"requested", "assigned", "booting", "starting", "armed", "running",
-                  "finished"})
+LIVE = frozenset({"requested", "assigned", "booting", "starting", "armed", "running", "finished"})
 # A worker in one of these states never started its round: create, assign, boot or start
 # failed. Read from the frozen contract; the scope suite reserves writing these for scope.py.
 NEVER_STARTED = frozenset(s for s in get_args(DropletStatus) if s.endswith("_failed")) - {
-    "collect_failed", "destroy_failed"}
+    "collect_failed",
+    "destroy_failed",
+}
 DESTROYED = frozenset({"destroyed", "destroy_refused", "destroy_failed"})
 ROUND_TERMINAL = frozenset({"completed", "stopped", "failed"})
 # Notes that qualify a cell's status; merge and completeness report them verbatim.
@@ -94,8 +95,9 @@ def _never_started(droplet: DropletRecord) -> bool:
     return droplet.status in NEVER_STARTED or (droplet.status in DESTROYED and unstarted)
 
 
-def cell_status(state: dict | None, droplets: list[DropletRecord] | None,
-                paused: bool = False) -> tuple[str, str | None]:
+def cell_status(
+    state: dict | None, droplets: list[DropletRecord] | None, paused: bool = False
+) -> tuple[str, str | None]:
     """A cell's status and qualifying note from its pulled round (or None) and its workers.
 
     Statuses: `pulled` (a closed round, judged by its data), `failed_ours`, `running`,
@@ -132,12 +134,20 @@ def read_round(path: Path, manifest: dict, region: str, hour: int) -> dict | Non
 
 def _unstarted_jobs(manifest: dict, region: str, hour: int) -> list[dict]:
     scheduled = manifest["rounds"][hour]
-    return [{"round": hour, "country": country, "scheduled_at": scheduled,
-             "status": "not_started_deadline"} for country in manifest["regions"][region]]
+    return [
+        {
+            "round": hour,
+            "country": country,
+            "scheduled_at": scheduled,
+            "status": "not_started_deadline",
+        }
+        for country in manifest["regions"][region]
+    ]
 
 
-def _cell_jobs(path: Path, manifest: dict, cell: tuple[str, str, int],
-               ledger: Ledger) -> tuple[list[dict], dict | None]:
+def _cell_jobs(
+    path: Path, manifest: dict, cell: tuple[str, str, int], ledger: Ledger
+) -> tuple[list[dict], dict | None]:
     """The jobs one finished cell contributes, and its round; raises for any other cell."""
     network, region, hour = cell
     state = read_round(path, manifest, region, hour)
@@ -155,8 +165,9 @@ def _cell_jobs(path: Path, manifest: dict, cell: tuple[str, str, int],
     return state["jobs"], state
 
 
-def build_region(path: Path, manifest: dict, network: str, region: str,
-                 ledger: Ledger, slots: int = HOURS) -> dict:
+def build_region(
+    path: Path, manifest: dict, network: str, region: str, ledger: Ledger, slots: int = HOURS
+) -> dict:
     """The closed 24-round checkpoint of one region; raises on an unfinished cell. Rounds past
     the spec's `slots` (a compressed test) are never launched: they close unstarted."""
     jobs, rounds = [], []
@@ -170,8 +181,12 @@ def build_region(path: Path, manifest: dict, network: str, region: str,
         rounds += [state] if state else []
     merged = new_state(manifest, region, settings(manifest["settings"]))
     peaks = [r["peak_memory_mb"] for r in rounds if r.get("peak_memory_mb") is not None]
-    merged.update(status="closed", jobs=jobs, peak_memory_mb=max(peaks, default=None),
-                  updated_at=max((r["updated_at"] for r in rounds), default=manifest["ends_at"]))
+    merged.update(
+        status="closed",
+        jobs=jobs,
+        peak_memory_mb=max(peaks, default=None),
+        updated_at=max((r["updated_at"] for r in rounds), default=manifest["ends_at"]),
+    )
     validate_state(merged, manifest, region)
     return merged
 
@@ -197,9 +212,10 @@ def merge_networks(root: Path, networks: list[str] | tuple[str, ...]) -> dict[st
         manifest = load(path)
         if manifest["schema_version"] != 3:
             raise ValueError("Campaign merge requires ephemeral (version 3) manifests")
-        built += [(network, path, build_region(path, manifest, network, region, ledger,
-                                                    spec.hours))
-                  for region in spec.regions]
+        built += [
+            (network, path, build_region(path, manifest, network, region, ledger, spec.hours))
+            for region in spec.regions
+        ]
     summaries: dict[str, list[dict]] = {network: [] for network in networks}
     for network, path, state in built:
         directory = path.parent / "regions" / state["region"]

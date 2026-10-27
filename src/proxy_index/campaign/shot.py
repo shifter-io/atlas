@@ -64,8 +64,16 @@ from .probe import (
 )
 
 # The country each region's workers ask for, unless `country_by_network` names one.
-REGION_COUNTRY = {"lon1": "GB", "fra1": "DE", "ams3": "NL", "nyc3": "US", "tor1": "CA",
-                  "sgp1": "SG", "blr1": "IN", "syd1": "AU"}
+REGION_COUNTRY = {
+    "lon1": "GB",
+    "fra1": "DE",
+    "ams3": "NL",
+    "nyc3": "US",
+    "tor1": "CA",
+    "sgp1": "SG",
+    "blr1": "IN",
+    "syd1": "AU",
+}
 LEAD_SECONDS = 600.0  # from the shot's start to the common start time
 CREATE_BATCH = 10  # names per create call (DigitalOcean's limit)
 
@@ -113,21 +121,44 @@ def cell_key(network: str, region: str) -> str:
 
 def markdown(result: dict[str, Any]) -> str:
     """The owner's table: one row per network and region."""
-    lines = [f"# Shot {result['shot_id']}", "",
-             f"{result['requests']} requests per worker, one step, started at "
-             f"{result['start_at']}.", "",
-             "| Network | Region | Country | Size | Concurrency | Outcome | Completed | Success % "
-             "| Rate-limited % | 5xx % | Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms "
-             f"| Unique IPs | {CLASS_HEADER} | Start lag s | Step down |",
-             "|" + "---|" * 23]
+    lines = [
+        f"# Shot {result['shot_id']}",
+        "",
+        f"{result['requests']} requests per worker, one step, started at {result['start_at']}.",
+        "",
+        "| Network | Region | Country | Size | Concurrency | Outcome | Completed | Success % "
+        "| Rate-limited % | 5xx % | Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms "
+        f"| Unique IPs | {CLASS_HEADER} | Start lag s | Step down |",
+        "|" + "---|" * 23,
+    ]
     for key, cell in result["cells"].items():
         step = cell.get("step") or {}
-        cells = [*key.split("/"), cell["country"], cell["size"], cell["concurrency"],
-                 cell["outcome"], *(step.get(k, "-") for k in (
-                     "completed", "success_pct", "rate_limited_pct", "gateway_5xx_pct",
-                     "proxy_connect_pct", "timeout_pct", "other_pct", "rps", "latency_p50_ms",
-                     "latency_p95_ms", "unique_ips")), *class_cells(step),
-                 cell.get("start_lag_seconds", "-"), ", ".join(cell.get("step_down", [])) or "-"]
+        cells = [
+            *key.split("/"),
+            cell["country"],
+            cell["size"],
+            cell["concurrency"],
+            cell["outcome"],
+            *(
+                step.get(k, "-")
+                for k in (
+                    "completed",
+                    "success_pct",
+                    "rate_limited_pct",
+                    "gateway_5xx_pct",
+                    "proxy_connect_pct",
+                    "timeout_pct",
+                    "other_pct",
+                    "rps",
+                    "latency_p50_ms",
+                    "latency_p95_ms",
+                    "unique_ips",
+                )
+            ),
+            *class_cells(step),
+            cell.get("start_lag_seconds", "-"),
+            ", ".join(cell.get("step_down", [])) or "-",
+        ]
         lines.append("| " + " | ".join(map(str, cells)) + " |")
     return "\n".join(lines) + "\n"
 
@@ -135,71 +166,113 @@ def markdown(result: dict[str, Any]) -> str:
 class Shot:
     """One shot: its workers, cells and files under `<output>/<shot id>/`."""
 
-    def __init__(self, cloud: DigitalOcean, remotes: Callable[[Path], ProbeRemote],
-                 inputs: ShotInputs, clock: Clock):
+    def __init__(
+        self,
+        cloud: DigitalOcean,
+        remotes: Callable[[Path], ProbeRemote],
+        inputs: ShotInputs,
+        clock: Clock,
+    ):
         self.cloud, self.inputs, self.clock = cloud, inputs, clock
         try:
             self.spec = CampaignSpec.from_json(spec_path(inputs.root).read_text())
             self.files = WorkerInputs.for_root(inputs.root, self.spec.wheel_sha256)
         except (OSError, ValueError, KeyError, TypeError) as error:
-            raise ProbeError(f"no planned campaign with its wheel at --root "
-                             f"({type(error).__name__})") from None
+            raise ProbeError(
+                f"no planned campaign with its wheel at --root ({type(error).__name__})"
+            ) from None
         self.networks = inputs.networks or self.spec.networks
         self.regions = inputs.regions or self.spec.regions
         self.check()
         now = datetime.fromtimestamp(clock.now(), UTC)
         self.shot_id = f"{now:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
-        self.scope = Scope(self.shot_id, short_id(self.shot_id), self.spec.project_id,
-                           self.spec.manager_droplet_id, now - ops_api.CLOCK_SKEW)
+        self.scope = Scope(
+            self.shot_id,
+            short_id(self.shot_id),
+            self.spec.project_id,
+            self.spec.manager_droplet_id,
+            now - ops_api.CLOCK_SKEW,
+        )
         self.tag, self.start_at = hour_tag(self.shot_id, 0), clock.now() + inputs.lead_seconds
         self.folder = inputs.output / self.shot_id
         self.remote = remotes(self.folder)  # its known-hosts file lives in this shot's folder
-        self.workers = [DropletRecord(
-            network, region, 0, droplet_name(self.shot_id, 0, region, network),
-            size=inputs.size_for(network), image_id=self.spec.image_by_region[region],
-            concurrency=network_concurrency(network, self.spec.concurrency))
-            for region in self.regions for network in self.networks]
+        self.workers = [
+            DropletRecord(
+                network,
+                region,
+                0,
+                droplet_name(self.shot_id, 0, region, network),
+                size=inputs.size_for(network),
+                image_id=self.spec.image_by_region[region],
+                concurrency=network_concurrency(network, self.spec.concurrency),
+            )
+            for region in self.regions
+            for network in self.networks
+        ]
         if len({w.name for w in self.workers}) != len(self.workers):  # one record per name
             raise ProbeError("refused: worker names repeated")
         # A droplet a create or adopt returned that no worker record holds (a second one with
         # a worker's name): recorded, removed through the guard and counted in workers_left.
         self.unrecorded: list[DropletRecord] = []
         self.result: dict[str, Any] = {
-            "shot_id": self.shot_id, "campaign_id": self.spec.campaign_id,
+            "shot_id": self.shot_id,
+            "campaign_id": self.spec.campaign_id,
             # What `campaign shot --remove` needs to rebuild this scope in a later process.
-            "scope": {"project_id": self.scope.project_id,
-                      "manager_droplet_id": self.scope.manager_droplet_id,
-                      "created_at": self.scope.created_at.isoformat()},
-            "requests": inputs.requests, "start_at": timestamp(self.start_at),
+            "scope": {
+                "project_id": self.scope.project_id,
+                "manager_droplet_id": self.scope.manager_droplet_id,
+                "created_at": self.scope.created_at.isoformat(),
+            },
+            "requests": inputs.requests,
+            "start_at": timestamp(self.start_at),
             # Until the removal reports no worker left (a killed or crashed shot keeps it).
             "recover": f"campaign shot --remove {self.folder}",
-            "cells": {cell_key(w.network, w.region): {
-                "country": inputs.country(w.network, w.region), "size": w.size,
-                "concurrency": w.concurrency, "outcome": "pending"} for w in self.workers}}
+            "cells": {
+                cell_key(w.network, w.region): {
+                    "country": inputs.country(w.network, w.region),
+                    "size": w.size,
+                    "concurrency": w.concurrency,
+                    "outcome": "pending",
+                }
+                for w in self.workers
+            },
+        }
 
     def check(self) -> None:
         """Every input before anything is created."""
         i = self.inputs
         unknown = set(self.regions) - set(self.spec.regions)
         sizes = {i.size_for(n) for n in self.networks}
-        repeated = (len(set(self.regions)) != len(self.regions)
-                    or len(set(self.networks)) != len(self.networks))
-        problems = [(repeated, "regions or networks repeated"),
-                    (bool(unknown), "regions not planned"),
-                    (not set(self.networks) <= set(self.spec.networks), "networks not planned"),
-                    (any(r not in REGION_COUNTRY for r in self.regions), "region without a "
-                     "country"),
-                    (not set(i.size_by_network) | set(i.country_by_network) <= set(
-                        self.networks), "a per-network setting names an unplanned network"),
-                    (any(not re.fullmatch(SIZE_RE, s) for s in sizes), "size"),
-                    (i.requests < 1 or i.lead_seconds < 0, "requests or lead")]
+        repeated = len(set(self.regions)) != len(self.regions) or len(set(self.networks)) != len(
+            self.networks
+        )
+        problems = [
+            (repeated, "regions or networks repeated"),
+            (bool(unknown), "regions not planned"),
+            (not set(self.networks) <= set(self.spec.networks), "networks not planned"),
+            (any(r not in REGION_COUNTRY for r in self.regions), "region without a country"),
+            (
+                not set(i.size_by_network) | set(i.country_by_network) <= set(self.networks),
+                "a per-network setting names an unplanned network",
+            ),
+            (any(not re.fullmatch(SIZE_RE, s) for s in sizes), "size"),
+            (i.requests < 1 or i.lead_seconds < 0, "requests or lead"),
+        ]
         bad = [text for failed, text in problems if failed]
-        bad += [f"{n} only loads its list's country: give --country-by-network {n}=<it>"
-                for n in self.networks if list_country(n) and n not in i.country_by_network]
+        bad += [
+            f"{n} only loads its list's country: give --country-by-network {n}=<it>"
+            for n in self.networks
+            if list_country(n) and n not in i.country_by_network
+        ]
         if not bad:
             for network in self.networks:
-                bad += network_problems(i.root, self.spec, self.files, network, [
-                    i.country(network, r) for r in self.regions])
+                bad += network_problems(
+                    i.root,
+                    self.spec,
+                    self.files,
+                    network,
+                    [i.country(network, r) for r in self.regions],
+                )
         if bad:
             raise ProbeError(f"refused: {', '.join(bad)}")
 
@@ -226,13 +299,18 @@ class Shot:
             await self.check_sizes()
             await self.create_all()
             droplets = await self.active()
-            await asyncio.gather(*(self.fire(w, droplets.get(w.droplet_id))
-                                   for w in self.workers if w.status == "assigned"))
+            await asyncio.gather(
+                *(
+                    self.fire(w, droplets.get(w.droplet_id))
+                    for w in self.workers
+                    if w.status == "assigned"
+                )
+            )
         except asyncio.CancelledError:
             self.result["error"] = "cancelled by a signal"
         except Exception as error:
             message = scope.SECRETS.sub("[removed]", str(error))
-            self.result["error"] = f"{type(error).__name__}: {message}"[:scope.MESSAGE_LIMIT]
+            self.result["error"] = f"{type(error).__name__}: {message}"[: scope.MESSAGE_LIMIT]
         finally:
             cleanup = asyncio.ensure_future(self.cleanup())
             while not cleanup.done():  # a signal during the removal never interrupts it
@@ -244,8 +322,13 @@ class Shot:
 
     async def check_sizes(self) -> None:
         offered = await self.cloud.sizes()
-        missing = sorted({f"{w.size} in {w.region}" for w in self.workers
-                          if w.region not in offered.get(w.size, [])})
+        missing = sorted(
+            {
+                f"{w.size} in {w.region}"
+                for w in self.workers
+                if w.region not in offered.get(w.size, [])
+            }
+        )
         if missing:
             raise ProbeError(f"not available: {', '.join(missing)}")
 
@@ -254,16 +337,24 @@ class Shot:
         groups: dict[tuple[str, str], list[DropletRecord]] = {}
         for worker in self.workers:
             groups.setdefault((worker.region, worker.size), []).append(worker)
-        batches = [group[i:i + CREATE_BATCH] for group in groups.values()
-                   for i in range(0, len(group), CREATE_BATCH)]
+        batches = [
+            group[i : i + CREATE_BATCH]
+            for group in groups.values()
+            for i in range(0, len(group), CREATE_BATCH)
+        ]
         async with asyncio.TaskGroup() as group:  # an error cancels the other creates
             for batch in batches:
                 group.create_task(self.create(batch))
         self.save()
         records = {w.droplet_id: w for w in self.workers + self.unrecorded if w.droplet_id}
         await scope.assign_and_verify_project(
-            self.cloud, self.scope, list(records), records, audit_path(self.folder),
-            retry=scope.Retry(sleep=self.clock.sleep, save=self.save))
+            self.cloud,
+            self.scope,
+            list(records),
+            records,
+            audit_path(self.folder),
+            retry=scope.Retry(sleep=self.clock.sleep, save=self.save),
+        )
         self.save()
 
     async def create(self, batch: list[DropletRecord]) -> None:
@@ -276,10 +367,16 @@ class Shot:
         uncertain = False
         try:
             found = await self.cloud.create(
-                [w.name for w in batch], region=batch[0].region, size=batch[0].size,
-                image=batch[0].image_id, tags=[WORKER_TAG, campaign_tag(self.shot_id), self.tag],
-                ssh_keys=[self.spec.ssh_key_id], monitoring=False, with_droplet_agent=False,
-                ipv6=False)
+                [w.name for w in batch],
+                region=batch[0].region,
+                size=batch[0].size,
+                image=batch[0].image_id,
+                tags=[WORKER_TAG, campaign_tag(self.shot_id), self.tag],
+                ssh_keys=[self.spec.ssh_key_id],
+                monitoring=False,
+                with_droplet_agent=False,
+                ipv6=False,
+            )
         except CreateError as error:
             found, uncertain = list(error.created), error.uncertain
             for wait in (0.0, CREATE_RETRY_SECONDS) if uncertain else ():
@@ -290,8 +387,7 @@ class Shot:
         self.take(batch, found, "create_uncertain" if uncertain else "create_failed")
         self.save()
 
-    def take(self, workers: list[DropletRecord], found: list[Droplet],
-             failed: str | None) -> None:
+    def take(self, workers: list[DropletRecord], found: list[Droplet], failed: str | None) -> None:
         """Give each worker the first droplet with its name; every other droplet found is
         recorded in `unrecorded` (never dropped). A worker with none gets `failed`."""
         by_name: dict[str, list[Droplet]] = {}
@@ -305,9 +401,16 @@ class Shot:
                 worker.status, worker.error_class = "create_failed", failed
         for droplet in (d for extra in by_name.values() for d in extra):
             region, network = droplet.name.split("-h00-", 1)[1].split("-", 1)
-            self.unrecorded.append(DropletRecord(network, region, 0, droplet.name,
-                                                 droplet_id=droplet.id,
-                                                 error_class="unrecorded"))
+            self.unrecorded.append(
+                DropletRecord(
+                    network,
+                    region,
+                    0,
+                    droplet.name,
+                    droplet_id=droplet.id,
+                    error_class="unrecorded",
+                )
+            )
 
     @staticmethod
     def missing(batch: list[DropletRecord], found: list[Droplet]) -> list[str]:
@@ -345,16 +448,22 @@ class Shot:
             worker.error_class = type(error).__name__
             cell["outcome"] = "failed" if worker.started_at else "setup_failed"
 
-    async def shoot(self, worker: DropletRecord, droplet: Droplet | None,
-                    cell: dict[str, Any]) -> None:
+    async def shoot(
+        self, worker: DropletRecord, droplet: Droplet | None, cell: dict[str, Any]
+    ) -> None:
         try:
             ready = droplet is not None and await self.remote.wait_ready(
-                droplet, max(self.start_at - self.clock.now(), 1.0))
+                droplet, max(self.start_at - self.clock.now(), 1.0)
+            )
             left = self.start_at - self.clock.now()
             if ready and left > 0:  # credentials only go to a worker that can still start
                 worker.ssh_ready_at = self.now()
-                await set_up(self.remote, droplet, payload(
-                    self.inputs.root, self.spec, self.files, [worker.network]), left)
+                await set_up(
+                    self.remote,
+                    droplet,
+                    payload(self.inputs.root, self.spec, self.files, [worker.network]),
+                    left,
+                )
                 worker.status, worker.armed_at = "armed", self.now()
         except (RemoteError, ProbeError) as error:
             worker.status, worker.error_class = "start_failed", type(error).__name__
@@ -373,21 +482,27 @@ class Shot:
         self.write()
 
     async def step(self, worker: DropletRecord, droplet: Droplet, country: str) -> dict:
-        command = run_command(worker.network, worker.concurrency, self.inputs.requests,
-                              country, worker.region)
+        command = run_command(
+            worker.network, worker.concurrency, self.inputs.requests, country, worker.region
+        )
         try:
-            reply = await self.remote.run(droplet, command, f"shot {worker.network}",
-                                          seconds=STEP_SECONDS)
+            reply = await self.remote.run(
+                droplet, command, f"shot {worker.network}", seconds=STEP_SECONDS
+            )
             summary = json.loads(reply.decode().strip().splitlines()[-1])
             return step_result(worker.concurrency, self.inputs.requests, summary)
         except (RemoteError, ValueError, IndexError, KeyError, TypeError) as error:
-            return {"concurrency": worker.concurrency, "requested": self.inputs.requests,
-                    "run_failed": type(error).__name__}
+            return {
+                "concurrency": worker.concurrency,
+                "requested": self.inputs.requests,
+                "run_failed": type(error).__name__,
+            }
 
     async def cleanup(self) -> None:
         """Remove every created worker through the guard; report what is left."""
-        uncertain = [w for w in self.workers
-                     if w.droplet_id is None and w.error_class == "create_uncertain"]
+        uncertain = [
+            w for w in self.workers if w.droplet_id is None and w.error_class == "create_uncertain"
+        ]
         if uncertain:  # one last look before reporting them
             self.take(uncertain, await self.adopted([w.name for w in uncertain]), None)
         for worker in self.workers:
@@ -395,11 +510,19 @@ class Shot:
             if cell["outcome"] == "pending":
                 cell["outcome"] = pending_outcome(worker)
         everyone = self.workers + self.unrecorded
-        await asyncio.gather(*(release(self.cloud, self.scope, w, audit_path(self.folder),
-                                       self.clock.sleep)
-                               for w in everyone if w.droplet_id is not None))
-        left = [w.name for w in everyone if w.error_class == "create_uncertain" or (
-            w.droplet_id is not None and w.status != "destroyed")]
+        await asyncio.gather(
+            *(
+                release(self.cloud, self.scope, w, audit_path(self.folder), self.clock.sleep)
+                for w in everyone
+                if w.droplet_id is not None
+            )
+        )
+        left = [
+            w.name
+            for w in everyone
+            if w.error_class == "create_uncertain"
+            or (w.droplet_id is not None and w.status != "destroyed")
+        ]
         refused = [w.name for w in everyone if w.status == "destroy_refused"]
         if refused:  # the owner's to decide: never retried by --remove
             self.result["destroy_refused"] = refused
@@ -409,8 +532,9 @@ class Shot:
         self.write()
 
 
-async def recover(cloud: DigitalOcean, folder: Path, *,
-                  sleep: ops_api.Sleep = asyncio.sleep) -> dict[str, Any]:
+async def recover(
+    cloud: DigitalOcean, folder: Path, *, sleep: ops_api.Sleep = asyncio.sleep
+) -> dict[str, Any]:
     """`campaign shot --remove <folder>`: remove the workers a stopped shot left, each by its
     exact name under the shot's hour tag (and recorded id), through `probe.recover_worker`.
     Writes the outcome back into the record; never touches anything the record does not name."""
@@ -418,30 +542,40 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
     try:
         result = json.loads(path.read_text())
         recorded = result["scope"]
-        workers = [DropletRecord(**raw) for raw in result["workers"] + result.get(
-            "unrecorded", [])]
-        shot_scope = Scope(result["shot_id"], short_id(result["shot_id"]),
-                           recorded["project_id"], recorded["manager_droplet_id"],
-                           datetime.fromisoformat(recorded["created_at"]))
+        workers = [DropletRecord(**raw) for raw in result["workers"] + result.get("unrecorded", [])]
+        shot_scope = Scope(
+            result["shot_id"],
+            short_id(result["shot_id"]),
+            recorded["project_id"],
+            recorded["manager_droplet_id"],
+            datetime.fromisoformat(recorded["created_at"]),
+        )
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ProbeError(f"no shot record in that folder ({type(error).__name__})") from None
     try:
         for worker in list(workers):  # a second droplet with a name joins `unrecorded`
-            workers += await recover_worker(cloud, shot_scope, worker, audit_path(folder),
-                                            sleep)
+            workers += await recover_worker(cloud, shot_scope, worker, audit_path(folder), sleep)
     finally:  # what was removed stays recorded, also when a later read fails
         left = sum(w.status not in ("destroyed", "absent") for w in workers)
         count = len(result["workers"])
-        result.update(workers=[asdict(w) for w in workers[:count]],
-                      unrecorded=[asdict(w) for w in workers[count:]], workers_left=left,
-                      recovered_at=timestamp(datetime.now(UTC).timestamp()))
+        result.update(
+            workers=[asdict(w) for w in workers[:count]],
+            unrecorded=[asdict(w) for w in workers[count:]],
+            workers_left=left,
+            recovered_at=timestamp(datetime.now(UTC).timestamp()),
+        )
         if not left:
             result.pop("recover", None)
         atomic_json(path, result)
     return {"shot_id": result["shot_id"], "workers_left": left}
 
 
-async def shot(cloud: DigitalOcean, remotes: Callable[[Path], ProbeRemote], inputs: ShotInputs,
-               *, clock: Clock | None = None) -> dict[str, Any]:
+async def shot(
+    cloud: DigitalOcean,
+    remotes: Callable[[Path], ProbeRemote],
+    inputs: ShotInputs,
+    *,
+    clock: Clock | None = None,
+) -> dict[str, Any]:
     """Run one shot; returns the result (also in `<output>/<shot id>/shot-result.*`)."""
     return await Shot(cloud, remotes, inputs, clock or Clock()).run()

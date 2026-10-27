@@ -415,9 +415,7 @@ async def load_references(conn: psycopg.AsyncConnection, now: datetime) -> list[
             candidates = sorted(
                 (stats[c]["p50"], c)
                 for c in countries
-                if c in stats
-                and stats[c]["p50"] is not None
-                and stats[c]["successes"] >= minimum
+                if c in stats and stats[c]["p50"] is not None and stats[c]["successes"] >= minimum
             )
             if overrides.get(region["slug"]) in countries:
                 country, basis = overrides[region["slug"]], "override"
@@ -447,8 +445,8 @@ async def load_references(conn: psycopg.AsyncConnection, now: datetime) -> list[
     return [
         chosen[r["region_id"]]
         for r in regions
-        if r["region_id"] in chosen and chosen[r["region_id"]]["country_code"].strip()
-        in r["countries"]
+        if r["region_id"] in chosen
+        and chosen[r["region_id"]]["country_code"].strip() in r["countries"]
     ]
 
 
@@ -798,15 +796,20 @@ async def census_retry(
             "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
             "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT DO NOTHING RETURNING batch_id",
-            (country, run["region_id"], census["target_id"], now, now + LATE_START,
-             census["batch_id"]),
+            (
+                country,
+                run["region_id"],
+                census["target_id"],
+                now,
+                now + LATE_START,
+                census["batch_id"],
+            ),
         )
         if retry is None:
             continue
         # The pulse's node is the product's node in the region.
         await conn.execute(
-            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) "
-            "VALUES (%s,%s,%s,'queued')",
+            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
             (retry["batch_id"], product_id, run["node_id"]),
         )
         await emit(
@@ -1014,9 +1017,7 @@ async def finish_run(
     }
     await db.ensure_partition("test_events", now)
     async with db.transaction() as conn:
-        await _row(
-            conn, "SELECT 1 FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,)
-        )
+        await _row(conn, "SELECT 1 FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,))
         updated = await _row(
             conn,
             "UPDATE batch_runs SET status=%(status)s,run_key=%(run_key)s,finished_at=%(now)s,"
@@ -1055,9 +1056,7 @@ async def fail_run(
     now = _now(now)
     await db.ensure_partition("test_events", now)
     async with db.transaction() as conn:
-        await _row(
-            conn, "SELECT 1 FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,)
-        )
+        await _row(conn, "SELECT 1 FROM test_batches WHERE batch_id=%s FOR UPDATE", (batch_id,))
         run = await _row(
             conn,
             "UPDATE batch_runs SET status='failed',error=%s,finished_at=%s,"
@@ -1118,8 +1117,13 @@ async def reap(db: Database, now: datetime | None = None) -> dict[str, Any]:
                 "  AND coalesce(br.last_progress_at,br.started_at)<%(stale)s)"
                 " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s)) "
                 "RETURNING br.product_id,br.node_id,br.error",
-                {"now": now, "batch": batch_id, "late": now - grace, "stale": now - stale,
-                 "ingest": now - UPLOAD_STALE * stale},
+                {
+                    "now": now,
+                    "batch": batch_id,
+                    "late": now - grace,
+                    "stale": now - stale,
+                    "ingest": now - UPLOAD_STALE * stale,
+                },
             )
             for run in reaped:
                 failed[run["error"]] += 1

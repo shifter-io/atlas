@@ -94,13 +94,23 @@ class FakeRemote:
 
 def make_spec(networks=NETWORKS[:2], regions=REGIONS[:2], **changes) -> CampaignSpec:
     values = dict(
-        campaign_id=CID, created_at=SPEC_TIME, account="leftclick", project_id=CAMPAIGN_PROJECT,
-        starts_at=SCHEDULED, grace_hours=48, regions=tuple(regions), networks=tuple(networks),
+        campaign_id=CID,
+        created_at=SPEC_TIME,
+        account="leftclick",
+        project_id=CAMPAIGN_PROJECT,
+        starts_at=SCHEDULED,
+        grace_hours=48,
+        regions=tuple(regions),
+        networks=tuple(networks),
         manifests={n: f"networks/{n}/residential/m-{n}/campaign.json" for n in networks},
         size_by_region=dict.fromkeys(regions, "c-2"),
-        image_by_region={r: f"snap-{r}" for r in regions}, image_name="pi-camp-worker-x",
-        wheel_sha256=hashlib.sha256(b"wheel bytes").hexdigest(), framework_version="1.0",
-        ssh_key_id="4242", manager_droplet_id=MANAGER_ID)
+        image_by_region={r: f"snap-{r}" for r in regions},
+        image_name="pi-camp-worker-x",
+        wheel_sha256=hashlib.sha256(b"wheel bytes").hexdigest(),
+        framework_version="1.0",
+        ssh_key_id="4242",
+        manager_droplet_id=MANAGER_ID,
+    )
     return CampaignSpec(**(values | changes)).validate()
 
 
@@ -111,10 +121,15 @@ def make_root(tmp_path: Path, spec: CampaignSpec) -> Path:
     for network in spec.networks:
         manifest = root / spec.manifests[network]
         manifest.parent.mkdir(parents=True)
-        manifest.write_text(json.dumps({"regions": {r: ["US", "GB"] for r in REGIONS},
-                                        "settings": {"concurrency": spec.concurrency},
-                                        **({"slot_minutes": spec.slot_minutes}
-                                           if spec.slot_minutes != 60 else {})}))
+        manifest.write_text(
+            json.dumps(
+                {
+                    "regions": {r: ["US", "GB"] for r in REGIONS},
+                    "settings": {"concurrency": spec.concurrency},
+                    **({"slot_minutes": spec.slot_minutes} if spec.slot_minutes != 60 else {}),
+                }
+            )
+        )
         (manifest.parent / "provider.toml").write_text(f"provider = '{network}'\n")
         secrets = base / ".secrets" / "credentials"
         secrets.mkdir(parents=True, exist_ok=True)
@@ -127,16 +142,20 @@ def make_root(tmp_path: Path, spec: CampaignSpec) -> Path:
 
 async def launched(tmp_path, fake, spec=None, *, start=PRE_CREATE, record=None, setup=None):
     spec = spec or make_spec()
-    root = make_root(tmp_path, spec) if not (tmp_path / "manager").exists() else (
-        tmp_path / "manager" / "campaigns" / spec.campaign_id)
+    root = (
+        make_root(tmp_path, spec)
+        if not (tmp_path / "manager").exists()
+        else (tmp_path / "manager" / "campaigns" / spec.campaign_id)
+    )
     clock = FakeClock(start)
     remote = FakeRemote(clock)
     if setup:
         setup(remote)
     record = record or HourRecord(CID, 0, SCHEDULED)
     async with running(fake) as cloud:
-        await launch.launch_hour(spec, record, root, cloud=cloud,
-                                 remote_factory=lambda hour: remote, clock=clock)
+        await launch.launch_hour(
+            spec, record, root, cloud=cloud, remote_factory=lambda hour: remote, clock=clock
+        )
     return record, root, remote, clock
 
 
@@ -158,8 +177,10 @@ async def test_a_full_hour_launches_16_networks_in_8_regions(tmp_path):
     assert len(posts(fake, f"/v2/projects/{CAMPAIGN_PROJECT}/resources")) == 8
     assert len(record.droplets) == 128 and len(remote.pushes) == 128
     assert {d.status for d in record.droplets} == {"armed"}
-    assert all(d.armed_at < SCHEDULED and d.droplet_id in fake.projects[CAMPAIGN_PROJECT]
-               for d in record.droplets)
+    assert all(
+        d.armed_at < SCHEDULED and d.droplet_id in fake.projects[CAMPAIGN_PROJECT]
+        for d in record.droplets
+    )
     assert record.state == "running" and set(record.cells.values()) == {"running"}
     assert record.traffic["net00"]["countries_total"] == 16
     text = hour_path(root, 0).read_text()
@@ -223,23 +244,29 @@ async def test_ssh_never_ready_gets_its_replacements_before_the_cutoff(tmp_path)
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
-    record, *_ = await launched(tmp_path, fake, spec,
-                                setup=lambda r: r.never_ready.add(name))
+    record, *_ = await launched(tmp_path, fake, spec, setup=lambda r: r.never_ready.add(name))
     tries = 1 + launch.REPLACEMENTS_PER_CELL
     assert [(d.status, d.error_class) for d in record.droplets] == [
-        ("destroyed", "boot_failed")] * tries
+        ("destroyed", "boot_failed")
+    ] * tries
     assert record.cells == {"net00/lon1": "failed_ours"} and len(fake.deleted) == tries
     assert [a["kind"] for a in record.alerts] == ["boot_failed", "cell_failed"]
 
     late = datetime.fromisoformat("2027-01-01T22:16:00+00:00").timestamp()
     fake = FakeDigitalOcean()
-    record, *_ = await launched(tmp_path / "late", fake, spec, start=late,
-                                setup=lambda r: r.never_ready.add(name))
+    record, *_ = await launched(
+        tmp_path / "late", fake, spec, start=late, setup=lambda r: r.never_ready.add(name)
+    )
     assert len(record.droplets) == tries  # a launch at HH:16 still has its own 15 minutes
 
     closed = make_spec(NETWORKS[:1], REGIONS[:1], replace_until_minutes=0)
-    record, *_ = await launched(tmp_path / "closed", FakeDigitalOcean(), closed, start=late,
-                                setup=lambda r: r.never_ready.add(name))
+    record, *_ = await launched(
+        tmp_path / "closed",
+        FakeDigitalOcean(),
+        closed,
+        start=late,
+        setup=lambda r: r.never_ready.add(name),
+    )
     assert len(record.droplets) == 1 and record.droplets[0].status == "destroyed"
     assert "cell_failed" in {a["kind"] for a in record.alerts}
 
@@ -248,8 +275,9 @@ async def test_a_push_error_is_retried_once_on_the_same_worker(tmp_path):
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
-    record, *_ = await launched(tmp_path, fake, spec,
-                                setup=lambda r: r.push_failures.update({name: 1}))
+    record, *_ = await launched(
+        tmp_path, fake, spec, setup=lambda r: r.push_failures.update({name: 1})
+    )
     assert len(record.droplets) == 1 and record.droplets[0].status == "armed"
     fake = FakeDigitalOcean()
 
@@ -267,15 +295,21 @@ async def test_1e_r1_a_failed_push_on_an_unreadable_worker_is_armed_not_start_fa
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
-    record, *_ = await launched(tmp_path, fake, spec,
-                                setup=lambda r: r.push_failures.update({name: 2}))
+    record, *_ = await launched(
+        tmp_path, fake, spec, setup=lambda r: r.push_failures.update({name: 2})
+    )
     worker = record.droplets[0]
     assert (worker.status, worker.error_class) == ("armed", "start_unconfirmed")
     assert worker.armed_at and len(record.droplets) == 1 and fake.deleted == []
 
 
-@pytest.mark.parametrize("seen", [{"service": {"ActiveState": "failed"}},
-                                  {"assignment": {}, "service": {"ActiveState": "inactive"}}])
+@pytest.mark.parametrize(
+    "seen",
+    [
+        {"service": {"ActiveState": "failed"}},
+        {"assignment": {}, "service": {"ActiveState": "inactive"}},
+    ],
+)
 async def test_1e_r1_a_failed_unit_after_a_failed_push_counts_as_started(tmp_path, seen):
     """m9: a unit that ran and failed, or the fleet marker alone, counts as started."""
     fake = FakeDigitalOcean()
@@ -317,6 +351,7 @@ async def test_a_guard_refusal_is_final_with_no_fallback(tmp_path):
         async def never(droplet, limit):
             fake.droplets[droplet.id]["tags"] = ["prod"]
             return False
+
         remote.wait_ready = never
 
     record, root, *_ = await launched(tmp_path, fake, spec, setup=strip_tags)
@@ -357,7 +392,8 @@ async def test_a_droplet_never_active_within_180_seconds_is_boot_failed(tmp_path
     assert audit and {a["path"] for a in audit} == {"normal"}
     lists = [r for r in fake.requests if r[0] == "GET" and r[2].get("tag_name")]
     assert len(lists) <= 2 * (1 + launch.REPLACEMENTS_PER_CELL) * (
-        launch.READY_LIMIT_SECONDS / launch.READY_POLL_SECONDS + 2)
+        launch.READY_LIMIT_SECONDS / launch.READY_POLL_SECONDS + 2
+    )
 
 
 async def test_m1_a_replacement_does_not_delay_the_confirmed_workers(tmp_path):
@@ -371,7 +407,8 @@ async def test_m1_a_replacement_does_not_delay_the_confirmed_workers(tmp_path):
         async def _assign(self, request):
             response = await super()._assign(request)
             self.first = getattr(self, "first", None) or min(
-                i for i, d in self.droplets.items() if d["name"] == late)
+                i for i, d in self.droplets.items() if d["name"] == late
+            )
             self.projects[CAMPAIGN_PROJECT].discard(self.first)
             return response
 
@@ -384,6 +421,7 @@ async def test_m1_a_replacement_does_not_delay_the_confirmed_workers(tmp_path):
                     await asyncio.sleep(0.01)
                 return False
             return True
+
         remote.wait_ready = wait_ready
 
     fake = DropOne()
@@ -423,6 +461,7 @@ async def test_m3_a_push_that_broke_after_starting_is_not_pushed_again(tmp_path)
             remote.pushes.append((droplet.name, payload, command))
             remote.inspected[droplet.name] = {"service": {"ActiveState": "active"}}
             raise fanout.RemoteError("push and start failed (exit 255)")
+
         remote.push_start = push_start
 
     record, _, remote, _ = await launched(tmp_path, fake, spec, setup=setup)
@@ -435,8 +474,9 @@ async def test_m5_a_manifest_with_another_concurrency_is_refused(tmp_path):
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     root = make_root(tmp_path, spec)
     manifest = root / spec.manifests["net00"]
-    manifest.write_text(json.dumps({"regions": {"lon1": ["US"]},
-                                    "settings": {"concurrency": 2500}}))
+    manifest.write_text(
+        json.dumps({"regions": {"lon1": ["US"]}, "settings": {"concurrency": 2500}})
+    )
     with pytest.raises(ValueError, match="concurrency"):
         await launched(tmp_path, fake, spec)
     assert posts(fake, "/v2/droplets") == []
@@ -465,13 +505,16 @@ async def test_the_bundle_holds_only_its_own_network_and_argv_no_secret(tmp_path
         with tarfile.open(fileobj=io.BytesIO(payload)) as archive:
             names = archive.getnames()
             secret = archive.extractfile("secrets/credentials.toml").read().decode()
-            assignment = json.loads(archive.extractfile(
-                f"run/m-{network}/assignment.json").read())
+            assignment = json.loads(archive.extractfile(f"run/m-{network}/assignment.json").read())
             modes = {m.mode for m in archive.getmembers()}
         assert secret == f"password = 'secret-{network}'\n" and modes == {0o600}
-        assert names == [f"run/m-{network}/campaign.json", f"run/m-{network}/provider.toml",
-                         f"run/m-{network}/assignment.json",
-                         "wheel/proxy_index-1.0-py3-none-any.whl", "secrets/credentials.toml"]
+        assert names == [
+            f"run/m-{network}/campaign.json",
+            f"run/m-{network}/provider.toml",
+            f"run/m-{network}/assignment.json",
+            "wheel/proxy_index-1.0-py3-none-any.whl",
+            "secrets/credentials.toml",
+        ]
         assert assignment["scheduled_at"] == SCHEDULED and assignment["name"] == name
         assert command == fanout.start_command(f"m-{network}", region, 0)
         assert not any("secret" in part for part in command[3:])
@@ -492,8 +535,11 @@ async def test_a_crashed_launch_resumes_without_creating_existing_names(tmp_path
     record = HourRecord(CID, 0, SCHEDULED, state="launching")
     for network in spec.networks:
         name = droplet_name(CID, 0, "lon1", network)
-        record.droplets.append(launch.DropletRecord(network, "lon1", 0, name, attempts=1,
-                                                    requested_at="2027-01-01T21:58:30.000Z"))
+        record.droplets.append(
+            launch.DropletRecord(
+                network, "lon1", 0, name, attempts=1, requested_at="2027-01-01T21:58:30.000Z"
+            )
+        )
         fake.add(name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)])
     fake.add(droplet_name(CID, 0, "lon1", "net00"), ["pi-camp-other"])  # same name, not ours
     for network in spec.networks:
@@ -501,24 +547,36 @@ async def test_a_crashed_launch_resumes_without_creating_existing_names(tmp_path
     record, *_ = await launched(tmp_path, fake, spec, record=record)
     assert posts(fake, "/v2/droplets") == []
     assert {d.status for d in record.droplets} == {"armed"}
-    assert all("pi-camp-other" not in fake.droplets[d.droplet_id]["tags"]
-               for d in record.droplets)
+    assert all("pi-camp-other" not in fake.droplets[d.droplet_id]["tags"] for d in record.droplets)
 
 
 async def test_a_resumed_started_worker_is_not_pushed_again(tmp_path):
     fake = FakeDigitalOcean()
     spec = make_spec(NETWORKS[:1], REGIONS[:1])
     name = droplet_name(CID, 0, "lon1", "net00")
-    droplet_id = fake.add(name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)],
-                          project=CAMPAIGN_PROJECT)
+    droplet_id = fake.add(
+        name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)], project=CAMPAIGN_PROJECT
+    )
     record = HourRecord(CID, 0, SCHEDULED, state="launching")
-    record.droplets.append(launch.DropletRecord(
-        "net00", "lon1", 0, name, droplet_id=droplet_id, status="starting",
-        requested_at="2027-01-01T21:58:30.000Z"))
+    record.droplets.append(
+        launch.DropletRecord(
+            "net00",
+            "lon1",
+            0,
+            name,
+            droplet_id=droplet_id,
+            status="starting",
+            requested_at="2027-01-01T21:58:30.000Z",
+        )
+    )
     record.traffic["net00"] = dict.fromkeys(launch.TRAFFIC_KEYS, 0)
     record, _, remote, _ = await launched(
-        tmp_path, fake, spec, record=record,
-        setup=lambda r: r.inspected.update({name: {"service": {"ActiveState": "active"}}}))
+        tmp_path,
+        fake,
+        spec,
+        record=record,
+        setup=lambda r: r.inspected.update({name: {"service": {"ActiveState": "active"}}}),
+    )
     assert remote.pushes == [] and record.droplets[0].status == "armed"
     again, *_ = await launched(tmp_path, fake, spec, record=record)
     assert again.launched_at == record.launched_at  # a running hour is left alone
@@ -546,8 +604,10 @@ async def test_one_region_failing_does_not_stop_the_others(tmp_path):
         record, *_ = await launched(tmp_path, fake, spec)
     finally:
         launch._Launch._create_call = original
-    assert {d.region: d.status for d in record.droplets} == {"lon1": "armed",
-                                                             "fra1": "create_failed"}
+    assert {d.region: d.status for d in record.droplets} == {
+        "lon1": "armed",
+        "fra1": "create_failed",
+    }
     assert record.cells == {"net00/lon1": "running", "net00/fra1": "failed_ours"}
     assert record.droplets[1].error_class == "RuntimeError"
     assert not {d.status for d in record.droplets} & set(launch.UP)
@@ -599,11 +659,15 @@ async def test_b1_b_a_missing_credentials_file_fails_only_its_network(tmp_path):
     bad = [d for d in record.droplets if d.network == "net01"]
     assert len(good) == 2 and {d.status for d in good} == {"armed"}
     assert len(bad) == 2 * (1 + launch.REPLACEMENTS_PER_CELL) and {
-        (d.status, d.error_class) for d in bad} == {
-        ("destroyed", "FileNotFoundError")}
+        (d.status, d.error_class) for d in bad
+    } == {("destroyed", "FileNotFoundError")}
     assert {i for _, i in fake.deleted} == {d.droplet_id for d in bad}
-    assert record.cells == {"net00/lon1": "running", "net00/fra1": "running",
-                            "net01/lon1": "failed_ours", "net01/fra1": "failed_ours"}
+    assert record.cells == {
+        "net00/lon1": "running",
+        "net00/fra1": "running",
+        "net01/lon1": "failed_ours",
+        "net01/fra1": "failed_ours",
+    }
 
 
 async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, monkeypatch):
@@ -617,8 +681,7 @@ async def test_b1_an_assignment_error_leaves_no_worker_in_requested(tmp_path, mo
 
     monkeypatch.setattr(launch.scope, "assign_and_verify_project", refuse)
     record, *_ = await launched(tmp_path, fake, spec)
-    assert [d.status for d in record.droplets] == ["destroyed"] * (
-        1 + launch.REPLACEMENTS_PER_CELL)
+    assert [d.status for d in record.droplets] == ["destroyed"] * (1 + launch.REPLACEMENTS_PER_CELL)
     assert len(fake.deleted) == 1 + launch.REPLACEMENTS_PER_CELL and not fake.droplets
     assert record.cells == {"net00/lon1": "failed_ours"}
     assert {d.error_class for d in record.droplets} == {"OwnershipError"}
@@ -631,11 +694,13 @@ async def test_synthetic_mode_makes_no_cloud_or_ssh_calls(tmp_path):
     for network in spec.networks:
         manifest = root / spec.manifests[network]
         manifest.parent.mkdir(parents=True)
-        manifest.write_text(json.dumps({"regions": {r: ["US"] for r in REGIONS},
-                                        "settings": {"concurrency": 2000}}))
+        manifest.write_text(
+            json.dumps({"regions": {r: ["US"] for r in REGIONS}, "settings": {"concurrency": 2000}})
+        )
     record = HourRecord(CID, 0, SCHEDULED)
-    await launch.launch_hour(spec, record, root, cloud=None, remote_factory=None,
-                             clock=FakeClock(PRE_CREATE))
+    await launch.launch_hour(
+        spec, record, root, cloud=None, remote_factory=None, clock=FakeClock(PRE_CREATE)
+    )
     assert {d.status for d in record.droplets} == {"armed"} and record.state == "running"
     assert launch.load_hour(root, 0).to_dict() == record.to_dict()
 
@@ -648,8 +713,16 @@ async def test_the_launch_refuses_a_wheel_the_spec_does_not_bind(tmp_path):
 
 # --- OpenSSH fan-out -------------------------------------------------------------------------
 
-DROPLET = Droplet("700001", "pic-01234567-h00-lon1-net00", "lon1", "c-2", "active",
-                  datetime.fromisoformat(SPEC_TIME), (), public_ipv4="203.0.113.7")
+DROPLET = Droplet(
+    "700001",
+    "pic-01234567-h00-lon1-net00",
+    "lon1",
+    "c-2",
+    "active",
+    datetime.fromisoformat(SPEC_TIME),
+    (),
+    public_ipv4="203.0.113.7",
+)
 
 
 class FakeRunner:
@@ -671,19 +744,30 @@ def test_the_openssh_options(tmp_path):
     argv = fanout.OpenSSHRemote(tmp_path / "key", runtime, 7).argv(DROPLET, ["true"])
     options = dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-o")
     assert options == {
-        "BatchMode": "yes", "IdentitiesOnly": "yes", "User": "root",
+        "BatchMode": "yes",
+        "IdentitiesOnly": "yes",
+        "User": "root",
         "UserKnownHostsFile": str(runtime / "known_hosts-07"),
-        "StrictHostKeyChecking": "accept-new", "ConnectTimeout": "5",
-        "ServerAliveInterval": "10", "ServerAliveCountMax": "3", "ControlMaster": "auto",
-        "ControlPath": str(fanout.control_dir(runtime) / "cm-%C"), "ControlPersist": "4h"}
+        "StrictHostKeyChecking": "accept-new",
+        "ConnectTimeout": "5",
+        "ServerAliveInterval": "10",
+        "ServerAliveCountMax": "3",
+        "ControlMaster": "auto",
+        "ControlPath": str(fanout.control_dir(runtime) / "cm-%C"),
+        "ControlPersist": "4h",
+    }
     assert argv[:3] == ["ssh", "-i", str(tmp_path / "key")] and argv[-3:] == [
-        "203.0.113.7", "--", "true"]
+        "203.0.113.7",
+        "--",
+        "true",
+    ]
     assert fanout.control_dir(Path("/r")) == Path("/r")
     long = Path("/opt/proxy-index-campaign/campaigns") / CID / ".runtime"
     assert fanout.control_dir(long) == Path("/tmp") / f"pi-camp-cm-{os.getuid()}"
     with pytest.raises(fanout.RemoteError):
         fanout.OpenSSHRemote(tmp_path, runtime, 0).argv(
-            Droplet("1", "n", "lon1", "c-2", "new", DROPLET.created_at, ()), ["true"])
+            Droplet("1", "n", "lon1", "c-2", "new", DROPLET.created_at, ()), ["true"]
+        )
 
 
 async def test_the_remote_steps_send_fixed_commands(tmp_path):
@@ -703,18 +787,26 @@ async def test_the_remote_steps_send_fixed_commands(tmp_path):
     assert journal.read_bytes() == b"journal" and stat.S_IMODE(journal.stat().st_mode) == 0o600
     assert stat.S_IMODE(runtime.stat().st_mode) == 0o700
     with pytest.raises(fanout.RemoteError, match=r"^inspect failed \(exit 255\)$"):
-        await fanout.OpenSSHRemote(tmp_path, runtime, 0, runner=FakeRunner(
-            (255, b"203.0.113.7 refused"))).inspect(DROPLET)
+        await fanout.OpenSSHRemote(
+            tmp_path, runtime, 0, runner=FakeRunner((255, b"203.0.113.7 refused"))
+        ).inspect(DROPLET)
 
 
 async def test_wait_ready_retries_until_its_limit(tmp_path):
     clock = FakeClock(0.0)
     runner = FakeRunner((255, b""), (255, b""), (0, b""))
-    remote = fanout.OpenSSHRemote(tmp_path, tmp_path / "rt", 0, runner=runner,
-                                  sleep=clock.sleep, clock=clock.now)
+    remote = fanout.OpenSSHRemote(
+        tmp_path, tmp_path / "rt", 0, runner=runner, sleep=clock.sleep, clock=clock.now
+    )
     assert await remote.wait_ready(DROPLET, 30) and clock.t == 4.0
-    never = fanout.OpenSSHRemote(tmp_path, tmp_path / "rt", 0, runner=FakeRunner(
-        *[(255, b"")] * 100), sleep=clock.sleep, clock=clock.now)
+    never = fanout.OpenSSHRemote(
+        tmp_path,
+        tmp_path / "rt",
+        0,
+        runner=FakeRunner(*[(255, b"")] * 100),
+        sleep=clock.sleep,
+        clock=clock.now,
+    )
     assert not await never.wait_ready(DROPLET, 10)
 
 
@@ -737,25 +829,39 @@ async def test_pull_replaces_the_local_round_with_the_remote_one(tmp_path):
     local = tmp_path / "regions" / "lon1" / "rounds" / "00"
     local.mkdir(parents=True)
     (local / "stale.json").write_text("{}")
-    archive = tar_bytes(member("00/round.json", b"{}"), member("00/us/summary.json", b"{}"),
-                        member("00/host-samples.jsonl", b""))
+    archive = tar_bytes(
+        member("00/round.json", b"{}"),
+        member("00/us/summary.json", b"{}"),
+        member("00/host-samples.jsonl", b""),
+    )
     runner = FakeRunner((0, archive))
     remote = fanout.OpenSSHRemote(tmp_path, tmp_path / "rt", 0, runner=runner)
     await remote.pull(DROPLET, f"{WORKER_ROOT}/run/m/regions/lon1/rounds/00", local)
     assert sorted(p.name for p in local.rglob("*")) == [
-        "host-samples.jsonl", "round.json", "summary.json", "us"]
-    assert "mkdir -p /opt/proxy-index-worker/run/m/regions/lon1/rounds/00 && tar -C " \
+        "host-samples.jsonl",
+        "round.json",
+        "summary.json",
+        "us",
+    ]
+    assert (
+        "mkdir -p /opt/proxy-index-worker/run/m/regions/lon1/rounds/00 && tar -C "
         "/opt/proxy-index-worker/run/m/regions/lon1/rounds -cf - 00" in runner.calls[0][0][-1]
+    )
     assert sorted(p.name for p in local.parent.iterdir()) == ["00"]
 
 
-@pytest.mark.parametrize("bad", [
-    member("/etc/passwd"), member("../escape"), member("00/../../escape"),
-    member("00/link", kind=tarfile.SYMTYPE, link="/etc/passwd"),
-    member("00/inner", kind=tarfile.SYMTYPE, link="round.json"),
-    member("00/hard", kind=tarfile.LNKTYPE, link="00/round.json"),
-    member("00/device", kind=tarfile.CHRTYPE),
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        member("/etc/passwd"),
+        member("../escape"),
+        member("00/../../escape"),
+        member("00/link", kind=tarfile.SYMTYPE, link="/etc/passwd"),
+        member("00/inner", kind=tarfile.SYMTYPE, link="round.json"),
+        member("00/hard", kind=tarfile.LNKTYPE, link="00/round.json"),
+        member("00/device", kind=tarfile.CHRTYPE),
+    ],
+)
 async def test_unsafe_tar_entries_are_rejected(tmp_path, bad):
     """12: absolute paths, `..`, links and devices never land on the manager."""
     local = tmp_path / "rounds" / "00"
@@ -808,24 +914,30 @@ def stub_systemctl(tmp_path: Path, state: str | None) -> dict:
     return {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
 
 
-@pytest.mark.parametrize("checkpoint,unit,allowed", [
-    ("running", "ActiveState=active\nSubState=running", False),
-    ("armed", "ActiveState=activating\nSubState=start", False),
-    ("running", None, False),  # systemctl itself failed: keep refusing (data first)
-    ("running", "ActiveState=failed\nSubState=failed", True),  # killed round (B2)
-    ("running", "ActiveState=inactive\nSubState=dead", True),  # unit gone after a reboot
-    ("running", "ActiveState=active\nSubState=exited", True),
-    ("completed", "ActiveState=active\nSubState=running", True),
-    (None, "ActiveState=failed\nSubState=failed", True),
-])
+@pytest.mark.parametrize(
+    "checkpoint,unit,allowed",
+    [
+        ("running", "ActiveState=active\nSubState=running", False),
+        ("armed", "ActiveState=activating\nSubState=start", False),
+        ("running", None, False),  # systemctl itself failed: keep refusing (data first)
+        ("running", "ActiveState=failed\nSubState=failed", True),  # killed round (B2)
+        ("running", "ActiveState=inactive\nSubState=dead", True),  # unit gone after a reboot
+        ("running", "ActiveState=active\nSubState=exited", True),
+        ("completed", "ActiveState=active\nSubState=running", True),
+        (None, "ActiveState=failed\nSubState=failed", True),
+    ],
+)
 def test_b2_the_pull_check_allows_a_round_whose_unit_ended(tmp_path, checkpoint, unit, allowed):
     """B2: a hard-killed round (checkpoint never terminal) can still be pulled."""
     folder = tmp_path / "00"
     folder.mkdir()
     if checkpoint:
         (folder / "round.json").write_text(json.dumps({"status": checkpoint}))
-    reply = subprocess.run([sys.executable, "-c", fanout.TERMINAL_CHECK, str(folder)],
-                           env=stub_systemctl(tmp_path, unit), check=False)
+    reply = subprocess.run(
+        [sys.executable, "-c", fanout.TERMINAL_CHECK, str(folder)],
+        env=stub_systemctl(tmp_path, unit),
+        check=False,
+    )
     assert (reply.returncode == 0) is allowed
 
 
@@ -834,34 +946,51 @@ def test_the_start_script_installs_arms_and_keeps_secrets_off_argv(tmp_path):
     bin_dir, log = tmp_path / "bin", tmp_path / "calls.log"
     bin_dir.mkdir()
     for tool, out in (("uv", ""), ("systemd-run", ""), ("timedatectl", "yes")):
-        (bin_dir / tool).write_text(f"#!/bin/sh\necho \"{tool} $*\" >> {log}\necho {out}\n")
+        (bin_dir / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> {log}\necho {out}\n')
         (bin_dir / tool).chmod(0o755)
-    payload = tar_bytes(member("run/m-net00/campaign.json", b"{}"),
-                        member("run/m-net00/provider.toml", b""),
-                        member("run/m-net00/assignment.json", b"{}"),
-                        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
-                        member("secrets/credentials.toml", b"password = 'secret-x'\n"))
+    payload = tar_bytes(
+        member("run/m-net00/campaign.json", b"{}"),
+        member("run/m-net00/provider.toml", b""),
+        member("run/m-net00/assignment.json", b"{}"),
+        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
+        member("secrets/credentials.toml", b"password = 'secret-x'\n"),
+    )
     worker, secrets = tmp_path / "worker", tmp_path / "secrets"
     command = fanout.start_command("m-net00", "lon1", 3)
     assert command[3:5] == [WORKER_ROOT, WORKER_SECRETS]
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
     for _ in range(2):
-        subprocess.run([sys.executable, "-c", command[2], str(worker), str(secrets),
-                        *command[5:]], input=payload, env=env, check=True)
+        subprocess.run(
+            [sys.executable, "-c", command[2], str(worker), str(secrets), *command[5:]],
+            input=payload,
+            env=env,
+            check=True,
+        )
     calls = log.read_text().splitlines()
     assert [c.split()[0] for c in calls] == [
-        "uv", "timedatectl", "systemd-run", "systemd-run", "timedatectl", "systemd-run",
-        "systemd-run"]
+        "uv",
+        "timedatectl",
+        "systemd-run",
+        "systemd-run",
+        "timedatectl",
+        "systemd-run",
+        "systemd-run",
+    ]
     assert "--property=LimitNOFILE=65536" in calls[2] and "--round 3" in calls[2]
     assert "proxy_index.campaign.sampler" in calls[3] and "secret-x" not in log.read_text()
     credentials = secrets / "credentials.toml"
     assert stat.S_IMODE(credentials.stat().st_mode) == 0o600
     assert not list(worker.rglob("credentials.toml"))
     marker = json.loads((worker / "active-run.json").read_text())
-    assert marker == {"kind": "round", "region": "lon1", "unit": "pi-camp-round",
-                      "state_path": "run/m-net00/regions/lon1/rounds/03/round.json"}
-    start = json.loads((worker / "run/m-net00/regions/lon1/rounds/03/worker-start.json")
-                       .read_text())
+    assert marker == {
+        "kind": "round",
+        "region": "lon1",
+        "unit": "pi-camp-round",
+        "state_path": "run/m-net00/regions/lon1/rounds/03/round.json",
+    }
+    start = json.loads(
+        (worker / "run/m-net00/regions/lon1/rounds/03/worker-start.json").read_text()
+    )
     assert start["ntp_synchronized"] is True and start["wheel_installed"] is False
     assert "--mmdb" not in calls[2]  # no database in this image: no country check
 
@@ -872,19 +1001,25 @@ def test_the_round_gets_the_country_check_from_one_image_database(tmp_path, coun
     bin_dir, log = tmp_path / "bin", tmp_path / "calls.log"
     bin_dir.mkdir()
     for tool, out in (("uv", ""), ("systemd-run", ""), ("timedatectl", "yes")):
-        (bin_dir / tool).write_text(f"#!/bin/sh\necho \"{tool} $*\" >> {log}\necho {out}\n")
+        (bin_dir / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> {log}\necho {out}\n')
         (bin_dir / tool).chmod(0o755)
     worker = tmp_path / "worker"
     (worker / "db-ip").mkdir(parents=True)
     for index in range(count):
         (worker / "db-ip" / f"dbip-{index}.mmdb").write_bytes(b"x")
-    payload = tar_bytes(member("run/m-net00/campaign.json", b"{}"),
-                        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
-                        member("secrets/credentials.toml", b""))
+    payload = tar_bytes(
+        member("run/m-net00/campaign.json", b"{}"),
+        member("wheel/proxy_index-1.0-py3-none-any.whl", b"wheel"),
+        member("secrets/credentials.toml", b""),
+    )
     command = fanout.start_command("m-net00", "lon1", 0)
     env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    subprocess.run([sys.executable, "-c", command[2], str(worker), str(tmp_path / "secrets"),
-                    *command[5:]], input=payload, env=env, check=True)
+    subprocess.run(
+        [sys.executable, "-c", command[2], str(worker), str(tmp_path / "secrets"), *command[5:]],
+        input=payload,
+        env=env,
+        check=True,
+    )
     [round_call] = [c for c in log.read_text().splitlines() if "onboarding round" in c]
     database = f"--mmdb {worker / 'db-ip' / 'dbip-0.mmdb'}"
     assert round_call.endswith(database) is (count == 1)
@@ -924,8 +1059,7 @@ def test_sampler_parses_proc_text(tmp_path):
     assert first["rss_mb"] == round(256 * os.sysconf("SC_PAGE_SIZE") / 1024**2, 1)
     (proc / "stat").write_text(STAT_2)
     second, _ = sampler.sample(proc, cgroup, ticks)
-    assert (second["cpu_pct"], second["steal_pct"], second["core_max_pct"]) == (
-        75.0, 25.0, 100.0)
+    assert (second["cpu_pct"], second["steal_pct"], second["core_max_pct"]) == (75.0, 25.0, 100.0)
     (cgroup / "cgroup.procs").write_text("")
     assert sampler.sample(proc, cgroup, ticks)[0] is None
     assert sampler.round_rss_mb(proc, tmp_path / "gone") is None
@@ -943,26 +1077,51 @@ def test_sampler_runs_until_the_round_unit_is_empty(tmp_path):
         else:
             (proc / "stat").write_text(text)
 
-    assert sampler.main(["--output", str(output), "--proc", str(proc), "--cgroup",
-                         str(cgroup)], sleep=sleep) == 0
+    assert (
+        sampler.main(
+            ["--output", str(output), "--proc", str(proc), "--cgroup", str(cgroup)], sleep=sleep
+        )
+        == 0
+    )
     lines = [json.loads(line) for line in output.read_text().splitlines()]
     assert len(lines) == 3 and lines[1]["cpu_pct"] == 75.0 and lines[2]["cpu_pct"] == 0.0
 
 
 def test_sampler_summary_percentiles(tmp_path):
     path = tmp_path / "host-samples.jsonl"
-    rows = [{"cpu_pct": float(v), "core_max_pct": v + 1.0, "steal_pct": v / 10,
-             "load1": v / 50, "mem_used_pct": 40.0 + v / 10, "rss_mb": 100.0 + v}
-            for v in range(1, 101)]
+    rows = [
+        {
+            "cpu_pct": float(v),
+            "core_max_pct": v + 1.0,
+            "steal_pct": v / 10,
+            "load1": v / 50,
+            "mem_used_pct": 40.0 + v / 10,
+            "rss_mb": 100.0 + v,
+        }
+        for v in range(1, 101)
+    ]
     path.write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n{}\n")
     summary = sampler.summarize(path)
-    assert summary == {"cpu_p50_pct": 50.0, "cpu_p95_pct": 95.0, "cpu_max_pct": 100.0,
-                       "cpu_peak_pct": 100.0, "cpu_core_max_pct": 101.0, "steal_p95_pct": 9.5,
-                       "load1_p95": 1.9, "mem_used_max_pct": 50.0, "rss_peak_mb": 200.0}
+    assert summary == {
+        "cpu_p50_pct": 50.0,
+        "cpu_p95_pct": 95.0,
+        "cpu_max_pct": 100.0,
+        "cpu_peak_pct": 100.0,
+        "cpu_core_max_pct": 101.0,
+        "steal_p95_pct": 9.5,
+        "load1_p95": 1.9,
+        "mem_used_max_pct": 50.0,
+        "rss_peak_mb": 200.0,
+    }
     assert set(sampler.summarize(tmp_path / "missing.jsonl").values()) == {None}
     timed = tmp_path / "timed.jsonl"
-    timed.write_text("\n".join(json.dumps({"time": t, "cpu_pct": c}) for t, c in (
-        (10.0, 1.0), (20.0, 2.0), (30.0, 80.0), (40.0, 90.0))) + "\n")
+    timed.write_text(
+        "\n".join(
+            json.dumps({"time": t, "cpu_pct": c})
+            for t, c in ((10.0, 1.0), (20.0, 2.0), (30.0, 80.0), (40.0, 90.0))
+        )
+        + "\n"
+    )
     assert sampler.summarize(timed, since=30.0)["cpu_p50_pct"] == 80.0  # m6: no idle lead-in
     assert sampler.summarize(timed)["cpu_p50_pct"] == 2.0
     assert sampler.percentile([], 0.5) is None and sampler.percentile([3.0], 0.95) == 3.0
@@ -971,13 +1130,17 @@ def test_sampler_summary_percentiles(tmp_path):
 # --- harvest ---------------------------------------------------------------------------------
 
 AT_HH = datetime.fromisoformat("2027-01-01T22:00:00+00:00").timestamp()
-RUNNING = {"service": {"ActiveState": "active", "SubState": "running"},
-           "state": {"status": "running", "jobs": [{"started_at": "2027-01-01T22:00:01.500Z"}]}}
+RUNNING = {
+    "service": {"ActiveState": "active", "SubState": "running"},
+    "state": {"status": "running", "jobs": [{"started_at": "2027-01-01T22:00:01.500Z"}]},
+}
 
 
 def ended(code=0, status="completed"):
-    return {"service": {"ActiveState": "active", "SubState": "exited",
-                        "ExecMainStatus": str(code)}, "state": {"status": status, "jobs": []}}
+    return {
+        "service": {"ActiveState": "active", "SubState": "exited", "ExecMainStatus": str(code)},
+        "state": {"status": status, "jobs": []},
+    }
 
 
 class HarvestRemote(FakeRemote):
@@ -994,11 +1157,16 @@ class HarvestRemote(FakeRemote):
             self.pull_failures -= 1
             raise fanout.RemoteError("pull failed (exit 1)")
         service = (self.inspected.get(droplet.name) or {}).get("service") or {
-            "ActiveState": "inactive", "SubState": "dead"}  # systemd's answer for no unit
+            "ActiveState": "inactive",
+            "SubState": "dead",
+        }  # systemd's answer for no unit
         unit = "\n".join(f"{key}={value}" for key, value in service.items())
         check = await asyncio.to_thread(
-            subprocess.run, [sys.executable, "-c", fanout.TERMINAL_CHECK, str(self.source)],
-            env=stub_systemctl(self.source.parent, unit), check=False)
+            subprocess.run,
+            [sys.executable, "-c", fanout.TERMINAL_CHECK, str(self.source)],
+            env=stub_systemctl(self.source.parent, unit),
+            check=False,
+        )
         if check.returncode:
             raise fanout.RemoteError(f"pull failed (exit {check.returncode})")
         shutil.rmtree(local, ignore_errors=True)
@@ -1019,10 +1187,24 @@ async def harvest_setup(tmp_path, *, samples=True, fake=None):
     source = worker_manifest.parent / "regions" / "tor1" / "rounds" / "00"
     (source / "worker-start.json").write_text('{"ntp_synchronized": true}')
     if samples:
-        (source / "host-samples.jsonl").write_text("\n".join(json.dumps(
-            {"cpu_pct": v, "core_max_pct": v + 5, "steal_pct": 1.0, "load1": 1.5,
-             "mem_used_pct": 30.0, "rss_mb": 200.0}) for v in (40.0, 60.0, 90.0)) + "\n"
-            + json.dumps({"time": AT_HH - 30, "cpu_pct": 1.0}) + "\n")  # idle lead-in (m6)
+        (source / "host-samples.jsonl").write_text(
+            "\n".join(
+                json.dumps(
+                    {
+                        "cpu_pct": v,
+                        "core_max_pct": v + 5,
+                        "steal_pct": 1.0,
+                        "load1": 1.5,
+                        "mem_used_pct": 30.0,
+                        "rss_mb": 200.0,
+                    }
+                )
+                for v in (40.0, 60.0, 90.0)
+            )
+            + "\n"
+            + json.dumps({"time": AT_HH - 30, "cpu_pct": 1.0})
+            + "\n"
+        )  # idle lead-in (m6)
     spec = make_spec(NETWORKS[:1], ("tor1",))
     root = make_root(tmp_path, spec)
     (root / spec.manifests["net00"]).write_bytes(worker_manifest.read_bytes())
@@ -1035,8 +1217,9 @@ async def harvest_setup(tmp_path, *, samples=True, fake=None):
 
 async def harvested(spec, record, root, fake, remote, clock):
     async with running(fake) as cloud:
-        await harvest.harvest_hour(spec, record, root, cloud=cloud,
-                                   remote_factory=lambda hour: remote, clock=clock)
+        await harvest.harvest_hour(
+            spec, record, root, cloud=cloud, remote_factory=lambda hour: remote, clock=clock
+        )
     return record
 
 
@@ -1059,7 +1242,10 @@ async def test_a_finished_round_is_pulled_verified_recorded_and_removed(tmp_path
     assert record.cells == {"net00/tor1": "complete"} and record.state == "done"
     traffic = record.traffic["net00"]
     assert (traffic["countries_done"], traffic["countries_total"], traffic["bytes_down"]) == (
-        3, 3, 1800)
+        3,
+        3,
+        1800,
+    )
     assert traffic["worker_hours"] > 0
     local = root / "networks/net00/residential/m-net00/regions/tor1/rounds/00"
     assert (local / "host-samples.jsonl").exists() and (local / "worker-start.json").exists()
@@ -1079,7 +1265,9 @@ async def test_a_long_round_is_never_stopped_only_alerted(tmp_path):
         clock.t = AT_HH + hours * HOUR
         await harvested(spec, record, root, fake, remote, clock)
     assert [(a["level"], a["kind"]) for a in record.alerts] == [
-        ("info", "round_long_3h"), ("high", "round_long_12h")]
+        ("info", "round_long_3h"),
+        ("high", "round_long_12h"),
+    ]
     assert remote.stops == [] and fake.deleted == [] and record.droplets[0].status == "running"
 
 
@@ -1090,8 +1278,7 @@ async def test_a_failed_round_unit_is_collected_partially_and_removed(tmp_path, 
     remote.inspected[record.droplets[0].name] = ended(1, "failed")
     await harvested(spec, record, root, fake, remote, clock)
     worker = record.droplets[0]
-    assert (worker.status, worker.exit_code, worker.error_class) == (
-        "destroyed", 1, "round_failed")
+    assert (worker.status, worker.exit_code, worker.error_class) == ("destroyed", 1, "round_failed")
     assert record.cells == {"net00/tor1": "failed_ours"} and len(remote.pulls) == 1
     assert (worker.cpu_max_pct is None) is (not samples)
 
@@ -1099,8 +1286,9 @@ async def test_a_failed_round_unit_is_collected_partially_and_removed(tmp_path, 
 async def test_a_unit_that_failed_before_its_checkpoint_is_still_removed(tmp_path):
     spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
     (remote.source / "round.json").unlink()
-    remote.inspected[record.droplets[0].name] = {"service": {
-        "ActiveState": "failed", "SubState": "failed", "ExecMainStatus": "1"}}
+    remote.inspected[record.droplets[0].name] = {
+        "service": {"ActiveState": "failed", "SubState": "failed", "ExecMainStatus": "1"}
+    }
     await harvested(spec, record, root, fake, remote, clock)
     assert record.droplets[0].status == "destroyed" and record.droplets[0].requests == 0
     assert record.cells == {"net00/tor1": "failed_ours"}
@@ -1154,14 +1342,19 @@ async def test_an_unreachable_worker_is_kept_and_alerted_after_30_minutes(tmp_pa
         clock.t = AT_HH + 60 + minutes * 60
         await harvested(spec, record, root, fake, remote, clock)
         assert [a["kind"] for a in record.alerts] == (
-            ["worker_unreachable"] if minutes > 30 else [])
+            ["worker_unreachable"] if minutes > 30 else []
+        )
     assert record.droplets[0].status == "armed" and fake.deleted == []
     memo = json.loads(harvest.harvest_state_path(root, 0).read_text())
     assert memo[record.droplets[0].droplet_id]["unreachable_since"] == AT_HH + 60
     remote.inspected[record.droplets[0].name] = RUNNING
     await harvested(spec, record, root, fake, remote, clock)
-    assert "unreachable_since" not in json.loads(
-        harvest.harvest_state_path(root, 0).read_text())[record.droplets[0].droplet_id]
+    assert (
+        "unreachable_since"
+        not in json.loads(harvest.harvest_state_path(root, 0).read_text())[
+            record.droplets[0].droplet_id
+        ]
+    )
 
 
 async def test_a_guard_refusal_in_harvest_is_final_and_fails_the_hour(tmp_path):
@@ -1190,8 +1383,9 @@ async def test_a_failed_removal_is_retried_on_the_next_pass(tmp_path):
 
 async def test_an_unexpected_error_stays_with_its_worker(tmp_path):
     spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
-    remote.inspected[record.droplets[0].name] = {"service": {"ActiveState": "inactive",
-                                                             "ExecMainStatus": "x"}}
+    remote.inspected[record.droplets[0].name] = {
+        "service": {"ActiveState": "inactive", "ExecMainStatus": "x"}
+    }
     await harvested(spec, record, root, fake, remote, clock)
     assert record.droplets[0].error_class == "ValueError" and fake.deleted == []
     assert [a["kind"] for a in record.alerts] == ["harvest_error"]
@@ -1200,8 +1394,9 @@ async def test_an_unexpected_error_stays_with_its_worker(tmp_path):
 async def test_harvest_leaves_planned_and_finished_hours_alone(tmp_path):
     record = HourRecord(CID, 0, SCHEDULED)
     spec = make_spec(synthetic=True)
-    await harvest.harvest_hour(spec, record, tmp_path, cloud=None, remote_factory=None,
-                               clock=FakeClock(AT_HH))
+    await harvest.harvest_hour(
+        spec, record, tmp_path, cloud=None, remote_factory=None, clock=FakeClock(AT_HH)
+    )
     assert record.state == "planned" and not hour_path(tmp_path, 0).exists()
 
 
@@ -1212,8 +1407,9 @@ async def test_synthetic_workers_finish_after_synthetic_minutes_without_calls(tm
     for network in spec.networks:
         manifest = root / spec.manifests[network]
         manifest.parent.mkdir(parents=True)
-        manifest.write_text(json.dumps({"regions": {r: ["US"] for r in REGIONS},
-                                        "settings": {"concurrency": 2000}}))
+        manifest.write_text(
+            json.dumps({"regions": {r: ["US"] for r in REGIONS}, "settings": {"concurrency": 2000}})
+        )
     record = HourRecord(CID, 0, SCHEDULED)
     clock = FakeClock(PRE_CREATE)
     await launch.launch_hour(spec, record, root, cloud=None, remote_factory=None, clock=clock)
@@ -1226,21 +1422,30 @@ async def test_synthetic_workers_finish_after_synthetic_minutes_without_calls(tm
     assert set(record.cells.values()) == {"complete"}
 
 
-@pytest.mark.parametrize("info,expected", [
-    (RUNNING, (False, None)),
-    ({"service": {"ActiveState": "activating"}}, (False, None)),
-    (ended(0), (True, 0)),
-    (ended(130, "stopped"), (True, 130)),
-    ({"service": {"ActiveState": "inactive", "ExecMainStatus": "0"},
-      "state": {"status": "running"}}, (True, 1)),
-    ({}, (True, 1)),
-])
+@pytest.mark.parametrize(
+    "info,expected",
+    [
+        (RUNNING, (False, None)),
+        ({"service": {"ActiveState": "activating"}}, (False, None)),
+        (ended(0), (True, 0)),
+        (ended(130, "stopped"), (True, 130)),
+        (
+            {
+                "service": {"ActiveState": "inactive", "ExecMainStatus": "0"},
+                "state": {"status": "running"},
+            },
+            (True, 1),
+        ),
+        ({}, (True, 1)),
+    ],
+)
 def test_round_ended_reads_the_unit_and_the_checkpoint(info, expected):
     assert harvest.round_ended(info) == expected
 
 
 async def test_a_missing_checkpoint_after_a_clean_exit_is_repulled_and_a_journal_error_is_info(
-        tmp_path):
+    tmp_path,
+):
     spec, root, fake, record, remote, clock = await harvest_setup(tmp_path)
     remote.inspected[record.droplets[0].name] = ended()
     checkpoint = (remote.source / "round.json").read_bytes()
@@ -1267,10 +1472,10 @@ async def test_b2_a_killed_round_is_collected_partially_and_removed(tmp_path):
     worker = record.droplets[0]
     remote.inspected[worker.name] = {
         "service": {"ActiveState": "failed", "SubState": "failed", "ExecMainStatus": "9"},
-        "state": {"status": "running", "jobs": [{"started_at": "2027-01-01T22:00:01.500Z"}]}}
+        "state": {"status": "running", "jobs": [{"started_at": "2027-01-01T22:00:01.500Z"}]},
+    }
     await harvested(spec, record, root, fake, remote, clock)
-    assert (worker.status, worker.exit_code, worker.error_class) == (
-        "destroyed", 9, "round_failed")
+    assert (worker.status, worker.exit_code, worker.error_class) == ("destroyed", 9, "round_failed")
     assert record.cells == {"net00/tor1": "failed_ours"} and record.state == "done"
     local = root / "networks/net00/residential/m-net00/regions/tor1/rounds/00"
     assert json.loads((local / "round.json").read_text())["status"] == "running"
@@ -1282,8 +1487,9 @@ async def test_b2_a_running_round_is_never_pulled_even_if_inspect_misreads_it(tm
     checkpoint = json.loads((remote.source / "round.json").read_text())
     (remote.source / "round.json").write_text(json.dumps(checkpoint | {"status": "running"}))
     worker = record.droplets[0]
-    remote.inspected[worker.name] = {"service": {"ActiveState": "active", "SubState": "running",
-                                                 "ExecMainStatus": "0"}}
+    remote.inspected[worker.name] = {
+        "service": {"ActiveState": "active", "SubState": "running", "ExecMainStatus": "0"}
+    }
     worker.status, worker.exit_code = "finished", 0
     await harvested(spec, record, root, fake, remote, clock)
     assert worker.status == "collect_failed" and fake.deleted == []
@@ -1296,7 +1502,9 @@ async def test_b1_after_a_readiness_api_error_the_hour_reaches_done(tmp_path):
     record, root, remote, clock = await launched(tmp_path, fake, spec)
     await harvested(spec, record, root, fake, remote, clock)
     assert record.state == "done" and {d.status for d in record.droplets} == {
-        "destroyed", "create_failed"}
+        "destroyed",
+        "create_failed",
+    }
 
 
 async def test_b1_a_failed_region_does_not_keep_the_hour_open(tmp_path):
@@ -1315,7 +1523,8 @@ async def test_b1_a_failed_region_does_not_keep_the_hour_open(tmp_path):
         launch._Launch._create_call = original
     await harvested(spec, record, root, fake, remote, clock)
     assert [d.status for d in record.droplets] == ["create_failed"] * (
-        1 + launch.REPLACEMENTS_PER_CELL) and record.state == "done"
+        1 + launch.REPLACEMENTS_PER_CELL
+    ) and record.state == "done"
 
 
 async def test_m7_a_collect_failed_worker_without_a_memo_is_repulled(tmp_path):
@@ -1338,7 +1547,6 @@ async def test_1e_r1_an_unconfirmed_start_that_never_ran_ends_failed_ours(tmp_pa
     worker.error_class = "start_unconfirmed"
     remote.inspected[worker.name] = {"server_time": 0}  # reachable, no fleet marker
     await harvested(spec, record, root, fake, remote, clock)
-    assert (worker.status, worker.exit_code, worker.error_class) == (
-        "destroyed", 1, "round_failed")
+    assert (worker.status, worker.exit_code, worker.error_class) == ("destroyed", 1, "round_failed")
     assert worker.armed_at and record.cells == {"net00/tor1": "failed_ours"}
     assert record.state == "done"

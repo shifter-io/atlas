@@ -228,12 +228,24 @@ def test_breakdowns_per_dimension_from_geo_buckets():
 
 def test_city_network_evidence_retains_unclassified_exits_and_does_not_copy_city_latency():
     ips = {
-        1: {"count": 3, "row": BERLIN | {
-            "asn": 3320, "asn_organization": "Telekom", "usage_type": "residential",
-        }},
-        2: {"count": 2, "row": BERLIN | {
-            "asn": None, "asn_organization": None, "usage_type": None,
-        }},
+        1: {
+            "count": 3,
+            "row": BERLIN
+            | {
+                "asn": 3320,
+                "asn_organization": "Telekom",
+                "usage_type": "residential",
+            },
+        },
+        2: {
+            "count": 2,
+            "row": BERLIN
+            | {
+                "asn": None,
+                "asn_organization": None,
+                "usage_type": None,
+            },
+        },
     }
     rows = [geo_row(BERLIN, NETWORK, 3, 3, [[50, 3]])]
     result = breakdowns(ips, rows)["city_asn"]
@@ -297,9 +309,9 @@ def test_uptime_is_outage_time_over_the_countries_tested():
     assert listed[0]["ended_at"] is None and listed[0]["duration_s"] == 3600
     assert listed[-1]["duration_s"] == 7 * 3600
     # An outage that ended after the cutoff was still open as of it.
-    assert outage_list([down("DE", h(2), end + timedelta(hours=1))], since, end)[0][
-        "ended_at"
-    ] is None
+    assert (
+        outage_list([down("DE", h(2), end + timedelta(hours=1))], since, end)[0]["ended_at"] is None
+    )
     assert len(outage_list([down("DE", h(1 + i / 10), h(1)) for i in range(60)], since, end)) == 50
 
 
@@ -527,7 +539,12 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
             (ids["alpha"],),
         ).fetchone()
     assert {r[0] for r in rows} == {
-        "asn", "country", "country_asn", "geography", "region", "city_asn",
+        "asn",
+        "country",
+        "country_asn",
+        "geography",
+        "region",
+        "city_asn",
     }
     assert all(r[2] for r in rows) and windows == (0.75, 600, 0.0)
     # The API projects v2 dimensions next to the v1 pool, and lists products with census.
@@ -720,9 +737,7 @@ def test_healthy_pulse_closes_a_census_outage_once(database):
             ("census", T0 + timedelta(minutes=100), T0 + timedelta(minutes=120))
         ]
         assert kinds(conn, last) == [("recovered", 1)]
-        data = conn.execute(
-            "SELECT data FROM test_events WHERE event_id>%s", (last,)
-        ).fetchone()[0]
+        data = conn.execute("SELECT data FROM test_events WHERE event_id>%s", (last,)).fetchone()[0]
         assert data["source"] == "census" and data["incident"] == "down"
         assert data["duration_s"] == 20 * 60
         conn.execute("DELETE FROM settings WHERE key=%s", (WATERMARK,))

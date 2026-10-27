@@ -42,13 +42,22 @@ async def test_a_failed_assignment_is_replaced_and_the_cell_completes(tmp_path):
     first, replacement = record.droplets
     assert (first.status, first.error_class) == ("destroyed", "project_assign_failed")
     assert replacement.replaced_from == 0 and replacement.status == "armed"
-    assert record.replacements == {"net00/tor1": {
-        "replaced_from": [{"droplet_id": first.droplet_id, "status": "destroyed",
-                           "error_class": "project_assign_failed"}],
-        "extra_delay_seconds": 0.0}}  # armed before HH:00: the round starts on time
+    assert record.replacements == {
+        "net00/tor1": {
+            "replaced_from": [
+                {
+                    "droplet_id": first.droplet_id,
+                    "status": "destroyed",
+                    "error_class": "project_assign_failed",
+                }
+            ],
+            "extra_delay_seconds": 0.0,
+        }
+    }  # armed before HH:00: the round starts on time
     audit = [json.loads(line) for line in audit_path(root).read_text().splitlines()]
     assert [(a["id"], a["path"]) for a in audit if a["result"] == "deleted"] == [
-        (first.droplet_id, "own_unassigned")]
+        (first.droplet_id, "own_unassigned")
+    ]
     remote.inspected[replacement.name] = ended()
     await harvested(spec, record, root, fake, remote, clock)
     assert record.cells == {"net00/tor1": "complete"} and record.state == "done"
@@ -67,7 +76,8 @@ async def test_a_create_5xx_is_replaced_and_its_delay_recorded(tmp_path):
     assert [name for name, *_ in remote.pushes] == [replacement.name]
     entry = record.replacements[CELL]
     assert entry["replaced_from"] == [
-        {"droplet_id": None, "status": "create_failed", "error_class": "create_failed"}]
+        {"droplet_id": None, "status": "create_failed", "error_class": "create_failed"}
+    ]
     assert entry["extra_delay_seconds"] > 60  # launched at HH:01, then 15 s create retry
     assert {a["kind"] for a in record.alerts} == {"create_failed"}
 
@@ -111,7 +121,8 @@ async def test_spent_replacements_make_the_cell_failed_ours_with_an_alert(tmp_pa
     record, root, remote, _ = await launched(tmp_path, fake, nyc3_spec())
     tries = 1 + launch.REPLACEMENTS_PER_CELL
     assert [(d.status, d.error_class) for d in record.droplets] == [
-        ("destroyed", "project_assign_failed")] * tries
+        ("destroyed", "project_assign_failed")
+    ] * tries
     assert [d.replaced_from for d in record.droplets] == [None, *range(tries - 1)]
     assert record.cells == {CELL: "failed_ours"} and not fake.droplets and not remote.pushes
     entry = record.replacements[CELL]

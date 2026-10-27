@@ -19,6 +19,7 @@ A run whose rate limits continue with no success for ``RATE_LIMIT_STOP_SECONDS``
 ``stop_reason = "rate_limited"``. The opt-in ``retry_http_469`` policy (census rule 3) is the
 special case "469 only, no safety stop, no new summary fields".
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -50,8 +51,13 @@ class Answers:
         classes = config.answer_classes
         self.classes = classes
         self.census = config.stop_rule == "unique_ratio"
-        signals = (classes.rate_limits if classes is not None
-                   else ("469",) if config.retry_http_469 else ())
+        signals = (
+            classes.rate_limits
+            if classes is not None
+            else ("469",)
+            if config.retry_http_469
+            else ()
+        )
         self.statuses = frozenset(signal for signal in signals if signal != CONNECT)
         self.connect = CONNECT in signals
         self.no_inventory_statuses = frozenset(classes.no_inventory if classes else ())
@@ -71,9 +77,15 @@ class Answers:
             self.first = completed_at
         status = str(result.status) if result.status is not None else None
         signal = status if status in self.statuses else None
-        if signal is None and self.connect and result.error in REFUSALS and (
+        if (
+            signal is None
+            and self.connect
+            and result.error in REFUSALS
+            and (
                 self.last_success is not None
-                and completed_at - self.last_success < RECENT_SUCCESS_SECONDS):
+                and completed_at - self.last_success < RECENT_SUCCESS_SECONDS
+            )
+        ):
             signal = CONNECT
         if signal is not None:
             self.rate_limited[signal] += 1
@@ -111,10 +123,17 @@ class Answers:
     def summary(self, totals: Counters) -> dict[str, Any]:
         """The RunSummary fields of this policy (none without answer classes or rule 3)."""
         if self.classes is None:
-            return {"census_requests": self.sample(totals),
-                    "http_469_responses": totals.statuses["469"]} if self.statuses else {}
+            return (
+                {
+                    "census_requests": self.sample(totals),
+                    "http_469_responses": totals.statuses["469"],
+                }
+                if self.statuses
+                else {}
+            )
         return {
-            "rate_limited": dict(self.rate_limited), "no_inventory": self.no_inventory,
+            "rate_limited": dict(self.rate_limited),
+            "no_inventory": self.no_inventory,
             "other_country": self.other_country if self.enricher is not None else None,
             "census_requests": self.sample(totals) if self.census else None,
         }

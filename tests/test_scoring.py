@@ -31,8 +31,17 @@ HALF_HOUR = timedelta(minutes=30)
 
 
 def row(
-    slot, ms, *, n=100, successes=None, test="pulse", country="US", target="generic_http",
-    census=(), run_key=None, region=None,
+    slot,
+    ms,
+    *,
+    n=100,
+    successes=None,
+    test="pulse",
+    country="US",
+    target="generic_http",
+    census=(),
+    run_key=None,
+    region=None,
 ):
     """One bucket row: n requests in a time slot, every success at `ms` milliseconds; census
     names the census batches the run overlapped (a pulse or load wave during a census)."""
@@ -88,8 +97,13 @@ def test_success_rate_is_the_mean_of_time_slots():
     assert m["success_rate"] == pytest.approx((1 + 0.5 + 0.5 + 0) / 4)
     assert m["request_success_rate"] == pytest.approx(1055 / 1110)
     assert m["time_slots"] == {
-        "minutes": 30, "success": 4, "down": 1, "skipped_during_census": 0, "latency": 2,
-        "latency_targets": ["generic_http"], "min_latency_successes": 30,
+        "minutes": 30,
+        "success": 4,
+        "down": 1,
+        "skipped_during_census": 0,
+        "latency": 2,
+        "latency_targets": ["generic_http"],
+        "min_latency_successes": 30,
     }
     # Light-load latency: pulses only; the census slot (and slots under 30 successes) do not vote.
     assert m["latency_ms"]["p50"] == 100
@@ -135,8 +149,17 @@ def test_latency_under_load_worked_example():
         "fra1": {T: dict.fromkeys(("p50", "p90", "p95", "p99"), 1.5)},
         "nyc3": {T: dict.fromkeys(("p50", "p90", "p95", "p99"), 2.0)},
     }
-    choices = [{"day": "2026-10-03", "region": "fra1", "country": "RO", "basis": "fastest",
-                "p50_ms": 610, "successes": 4000, "candidates": 2}]
+    choices = [
+        {
+            "day": "2026-10-03",
+            "region": "fra1",
+            "country": "RO",
+            "basis": "fastest",
+            "p50_ms": 610,
+            "successes": 4000,
+            "candidates": 2,
+        }
+    ]
     detail = latency_detail(rows, factors, references, 30, excluded, choices)
     countries = {c["country"]: c for c in detail["countries"]}
     assert countries["BG"]["region"] == "fra1"
@@ -147,8 +170,14 @@ def test_latency_under_load_worked_example():
     regions = {r["region"]: r for r in detail["regions"]}
     assert regions["fra1"]["reference"]["country"] == "RO"
     assert regions["fra1"]["chosen"] == [
-        {"day": "2026-10-03", "country": "RO", "basis": "fastest", "p50_ms": 610,
-         "successes": 4000, "candidates": 2}
+        {
+            "day": "2026-10-03",
+            "country": "RO",
+            "basis": "fastest",
+            "p50_ms": 610,
+            "successes": 4000,
+            "candidates": 2,
+        }
     ]
     assert regions["nyc3"]["chosen"] == []
     assert regions["fra1"]["factors"]["latest"] == {"at": T} | dict.fromkeys(
@@ -163,9 +192,12 @@ def test_latency_under_load_worked_example():
 def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():
     rows = [
         row(T - HALF_HOUR, 700, country="RO"),  # before the first load test: no value
-        row(T, 600), row(T, 900, n=1000, test="load"), row(T, 800, country="RO"),
+        row(T, 600),
+        row(T, 900, n=1000, test="load"),
+        row(T, 800, country="RO"),
         # Next slot: the load run had too few successes; the factor of T carries forward.
-        row(T + HALF_HOUR, 400), row(T + HALF_HOUR, 4000, n=1000, successes=10, test="load"),
+        row(T + HALF_HOUR, 400),
+        row(T + HALF_HOUR, 4000, n=1000, successes=10, test="load"),
         row(T + HALF_HOUR, 1000, country="RO"),
     ]
     factors, *_ = load_factors(rows, 30)
@@ -272,13 +304,22 @@ def test_removed_settings_are_refused(tmp_path):
 
 
 def census_run(batch_id, start, minutes, product=1):
-    return {"product_id": product, "batch_id": batch_id, "started_at": start,
-            "finished_at": start + timedelta(minutes=minutes)}
+    return {
+        "product_id": product,
+        "batch_id": batch_id,
+        "started_at": start,
+        "finished_at": start + timedelta(minutes=minutes),
+    }
 
 
 def test_census_overlap_detection_any_country_same_product():
-    pulse = {"product_id": 1, "batch_id": 50, "run_key": 7, "started_at": T,
-             "finished_at": T + timedelta(minutes=1)}
+    pulse = {
+        "product_id": 1,
+        "batch_id": 50,
+        "run_key": 7,
+        "started_at": T,
+        "finished_at": T + timedelta(minutes=1),
+    }
     census = [
         census_run(1, T - timedelta(minutes=10), 10),  # ends as the pulse starts: no overlap
         census_run(2, T - timedelta(minutes=10), 10.5),  # still running at its start
@@ -323,8 +364,12 @@ def test_pulses_during_a_census_count_as_requests_but_not_light_load():
     assert timed_split["targets"]["generic_http"]["clean"]["latency_ms"]["p50"] == 600
     split = census_split(rows, [], 30, 30)
     assert split["pulses"]["clean"] | {"latency_ms": None} == {
-        "runs": 0, "requests": 100, "successes": 99, "request_success_rate": 0.99,
-        "success_rate": 0.99, "latency_ms": None,
+        "runs": 0,
+        "requests": 100,
+        "successes": 99,
+        "request_success_rate": 0.99,
+        "success_rate": 0.99,
+        "latency_ms": None,
     }
     assert split["pulses"]["clean"]["latency_ms"]["p50"] == 600
     during_census = split["pulses"]["during_census"]
@@ -334,20 +379,33 @@ def test_pulses_during_a_census_count_as_requests_but_not_light_load():
     assert split["census_batches"] == [9, 10]
     assert split["targets"]["generic_http"]["during_census"]["requests"] == 300
     # Done runs without an artifact count by their own flag.
-    runs = [{"slot": T + 3 * HALF_HOUR, "target": "generic_http", "requests": 100,
-             "successes": 100, "counted": False, "during_census": True, "census_batches": [11]}]
+    runs = [
+        {
+            "slot": T + 3 * HALF_HOUR,
+            "target": "generic_http",
+            "requests": 100,
+            "successes": 100,
+            "counted": False,
+            "during_census": True,
+            "census_batches": [11],
+        }
+    ]
     assert census_split(rows, runs, 30, 30)["pulses"]["during_census"]["runs"] == 1
     assert timed(rows, 24, 30, runs)["time_slots"]["skipped_during_census"] == 2
 
 
 def test_no_load_factor_from_a_census_slot():
     rows = [
-        row(T, 600), row(T, 900, n=1000, test="load"), row(T, 800, country="RO"),
+        row(T, 600),
+        row(T, 900, n=1000, test="load"),
+        row(T, 800, country="RO"),
         # Next slot: the load wave ran during a census; T's factor carries forward.
-        row(T + HALF_HOUR, 600), row(T + HALF_HOUR, 6000, n=1000, test="load", census=[5]),
+        row(T + HALF_HOUR, 600),
+        row(T + HALF_HOUR, 6000, n=1000, test="load", census=[5]),
         row(T + HALF_HOUR, 1000, country="RO"),
         # Then the reference pulse ran during a census: no factor either.
-        row(T + 2 * HALF_HOUR, 600, census=[6]), row(T + 2 * HALF_HOUR, 900, n=1000, test="load"),
+        row(T + 2 * HALF_HOUR, 600, census=[6]),
+        row(T + 2 * HALF_HOUR, 900, n=1000, test="load"),
         row(T + 2 * HALF_HOUR, 1000, country="RO"),
     ]
     factors, _, excluded = load_factors(rows, 30)
@@ -360,9 +418,10 @@ def test_no_load_factor_from_a_census_slot():
     assert region["factors"]["excluded_during_census"] == 2
     # A slot holding a clean pair and a pair during a census makes its factor from the clean one.
     mixed = [
-        row(T, 600, run_key=1), row(T, 900, n=1000, test="load", run_key=2),
-        row(T, 3000, census=[7], run_key=3), row(T, 9000, n=1000, test="load", census=[7],
-                                                  run_key=4),
+        row(T, 600, run_key=1),
+        row(T, 900, n=1000, test="load", run_key=2),
+        row(T, 3000, census=[7], run_key=3),
+        row(T, 9000, n=1000, test="load", census=[7], run_key=4),
     ]
     factors, _, excluded = load_factors(mixed, 30)
     assert factors[""][T]["p50"] == 1.5 and excluded == {}

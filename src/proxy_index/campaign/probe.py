@@ -67,7 +67,8 @@ CONNECT_ERRORS = ("proxy_connect", "connection", "proxy_auth", "dns")
 
 # Runs with the worker's system Python: argv = worker root, secrets dir. Credentials go to a
 # 0600 file under the secrets dir; the wheel is installed as for a round (`INSTALL_WHEEL`).
-SETUP_SCRIPT = r"""
+SETUP_SCRIPT = (
+    r"""
 import hashlib, io, os, pathlib, subprocess, sys, tarfile
 root, secrets = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]) / "probe"
 archive = tarfile.open(fileobj=io.BytesIO(sys.stdin.buffer.read()), mode="r:")
@@ -80,8 +81,11 @@ for member in archive.getmembers():
 members = [m for m in archive.getmembers() if m.name.startswith(("probe/", "wheel/"))]
 archive.extractall(root, members=members, filter="data")
 wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
-""" + INSTALL_WHEEL + r"""print("ready")
 """
+    + INSTALL_WHEEL
+    + r"""print("ready")
+"""
+)
 
 
 class ProbeError(RuntimeError):
@@ -92,8 +96,15 @@ class ProbeRemote(Protocol):
     """What the probe needs from `fanout.OpenSSHRemote`."""
 
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool: ...
-    async def run(self, droplet: Droplet, command: list[str], what: str, *,
-                  stdin: bytes | None = None, seconds: float = 120) -> bytes: ...
+    async def run(
+        self,
+        droplet: Droplet,
+        command: list[str],
+        what: str,
+        *,
+        stdin: bytes | None = None,
+        seconds: float = 120,
+    ) -> bytes: ...
 
 
 @dataclass(frozen=True)
@@ -124,36 +135,49 @@ def step_result(concurrency: int, requested: int, summary: dict[str, Any]) -> di
     answered requests. A summary without those fields gives the shares it always gave."""
     done, statuses, errors = summary["completed"], summary["status_codes"], summary["errors"]
     limited = summary.get("rate_limited")
-    classes = {"rate_limited": sum(limited.values()) if limited is not None else
-               sum(statuses.get(s, 0) for s in RATE_STATUSES),
-               "gateway_5xx": sum(statuses.get(s, 0) for s in GATEWAY_STATUSES),
-               "proxy_connect": sum(errors.get(e, 0) for e in CONNECT_ERRORS)
-               - (limited or {}).get("proxy_connect", 0),
-               "timeout": errors.get("timeout", 0),
-               "no_inventory": summary.get("no_inventory") or 0}
+    classes = {
+        "rate_limited": sum(limited.values())
+        if limited is not None
+        else sum(statuses.get(s, 0) for s in RATE_STATUSES),
+        "gateway_5xx": sum(statuses.get(s, 0) for s in GATEWAY_STATUSES),
+        "proxy_connect": sum(errors.get(e, 0) for e in CONNECT_ERRORS)
+        - (limited or {}).get("proxy_connect", 0),
+        "timeout": errors.get("timeout", 0),
+        "no_inventory": summary.get("no_inventory") or 0,
+    }
     classes["other"] = max(0, summary["total_errors"] - sum(classes.values()))
     share = (lambda n: round(100.0 * n / done, 3)) if done else (lambda n: 0.0)
     answered = done - classes["rate_limited"] if limited is not None else done
     latency = summary.get("latency_ms") or {}
-    return {"concurrency": concurrency, "requested": requested, "completed": done,
-            "success_pct": share(summary["successes"]),
-            **{f"{name}_pct": share(count) for name, count in classes.items()},
-            "rps": round(summary["requests_per_second"], 1),
-            "latency_p50_ms": latency.get("p50"), "latency_p95_ms": latency.get("p95"),
-            "unique_ips": summary.get("unique_ips"), "stop_reason": summary.get("stop_reason"),
-            **answer_shares(summary, classes, answered, share)}
+    return {
+        "concurrency": concurrency,
+        "requested": requested,
+        "completed": done,
+        "success_pct": share(summary["successes"]),
+        **{f"{name}_pct": share(count) for name, count in classes.items()},
+        "rps": round(summary["requests_per_second"], 1),
+        "latency_p50_ms": latency.get("p50"),
+        "latency_p95_ms": latency.get("p95"),
+        "unique_ips": summary.get("unique_ips"),
+        "stop_reason": summary.get("stop_reason"),
+        **answer_shares(summary, classes, answered, share),
+    }
 
 
-def answer_shares(summary: dict[str, Any], classes: dict[str, int], answered: int,
-                  share: Callable[[int], float]) -> dict[str, Any]:
+def answer_shares(
+    summary: dict[str, Any], classes: dict[str, int], answered: int, share: Callable[[int], float]
+) -> dict[str, Any]:
     """The answer-class keys of `step_result`; None where the summary lacks their counts."""
     other, unique = summary.get("other_country"), summary.get("unique_ips")
     real = summary["total_errors"] - classes["rate_limited"] - classes["no_inventory"]
-    return {"answered": answered,
-            "other_country_pct": None if other is None else share(other),
-            "duplicates_pct": None if unique is None else share(
-                max(0, summary["successes"] - (other or 0) - unique)),
-            "real_error_pct": round(100.0 * max(0, real) / answered, 3) if answered else 0.0}
+    return {
+        "answered": answered,
+        "other_country_pct": None if other is None else share(other),
+        "duplicates_pct": None
+        if unique is None
+        else share(max(0, summary["successes"] - (other or 0) - unique)),
+        "real_error_pct": round(100.0 * max(0, real) / answered, 3) if answered else 0.0,
+    }
 
 
 def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
@@ -167,8 +191,10 @@ def reasons(step: dict[str, Any], baseline: dict[str, Any]) -> list[str]:
         found.append("rate_limited")
     if step["proxy_connect_pct"] > CONNECT_PCT:
         found.append("proxy_connect")
-    for reason, keys in (("timeouts_5xx", ("timeout_pct", "gateway_5xx_pct")),
-                         ("other_errors", ("other_pct",))):
+    for reason, keys in (
+        ("timeouts_5xx", ("timeout_pct", "gateway_5xx_pct")),
+        ("other_errors", ("other_pct",)),
+    ):
         rate, base = (sum(s[k] for k in keys) for s in (step, baseline))
         if rate > max(SLOWDOWN_FACTOR * base, base + SLOWDOWN_POINTS):
             found.append(reason)
@@ -185,29 +211,57 @@ def targeting(network: str, country: str) -> dict[str, str]:
 def launcher(databases: str) -> str:
     """The `sh -c` script of a step: raise the file limit, then run `"$0" "$@"`, adding
     `--mmdb` when `databases` holds exactly one MMDB, so the run applies the country check."""
-    return ('ulimit -n 65536 || exit 1; n=0; for m in ' + databases + '/*.mmdb; do '
-            '[ -f "$m" ] && n=$((n + 1)) && f="$m"; done; '
-            'if [ "$n" = 1 ]; then set -- "$@" --mmdb "$f"; fi; exec "$0" "$@"')
+    return (
+        "ulimit -n 65536 || exit 1; n=0; for m in " + databases + "/*.mmdb; do "
+        '[ -f "$m" ] && n=$((n + 1)) && f="$m"; done; '
+        'if [ "$n" = 1 ]; then set -- "$@" --mmdb "$f"; fi; exec "$0" "$@"'
+    )
 
 
-def run_command(network: str, concurrency: int, requests: int, country: str,
-                region: str) -> list[str]:
+def run_command(
+    network: str, concurrency: int, requests: int, country: str, region: str
+) -> list[str]:
     """The fixed worker command for one step; every argument is public."""
     probe, secret = f"{WORKER_ROOT}/probe", f"{WORKER_SECRETS}/probe"
-    parameters = [arg for value in targeting(network, country).values()
-                  for arg in ("--param", f"country={value}")]
-    return ["sh", "-c", launcher(MMDB_DIR), f"{WORKER_ROOT}/venv/bin/proxy-index",
-            "run", "--target", "generic_http", "--requests", str(requests),
-            "--concurrency", str(concurrency), "--timeout", str(TIMEOUT_SECONDS),
-            "--answer-classes", "--provider-config", f"{probe}/{network}.toml",
-            "--credentials-file", f"{secret}/{network}.toml",
-            *parameters, "--provider", network,
-            "--country", country.lower(), "--location", region,
-            "--output", f"{probe}/results"]
+    parameters = [
+        arg
+        for value in targeting(network, country).values()
+        for arg in ("--param", f"country={value}")
+    ]
+    return [
+        "sh",
+        "-c",
+        launcher(MMDB_DIR),
+        f"{WORKER_ROOT}/venv/bin/proxy-index",
+        "run",
+        "--target",
+        "generic_http",
+        "--requests",
+        str(requests),
+        "--concurrency",
+        str(concurrency),
+        "--timeout",
+        str(TIMEOUT_SECONDS),
+        "--answer-classes",
+        "--provider-config",
+        f"{probe}/{network}.toml",
+        "--credentials-file",
+        f"{secret}/{network}.toml",
+        *parameters,
+        "--provider",
+        network,
+        "--country",
+        country.lower(),
+        "--location",
+        region,
+        "--output",
+        f"{probe}/results",
+    ]
 
 
-def network_problems(root: Path, spec: CampaignSpec, files: WorkerInputs, network: str,
-                     countries: Collection[str]) -> list[str]:
+def network_problems(
+    root: Path, spec: CampaignSpec, files: WorkerInputs, network: str, countries: Collection[str]
+) -> list[str]:
     """Why a network cannot be measured: no credentials, or its census config, credentials and
     country parameter do not load (no network I/O)."""
     credentials = files.credentials_dir / f"{network}.toml"
@@ -216,22 +270,25 @@ def network_problems(root: Path, spec: CampaignSpec, files: WorkerInputs, networ
     config = manifest_path(root, spec, network).parent / "provider.toml"
     try:
         for country in sorted(set(countries)):
-            load_provider(config, parameters=targeting(network, country),
-                          credentials_file=credentials)
+            load_provider(
+                config, parameters=targeting(network, country), credentials_file=credentials
+            )
     except (OSError, ValueError) as error:
         return [f"network {network}: {type(error).__name__}: {error}"]
     return []
 
 
-def payload(root: Path, spec: CampaignSpec, files: WorkerInputs,
-            networks: Collection[str]) -> bytes:
+def payload(
+    root: Path, spec: CampaignSpec, files: WorkerInputs, networks: Collection[str]
+) -> bytes:
     """One tar for `SETUP_SCRIPT`: the wheel, each network's census config and credentials."""
     entries = [(f"wheel/{files.wheel.name}", files.wheel.read_bytes())]
     for network in networks:
         config = manifest_path(root, spec, network).parent / "provider.toml"
-        entries += [(f"probe/{network}.toml", config.read_bytes()),
-                    (f"secrets/{network}.toml",
-                     (files.credentials_dir / f"{network}.toml").read_bytes())]
+        entries += [
+            (f"probe/{network}.toml", config.read_bytes()),
+            (f"secrets/{network}.toml", (files.credentials_dir / f"{network}.toml").read_bytes()),
+        ]
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, data in entries:
@@ -241,19 +298,26 @@ def payload(root: Path, spec: CampaignSpec, files: WorkerInputs,
     return buffer.getvalue()
 
 
-async def set_up(remote: ProbeRemote, droplet: Droplet, data: bytes,
-                 seconds: float = 600) -> None:
+async def set_up(remote: ProbeRemote, droplet: Droplet, data: bytes, seconds: float = 600) -> None:
     """Install the wheel and write the configs and credentials on one worker."""
-    reply = await remote.run(droplet, ["python3", "-c", SETUP_SCRIPT, WORKER_ROOT,
-                                       WORKER_SECRETS], "probe setup", stdin=data,
-                             seconds=seconds)
+    reply = await remote.run(
+        droplet,
+        ["python3", "-c", SETUP_SCRIPT, WORKER_ROOT, WORKER_SECRETS],
+        "probe setup",
+        stdin=data,
+        seconds=seconds,
+    )
     if reply.decode(errors="replace").strip().splitlines()[-1:] != ["ready"]:
         raise ProbeError("probe setup did not finish")
 
 
 # The answer-class columns of the probe and shot tables (from `step_result`).
-CLASS_COLUMNS = {"No-IP %": "no_inventory_pct", "Other-country %": "other_country_pct",
-                 "Duplicates %": "duplicates_pct", "Real errors % (answered)": "real_error_pct"}
+CLASS_COLUMNS = {
+    "No-IP %": "no_inventory_pct",
+    "Other-country %": "other_country_pct",
+    "Duplicates %": "duplicates_pct",
+    "Real errors % (answered)": "real_error_pct",
+}
 CLASS_HEADER = " | ".join(CLASS_COLUMNS)
 
 
@@ -264,68 +328,129 @@ def class_cells(step: dict[str, Any]) -> list[Any]:
 
 def markdown(result: dict[str, Any]) -> str:
     """The owner's table: one row per step, the maximum and the grammar line per network."""
-    lines = [f"# Concurrency probe {result['probe_id']}", "",
-             f"{result['requests']} requests per step, country {result['country']}, one "
-             f"{result['size']} worker in {result['region']}.", "",
-             "| Network | Max | Grammar |", "|---|---|---|"]
+    lines = [
+        f"# Concurrency probe {result['probe_id']}",
+        "",
+        f"{result['requests']} requests per step, country {result['country']}, one "
+        f"{result['size']} worker in {result['region']}.",
+        "",
+        "| Network | Max | Grammar |",
+        "|---|---|---|",
+    ]
     for network, found in result["networks"].items():
         best, verdict = found.get("max_concurrency"), found.get("verdict")
         # A verdict (the floor also fails, or no maximum) replaces the grammar line.
         line = verdict or f"`[testing] max_concurrency = {best}`"
         lines.append(f"| {network} | {best or '-'} | {line} |")
-    lines += ["", "| Network | Concurrency | Completed | Success % | Rate-limited % | 5xx % "
-              f"| Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms | {CLASS_HEADER} "
-              "| Step down |", "|" + "---|" * 17]
+    lines += [
+        "",
+        "| Network | Concurrency | Completed | Success % | Rate-limited % | 5xx % "
+        f"| Connect % | Timeout % | Other % | RPS | p50 ms | p95 ms | {CLASS_HEADER} "
+        "| Step down |",
+        "|" + "---|" * 17,
+    ]
     for network, found in result["networks"].items():
         for s in found["steps"]:
-            cells = [s.get(k, "-") for k in (
-                "concurrency", "completed", "success_pct", "rate_limited_pct",
-                "gateway_5xx_pct", "proxy_connect_pct", "timeout_pct", "other_pct", "rps",
-                "latency_p50_ms", "latency_p95_ms")]
-            lines.append("| " + " | ".join(map(str, [network, *cells, *class_cells(s), ", ".join(
-                s.get("step_down", [])) or "-"])) + " |")
+            cells = [
+                s.get(k, "-")
+                for k in (
+                    "concurrency",
+                    "completed",
+                    "success_pct",
+                    "rate_limited_pct",
+                    "gateway_5xx_pct",
+                    "proxy_connect_pct",
+                    "timeout_pct",
+                    "other_pct",
+                    "rps",
+                    "latency_p50_ms",
+                    "latency_p95_ms",
+                )
+            ]
+            lines.append(
+                "| "
+                + " | ".join(
+                    map(
+                        str,
+                        [
+                            network,
+                            *cells,
+                            *class_cells(s),
+                            ", ".join(s.get("step_down", [])) or "-",
+                        ],
+                    )
+                )
+                + " |"
+            )
     return "\n".join(lines) + "\n"
 
 
 class Probe:
     """One probe: its worker record, results and files under `<output>/<probe id>/`."""
 
-    def __init__(self, cloud: DigitalOcean, remotes: Callable[[Path], ProbeRemote],
-                 inputs: ProbeInputs, now: datetime, sleep: ops_api.Sleep):
+    def __init__(
+        self,
+        cloud: DigitalOcean,
+        remotes: Callable[[Path], ProbeRemote],
+        inputs: ProbeInputs,
+        now: datetime,
+        sleep: ops_api.Sleep,
+    ):
         self.cloud, self.inputs, self.sleep = cloud, inputs, sleep
         try:
             self.spec = CampaignSpec.from_json(spec_path(inputs.root).read_text())
             self.files = WorkerInputs.for_root(inputs.root, self.spec.wheel_sha256)
         except (OSError, ValueError, KeyError, TypeError) as error:
-            raise ProbeError(f"no planned campaign with its wheel at --root "
-                             f"({type(error).__name__})") from None
+            raise ProbeError(
+                f"no planned campaign with its wheel at --root ({type(error).__name__})"
+            ) from None
         self.networks = inputs.networks or self.spec.networks
         self.check()
         self.probe_id = f"{now:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
-        self.scope = Scope(self.probe_id, short_id(self.probe_id), self.spec.project_id,
-                           self.spec.manager_droplet_id, now - ops_api.CLOCK_SKEW)
+        self.scope = Scope(
+            self.probe_id,
+            short_id(self.probe_id),
+            self.spec.project_id,
+            self.spec.manager_droplet_id,
+            now - ops_api.CLOCK_SKEW,
+        )
         self.folder = inputs.output / self.probe_id
         self.remote = remotes(self.folder)  # its known-hosts file lives in this probe's folder
         self.worker = DropletRecord(
-            "probe", inputs.region, 0, droplet_name(self.probe_id, 0, inputs.region, "probe"),
-            size=inputs.size, image_id=self.spec.image_by_region[inputs.region])
+            "probe",
+            inputs.region,
+            0,
+            droplet_name(self.probe_id, 0, inputs.region, "probe"),
+            size=inputs.size,
+            image_id=self.spec.image_by_region[inputs.region],
+        )
         self.result: dict[str, Any] = {
-            "probe_id": self.probe_id, "campaign_id": self.spec.campaign_id,
+            "probe_id": self.probe_id,
+            "campaign_id": self.spec.campaign_id,
             # What `campaign probe --remove` needs to rebuild this scope in a later process.
-            "scope": {"project_id": self.scope.project_id,
-                      "manager_droplet_id": self.scope.manager_droplet_id,
-                      "created_at": self.scope.created_at.isoformat()},
-            "requests": inputs.requests, "country": inputs.country, "region": inputs.region,
-            "size": inputs.size, "ladder": [inputs.floor, *inputs.ladder()], "networks": {}}
+            "scope": {
+                "project_id": self.scope.project_id,
+                "manager_droplet_id": self.scope.manager_droplet_id,
+                "created_at": self.scope.created_at.isoformat(),
+            },
+            "requests": inputs.requests,
+            "country": inputs.country,
+            "region": inputs.region,
+            "size": inputs.size,
+            "ladder": [inputs.floor, *inputs.ladder()],
+            "networks": {},
+        }
 
     def check(self) -> None:
         """Every input before anything is created."""
         i = self.inputs
         planned = set(self.networks) <= set(self.spec.networks)
-        problems = [(i.region not in self.spec.regions, f"region {i.region} is not planned"),
-                    (not planned, "networks not planned"),
-                    (not 1 <= i.floor <= i.start <= MAX_CONCURRENCY, "start or floor"),
-                    (i.step < 1 or i.requests < 1, "step or requests")]
+        problems = [
+            (i.region not in self.spec.regions, f"region {i.region} is not planned"),
+            (not planned, "networks not planned"),
+            (not 1 <= i.floor <= i.start <= MAX_CONCURRENCY, "start or floor"),
+            (i.step < 1 or i.requests < 1, "step or requests"),
+        ]
         bad = [text for failed, text in problems if failed]
         for network in self.networks if planned else ():
             bad += network_problems(i.root, self.spec, self.files, network, [i.country])
@@ -354,7 +479,7 @@ class Probe:
             self.result["error"] = "cancelled by a signal"
         except Exception as error:
             message = scope.SECRETS.sub("[removed]", str(error))
-            self.result["error"] = f"{type(error).__name__}: {message}"[:scope.MESSAGE_LIMIT]
+            self.result["error"] = f"{type(error).__name__}: {message}"[: scope.MESSAGE_LIMIT]
         finally:
             cleanup = asyncio.ensure_future(self.cleanup())
             while not cleanup.done():  # a signal during the removal never interrupts it
@@ -372,7 +497,8 @@ class Probe:
             await release(self.cloud, self.scope, worker, audit_path(self.folder), self.sleep)
         self.result["worker_status"] = worker.status
         if worker.status != "destroyed" and (
-                worker.droplet_id or worker.error_class == "create_uncertain"):
+            worker.droplet_id or worker.error_class == "create_uncertain"
+        ):
             self.result["recover"] = f"campaign probe --remove {self.folder}"
         self.write()
 
@@ -393,10 +519,16 @@ class Probe:
         self.save()
         try:
             [droplet] = await self.cloud.create(
-                [worker.name], region=worker.region, size=worker.size, image=worker.image_id,
+                [worker.name],
+                region=worker.region,
+                size=worker.size,
+                image=worker.image_id,
                 tags=[WORKER_TAG, campaign_tag(self.probe_id), tag],
-                ssh_keys=[self.spec.ssh_key_id], monitoring=False, with_droplet_agent=False,
-                ipv6=False)
+                ssh_keys=[self.spec.ssh_key_id],
+                monitoring=False,
+                with_droplet_agent=False,
+                ipv6=False,
+            )
         except CreateError as error:
             found = error.created[0] if error.created else None
             if found is None and error.uncertain:
@@ -413,8 +545,13 @@ class Probe:
         worker.droplet_id, worker.error_class = droplet.id, None
         self.save()
         _, failed = await scope.assign_and_verify_project(
-            self.cloud, self.scope, [droplet.id], {droplet.id: worker},
-            audit_path(self.folder), retry=scope.Retry(sleep=self.sleep, save=self.save))
+            self.cloud,
+            self.scope,
+            [droplet.id],
+            {droplet.id: worker},
+            audit_path(self.folder),
+            retry=scope.Retry(sleep=self.sleep, save=self.save),
+        )
         self.save()
         if failed:
             raise ProbeError(f"worker not confirmed in the project ({worker.status})")
@@ -425,8 +562,9 @@ class Probe:
         return ready
 
     async def measure_all(self, droplet: Droplet) -> None:
-        await set_up(self.remote, droplet,
-                     payload(self.inputs.root, self.spec, self.files, self.networks))
+        await set_up(
+            self.remote, droplet, payload(self.inputs.root, self.spec, self.files, self.networks)
+        )
         for network in self.networks:
             self.result["networks"][network] = found = {"steps": []}
             await self.measure(droplet, network, found)
@@ -438,8 +576,12 @@ class Probe:
         base["step_down"] = reasons(base, base)
         found["steps"].append(base)
         if base.get("run_failed") or base["success_pct"] < USABLE_PCT:
-            found.update(max_concurrency=None, verdict="run failed at the floor" if base.get(
-                "run_failed") else "unusable at the floor")
+            found.update(
+                max_concurrency=None,
+                verdict="run failed at the floor"
+                if base.get("run_failed")
+                else "unusable at the floor",
+            )
             return
         for concurrency in self.inputs.ladder():
             current = await self.step(droplet, network, concurrency)
@@ -456,17 +598,22 @@ class Probe:
         i = self.inputs
         command = run_command(network, concurrency, i.requests, i.country, i.region)
         try:
-            reply = await self.remote.run(droplet, command, f"probe {network}",
-                                          seconds=STEP_SECONDS)
+            reply = await self.remote.run(
+                droplet, command, f"probe {network}", seconds=STEP_SECONDS
+            )
             summary = json.loads(reply.decode().strip().splitlines()[-1])
             return step_result(concurrency, self.inputs.requests, summary)
         except (RemoteError, ValueError, IndexError, KeyError, TypeError) as error:
-            return {"concurrency": concurrency, "requested": self.inputs.requests,
-                    "run_failed": type(error).__name__}
+            return {
+                "concurrency": concurrency,
+                "requested": self.inputs.requests,
+                "run_failed": type(error).__name__,
+            }
 
 
-async def adopt(cloud: DigitalOcean, worker: DropletRecord, probe_id: str, *,
-                strict: bool = False) -> Droplet | None:
+async def adopt(
+    cloud: DigitalOcean, worker: DropletRecord, probe_id: str, *, strict: bool = False
+) -> Droplet | None:
     """The droplet with the worker's exact name under the probe's hour tag (`adopt_uncertain`,
     which also counts it as this client's own create); None when absent, or when unreadable
     unless `strict` (then the API error is raised)."""
@@ -483,8 +630,13 @@ async def adopt(cloud: DigitalOcean, worker: DropletRecord, probe_id: str, *,
     return mine[0]
 
 
-async def release(cloud: DigitalOcean, probe_scope: Scope, worker: DropletRecord, audit: Path,
-                  sleep: ops_api.Sleep) -> None:
+async def release(
+    cloud: DigitalOcean,
+    probe_scope: Scope,
+    worker: DropletRecord,
+    audit: Path,
+    sleep: ops_api.Sleep,
+) -> None:
     """Remove the probe worker through the guard and set its final status.
 
     Confirmed in the project: the plain `guarded_delete`. Marked by a failed assignment: the
@@ -498,11 +650,13 @@ async def release(cloud: DigitalOcean, probe_scope: Scope, worker: DropletRecord
     try:
         if worker.assigned_at is None and worker.assign_failed_at is None:
             _, failed = await scope.assign_and_verify_project(
-                cloud, probe_scope, [rid], records, audit, retry=scope.Retry(sleep=sleep))
+                cloud, probe_scope, [rid], records, audit, retry=scope.Retry(sleep=sleep)
+            )
             if failed:
                 return
-        await scope.guarded_delete(cloud, "droplet", rid, probe_scope,
-                                   scope.Ledger({"droplet": [rid]}, records), audit)
+        await scope.guarded_delete(
+            cloud, "droplet", rid, probe_scope, scope.Ledger({"droplet": [rid]}, records), audit
+        )
         worker.status, worker.destroyed_at = "destroyed", timestamp(datetime.now(UTC).timestamp())
     except scope.OwnershipError:
         worker.status = "destroy_refused"
@@ -510,8 +664,9 @@ async def release(cloud: DigitalOcean, probe_scope: Scope, worker: DropletRecord
         worker.status, worker.error_class = "destroy_failed", type(error).__name__
 
 
-async def recover_worker(cloud: DigitalOcean, run_scope: Scope, worker: DropletRecord,
-                         audit: Path, sleep: ops_api.Sleep) -> list[DropletRecord]:
+async def recover_worker(
+    cloud: DigitalOcean, run_scope: Scope, worker: DropletRecord, audit: Path, sleep: ops_api.Sleep
+) -> list[DropletRecord]:
     """Find one recorded worker by its exact name under the run's hour tag (and, when an id is
     recorded, only that id), then `release`; `absent` when never created or already gone.
     Only a listing that answered may say "absent"; an unreadable one raises `ProbeError` and
@@ -526,16 +681,29 @@ async def recover_worker(cloud: DigitalOcean, run_scope: Scope, worker: DropletR
             found = await cloud.adopt_uncertain([worker.name], hour_tag(run_scope.campaign_id, 0))
             if found:
                 worker.droplet_id, worker.error_class = found[0].id, None
-            extra = [DropletRecord(worker.network, worker.region, worker.hour, worker.name,
-                                   droplet_id=d.id, size=worker.size, image_id=worker.image_id,
-                                   error_class="unrecorded") for d in found[1:]]
+            extra = [
+                DropletRecord(
+                    worker.network,
+                    worker.region,
+                    worker.hour,
+                    worker.name,
+                    droplet_id=d.id,
+                    size=worker.size,
+                    image_id=worker.image_id,
+                    error_class="unrecorded",
+                )
+                for d in found[1:]
+            ]
             gone = not found
         else:
             gone = await adopt(cloud, worker, run_scope.campaign_id, strict=True) is None and (
-                await cloud.get(str(worker.droplet_id)) is None)
+                await cloud.get(str(worker.droplet_id)) is None
+            )
     except Exception as error:
-        raise ProbeError(f"could not read the probe's droplets ({type(error).__name__}); "
-                         "nothing changed, run --remove again") from None
+        raise ProbeError(
+            f"could not read the probe's droplets ({type(error).__name__}); "
+            "nothing changed, run --remove again"
+        ) from None
     if gone:
         worker.status = "absent"  # never created, or already gone
         return []
@@ -544,8 +712,9 @@ async def recover_worker(cloud: DigitalOcean, run_scope: Scope, worker: DropletR
     return extra
 
 
-async def recover(cloud: DigitalOcean, folder: Path, *,
-                  sleep: ops_api.Sleep = asyncio.sleep) -> dict[str, Any]:
+async def recover(
+    cloud: DigitalOcean, folder: Path, *, sleep: ops_api.Sleep = asyncio.sleep
+) -> dict[str, Any]:
     """`campaign probe --remove <folder>`: remove a probe's worker that its own run left.
 
     Rebuilds the scope from the folder's record, finds the worker by its exact name under the
@@ -556,9 +725,13 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
         result = json.loads(path.read_text())
         recorded = result["scope"]
         worker = DropletRecord(**result["worker"])
-        probe_scope = Scope(result["probe_id"], short_id(result["probe_id"]),
-                            recorded["project_id"], recorded["manager_droplet_id"],
-                            datetime.fromisoformat(recorded["created_at"]))
+        probe_scope = Scope(
+            result["probe_id"],
+            short_id(result["probe_id"]),
+            recorded["project_id"],
+            recorded["manager_droplet_id"],
+            datetime.fromisoformat(recorded["created_at"]),
+        )
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise ProbeError(f"no probe record in that folder ({type(error).__name__})") from None
     # A second droplet with the worker's name (S1r) is kept under `unrecorded` until removed.
@@ -567,19 +740,28 @@ async def recover(cloud: DigitalOcean, folder: Path, *,
         twins += await recover_worker(cloud, probe_scope, record, audit_path(folder), sleep)
     if twins:
         result["unrecorded"] = [asdict(twin) for twin in twins]
-    status = next((t.status for t in twins if t.status not in ("destroyed", "absent")),
-                  worker.status)  # a twin still alive keeps the hint and the failure
-    result.update(worker=asdict(worker), worker_status=status,
-                  recovered_at=timestamp(datetime.now(UTC).timestamp()))
+    status = next(
+        (t.status for t in twins if t.status not in ("destroyed", "absent")), worker.status
+    )  # a twin still alive keeps the hint and the failure
+    result.update(
+        worker=asdict(worker),
+        worker_status=status,
+        recovered_at=timestamp(datetime.now(UTC).timestamp()),
+    )
     if status in ("destroyed", "absent"):
         result.pop("recover", None)
     atomic_json(path, result)
     return {"probe_id": result["probe_id"], "worker_status": status}
 
 
-async def probe(cloud: DigitalOcean, remotes: Callable[[Path], ProbeRemote],
-                inputs: ProbeInputs, *, now: datetime | None = None,
-                sleep: ops_api.Sleep = asyncio.sleep) -> dict[str, Any]:
+async def probe(
+    cloud: DigitalOcean,
+    remotes: Callable[[Path], ProbeRemote],
+    inputs: ProbeInputs,
+    *,
+    now: datetime | None = None,
+    sleep: ops_api.Sleep = asyncio.sleep,
+) -> dict[str, Any]:
     """Run one probe; returns the result (also in `<output>/<probe id>/probe-result.*`).
     `remotes(folder)` gives the SSH remote whose runtime files live in the probe's folder."""
     return await Probe(cloud, remotes, inputs, now or datetime.now(UTC), sleep).run()

@@ -21,13 +21,16 @@ def collector(root, uptime):
     return collector_module.Collector(root, None, None, None, clock, pacing)
 
 
-@pytest.mark.parametrize(("uptime", "raised"), [
-    (15.0, False),  # just booted: NTP has not synced yet
-    (GRACE - 0.5, False),
-    (float(GRACE), True),
-    (600.0, True),
-    (None, True),  # unknown uptime gets no grace
-])
+@pytest.mark.parametrize(
+    ("uptime", "raised"),
+    [
+        (15.0, False),  # just booted: NTP has not synced yet
+        (GRACE - 0.5, False),
+        (float(GRACE), True),
+        (600.0, True),
+        (None, True),  # unknown uptime gets no grace
+    ],
+)
 async def test_clock_unsynced_waits_out_the_boot_grace(tmp_path, uptime, raised):
     root = make_root(tmp_path, synthetic=True)
     status = await collector(root, lambda: uptime).pass_once()

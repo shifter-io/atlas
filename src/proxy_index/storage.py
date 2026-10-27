@@ -32,9 +32,21 @@ PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
 # and a pulse of the same product, target and country therefore share one pool.
-RUN_LENGTH = ("requests", "target_url", "stop_rule", "min_sample", "stall_seconds",
-              "census_rule_version", "census_ratio_basis", "retry_http_469", "processes",
-              "execution_processes", "execution_backend", "worker_pids", "answer_classes")
+RUN_LENGTH = (
+    "requests",
+    "target_url",
+    "stop_rule",
+    "min_sample",
+    "stall_seconds",
+    "census_rule_version",
+    "census_ratio_basis",
+    "retry_http_469",
+    "processes",
+    "execution_processes",
+    "execution_backend",
+    "worker_pids",
+    "answer_classes",
+)
 BUCKET_KEYS = (
     "bucket_start",
     "completed",
@@ -258,8 +270,17 @@ def _steps(bins):
 
 def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     """Add one run to a scope's cached metrics; histogram is the merged lifetime one."""
-    for name in ("requested", "started", "completed", "successes", "total_errors", "cancelled",
-                 "not_started", "response_body_bytes", "duration_seconds"):
+    for name in (
+        "requested",
+        "started",
+        "completed",
+        "successes",
+        "total_errors",
+        "cancelled",
+        "not_started",
+        "response_body_bytes",
+        "duration_seconds",
+    ):
         value = attempted if name == "requested" else summary[name]
         metrics[name] = metrics.get(name, 0) + value
     metrics["runs"] = metrics.get("runs", 0) + 1
@@ -410,8 +431,7 @@ def _store_geo(conn, run_key, rows):
         "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
         "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
         "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
-        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g "
-        + " ".join(joins),
+        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + " ".join(joins),
         (run_key,),
     )
 
@@ -429,12 +449,17 @@ def ingest(directory, credentials_file, *, batch_id=None):
     if summary["schema_version"] != "1":
         raise ValueError("Unsupported measurement schema")
     requested, started, completed, successes = (
-        summary[name] for name in ("requested", "started", "completed", "successes"))
+        summary[name] for name in ("requested", "started", "completed", "successes")
+    )
     # A census is unbounded; a bounded run also attempted one replacement per rate limit.
-    attempted = (started + summary["not_started"] if requested is None
-                 else requested + sum(summary.get("rate_limited", {}).values()))
+    attempted = (
+        started + summary["not_started"]
+        if requested is None
+        else requested + sum(summary.get("rate_limited", {}).values())
+    )
     in_country = successes - summary.get("other_country", 0)  # other-country exits: no rows
-    if (not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
+    if (
+        not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
         or attempted != started + summary["not_started"]
         or started != completed + summary["cancelled"]
         or completed != successes + summary["total_errors"]
@@ -453,9 +478,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
         raise ValueError("Persistence requires provider and product labels")
     scope = {
         "target": summary["target"],
-        "config": {
-            key: value for key, value in config.items() if key not in RUN_LENGTH
-        },
+        "config": {key: value for key, value in config.items() if key not in RUN_LENGTH},
     }
     scope_hash = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
     run_id = summary["run_id"]
@@ -478,9 +501,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
     if any(key in summary for key in OUTCOME_KEYS):
         if not all(_count(summary.get(key)) for key in OUTCOME_KEYS) or (
             all(row[8] for row in bucket_rows.values())
-            and any(
-                sum(buckets[b][key] for b in buckets) != summary[key] for key in OUTCOME_KEYS
-            )
+            and any(sum(buckets[b][key] for b in buckets) != summary[key] for key in OUTCOME_KEYS)
         ):
             raise ValueError("Outcome counters do not reconcile")
     geo_rows = _geo_rows(directory, summary, buckets, bucket_rows)
@@ -638,7 +659,9 @@ def ingest(directory, credentials_file, *, batch_id=None):
                 conn.execute(
                     "INSERT INTO run_buckets(bucket_start,run_key,completed,successes,"
                     "response_body_bytes,errors,status_codes,histogram_steps,histogram_counts,"
-                    "extra,outcome_counters," + ",".join(OUTCOME_KEYS) + ") VALUES ("
+                    "extra,outcome_counters,"
+                    + ",".join(OUTCOME_KEYS)
+                    + ") VALUES ("
                     + ",".join(["%s"] * (len(values) + 2))
                     + ")",
                     (bucket, run_key, *values),
@@ -962,9 +985,7 @@ V5_SNAPSHOT = (
 )
 V5_CHECKS = {name: query.replace("v4_", "v5_before_") for name, query in MIGRATION_CHECKS.items()}
 # v6 → v7 changes test_batches only: every batch must be unchanged (and no batch a retry).
-V6_SNAPSHOT = (
-    "CREATE TEMP TABLE v6_before_batches ON COMMIT DROP AS SELECT * FROM test_batches"
-)
+V6_SNAPSHOT = "CREATE TEMP TABLE v6_before_batches ON COMMIT DROP AS SELECT * FROM test_batches"
 V6_CHECKS = {
     "test batches": "SELECT count(*) FROM v6_before_batches o FULL JOIN test_batches n "
     "USING(batch_id) WHERE to_jsonb(o)::text IS DISTINCT FROM (to_jsonb(n) - 'retry_of')::text "
@@ -1156,7 +1177,9 @@ def seed(
             columns = ("target_id", *definition, *schedule)
             # Ingest-added targets have no label; their schedule comes from the seed once.
             cursor.executemany(
-                "INSERT INTO targets(" + ",".join(columns) + ") VALUES ("
+                "INSERT INTO targets("
+                + ",".join(columns)
+                + ") VALUES ("
                 + ",".join(["%s"] * len(columns))
                 + ") ON CONFLICT(target_id) DO UPDATE SET "
                 + ",".join(f"{c}=excluded.{c}" for c in definition)

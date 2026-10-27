@@ -31,13 +31,9 @@ def prepare(config, countries=("DE",), **times):
     """Seeded reference data with only `countries` enabled; times maps code -> census time."""
     seed(config)
     with connect(config) as conn:
-        conn.execute(
-            "UPDATE countries SET enabled = country_code = ANY(%s)", (list(countries),)
-        )
+        conn.execute("UPDATE countries SET enabled = country_code = ANY(%s)", (list(countries),))
         for code, value in times.items():
-            conn.execute(
-                "UPDATE countries SET census_time=%s WHERE country_code=%s", (value, code)
-            )
+            conn.execute("UPDATE countries SET census_time=%s WHERE country_code=%s", (value, code))
 
 
 def query(config, statement, params=None):
@@ -106,10 +102,12 @@ async def test_census_plan_due_slots_region_routing_and_no_node(database, db):
         ("FR", "beta", beta["node_id"], "queued", None, None),
     ]
     alerts = query(database, "SELECT dedupe_key,occurrences FROM alerts ORDER BY 1")
-    assert alerts == sorted([
-        (f"no_node:{product_id(database, 'alpha')}:{LON1}", 1),
-        (f"no_node:{product_id(database, 'beta')}:{FRA1}", 1),
-    ])
+    assert alerts == sorted(
+        [
+            (f"no_node:{product_id(database, 'alpha')}:{LON1}", 1),
+            (f"no_node:{product_id(database, 'beta')}:{FRA1}", 1),
+        ]
+    )
     events = query(database, "SELECT kind,region_id,signal,data->>'kind' FROM test_events")
     assert sorted(events) == sorted(
         [("no_node", FRA1, -1, "census"), ("no_node", LON1, -1, "census")]
@@ -123,12 +121,14 @@ async def test_census_plan_due_slots_region_routing_and_no_node(database, db):
     # Half an hour on, Austria's slot is due and nothing else.
     later = await batches.census_plan(db, NOW + timedelta(minutes=30))
     assert later["created"] == 1
-    newer = query(database, "SELECT country_code FROM test_batches WHERE batch_id>%s",
-                  (rows[-1][0],))
+    newer = query(
+        database, "SELECT country_code FROM test_batches WHERE batch_id>%s", (rows[-1][0],)
+    )
     assert newer == [("AT",)]
     # Beta still has no fra1 node: the open alert counts it again, the tape stays quiet.
-    assert query(database, "SELECT occurrences FROM alerts WHERE dedupe_key LIKE %s",
-                 (f"no_node:%:{FRA1}",)) == [(2,)]
+    assert query(
+        database, "SELECT occurrences FROM alerts WHERE dedupe_key LIKE %s", (f"no_node:%:{FRA1}",)
+    ) == [(2,)]
     assert len(query(database, "SELECT 1 FROM test_events")) == 2
 
 
@@ -152,12 +152,18 @@ async def test_census_overlap_is_skipped(database, db):
         conn.execute("UPDATE countries SET census_time='12:10' WHERE country_code='DE'")
     # Before the new start_at (12:10:30) the first census may still finish: deferred.
     assert await batches.census_plan(db, NOW + timedelta(minutes=10)) == {
-        "created": 0, "skipped": 0, "deferred": 1, "no_node": 0,
+        "created": 0,
+        "skipped": 0,
+        "deferred": 1,
+        "no_node": 0,
     }
     assert len(query(database, "SELECT 1 FROM test_batches")) == 1
     # Still open at start_at: skipped.
     assert await batches.census_plan(db, NOW + timedelta(minutes=11)) == {
-        "created": 0, "skipped": 1, "deferred": 0, "no_node": 0,
+        "created": 0,
+        "skipped": 1,
+        "deferred": 0,
+        "no_node": 0,
     }
     rows = query(database, "SELECT status,finished_at IS NOT NULL FROM test_batches ORDER BY 1")
     assert rows == [("scheduled", False), ("skipped", True)]
@@ -171,9 +177,7 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
     prepare(database, ("DE", "AT"))
     issue_token(database, provider="alpha", product="res", region="fra1")
     with connect(database) as conn:
-        conn.execute(
-            "UPDATE targets SET pulse_interval_minutes=60 WHERE target_id='generic_https'"
-        )
+        conn.execute("UPDATE targets SET pulse_interval_minutes=60 WHERE target_id='generic_https'")
 
     def slots():
         return query(
@@ -209,7 +213,8 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
     nxt = await batches.pulse_plan(db, top + timedelta(minutes=16))
     assert nxt["targets"] == ["probe_x"]
     assert (await batches.pulse_plan(db, top + timedelta(minutes=31)))["targets"] == [
-        "probe_x", "generic_http",
+        "probe_x",
+        "generic_http",
     ]
     assert len(slots()) == 7
     runs = query(database, "SELECT DISTINCT status FROM batch_runs")
@@ -270,7 +275,10 @@ class SlowTransport(FakeTransport):
 async def pulse_history(database, tmp_path, country, at, transport):
     """An ingested census-target pulse of alpha/res in `country`, scheduled at `at`."""
     directory = await measurement(
-        tmp_path, provider="alpha", product="res", requested_country=country.lower(),
+        tmp_path,
+        provider="alpha",
+        product="res",
+        requested_country=country.lower(),
         transport_factory=transport,
     )
     with connect(database) as conn:
@@ -312,8 +320,9 @@ async def test_the_reference_is_the_fastest_clean_country_of_the_region(database
         tomorrow = await batches.load_references(conn, today + timedelta(days=1))
     assert (tomorrow[0]["country_code"], tomorrow[0]["basis"]) == ("DE", "override")
     # A pulse that ran during a census of the same product (another country) never counts.
-    (run,) = query(database, "SELECT started_at,finished_at FROM test_runs WHERE run_key=%s",
-                   (fast,))
+    (run,) = query(
+        database, "SELECT started_at,finished_at FROM test_runs WHERE run_key=%s", (fast,)
+    )
     with connect(database) as conn:
         census = conn.execute(
             "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
@@ -333,15 +342,17 @@ async def test_the_reference_is_the_fastest_clean_country_of_the_region(database
 
 
 async def finish_pulse(db, node, batch_id, successes, now):
-    summary = {"status": "completed", "completed": 100, "successes": successes,
-               "stop_reason": "requests"}
+    summary = {
+        "status": "completed",
+        "completed": 100,
+        "successes": successes,
+        "stop_reason": "requests",
+    }
     return await batches.finish_run(db, node, batch_id, summary, None, now)
 
 
 @pytest.mark.parametrize("spoiled", ["no_success", "stalled", "failed"])
-async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
-    database, db, spoiled
-):
+async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(database, db, spoiled):
     """A census that ended because the provider was down is rerun for that product alone at the
     first pulse that sees it up again in the country, once per UTC day. A census our side
     failed (here the runner failed) is not the provider's and is not rerun."""
@@ -361,9 +372,15 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
         conn.execute(
             "INSERT INTO batch_runs(batch_id,product_id,node_id,status,stop_reason,error,"
             "successes,finished_at) VALUES (%s,%s,%s,%s,%s,%s,0,%s)",
-            (census, alpha, a["node_id"], "failed" if spoiled == "failed" else "done",
-             None if spoiled == "failed" else spoiled,
-             "run failed" if spoiled == "failed" else None, day + timedelta(minutes=20)),
+            (
+                census,
+                alpha,
+                a["node_id"],
+                "failed" if spoiled == "failed" else "done",
+                None if spoiled == "failed" else spoiled,
+                "run failed" if spoiled == "failed" else None,
+                day + timedelta(minutes=20),
+            ),
         )
         conn.execute(
             "INSERT INTO batch_runs(batch_id,product_id,node_id,status,stop_reason,successes,"
@@ -374,24 +391,24 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
     for i in range(3):
         at = day + timedelta(hours=1, minutes=30 * i)
         await batches.pulse_plan(db, at)
-        pulses.append(query(
-            database,
-            "SELECT batch_id FROM test_batches WHERE kind='pulse' AND target_id='generic_http' "
-            "AND scheduled_for<=%s ORDER BY scheduled_for DESC LIMIT 1",
-            (at,),
-        )[0][0])
+        pulses.append(
+            query(
+                database,
+                "SELECT batch_id FROM test_batches WHERE kind='pulse' AND target_id='generic_http' "
+                "AND scheduled_for<=%s ORDER BY scheduled_for DESC LIMIT 1",
+                (at,),
+            )[0][0]
+        )
         await batches.assignments(db, node, at + timedelta(minutes=1))
     # Still down: no rerun. Then up: one rerun for alpha alone. Up again: nothing more.
     await finish_pulse(db, node, pulses[0], 0, day + timedelta(hours=1, minutes=1))
-    assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [
-        (0,)
-    ]
+    assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [(0,)]
     up = day + timedelta(hours=1, minutes=31)
     await finish_pulse(db, node, pulses[1], 97, up)
     if spoiled == "failed":
-        assert query(
-            database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL"
-        ) == [(0,)]
+        assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [
+            (0,)
+        ]
         return
     retries = query(
         database,
@@ -402,8 +419,9 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
     assert [r[1:] for r in retries] == [
         (census, "DE", "generic_http", timedelta(seconds=5), [alpha], ["queued"])
     ]
-    events = query(database, "SELECT kind,product_id,data FROM test_events WHERE "
-                             "kind='census_retry'")
+    events = query(
+        database, "SELECT kind,product_id,data FROM test_events WHERE kind='census_retry'"
+    )
     assert [(e[0], e[1], e[2]["retry_of"]) for e in events] == [("census_retry", alpha, census)]
     # The rerun is spoiled too; another pulse gets through the same day: still only one rerun.
     with connect(database) as conn:
@@ -414,9 +432,7 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(
         )
         conn.execute("UPDATE test_batches SET status='done' WHERE batch_id=%s", (retries[0][0],))
     await finish_pulse(db, node, pulses[2], 100, day + timedelta(hours=2, minutes=1))
-    assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [
-        (1,)
-    ]
+    assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [(1,)]
 
 
 # --- barrier --------------------------------------------------------------------------------
@@ -441,20 +457,34 @@ async def test_barrier_waits_for_every_product(database, db):
     assert query(database, "SELECT kind,product_id,data FROM test_events") == [
         ("census_started", alpha, {"region": "fra1", "start_at": "2026-10-01T12:00:30+00:00"})
     ]
-    await batches.progress(db, node_a, batch_id, {"requests": 40, "successes": 30,
-                                                   "unique_ips": 20}, start)
+    await batches.progress(
+        db, node_a, batch_id, {"requests": 40, "successes": 30, "unique_ips": 20}, start
+    )
     assert await batches.fail_run(db, node_a, batch_id, "boom", start) == "failed"
     assert query(database, "SELECT status FROM test_batches") == [("running",)]
-    assert query(database, "SELECT requests,unique_ips,error FROM batch_runs "
-                           "WHERE node_id=%s", (a["node_id"],)) == [(40, 20, "boom")]
-    finished = "SELECT product_id,signal,severity,data FROM test_events " \
+    assert query(
+        database,
+        "SELECT requests,unique_ips,error FROM batch_runs WHERE node_id=%s",
+        (a["node_id"],),
+    ) == [(40, 20, "boom")]
+    finished = (
+        "SELECT product_id,signal,severity,data FROM test_events "
         "WHERE kind='census_finished' ORDER BY event_id"
+    )
     ((product, signal, severity, data),) = query(database, finished)
     assert (product, signal, severity) == (alpha, -1, "minor")
     assert data == {
-        "region": "fra1", "requests": 40, "successes": 30, "unique_ips": 20,
-        "success_rate": 0.75, "duration_s": 0.0, "stop_reason": "error", "status": "failed",
-        "bytes_up": 0, "bytes_down": 0, "error": "boom",
+        "region": "fra1",
+        "requests": 40,
+        "successes": 30,
+        "unique_ips": 20,
+        "success_rate": 0.75,
+        "duration_s": 0.0,
+        "stop_reason": "error",
+        "status": "failed",
+        "bytes_up": 0,
+        "bytes_down": 0,
+        "error": "boom",
     }
     # Every run is terminal: the batch closes as failed; beta never started.
     await batches.fail_run(db, node_b, batch_id, "boom", start)
@@ -479,11 +509,13 @@ async def test_reaper_fails_unstarted_and_silent_runs(database, db):
     # Beta never started; alpha went silent.
     result = await batches.reap(db, start + timedelta(hours=1))
     assert result == {"failed": {"not_started": 1, "stale": 1}, "closed": 1}
-    reaped = query(database, "SELECT kind,signal,data->>'status' FROM test_events "
-                             "WHERE kind='census_finished'")
+    reaped = query(
+        database, "SELECT kind,signal,data->>'status' FROM test_events WHERE kind='census_finished'"
+    )
     assert reaped == [("census_finished", -1, "failed")] * 2
     assert query(database, "SELECT node_id,error FROM batch_runs ORDER BY node_id") == [
-        (a["node_id"], "stale"), (b["node_id"], "not_started"),
+        (a["node_id"], "stale"),
+        (b["node_id"], "not_started"),
     ]
     assert query(database, "SELECT status FROM test_batches") == [("failed",)]
 
@@ -491,8 +523,11 @@ async def test_reaper_fails_unstarted_and_silent_runs(database, db):
 async def test_nodes_go_offline_and_come_back(database, db, client):
     prepare(database)
     a = issue_token(database, provider="alpha", product="res", region="fra1")
-    response = await client.post("/v1/heartbeat", json={"open_conns": 3, "req_per_s": 1.5,
-                                                        "rss_mb": 80}, headers=bearer(a["token"]))
+    response = await client.post(
+        "/v1/heartbeat",
+        json={"open_conns": 3, "req_per_s": 1.5, "rss_mb": 80},
+        headers=bearer(a["token"]),
+    )
     assert response.status == 200
     assert query(database, "SELECT status,open_conns,req_per_s,rss_mb FROM nodes") == [
         ("online", 3, 1.5, 80)
@@ -522,7 +557,8 @@ async def test_api_requires_a_node_token_and_matching_registration(database, cli
     wrong = await client.post("/v1/register", json=register, headers=bearer(a["token"]))
     assert wrong.status == 403
     other = await client.post(
-        "/v1/register", json=register | {"region": "fra1", "product": "dc"},
+        "/v1/register",
+        json=register | {"region": "fra1", "product": "dc"},
         headers=bearer(a["token"]),
     )
     assert other.status == 403
@@ -556,30 +592,44 @@ async def test_work_progress_and_kill(database, db, client):
     start_at = datetime.fromisoformat(assignment.pop("start_at"))
     assert start_at == query(database, "SELECT start_at FROM test_batches")[0][0]
     assert assignment == {
-        "batch_id": batch_id, "kind": "census", "product_id": product_id(database, "alpha"),
-        "provider": "alpha", "product": "res", "country_code": "DE", "region": "fra1",
-        "target_id": "generic_http", "target_url": "http://ip-info.com/myip",
-        "timeout_ms": 15000, "concurrency": 1000, "stop_rule": "unique_ratio",
-        "requests": None, "min_sample": 50, "stall_seconds": 600,
+        "batch_id": batch_id,
+        "kind": "census",
+        "product_id": product_id(database, "alpha"),
+        "provider": "alpha",
+        "product": "res",
+        "country_code": "DE",
+        "region": "fra1",
+        "target_id": "generic_http",
+        "target_url": "http://ip-info.com/myip",
+        "timeout_ms": 15000,
+        "concurrency": 1000,
+        "stop_rule": "unique_ratio",
+        "requests": None,
+        "min_sample": 50,
+        "stall_seconds": 600,
     }
     assert query(database, "SELECT status,started_at FROM batch_runs") == [("running", None)]
     # Not started yet, so a restarted node is handed it again.
     again = await (await client.get("/v1/work", headers=headers)).json()
     assert [w["batch_id"] for w in again["assignments"]] == [batch_id]
 
-    progress = {"batch_id": batch_id, "counters": {"requests": 10, "successes": 9,
-                                                   "unique_ips": 9, "bytes_up": 100}}
+    progress = {
+        "batch_id": batch_id,
+        "counters": {"requests": 10, "successes": 9, "unique_ips": 9, "bytes_up": 100},
+    }
     reply = await client.post("/v1/progress", json=progress, headers=headers)
     assert await reply.json() == {"stop": False}
     assert query(database, "SELECT requests,successes,unique_ips,bytes_up FROM batch_runs") == [
         (10, 9, 9, 100)
     ]
     assert (await (await client.get("/v1/work", headers=headers)).json())["assignments"] == []
-    bad = await client.post("/v1/progress", json={"batch_id": batch_id,
-                                                  "counters": {"requests": "x"}}, headers=headers)
+    bad = await client.post(
+        "/v1/progress", json={"batch_id": batch_id, "counters": {"requests": "x"}}, headers=headers
+    )
     assert bad.status == 400
-    missing = await client.post("/v1/progress", json={"batch_id": 999999, "counters": {}},
-                                headers=headers)
+    missing = await client.post(
+        "/v1/progress", json={"batch_id": 999999, "counters": {}}, headers=headers
+    )
     assert missing.status == 404
 
     # The operator kills the batch: progress says stop and /v1/work lists it.
@@ -781,14 +831,17 @@ async def test_results_ingest_errors_fail_the_run(database, db, client, tmp_path
 
 async def test_failed_endpoint(database, db, client):
     batch_id, headers = await planned_run(database, db, client)
-    reply = await client.post("/v1/failed", json={"batch_id": batch_id, "error": "proxy down"},
-                              headers=headers)
+    reply = await client.post(
+        "/v1/failed", json={"batch_id": batch_id, "error": "proxy down"}, headers=headers
+    )
     assert await reply.json() == {"ok": True, "status": "failed"}
     assert query(database, "SELECT error FROM batch_runs") == [("proxy down",)]
-    assert (await client.post("/v1/failed", json={"batch_id": batch_id},
-                              headers=headers)).status == 400
-    assert (await client.post("/v1/failed", json={"batch_id": 424242, "error": "x"},
-                              headers=headers)).status == 404
+    assert (
+        await client.post("/v1/failed", json={"batch_id": batch_id}, headers=headers)
+    ).status == 400
+    assert (
+        await client.post("/v1/failed", json={"batch_id": 424242, "error": "x"}, headers=headers)
+    ).status == 404
     assert (await client.post("/v1/failed", data=b"[", headers=headers)).status == 400
 
 
@@ -799,7 +852,8 @@ def test_archive_limits(tmp_path):
     archive = pack(tmp_path / "src", tmp_path / "a.tar.gz")
     (tmp_path / "out").mkdir()
     assert sorted(unpack(archive, tmp_path / "out", max_bytes=10_000)) == [
-        "ips.jsonl.gz", "summary.json",
+        "ips.jsonl.gz",
+        "summary.json",
     ]
     (tmp_path / "small").mkdir()
     with pytest.raises(ArchiveError, match="extraction limit"):
@@ -869,9 +923,7 @@ def test_task_schedules():
     )
     assert Task("b", job, every_s=15).schedule(at) == at + timedelta(seconds=15)
     assert Task("c", job, at_minute=0).schedule(at) == datetime(2026, 10, 1, 13, tzinfo=UTC)
-    assert Task("d", job, at_utc_minute=30).schedule(at) == datetime(
-        2026, 10, 2, 0, 30, tzinfo=UTC
-    )
+    assert Task("d", job, at_utc_minute=30).schedule(at) == datetime(2026, 10, 2, 0, 30, tzinfo=UTC)
 
 
 async def test_scheduler_loop_fires_due_jobs(db):
@@ -913,9 +965,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
         conn.execute("UPDATE test_batches SET status='done',finished_at=now()")
     assert await calculate(db, database, "m.toml") == {"snapshot_id": "s1", "as_of": "now"}
     with connect(database) as conn:
-        conn.execute(
-            "INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',now())"
-        )
+        conn.execute("INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',now())")
         conn.execute("UPDATE test_batches SET finished_at=now()+interval '1 second'")
     assert (await calculate(db, database, "m.toml")) == {"skipped": "debounced"}
     assert calls == [True]
@@ -978,12 +1028,41 @@ def test_cli_node_token_and_dev_bind(database, capsys):
     from proxy_index.cli import main
 
     prepare(database)
-    assert main(["node-token", "--database-file", str(database), "--provider", "alpha",
-                 "--product", "res", "--region", "prod-fra1-a"]) == 0
+    assert (
+        main(
+            [
+                "node-token",
+                "--database-file",
+                str(database),
+                "--provider",
+                "alpha",
+                "--product",
+                "res",
+                "--region",
+                "prod-fra1-a",
+            ]
+        )
+        == 0
+    )
     issued = json.loads(capsys.readouterr().out)
     assert issued["region"] == "fra1" and len(issued["token"]) > 30 and not issued["rotated"]
     assert query(database, "SELECT token_hash<>%s FROM nodes", (issued["token"],)) == [(True,)]
-    assert main(["orchestrator", "--dev", "--host", "0.0.0.0",
-                 "--database-file", str(database)]) == 2
-    assert main(["node-token", "--database-file", str(database), "--provider", "alpha",
-                 "--product", "res", "--region", "mars1"]) == 2
+    assert (
+        main(["orchestrator", "--dev", "--host", "0.0.0.0", "--database-file", str(database)]) == 2
+    )
+    assert (
+        main(
+            [
+                "node-token",
+                "--database-file",
+                str(database),
+                "--provider",
+                "alpha",
+                "--product",
+                "res",
+                "--region",
+                "mars1",
+            ]
+        )
+        == 2
+    )

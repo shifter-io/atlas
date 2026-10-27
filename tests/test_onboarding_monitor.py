@@ -16,13 +16,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_cpu_monitor_uses_intervals_and_rejects_reused_pid():
-    previous = {"server_time": 10, "processes": [
-        {"pid": 3, "cpu_seconds": 2, "start_ticks": "100"}],
-        "core_ticks": {"cpu0": {"total": 100, "idle": 20}}}
-    current = {"server_time": 12, "processes": [
-        {"pid": 3, "cpu_seconds": 3.5, "start_ticks": "100"},
-        {"pid": 4, "cpu_seconds": 8, "start_ticks": "110"}],
-        "core_ticks": {"cpu0": {"total": 300, "idle": 70}}}
+    previous = {
+        "server_time": 10,
+        "processes": [{"pid": 3, "cpu_seconds": 2, "start_ticks": "100"}],
+        "core_ticks": {"cpu0": {"total": 100, "idle": 20}},
+    }
+    current = {
+        "server_time": 12,
+        "processes": [
+            {"pid": 3, "cpu_seconds": 3.5, "start_ticks": "100"},
+            {"pid": 4, "cpu_seconds": 8, "start_ticks": "110"},
+        ],
+        "core_ticks": {"cpu0": {"total": 300, "idle": 70}},
+    }
     result = cpu_usage(current, previous)
     assert result["processes"][0]["cpu_pct"] == 75
     assert "cpu_pct" not in result["processes"][1]

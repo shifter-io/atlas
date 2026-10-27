@@ -50,22 +50,55 @@ def ssh_fetch(inventory: dict, offset: int, seen: dict[str, str]) -> dict:
     """One SSH call to the manager with the Mac key (key-only, known host required).
     `known_hosts` must be the resolved path (`run_watch` resolves it beside the inventory)."""
     root = inventory.get("campaign_root") or (
-        f"/opt/proxy-index-campaign/campaigns/{inventory['campaign_id']}")
-    command = ["ssh", "-i", inventory["identity"], "-o", "BatchMode=yes",
-               "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=10",
-               "-o", known_hosts_option(inventory["known_hosts"]),
-               "-o", "StrictHostKeyChecking=yes", f"root@{inventory['host']}",
-               shlex.join(["python3", "-c", REMOTE_READ, root, str(offset),
-                           ",".join(f"{n}:{h}" for n, h in sorted(seen.items())) or "-"])]
+        f"/opt/proxy-index-campaign/campaigns/{inventory['campaign_id']}"
+    )
+    command = [
+        "ssh",
+        "-i",
+        inventory["identity"],
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        known_hosts_option(inventory["known_hosts"]),
+        "-o",
+        "StrictHostKeyChecking=yes",
+        f"root@{inventory['host']}",
+        shlex.join(
+            [
+                "python3",
+                "-c",
+                REMOTE_READ,
+                root,
+                str(offset),
+                ",".join(f"{n}:{h}" for n, h in sorted(seen.items())) or "-",
+            ]
+        ),
+    ]
     reply = subprocess.run(command, capture_output=True, text=True, timeout=60, check=True)
     return json.loads(reply.stdout)
 
 
 def notify(text: str) -> None:
     """A macOS notification; the text goes in argv, never into the AppleScript source."""
-    subprocess.run(["osascript", "-e", "on run argv", "-e",
-                    f'display notification (item 1 of argv) with title "{TITLE}"',
-                    "-e", "end run", text], capture_output=True, timeout=30, check=False)
+    subprocess.run(
+        [
+            "osascript",
+            "-e",
+            "on run argv",
+            "-e",
+            f'display notification (item 1 of argv) with title "{TITLE}"',
+            "-e",
+            "end run",
+            text,
+        ],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
 
 
 @dataclass
@@ -101,10 +134,11 @@ def hour_totals(tsv: str) -> dict[str, dict[str, int]]:
 
 def report_label(name: str, text: str = "") -> str:
     """`hour NN`, or the report heading's `slot NN (HH:MM UTC)` for other than hourly slots."""
-    heading = re.fullmatch(r"# Campaign (slot \d{2} \(\d{2}:\d{2} UTC\)) — traffic per network",
-                           text.partition("\n")[0])
-    return heading.group(1) if heading else "hour " + name.removeprefix("hour-").removesuffix(
-        ".md")
+    heading = re.fullmatch(
+        r"# Campaign (slot \d{2} \(\d{2}:\d{2} UTC\)) — traffic per network",
+        text.partition("\n")[0],
+    )
+    return heading.group(1) if heading else "hour " + name.removeprefix("hour-").removesuffix(".md")
 
 
 def report_message(name: str, totals: dict[str, dict[str, int]], report: str = "") -> str:
@@ -121,12 +155,19 @@ def header(state: str, now: datetime, status: dict | None, memory: dict) -> str:
     for row in hours:
         counts[row["state"]] += 1
     summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items()))
-    return "\n".join([
-        f"State: {state}", f"Updated UTC: {now.strftime('%Y-%m-%dT%H:%M:%SZ')}",
-        f"Hours: {summary or 'unknown'} (of {len(hours) or '?'})",
-        f"Live workers: {(status or {}).get('live_workers', 'unknown')}",
-        f"Traffic-Latest: {memory['latest'] or 'none'}",
-        f"Alerts: {memory['high']} high ({unacknowledged(memory)} new)"]) + "\n"
+    return (
+        "\n".join(
+            [
+                f"State: {state}",
+                f"Updated UTC: {now.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+                f"Hours: {summary or 'unknown'} (of {len(hours) or '?'})",
+                f"Live workers: {(status or {}).get('live_workers', 'unknown')}",
+                f"Traffic-Latest: {memory['latest'] or 'none'}",
+                f"Alerts: {memory['high']} high ({unacknowledged(memory)} new)",
+            ]
+        )
+        + "\n"
+    )
 
 
 def unacknowledged(memory: dict) -> int:
@@ -158,11 +199,26 @@ def acknowledge(status_file: Path) -> int:
 class Watch:
     def __init__(self, inventory: dict, status_file: Path, traffic_dir: Path, io: WatchIO):
         self.inventory, self.status_file, self.traffic_dir, self.io = (
-            inventory, status_file, traffic_dir, io)
+            inventory,
+            status_file,
+            traffic_dir,
+            io,
+        )
         self.state_file = state_path(status_file)
-        self.memory = (json.loads(self.state_file.read_text()) if self.state_file.exists()
-                       else {"offset": 0, "seen": {}, "high": 0, "acked": 0, "latest": "",
-                             "status": None, "stale": False, "parse_error": False})
+        self.memory = (
+            json.loads(self.state_file.read_text())
+            if self.state_file.exists()
+            else {
+                "offset": 0,
+                "seen": {},
+                "high": 0,
+                "acked": 0,
+                "latest": "",
+                "status": None,
+                "stale": False,
+                "parse_error": False,
+            }
+        )
 
     def _save(self) -> None:
         write_text(self.state_file, json.dumps(self.memory, indent=2) + "\n")
@@ -179,8 +235,13 @@ class Watch:
         if stale and not memory["stale"]:
             self.io.notify("CAMP-1 alert manager_stale: status.json older than 3 min")
         memory["stale"] = stale
-        state = ("finished" if status and status.get("finished") and not stale
-                 else "blocked" if stale or unacknowledged(memory) else "active")
+        state = (
+            "finished"
+            if status and status.get("finished") and not stale
+            else "blocked"
+            if stale or unacknowledged(memory)
+            else "active"
+        )
         write_text(self.status_file, header(state, now, status, memory) + self._body())
         self._save()
         return state
@@ -223,8 +284,15 @@ class Watch:
         return f"\n{rest}" if rest else ""
 
 
-def run_watch(inventory: Path, status_file: Path, traffic_dir: Path, *, interval: float = 60,
-              io: WatchIO | None = None, iterations: int | None = None) -> str:
+def run_watch(
+    inventory: Path,
+    status_file: Path,
+    traffic_dir: Path,
+    *,
+    interval: float = 60,
+    io: WatchIO | None = None,
+    iterations: int | None = None,
+) -> str:
     """Poll until the campaign is finished (or `iterations` passes); returns the last state.
     The inventory's host-key file is resolved once, beside the inventory (`known_hosts`)."""
     data = json.loads(Path(inventory).read_text())
@@ -244,8 +312,13 @@ def _watch_command(args) -> int:
     if args.ack:
         print(json.dumps({"acked": acknowledge(Path(args.status_file))}))
         return 0
-    state = run_watch(Path(args.inventory), Path(args.status_file), Path(args.traffic_dir),
-                      interval=args.interval, iterations=1 if args.once else None)
+    state = run_watch(
+        Path(args.inventory),
+        Path(args.status_file),
+        Path(args.traffic_dir),
+        interval=args.interval,
+        iterations=1 if args.once else None,
+    )
     print(json.dumps({"state": state}))
     return 0
 
@@ -257,6 +330,9 @@ def register(subcommands, handlers: dict) -> None:
     watch.add_argument("--traffic-dir", required=True)
     watch.add_argument("--interval", type=float, default=60.0)
     watch.add_argument("--once", action="store_true")
-    watch.add_argument("--ack", action="store_true",
-                       help="acknowledge the high alerts so far; State: blocked then clears")
+    watch.add_argument(
+        "--ack",
+        action="store_true",
+        help="acknowledge the high alerts so far; State: blocked then clears",
+    )
     handlers.update(watch=_watch_command)

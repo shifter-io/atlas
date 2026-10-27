@@ -9,10 +9,19 @@ from urllib.parse import unquote, urlsplit
 from .outcome import from_error
 
 ErrorCode = Literal[
-    "proxy_auth", "proxy_connect", "dns", "tls", "timeout", "http_status",
-    "invalid_body", "body_too_large", "connection", "protocol",
+    "proxy_auth",
+    "proxy_connect",
+    "dns",
+    "tls",
+    "timeout",
+    "http_status",
+    "invalid_body",
+    "body_too_large",
+    "connection",
+    "protocol",
     # A 200 whose body is a challenge or block page (see outcome.sniff_body).
-    "challenge", "blocked",
+    "challenge",
+    "blocked",
 ]
 VerdictName = Literal["ok", "challenge", "block", "timeout", "proxy_error", "error"]
 VERDICTS = ("ok", "challenge", "block", "timeout", "proxy_error", "error")
@@ -86,9 +95,9 @@ class ProxyConfig:
             return cls(
                 scheme="http" if parsed.scheme == "http" else "socks5",
                 host=parsed.hostname or "",
-                port=parsed.port if parsed.port is not None else (
-                    8080 if parsed.scheme == "http" else 1080
-                ),
+                port=parsed.port
+                if parsed.port is not None
+                else (8080 if parsed.scheme == "http" else 1080),
                 username=unquote(parsed.username) if parsed.username is not None else None,
                 password=unquote(parsed.password) if parsed.password is not None else None,
             )
@@ -130,11 +139,18 @@ class AnswerClasses:
         status = re.compile(r"[45][0-9][0-9]")
         for name in ("rate_limits", "no_inventory"):
             values = getattr(self, name)
-            if not isinstance(values, tuple) or len(set(values)) != len(values) or any(
-                    not isinstance(value, str) or (
+            if (
+                not isinstance(values, tuple)
+                or len(set(values)) != len(values)
+                or any(
+                    not isinstance(value, str)
+                    or (
                         not status.fullmatch(value)
-                        and not (name == "rate_limits" and value == "proxy_connect"))
-                    for value in values):
+                        and not (name == "rate_limits" and value == "proxy_connect")
+                    )
+                    for value in values
+                )
+            ):
                 raise ValueError(f"Answer class {name} must hold distinct HTTP statuses 400-599")
         if set(self.rate_limits) & set(self.no_inventory) or "429" in self.no_inventory:
             raise ValueError("Rate-limit and no-IP statuses must be disjoint (429 is a rate limit)")
@@ -197,14 +213,21 @@ class RunConfig:
                 ):
                     raise ValueError
                 url = urlsplit(self.target_url)
-                if (url.scheme != expected or not url.hostname or url.username is not None
-                        or url.password is not None or url.fragment
-                        or (url.port is not None and not 1 <= url.port <= 65535)):
+                if (
+                    url.scheme != expected
+                    or not url.hostname
+                    or url.username is not None
+                    or url.password is not None
+                    or url.fragment
+                    or (url.port is not None and not 1 <= url.port <= 65535)
+                ):
                     raise ValueError
                 object.__setattr__(self, "target_url", url.geturl())
             except (KeyError, ValueError):
-                raise ValueError("Target URL must match the generic target protocol, "
-                                 "without credentials or a fragment") from None
+                raise ValueError(
+                    "Target URL must match the generic target protocol, "
+                    "without credentials or a fragment"
+                ) from None
         metadata = self.proxy.public()
         protocol_of(self.proxy)  # Reject an unknown network test protocol before any traffic.
         for name in ("provider", "product", "requested_country"):
@@ -237,16 +260,25 @@ class RunConfig:
         # The stop-rule fields are omitted for count runs, so they keep the
         # configuration (and storage scope hash) they had before stop rules.
         version, basis = census_rule(self.retry_http_469, self.answer_classes is not None)
-        return {
-            name: getattr(self, name)
-            for name in self.__dataclass_fields__
-            if name not in ("proxy", "answer_classes")
-            and not (name == "retry_http_469" and not self.retry_http_469)
-            and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
-        } | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {}
-             ) | self.proxy.public() | ({
-                 "census_rule_version": version, "census_ratio_basis": basis,
-             } if self.stop_rule == "unique_ratio" else {})
+        return (
+            {
+                name: getattr(self, name)
+                for name in self.__dataclass_fields__
+                if name not in ("proxy", "answer_classes")
+                and not (name == "retry_http_469" and not self.retry_http_469)
+                and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
+            }
+            | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {})
+            | self.proxy.public()
+            | (
+                {
+                    "census_rule_version": version,
+                    "census_ratio_basis": basis,
+                }
+                if self.stop_rule == "unique_ratio"
+                else {}
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,8 +365,14 @@ class RunSummary:
         summary = asdict(self)
         if summary["outage_started_at"] is None:
             del summary["outage_started_at"]
-        for key in ("census_requests", "http_469_responses", "redirects", "rate_limited",
-                    "no_inventory", "other_country"):
+        for key in (
+            "census_requests",
+            "http_469_responses",
+            "redirects",
+            "rate_limited",
+            "no_inventory",
+            "other_country",
+        ):
             if summary[key] is None:
                 del summary[key]
         return summary

@@ -1,4 +1,5 @@
 """HTTP 469 retry policy: real attempts remain auditable, census samples exclude them."""
+
 import asyncio
 import time
 
@@ -11,9 +12,20 @@ from proxy_index.models import Outcome
 
 
 def config(**overrides):
-    return RunConfig("generic_http", ProxyConfig("http", "127.0.0.1", 8080),
-                     **({"requests": None, "concurrency": 1, "stop_rule": "unique_ratio",
-                         "min_sample": 10, "retry_http_469": True} | overrides))
+    return RunConfig(
+        "generic_http",
+        ProxyConfig("http", "127.0.0.1", 8080),
+        **(
+            {
+                "requests": None,
+                "concurrency": 1,
+                "stop_rule": "unique_ratio",
+                "min_sample": 10,
+                "retry_http_469": True,
+            }
+            | overrides
+        ),
+    )
 
 
 async def test_469s_do_not_trigger_saturation_but_remain_in_attempts_and_bytes(tmp_path):
@@ -25,8 +37,9 @@ async def test_469s_do_not_trigger_saturation_but_remain_in_attempts_and_bytes(t
             return Outcome(1, ip=f"192.0.2.{(self.count - 1) % 6 + 1}", status=200)
 
     progress = []
-    result = await run(config(), JsonSink(tmp_path), transport_factory=Responses,
-                       progress=progress.append)
+    result = await run(
+        config(), JsonSink(tmp_path), transport_factory=Responses, progress=progress.append
+    )
     assert result.stop_reason == "unique_ratio"
     assert result.completed == 513 and result.census_requests == 13
     assert result.http_469_responses == result.status_codes["469"] == 500
@@ -70,11 +83,15 @@ async def test_other_failures_still_count_toward_unique_ratio(tmp_path):
 async def test_all_469_retries_are_bounded_by_deadline(tmp_path):
     class RateLimited(FakeTransport):
         async def execute(self, target, *, context=None):
-            await asyncio.sleep(.001)
+            await asyncio.sleep(0.001)
             return Outcome(1, error="http_status", status=469)
 
-    result = await run(config(min_sample=2), JsonSink(tmp_path), transport_factory=RateLimited,
-                       deadline=time.time() + .1)
+    result = await run(
+        config(min_sample=2),
+        JsonSink(tmp_path),
+        transport_factory=RateLimited,
+        deadline=time.time() + 0.1,
+    )
     assert result.completed > 2 and result.census_requests == 0
     assert result.http_469_responses == result.completed
     assert result.stop_reason == "deadline"
@@ -85,12 +102,18 @@ async def test_explicit_attempt_cap_and_legacy_policy_remain_bounded(tmp_path):
         async def execute(self, target, *, context=None):
             return Outcome(1, error="http_status", status=469)
 
-    result = await run(config(requests=25, min_sample=2), JsonSink(tmp_path / "retry"),
-                       transport_factory=RateLimited)
+    result = await run(
+        config(requests=25, min_sample=2),
+        JsonSink(tmp_path / "retry"),
+        transport_factory=RateLimited,
+    )
     assert result.completed == 25 and result.census_requests == 0
     assert result.stop_reason == "requests"
-    legacy = await run(config(retry_http_469=False, min_sample=2),
-                       JsonSink(tmp_path / "legacy"), transport_factory=RateLimited)
+    legacy = await run(
+        config(retry_http_469=False, min_sample=2),
+        JsonSink(tmp_path / "legacy"),
+        transport_factory=RateLimited,
+    )
     assert legacy.completed == 2 and legacy.stop_reason == "no_success"
     assert legacy.config["census_rule_version"] == 2
     assert "retry_http_469" not in legacy.config
@@ -110,7 +133,7 @@ async def test_four_real_workers_retry_469_with_one_shared_census_denominator(tm
     async def echo(request):
         status = 469 if sum(counts.values()) % 2 == 0 else 200
         counts[str(status)] += 1
-        await asyncio.sleep(.001)
+        await asyncio.sleep(0.001)
         return web.Response(status=status, text="limited" if status == 469 else "2001:db8::1")
 
     app = web.Application()
@@ -121,11 +144,20 @@ async def test_four_real_workers_retry_469_with_one_shared_census_denominator(tm
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
     try:
-        result = await run(RunConfig(
-            "generic_http", ProxyConfig("http", "127.0.0.1", port),
-            target_url="http://example.test/", requests=None, concurrency=12, processes=4,
-            stop_rule="unique_ratio", min_sample=20, retry_http_469=True,
-        ), JsonSink(tmp_path))
+        result = await run(
+            RunConfig(
+                "generic_http",
+                ProxyConfig("http", "127.0.0.1", port),
+                target_url="http://example.test/",
+                requests=None,
+                concurrency=12,
+                processes=4,
+                stop_rule="unique_ratio",
+                min_sample=20,
+                retry_http_469=True,
+            ),
+            JsonSink(tmp_path),
+        )
     finally:
         await server.cleanup()
     assert result.stop_reason == "unique_ratio"

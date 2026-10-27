@@ -1,4 +1,5 @@
 """Per-network test protocols: grammar setting, https-only upgrades and mixed redirects."""
+
 import asyncio
 import json
 import ssl
@@ -74,12 +75,15 @@ def test_run_config_rejects_an_unknown_protocol():
         RunConfig("generic_http", Network(ProxyConfig("http", "localhost", 8080), "sometimes"))
 
 
-@pytest.mark.parametrize("url,expected", [
-    ("http://ip-info.com/myip", "https://ip-info.com/myip"),
-    ("http://ip-info.com:80/myip?x=1", "https://ip-info.com/myip?x=1"),
-    ("http://localhost:8443/", "https://localhost:8443/"),
-    ("https://ip-info.com/myip", "https://ip-info.com/myip"),
-])
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("http://ip-info.com/myip", "https://ip-info.com/myip"),
+        ("http://ip-info.com:80/myip?x=1", "https://ip-info.com/myip?x=1"),
+        ("http://localhost:8443/", "https://localhost:8443/"),
+        ("https://ip-info.com/myip", "https://ip-info.com/myip"),
+    ],
+)
 def test_https_only_upgrades_echo_targets(url, expected):
     assert https_only(EchoIpTarget("generic_http", url)).url == expected
 
@@ -95,21 +99,24 @@ def test_https_only_refuses_other_plain_http_targets():
         https_only(Custom())
 
 
-@pytest.mark.parametrize("status,location,expected", [
-    (301, "https://ip-info.com/myip", "https://ip-info.com/myip"),
-    (308, "HTTPS://ip-info.com/myip#top", "https://ip-info.com/myip"),
-    (302, "https://ip-info.com:443/other", "https://ip-info.com:443/other"),
-    (301, "http://ip-info.com/myip", None),
-    (301, "https://elsewhere.test/myip", None),
-    # Credentials refuse the upgrade; the upper-case host (urlsplit lowercases it, so it is
-    # the same host) keeps this test data from reading as an e-mail address.
-    (301, "https://user:pw@IP-INFO.COM/myip", None),
-    (301, "/myip", None),
-    (301, None, None),
-    (200, "https://ip-info.com/myip", None),
-    (None, "https://ip-info.com/myip", None),
-    (301, "https://[::1", None),
-])
+@pytest.mark.parametrize(
+    "status,location,expected",
+    [
+        (301, "https://ip-info.com/myip", "https://ip-info.com/myip"),
+        (308, "HTTPS://ip-info.com/myip#top", "https://ip-info.com/myip"),
+        (302, "https://ip-info.com:443/other", "https://ip-info.com:443/other"),
+        (301, "http://ip-info.com/myip", None),
+        (301, "https://elsewhere.test/myip", None),
+        # Credentials refuse the upgrade; the upper-case host (urlsplit lowercases it, so it is
+        # the same host) keeps this test data from reading as an e-mail address.
+        (301, "https://user:pw@IP-INFO.COM/myip", None),
+        (301, "/myip", None),
+        (301, None, None),
+        (200, "https://ip-info.com/myip", None),
+        (None, "https://ip-info.com/myip", None),
+        (301, "https://[::1", None),
+    ],
+)
 def test_https_upgrade_follows_only_same_host_https_redirects(status, location, expected):
     assert _https_upgrade("http://ip-info.com/myip", status, location) == expected
 
@@ -155,8 +162,10 @@ class RedirectingGateway(Gateway):
         if self.plain % self.every:
             await super().respond(writer)
             return
-        writer.write(f"HTTP/1.1 301 Moved\r\nLocation: {self.location}\r\n"
-                     "Content-Length: 0\r\nConnection: close\r\n\r\n".encode())
+        writer.write(
+            f"HTTP/1.1 301 Moved\r\nLocation: {self.location}\r\n"
+            "Content-Length: 0\r\nConnection: close\r\n\r\n".encode()
+        )
         await writer.drain()
 
 
@@ -166,7 +175,9 @@ async def measure(tmp_path, gateway, origin, protocol, url, *, tls_client, **kwa
         targets.register(EchoIpTarget("generic_http", url(origin)))
         proxy = Network(ProxyConfig("http", "127.0.0.1", port, "test", "secret"), protocol)
         return await run(
-            RunConfig("generic_http", proxy, **kwargs), JsonSink(tmp_path), targets=targets,
+            RunConfig("generic_http", proxy, **kwargs),
+            JsonSink(tmp_path),
+            targets=targets,
             transport_factory=partial(HttpTransport, ssl_context=tls_client),
         )
 
@@ -177,8 +188,15 @@ async def test_https_only_never_sends_plain_http(tmp_path):
     gateway = Gateway(auth=True)
     async with server(origin, tls=tls_server) as origin_port:
         result = await measure(
-            tmp_path, gateway, origin, "https-only", lambda _: f"http://localhost:{origin_port}/",
-            tls_client=tls_client, requests=4, concurrency=2, processes=1,
+            tmp_path,
+            gateway,
+            origin,
+            "https-only",
+            lambda _: f"http://localhost:{origin_port}/",
+            tls_client=tls_client,
+            requests=4,
+            concurrency=2,
+            processes=1,
         )
     assert result.successes == 4
     assert result.target["url"] == f"https://localhost:{origin_port}/"
@@ -197,8 +215,15 @@ async def test_mixed_follows_gateway_redirects_over_https(tmp_path, processes):
     async with server(origin, tls=tls_server) as origin_port:
         gateway = RedirectingGateway(f"https://localhost:{origin_port}/", every=2)
         result = await measure(
-            tmp_path, gateway, origin, "mixed", lambda _: f"http://localhost:{origin_port}/",
-            tls_client=tls_client, requests=6, concurrency=1, processes=processes,
+            tmp_path,
+            gateway,
+            origin,
+            "mixed",
+            lambda _: f"http://localhost:{origin_port}/",
+            tls_client=tls_client,
+            requests=6,
+            concurrency=1,
+            processes=processes,
         )
     assert result.successes == 6
     assert result.redirects == 3
@@ -217,29 +242,52 @@ async def test_mixed_counts_both_legs_of_traffic(tmp_path):
     tls_server, tls_client = tls_pair()
     async with server(Origin(), tls=tls_server) as origin_port:
         url = f"http://localhost:{origin_port}/"
-        direct = await measure(tmp_path / "a", Gateway(auth=True), None, "mixed",
-                               lambda _: url, tls_client=tls_client, requests=1, processes=1)
+        direct = await measure(
+            tmp_path / "a",
+            Gateway(auth=True),
+            None,
+            "mixed",
+            lambda _: url,
+            tls_client=tls_client,
+            requests=1,
+            processes=1,
+        )
         followed = await measure(
-            tmp_path / "b", RedirectingGateway(f"https://localhost:{origin_port}/"), None,
-            "mixed", lambda _: url, tls_client=tls_client, requests=1, processes=1,
+            tmp_path / "b",
+            RedirectingGateway(f"https://localhost:{origin_port}/"),
+            None,
+            "mixed",
+            lambda _: url,
+            tls_client=tls_client,
+            requests=1,
+            processes=1,
         )
     assert (direct.redirects, followed.redirects) == (0, 1)
     assert followed.bytes_up > direct.bytes_up and followed.bytes_down > direct.bytes_down
 
 
-@pytest.mark.parametrize("protocol,location", [
-    ("default", "https://localhost:{port}/"),
-    ("mixed", "https://elsewhere.test/"),
-    ("mixed", "http://localhost:{port}/"),
-])
+@pytest.mark.parametrize(
+    "protocol,location",
+    [
+        ("default", "https://localhost:{port}/"),
+        ("mixed", "https://elsewhere.test/"),
+        ("mixed", "http://localhost:{port}/"),
+    ],
+)
 async def test_redirects_are_not_followed_otherwise(tmp_path, protocol, location):
     tls_server, tls_client = tls_pair()
     origin = Origin()
     async with server(origin, tls=tls_server) as origin_port:
         gateway = RedirectingGateway(location.format(port=origin_port))
         result = await measure(
-            tmp_path, gateway, origin, protocol, lambda _: f"http://localhost:{origin_port}/",
-            tls_client=tls_client, requests=2, processes=1,
+            tmp_path,
+            gateway,
+            origin,
+            protocol,
+            lambda _: f"http://localhost:{origin_port}/",
+            tls_client=tls_client,
+            requests=2,
+            processes=1,
         )
     assert result.errors == {"http_status": 2}
     assert result.status_codes == {"301": 2}
@@ -249,12 +297,19 @@ async def test_redirects_are_not_followed_otherwise(tmp_path, protocol, location
 
 async def test_mixed_redirect_shares_one_timeout_budget(tmp_path):
     tls_server, tls_client = tls_pair()
-    origin = Origin(delay=.3)
+    origin = Origin(delay=0.3)
     async with server(origin, tls=tls_server) as origin_port:
-        gateway = RedirectingGateway(f"https://localhost:{origin_port}/", delay=.05)
+        gateway = RedirectingGateway(f"https://localhost:{origin_port}/", delay=0.05)
         result = await measure(
-            tmp_path, gateway, origin, "mixed", lambda _: f"http://localhost:{origin_port}/",
-            tls_client=tls_client, requests=1, processes=1, timeout_seconds=.2,
+            tmp_path,
+            gateway,
+            origin,
+            "mixed",
+            lambda _: f"http://localhost:{origin_port}/",
+            tls_client=tls_client,
+            requests=1,
+            processes=1,
+            timeout_seconds=0.2,
         )
     assert result.errors == {"timeout": 1}
     assert result.redirects == 1

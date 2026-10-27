@@ -24,9 +24,24 @@ from ..regions import REGION_IDS
 from .contracts import NETWORK_RE, PROJECT_NAME, SIZE_RE, CampaignSpec, spec_path
 from .do_api import DigitalOcean
 
-ALL16 = ("byteful", "dataimpulse", "decodo", "evomi", "fleetproxy", "infatica", "iproyal",
-         "massive", "nodemaven", "oxylabs", "proxy-cheap", "proxy-seller", "proxyempire",
-         "rayobyte", "soax", "webshare")
+ALL16 = (
+    "byteful",
+    "dataimpulse",
+    "decodo",
+    "evomi",
+    "fleetproxy",
+    "infatica",
+    "iproyal",
+    "massive",
+    "nodemaven",
+    "oxylabs",
+    "proxy-cheap",
+    "proxy-seller",
+    "proxyempire",
+    "rayobyte",
+    "soax",
+    "webshare",
+)
 WORKER_SIZE = "c-2"  # the default worker size
 PRODUCT = "residential"
 
@@ -57,10 +72,17 @@ class PlanInputs:
 
 
 def parse_networks(value: str) -> tuple[str, ...]:
-    names = tuple(n for part in value.split(",") if part.strip()
-                  for n in (ALL16 if part.strip() == "all16" else (part.strip(),)))
-    if not names or len(set(names)) != len(names) or any(
-            not re.fullmatch(NETWORK_RE, n) for n in names):
+    names = tuple(
+        n
+        for part in value.split(",")
+        if part.strip()
+        for n in (ALL16 if part.strip() == "all16" else (part.strip(),))
+    )
+    if (
+        not names
+        or len(set(names)) != len(names)
+        or any(not re.fullmatch(NETWORK_RE, n) for n in names)
+    ):
         raise PlanError("--networks must be distinct network names (all16 adds the 16)")
     return names
 
@@ -112,15 +134,19 @@ def check_credentials(inputs: PlanInputs) -> None:
 
 
 def image_id(inputs: PlanInputs) -> str:
-    builds = [b for b in read_json(inputs.images).get("builds", [])
-              if b.get("snapshot_name") == inputs.image and b.get("snapshot_id")]
+    builds = [
+        b
+        for b in read_json(inputs.images).get("builds", [])
+        if b.get("snapshot_name") == inputs.image and b.get("snapshot_id")
+    ]
     found = {str(b["snapshot_id"]) for b in builds}
     if len(found) != 1:
         raise PlanError(f"image {inputs.image} is not one recorded build")
     if not inputs.synthetic and not all(b.get("mmdb_sha256") for b in builds):
         # A campaign never runs without the run-time country check (CTRY-2).
-        raise PlanError(f"image {inputs.image} has no country database; rebuild it with "
-                        "`image build --mmdb`")
+        raise PlanError(
+            f"image {inputs.image} has no country database; rebuild it with `image build --mmdb`"
+        )
     return found.pop()
 
 
@@ -132,26 +158,36 @@ async def check_cloud(cloud: DigitalOcean, inputs: PlanInputs, key_name: str) ->
     image = await cloud.image(snapshot) or {}
     keys = [str(k["id"]) for k in await cloud.ssh_keys() if k.get("name") == key_name]
     problems = [f"size {inputs.size} in {r}" for r in inputs.regions if r not in offered]
-    problems += [f"image in {r}" for r in inputs.regions if image.get("name") != inputs.image
-                 or r not in image.get("regions", [])]
+    problems += [
+        f"image in {r}"
+        for r in inputs.regions
+        if image.get("name") != inputs.image or r not in image.get("regions", [])
+    ]
     problems += [] if len(keys) == 1 else [f"ssh key {key_name}"]
     if problems:
         raise PlanError(f"not available: {', '.join(problems)}")
     return {"project_id": project_id, "image_id": snapshot, "ssh_key_id": keys[0]}
 
 
-def _manifests(inputs: PlanInputs, begins: datetime, current: bool, root: Path,
-               now: datetime) -> dict[str, str]:
+def _manifests(
+    inputs: PlanInputs, begins: datetime, current: bool, root: Path, now: datetime
+) -> dict[str, str]:
     """One v3 manifest per network, with its census run config beside it (SHA-bound)."""
     found = {}
     for network in inputs.networks:
         config = census_config(inputs.configs, network)
         path = manifest.create(
-            config, PRODUCT, begins.isoformat(), root / "networks", now=now,
-            execution_mode="ephemeral", grace_hours=inputs.grace_hours,
+            config,
+            PRODUCT,
+            begins.isoformat(),
+            root / "networks",
+            now=now,
+            execution_mode="ephemeral",
+            grace_hours=inputs.grace_hours,
             allow_current_hour=current,
             run_settings={"concurrency": network_concurrency(network, inputs.concurrency)},
-            slot_minutes=inputs.slot_minutes)
+            slot_minutes=inputs.slot_minutes,
+        )
         if manifest.slot_minutes(manifest.load(path)) != inputs.slot_minutes:
             raise PlanError("a manifest's slot_minutes differs from the campaign spec")
         atomic_bytes(path.parent / "provider.toml", config.read_bytes())
@@ -179,35 +215,52 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         raise PlanError(f"the manager holds no credentials for {', '.join(absent)}; deploy them")
     key_name = inputs.ssh_key_name or manager.get("worker_key_name", "")
     found = await check_cloud(cloud, inputs, key_name)
-    if (manager.get("account"), manager.get("project_id")) != (inputs.account,
-                                                               found["project_id"]):
-        raise PlanError(f"the manager is on account {manager.get('account')}, "
-                        f"not {inputs.account}")
+    if (manager.get("account"), manager.get("project_id")) != (inputs.account, found["project_id"]):
+        raise PlanError(f"the manager is on account {manager.get('account')}, not {inputs.account}")
     cid = f"{begins:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
     root = inputs.output / cid
     if root.exists():
         raise PlanError("campaign folder already exists")
     spec = CampaignSpec(
-        campaign_id=cid, created_at=now.isoformat(), account=inputs.account,
-        project_id=found["project_id"], starts_at=begins.isoformat(),
-        grace_hours=inputs.grace_hours, regions=regions, networks=inputs.networks,
+        campaign_id=cid,
+        created_at=now.isoformat(),
+        account=inputs.account,
+        project_id=found["project_id"],
+        starts_at=begins.isoformat(),
+        grace_hours=inputs.grace_hours,
+        regions=regions,
+        networks=inputs.networks,
         manifests=dict.fromkeys(inputs.networks, ""),
         size_by_region=dict.fromkeys(regions, inputs.size),
-        image_by_region=dict.fromkeys(regions, found["image_id"]), image_name=inputs.image,
-        wheel_sha256=manager["wheel_sha256"], framework_version=manager["framework_version"],
-        ssh_key_id=found["ssh_key_id"], manager_droplet_id=str(manager["manager_id"]),
-        synthetic=inputs.synthetic, concurrency=inputs.concurrency, hours=inputs.slots,
+        image_by_region=dict.fromkeys(regions, found["image_id"]),
+        image_name=inputs.image,
+        wheel_sha256=manager["wheel_sha256"],
+        framework_version=manager["framework_version"],
+        ssh_key_id=found["ssh_key_id"],
+        manager_droplet_id=str(manager["manager_id"]),
+        synthetic=inputs.synthetic,
+        concurrency=inputs.concurrency,
+        hours=inputs.slots,
         slot_minutes=inputs.slot_minutes,
-        replace_until_minutes=min(15, inputs.slot_minutes)).validate()
+        replace_until_minutes=min(15, inputs.slot_minutes),
+    ).validate()
     try:
         spec = replace(spec, manifests=_manifests(inputs, begins, current, root, now)).validate()
     except Exception:
         shutil.rmtree(root, ignore_errors=True)  # only the folder this plan just made
         raise
     atomic_bytes(spec_path(root), spec.to_json().encode())
-    return {"campaign_id": cid, "root": str(root), "starts_at": spec.starts_at,
-            "networks": list(spec.networks), "regions": list(regions),
-            "concurrency": spec.concurrency, "synthetic": spec.synthetic,
-            "slot_minutes": spec.slot_minutes, "slots": spec.hours,
-            "concurrency_by_network": {n: network_concurrency(n, spec.concurrency)
-                                       for n in spec.networks}}
+    return {
+        "campaign_id": cid,
+        "root": str(root),
+        "starts_at": spec.starts_at,
+        "networks": list(spec.networks),
+        "regions": list(regions),
+        "concurrency": spec.concurrency,
+        "synthetic": spec.synthetic,
+        "slot_minutes": spec.slot_minutes,
+        "slots": spec.hours,
+        "concurrency_by_network": {
+            n: network_concurrency(n, spec.concurrency) for n in spec.networks
+        },
+    }

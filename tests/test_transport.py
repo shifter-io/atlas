@@ -15,15 +15,21 @@ def config(port, *, scheme="http", **kwargs):
     return RunConfig("generic_http", ProxyConfig(scheme, "127.0.0.1", port), **kwargs)
 
 
-@pytest.mark.parametrize("status,body,error", [
-    (200, b"203.0.113.8\n", None), (200, b"2001:4860:4860::8888\n", None),
-    (200, b"203.0.113.8 garbage", "invalid_body"),
-    (200, b"203.0.113.8" + b" " * 600, "body_too_large"),
-    (302, b"", "http_status"), (403, b"denied", "http_status"),
-    (429, b"limited", "http_status"), (500, b"bad", "http_status"),
-    (403, b"x" * 1000, "body_too_large"),
-    (407, b"auth", "proxy_auth"),
-])
+@pytest.mark.parametrize(
+    "status,body,error",
+    [
+        (200, b"203.0.113.8\n", None),
+        (200, b"2001:4860:4860::8888\n", None),
+        (200, b"203.0.113.8 garbage", "invalid_body"),
+        (200, b"203.0.113.8" + b" " * 600, "body_too_large"),
+        (302, b"", "http_status"),
+        (403, b"denied", "http_status"),
+        (429, b"limited", "http_status"),
+        (500, b"bad", "http_status"),
+        (403, b"x" * 1000, "body_too_large"),
+        (407, b"auth", "proxy_auth"),
+    ],
+)
 async def test_http_results(tmp_path, status, body, error):
     gateway = Gateway(status=status, body=body, fragmented=True)
     async with server(gateway) as port:
@@ -36,7 +42,7 @@ async def test_http_results(tmp_path, status, body, error):
 
 
 async def test_fresh_connections_and_concurrency(tmp_path):
-    gateway = Gateway(delay=.005)
+    gateway = Gateway(delay=0.005)
     async with server(gateway) as port:
         result = await run(config(port, requests=60, concurrency=3), JsonSink(tmp_path))
     assert result.successes == 60
@@ -58,8 +64,10 @@ async def test_fresh_connection_even_when_the_gateway_keeps_alive(tmp_path):
             except (asyncio.IncompleteReadError, ConnectionError):
                 break
             requests.append(request)
-            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n"
-                         b"Connection: keep-alive\r\n\r\n192.0.2.1\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n"
+                b"Connection: keep-alive\r\n\r\n192.0.2.1\n"
+            )
             await writer.drain()
 
     async with server(gateway) as port:
@@ -80,9 +88,9 @@ async def test_no_hidden_retry(tmp_path):
 
 
 async def test_timeout(tmp_path):
-    gateway = Gateway(delay=.2)
+    gateway = Gateway(delay=0.2)
     async with server(gateway) as port:
-        result = await run(config(port, requests=2, timeout_seconds=.02), JsonSink(tmp_path))
+        result = await run(config(port, requests=2, timeout_seconds=0.02), JsonSink(tmp_path))
     assert result.errors == {"timeout": 2}
 
 
@@ -117,7 +125,9 @@ async def test_tls_tunnel_and_verification(tmp_path, scheme, trusted):
         targets.register(EchoIpTarget("generic_https", f"https://localhost:{origin_port}/"))
         proxy = ProxyConfig(scheme, "127.0.0.1", port, "test", "secret")
         result = await run(
-            RunConfig("generic_https", proxy, requests=2), JsonSink(tmp_path), targets=targets,
+            RunConfig("generic_https", proxy, requests=2),
+            JsonSink(tmp_path),
+            targets=targets,
             transport_factory=partial(HttpTransport, ssl_context=tls_client),
         )
     assert result.errors == ({} if trusted else {"tls": 2})
@@ -141,8 +151,9 @@ async def test_socks_http_auth_and_remote_dns(tmp_path, valid):
         targets = TargetRegistry()
         targets.register(EchoIpTarget("generic_http", f"http://localhost:{origin_port}/", True))
         proxy = ProxyConfig("socks5", "127.0.0.1", port, "test", "secret" if valid else "bad")
-        result = await run(RunConfig("generic_http", proxy, requests=3),
-                           JsonSink(tmp_path), targets=targets)
+        result = await run(
+            RunConfig("generic_http", proxy, requests=3), JsonSink(tmp_path), targets=targets
+        )
     assert result.errors == ({} if valid else {"proxy_auth": 3})
     if valid:
         assert gateway.domains == ["localhost"] * 3
@@ -152,8 +163,9 @@ async def test_stop_in_flight(tmp_path):
     gateway = Gateway(delay=1)
     stop = asyncio.Event()
     async with server(gateway) as port:
-        task = asyncio.create_task(run(config(port, requests=100, concurrency=3),
-                                       JsonSink(tmp_path), stop=stop))
+        task = asyncio.create_task(
+            run(config(port, requests=100, concurrency=3), JsonSink(tmp_path), stop=stop)
+        )
         await asyncio.wait_for(gateway.accepted.wait(), 5)
         stop.set()
         result = await task
@@ -171,8 +183,9 @@ async def test_socks_without_authentication(tmp_path):
     async with server(origin) as origin_port, server(gateway) as port:
         targets = TargetRegistry()
         targets.register(EchoIpTarget("generic_http", f"http://localhost:{origin_port}/", True))
-        result = await run(config(port, scheme="socks5", requests=1),
-                           JsonSink(tmp_path), targets=targets)
+        result = await run(
+            config(port, scheme="socks5", requests=1), JsonSink(tmp_path), targets=targets
+        )
     assert result.successes == 1
 
 
@@ -181,8 +194,9 @@ async def test_custom_target_controls_method_headers_and_success(tmp_path):
         id, version, engine, pool_eligible = "custom", "1", "http", False
 
         def build_request(self):
-            return RequestSpec("http://example.test/", method="POST",
-                               headers={"X-Test": "custom"}, body=b"hello")
+            return RequestSpec(
+                "http://example.test/", method="POST", headers={"X-Test": "custom"}, body=b"hello"
+            )
 
         def assess(self, status, body):
             assert status == 201
@@ -193,8 +207,9 @@ async def test_custom_target_controls_method_headers_and_success(tmp_path):
     gateway = Gateway(status=201, auth=True)
     async with server(gateway) as port:
         proxy = ProxyConfig("http", "127.0.0.1", port, "test", "secret")
-        result = await run(RunConfig("custom", proxy, requests=1),
-                           JsonSink(tmp_path), targets=targets)
+        result = await run(
+            RunConfig("custom", proxy, requests=1), JsonSink(tmp_path), targets=targets
+        )
     assert result.successes == 1
     assert b"POST http://example.test/" in gateway.requests[0]
     assert b"X-Test: custom" in gateway.requests[0]

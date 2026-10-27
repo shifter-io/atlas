@@ -34,9 +34,17 @@ def logs_dir(home: Path) -> Path:
 def watch_command(inventory: Path, status_file: Path, traffic_dir: Path) -> list[str]:
     """The installed console script next to this interpreter, with absolute paths only."""
     script = Path(sys.executable).with_name("proxy-index")
-    return [str(script), "campaign", "watch", "--inventory", str(inventory.resolve()),
-            "--status-file", str(status_file.resolve()), "--traffic-dir",
-            str(traffic_dir.resolve())]
+    return [
+        str(script),
+        "campaign",
+        "watch",
+        "--inventory",
+        str(inventory.resolve()),
+        "--status-file",
+        str(status_file.resolve()),
+        "--traffic-dir",
+        str(traffic_dir.resolve()),
+    ]
 
 
 def render(command: list[str], home: Path) -> bytes:
@@ -44,8 +52,11 @@ def render(command: list[str], home: Path) -> bytes:
     template = files("proxy_index.campaign").joinpath("assets", "launchd-watch.plist")
     agent = plistlib.loads(template.read_bytes())
     logs = logs_dir(home)
-    agent.update(ProgramArguments=command, StandardOutPath=str(logs / "watch.out.log"),
-                 StandardErrorPath=str(logs / "watch.err.log"))
+    agent.update(
+        ProgramArguments=command,
+        StandardOutPath=str(logs / "watch.out.log"),
+        StandardErrorPath=str(logs / "watch.err.log"),
+    )
     return plistlib.dumps(agent)
 
 
@@ -78,7 +89,14 @@ def remove(home: Path, run: Runner = _run) -> bool:
 
 def status(home: Path, run: Runner = _run) -> dict[str, object]:
     found = run(["launchctl", "print", f"{_domain()}/{LABEL}"])
-    fields = dict(line.strip().split(" = ", 1) for line in found.stdout.splitlines()
-                  if line.startswith("\t") and line.count("\t") == 1 and " = " in line)
-    return {"installed": plist_path(home).exists(), "loaded": found.returncode == 0,
-            "state": fields.get("state"), "last_exit_code": fields.get("last exit code")}
+    fields = dict(
+        line.strip().split(" = ", 1)
+        for line in found.stdout.splitlines()
+        if line.startswith("\t") and line.count("\t") == 1 and " = " in line
+    )
+    return {
+        "installed": plist_path(home).exists(),
+        "loaded": found.returncode == 0,
+        "state": fields.get("state"),
+        "last_exit_code": fields.get("last exit code"),
+    }

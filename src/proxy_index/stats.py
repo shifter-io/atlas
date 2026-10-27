@@ -1,4 +1,5 @@
 """Exact counters and a mergeable, sparse 1 ms ceiling histogram."""
+
 from __future__ import annotations
 
 import math
@@ -12,14 +13,27 @@ from .models import Outcome
 # LocalEnricher.lookup() fields, split the way storage keys them:
 # enrichment_locations and enrichment_networks.
 LOCATION_FIELDS = (
-    "country_code", "country", "region_code", "region", "city", "latitude", "longitude",
+    "country_code",
+    "country",
+    "region_code",
+    "region",
+    "city",
+    "latitude",
+    "longitude",
 )
 NETWORK_FIELDS = (
-    "isp", "organization", "asn", "asn_organization", "connection_type", "usage_type",
+    "isp",
+    "organization",
+    "asn",
+    "asn_organization",
+    "connection_type",
+    "usage_type",
 )
 # Verdict -> counter attribute, for the non-ok verdicts that have one.
 VERDICT_COUNTERS = {
-    "challenge": "challenges", "block": "blocks", "timeout": "timeouts",
+    "challenge": "challenges",
+    "block": "blocks",
+    "timeout": "timeouts",
     "proxy_error": "proxy_errors",
 }
 
@@ -48,7 +62,7 @@ class Histogram:
         if not total:
             return result
         ordered = sorted(self.counts.items())
-        for label, fraction in (("p50", .5), ("p90", .9), ("p95", .95), ("p99", .99)):
+        for label, fraction in (("p50", 0.5), ("p90", 0.9), ("p95", 0.95), ("p99", 0.99)):
             rank, seen = math.ceil(total * fraction), 0
             for value, count in ordered:
                 seen += count
@@ -109,15 +123,20 @@ class Counters:
     def verdicts(self) -> dict[str, int]:
         """The six typed counters shared by run totals, buckets and progress."""
         return {
-            "challenges": self.challenges, "blocks": self.blocks, "timeouts": self.timeouts,
-            "proxy_errors": self.proxy_errors, "bytes_up": self.bytes_up,
+            "challenges": self.challenges,
+            "blocks": self.blocks,
+            "timeouts": self.timeouts,
+            "proxy_errors": self.proxy_errors,
+            "bytes_up": self.bytes_up,
             "bytes_down": self.bytes_down,
         }
 
     def export(self) -> dict[str, Any]:
         return {
-            "completed": self.completed, "successes": self.successes,
-            "errors": dict(self.errors), "status_codes": dict(self.statuses),
+            "completed": self.completed,
+            "successes": self.successes,
+            "errors": dict(self.errors),
+            "status_codes": dict(self.statuses),
             "response_body_bytes": self.body_bytes,
             "latency_histogram": self.histogram.export(),
             **self.verdicts(),
@@ -126,9 +145,12 @@ class Counters:
     def export_geo(self) -> dict[str, Any]:
         """The run_geo_buckets columns (no proxy_errors: those never have an exit IP)."""
         return {
-            "completed": self.completed, "successes": self.successes,
-            "challenges": self.challenges, "blocks": self.blocks, "timeouts": self.timeouts,
-            "bytes_up": self.bytes_up, "bytes_down": self.bytes_down,
+            "completed": self.completed,
+            "successes": self.successes,
+            "challenges": self.challenges,
+            "blocks": self.blocks,
+            "timeouts": self.timeouts,
+            "bytes_up": self.bytes_up,
+            "bytes_down": self.bytes_down,
             "latency_histogram": self.histogram.export(),
         }
-

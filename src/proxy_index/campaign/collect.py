@@ -73,11 +73,25 @@ def ssh_command(inventory: dict, path: Path) -> list[str]:
     """
     pinned = []
     if inventory.get("known_hosts"):
-        pinned = ["-o", known_hosts_option(known_hosts(path, inventory)),
-                  "-o", "StrictHostKeyChecking=yes"]
-    return ["ssh", "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=15",
-            *pinned, "-i", os.path.expanduser(inventory["identity_file"]),
-            f"{inventory.get('user', 'root')}@{inventory['host']}"]
+        pinned = [
+            "-o",
+            known_hosts_option(known_hosts(path, inventory)),
+            "-o",
+            "StrictHostKeyChecking=yes",
+        ]
+    return [
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ConnectTimeout=15",
+        *pinned,
+        "-i",
+        os.path.expanduser(inventory["identity_file"]),
+        f"{inventory.get('user', 'root')}@{inventory['host']}",
+    ]
 
 
 def parse_manifest(text: str) -> tuple[dict[str, str], int]:
@@ -121,18 +135,26 @@ def _extract(spawn: Spawn, command: str, dest: Path) -> None:
 
 def verify_tree(dest: Path, expected: dict[str, str]) -> dict:
     """Compare every local file with the manifest; returns the collect report."""
-    local = {p.relative_to(dest).as_posix(): p for p in dest.rglob("*")
-             if p.is_file() or p.is_symlink()}
+    local = {
+        p.relative_to(dest).as_posix(): p for p in dest.rglob("*") if p.is_file() or p.is_symlink()
+    }
     local.pop(REPORT, None)
     local.pop(MANIFEST, None)
-    mismatches = sorted(name for name, sha in expected.items()
-                        if name in local and (local[name].is_symlink()
-                                              or digest(local[name]) != sha))
+    mismatches = sorted(
+        name
+        for name, sha in expected.items()
+        if name in local and (local[name].is_symlink() or digest(local[name]) != sha)
+    )
     missing = sorted(set(expected) - set(local))
     extra = sorted(set(local) - set(expected))
-    return {"files": len(expected), "verified": len(expected) - len(mismatches) - len(missing),
-            "mismatches": mismatches, "missing": missing, "extra": extra,
-            "clean": not (mismatches or missing or extra)}
+    return {
+        "files": len(expected),
+        "verified": len(expected) - len(mismatches) - len(missing),
+        "mismatches": mismatches,
+        "missing": missing,
+        "extra": extra,
+        "clean": not (mismatches or missing or extra),
+    }
 
 
 def collect(inventory: Path, cid: str, dest: Path, *, spawn: Spawn | None = None) -> dict:
@@ -157,8 +179,9 @@ def collect(inventory: Path, cid: str, dest: Path, *, spawn: Spawn | None = None
     output = _run(spawn, shlex.join(["python3", "-c", REMOTE_MANIFEST, remote]))
     expected, size = parse_manifest(output.decode())
     check_space(dest, size)
-    _extract(spawn, shlex.join(["tar", "-C", remote, "--exclude", "./.runtime", "-cf", "-",
-                                "."]), dest)
+    _extract(
+        spawn, shlex.join(["tar", "-C", remote, "--exclude", "./.runtime", "-cf", "-", "."]), dest
+    )
     report = {"schema_version": 1, "campaign_id": cid, "bytes": size} | verify_tree(dest, expected)
     downloaded = dest / MANIFEST
     if not downloaded.is_file() or downloaded.read_text() != output.decode().rsplit("size ", 1)[0]:

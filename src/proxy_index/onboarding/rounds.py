@@ -64,15 +64,24 @@ def new_round(manifest: dict, region: str, index: int) -> dict:
         "status": "armed",
         "active": None,
         "progress": {},
-        "jobs": [{"round": index, "country": country, "scheduled_at": scheduled,
-                  "status": "pending"} for country in manifest["regions"][region]],
+        "jobs": [
+            {"round": index, "country": country, "scheduled_at": scheduled, "status": "pending"}
+            for country in manifest["regions"][region]
+        ],
     }
 
 
 def validate_round(state: dict, manifest: dict, region: str, index: int) -> None:
     expected = new_round(manifest, region, index)
-    keys = ("schema_version", "kind", "campaign_id", "region", "round", "scheduled_at",
-            "campaign_sha256")
+    keys = (
+        "schema_version",
+        "kind",
+        "campaign_id",
+        "region",
+        "round",
+        "scheduled_at",
+        "campaign_sha256",
+    )
     if any(state.get(key) != expected[key] for key in keys):
         raise RoundRefused("Round checkpoint does not match this campaign, region and round")
     settings(state["settings"])
@@ -137,8 +146,20 @@ async def execute_round(
         state = new_round(manifest, region, round_index)
         save = functools.partial(_save, path, state, clock)
         save()
-        context = JobContext(manifest, region, directory, state["settings"], state, save,
-                             proxy_factory, run_country, stop, clock, math.inf, None)
+        context = JobContext(
+            manifest,
+            region,
+            directory,
+            state["settings"],
+            state,
+            save,
+            proxy_factory,
+            run_country,
+            stop,
+            clock,
+            math.inf,
+            None,
+        )
         try:
             await _wait_until(state, save, scheduled, clock, stop)
             for job in state["jobs"]:
@@ -162,15 +183,20 @@ async def execute_round(
 def _country_entry(job: dict, measured: dict | None) -> dict:
     measured = measured or {}
     return {
-        "country": job["country"], "status": job["status"],
-        "stop_reason": job.get("stop_reason"), "requests": measured.get("completed", 0),
-        "successes": measured.get("successes", 0), "errors": measured.get("total_errors", 0),
+        "country": job["country"],
+        "status": job["status"],
+        "stop_reason": job.get("stop_reason"),
+        "requests": measured.get("completed", 0),
+        "successes": measured.get("successes", 0),
+        "errors": measured.get("total_errors", 0),
         # Answer classes (answers.py); 0 for a measurement without them.
         "rate_limited": sum((measured.get("rate_limited") or {}).values()),
         "no_inventory": measured.get("no_inventory") or 0,
         "other_country": measured.get("other_country") or 0,
-        "observations": 0, "unique_ips": measured.get("unique_ips"),
-        "bytes_up": measured.get("bytes_up", 0), "bytes_down": measured.get("bytes_down", 0),
+        "observations": 0,
+        "unique_ips": measured.get("unique_ips"),
+        "bytes_up": measured.get("bytes_up", 0),
+        "bytes_down": measured.get("bytes_down", 0),
         "duration_seconds": job.get("duration_seconds"),
     }
 
@@ -210,18 +236,23 @@ def _verify_country(directory: Path, job: dict) -> tuple[dict, list[str]]:
         entry["observations"], unique = _verify_chunks(folder, job)
     except (OSError, ValueError, KeyError) as exc:
         # Library messages can quote file paths or row values, so only fixed text is reported.
-        reason = (str(exc) if isinstance(exc, RoundDataError)
-                  else f"failed verification ({type(exc).__name__})")
+        reason = (
+            str(exc)
+            if isinstance(exc, RoundDataError)
+            else f"failed verification ({type(exc).__name__})"
+        )
         return _country_entry(job, None), [f"{label}: {reason}"]
     entry["unique_ips"] = unique
     issues = [] if job["status"] == "completed" else [f"{label}: {job['status']}"]
     # Other-country exits are successes, never observations.
-    if (entry["observations"] + entry["other_country"] != measured.get("successes")
-            or entry["observations"] != job.get("observations")
-            or unique != measured.get("unique_ips")
-            or measured.get("completed") != measured.get("successes", 0)
-            + measured.get("total_errors", 0)
-            or measured.get("cancelled") != 0):
+    if (
+        entry["observations"] + entry["other_country"] != measured.get("successes")
+        or entry["observations"] != job.get("observations")
+        or unique != measured.get("unique_ips")
+        or measured.get("completed")
+        != measured.get("successes", 0) + measured.get("total_errors", 0)
+        or measured.get("cancelled") != 0
+    ):
         issues.append(f"{label}: measurements do not reconcile")
     return entry, issues
 
@@ -253,6 +284,11 @@ def verify_round(manifest_path: Path, region: str, round_index: int) -> dict:
         entry, problems = _verify_country(directory, job)
         countries.append(entry)
         issues.extend(problems)
-    return {"region": region, "round": round_index, "countries": countries,
-            "rows": sum(c["observations"] for c in countries), "complete": not issues,
-            "issues": issues}
+    return {
+        "region": region,
+        "round": round_index,
+        "countries": countries,
+        "rows": sum(c["observations"] for c in countries),
+        "complete": not issues,
+        "issues": issues,
+    }

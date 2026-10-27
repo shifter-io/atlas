@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify every observation in one complete regional round and combine its chunks."""
+
 import argparse
 import gzip
 import html
@@ -31,8 +32,11 @@ def main():
     state = read_json(region / "state.json")
     validate_state(state, manifest, args.region)
     jobs = [j for j in state["jobs"] if j["round"] == args.round]
-    if (not jobs or [j["country"] for j in jobs] != manifest["regions"][args.region]
-            or any(j["status"] != "completed" for j in jobs)):
+    if (
+        not jobs
+        or [j["country"] for j in jobs] != manifest["regions"][args.region]
+        or any(j["status"] != "completed" for j in jobs)
+    ):
         raise ValueError("Round is incomplete")
     output = args.manifest.parent / "export" / args.region / f"round-{args.round:02d}"
     private_dir(output)
@@ -68,16 +72,26 @@ def main():
                 chunks += 1
             if verified != {p.name for p in folder.glob("observations-*.jsonl.gz")}:
                 raise ValueError("Unverified country chunk")
-            if (count != measured["successes"] or count != job["observations"]
-                    or len(unique) != measured["unique_ips"]
-                    or measured["completed"] != measured["successes"] + measured["total_errors"]
-                    or measured["cancelled"] != 0):
+            if (
+                count != measured["successes"]
+                or count != job["observations"]
+                or len(unique) != measured["unique_ips"]
+                or measured["completed"] != measured["successes"] + measured["total_errors"]
+                or measured["cancelled"] != 0
+            ):
                 raise ValueError("Country measurements do not reconcile")
-            results.append({"country": job["country"], "observations": count, "chunks": chunks,
-                            "unique_ips": len(unique), "requests": measured["completed"],
-                            "errors": measured["total_errors"],
-                            "stop_reason": measured["stop_reason"],
-                            "duration_seconds": job["duration_seconds"]})
+            results.append(
+                {
+                    "country": job["country"],
+                    "observations": count,
+                    "chunks": chunks,
+                    "unique_ips": len(unique),
+                    "requests": measured["completed"],
+                    "errors": measured["total_errors"],
+                    "stop_reason": measured["stop_reason"],
+                    "duration_seconds": job["duration_seconds"],
+                }
+            )
         if combined.tell() == 0:
             combined.write(gzip.compress(b"", mtime=0))
         combined.flush()
@@ -87,16 +101,38 @@ def main():
     with gzip.open(output / "observations.jsonl.gz", "rt") as stream:
         rows = sum(1 for _ in stream)
     assert rows == sum(r["observations"] for r in results)
-    result = {"verified": True, "schema_version": 1, "region": args.region, "round": args.round,
-              "campaign_id": manifest["campaign_id"], "countries": results, "rows": rows,
-              "duration_seconds": (moment(jobs[-1]["finished_at"])
-                                   - moment(jobs[0]["started_at"])).total_seconds(),
-              "file": "observations.jsonl.gz", "sha256": digest(output / "observations.jsonl.gz")}
+    result = {
+        "verified": True,
+        "schema_version": 1,
+        "region": args.region,
+        "round": args.round,
+        "campaign_id": manifest["campaign_id"],
+        "countries": results,
+        "rows": rows,
+        "duration_seconds": (
+            moment(jobs[-1]["finished_at"]) - moment(jobs[0]["started_at"])
+        ).total_seconds(),
+        "file": "observations.jsonl.gz",
+        "sha256": digest(output / "observations.jsonl.gz"),
+    }
     atomic_json(output / "manifest.json", result)
-    table = "".join("<tr>" + "".join(f"<td>{html.escape(str(r[k]))}</td>" for k in (
-        "country", "duration_seconds", "requests", "observations", "unique_ips", "errors"
-    )) + "</tr>" for r in results)
-    page = f'''<!doctype html><html lang="en"><meta charset="utf-8">
+    table = "".join(
+        "<tr>"
+        + "".join(
+            f"<td>{html.escape(str(r[k]))}</td>"
+            for k in (
+                "country",
+                "duration_seconds",
+                "requests",
+                "observations",
+                "unique_ips",
+                "errors",
+            )
+        )
+        + "</tr>"
+        for r in results
+    )
+    page = f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Regional round validation</title>
 <style>body{{font:16px/1.6 system-ui;max-width:1100px;margin:40px auto;padding:0 24px;
@@ -104,7 +140,7 @@ background:#f4f7fa;color:#203040}}table{{border-collapse:collapse;background:whi
 th,td{{padding:12px;text-align:left;border-bottom:1px solid #ccd8e0}}
 .scroll{{overflow:auto}}</style>
 <h1>{html.escape(args.region)} · regional round verified</h1>
-<p>Duration: {result['duration_seconds']:.2f} seconds · {rows:,} successful observations.</p>
+<p>Duration: {result["duration_seconds"]:.2f} seconds · {rows:,} successful observations.</p>
 <div class="scroll"><table><tr><th>Country requested</th><th>Seconds</th><th>Requests</th>
 <th>Observations</th><th>Unique IPs</th><th>Errors</th></tr>{table}</table></div>
 <p>All chunks passed gzip, JSON schema, IP syntax, country/timestamp, checksum and count checks.
@@ -113,7 +149,7 @@ Countries ran sequentially in the frozen configuration order.
 Duplicate observations remain intact.</p>
 <p>Country codes describe requested targeting; this format does not assert geolocated country.</p>
 <p><a href="manifest.json">Verification manifest and checksum</a> ·
-<a href="observations.jsonl.gz">Combined round observations</a></p></html>'''
+<a href="observations.jsonl.gz">Combined round observations</a></p></html>"""
     atomic_bytes(output / "report.html", page.encode())
     print(json.dumps(result))
 

@@ -175,12 +175,22 @@ async def test_geo_buckets_and_outcomes_round_trip(database, tmp_path):
             "SELECT summary->'config_overrides' FROM test_runs ORDER BY run_key"
         ).fetchall()
     assert overrides[0][0] == {
-        "requests": None, "stop_rule": "unique_ratio", "min_sample": 1000, "stall_seconds": 600,
-        "target_url": None, "processes": 0,
-        "execution_backend": "inline", "execution_processes": 1,
+        "requests": None,
+        "stop_rule": "unique_ratio",
+        "min_sample": 1000,
+        "stall_seconds": 600,
+        "target_url": None,
+        "processes": 0,
+        "execution_backend": "inline",
+        "execution_processes": 1,
     }
-    assert overrides[2][0] == {"requests": 3, "target_url": None, "processes": 0,
-                               "execution_backend": "inline", "execution_processes": 1}
+    assert overrides[2][0] == {
+        "requests": 3,
+        "target_url": None,
+        "processes": 0,
+        "execution_backend": "inline",
+        "execution_processes": 1,
+    }
 
 
 async def test_geo_ids_are_the_enrichment_ids(database, tmp_path):
@@ -278,9 +288,10 @@ async def test_batch_link(database, tmp_path):
     ingest(unlinked, database)
     ingest(unlinked, database, batch_id=second)
     with connect(database) as conn:
-        assert conn.execute(
-            "SELECT batch_id FROM test_runs ORDER BY run_key"
-        ).fetchall() == [(first,), (second,)]
+        assert conn.execute("SELECT batch_id FROM test_runs ORDER BY run_key").fetchall() == [
+            (first,),
+            (second,),
+        ]
 
 
 async def test_seed_is_idempotent_and_keeps_operator_edits(database, tmp_path):
@@ -342,9 +353,10 @@ def test_partition_helper_serves_test_events(database):
             "VALUES (%s,'census_started','DE','generic_http',1,'{\"requests\":0}')",
             (moment,),
         )
-        assert conn.execute(
-            "SELECT tableoid::regclass::text,kind FROM test_events"
-        ).fetchone() == ("test_events_2026_10", "census_started")
+        assert conn.execute("SELECT tableoid::regclass::text,kind FROM test_events").fetchone() == (
+            "test_events_2026_10",
+            "census_started",
+        )
 
 
 class FakeEnricher:

@@ -50,8 +50,17 @@ async def pipe(reader, writer):
 class Gateway:
     """Minimal loopback gateways: no public hosts or credentials are contacted."""
 
-    def __init__(self, scheme="http", *, auth=False, body=b"203.0.113.8\n", status=200,
-                 disconnect=False, delay=0, fragmented=False):
+    def __init__(
+        self,
+        scheme="http",
+        *,
+        auth=False,
+        body=b"203.0.113.8\n",
+        status=200,
+        disconnect=False,
+        delay=0,
+        fragmented=False,
+    ):
         self.scheme = scheme
         self.auth = auth
         self.body = body
@@ -82,8 +91,14 @@ class Gateway:
                 return
             request = await reader.readuntil(b"\r\n\r\n")
             self.requests.append(request)
-            auth_line = next((line for line in request.split(b"\r\n")
-                              if line.startswith(b"Proxy-Authorization: Basic ")), None)
+            auth_line = next(
+                (
+                    line
+                    for line in request.split(b"\r\n")
+                    if line.startswith(b"Proxy-Authorization: Basic ")
+                ),
+                None,
+            )
             credentials = (None, None)
             if auth_line:
                 credentials = tuple(base64.b64decode(auth_line.split()[-1]).decode().split(":", 1))
@@ -114,7 +129,7 @@ class Gateway:
         if self.fragmented:
             writer.write(self.body[:7])
             await writer.drain()
-            await asyncio.sleep(.01)
+            await asyncio.sleep(0.01)
             writer.write(self.body[7:])
         else:
             writer.write(self.body)
@@ -150,8 +165,9 @@ class Gateway:
             self.domains.append(host)
         else:
             size = 4 if atyp == 1 else 16
-            host = socket.inet_ntop(socket.AF_INET if atyp == 1 else socket.AF_INET6,
-                                   await reader.readexactly(size))
+            host = socket.inet_ntop(
+                socket.AF_INET if atyp == 1 else socket.AF_INET6, await reader.readexactly(size)
+            )
         port = struct.unpack("!H", await reader.readexactly(2))[0]
         assert host in ("localhost", "127.0.0.1")
         remote_reader, remote_writer = await asyncio.open_connection("127.0.0.1", port)
@@ -172,6 +188,7 @@ class FakeTransport:
 
     async def execute(self, target, *, context=None):
         from proxy_index.models import Outcome
+
         self.count += 1
         return Outcome(10.1, ip="8.8.8.8", status=200, response_body_bytes=8)
 

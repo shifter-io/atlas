@@ -39,9 +39,17 @@ COMPRESSED = {"slot_minutes": 15, "hours": 4}
 def test_a_15_minute_spec_schedules_4_slots_with_the_lead_before_each():
     spec = make_spec(**COMPRESSED).validate()
     assert [f"{scheduled_at(spec, k):%H:%M:%S}" for k in range(4)] == [
-        "22:00:00", "22:15:00", "22:30:00", "22:45:00"]
+        "22:00:00",
+        "22:15:00",
+        "22:30:00",
+        "22:45:00",
+    ]
     assert [f"{due_at(spec, k):%H:%M:%S}" for k in range(4)] == [
-        "21:58:30", "22:13:30", "22:28:30", "22:43:30"]
+        "21:58:30",
+        "22:13:30",
+        "22:28:30",
+        "22:43:30",
+    ]
     assert [slot_label(spec, k) for k in (0, 3)] == ["slot 00 (22:00 UTC)", "slot 03 (22:45 UTC)"]
     assert slot_label(make_spec(), 3) == "hour 03" and slot_label(make_spec(), 3, True) == "h03"
 
@@ -54,20 +62,28 @@ async def test_4_slots_launch_90_s_before_each_quarter_exactly_once(tmp_path):
     assert await run_tick(root, launcher=launcher, clock=clock) == []
     for slot in range(4):
         clock.now = START + slot * QUARTER - timedelta(seconds=90)
-        assert await run_tick(root, launcher=launcher, clock=clock,
-                              disable_timer=lambda: disabled.append(1)) == [slot]
+        assert await run_tick(
+            root, launcher=launcher, clock=clock, disable_timer=lambda: disabled.append(1)
+        ) == [slot]
         clock.now += timedelta(seconds=10)
-        assert await run_tick(root, launcher=launcher, clock=clock,
-                              disable_timer=lambda: disabled.append(1)) == []
+        assert (
+            await run_tick(
+                root, launcher=launcher, clock=clock, disable_timer=lambda: disabled.append(1)
+            )
+            == []
+        )
         record = load_hour(root, spec, slot)
         assert record.launch_delay_seconds == 0
         assert record.scheduled_at == (START + slot * QUARTER).isoformat()
     assert [(slot, f"{at:%H:%M:%S}") for slot, at, _ in calls] == [
-        (0, "21:58:30"), (1, "22:13:30"), (2, "22:28:30"), (3, "22:43:30")]
+        (0, "21:58:30"),
+        (1, "22:13:30"),
+        (2, "22:28:30"),
+        (3, "22:43:30"),
+    ]
     assert disabled == [1, 1]  # after slot 3: one test hour, then the timer is gone
     clock.now = START + timedelta(hours=1, minutes=13, seconds=30)
-    assert await run_tick(root, launcher=launcher, clock=clock,
-                          disable_timer=lambda: None) == []
+    assert await run_tick(root, launcher=launcher, clock=clock, disable_timer=lambda: None) == []
     assert read_alerts(root) == []
 
 
@@ -78,19 +94,29 @@ async def test_a_restarted_timer_launches_every_missed_quarter_with_its_delay(tm
     clock = Clock(START + timedelta(minutes=2))
 
     def watchdog(check):
-        return run_watchdog(root, check=check, clock=clock, start_tick=lambda: started.append(1),
-                            timer_enabled=lambda: True)
+        return run_watchdog(
+            root,
+            check=check,
+            clock=clock,
+            start_tick=lambda: started.append(1),
+            timer_enabled=lambda: True,
+        )
 
     assert watchdog("fired") == "missed_launch"
     clock.now = START + QUARTER + timedelta(seconds=30)
     assert watchdog("armed") == "missed_launch" and len(started) == 2
     assert [(a["key"], a["hour"]) for a in read_alerts(root) if a["code"] == "missed_launch"] == [
-        ("h00-fired", 0), ("h01-armed", 1)]
+        ("h00-fired", 0),
+        ("h01-armed", 1),
+    ]
     clock.now = START + timedelta(minutes=20)
     assert await run_tick(root, launcher=fake_launcher(clock, calls), clock=clock) == [0, 1]
     spec = make_spec(**COMPRESSED)
     assert [load_hour(root, spec, k).launch_delay_seconds for k in range(3)] == [
-        1290.0, 390.0, None]
+        1290.0,
+        390.0,
+        None,
+    ]
     assert [a["key"] for a in read_alerts(root) if a["code"] == "late_launch"] == ["h00", "h01"]
     clock.now = START + 2 * QUARTER + timedelta(seconds=30)
     assert watchdog("armed") == "missed_launch"  # slot 2 is due and still planned
@@ -109,8 +135,9 @@ async def test_a_slot_still_running_at_the_next_quarter_is_recorded_as_overlap(t
     assert first.droplets[0].overlap == 0
     assert first.droplets[0].requested_at == "2027-01-01T21:58:30.000Z"
     record = HourRecord(CID, 1, "2027-01-01T22:15:00Z")
-    second, *_ = await launched(tmp_path, FakeDigitalOcean(), spec, start=PRE_CREATE + 900,
-                                record=record)
+    second, *_ = await launched(
+        tmp_path, FakeDigitalOcean(), spec, start=PRE_CREATE + 900, record=record
+    )
     assert second.droplets[0].overlap == 1 and second.droplets[0].status == "armed"
     assert second.droplets[0].requested_at == "2027-01-01T22:13:30.000Z"
     assert first.droplets[0].status == "armed"
@@ -123,14 +150,21 @@ def test_a_15_minute_slot_report_names_its_slot_and_time(tmp_path):
     lines = path.read_text().splitlines()
     assert path.name == "hour-03.md"
     assert lines[0] == "# Campaign slot 03 (22:45 UTC) — traffic per network"
-    assert lines[2].startswith(f"Campaign `{CID}`, slot scheduled 2027-01-01T22:45:00+00:00 "
-                               "(a slot every 15 min), state failed.")
+    assert lines[2].startswith(
+        f"Campaign `{CID}`, slot scheduled 2027-01-01T22:45:00+00:00 "
+        "(a slot every 15 min), state failed."
+    )
 
 
 def _create(tmp_path, **options):
-    return manifest.create(ROOT / "configs" / "shifter.toml", "residential",
-                           manifest.timestamp(START), tmp_path, now=START - timedelta(hours=1),
-                           **options)
+    return manifest.create(
+        ROOT / "configs" / "shifter.toml",
+        "residential",
+        manifest.timestamp(START),
+        tmp_path,
+        now=START - timedelta(hours=1),
+        **options,
+    )
 
 
 def test_a_15_minute_manifest_spaces_its_24_rounds_15_minutes_apart(tmp_path):
@@ -140,7 +174,8 @@ def test_a_15_minute_manifest_spaces_its_24_rounds_15_minutes_apart(tmp_path):
     assert data["ends_at"] == manifest.timestamp(START + timedelta(hours=6 + 48))
     hourly = manifest.load(_create(tmp_path / "h", execution_mode="ephemeral"))
     assert "slot_minutes" not in hourly and hourly["rounds"][1] == manifest.timestamp(
-        START + timedelta(hours=1))
+        START + timedelta(hours=1)
+    )
     with pytest.raises(ValueError, match="Only ephemeral"):
         _create(tmp_path / "p", slot_minutes=15)
     for bad in (7, 60, 15.0, "15", 30):  # 30: the rounds and end are 15 minutes apart
@@ -169,6 +204,7 @@ def test_the_mac_watch_names_the_slot_and_its_time(tmp_path):
     totals = {"02": {"shifter": 3 * 10**9}}
     assert report_label("hour-02.md", text) == "slot 02 (22:30 UTC)"
     assert report_message("hour-02.md", totals, text) == (
-        "CAMP-1 slot 02 (22:30 UTC): 3.00 GB; top network shifter 3.00 GB")
+        "CAMP-1 slot 02 (22:30 UTC): 3.00 GB; top network shifter 3.00 GB"
+    )
     assert report_label("hour-02.md") == "hour 02"
     assert report_label("hour-02.md", "# Campaign hour 02 — traffic per network\n") == "hour 02"

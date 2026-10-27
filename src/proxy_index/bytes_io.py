@@ -135,7 +135,11 @@ def estimate(
 
 
 def socks5_handshake(
-    *, username: str | None, password: str | None, host: str, ipv6_bound: bool = False,
+    *,
+    username: str | None,
+    password: str | None,
+    host: str,
+    ipv6_bound: bool = False,
 ) -> tuple[int, int]:
     """(up, down) bytes of a SOCKS5 greeting, auth and CONNECT with remote DNS.
 

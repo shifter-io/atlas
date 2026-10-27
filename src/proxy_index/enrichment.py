@@ -1,4 +1,5 @@
 """Optional local MMDB enrichment, independent of the request path."""
+
 from __future__ import annotations
 
 import gzip
@@ -39,7 +40,8 @@ class LocalEnricher:
         with self.path.open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()
         self.release = {
-            "file": self.path.name, "sha256": checksum,
+            "file": self.path.name,
+            "sha256": checksum,
             "database_type": metadata.database_type,
             "build_epoch": metadata.build_epoch,
             "built_at": datetime.fromtimestamp(metadata.build_epoch, UTC).isoformat(),
@@ -69,7 +71,8 @@ class LocalEnricher:
             "city": data.get("city", {}).get("names", {}).get("en"),
             "latitude": data.get("location", {}).get("latitude"),
             "longitude": data.get("location", {}).get("longitude"),
-            "isp": traits.get("isp"), "organization": traits.get("organization"),
+            "isp": traits.get("isp"),
+            "organization": traits.get("organization"),
             "asn": traits.get("autonomous_system_number"),
             "asn_organization": traits.get("autonomous_system_organization"),
             "connection_type": traits.get("connection_type"),
@@ -103,8 +106,10 @@ def enrich_run(directory: str | Path, mmdb: str | Path | None = None) -> dict[st
         # An exclusive creation also prevents two writers racing this release.
         with partial.open("xb") as raw_output:
             os.chmod(partial, 0o600)
-            with gzip.open(source, "rt", encoding="utf-8") as src, \
-                    gzip.open(raw_output, "wt", encoding="utf-8") as dst:
+            with (
+                gzip.open(source, "rt", encoding="utf-8") as src,
+                gzip.open(raw_output, "wt", encoding="utf-8") as dst,
+            ):
                 for line in src:
                     row = json.loads(line)
                     if row["run_id"] != summary["run_id"]:
@@ -112,19 +117,29 @@ def enrich_run(directory: str | Path, mmdb: str | Path | None = None) -> dict[st
                     data = enricher.lookup(row["ip"])
                     unmatched += not data["matched"]
                     count += 1
-                    dst.write(json.dumps(row | {
-                        "enrichment": data, "dbip_release": release_id,
-                    }, separators=(",", ":")) + "\n")
+                    dst.write(
+                        json.dumps(
+                            row
+                            | {
+                                "enrichment": data,
+                                "dbip_release": release_id,
+                            },
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    )
         if count != summary["artifacts"]["ips"]["rows"]:
             raise ValueError("IP artifact row count does not match summary")
         partial.replace(destination)
         report = {
-            "schema_version": "1", "run_id": summary["run_id"],
-            "release": enricher.release, "rows": count, "unmatched_rows": unmatched,
+            "schema_version": "1",
+            "run_id": summary["run_id"],
+            "release": enricher.release,
+            "rows": count,
+            "unmatched_rows": unmatched,
             "file": destination.name,
         }
         with report_path.open("x", encoding="utf-8") as out:
             os.chmod(report_path, 0o600)
             json.dump(report, out, indent=2)
         return report
-

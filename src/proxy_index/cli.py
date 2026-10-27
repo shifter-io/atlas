@@ -73,7 +73,7 @@ async def _run(args: argparse.Namespace) -> int:
     try:
         from .enrichment import LocalEnricher
 
-        with (LocalEnricher(args.mmdb) if args.mmdb else nullcontext()) as enricher:
+        with LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
             summary = await run(config, sink, stop=stop, enricher=enricher)
         print(f"Results: {sink.directory}", file=sys.stderr)
         if args.database_file:
@@ -94,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("targets", help="List available target definitions")
     provider_list = commands.add_parser("providers", help="List available provider adapters")
     provider_list.add_argument(
-        "--protocol", choices=NETWORK_PROTOCOLS,
+        "--protocol",
+        choices=NETWORK_PROTOCOLS,
         help="Only networks whose echo test uses this protocol (e.g. https-only: no HTTP test)",
     )
     measure = commands.add_parser("run", help="Run a target through a supplied proxy")
@@ -133,8 +134,11 @@ def main(argv: list[str] | None = None) -> int:
     measure.add_argument("--product")
     measure.add_argument("--country", help="Requested geography label; does not change credentials")
     measure.add_argument("--location", help="Runner location label")
-    measure.add_argument("--answer-classes", action="store_true",
-                         help="Replace rate-limited answers (needs --provider-config)")
+    measure.add_argument(
+        "--answer-classes",
+        action="store_true",
+        help="Replace rate-limited answers (needs --provider-config)",
+    )
     measure.add_argument("--mmdb", help="Local MMDB: geo rows and the country check")
     enrich = commands.add_parser("enrich", help="Enrich an existing HTTP result using local MMDB")
     enrich.add_argument("directory")

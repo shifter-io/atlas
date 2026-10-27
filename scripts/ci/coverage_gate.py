@@ -9,6 +9,7 @@ A missing line or a missing branch (by its source line) inside a target fails th
 A target file or function that does not exist also fails, so the gate cannot pass
 vacuously. Exit 0 only when every target is complete.
 """
+
 import ast
 import json
 import sys

@@ -28,25 +28,35 @@ def main():
     samples = []
     if args.telemetry:
         samples = [json.loads(line)["node"] for line in args.telemetry.read_text().splitlines()]
-        live = [n for n in samples if n.get("state", {}).get("status") == "running"
-                and sum(p.get("role") == "http_worker" and "cpu_pct" in p
-                        for p in n.get("processes", [])) == 4]
+        live = [
+            n
+            for n in samples
+            if n.get("state", {}).get("status") == "running"
+            and sum(
+                p.get("role") == "http_worker" and "cpu_pct" in p for p in n.get("processes", [])
+            )
+            == 4
+        ]
         core_rows = []
         for core in ("cpu0", "cpu1", "cpu2", "cpu3"):
             values = [n["core_cpu_pct"][core] for n in live if core in n.get("core_cpu_pct", {})]
             if values:
-                core_rows.append(f"<tr><td>{core}</td><td>{sum(values)/len(values):.1f}%</td>"
-                                 f"<td>{min(values):.1f}%</td><td>{max(values):.1f}%</td></tr>")
+                core_rows.append(
+                    f"<tr><td>{core}</td><td>{sum(values) / len(values):.1f}%</td>"
+                    f"<td>{min(values):.1f}%</td><td>{max(values):.1f}%</td></tr>"
+                )
         pids = sorted({p["pid"] for n in live for p in n.get("processes", [])})
         worker_rows = []
         for pid in pids:
             values = [p for n in live for p in n["processes"] if p["pid"] == pid]
             cpu = [p["cpu_pct"] for p in values if "cpu_pct" in p]
             if cpu:
-                worker_rows.append(f"<tr><td>{esc(values[0]['role'])}</td><td>{pid}</td>"
-                                   f"<td>{sum(cpu)/len(cpu):.1f}%</td>"
-                                   f"<td>{max(p['rss_mb'] for p in values):.1f} MiB</td></tr>")
-        extra += f'''<section><h2>CPU evidence from production</h2>
+                worker_rows.append(
+                    f"<tr><td>{esc(values[0]['role'])}</td><td>{pid}</td>"
+                    f"<td>{sum(cpu) / len(cpu):.1f}%</td>"
+                    f"<td>{max(p['rss_mb'] for p in values):.1f} MiB</td></tr>"
+                )
+        extra += f"""<section><h2>CPU evidence from production</h2>
 <p>{len(live)} running samples with CPU readings for all four HTTP workers.
 CPU percentages use the interval between SSH samples (approximately 13 seconds).
 For one process, 100% means one occupied core. Core totals include other host activity.</p>
@@ -54,25 +64,31 @@ For one process, 100% means one occupied core. Core totals include other host ac
 <tbody>{"".join(core_rows)}</tbody></table>
 <table><thead><tr><th>Role</th><th>PID</th><th>Mean CPU</th><th>Peak sampled RSS</th></tr></thead>
 <tbody>{"".join(worker_rows)}</tbody></table>
-<p><a href="cpu-samples.jsonl">Raw CPU and progress samples</a></p></section>'''
+<p><a href="cpu-samples.jsonl">Raw CPU and progress samples</a></p></section>"""
         atomic_bytes(args.directory / "cpu-samples.jsonl", args.telemetry.read_bytes())
     if args.baseline:
         before = json.loads((args.baseline / "summary.json").read_text())["measurement"]
         rows = []
-        for label, key in (("Tester duration (seconds)", "duration_seconds"),
-                           ("Completed requests", "completed"), ("Unique IPs", "unique_ips"),
-                           ("Errors", "total_errors"), ("Requests/second", "requests_per_second")):
-            old_value = (f"{before[key]:,}" if isinstance(before[key], int)
-                         else f"{before[key]:,.2f}")
-            value = (f"{measured[key]:,}" if isinstance(measured[key], int)
-                     else f"{measured[key]:,.2f}")
+        for label, key in (
+            ("Tester duration (seconds)", "duration_seconds"),
+            ("Completed requests", "completed"),
+            ("Unique IPs", "unique_ips"),
+            ("Errors", "total_errors"),
+            ("Requests/second", "requests_per_second"),
+        ):
+            old_value = (
+                f"{before[key]:,}" if isinstance(before[key], int) else f"{before[key]:,.2f}"
+            )
+            value = (
+                f"{measured[key]:,}" if isinstance(measured[key], int) else f"{measured[key]:,.2f}"
+            )
             rows.append(f"<tr><td>{label}</td><td>{old_value}</td><td>{value}</td></tr>")
-        extra += f'''<section><h2>Comparison with the first run</h2><table><thead><tr>
+        extra += f"""<section><h2>Comparison with the first run</h2><table><thead><tr>
 <th>Measurement</th><th>Previous execution</th><th>Four workers</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table>
 <p>Both runs used US targeting, 2,500 concurrency, a 10-second timeout, and the same census rule.
 These are separate live samples, with different request totals and observed pools.
-The comparison is not a fixed-work CPU benchmark.</p></section>'''
+The comparison is not a fixed-work CPU benchmark.</p></section>"""
     metrics = [
         ("Tester duration", f"{elapsed:.3f} s ({elapsed / 60:.2f} min)"),
         ("Including finalization", f"{state['total_duration_seconds']:.3f} s"),

@@ -75,7 +75,8 @@ def validate_state(state: dict, manifest: dict, region: str) -> None:
         raise ValueError("Checkpoint does not match this campaign and region")
     settings(state["settings"])
     expected = [
-        (i, c, at) for i, at in enumerate(regional_window(manifest, region)["rounds"])
+        (i, c, at)
+        for i, at in enumerate(regional_window(manifest, region)["rounds"])
         for c in manifest["regions"][region]
     ]
     actual = [(j["round"], j["country"], j["scheduled_at"]) for j in state["jobs"]]
@@ -178,11 +179,21 @@ def _start_job(context: JobContext, job: dict) -> float:
 def _census_config(context: JobContext, proxy) -> RunConfig:
     """One country's census run config; ``answer_classes`` come from the network's grammar."""
     effective = dict(context.effective)
-    classes = (answer_classes(context.manifest["provider"])
-               if effective.pop("answer_classes", False) else None)
-    return RunConfig("generic_http", proxy, requests=None, stop_rule="unique_ratio",
-                     runner_location=context.region, target_url=context.manifest["target_url"],
-                     answer_classes=classes, **effective)
+    classes = (
+        answer_classes(context.manifest["provider"])
+        if effective.pop("answer_classes", False)
+        else None
+    )
+    return RunConfig(
+        "generic_http",
+        proxy,
+        requests=None,
+        stop_rule="unique_ratio",
+        runner_location=context.region,
+        target_url=context.manifest["target_url"],
+        answer_classes=classes,
+        **effective,
+    )
 
 
 async def _measure(context: JobContext, job: dict, writer: ObservationWriter, sink: SummarySink):
@@ -219,8 +230,14 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             raise ValueError("Provider must target and label the configured country")
         config = _census_config(context, proxy)
         summary = await context.run_country(
-            config, sink, stop=country_stop, deadline=context.deadline, aggregate_ips=False,
-            wall_clock=clock.now, observation_consumer=writer.observe, progress=progress,
+            config,
+            sink,
+            stop=country_stop,
+            deadline=context.deadline,
+            aggregate_ips=False,
+            wall_clock=clock.now,
+            observation_consumer=writer.observe,
+            progress=progress,
             progress_interval=5,
         )
     except BaseException as exc:
@@ -255,8 +272,13 @@ async def run_job(context: JobContext, job: dict) -> None:
     """
     began = _start_job(context, job)
     folder = job_directory(context.directory, job)
-    writer = ObservationWriter(folder, country=job["country"], scheduled=job["scheduled_at"],
-                               started=job["started_at"], deadline=context.end)
+    writer = ObservationWriter(
+        folder,
+        country=job["country"],
+        scheduled=job["scheduled_at"],
+        started=job["started_at"],
+        deadline=context.end,
+    )
     sink = SummarySink()
     summary, error = await _measure(context, job, writer, sink)
     finished = context.clock.now()
@@ -298,14 +320,19 @@ def _recover_running(state: dict, directory: Path, now: float) -> None:
         summary_path = job_directory(directory, job) / "summary.json"
         if summary_path.exists():
             saved = read_json(summary_path)
-            for key in ("status", "finished_at", "observations", "requests", "errors",
-                        "duration_seconds", "stop_reason"):
+            for key in (
+                "status",
+                "finished_at",
+                "observations",
+                "requests",
+                "errors",
+                "duration_seconds",
+                "stop_reason",
+            ):
                 job[key] = saved[key]
             continue
         folder = job_directory(directory, job)
-        committed = sum(
-            read_json(p)["rows"] for p in folder.glob("observations-*.jsonl.meta.json")
-        )
+        committed = sum(read_json(p)["rows"] for p in folder.glob("observations-*.jsonl.meta.json"))
         counters = state.get("progress", {})
         job.update(
             status="interrupted",
@@ -352,8 +379,11 @@ async def execute(
             if resume:
                 raise ValueError("No region checkpoint exists to resume")
             state = None
-        for key, override in (("concurrency", concurrency), ("timeout_seconds", request_timeout),
-                              ("processes", processes)):
+        for key, override in (
+            ("concurrency", concurrency),
+            ("timeout_seconds", request_timeout),
+            ("processes", processes),
+        ):
             if override is not None:
                 if state is not None and override != effective[key]:
                     raise ValueError("Resume must preserve the original regional settings")
@@ -375,8 +405,20 @@ async def execute(
         state["active"] = None
         state["status"] = "armed"
         save()
-        context = JobContext(manifest, region, directory, effective, state, save, proxy_factory,
-                             run_country, stop, clock, end, end)
+        context = JobContext(
+            manifest,
+            region,
+            directory,
+            effective,
+            state,
+            save,
+            proxy_factory,
+            run_country,
+            stop,
+            clock,
+            end,
+            end,
+        )
         try:
             for job in state["jobs"]:
                 if job["status"] in TERMINAL:

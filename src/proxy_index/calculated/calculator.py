@@ -710,7 +710,10 @@ def build(
             for target in sorted(ids):
                 own = [r for r in rows if r["target"] == target]
                 tm = timed(
-                    own, hours, minimum, [d for d in slots_now if d["target"] == target],
+                    own,
+                    hours,
+                    minimum,
+                    [d for d in slots_now if d["target"] == target],
                     slot_minutes,
                 )
                 # Latency is the latency target's alone; every other target has none.
@@ -742,9 +745,7 @@ def build(
                     "score": None,
                     "readiness": "measured" if tm["completed"] else "unavailable",
                 }
-            member["inputs"] = product_inputs(
-                ps, p["pricing"], cfg, p["kind"], up, values
-            )
+            member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], up, values)
             member["observed"] = m["last_observed"]
             previous_rows = [
                 r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since

@@ -44,7 +44,8 @@ if sha != installed:
 """
 
 # Runs with the worker's system Python: argv = root, secrets dir, mcid, region, round.
-START_SCRIPT = r"""
+START_SCRIPT = (
+    r"""
 import hashlib, io, json, os, pathlib, subprocess, sys, tarfile, time
 root, secrets = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 mcid, region, hour = sys.argv[3], sys.argv[4], int(sys.argv[5])
@@ -58,7 +59,9 @@ archive.extractall(root, members=members, filter="data")
 wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
 databases = sorted((root / "db-ip").glob("*.mmdb"))  # exactly one: the round's country check
 country_check = ["--mmdb", str(databases[0])] if len(databases) == 1 else []
-""" + INSTALL_WHEEL + r"""for _ in range(11):
+"""
+    + INSTALL_WHEEL
+    + r"""for _ in range(11):
     synced = subprocess.run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"],
                             capture_output=True, text=True).stdout.strip() == "yes"
     if synced:
@@ -84,6 +87,7 @@ subprocess.run(["systemd-run", "--unit=pi-camp-sampler", "--property=Restart=no"
                 "-m", "proxy_index.campaign.sampler", "--interval", "1",
                 "--output", str(folder / "host-samples.jsonl")], check=True)
 """
+)
 
 # A round directory is pulled once its checkpoint is terminal or the round unit has ended (a
 # killed round never writes a terminal checkpoint, B2). An unknown unit state refuses.
@@ -117,11 +121,19 @@ def control_dir(runtime: Path) -> Path:
 
 
 def ssh_options(runtime: Path, hour: int) -> list[str]:
-    options = {"BatchMode": "yes", "IdentitiesOnly": "yes", "User": "root",
-               "UserKnownHostsFile": str(runtime / f"known_hosts-{hour:02d}"),
-               "StrictHostKeyChecking": "accept-new", "ConnectTimeout": "5",
-               "ServerAliveInterval": "10", "ServerAliveCountMax": "3", "ControlMaster": "auto",
-               "ControlPath": str(control_dir(runtime) / "cm-%C"), "ControlPersist": "4h"}
+    options = {
+        "BatchMode": "yes",
+        "IdentitiesOnly": "yes",
+        "User": "root",
+        "UserKnownHostsFile": str(runtime / f"known_hosts-{hour:02d}"),
+        "StrictHostKeyChecking": "accept-new",
+        "ConnectTimeout": "5",
+        "ServerAliveInterval": "10",
+        "ServerAliveCountMax": "3",
+        "ControlMaster": "auto",
+        "ControlPath": str(control_dir(runtime) / "cm-%C"),
+        "ControlPersist": "4h",
+    }
     return [item for key, value in options.items() for item in ("-o", f"{key}={value}")]
 
 
@@ -141,12 +153,16 @@ def safe_extract(archive: Path, destination: Path, top: str) -> None:
         stream.extractall(destination, filter=only_data)
 
 
-async def run_process(argv: list[str], stdin: bytes | None, seconds: float, sink: BinaryIO,
-                      limit: int) -> int:
+async def run_process(
+    argv: list[str], stdin: bytes | None, seconds: float, sink: BinaryIO, limit: int
+) -> int:
     """Stream at most `limit` stdout bytes to `sink`; exit code, 255 timeout, 254 too long."""
     process = await asyncio.create_subprocess_exec(
-        *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL)
+        *argv,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
     try:
         async with asyncio.timeout(seconds):
             with contextlib.suppress(ConnectionError):
@@ -178,21 +194,43 @@ def owned_dir(path: Path) -> None:
 class OpenSSHRemote:
     """`Remote` over the system `ssh`, with one persistent control master per worker."""
 
-    def __init__(self, identity: Path, runtime: Path, hour: int, *, runner: Runner = run_process,
-                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-                 clock: Callable[[], float] = time.monotonic):
+    def __init__(
+        self,
+        identity: Path,
+        runtime: Path,
+        hour: int,
+        *,
+        runner: Runner = run_process,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ):
         self.identity, self.runtime, self.hour = identity, runtime, hour
         self._run, self._sleep, self._clock = runner, sleep, clock
 
     def argv(self, droplet: Droplet, command: list[str]) -> list[str]:
         if not droplet.public_ipv4:
             raise RemoteError("worker has no public address yet")
-        return ["ssh", "-i", str(self.identity), *ssh_options(self.runtime, self.hour),
-                droplet.public_ipv4, "--", shlex.join(command)]
+        return [
+            "ssh",
+            "-i",
+            str(self.identity),
+            *ssh_options(self.runtime, self.hour),
+            droplet.public_ipv4,
+            "--",
+            shlex.join(command),
+        ]
 
-    async def _call(self, droplet: Droplet, command: list[str], what: str, *,
-                    stdin: bytes | None = None, seconds: float = 120,
-                    sink: BinaryIO | None = None, limit: int = OUTPUT_BYTES) -> bytes:
+    async def _call(
+        self,
+        droplet: Droplet,
+        command: list[str],
+        what: str,
+        *,
+        stdin: bytes | None = None,
+        seconds: float = 120,
+        sink: BinaryIO | None = None,
+        limit: int = OUTPUT_BYTES,
+    ) -> bytes:
         """Run one remote command; its output goes to `sink`, or is returned when none."""
         owned_dir(self.runtime)
         owned_dir(control_dir(self.runtime))
@@ -202,8 +240,15 @@ class OpenSSHRemote:
             raise RemoteError(f"{what} failed (exit {code})")
         return b"" if sink else buffer.getvalue()
 
-    async def run(self, droplet: Droplet, command: list[str], what: str, *,
-                  stdin: bytes | None = None, seconds: float = 120) -> bytes:
+    async def run(
+        self,
+        droplet: Droplet,
+        command: list[str],
+        what: str,
+        *,
+        stdin: bytes | None = None,
+        seconds: float = 120,
+    ) -> bytes:
         """Run one fixed command (inputs on stdin only) and return its output."""
         return await self._call(droplet, command, what, stdin=stdin, seconds=seconds)
 
@@ -222,8 +267,9 @@ class OpenSSHRemote:
         await self._call(droplet, command, "push and start", stdin=payload, seconds=300)
 
     async def inspect(self, droplet: Droplet) -> dict[str, Any]:
-        out = await self._call(droplet, ["python3", "-c", REMOTE_INSPECT, WORKER_ROOT],
-                               "inspect", seconds=30)
+        out = await self._call(
+            droplet, ["python3", "-c", REMOTE_INSPECT, WORKER_ROOT], "inspect", seconds=30
+        )
         return json.loads(out)
 
     async def stop(self, droplet: Droplet) -> None:
@@ -233,16 +279,23 @@ class OpenSSHRemote:
         """Replace `local` with the remote round directory, once its state is terminal."""
         parent, name = remote.rstrip("/").rsplit("/", 1)
         where = shlex.quote(remote)  # an unstarted round's directory is pulled empty
-        command = (f"python3 -c {shlex.quote(TERMINAL_CHECK)} {where} && mkdir -p {where} && "
-                   f"tar -C {shlex.quote(parent)} -cf - {shlex.quote(name)}")
+        command = (
+            f"python3 -c {shlex.quote(TERMINAL_CHECK)} {where} && mkdir -p {where} && "
+            f"tar -C {shlex.quote(parent)} -cf - {shlex.quote(name)}"
+        )
         private_dir(local.parent)
-        archive, staging = (local.parent / f".{local.name}.pull{suffix}"
-                            for suffix in (".tar", ""))
+        archive, staging = (local.parent / f".{local.name}.pull{suffix}" for suffix in (".tar", ""))
         shutil.rmtree(staging, ignore_errors=True)
         try:
             with archive.open("wb") as sink:
-                await self._call(droplet, ["sh", "-c", command], "pull", seconds=1800,
-                                 sink=sink, limit=PULL_BYTES)
+                await self._call(
+                    droplet,
+                    ["sh", "-c", command],
+                    "pull",
+                    seconds=1800,
+                    sink=sink,
+                    limit=PULL_BYTES,
+                )
             safe_extract(archive, staging, name)
             shutil.rmtree(local, ignore_errors=True)
             (staging / name).replace(local)
@@ -251,10 +304,18 @@ class OpenSSHRemote:
             shutil.rmtree(staging, ignore_errors=True)
 
     async def journal(self, droplet: Droplet, local: Path) -> None:
-        command = (f"journalctl -u {ROUND_UNIT} -u {SAMPLER_UNIT} --no-pager -o short-iso"
-                   f" | tail -c {JOURNAL_BYTES}")
+        command = (
+            f"journalctl -u {ROUND_UNIT} -u {SAMPLER_UNIT} --no-pager -o short-iso"
+            f" | tail -c {JOURNAL_BYTES}"
+        )
         private_dir(local.parent)
         fd = os.open(local, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as sink:
-            await self._call(droplet, ["sh", "-c", command], "journal", seconds=120, sink=sink,
-                             limit=JOURNAL_BYTES)
+            await self._call(
+                droplet,
+                ["sh", "-c", command],
+                "journal",
+                seconds=120,
+                sink=sink,
+                limit=JOURNAL_BYTES,
+            )

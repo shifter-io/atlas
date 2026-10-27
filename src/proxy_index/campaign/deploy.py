@@ -54,18 +54,49 @@ SECRETS = f"{BASE}/.secrets"
 STAGE = "/root/pi-camp-deploy"
 MANAGER_REGION, MANAGER_SIZE = "lon1", "s-8vcpu-16gb"
 IP_ECHO = "https://ip-info.com/myip"  # the campaign's own echo target (plan D8)
-UNIT_FILES = tuple(f"proxy-index-campaign-{name}" for name in (
-    "tick@.service", "tick@.timer", "collector@.service", "watchdog-armed@.service",
-    "watchdog-armed@.timer", "watchdog-fired@.service", "watchdog-fired@.timer"))
+UNIT_FILES = tuple(
+    f"proxy-index-campaign-{name}"
+    for name in (
+        "tick@.service",
+        "tick@.timer",
+        "collector@.service",
+        "watchdog-armed@.service",
+        "watchdog-armed@.timer",
+        "watchdog-fired@.service",
+        "watchdog-fired@.timer",
+    )
+)
 GONE = ("deleted", "absent")  # guarded_delete results that leave nothing behind
 # What `teardown --keep-worker-assets` moves into `retired_managers`; RESET is cleared with it
 # so the next `deploy` creates, provisions and records a new manager from scratch.
-RETIRED = ("manager_id", "manager_name", "manager_since", "manager_size", "manager_firewall_id",
-           "campaigns", "worker_key_id", "worker_key_name", "framework_version")
-RESET = RETIRED + ("host", "mac_ipv4", "secrets_shredded", "campaign_id", "specs", "enabled",
-                   "disabled", "credentials", "wheel_sha256", "deployed_at", "teardown")
-SHRED = (f"cd {BASE} && find .secrets -type f -exec shred -u {{}} + && rm -rf .secrets && "
-         "test ! -e .secrets && echo shredded")
+RETIRED = (
+    "manager_id",
+    "manager_name",
+    "manager_since",
+    "manager_size",
+    "manager_firewall_id",
+    "campaigns",
+    "worker_key_id",
+    "worker_key_name",
+    "framework_version",
+)
+RESET = RETIRED + (
+    "host",
+    "mac_ipv4",
+    "secrets_shredded",
+    "campaign_id",
+    "specs",
+    "enabled",
+    "disabled",
+    "credentials",
+    "wheel_sha256",
+    "deployed_at",
+    "teardown",
+)
+SHRED = (
+    f"cd {BASE} && find .secrets -type f -exec shred -u {{}} + && rm -rf .secrets && "
+    "test ! -e .secrets && echo shredded"
+)
 PROBE = f"test -d {BASE} && echo present || echo absent"  # a deploy that stopped early has none
 
 
@@ -76,8 +107,15 @@ class DeployError(RuntimeError):
 def unit_names(cid: str) -> list[str]:
     """The units `enable` starts for one campaign: three timers and the collector."""
     short_id(cid)
-    return [f"proxy-index-campaign-{name}@{cid}.{kind}" for name, kind in (("tick", "timer"), (
-        "collector", "service"), ("watchdog-armed", "timer"), ("watchdog-fired", "timer"))]
+    return [
+        f"proxy-index-campaign-{name}@{cid}.{kind}"
+        for name, kind in (
+            ("tick", "timer"),
+            ("collector", "service"),
+            ("watchdog-armed", "timer"),
+            ("watchdog-fired", "timer"),
+        )
+    ]
 
 
 def timer_dropins(cid: str, spec: dict) -> list[tuple[str, bytes, int]]:
@@ -87,16 +125,22 @@ def timer_dropins(cid: str, spec: dict) -> list[tuple[str, bytes, int]]:
     if slot == 60:
         return []
     found = timer_calendars(slot, spec.get("create_lead_seconds", 90))
-    roles = {"tick": "launch", "watchdog-armed": "watchdog (armed)",
-             "watchdog-fired": "watchdog (fired)"}
+    roles = {
+        "tick": "launch",
+        "watchdog-armed": "watchdog (armed)",
+        "watchdog-fired": "watchdog (fired)",
+    }
     dropins = []
     for name, calendar in found.items():
-        text = (f"# CAMP-1: campaign {cid} has a slot every {slot} minutes.\n[Unit]\n"
-                f"Description=Proxy Index campaign %i: {roles[name]} every {slot} min at "
-                f"{calendar.removeprefix('*-*-* ')}\n[Timer]\n"
-                f"OnCalendar=\nOnCalendar={calendar}\n")
-        dropins.append((f"proxy-index-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(),
-                        0o644))
+        text = (
+            f"# CAMP-1: campaign {cid} has a slot every {slot} minutes.\n[Unit]\n"
+            f"Description=Proxy Index campaign %i: {roles[name]} every {slot} min at "
+            f"{calendar.removeprefix('*-*-* ')}\n[Timer]\n"
+            f"OnCalendar=\nOnCalendar={calendar}\n"
+        )
+        dropins.append(
+            (f"proxy-index-campaign-{name}@{cid}.timer.d/slots.conf", text.encode(), 0o644)
+        )
     return dropins
 
 
@@ -116,9 +160,13 @@ async def check_account(cloud: DigitalOcean, inventory: dict[str, Any], account:
     Proxy Index project id (each team has its own). Returns the project id."""
     project_id = await cloud.project_id(PROJECT_NAME)
     if (inventory.get("account", account), inventory.get("project_id", project_id)) != (
-            account, project_id):
-        raise DeployError(f"the recorded manager is on account {inventory.get('account')}, "
-                          f"not on this client's account ({account})")
+        account,
+        project_id,
+    ):
+        raise DeployError(
+            f"the recorded manager is on account {inventory.get('account')}, "
+            f"not on this client's account ({account})"
+        )
     return project_id
 
 
@@ -143,8 +191,12 @@ def checked_ipv4(value: str) -> str:
 
 def mac_ipv4(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> str:
     """This Mac's public IPv4, as the echo target sees it."""
-    found = run(["curl", "-4", "-fsS", "--max-time", "10", IP_ECHO], capture_output=True,
-                text=True, check=False)
+    found = run(
+        ["curl", "-4", "-fsS", "--max-time", "10", IP_ECHO],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     return checked_ipv4(found.stdout if found.returncode == 0 else "")
 
 
@@ -155,9 +207,14 @@ def _toml_string(value: str) -> str:
 
 def toml_table(name: str, values: dict[str, Any]) -> bytes:
     """One `[name]` table of string values, checked by reading it back with `tomllib`."""
-    if not values or not re.fullmatch(NETWORK_RE, name) or any(
+    if (
+        not values
+        or not re.fullmatch(NETWORK_RE, name)
+        or any(
             not re.fullmatch(r"[A-Za-z0-9_-]+", key) or type(value) is not str
-            for key, value in values.items()):
+            for key, value in values.items()
+        )
+    ):
         raise DeployError(f"credentials for {name} must be a table of strings")
     text = f"[{name}]\n" + "".join(f"{k} = {_toml_string(v)}\n" for k, v in values.items())
     if tomllib.loads(text) != {name: values}:
@@ -196,10 +253,23 @@ class Manager:
 
     def argv(self, command: str) -> list[str]:
         inv = self.inventory
-        return ["ssh", "-i", inv["identity"], "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
-                "-o", "StrictHostKeyChecking=accept-new", "-o",
-                known_hosts_option(known_hosts(self.path, inv)), "-o", "ConnectTimeout=10",
-                f"root@{inv['host']}", command]
+        return [
+            "ssh",
+            "-i",
+            inv["identity"],
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            known_hosts_option(known_hosts(self.path, inv)),
+            "-o",
+            "ConnectTimeout=10",
+            f"root@{inv['host']}",
+            command,
+        ]
 
     async def run(self, command: str, what: str, stdin: bytes = b"") -> str:
         code, out = await self.shell(self.argv(command), stdin)
@@ -217,8 +287,11 @@ class Manager:
     async def put_secret(self, relative: str, data: bytes) -> None:
         """Write one root-only 0600 file under `.secrets/` from stdin; nothing in `argv`."""
         target = shlex.quote(f"{SECRETS}/{relative}")
-        await self.run(f"umask 077 && cat > {target}.partial && mv -f {target}.partial "
-                       f"{target}", f"secret {relative}", data)
+        await self.run(
+            f"umask 077 && cat > {target}.partial && mv -f {target}.partial {target}",
+            f"secret {relative}",
+            data,
+        )
 
 
 @dataclass(frozen=True)
@@ -238,15 +311,29 @@ class DeployJob:
     def payload(self) -> bytes:
         assets = files("proxy_index.campaign").joinpath("assets")
         public = self.mac_key.with_name(self.mac_key.name + ".pub").read_bytes()
-        return _tar([("manager-provision.sh", assets.joinpath("manager-provision.sh")
-                      .read_bytes(), 0o700), ("requirements.txt", self.requirements
-                     .read_bytes(), 0o600), (self.wheel.name, self.wheel.read_bytes(), 0o600),
-                     ("mac.pub", public, 0o600)] + [
-            (f"units/{name}", assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES])
+        return _tar(
+            [
+                (
+                    "manager-provision.sh",
+                    assets.joinpath("manager-provision.sh").read_bytes(),
+                    0o700,
+                ),
+                ("requirements.txt", self.requirements.read_bytes(), 0o600),
+                (self.wheel.name, self.wheel.read_bytes(), 0o600),
+                ("mac.pub", public, 0o600),
+            ]
+            + [(f"units/{name}", assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
+        )
 
 
-async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shell,
-                 sleep: ops_api.Sleep = asyncio.sleep, now: datetime | None = None) -> dict:
+async def deploy(
+    cloud: DigitalOcean,
+    job: DeployJob,
+    *,
+    shell: Shell = run_shell,
+    sleep: ops_api.Sleep = asyncio.sleep,
+    now: datetime | None = None,
+) -> dict:
     """Create (once) and harden the manager, then install the wheel, units and secrets.
 
     Run again with a new wheel to update a recorded manager; it is never created twice."""
@@ -258,33 +345,63 @@ async def deploy(cloud: DigitalOcean, job: DeployJob, *, shell: Shell = run_shel
         await _refuse_while_running(Manager(inventory, path, shell), inventory["campaigns"])
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
     mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
-    save(path, inventory, account=job.account, project_id=project_id, mac_key_id=mac_key_id,
-         manager_size=size, user="root",
-         identity=str(job.mac_key), identity_file=str(job.mac_key),
-         known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
-         campaigns_root=f"{BASE}/campaigns")
+    save(
+        path,
+        inventory,
+        account=job.account,
+        project_id=project_id,
+        mac_key_id=mac_key_id,
+        manager_size=size,
+        user="root",
+        identity=str(job.mac_key),
+        identity_file=str(job.mac_key),
+        known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
+        campaigns_root=f"{BASE}/campaigns",
+    )
     manager = await _ensure_manager(cloud, job, inventory, now, sleep)
     scope = manager_scope(inventory)
     rules = ops_api.manager_firewall(job.mac_ipv4, manager.id)
-    save(path, inventory, mac_ipv4=job.mac_ipv4, manager_firewall_id=await ops_api.apply_firewall(
-        cloud, scope, rules, inventory.get("manager_firewall_id")))
+    save(
+        path,
+        inventory,
+        mac_ipv4=job.mac_ipv4,
+        manager_firewall_id=await ops_api.apply_firewall(
+            cloud, scope, rules, inventory.get("manager_firewall_id")
+        ),
+    )
     remote = Manager(inventory, path, shell)
     worker_public = await _provision(remote, job, sleep)
     await remote.put_secret("do-token", job.token().encode())
     for network, data in job.credentials.items():
         await remote.put_secret(f"credentials/{network}.toml", data)
     key_id, key_name, _ = await ops_api.ensure_ssh_key(
-        cloud, await _worker_key_name(cloud, now, worker_public), worker_public)
+        cloud, await _worker_key_name(cloud, now, worker_public), worker_public
+    )
     rules = ops_api.worker_firewall(inventory["host"])
-    save(path, inventory, worker_key_id=key_id, worker_key_name=key_name,
-         worker_firewall_id=await ops_api.apply_firewall(
-             cloud, scope, rules, inventory.get("worker_firewall_id")),
-         wheel_sha256=digest(job.wheel), framework_version=job.wheel.name.split("-")[1],
-         credentials=sorted({*inventory.get("credentials", []), *job.credentials}),
-         deployed_at=now.isoformat())
-    keys = ("manager_id", "manager_name", "manager_size", "manager_firewall_id",
-            "worker_firewall_id", "worker_key_id", "worker_key_name", "wheel_sha256",
-            "credentials")
+    save(
+        path,
+        inventory,
+        worker_key_id=key_id,
+        worker_key_name=key_name,
+        worker_firewall_id=await ops_api.apply_firewall(
+            cloud, scope, rules, inventory.get("worker_firewall_id")
+        ),
+        wheel_sha256=digest(job.wheel),
+        framework_version=job.wheel.name.split("-")[1],
+        credentials=sorted({*inventory.get("credentials", []), *job.credentials}),
+        deployed_at=now.isoformat(),
+    )
+    keys = (
+        "manager_id",
+        "manager_name",
+        "manager_size",
+        "manager_firewall_id",
+        "worker_firewall_id",
+        "worker_key_id",
+        "worker_key_name",
+        "wheel_sha256",
+        "credentials",
+    )
     return {key: inventory[key] for key in keys}
 
 
@@ -293,12 +410,13 @@ async def manager_size(cloud: DigitalOcean, inventory: dict[str, Any], wanted: s
     recorded is MANAGER_SIZE); a new one takes `wanted`, else the size of an attempt that
     failed before its manager was recorded, else MANAGER_SIZE, and it must be offered in
     MANAGER_REGION."""
-    recorded = inventory.get("manager_size", MANAGER_SIZE) if inventory.get(
-        "manager_id") else None
+    recorded = inventory.get("manager_size", MANAGER_SIZE) if inventory.get("manager_id") else None
     size = wanted or recorded or inventory.get("manager_size") or MANAGER_SIZE
     if recorded and size != recorded:
-        raise DeployError(f"the recorded manager is {recorded}; tear it down with "
-                          f"--keep-worker-assets before deploying a {size} manager")
+        raise DeployError(
+            f"the recorded manager is {recorded}; tear it down with "
+            f"--keep-worker-assets before deploying a {size} manager"
+        )
     if not recorded and MANAGER_REGION not in (await cloud.sizes()).get(size, []):
         raise DeployError(f"size {size} is not offered in {MANAGER_REGION}")
     return size
@@ -308,25 +426,33 @@ async def _worker_key_name(cloud: DigitalOcean, now: datetime, public: str) -> s
     """The dated worker key name, with a suffix when a kept key of a retired manager already
     holds it (the plan finds the worker key by its unique name)."""
     name, wanted = f"pi-camp-worker-{now:%Y%m%d}", public.split()[:2]
-    taken = {str(k.get("name")) for k in await cloud.ssh_keys()
-             if str(k.get("public_key", "")).split()[:2] != wanted}
+    taken = {
+        str(k.get("name"))
+        for k in await cloud.ssh_keys()
+        if str(k.get("public_key", "")).split()[:2] != wanted
+    }
     return f"{name}-{secrets.token_hex(2)}" if name in taken else name
 
 
 async def _refuse_while_running(remote: Manager, campaigns: list[str]) -> None:
     """A deploy reinstalls the venv and the wheel under the units: never while a campaign's
     tick or collector runs. The watchdog timers stay active until `disable` (they only alert)."""
-    units = " ".join(f"proxy-index-campaign-{name}@{cid}.{kind}" for cid in campaigns
-                     for name, kind in (("tick", "timer"), ("tick", "service"),
-                                        ("collector", "service")))
-    out = await remote.run(f"for u in {units}; do systemctl is-active --quiet $u && "
-                           "echo active $u; done; true", "check running units")
+    units = " ".join(
+        f"proxy-index-campaign-{name}@{cid}.{kind}"
+        for cid in campaigns
+        for name, kind in (("tick", "timer"), ("tick", "service"), ("collector", "service"))
+    )
+    out = await remote.run(
+        f"for u in {units}; do systemctl is-active --quiet $u && echo active $u; done; true",
+        "check running units",
+    )
     if "active " in out:
         raise DeployError("a campaign's units are running; deploy only between campaigns")
 
 
-async def _ensure_manager(cloud: DigitalOcean, job: DeployJob, inventory: dict, now: datetime,
-                          sleep: ops_api.Sleep) -> Droplet:
+async def _ensure_manager(
+    cloud: DigitalOcean, job: DeployJob, inventory: dict, now: datetime, sleep: ops_api.Sleep
+) -> Droplet:
     """The recorded manager, or a new one of the recorded size: created, moved into Proxy
     Index, then active."""
     if not inventory.get("manager_id"):
@@ -334,9 +460,16 @@ async def _ensure_manager(cloud: DigitalOcean, job: DeployJob, inventory: dict, 
         save(job.inventory, inventory, manager_name=name, manager_since=now.isoformat())
         try:
             [droplet] = await cloud.create(
-                [name], region=MANAGER_REGION, size=inventory["manager_size"], image=BASE_IMAGE,
-                tags=[MANAGER_TAG], ssh_keys=[inventory["mac_key_id"]],
-                with_droplet_agent=False, monitoring=False, ipv6=False)
+                [name],
+                region=MANAGER_REGION,
+                size=inventory["manager_size"],
+                image=BASE_IMAGE,
+                tags=[MANAGER_TAG],
+                ssh_keys=[inventory["mac_key_id"]],
+                with_droplet_agent=False,
+                monitoring=False,
+                ipv6=False,
+            )
         except CreateError as error:
             adopted = await cloud.adopt_uncertain([name], MANAGER_TAG) if error.uncertain else []
             if not adopted:
@@ -344,11 +477,16 @@ async def _ensure_manager(cloud: DigitalOcean, job: DeployJob, inventory: dict, 
             droplet = adopted[0]
         save(job.inventory, inventory, manager_id=droplet.id)
         try:
-            await ops_api.assign(cloud, manager_scope(inventory), droplet,
-                                 audit_path(job.inventory), "manager")
+            await ops_api.assign(
+                cloud, manager_scope(inventory), droplet, audit_path(job.inventory), "manager"
+            )
         except ops_api.OpsError:  # removed through the guard (or listed); a rerun starts fresh
-            save(job.inventory, inventory, manager_id=None, unassigned_managers=[
-                *inventory.get("unassigned_managers", []), droplet.id])
+            save(
+                job.inventory,
+                inventory,
+                manager_id=None,
+                unassigned_managers=[*inventory.get("unassigned_managers", []), droplet.id],
+            )
             raise
     ready = await ops_api.wait_droplet(cloud, str(inventory["manager_id"]), "active", sleep)
     save(job.inventory, inventory, host=ready.public_ipv4)
@@ -358,12 +496,17 @@ async def _ensure_manager(cloud: DigitalOcean, job: DeployJob, inventory: dict, 
 async def _provision(remote: Manager, job: DeployJob, sleep: ops_api.Sleep) -> str:
     """Run the provision script; returns the worker key's public part. Ends `hardened`."""
     await remote.wait_ssh(sleep)
-    command = (f"rm -rf {STAGE} && mkdir -m 700 {STAGE} && tar -x -C {STAGE} && "
-               f"bash {STAGE}/manager-provision.sh")
+    command = (
+        f"rm -rf {STAGE} && mkdir -m 700 {STAGE} && tar -x -C {STAGE} && "
+        f"bash {STAGE}/manager-provision.sh"
+    )
     code, out = await remote.shell(remote.argv(command), job.payload())
     lines = out.strip().splitlines() or [""]
-    keys = [line.removeprefix("worker-key ") for line in lines
-            if re.fullmatch(r"worker-key ssh-ed25519 [A-Za-z0-9+/=]+", line)]
+    keys = [
+        line.removeprefix("worker-key ")
+        for line in lines
+        if re.fullmatch(r"worker-key ssh-ed25519 [A-Za-z0-9+/=]+", line)
+    ]
     if code != 0 or lines[-1] != "hardened" or len(keys) != 1:
         raise DeployError(f"manager provision failed ({code}): {lines[-1][:200]}")
     return keys[0]
@@ -380,22 +523,33 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
     inventory = load_inventory(inventory_path)
     spec = CampaignSpec.from_json(spec_path(root).read_text())
     if not inventory.get("manager_id") or (
-            spec.manager_droplet_id, spec.wheel_sha256, spec.account, spec.project_id) != (
-            str(inventory["manager_id"]), inventory.get("wheel_sha256"),
-            inventory.get("account"), inventory.get("project_id")):
+        spec.manager_droplet_id,
+        spec.wheel_sha256,
+        spec.account,
+        spec.project_id,
+    ) != (
+        str(inventory["manager_id"]),
+        inventory.get("wheel_sha256"),
+        inventory.get("account"),
+        inventory.get("project_id"),
+    ):
         raise DeployError("the spec does not name the deployed manager, wheel and account")
     target = f"{BASE}/campaigns/{spec.campaign_id}"
     await Manager(inventory, inventory_path, shell).run(
-        f"umask 077 && test ! -e {target} && mkdir {target} && "
-        f"tar -x --no-same-owner -C {target}", "upload-spec (exists or failed)",
-        spec_payload(root))
+        f"umask 077 && test ! -e {target} && mkdir {target} && tar -x --no-same-owner -C {target}",
+        "upload-spec (exists or failed)",
+        spec_payload(root),
+    )
     campaigns = sorted({*inventory.get("campaigns", []), spec.campaign_id})
-    slots = ({"slot_minutes": spec.slot_minutes, "create_lead_seconds": spec.create_lead_seconds}
-             if spec.slot_minutes != 60 else {})
-    specs = inventory.get("specs", {}) | {spec.campaign_id: {
-        "starts_at": spec.starts_at, "synthetic": spec.synthetic, **slots}}
-    save(inventory_path, inventory, campaigns=campaigns, campaign_id=spec.campaign_id,
-         specs=specs)
+    slots = (
+        {"slot_minutes": spec.slot_minutes, "create_lead_seconds": spec.create_lead_seconds}
+        if spec.slot_minutes != 60
+        else {}
+    )
+    specs = inventory.get("specs", {}) | {
+        spec.campaign_id: {"starts_at": spec.starts_at, "synthetic": spec.synthetic, **slots}
+    }
+    save(inventory_path, inventory, campaigns=campaigns, campaign_id=spec.campaign_id, specs=specs)
     return {"campaign_id": spec.campaign_id, "campaigns": campaigns}
 
 
@@ -409,12 +563,23 @@ def owner_go_record(cid: str, owner_go: Path | None, spec: dict, now: datetime) 
     line = f"Start: {datetime.fromisoformat(spec['starts_at']).astimezone(UTC):%Y-%m-%dT%H:00Z}"
     if not spec["synthetic"] and line not in text.splitlines():
         raise DeployError(f"the owner's go must hold the line '{line}' (D9)")
-    return {"campaign_id": cid, "owner_go": str(owner_go.resolve()), "synthetic": spec[
-        "synthetic"], "owner_go_sha256": digest(owner_go), "enabled_at": now.isoformat()}
+    return {
+        "campaign_id": cid,
+        "owner_go": str(owner_go.resolve()),
+        "synthetic": spec["synthetic"],
+        "owner_go_sha256": digest(owner_go),
+        "enabled_at": now.isoformat(),
+    }
 
 
-async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
-                 shell: Shell = run_shell, now: datetime | None = None) -> dict:
+async def enable(
+    inventory_path: Path,
+    cid: str,
+    owner_go: Path | None,
+    *,
+    shell: Shell = run_shell,
+    now: datetime | None = None,
+) -> dict:
     """Start the tick timer, collector and watchdogs, only with the owner's recorded go (D9).
     A campaign with other than hourly slots first gets its timer drop-ins (`timer_dropins`)."""
     units, inventory = unit_names(cid), load_inventory(inventory_path)
@@ -426,21 +591,26 @@ async def enable(inventory_path: Path, cid: str, owner_go: Path | None, *,
     dropins = timer_dropins(cid, spec)
     command = "systemctl enable --now " + " ".join(units)
     if dropins:
-        command = ("umask 022 && tar -x --no-same-owner -C /etc/systemd/system && "
-                   f"systemctl daemon-reload && {command}")
-    await Manager(inventory, inventory_path, shell).run(command, "enable",
-                                                        _tar(dropins) if dropins else b"")
+        command = (
+            "umask 022 && tar -x --no-same-owner -C /etc/systemd/system && "
+            f"systemctl daemon-reload && {command}"
+        )
+    await Manager(inventory, inventory_path, shell).run(
+        command, "enable", _tar(dropins) if dropins else b""
+    )
     return go | {"units": units}
 
 
-async def disable(inventory_path: Path, cid: str, *, shell: Shell = run_shell,
-                  now: datetime | None = None) -> dict:
+async def disable(
+    inventory_path: Path, cid: str, *, shell: Shell = run_shell, now: datetime | None = None
+) -> dict:
     """Stop one campaign's timers and collector (the end of the dry run, or an owner's stop)."""
     units, inventory = unit_names(cid), load_inventory(inventory_path)
     if cid not in inventory.get("campaigns", []):
         raise DeployError("campaign was never uploaded to the recorded manager")
     await Manager(inventory, inventory_path, shell).run(
-        "systemctl disable --now " + " ".join(units), "disable")
+        "systemctl disable --now " + " ".join(units), "disable"
+    )
     disabled = inventory.get("disabled", {}) | {cid: (now or datetime.now(UTC)).isoformat()}
     save(inventory_path, inventory, disabled=disabled)
     return {"campaign_id": cid, "units": units}
@@ -451,14 +621,16 @@ async def allow_me(cloud: DigitalOcean, inventory_path: Path, address: str) -> d
     inventory, address = load_inventory(inventory_path), checked_ipv4(address)
     await check_account(cloud, inventory, inventory.get("account", ""))
     rules = ops_api.manager_firewall(address, str(inventory["manager_id"]))
-    firewall = await ops_api.apply_firewall(cloud, manager_scope(inventory), rules,
-                                            inventory["manager_firewall_id"])
+    firewall = await ops_api.apply_firewall(
+        cloud, manager_scope(inventory), rules, inventory["manager_firewall_id"]
+    )
     save(inventory_path, inventory, mac_ipv4=address)
     return {"manager_firewall_id": firewall}
 
 
 def _remove_agent() -> bool:
     from .guard import remove
+
     return remove(Path.home())
 
 
@@ -470,7 +642,8 @@ def check_reports(inventory: dict, reports: list[Path]) -> None:
     for path in reports:
         report = read_json(path)
         if report.get("clean") is not True or any(
-                report.get(key) for key in ("mismatches", "missing", "extra")):
+            report.get(key) for key in ("mismatches", "missing", "extra")
+        ):
             raise DeployError(f"collect report {path.name} is not clean")
         if report.get("campaign_id") not in recorded:
             raise DeployError(f"collect report {path.name} is for no recorded campaign")
@@ -480,16 +653,21 @@ def check_reports(inventory: dict, reports: list[Path]) -> None:
         raise DeployError(f"teardown needs a clean collect report for {missing}")
 
 
-def _owned(inventory: dict, images: dict, keep_worker_assets: bool = False
-           ) -> list[tuple[str, str]]:
+def _owned(
+    inventory: dict, images: dict, keep_worker_assets: bool = False
+) -> list[tuple[str, str]]:
     """(kind, id) in teardown order: manager, firewalls, the worker keys (the current one and
     those kept from retired managers), the Mac key, snapshots. Keeping the worker assets
     leaves only the manager and its firewall."""
-    found = [("droplet", inventory.get("manager_id")),
-             ("firewall", inventory.get("manager_firewall_id"))]
+    found = [
+        ("droplet", inventory.get("manager_id")),
+        ("firewall", inventory.get("manager_firewall_id")),
+    ]
     if not keep_worker_assets:
-        found += [("firewall", inventory.get("worker_firewall_id")),
-                  ("ssh_key", inventory.get("worker_key_id"))]
+        found += [
+            ("firewall", inventory.get("worker_firewall_id")),
+            ("ssh_key", inventory.get("worker_key_id")),
+        ]
         found += [("ssh_key", key) for key in inventory.get("kept_worker_key_ids", [])]
         found += [("ssh_key", inventory.get("mac_key_id"))]
         found += [("snapshot", b.get("snapshot_id")) for b in images.get("builds", [])]
@@ -509,8 +687,7 @@ async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shel
     units = [unit for cid in inventory.get("campaigns", []) for unit in unit_names(cid)]
     if units:
         await remote.run("systemctl disable --now " + " ".join(units), "stop units")
-    if (await remote.run(PROBE, "find the base directory")).strip().splitlines()[-1:] == [
-            "absent"]:
+    if (await remote.run(PROBE, "find the base directory")).strip().splitlines()[-1:] == ["absent"]:
         return f"none: {BASE} does not exist"
     if (await remote.run(SHRED, "shred secrets")).strip().splitlines()[-1:] != ["shredded"]:
         raise DeployError("manager secrets were not shredded")
@@ -518,14 +695,17 @@ async def _silence(cloud: DigitalOcean, inventory: dict, path: Path, shell: Shel
     return "shredded"
 
 
-async def _release(cloud: DigitalOcean, inventory: dict, path: Path,
-                   keep_worker_assets: bool) -> list[dict]:
+async def _release(
+    cloud: DigitalOcean, inventory: dict, path: Path, keep_worker_assets: bool
+) -> list[dict]:
     """Every recorded resource through the guard, except what an earlier run removed. The
     manager's firewall stays while the manager does, so SSH never opens on a live manager."""
-    earlier = {(r["kind"], r["id"]): r["result"]
-               for r in inventory.get("teardown", {}).get("released", [])}
-    owned = _owned(inventory, load_inventory(path.with_name("campaign-images.json")),
-                   keep_worker_assets)
+    earlier = {
+        (r["kind"], r["id"]): r["result"] for r in inventory.get("teardown", {}).get("released", [])
+    }
+    owned = _owned(
+        inventory, load_inventory(path.with_name("campaign-images.json")), keep_worker_assets
+    )
     ledger = Ledger({kind: {rid for k, rid in owned if k == kind} for kind, _ in owned})
     scope, audit = manager_scope(inventory), audit_path(path)
 
@@ -542,8 +722,11 @@ async def _release(cloud: DigitalOcean, inventory: dict, path: Path,
         result = earlier.get((kind, rid), "")
         if result in GONE:
             pass
-        elif kind == "firewall" and rid == str(inventory.get("manager_firewall_id")) and not (
-                manager_gone):
+        elif (
+            kind == "firewall"
+            and rid == str(inventory.get("manager_firewall_id"))
+            and not (manager_gone)
+        ):
             result = "kept: the manager remains"
         else:
             result = await remove(kind, rid)
@@ -556,18 +739,30 @@ def _retire(path: Path, inventory: dict, done: dict) -> None:
     """Move the removed manager into `retired_managers`, keep its worker key for a later full
     teardown, and forget its host key, so the next `deploy` creates a new manager."""
     retired = {key: inventory.get(key) for key in RETIRED} | {"teardown": done}
-    kept = [*inventory.get("kept_worker_key_ids", []), *filter(None, [
-        inventory.get("worker_key_id")])]
+    kept = [
+        *inventory.get("kept_worker_key_ids", []),
+        *filter(None, [inventory.get("worker_key_id")]),
+    ]
     known_hosts(path, inventory).unlink(missing_ok=True)  # recorded before any manager
     for key in RESET:
         inventory.pop(key, None)
-    save(path, inventory, kept_worker_key_ids=kept, retired_managers=[
-        *inventory.get("retired_managers", []), retired])
+    save(
+        path,
+        inventory,
+        kept_worker_key_ids=kept,
+        retired_managers=[*inventory.get("retired_managers", []), retired],
+    )
 
 
-async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path], *,
-                   keep_worker_assets: bool = False, shell: Shell = run_shell,
-                   remove_agent: Callable[[], bool] | None = None) -> dict:
+async def teardown(
+    cloud: DigitalOcean,
+    inventory_path: Path,
+    reports: list[Path],
+    *,
+    keep_worker_assets: bool = False,
+    shell: Shell = run_shell,
+    remove_agent: Callable[[], bool] | None = None,
+) -> dict:
     """Section 16: refuse unless collected and no worker lives; stop the units; shred the
     secrets; remove every recorded resource (snapshots: from the image inventory beside the
     manager's) through the guard; remove the Mac agent; prove. Rerun it after a partial
@@ -585,14 +780,20 @@ async def teardown(cloud: DigitalOcean, inventory_path: Path, reports: list[Path
     secrets = await _silence(cloud, inventory, inventory_path, shell)
     released = await _release(cloud, inventory, inventory_path, keep_worker_assets)
     tags = [tag for tag, _ in ROLES.values()] + [
-        campaign_tag(c) for c in inventory.get("campaigns", [])]
+        campaign_tag(c) for c in inventory.get("campaigns", [])
+    ]
     proof = {tag: len(await cloud.list_tag(tag)) for tag in tags}
     stray = [i for i in inventory.get("unassigned_managers", []) if await cloud.get(str(i))]
-    clean = all(r["result"] in GONE for r in released) and not any(proof.values()) and not (
-        stray)
-    done = {"secrets": secrets, "released": released,
-            "agent_removed": (remove_agent or _remove_agent)(), "tag_counts": proof,
-            "unassigned_managers": stray, "clean": clean, "kept_worker_assets": keep_worker_assets}
+    clean = all(r["result"] in GONE for r in released) and not any(proof.values()) and not (stray)
+    done = {
+        "secrets": secrets,
+        "released": released,
+        "agent_removed": (remove_agent or _remove_agent)(),
+        "tag_counts": proof,
+        "unassigned_managers": stray,
+        "clean": clean,
+        "kept_worker_assets": keep_worker_assets,
+    }
     save(inventory_path, inventory, teardown=done)
     if keep_worker_assets and clean:
         _retire(inventory_path, inventory, done)

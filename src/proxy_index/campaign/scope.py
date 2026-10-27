@@ -44,11 +44,19 @@ UNASSIGNED_REMOVABLE = ("assign_failed", "destroy_failed", "destroyed")
 SETTLE_DELAYS = (1.0, 2.0, 4.0, 8.0, 15.0)
 SETTLING = frozenset({"readable", "exists", "tags", "name", "created_after"})
 # Removed from a stored error message: tokens, IPv4 and IPv6 addresses, long opaque strings.
-SECRETS = re.compile(r"(?i)bearer\s+\S+|\b(?:\d{1,3}\.){3}\d{1,3}\b"
-                     r"|\b(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}\b|[\w-]{32,}")
+SECRETS = re.compile(
+    r"(?i)bearer\s+\S+|\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    r"|\b(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}\b|[\w-]{32,}"
+)
 MESSAGE_LIMIT = 300
-PATHS = MappingProxyType({"droplet": "/v2/droplets/{}", "ssh_key": "/v2/account/keys/{}",
-                          "firewall": "/v2/firewalls/{}", "snapshot": "/v2/snapshots/{}"})
+PATHS = MappingProxyType(
+    {
+        "droplet": "/v2/droplets/{}",
+        "ssh_key": "/v2/account/keys/{}",
+        "firewall": "/v2/firewalls/{}",
+        "snapshot": "/v2/snapshots/{}",
+    }
+)
 Kind = Literal["droplet", "ssh_key", "firewall", "snapshot"]
 Role = Literal["worker", "manager", "builder"]
 # Per client: project membership cache and the project ids whose name was checked.
@@ -106,21 +114,33 @@ def require_guard(token: object) -> None:
         raise ScopeError("only scope.py may delete or assign to a project")
 
 
-def error_detail(cloud: DigitalOcean, droplet_ids: Collection[str],
-                 error: BaseException | None = None, failed: Collection[str] = ()) -> dict:
+def error_detail(
+    cloud: DigitalOcean,
+    droplet_ids: Collection[str],
+    error: BaseException | None = None,
+    failed: Collection[str] = (),
+) -> dict:
     """Why droplets failed, for the ledger and the audit: the exception class (`Unconfirmed`
     when nothing was raised), its message without tokens or addresses, the failed checks and
     the HTTP statuses of the latest calls about these droplets."""
     failed = list(getattr(error, "failed", failed))
     message = str(error) if error else f"not confirmed: failed {', '.join(failed)}"
-    return {"error": type(error).__name__ if error else "Unconfirmed",
-            "message": SECRETS.sub("[removed]", message)[:MESSAGE_LIMIT], "failed": failed,
-            "http": cloud.http_trace(droplet_ids)}
+    return {
+        "error": type(error).__name__ if error else "Unconfirmed",
+        "message": SECRETS.sub("[removed]", message)[:MESSAGE_LIMIT],
+        "failed": failed,
+        "http": cloud.http_trace(droplet_ids),
+    }
 
 
 def scope_for(spec: CampaignSpec) -> Scope:
-    return Scope(spec.campaign_id, short_id(spec.campaign_id), spec.project_id,
-                 str(spec.manager_droplet_id), datetime.fromisoformat(spec.created_at))
+    return Scope(
+        spec.campaign_id,
+        short_id(spec.campaign_id),
+        spec.project_id,
+        str(spec.manager_droplet_id),
+        datetime.fromisoformat(spec.created_at),
+    )
 
 
 def role_checks(droplet: Droplet, scope: Scope, role: Role) -> dict[str, bool]:
@@ -156,8 +176,9 @@ async def _in_project(cloud: DigitalOcean, project_id: str, droplet_id: str) -> 
     return droplet_id in members
 
 
-async def _droplet_checks(cloud: DigitalOcean, droplet: Droplet, scope: Scope, ledger: Ledger,
-                          role: Role, entry: dict) -> dict[str, bool]:
+async def _droplet_checks(
+    cloud: DigitalOcean, droplet: Droplet, scope: Scope, ledger: Ledger, role: Role, entry: dict
+) -> dict[str, bool]:
     """Checks 2-6; check 4 may be replaced only by the own-unassigned path (section 2)."""
     checks = role_checks(droplet, scope, role)
     checks["project_id"] = await _project_named(cloud, scope.project_id)
@@ -166,8 +187,11 @@ async def _droplet_checks(cloud: DigitalOcean, droplet: Droplet, scope: Scope, l
     record = ledger.records.get(droplet.id)
     # The ledger mark: only assign_and_verify_project writes it, for an id it had checked
     # against its own client's create. A restarted process has no other proof of that create.
-    marked = (record is not None and record.droplet_id == droplet.id
-              and record.assign_failed_at is not None)
+    marked = (
+        record is not None
+        and record.droplet_id == droplet.id
+        and record.assign_failed_at is not None
+    )
     exception = {
         "assign_failed": marked,
         "own_create": droplet.id in cloud.created_ids or marked,
@@ -183,10 +207,9 @@ async def _droplet_checks(cloud: DigitalOcean, droplet: Droplet, scope: Scope, l
 def _other_checks(kind: str, raw: dict, ledger: Ledger) -> dict[str, bool]:
     checks = {"name": str(raw.get("name", "")).startswith(RESOURCE_PREFIX)}
     if kind == "firewall":
-        checks["targets"] = (
-            all(str(tag).startswith(RESOURCE_PREFIX) for tag in raw.get("tags", []))
-            and all(ledger.has("droplet", str(i)) for i in raw.get("droplet_ids", []))
-        )
+        checks["targets"] = all(
+            str(tag).startswith(RESOURCE_PREFIX) for tag in raw.get("tags", [])
+        ) and all(ledger.has("droplet", str(i)) for i in raw.get("droplet_ids", []))
     return checks
 
 
@@ -202,8 +225,13 @@ def _audit(path: Path, entry: dict) -> None:
 
 
 async def guarded_delete(
-    cloud: DigitalOcean, kind: Kind, resource_id: str | int, scope: Scope, ledger: Ledger,
-    audit_path: Path, role: Role = "worker",
+    cloud: DigitalOcean,
+    kind: Kind,
+    resource_id: str | int,
+    scope: Scope,
+    ledger: Ledger,
+    audit_path: Path,
+    role: Role = "worker",
 ) -> str:
     """Delete one recorded resource of this campaign, or raise `OwnershipError`.
 
@@ -215,8 +243,14 @@ async def guarded_delete(
         raise ValueError("unknown resource kind or role")
     rid = str(resource_id)
     path = PATHS[kind].format(rid)
-    entry = {"time": utcnow().isoformat(), "kind": kind, "id": rid, "role": role,
-             "campaign": scope.sid, "path": "normal"}
+    entry = {
+        "time": utcnow().isoformat(),
+        "kind": kind,
+        "id": rid,
+        "role": role,
+        "campaign": scope.sid,
+        "path": "normal",
+    }
     record = ledger.records.get(rid) if kind == "droplet" else None
     if record is not None and record.error_detail:  # why this removal happens
         entry["cause"] = record.error_detail
@@ -228,7 +262,9 @@ async def guarded_delete(
         entry["name"] = raw.get("name")
         checks = {"recorded": ledger.has(kind, rid)} | (
             await _droplet_checks(cloud, parse_droplet(raw), scope, ledger, role, entry)
-            if kind == "droplet" else _other_checks(kind, raw, ledger))
+            if kind == "droplet"
+            else _other_checks(kind, raw, ledger)
+        )
         entry["checks"] = checks
         failed = _failed(checks)
         if failed:
@@ -239,15 +275,23 @@ async def guarded_delete(
     except OwnershipError:
         raise
     except Exception as error:
-        _audit(audit_path, entry | {"result": "failed", "error": type(error).__name__,
-                                    "http": getattr(error, "status", None)})
+        _audit(
+            audit_path,
+            entry
+            | {
+                "result": "failed",
+                "error": type(error).__name__,
+                "http": getattr(error, "status", None),
+            },
+        )
         raise
     _audit(audit_path, entry | {"result": "deleted", "http": 204})
     return "deleted"
 
 
-async def _fresh_owned(cloud: DigitalOcean, scope: Scope, rid: str,
-                       records: Mapping[str, DropletRecord], role: Role) -> list[str]:
+async def _fresh_owned(
+    cloud: DigitalOcean, scope: Scope, rid: str, records: Mapping[str, DropletRecord], role: Role
+) -> list[str]:
     """The failed checks of one id on a fresh GET ([] when it shows every marker).
 
     An id that is not recorded or not from this client's create raises `OwnershipError` on any
@@ -255,8 +299,10 @@ async def _fresh_owned(cloud: DigitalOcean, scope: Scope, rid: str,
     shown yet, tags, name, creation time); the caller reads it again. Anything else raises.
     """
     record = records.get(rid)
-    checks = {"recorded": record is not None and record.droplet_id == rid,
-              "own_create": rid in cloud.created_ids}
+    checks = {
+        "recorded": record is not None and record.droplet_id == rid,
+        "own_create": rid in cloud.created_ids,
+    }
     try:
         droplet = await cloud.get(rid)
     except Exception:  # unreadable: read again for our own ids only
@@ -308,9 +354,14 @@ async def _retrying(retry: Retry, step: Callable[[], Awaitable[bool]]) -> None:
             await retry.sleep(retry.delay)
 
 
-async def _shown(cloud: DigitalOcean, scope: Scope, ids: list[str],
-                 records: Mapping[str, DropletRecord], role: Role,
-                 retry: Retry) -> dict[str, list[str]]:
+async def _shown(
+    cloud: DigitalOcean,
+    scope: Scope,
+    ids: list[str],
+    records: Mapping[str, DropletRecord],
+    role: Role,
+    retry: Retry,
+) -> dict[str, list[str]]:
     """Before any POST: each id's failed checks on its latest fresh GET ([] when shown). Our
     own creates are read again, `retry.settle` apart, until shown. An id that is not provably
     ours raises `OwnershipError` at once."""
@@ -350,8 +401,12 @@ async def _assign(cloud: DigitalOcean, project_id: str, missing: set[str], retry
 
 
 async def assign_and_verify_project(
-    cloud: DigitalOcean, scope: Scope, droplet_ids: Collection[str],
-    records: Mapping[str, DropletRecord], audit_path: Path, role: Role = "worker",
+    cloud: DigitalOcean,
+    scope: Scope,
+    droplet_ids: Collection[str],
+    records: Mapping[str, DropletRecord],
+    audit_path: Path,
+    role: Role = "worker",
     retry: Retry = ASSIGN_RETRY,
 ) -> tuple[frozenset[str], frozenset[str]]:
     """The only assignment path: move droplets we just created into project Proxy Index.
@@ -376,14 +431,21 @@ async def assign_and_verify_project(
     now = utcnow().isoformat()
     for rid in set(ids) - set(unconfirmed):
         records[rid].status, records[rid].assigned_at = "assigned", now
-    await remove_unassigned(cloud, scope, records, audit_path, {
-        rid: error_detail(cloud, [rid], failed=reads[rid] or ["project"]) for rid in unconfirmed},
-        role, retry.save)
+    await remove_unassigned(
+        cloud,
+        scope,
+        records,
+        audit_path,
+        {rid: error_detail(cloud, [rid], failed=reads[rid] or ["project"]) for rid in unconfirmed},
+        role,
+        retry.save,
+    )
     return frozenset(ids) - set(unconfirmed), frozenset(unconfirmed)
 
 
-def _require_own(cloud: DigitalOcean, ids: Collection[str],
-                 records: Mapping[str, DropletRecord]) -> None:
+def _require_own(
+    cloud: DigitalOcean, ids: Collection[str], records: Mapping[str, DropletRecord]
+) -> None:
     """The mark's own precondition (m1): only ids from this client's own create, recorded."""
     for rid in sorted(ids):
         record = records.get(rid)
@@ -392,8 +454,13 @@ def _require_own(cloud: DigitalOcean, ids: Collection[str],
 
 
 async def remove_unassigned(
-    cloud: DigitalOcean, scope: Scope, records: Mapping[str, DropletRecord], audit_path: Path,
-    causes: Mapping[str, dict], role: Role = "worker", save: Callable[[], None] = _unsaved,
+    cloud: DigitalOcean,
+    scope: Scope,
+    records: Mapping[str, DropletRecord],
+    audit_path: Path,
+    causes: Mapping[str, dict],
+    role: Role = "worker",
+    save: Callable[[], None] = _unsaved,
 ) -> None:
     """Fail closed for droplets this client just created whose assignment was never confirmed,
     for any reason (`causes`: id -> `error_detail`). Each is set to `assign_failed` with the

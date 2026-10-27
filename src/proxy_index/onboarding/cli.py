@@ -30,19 +30,30 @@ def register(commands):
         "--start", required=True, help="Future whole UTC hour, e.g. 2027-01-01T22:00:00Z"
     )
     plan.add_argument("--output", type=Path, default=Path("onboarding-networks"))
-    plan.add_argument("--execution-mode", choices=("parallel", "sequential", "ephemeral"),
-                      default="parallel")
+    plan.add_argument(
+        "--execution-mode", choices=("parallel", "sequential", "ephemeral"), default="parallel"
+    )
     plan.add_argument("--region-order", nargs="+", help="Each of the eight regions, in daily order")
     plan.add_argument("--retry-http-469", action="store_true")
     plan.add_argument("--target-url", help="HTTP exit-IP destination")
-    plan.add_argument("--concurrency", type=int,
-                      help="Concurrent requests per country (default 1000; ephemeral 2000)")
+    plan.add_argument(
+        "--concurrency",
+        type=int,
+        help="Concurrent requests per country (default 1000; ephemeral 2000)",
+    )
     plan.add_argument("--processes", type=int, default=0)
     plan.add_argument("--timeout", type=float, default=10)
-    plan.add_argument("--grace-hours", type=int, default=48,
-                      help="Ephemeral only: observation-validity hours after the last round")
-    plan.add_argument("--allow-current-hour", action="store_true",
-                      help="Ephemeral only: accept the current whole UTC hour as the start")
+    plan.add_argument(
+        "--grace-hours",
+        type=int,
+        default=48,
+        help="Ephemeral only: observation-validity hours after the last round",
+    )
+    plan.add_argument(
+        "--allow-current-hour",
+        action="store_true",
+        help="Ephemeral only: accept the current whole UTC hour as the start",
+    )
     run = actions.add_parser("run", help="Arm or explicitly resume one region")
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--region", required=True)
@@ -67,8 +78,9 @@ def register(commands):
         action.add_argument("--round", type=int, required=True)
     one.add_argument("--provider-config", type=Path, required=True)
     one.add_argument("--credentials-file", type=Path)
-    one.add_argument("--mmdb", type=Path,
-                     help="Local MMDB: other-country exits count like duplicates (rule 4)")
+    one.add_argument(
+        "--mmdb", type=Path, help="Local MMDB: other-country exits count like duplicates (rule 4)"
+    )
 
     probe = actions.add_parser("probe", help="Single-country census calibration")
     probe.add_argument("--provider-config", type=Path, required=True)
@@ -164,11 +176,12 @@ async def _round(args):
 
     proxies = _proxies(args, load(args.manifest), no_list=True)
     stop = asyncio.Event()
-    with _signals(stop), (LocalEnricher(args.mmdb) if args.mmdb else nullcontext()) as enricher:
+    with _signals(stop), LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
         # The round's census runs get the enricher, which turns on the country check.
         extra = {"run_country": functools.partial(run, enricher=enricher)} if enricher else {}
-        result = await execute_round(args.manifest, args.region, args.round,
-                                     proxies.__getitem__, stop=stop, **extra)
+        result = await execute_round(
+            args.manifest, args.region, args.round, proxies.__getitem__, stop=stop, **extra
+        )
     print(json.dumps({key: result[key] for key in ("campaign_id", "region", "round", "status")}))
     return 130 if result["status"] == "stopped" else 0
 
@@ -222,10 +235,16 @@ def _plan(args) -> Path:
     if args.concurrency is not None:
         run_settings["concurrency"] = args.concurrency
     return create(
-        args.provider_config, args.product, args.start, args.output,
-        execution_mode=args.execution_mode, region_order=args.region_order,
-        retry_http_469=args.retry_http_469, target_url=args.target_url,
-        run_settings=run_settings, grace_hours=args.grace_hours,
+        args.provider_config,
+        args.product,
+        args.start,
+        args.output,
+        execution_mode=args.execution_mode,
+        region_order=args.region_order,
+        retry_http_469=args.retry_http_469,
+        target_url=args.target_url,
+        run_settings=run_settings,
+        grace_hours=args.grace_hours,
         allow_current_hour=args.allow_current_hour,
     )
 

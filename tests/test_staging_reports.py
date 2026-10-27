@@ -78,7 +78,8 @@ async def test_scheduler_switches_skip_planning(database, db, capsys):
     assert jobs(database, "pulse_plan")[-1] == ("ok", None)
     # Pulses, and the load wave the census target's pulse slot adds; no census.
     assert query(database, "SELECT DISTINCT kind FROM test_batches ORDER BY 1") == [
-        ("load",), ("pulse",)
+        ("load",),
+        ("pulse",),
     ]
 
     assert main(["scheduler", "on", "--census", "--database-file", str(database)]) == 0
@@ -98,8 +99,10 @@ async def test_overlap_skip_count_still_records_ok(database, db):
     await batches.census_plan(db, NOW)
     # A slot whose start_at (slot + 30 s) has passed, with the first census still open.
     with connect(database) as conn:
-        conn.execute("UPDATE countries SET census_time=%s WHERE country_code='DE'",
-                     ((datetime.now(UTC) - timedelta(seconds=40)).time(),))
+        conn.execute(
+            "UPDATE countries SET census_time=%s WHERE country_code='DE'",
+            ((datetime.now(UTC) - timedelta(seconds=40)).time(),),
+        )
     scheduler = Scheduler(db)
     register_jobs(scheduler, db, str(database))
     assert (await scheduler.run_now("census_plan"))["skipped"] == 1
@@ -156,18 +159,26 @@ async def test_census_interval_slots_idempotent_and_overlap(database, db):
     later = slot + timedelta(minutes=4)
     for at in (later - timedelta(seconds=59.8), later + timedelta(milliseconds=200)):
         assert await batches.census_plan(db, at) == {
-            "created": 0, "skipped": 0, "deferred": 2, "no_node": 0,
+            "created": 0,
+            "skipped": 0,
+            "deferred": 2,
+            "no_node": 0,
         }
     assert len(census()) == 2
     assert await batches.census_plan(db, later + lead) == {
-        "created": 0, "skipped": 2, "deferred": 0, "no_node": 0,
+        "created": 0,
+        "skipped": 2,
+        "deferred": 0,
+        "no_node": 0,
     }
     assert [row[1:] for row in census()[2:]] == [(later, later + lead, "skipped")] * 2
     events = query(
         database, "SELECT country_code,data->>'reason' FROM test_events ORDER BY country_code"
     )
-    assert events == [("AT", "previous census still scheduled"),
-                      ("DE", "previous census still scheduled")]
+    assert events == [
+        ("AT", "previous census still scheduled"),
+        ("DE", "previous census still scheduled"),
+    ]
 
     # Once they finished, the following slot runs.
     with connect(database) as conn:
@@ -233,8 +244,9 @@ async def test_census_overlap_is_decided_at_start_time(database, db):
     slot12 = datetime(2026, 10, 1, 12, 12, tzinfo=UTC)
     assert batch(12)[1:] == (slot12 + lead, "skipped")
     assert query(
-        database, "SELECT kind,(data->>'previous_batch_id')::bigint FROM test_events "
-        "WHERE batch_id=%s", (batch(12)[0],)
+        database,
+        "SELECT kind,(data->>'previous_batch_id')::bigint FROM test_events WHERE batch_id=%s",
+        (batch(12)[0],),
     ) == [("census_skipped", batch(8)[0])]
     assert (await plan(at(14)))["skipped"] == 0  # idempotent
 
@@ -391,9 +403,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
         clean = json.loads(capsys.readouterr().out)
         assert clean["created"] and clean["dropped"]
         with connect(staging_file) as conn:
-            assert conn.execute("SELECT id FROM providers ORDER BY 1").fetchall() == [
-                ("shifter",)
-            ]
+            assert conn.execute("SELECT id FROM providers ORDER BY 1").fetchall() == [("shifter",)]
     finally:
         with psycopg.connect(**admin, autocommit=True) as conn:
             conn.execute(

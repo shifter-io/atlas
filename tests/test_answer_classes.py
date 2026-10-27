@@ -1,5 +1,6 @@
 """Answer classes (census rule 4): rate limits are replaced, no-IP and other-country answers
 count like duplicates, and a run with only rate limits stops after two minutes."""
+
 import asyncio
 import gzip
 import json
@@ -23,13 +24,15 @@ PLAIN = AnswerClasses(("429",), ())
 
 
 def config(**overrides):
-    return RunConfig("generic_http", ProxyConfig("http", "127.0.0.1", 8080),
-                     **({"concurrency": 1, "answer_classes": PLAIN} | overrides))
+    return RunConfig(
+        "generic_http",
+        ProxyConfig("http", "127.0.0.1", 8080),
+        **({"concurrency": 1, "answer_classes": PLAIN} | overrides),
+    )
 
 
 def census(**overrides):
-    return config(**({"requests": None, "stop_rule": "unique_ratio", "min_sample": 10}
-                     | overrides))
+    return config(**({"requests": None, "stop_rule": "unique_ratio", "min_sample": 10} | overrides))
 
 
 def scripted(outcomes):
@@ -51,8 +54,13 @@ class Countries:
     release = {"sha256": "0" * 64}
 
     def lookup(self, address):
-        code = ("US" if address.startswith("192.0.2.")
-                else "DE" if address.startswith("198.51.100.") else None)
+        code = (
+            "US"
+            if address.startswith("192.0.2.")
+            else "DE"
+            if address.startswith("198.51.100.")
+            else None
+        )
         return {"matched": code is not None, "country_code": code}
 
 
@@ -75,8 +83,11 @@ def timeout(at=None):
 async def test_rl1_429s_do_not_consume_the_request_goal(tmp_path):
     progress = []
     result = await run(
-        config(requests=100, concurrency=10), JsonSink(tmp_path), progress=progress.append,
-        transport_factory=scripted(lambda n: limited() if n % 2 else ok(f"192.0.2.{n % 7}")))
+        config(requests=100, concurrency=10),
+        JsonSink(tmp_path),
+        progress=progress.append,
+        transport_factory=scripted(lambda n: limited() if n % 2 else ok(f"192.0.2.{n % 7}")),
+    )
     assert result.completed == 200 and result.successes == 100
     assert result.rate_limited == {"429": 100} and result.total_errors == 100
     assert result.status == "completed" and result.stop_reason == "requests"
@@ -89,10 +100,20 @@ async def test_rl1_429s_do_not_consume_the_request_goal(tmp_path):
 
 
 async def test_rl1_connect_refusals_are_rate_limits_only_while_succeeding(tmp_path):
-    answers = [refused(0), ok("192.0.2.1", 1), refused(50), ok("192.0.2.2", 100),
-               refused(219), ok("192.0.2.3", 220), refused(341)]
-    result = await run(config(requests=5, answer_classes=answer_classes("dataimpulse")),
-                       JsonSink(tmp_path), transport_factory=scripted(answers))
+    answers = [
+        refused(0),
+        ok("192.0.2.1", 1),
+        refused(50),
+        ok("192.0.2.2", 100),
+        refused(219),
+        ok("192.0.2.3", 220),
+        refused(341),
+    ]
+    result = await run(
+        config(requests=5, answer_classes=answer_classes("dataimpulse")),
+        JsonSink(tmp_path),
+        transport_factory=scripted(answers),
+    )
     assert result.completed == 7 and result.successes == 3
     assert result.rate_limited == {"429": 0, "proxy_connect": 2}
     # Before the first success and 121 s after the latest one, a refusal is a real error.
@@ -100,8 +121,11 @@ async def test_rl1_connect_refusals_are_rate_limits_only_while_succeeding(tmp_pa
 
 
 async def test_rl1_rate_limit_safety_stop_after_two_minutes_without_success(tmp_path):
-    result = await run(config(requests=1000), JsonSink(tmp_path / "only"),
-                       transport_factory=scripted(lambda n: limited(at=10.0 * (n - 1))))
+    result = await run(
+        config(requests=1000),
+        JsonSink(tmp_path / "only"),
+        transport_factory=scripted(lambda n: limited(at=10.0 * (n - 1))),
+    )
     assert result.stop_reason == "rate_limited" and result.status == "completed"
     assert result.completed == 13 and result.successes == 0  # stops at t = 120 s
 
@@ -110,22 +134,29 @@ async def test_rl1_rate_limit_safety_stop_after_two_minutes_without_success(tmp_
             return ok("192.0.2.1", 0)
         return limited(at=10.0 * n) if n % 2 else timeout(10.0 * n)
 
-    result = await run(config(requests=1000), JsonSink(tmp_path / "mixed"),
-                       transport_factory=scripted(mixed))
+    result = await run(
+        config(requests=1000), JsonSink(tmp_path / "mixed"), transport_factory=scripted(mixed)
+    )
     assert result.stop_reason == "rate_limited" and result.completed == 12  # t = 120 s
     assert result.rate_limited == {"429": 5} and result.timeouts == 6
 
 
 async def test_rl1_no_safety_stop_without_rate_limits(tmp_path):
-    result = await run(config(requests=40), JsonSink(tmp_path),
-                       transport_factory=scripted(lambda n: timeout(10.0 * n)))
+    result = await run(
+        config(requests=40),
+        JsonSink(tmp_path),
+        transport_factory=scripted(lambda n: timeout(10.0 * n)),
+    )
     assert result.stop_reason == "requests" and result.completed == 40
 
     def recovering(n):  # rate limits for 100 s, then a success: the window restarts
         return ok("192.0.2.1", 10.0 * n) if n in (1, 12, 23) else limited(at=10.0 * n)
 
-    result = await run(config(requests=3), JsonSink(tmp_path / "recovering"),
-                       transport_factory=scripted(recovering))
+    result = await run(
+        config(requests=3),
+        JsonSink(tmp_path / "recovering"),
+        transport_factory=scripted(recovering),
+    )
     assert result.stop_reason == "requests" and result.completed == 23
 
 
@@ -134,8 +165,9 @@ async def test_rl1_census_rule_4_excludes_rate_limits_from_the_sample(tmp_path):
         return limited() if 10 < n <= 510 else ok(f"192.0.2.{(n - 1) % 6 + 1}")
 
     progress = []
-    result = await run(census(), JsonSink(tmp_path), transport_factory=scripted(answers),
-                       progress=progress.append)
+    result = await run(
+        census(), JsonSink(tmp_path), transport_factory=scripted(answers), progress=progress.append
+    )
     assert result.stop_reason == "unique_ratio"
     assert result.completed == 513 and result.census_requests == 13
     assert result.rate_limited == {"429": 500} and result.unique_ips == 6
@@ -149,8 +181,11 @@ async def test_rl1_469_and_429_together_for_geonode(tmp_path):
     def answers(n):
         return limited(469 if n % 2 else 429) if n <= 20 else limited(503)
 
-    result = await run(census(min_sample=4, answer_classes=answer_classes("geonode")),
-                       JsonSink(tmp_path), transport_factory=scripted(answers))
+    result = await run(
+        census(min_sample=4, answer_classes=answer_classes("geonode")),
+        JsonSink(tmp_path),
+        transport_factory=scripted(answers),
+    )
     assert result.stop_reason == "no_success"
     assert result.completed == 24 and result.census_requests == 4
     assert result.rate_limited == {"429": 10, "469": 10} and result.no_inventory == 0
@@ -166,8 +201,13 @@ async def test_ctry_other_country_exits_count_like_duplicates(tmp_path):
     async def observe(ip, at):
         seen.append(ip)
 
-    result = await run(census(requested_country="us"), JsonSink(tmp_path), enricher=Countries(),
-                       transport_factory=scripted(answers), observation_consumer=observe)
+    result = await run(
+        census(requested_country="us"),
+        JsonSink(tmp_path),
+        enricher=Countries(),
+        transport_factory=scripted(answers),
+        observation_consumer=observe,
+    )
     assert result.stop_reason == "unique_ratio" and result.completed == 10
     assert result.successes == 10 and result.other_country == 5 and result.unique_ips == 3
     assert result.census_requests == 10 and set(seen) == {"192.0.2.1", "192.0.2.2", "192.0.2.3"}
@@ -177,26 +217,39 @@ async def test_ctry_other_country_exits_count_like_duplicates(tmp_path):
 
 
 async def test_ctry_all_other_country_stops_at_min_sample(tmp_path):
-    result = await run(census(requested_country="US"), JsonSink(tmp_path), enricher=Countries(),
-                       transport_factory=scripted(lambda n: ok(f"198.51.100.{n}")))
+    result = await run(
+        census(requested_country="US"),
+        JsonSink(tmp_path),
+        enricher=Countries(),
+        transport_factory=scripted(lambda n: ok(f"198.51.100.{n}")),
+    )
     assert result.stop_reason == "unique_ratio" and result.completed == 10
     assert result.unique_ips == 0 and result.other_country == 10
 
 
 async def test_ctry_unmatched_address_counts_in_country(tmp_path):
-    result = await run(config(requests=20, requested_country="US"), JsonSink(tmp_path),
-                       enricher=Countries(),
-                       transport_factory=scripted(lambda n: ok(f"203.0.113.{n}")))
+    result = await run(
+        config(requests=20, requested_country="US"),
+        JsonSink(tmp_path),
+        enricher=Countries(),
+        transport_factory=scripted(lambda n: ok(f"203.0.113.{n}")),
+    )
     assert result.unique_ips == 20 and result.other_country == 0
     # Without an enricher the check is off: other_country is not reported.
-    plain = await run(config(requests=2, requested_country="US"), JsonSink(tmp_path / "off"),
-                      transport_factory=scripted(lambda n: ok(f"198.51.100.{n}")))
+    plain = await run(
+        config(requests=2, requested_country="US"),
+        JsonSink(tmp_path / "off"),
+        transport_factory=scripted(lambda n: ok(f"198.51.100.{n}")),
+    )
     assert plain.unique_ips == 2 and plain.other_country is None
 
 
 async def test_ctry_no_inventory_status_counts_in_sample_not_as_unique(tmp_path):
-    result = await run(census(answer_classes=GEONODE), JsonSink(tmp_path / "empty"),
-                       transport_factory=scripted(lambda n: limited(465)))
+    result = await run(
+        census(answer_classes=GEONODE),
+        JsonSink(tmp_path / "empty"),
+        transport_factory=scripted(lambda n: limited(465)),
+    )
     assert result.stop_reason == "no_success" and result.completed == 10
     assert result.no_inventory == 10 and result.total_errors == 10
     assert result.census_requests == 10
@@ -204,8 +257,11 @@ async def test_ctry_no_inventory_status_counts_in_sample_not_as_unique(tmp_path)
     def thin(n):  # three exits, otherwise "no exits in this country"
         return ok(f"192.0.2.{n}") if n <= 3 else limited(465)
 
-    result = await run(census(answer_classes=GEONODE), JsonSink(tmp_path / "thin"),
-                       transport_factory=scripted(thin))
+    result = await run(
+        census(answer_classes=GEONODE),
+        JsonSink(tmp_path / "thin"),
+        transport_factory=scripted(thin),
+    )
     assert result.stop_reason == "unique_ratio" and result.completed == 10
     assert result.no_inventory == 7 and result.unique_ips == 3
 
@@ -215,9 +271,15 @@ def test_rl1_rule_3_and_rule_4_are_exclusive():
         census(retry_http_469=True)
     with pytest.raises(ValueError, match="AnswerClasses"):
         config(answer_classes={"rate_limits": ["429"]})
-    for rate_limits, no_inventory in ((["429"], ()), (("429", "429"), ()), (("200",), ()),
-                                      (("429",), ("proxy_connect",)), ((429,), ()),
-                                      (("429",), ("429",)), (("469",), ("469",))):
+    for rate_limits, no_inventory in (
+        (["429"], ()),
+        (("429", "429"), ()),
+        (("200",), ()),
+        (("429",), ("proxy_connect",)),
+        ((429,), ()),
+        (("429",), ("429",)),
+        (("469",), ("469",)),
+    ):
         with pytest.raises(ValueError, match="Answer class|disjoint"):
             AnswerClasses(rate_limits, no_inventory)
 
@@ -228,8 +290,9 @@ async def test_rl1_configs_without_answer_classes_are_unchanged(tmp_path):
     assert census(answer_classes=None).public()["census_rule_version"] == 2
     progress = []
     first_limited = scripted(lambda n: limited() if n == 1 else ok("192.0.2.8"))
-    result = await run(count, JsonSink(tmp_path), progress=progress.append,
-                       transport_factory=first_limited)
+    result = await run(
+        count, JsonSink(tmp_path), progress=progress.append, transport_factory=first_limited
+    )
     # Without answer classes a 429 is an ordinary answer: it consumes the request goal.
     assert result.completed == 100 and result.successes == 99
     saved = result.to_dict()
@@ -246,8 +309,7 @@ def test_cli_answer_classes_needs_a_provider_config(capsys, monkeypatch, tmp_pat
     assert capsys.readouterr().err == "Run refused: --answer-classes needs --provider-config.\n"
 
 
-def test_cli_answer_classes_and_mmdb_build_the_config_and_enricher(capsys, monkeypatch,
-                                                                   tmp_path):
+def test_cli_answer_classes_and_mmdb_build_the_config_and_enricher(capsys, monkeypatch, tmp_path):
     monkeypatch.setenv("GEONODE_ACCOUNT", "example")
     monkeypatch.setenv("GEONODE_PASSWORD", "example-password")
     seen = {}
@@ -264,14 +326,37 @@ def test_cli_answer_classes_and_mmdb_build_the_config_and_enricher(capsys, monke
 
     async def fake_run(config, sink, *, stop, enricher):
         seen.update(classes=config.answer_classes, enricher=enricher)
-        return await run(config, sink, stop=stop, enricher=enricher,
-                         transport_factory=scripted(lambda n: ok("192.0.2.1")))
+        return await run(
+            config,
+            sink,
+            stop=stop,
+            enricher=enricher,
+            transport_factory=scripted(lambda n: ok("192.0.2.1")),
+        )
 
     monkeypatch.setattr("proxy_index.enrichment.LocalEnricher", Enricher)
     monkeypatch.setattr(cli_module, "run", fake_run)
-    assert main(["run", "--target", "generic_http", "--requests", "2", "--answer-classes",
-                 "--provider-config", str(ROOT / "configs/geonode.toml"), "--param",
-                 "country=us", "--mmdb", "db.mmdb", "--output", str(tmp_path)]) == 0
+    assert (
+        main(
+            [
+                "run",
+                "--target",
+                "generic_http",
+                "--requests",
+                "2",
+                "--answer-classes",
+                "--provider-config",
+                str(ROOT / "configs/geonode.toml"),
+                "--param",
+                "country=us",
+                "--mmdb",
+                "db.mmdb",
+                "--output",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
     assert seen["classes"] == GEONODE and isinstance(seen["enricher"], Enricher)
     assert seen["mmdb"] == "db.mmdb" and seen["closed"]
     printed = json.loads(capsys.readouterr().out)
@@ -284,7 +369,7 @@ async def test_rl1_two_processes_share_one_answered_goal(tmp_path):
     async def echo(request):
         status = 429 if sum(counts.values()) % 3 == 2 else 200
         counts[str(status)] += 1
-        await asyncio.sleep(.001)
+        await asyncio.sleep(0.001)
         return web.Response(status=status, text="limited" if status == 429 else "2001:db8::1")
 
     app = web.Application()
@@ -295,11 +380,18 @@ async def test_rl1_two_processes_share_one_answered_goal(tmp_path):
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
     try:
-        result = await run(RunConfig(
-            "generic_http", ProxyConfig("http", "127.0.0.1", port),
-            target_url="http://example.test/", requests=30, concurrency=6, processes=2,
-            answer_classes=PLAIN,
-        ), JsonSink(tmp_path))
+        result = await run(
+            RunConfig(
+                "generic_http",
+                ProxyConfig("http", "127.0.0.1", port),
+                target_url="http://example.test/",
+                requests=30,
+                concurrency=6,
+                processes=2,
+                answer_classes=PLAIN,
+            ),
+            JsonSink(tmp_path),
+        )
     finally:
         await server.cleanup()
     assert result.config["execution_processes"] == 2
@@ -326,13 +418,22 @@ def dropping_gateway(served, *, after=0):
 
 @pytest.mark.parametrize("processes", [1, 2])
 async def test_rl1b_dropped_gateway_connections_are_rate_limits_while_succeeding(
-        tmp_path, processes):
+    tmp_path, processes
+):
     served = {"connections": 0}
     async with server(dropping_gateway(served, after=6)) as port:
-        result = await run(RunConfig(
-            "generic_http", ProxyConfig("http", "127.0.0.1", port),
-            target_url="http://example.test/", requests=30, concurrency=6, processes=processes,
-            answer_classes=answer_classes("dataimpulse")), JsonSink(tmp_path))
+        result = await run(
+            RunConfig(
+                "generic_http",
+                ProxyConfig("http", "127.0.0.1", port),
+                target_url="http://example.test/",
+                requests=30,
+                concurrency=6,
+                processes=processes,
+                answer_classes=answer_classes("dataimpulse"),
+            ),
+            JsonSink(tmp_path),
+        )
     dropped = result.errors.get("connection", 0)
     assert dropped > 0 and result.errors == {"connection": dropped}
     # Every drop came while successes continued: each is a rate limit, replaced by an answer.
@@ -348,10 +449,16 @@ def test_rl1b_only_refused_or_dropped_connections_join_the_connect_signal():
     answers = Answers(config(answer_classes=answer_classes("dataimpulse")))
     assert answers.add(dropped(0), 0) == "answer"  # before any success: a real error
     answers.add(ok("192.0.2.1"), 1)
-    assert [answers.add(outcome, at) for outcome, at in (
-        (dropped(50), 50), (refused(60), 60), (Outcome(1, error="proxy_auth"), 70),
-        (Outcome(1, error="dns"), 80), (dropped(121), 121))] == [
-        "rate_limited", "rate_limited", "answer", "answer", "answer"]
+    assert [
+        answers.add(outcome, at)
+        for outcome, at in (
+            (dropped(50), 50),
+            (refused(60), 60),
+            (Outcome(1, error="proxy_auth"), 70),
+            (Outcome(1, error="dns"), 80),
+            (dropped(121), 121),
+        )
+    ] == ["rate_limited", "rate_limited", "answer", "answer", "answer"]
     assert answers.rate_limited == {"429": 0, "proxy_connect": 2}
     # A network without rate_limit_connect keeps every dropped connection a real error.
     plain = Answers(config(answer_classes=answer_classes("soax")))
