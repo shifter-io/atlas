@@ -1,7 +1,7 @@
 # The framework's Tier 1 (CAMP-1 PLAN §17), on every ready pull request, every
 # push to main and owner dispatches.
 #
-# Runs on the shared CI pool: self-hosted runners labelled ci-heavy. Pinned
+# Runs on fresh one-job CI-SelfHosted runners labelled ci-4cpu. Pinned
 # tools (uv, CPython, PostgreSQL), the uv cache and the virtualenv persist under
 # $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each run. A job-started
 # hook on the servers refuses every job except the owner's pull requests from
@@ -37,7 +37,7 @@ jobs:
   tier1:
     name: tier1
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, ci-heavy]
+    runs-on: [self-hosted, ci-4cpu]
     timeout-minutes: 30
     defaults:
       run:
