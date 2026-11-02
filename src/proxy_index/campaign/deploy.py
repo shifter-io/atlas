@@ -32,10 +32,10 @@ from typing import Any
 from ..onboarding.files import atomic_json, digest, read_json
 from . import ops_api
 from .contracts import (
+    CAMPAIGN_ROLES,
     MANAGER_TAG,
     NETWORK_RE,
     PROJECT_NAME,
-    ROLES,
     WORKER_TAG,
     CampaignSpec,
     Droplet,
@@ -779,7 +779,7 @@ async def teardown(
         raise DeployError("campaign workers are still alive")
     secrets = await _silence(cloud, inventory, inventory_path, shell)
     released = await _release(cloud, inventory, inventory_path, keep_worker_assets)
-    tags = [tag for tag, _ in ROLES.values()] + [
+    tags = [tag for tag, _ in CAMPAIGN_ROLES.values()] + [
         campaign_tag(c) for c in inventory.get("campaigns", [])
     ]
     proof = {tag: len(await cloud.list_tag(tag)) for tag in tags}

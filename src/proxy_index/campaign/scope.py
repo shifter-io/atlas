@@ -23,6 +23,8 @@ from typing import Literal
 from ..onboarding.files import private_dir
 from .contracts import (
     PROJECT_NAME,
+    PULSE_PREFIX,
+    PULSE_PROJECT_NAME,
     RESOURCE_PREFIX,
     ROLES,
     CampaignSpec,
@@ -58,7 +60,9 @@ PATHS = MappingProxyType(
     }
 )
 Kind = Literal["droplet", "ssh_key", "firewall", "snapshot"]
-Role = Literal["worker", "manager", "builder"]
+Role = Literal["worker", "manager", "builder", "pulse"]
+# The scope of the always-on pulse nodes: no campaign's short id (always 8 hex digits) equals it.
+PULSE_SID = "pulse"
 # Per client: project membership cache and the project ids whose name was checked.
 _projects: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _named: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
@@ -143,9 +147,18 @@ def scope_for(spec: CampaignSpec) -> Scope:
     )
 
 
+def pulse_scope(project_id: str) -> Scope:
+    """The scope of the pulse nodes in project `project_id` (which must be Dev Resources)."""
+    return Scope(PULSE_SID, PULSE_SID, project_id, "", datetime.min.replace(tzinfo=UTC))
+
+
 def role_checks(droplet: Droplet, scope: Scope, role: Role) -> dict[str, bool]:
     """Section 2 checks 2, 3, 5 and 6 on one droplet, by the role the caller intends."""
     tags, (role_tag, pattern) = set(droplet.tags), ROLES[role]
+    if role == "pulse":  # its own rule: the pulse tag, only pi-pulse- tags, its name pattern
+        only_pulse = all(tag.startswith(PULSE_PREFIX) for tag in tags)
+        named = re.fullmatch(pattern, droplet.name) is not None
+        return {"tags": role_tag in tags and only_pulse, "name": named}
     worker, is_manager = role == "worker", droplet.id == scope.manager_droplet_id
     required = {role_tag, f"{RESOURCE_PREFIX}{scope.sid}"} if worker else {role_tag}
     others = {tag for tag, _ in ROLES.values()} - {role_tag}
@@ -158,12 +171,12 @@ def role_checks(droplet: Droplet, scope: Scope, role: Role) -> dict[str, bool]:
     }
 
 
-async def _project_named(cloud: DigitalOcean, project_id: str) -> bool:
-    """The scope's project id really is project Proxy Index (checked once per client)."""
+async def _project_named(cloud: DigitalOcean, project_id: str, name: str = PROJECT_NAME) -> bool:
+    """The scope's project id really is project `name` (checked once per client)."""
     named = _named.setdefault(cloud, set())
-    if project_id not in named and await cloud.project_name(project_id) == PROJECT_NAME:
-        named.add(project_id)
-    return project_id in named
+    if (project_id, name) not in named and await cloud.project_name(project_id) == name:
+        named.add((project_id, name))
+    return (project_id, name) in named
 
 
 async def _in_project(cloud: DigitalOcean, project_id: str, droplet_id: str) -> bool:
@@ -181,9 +194,12 @@ async def _droplet_checks(
 ) -> dict[str, bool]:
     """Checks 2-6; check 4 may be replaced only by the own-unassigned path (section 2)."""
     checks = role_checks(droplet, scope, role)
-    checks["project_id"] = await _project_named(cloud, scope.project_id)
-    if await _in_project(cloud, scope.project_id, droplet.id):
-        return checks | {"project": True}
+    pulse = role == "pulse"
+    project_name = PULSE_PROJECT_NAME if pulse else PROJECT_NAME
+    checks["project_id"] = await _project_named(cloud, scope.project_id, project_name)
+    in_project = await _in_project(cloud, scope.project_id, droplet.id)
+    if in_project or pulse:  # a pulse node has no own-unassigned path
+        return checks | {"project": in_project}
     record = ledger.records.get(droplet.id)
     # The ledger mark: only assign_and_verify_project writes it, for an id it had checked
     # against its own client's create. A restarted process has no other proof of that create.
@@ -241,6 +257,8 @@ async def guarded_delete(
     """
     if kind not in PATHS or role not in ROLES:
         raise ValueError("unknown resource kind or role")
+    if (role == "pulse") != (scope.sid == PULSE_SID) or (role == "pulse" and kind != "droplet"):
+        raise ValueError("a pulse node is removed only by retire_pulse_node")
     rid = str(resource_id)
     path = PATHS[kind].format(rid)
     entry = {
@@ -287,6 +305,16 @@ async def guarded_delete(
         raise
     _audit(audit_path, entry | {"result": "deleted", "http": 204})
     return "deleted"
+
+
+async def retire_pulse_node(
+    cloud: DigitalOcean, droplet_id: str | int, project_id: str, ledger: Ledger, audit_path: Path
+) -> str:
+    """The only path that deletes an always-on pulse node: `guarded_delete` with role "pulse",
+    which needs its recorded id, the pi-pulse-node tag, its name and project Dev Resources."""
+    return await guarded_delete(
+        cloud, "droplet", droplet_id, pulse_scope(project_id), ledger, audit_path, "pulse"
+    )
 
 
 async def _fresh_owned(

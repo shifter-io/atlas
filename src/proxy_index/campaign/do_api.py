@@ -26,7 +26,10 @@ from ..regions import REGION_IDS
 from .contracts import (
     BUILDER_NAME_RE,
     BUILDER_TAG,
+    CAMPAIGN_ROLES,
     PROJECT_NAME,
+    PULSE_PREFIX,
+    PULSE_TAG,
     RESOURCE_PREFIX,
     ROLES,
     WORKER_TAG,
@@ -86,7 +89,7 @@ ALLOWED = MappingProxyType(
         ("POST", "/v2/tags"): (NONE, False),
     }
 )
-ROLE_TAGS = frozenset(tag for tag, _ in ROLES.values())
+ROLE_TAGS = frozenset(tag for tag, _ in CAMPAIGN_ROLES.values())
 SNAPSHOT_NAME_RE = r"^pi-camp-worker-[0-9A-Za-z.+]+-[0-9a-f]{12}-[0-9]{8}$"
 FIREWALL_KEYS = frozenset({"name", "inbound_rules", "outbound_rules", "tags", "droplet_ids"})
 
@@ -201,10 +204,11 @@ def check_allowed(
         raise ScopeError(f"{method} {path} body is outside the campaign's scope")
     if _lookup(OWNED_WRITES, method, path) and guard is not _OWNED:
         raise ScopeError(f"{method} {path} is sent only after an ownership check")
-    if "tag_name" in entry[0] and not str((params or {}).get("tag_name")).startswith(
-        RESOURCE_PREFIX
+    tag_name = str((params or {}).get("tag_name"))
+    if "tag_name" in entry[0] and not (
+        tag_name.startswith(RESOURCE_PREFIX) or tag_name == PULSE_TAG
     ):
-        raise ScopeError("droplets are listed only by a pi-camp- tag")
+        raise ScopeError("droplets are listed only by a pi-camp- tag or pi-pulse-node")
     if entry[1]:
         from .scope import require_guard
 
@@ -263,8 +267,9 @@ def parse_droplet(raw: dict[str, Any]) -> Droplet:
 def check_create(names: list[str], tags: list[str], ssh_keys: list[str]) -> None:
     """Refuse a create whose names, tags or keys do not carry all ownership markers."""
     roles = [(tag, pattern) for tag, pattern in ROLES.values() if tag in tags]
-    if len(roles) != 1 or any(not tag.startswith(RESOURCE_PREFIX) for tag in tags):
-        raise ScopeError("create needs exactly one role tag and only pi-camp- tags")
+    prefix = PULSE_PREFIX if roles == [ROLES["pulse"]] else RESOURCE_PREFIX
+    if len(roles) != 1 or any(not tag.startswith(prefix) for tag in tags):
+        raise ScopeError("create needs exactly one role tag and only that role's tag prefix")
     if not names or not ssh_keys:
         raise ScopeError("create needs names and ssh_keys")
     [(role_tag, pattern)] = roles
@@ -274,7 +279,7 @@ def check_create(names: list[str], tags: list[str], ssh_keys: list[str]) -> None
         sids = {name.split("-")[1] for name in names}
         if len(sids) != 1 or f"{RESOURCE_PREFIX}{sids.pop()}" not in tags:
             raise ScopeError("worker create needs the campaign tag of its names")
-    elif len(names) != 1:
+    elif role_tag != PULSE_TAG and len(names) != 1:
         raise ScopeError("manager and builder are created one at a time")
 
 
@@ -589,7 +594,7 @@ class DigitalOcean:
             found = await self.get(droplet_id)
             if found is None or not any(
                 tag in found.tags and re.fullmatch(pattern, found.name)
-                for tag, pattern in ROLES.values()
+                for tag, pattern in CAMPAIGN_ROLES.values()
             ):
                 raise ScopeError("firewall targets a droplet that is not the campaign's")
         if not await self._in_project(project_id, ids):
