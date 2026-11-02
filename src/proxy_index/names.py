@@ -9,6 +9,8 @@ NULL-safe, hashable tuple join. The all-NULL row of each list is its unknown mem
 
 from __future__ import annotations
 
+from psycopg.rows import tuple_row
+
 PLACE = ("country_code", "country", "region_code", "region", "city")
 # Each list's identity column and the fields that identify one of its rows.
 LISTS = {
@@ -19,7 +21,11 @@ LISTS = {
         "network_id",
         ("asn_name_id", "isp", "organization", "connection_type", "usage_type"),
     ),
+    # Calculated layer: a breakdown's ASN label is an ASN name with a usage type.
+    "asn_labels": ("asn_label_id", ("asn_name_id", "usage_type")),
 }
+# A calculated breakdown label's ASN fields, as calculated.aggregate and its persist use them.
+NETWORK = ("asn", "name", "usage_type")
 # v8 → v9 (migrate_v8_v9.sql keeps the v8 rows): each count is of rows whose v9 view output
 # differs from the v8 row, so every location, network and per-IP enrichment row must be equal.
 V8_CHECKS = {
@@ -72,3 +78,42 @@ def resolve(conn, source, value):
     fill(conn, "enrichment_networks", network, f"{source} {asns}")
     locations = lookup("enrichment_locations", location)
     return " ".join((places, asns, locations, lookup("enrichment_networks", network)))
+
+
+def labels(conn, places, networks):
+    """Shared ids of calculated breakdown labels, filled like the enrichment lists.
+
+    `places` holds PLACE tuples and `networks` (asn, name, usage_type) tuples; returns
+    {place: place_names.place_id} and {network: asn_labels.asn_label_id}.
+    """
+    return (
+        _ids(conn, places, PLACE, ("text",) * 5, _place),
+        _ids(conn, networks, NETWORK, ("bigint", "text", "text"), _network),
+    )
+
+
+def _place(conn, source, params):
+    values = [f"s.{field}" for field in PLACE]
+    fill(conn, "place_names", values, source, params)
+    return values, lookup("place_names", values), "place_id"
+
+
+def _network(conn, source, params):
+    asn = ["s.asn", "s.name"]
+    fill(conn, "asn_names", asn, source, params)
+    asns = lookup("asn_names", asn)
+    label = ["asn_name_id.asn_name_id", "s.usage_type"]
+    fill(conn, "asn_labels", label, f"{source} {asns}", params)
+    return [*asn, "s.usage_type"], f"{asns} {lookup('asn_labels', label)}", "asn_label_id"
+
+
+def _ids(conn, wanted, fields, types, add):
+    """Fill the lists of `wanted` (tuples of `fields`) with `add`; map each tuple to its id."""
+    rows = sorted(wanted, key=str)
+    params = [list(column) for column in zip(*rows, strict=True)] or [[] for _ in fields]
+    unnest = ",".join(f"%s::{kind}[]" for kind in types)
+    source = f"unnest({unnest}) s({','.join(fields)})"
+    values, joins, identity = add(conn, source, params)
+    query = f"SELECT {','.join(values)},{identity}.{identity} FROM {source} {joins}"
+    found = conn.cursor(row_factory=tuple_row).execute(query, params)
+    return {tuple(row[:-1]): row[-1] for row in found}

@@ -970,8 +970,15 @@ async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_pa
         assert positions == {-1, 1}
         assert conn.execute("SELECT count(*) FROM cohorts").fetchone()[0] == 1
         # Labels are shared across builds instead of repeated per row: two cities, their
-        # (shared) region and country.
-        assert conn.execute("SELECT count(*) FROM places").fetchone()[0] == 4
+        # (shared) region and country. The cities and the ASN name are the enrichment's own rows.
+        assert conn.execute(
+            "SELECT count(DISTINCT place_id),count(DISTINCT l.place_id) FROM calculated_breakdowns "
+            "LEFT JOIN enrichment_locations l USING(place_id)"
+        ).fetchone() == (4, 2)
+        assert conn.execute(
+            "SELECT count(DISTINCT asn_name_id) FROM asn_labels "
+            "JOIN enrichment_networks USING(asn_name_id)"
+        ).fetchone() == (1,)
         assert conn.execute("SELECT count(*) FROM asn_labels").fetchone()[0] == 1
         # Only referenced texts are stored; "coverage not ready" style reasons are derived.
         assert not conn.execute(

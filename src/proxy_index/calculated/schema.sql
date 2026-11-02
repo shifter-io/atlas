@@ -51,18 +51,16 @@ CREATE TABLE IF NOT EXISTS calculated_windows (
  -- Lets breakdown rows carry their build (the partition key) consistently.
  UNIQUE(result_id,build_id)
 );
--- Coordinate-free breakdown labels, shared by every build.
-CREATE TABLE IF NOT EXISTS places (
- place_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- country_code text NOT NULL, country text, region_code text, region text, city text,
- UNIQUE NULLS NOT DISTINCT(country_code,country,region_code,region,city)
-);
+-- Coordinate-free breakdown labels, shared by every build: places are the main schema's
+-- place_names (shared with enrichment locations), and an ASN label is an asn_names entry with a
+-- usage type.
 CREATE TABLE IF NOT EXISTS asn_labels (
  asn_label_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- asn bigint, name text, usage_type text, UNIQUE NULLS NOT DISTINCT(asn,name,usage_type)
+ asn_name_id integer NOT NULL REFERENCES asn_names(asn_name_id), usage_type text,
+ UNIQUE NULLS NOT DISTINCT(asn_name_id,usage_type)
 );
--- dimension: g city (geography), r state/region and c country reference places; a asn references
--- asn_labels; x country x ASN and y city x ASN reference both. position is the payload
+-- dimension: g city (geography), r state/region and c country reference place_names; a asn
+-- references asn_labels; x country x ASN and y city x ASN reference both. position is the payload
 -- order within the dimension. Request counters and percentiles come from run_geo_buckets; they
 -- are NULL on rows calculated before v3, which held IP counts only.
 -- One LIST partition per build (calculated_breakdowns_b<build_id>, created by
@@ -71,7 +69,8 @@ CREATE TABLE IF NOT EXISTS asn_labels (
 CREATE TABLE IF NOT EXISTS calculated_breakdowns (
  build_id bigint NOT NULL, result_id bigint NOT NULL,
  ips bigint NOT NULL, observations bigint NOT NULL,
- place_id integer REFERENCES places(place_id), asn_label_id integer REFERENCES asn_labels(asn_label_id),
+ place_id integer REFERENCES place_names(place_id),
+ asn_label_id integer REFERENCES asn_labels(asn_label_id),
  position integer NOT NULL, dimension "char" NOT NULL CHECK(dimension IN ('g','c','a','r','x','y')),
  completed bigint, successes bigint, challenges bigint, blocks bigint,
  p50 integer, p90 integer, p99 integer,
@@ -138,6 +137,10 @@ SELECT cohort,jsonb_build_object('kind',kind,'country',country,'runner_location'
  'flags',flags,'ttl_seconds',ttl_seconds,'target_variant',target_variant)
  || coalesce(extra,'{}') AS criteria
 FROM cohorts;
+-- ASN labels with their names, as asn_labels held them up to calculated v6.
+CREATE OR REPLACE VIEW asn_label_names AS
+SELECT l.asn_label_id,n.asn,n.name,l.usage_type FROM asn_labels l
+JOIN asn_names n USING(asn_name_id);
 CREATE OR REPLACE VIEW calculated_breakdown_details AS
 SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country'
  WHEN 'r' THEN 'region' WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END
@@ -155,7 +158,8 @@ SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'cou
  ELSE jsonb_build_object('asn',a.asn,'name',a.name,'usage_type',a.usage_type) END AS label,
  b.completed,b.successes,b.successes::double precision/nullif(b.completed,0) AS success_rate,
  b.challenges,b.blocks,b.p50,b.p90,b.p99
-FROM calculated_breakdowns b LEFT JOIN places p USING(place_id) LEFT JOIN asn_labels a USING(asn_label_id);
+FROM calculated_breakdowns b LEFT JOIN place_names p USING(place_id)
+LEFT JOIN asn_label_names a USING(asn_label_id);
 CREATE OR REPLACE VIEW calculated_score_details AS
 SELECT s.*,
  (SELECT jsonb_object_agg(c.component,jsonb_build_object('state',c.state,'value',c.value,
@@ -195,5 +199,5 @@ SELECT b.build_id,b.result_id,pr.provider,pr.name AS product,w.cohort,w.window_h
  b.challenges,b.blocks,b.p50,b.p90,b.p99
 FROM calculated_breakdowns b JOIN calculated_windows w USING(result_id,build_id)
 JOIN products pr USING(product_id)
-LEFT JOIN places p USING(place_id) LEFT JOIN asn_labels a USING(asn_label_id)
+LEFT JOIN place_names p USING(place_id) LEFT JOIN asn_label_names a USING(asn_label_id)
 WHERE b.build_id=(SELECT build_id FROM current_calculation);

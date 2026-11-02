@@ -16,13 +16,14 @@ from ..storage import initialize as initialize_history
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
 V3_CHECKSUM = "5f24879fc7f37486903881c91f5334f85cfa83dcffd90fc00a972508424b394d"
 V4_CHECKSUM = "83d3794413bb56b371ff04ac7f9978652310b20013077c0400d1477d7fb24938"
 V5_CHECKSUM = "ccb566016dba5d6d18b09da7cb88ced16758f0fbf446fcac88495d67d94b8782"
+V6_CHECKSUM = "140ad11f64d300f4e8104da53421bcf00816464fa052d854082831775286dd26"
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.
 KEEP_DRAFTS = 2
 # After each publication expire() keeps the current build, the newest RETAIN_PER_DAY published
@@ -107,6 +108,33 @@ V5_CHECKS = {
     "calculated_breakdowns n USING(result_id,dimension,position) LEFT JOIN calculated_windows w "
     "ON w.result_id=n.result_id WHERE to_jsonb(o)::text IS DISTINCT FROM "
     "(to_jsonb(n) - 'build_id')::text OR n.build_id IS DISTINCT FROM w.build_id",
+}
+# A v6 layer's places and ASN names move into the shared lists: every breakdown of every build
+# must keep its counters and resolve to the same place and ASN label as before (place_id may
+# change; asn_label_id does not).
+V6_ROWS = (
+    "SELECT b.build_id,b.result_id,b.dimension,b.position,to_jsonb(b) - 'place_id' AS counters,"
+    "jsonb_build_array(p.country_code,p.country,p.region_code,p.region,p.city,a.asn_label_id,"
+    "a.asn,a.name,a.usage_type) AS names FROM calculated_breakdowns b "
+    "LEFT JOIN {} p USING(place_id) LEFT JOIN {} a USING(asn_label_id)"
+)
+V6_LABELS = (
+    "(SELECT l.asn_label_id,n.asn,n.name,l.usage_type FROM asn_labels l "
+    "JOIN asn_names n USING(asn_name_id))"
+)
+V6_SNAPSHOT = (
+    "CREATE TEMP TABLE v6_before_breakdowns ON COMMIT DROP AS "
+    + V6_ROWS.format("places", "asn_labels")
+    + ";CREATE TEMP TABLE v6_before_asn_labels ON COMMIT DROP AS SELECT * FROM asn_labels"
+)
+V6_CHECKS = {
+    "shared breakdown names": "SELECT count(*) FROM v6_before_breakdowns o FULL JOIN ("
+    + V6_ROWS.format("place_names", V6_LABELS)
+    + ") n USING(build_id,result_id,dimension,position) WHERE "
+    "(o.counters::text,o.names::text) IS DISTINCT FROM (n.counters::text,n.names::text)",
+    "shared network labels": "SELECT count(*) FROM v6_before_asn_labels o FULL JOIN "
+    + V6_LABELS
+    + " n USING(asn_label_id) WHERE to_jsonb(o)::text IS DISTINCT FROM to_jsonb(n)::text",
 }
 
 
@@ -264,7 +292,7 @@ def estimate(conn, expired):
 
 
 def layer(conn):
-    """Name the calculated layer that retention accepts ("v6" or an unmodified "v5"), or raise.
+    """Name the calculated layer that retention accepts ("v7" or an unmodified "v5"), or raise.
 
     A v5 database can expire before db-migrate, so that the migration moves only kept rows.
     """

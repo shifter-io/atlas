@@ -134,7 +134,11 @@ The development API helper is `python scripts/measurements_local.py start|status
 Calculated schema v2 keeps cohorts, breakdown labels (`places`, `asn_labels`) and score
 components/reasons (`calculated_score_components`, `calculated_score_reasons`, `score_reasons`)
 as typed rows; `cohort_criteria`, `calculated_breakdown_details` and `calculated_score_details`
-rebuild the payload fragments. Snapshot payloads are kept for the current build, published builds
+rebuild the payload fragments. Calculated schema v7 (`calculated/migrate_v6_v7.sql`) moves the
+breakdown names into the main schema's shared lists: breakdown places are `place_names` rows
+(the same ids as enrichment locations; `places` is gone) and an `asn_labels` row is an
+`asn_names` id plus a usage type, shown with its ASN and name by the view `asn_label_names`.
+`calculated_breakdown_details` and `current_breakdowns` keep their columns and values. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,

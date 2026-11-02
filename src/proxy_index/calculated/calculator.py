@@ -14,6 +14,7 @@ from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
 from .. import detect, traffic
+from ..names import labels as shared_labels
 from ..storage import column, connect
 from ..targets import registry
 from .aggregate import (
@@ -304,7 +305,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     source = (
         "FROM run_geo_buckets g JOIN test_runs r USING(run_key) "
         "JOIN scope_stats s ON s.scope_id=r.scope_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
-        "JOIN enrichment_locations l ON l.location_id=g.location_id "
+        "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
         "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     )
     window = "WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
@@ -355,14 +356,14 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     locations = {
         r["location_id"]: tuple(r[f] for f in PLACE)
         for r in conn.execute(
-            "SELECT * FROM enrichment_locations WHERE location_id=ANY(%s)",
+            "SELECT * FROM enrichment_location_fields WHERE location_id=ANY(%s)",
             (sorted({t["location_id"] for t in totals}),),
         )
     }
     networks = {
         r["network_id"]: (r["asn"], r["asn_organization"], r["usage_type"])
         for r in conn.execute(
-            "SELECT * FROM enrichment_networks WHERE network_id=ANY(%s)",
+            "SELECT * FROM enrichment_network_fields WHERE network_id=ANY(%s)",
             (sorted({t["network_id"] for t in totals}),),
         )
     }
@@ -411,10 +412,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
         "b.country_code AS country,rr.slug AS region,b.target_id AS target,br.started_at,"
         "br.finished_at,br.requests,br.successes,br.unique_ips,br.stop_reason,"
         "CASE WHEN br.run_key IS NOT NULL THEN (SELECT count(DISTINCT (l.country_code,"
-        "l.region_code,l.region,l.city)) FROM run_geo_buckets g JOIN enrichment_locations l "
+        "l.region_code,l.region,l.city)) FROM run_geo_buckets g JOIN enrichment_location_fields l "
         "USING(location_id) WHERE g.run_key=br.run_key AND g.successes>0 AND l.city IS NOT NULL) "
         "END AS cities,CASE WHEN br.run_key IS NOT NULL THEN (SELECT count(DISTINCT n.asn) "
-        "FROM run_geo_buckets g JOIN enrichment_networks n USING(network_id) "
+        "FROM run_geo_buckets g JOIN enrichment_network_fields n USING(network_id) "
         "WHERE g.run_key=br.run_key AND g.successes>0) END AS asns "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "JOIN runner_regions rr ON rr.region_id=b.region_id "
@@ -1093,11 +1094,8 @@ FIELDS = {
 }
 COUNTERS = ("ips", "observations", "completed", "successes", "success_rate", "challenges", "blocks")
 LATENCY = ("p50", "p90", "p99")
-LABELS = {
-    "places": ("place_id", PLACE, ("text",) * 5),
-    "asn_labels": ("asn_label_id", ("asn", "name", "usage_type"), ("bigint", "text", "text")),
-    "score_reasons": ("reason_id", ("reason",), ("text",)),
-}
+# Place and ASN labels use the shared name lists (shared_labels); reasons stay calculator-only.
+LABELS = {"score_reasons": ("reason_id", ("reason",), ("text",))}
 
 
 def labels(conn, table, wanted):
@@ -1312,8 +1310,7 @@ def persist(conn, payload):
                             row["uptime"],
                         ),
                     )
-    places = labels(conn, "places", {b[3] for b in breakdowns if b[3]})
-    networks = labels(conn, "asn_labels", {b[4] for b in breakdowns if b[4]})
+    places, networks = shared_labels(conn, *({b[i] for b in breakdowns if b[i]} for i in (3, 4)))
     partition(conn, build_id)
     with conn.cursor().copy(
         "COPY calculated_breakdowns(build_id,result_id,dimension,position,place_id,asn_label_id,"

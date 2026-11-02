@@ -971,7 +971,8 @@ def migrate(credentials_file):
     migrate_v7_v8.sql and migrate_v8_v9.sql; v5 to v8 start at the step for their version (v7 only
     adds a table; v8 moves names into the shared lists). A calculated v2 layer then runs
     calculated/migrate_v2_v3.sql, then calculated v3 → v4 (availability), v4 → v5 (city/network
-    evidence) and v5 → v6 (breakdowns partitioned by build). A v6 or later database with an older
+    evidence), v5 → v6 (breakdowns partitioned by build) and v6 → v7 (breakdown names in the shared
+    lists); each step's rows are verified right after it. A v6 or later database with an older
     calculated layer starts at its step. Every rebuilt pool, scope, bucket and run summary, every
     test batch, location, network and per-IP enrichment, and every calculated window, breakdown and
     score, must equal its original.
@@ -1005,9 +1006,9 @@ def migrate(credentials_file):
                     "Only an unmodified v4, v5, v6, v7 or v8 schema can be migrated in place"
                 )
         # A v6, v7 or v8 database may already carry the current calculated layer, and a v6 or
-        # later one a calculated v3, v4 or v5 layer (later is its version, else None).
+        # later one a calculated v3 to v6 layer (later is its version, else None).
         upgraded = layered and start in (6, 7, 8) and layers == current_layer
-        known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in (3, 4, 5)}
+        known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in (3, 4, 5, 6)}
         later = known.get(layers[0]) if layered and start >= 6 and len(layers) == 1 else None
         expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
         if layered and not upgraded and not later and layers != expected:
@@ -1015,7 +1016,7 @@ def migrate(credentials_file):
                 "Only an unmodified calculated v1 schema can be migrated in place"
                 if start == 4
                 else "The calculated schema differs from this release; only an unmodified "
-                "calculated v2, v3, v4 or v5 schema can be migrated in place"
+                "calculated v2, v3, v4, v5 or v6 schema can be migrated in place"
             )
         checks = {}
         if start == 4:
@@ -1044,21 +1045,17 @@ def migrate(credentials_file):
             checks |= names.V8_CHECKS
         if layered and not upgraded and not later:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
-        for n in (3, 4, 5):  # calculated v3 → v4, v4 → v5 and v5 → v6, from the layer's step
+        steps = []
+        for n in (3, 4, 5, 6):  # calculated v3 → v4 up to v6 → v7, from the layer's step
             if layered and not upgraded and (later or n) <= n:
                 conn.execute(getattr(store, f"V{n}_SNAPSHOT"))
                 conn.execute((root / f"calculated/migrate_v{n}_v{n + 1}.sql").read_text())
-                checks |= getattr(store, f"V{n}_CHECKS")
+                # Checked at once: they compare stored rows, which a later step may change.
+                steps += _verify(conn, getattr(store, f"V{n}_CHECKS"), start)
         conn.execute(schema)
         if layered:
             conn.execute(calculated)
-        failed = {
-            name: count
-            for name, query in checks.items()
-            if (count := conn.execute(query).fetchone()[0])
-        }
-        if failed:
-            raise ValueError(f"Migrated rows do not rebuild their v{start} JSON: {failed}")
+        verified = [*_verify(conn, checks, start), *steps]
         if start < SCHEMA_VERSION:
             conn.execute("DELETE FROM schema_versions")
             conn.execute(
@@ -1071,17 +1068,20 @@ def migrate(credentials_file):
                 "INSERT INTO calculation_schema VALUES (%s,%s)",
                 (store.SCHEMA_VERSION, calculated_checksum),
             )
-    if start < SCHEMA_VERSION:
-        # Dropped columns keep their bytes until the rewritten tables are compacted: the v4 ones
-        # and the v8 names. v5 → v6, v6 → v7, v7 → v8 and calculated v2 → v3 only add tables and
-        # nullable or constant-default columns (and swap a check constraint): no rewrite.
+    # Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
+    # columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
+    # v5 → v6, v6 → v7, v7 → v8 and calculated v2 → v3 only add tables and nullable or
+    # constant-default columns (and swap a check constraint): no rewrite.
+    tables = ["enrichment_locations", "enrichment_networks"] if start < SCHEMA_VERSION else []
+    if start == 4:
+        tables += ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
+    if start == 4 and layered:
+        tables += ["calculated_windows", "calculated_scores"]
+    if layered and not upgraded:
+        tables += ["asn_labels", "calculated_breakdowns"]
+    if tables:
         with connect(credentials_file) as conn:
             conn.autocommit = True
-            tables = ["enrichment_locations", "enrichment_networks"]
-            if start == 4:
-                tables += ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
-            if start == 4 and layered:
-                tables += ["calculated_windows", "calculated_scores"]
             conn.execute("VACUUM (FULL, ANALYZE) " + ",".join(tables))
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1089,8 +1089,20 @@ def migrate(credentials_file):
         "calculated_schema_version": store.SCHEMA_VERSION if layered else None,
         "from_calculated_schema_version": layers[0][0] if layered else None,
         "migrated": True,
-        "verified": list(checks),
+        "verified": verified,
     }
+
+
+def _verify(conn, checks, start):
+    """Raise unless every check counts no differing row; return the checks' names."""
+    failed = {
+        name: count
+        for name, query in checks.items()
+        if (count := conn.execute(query).fetchone()[0])
+    }
+    if failed:
+        raise ValueError(f"Migrated rows do not rebuild their v{start} JSON: {failed}")
+    return list(checks)
 
 
 def seed(
