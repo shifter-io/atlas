@@ -35,7 +35,7 @@ from .events import (
 )
 
 WINDOW = timedelta(minutes=5)
-MAX_WINDOWS = 12  # windows evaluated per tick when catching up
+MAX_WINDOWS = 12  # windows evaluated per tick; a backlog continues on the next ticks
 GRACE = timedelta(seconds=60)  # a start passed by at most this much still runs, a bit late
 
 
@@ -320,7 +320,9 @@ def _floor(at: datetime) -> datetime:
 
 
 async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
-    """Evaluate every complete, settled window since the last one (at most MAX_WINDOWS)."""
+    """Evaluate the complete, settled windows after the watermark, the oldest first and at most
+    MAX_WINDOWS per call; a longer backlog (the evaluator was down) continues on the next calls,
+    so no window is skipped. The first call starts at the newest settled window."""
     now = now or datetime.now(UTC)
     await db.ensure_partition("test_events", now)
     totals = {"windows": 0, "opened": 0, "closed": 0, "latency_rise": 0}
@@ -330,8 +332,7 @@ async def evaluate(db: Database, now: datetime | None = None) -> dict[str, Any]:
         last = _floor(now - timedelta(seconds=float(cfg["settle_seconds"]))) - WINDOW
         done = cfg["evaluated_until"]
         start = datetime.fromisoformat(done) + WINDOW if done else last
-        start = max(start, last - WINDOW * (MAX_WINDOWS - 1))
-        while start <= last:
+        while start <= last and totals["windows"] < MAX_WINDOWS:
             for key, value in (await evaluate_window(conn, start, now, cfg)).items():
                 totals[key] += value
             totals["latency_rise"] += await evaluate_latency(conn, start, now, cfg)

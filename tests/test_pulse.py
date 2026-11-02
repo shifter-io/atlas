@@ -192,6 +192,24 @@ async def test_recovery_waits_for_the_configured_healthy_windows(database, db, t
     assert query(database, "SELECT DISTINCT ended_at FROM outages") == [(window(3),)]
 
 
+async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_window(
+    database, db, tmp_path
+):
+    prepare(database, REGIONS)
+    (alpha,) = products(database, "alpha")
+    for country in REGIONS:
+        await run(
+            tmp_path, database, "pulse", window(3), alpha, country, [(window(3), 10, 10, 300)]
+        )
+    await evaluated(db, 0)
+    # The evaluator was down for 20 windows: 12 now, from the watermark, then the other 8.
+    assert await evaluated(db, 20) == {"windows": 12, "opened": 1, "closed": 0, "latency_rise": 0}
+    assert (await evaluated(db, 20))["windows"] == 8
+    assert query(database, "SELECT value FROM settings WHERE key='pulse.evaluated_until'") == [
+        (window(20).isoformat(),)
+    ]
+
+
 async def test_latency_rise_fires_once_per_streak_only_above_the_baseline(database, db, tmp_path):
     prepare(database, ("DE",))
     alpha, beta = products(database, "alpha", "beta")
