@@ -281,7 +281,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     builds = sorted(before["payloads"])
     api_before = await api_bodies(database, builds)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (5, 9)
+    assert (result["from_schema_version"], result["schema_version"]) == (5, 10)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (2, 7)
     assert set(store.V2_CHECKS) <= set(result["verified"])
     assert migrate(database)["migrated"] is False
@@ -312,7 +312,7 @@ def test_modified_v5_is_refused(databases):
         migrate(database)
     with connect(database) as conn:
         conn.execute("UPDATE schema_versions SET checksum='edited'")
-    with pytest.raises(ValueError, match="unmodified v4, v5, v6, v7 or v8"):
+    with pytest.raises(ValueError, match="unmodified v4, v5, v6, v7, v8 or v9"):
         migrate(database)
     with connect(database) as conn:
         assert conn.execute("SELECT to_regclass('targets')").fetchone() == (None,)
@@ -385,7 +385,7 @@ def test_v6_database_migrates_through_v7(databases):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (6, 9)
+    assert (result["from_schema_version"], result["schema_version"]) == (6, 10)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (3, 7)
     assert result["verified"] == [
         *V6_CHECKS,

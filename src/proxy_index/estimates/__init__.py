@@ -4,3 +4,5 @@ compute: the 24 estimated hours of an ingested test, from the network's hour for
 estimated_hours. release: one ended hour released at a time, with its estimate_hour_released
 event. window: the released hours as the calculator windows' `estimated` blocks.
 """
+
+from . import window as window  # the calculator's entry point: window.attach

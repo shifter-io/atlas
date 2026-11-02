@@ -34,15 +34,8 @@ V8_CHECKSUM = "5986ee1ea743a34bf42cb49d3a7d5ded4d0b884bb653cb090e3d4b7f679a4552"
 # record it.
 V8_PRE_RENAME_CHECKSUM = "315af82775eb32324307b33c7f88b18a7fd1a9b443ee1b8cb15d42fa7b1945ca"
 V9_CHECKSUM = "bf4c540376649ecf841e5207e2581cda29cba76473761b7e5c27e72cee98b0ee"
-MIGRATABLE = {
-    (4, V4_CHECKSUM): 4,
-    (5, V5_CHECKSUM): 5,
-    (6, V6_CHECKSUM): 6,
-    (7, V7_CHECKSUM): 7,
-    (8, V8_CHECKSUM): 8,
-    (8, V8_PRE_RENAME_CHECKSUM): 8,
-    (9, V9_CHECKSUM): 9,
-}
+MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
+MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)

@@ -131,7 +131,7 @@ def product_window(start):
     }
 
 
-def test_attach_flags_every_estimated_figure_with_its_formula_version():
+def test_place_flags_every_estimated_figure_with_its_formula_version():
     groups = {
         (1, "c"): {
             "product_id": 1,
@@ -143,8 +143,8 @@ def test_attach_flags_every_estimated_figure_with_its_formula_version():
         "hours": hours + [rows_of(9, product=2)],  # a run outside the calculation: ignored
         "distinct": {"7d": [{"product_id": 1, "country_code": None, "ips": 2}]},
     }
-    run_map = {key: {"group": (1, "c")} for key in (1, 2, 3)}
-    window.attach(groups, run_map, estimates, {"estimates": {"window_unique": "sum"}})
+    run_group = dict.fromkeys((1, 2, 3), (1, "c"))
+    window.place(groups, run_group, estimates, {"estimates": {"window_unique": "sum"}})
     week = groups[(1, "c")]["windows"]["7d"]["estimated"]
     day = groups[(1, "c")]["windows"]["24h"]["estimated"]
     assert week["estimated"] is True and week["formula_versions"] == [1, 2] and week["hours"] == 3
@@ -169,10 +169,10 @@ def test_attach_flags_every_estimated_figure_with_its_formula_version():
     assert day["hours"] == 2  # the 24h window starts at the second hour
     groups[(1, "c")]["windows"]["24h"]["period"]["start"] = T2
     del groups[(1, "c")]["windows"]["24h"]["estimated"]
-    window.attach(groups, run_map, estimates, {})
+    window.place(groups, run_group, estimates, {})
     assert "estimated" not in groups[(1, "c")]["windows"]["24h"]
     assert groups[(1, "c")]["windows"]["7d"]["estimated"]["unique_ips"]["method"] == "distinct"
-    window.attach(groups, run_map, None, {})  # nothing released: no change
+    window.place(groups, run_group, {"hours": [], "distinct": {}}, {})  # nothing released
 
 
 # --- stored rows and release ---------------------------------------------------------------

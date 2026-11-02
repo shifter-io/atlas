@@ -72,7 +72,8 @@ def hours(formula: dict, country: str, measured_at: datetime, ips: int, requests
 
 MEASURED = """SELECT r.run_key,r.started_at,s.product_id,
  (SELECT count(DISTINCT ip_id) FROM ip_observations o WHERE o.run_key=r.run_key) AS ips,
- (SELECT coalesce(sum(count),0) FROM ip_observations o WHERE o.run_key=r.run_key) AS requests
+ (SELECT coalesce(sum(count),0)::bigint FROM ip_observations o WHERE o.run_key=r.run_key)
+ AS requests
 FROM test_runs r JOIN scope_stats s USING(scope_id) WHERE r.run_id=%s"""
 
 UPSERT = """INSERT INTO estimated_hours AS e(product_id,country_code,day,hour,run_key,measured_at,

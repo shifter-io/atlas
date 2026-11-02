@@ -116,18 +116,18 @@ def block(window: dict, rows: list[dict], distinct: dict, method: str) -> dict:
     }
 
 
-def attach(groups: dict, run_map: dict, estimates: dict | None, config: dict) -> None:
+def place(groups: dict, run_group: dict, estimates: dict, config: dict) -> None:
     """Add the `estimated` block to every product window with released hours in it.
 
-    A test's hours go to the product group its run was calculated in (run_map[run_key]).
+    A test's hours go to the product group its run was calculated in (run_group[run_key]).
     """
-    if not estimates or not estimates["hours"]:
+    if not estimates["hours"]:
         return
     method = config.get("estimates", {}).get("window_unique", "distinct")
     rows_of = defaultdict(list)
     for r in estimates["hours"]:
-        if r["run_key"] in run_map:
-            rows_of[run_map[r["run_key"]]["group"]].append(r)
+        if r["run_key"] in run_group:
+            rows_of[run_group[r["run_key"]]].append(r)
     for key, rows in rows_of.items():
         product = groups[key]
         for label, window in product["windows"].items():
@@ -141,3 +141,14 @@ def attach(groups: dict, run_map: dict, estimates: dict | None, config: dict) ->
                 if d["product_id"] == product["product_id"]
             }
             window["estimated"] = block(window, inside, distinct, method)
+
+
+def attach(payload: dict, runs: list, conn, as_of, config: dict) -> dict:
+    """The built payload with the released estimated hours placed in its product windows.
+
+    build() records each run's product group (run["group"], the (product_id, cohort) key).
+    """
+    groups = {(p["product_id"], p["cohort"]): p for p in payload["products"]}
+    run_group = {r["run_key"]: r["group"] for r in runs if "group" in r}
+    place(groups, run_group, fetch(conn, as_of), config)
+    return payload
