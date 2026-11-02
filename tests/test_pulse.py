@@ -181,10 +181,11 @@ async def test_recovery_waits_for_the_configured_healthy_windows(database, db, t
     (alpha,) = products(database, "alpha")
     async with db.transaction() as conn:
         await put_setting(conn, "pulse.recover_windows", 2)
-    # Down, healthy, no data (neutral), healthy, healthy.
-    rows = [(window(k), 10, 10 if k == 0 else 0, 300) for k in (0, 1, 3, 4)]
-    for country in REGIONS:
-        await run(tmp_path, database, "pulse", W0, alpha, country, rows)
+    # Down, healthy, no data (neutral), healthy, healthy: one pulse run per window.
+    for k in (0, 1, 3, 4):
+        rows = [(window(k), 10, 10 if k == 0 else 0, 300)]
+        for country in REGIONS:
+            await run(tmp_path, database, "pulse", window(k), alpha, country, rows)
     await evaluated(db, 0)
     totals = await evaluated(db, 3)
     assert (totals["windows"], totals["closed"]) == (3, 0)
@@ -208,6 +209,59 @@ async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_wind
     assert query(database, "SELECT value FROM settings WHERE key='pulse.evaluated_until'") == [
         (window(20).isoformat(),)
     ]
+
+
+async def test_the_latency_baseline_is_the_latest_census_run_until_pulse_base_1(
+    database, db, tmp_path
+):
+    """The current baseline source (follow-up PULSE-BASE-1 switches it to the daily test)."""
+    prepare(database, ("DE",))
+    alpha, beta = products(database, "alpha", "beta")
+    old, new = W0 - timedelta(hours=26), W0 - timedelta(hours=3)
+    await run(tmp_path, database, "census", old, alpha, "DE", [(old, 100, 0, 400)])
+    await run(tmp_path, database, "census", new, alpha, "DE", [(new, 100, 0, 100)])
+    # Newer pulses and a daily-test run (DAILY-1 ingests it without a batch) are not read.
+    await run(tmp_path, database, "pulse", W0, alpha, "DE", [(W0, 100, 0, 900)])
+    await run(tmp_path, database, "pulse", W0, beta, "DE", [(W0, 100, 0, 900)], "generic_https")
+    daily = ingest(await measurement(tmp_path / "daily"), database)["run_key"]
+    with connect(database) as conn:
+        buckets(conn, daily, [(W0, 100, 0, 700)])
+    async with db.connection() as conn:
+        assert await pulse.latency_baseline(conn, alpha, "DE") == 100
+        assert await pulse.latency_baseline(conn, beta, "DE") is None
+
+
+def nodes(plan):
+    yield plan
+    for child in plan.get("Plans", ()):
+        yield from nodes(child)
+
+
+async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by_index(
+    database, db
+):
+    with connect(database) as conn:
+        for month in range(7, 13):
+            partition(conn, "run_buckets", datetime(2026, month, 15, tzinfo=UTC))
+    async with db.transaction() as conn:
+        cfg = await pulse._settings(conn)
+        await conn.execute("SET LOCAL enable_seqscan=off")
+        statements = (
+            (pulse.WINDOW_STATS_SQL, pulse._range(W0, cfg)),
+            (pulse.PAIRS_SQL, pulse._range(W0, cfg)),
+            (pulse.P50_SINCE_SQL, (["k"], W0 - WINDOW, W0 + 2 * WINDOW)),
+        )
+        for statement, params in statements:
+            explained = await (await conn.execute("EXPLAIN (FORMAT JSON) " + statement, params))
+            plan = list(nodes((await explained.fetchone())["QUERY PLAN"][0]["Plan"]))
+            relations = {n["Relation Name"] for n in plan if "Relation Name" in n}
+            assert {r for r in relations if r.startswith("run_buckets")} == {
+                "run_buckets_2026_10"
+            }, statement
+            if "test_batches" in relations:
+                scans = [n["Node Type"] for n in plan if n.get("Relation Name") == "test_batches"]
+                assert "Seq Scan" not in scans, statement
+                assert any("scheduled_for" in n.get("Index Cond", "") for n in plan), statement
 
 
 async def test_latency_rise_fires_once_per_streak_only_above_the_baseline(database, db, tmp_path):

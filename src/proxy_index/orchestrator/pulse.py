@@ -11,9 +11,15 @@ then opens as one outages row per enabled country (source 'pulse', batch_id NULL
 a network outage is told apart from a per-batch one) and a pulse_down event lists them. After
 pulse.recover_windows healthy windows the rows close and pulse_recovered lists them. A window
 without pulse data is neutral. Latency: latency_rise fires when a network's last
-pulse.latency_windows done pulse runs in a country all have a p50 at least
-pulse.latency_ratio x the baseline, the p50 of its latest done census run there (the daily
-test); a lower pulse never moves the baseline.
+pulse.latency_windows done pulse runs in a country (runs, one per slot, not 5-minute windows)
+all have a p50 at least pulse.latency_ratio x latency_baseline(); a lower pulse never moves
+the baseline.
+
+A window is evaluated once, pulse.settle_seconds after it ends: buckets uploaded later never
+count toward its downtime, and a run that turns done later is never a latency candidate, so
+settle_seconds must cover the observed upload lag. Every query is bounded by time (a window's
+batches began at most batch.start_grace_seconds before it, see PULSES), so run_buckets
+partitions prune and test_batches is read through its (kind, target_id, scheduled_for) index.
 """
 
 from __future__ import annotations
@@ -105,6 +111,34 @@ async def open_slot(
 
 # --- evaluation --------------------------------------------------------------------------
 
+# Pulse batches that started in [%(lo)s, %(hi)s). A batch starts within one interval (plus the
+# lead) of its slot, so the targets join turns the range into an index range on
+# test_batches(kind, target_id, scheduled_for); 2 intervals keep a lowered interval safe.
+PULSES = (
+    "test_batches b JOIN targets t ON t.target_id=b.target_id AND b.kind='pulse' "
+    "AND b.scheduled_for>=%(lo)s-2*make_interval(mins=>t.pulse_interval_minutes) "
+    "AND b.scheduled_for<%(hi)s AND b.start_at>=%(lo)s AND b.start_at<%(hi)s "
+)
+# Per network and region: requests and connection errors of the pulse runs in the window.
+WINDOW_STATS_SQL = (
+    "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
+    "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM " + PULSES + "JOIN batch_runs br "
+    "ON br.batch_id=b.batch_id JOIN run_buckets rb ON rb.run_key=br.run_key "
+    "AND rb.bucket_start=%(start)s GROUP BY 1,2"
+)
+# The networks and countries of the done pulse runs whose first bucket is the window.
+PAIRS_SQL = (
+    "SELECT DISTINCT br.product_id,b.country_code FROM " + PULSES + "JOIN batch_runs br "
+    "ON br.batch_id=b.batch_id AND br.status='done' WHERE (SELECT min(rb.bucket_start) "
+    "FROM run_buckets rb WHERE rb.run_key=br.run_key AND rb.bucket_start>=%(lo)s-interval "
+    "'5 minutes' AND rb.bucket_start<=%(start)s)=%(start)s ORDER BY 1,2"
+)
+# RUN_P50_SQL over the buckets in [%s, %s), so only those run_buckets partitions are read.
+P50_SINCE_SQL = RUN_P50_SQL.replace(
+    "b.run_key=ANY(%s)", "b.run_key=ANY(%s) AND b.bucket_start>=%s AND b.bucket_start<%s"
+)
+NEVER = datetime(9999, 1, 1, tzinfo=UTC)
+
 
 async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     keys = (
@@ -116,24 +150,25 @@ async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
         "settle_seconds",
         "evaluated_until",
     )
-    return {key: await setting(conn, f"pulse.{key}") for key in keys}
+    cfg = {key: await setting(conn, f"pulse.{key}") for key in keys}
+    grace = timedelta(seconds=float(await setting(conn, "batch.start_grace_seconds")))
+    # A run starts at most start_grace after its batch (the reaper fails it then) and a pulse
+    # run lasts well under a window: a window's buckets come from batches that began this far
+    # before it at the most.
+    cfg["lookback"] = grace + 2 * WINDOW
+    return cfg
+
+
+def _range(start: datetime, cfg: dict[str, Any]) -> dict[str, datetime]:
+    return {"start": start, "lo": start - cfg["lookback"], "hi": start + WINDOW}
 
 
 async def window_stats(
-    conn: psycopg.AsyncConnection, start: datetime, share: float
+    conn: psycopg.AsyncConnection, start: datetime, share: float, cfg: dict[str, Any]
 ) -> dict[int, dict[str, int]]:
     """Per network: requests and connection errors over all regions in the window, the
     regions with data and the regions whose own error share reached `share`."""
-    rows = await (
-        await conn.execute(
-            "SELECT br.product_id,b.region_id,sum(rb.completed)::bigint AS requests,"
-            "sum(rb.timeouts+rb.proxy_errors)::bigint AS errors FROM run_buckets rb "
-            "JOIN batch_runs br ON br.run_key=rb.run_key "
-            "JOIN test_batches b ON b.batch_id=br.batch_id "
-            "WHERE b.kind='pulse' AND rb.bucket_start=%s GROUP BY 1,2",
-            (start,),
-        )
-    ).fetchall()
+    rows = await (await conn.execute(WINDOW_STATS_SQL, _range(start, cfg))).fetchall()
     out: dict[int, dict[str, int]] = {}
     for row in rows:
         stats = out.setdefault(
@@ -146,6 +181,16 @@ async def window_stats(
             stats["regions"] += 1
             stats["over"] += int(errors >= share * requests)
     return out
+
+
+async def _stats(
+    conn: psycopg.AsyncConnection, start: datetime, cfg: dict[str, Any]
+) -> dict[int, dict[str, int]]:
+    """window_stats, computed once per window and evaluation (cfg["cache"])."""
+    cache = cfg.setdefault("cache", {})
+    if start not in cache:
+        cache[start] = await window_stats(conn, start, float(cfg["down_error_share"]), cfg)
+    return cache[start]
 
 
 def is_down(stats: dict[str, int] | None, share: float, min_regions: int) -> bool | None:
@@ -189,7 +234,7 @@ async def _recovered(
 ) -> bool:
     """True when this window and the recover_windows - 1 before it are all healthy."""
     for k in range(int(cfg["recover_windows"])):
-        stats = (await window_stats(conn, start - WINDOW * k, cfg["down_error_share"])).get(product)
+        stats = (await _stats(conn, start - WINDOW * k, cfg)).get(product)
         if is_down(stats, cfg["down_error_share"], int(cfg["down_min_regions"])) is not False:
             return False
     return True
@@ -215,7 +260,7 @@ async def evaluate_window(
     """Open and close network outages for one complete window. Call inside a transaction."""
     share, min_regions = float(cfg["down_error_share"]), int(cfg["down_min_regions"])
     opened = closed = 0
-    for product, stats in sorted((await window_stats(conn, start, share)).items()):
+    for product, stats in sorted((await _stats(conn, start, cfg)).items()):
         state = is_down(stats, share, min_regions)
         open_rows = await _open_network(conn, product)
         if state and not open_rows:
@@ -237,36 +282,53 @@ async def evaluate_window(
     return {"opened": opened, "closed": closed}
 
 
-async def _p50s(conn: psycopg.AsyncConnection, run_keys: list[str]) -> dict[str, int]:
+async def _p50s(
+    conn: psycopg.AsyncConnection, run_keys: list[str], since: datetime, until: datetime = NEVER
+) -> dict[str, int]:
     if not run_keys:
         return {}
-    rows = await (await conn.execute(RUN_P50_SQL, (sorted(set(run_keys)),))).fetchall()
+    keys = sorted(set(run_keys))
+    rows = await (await conn.execute(P50_SINCE_SQL, (keys, since, until))).fetchall()
     return {row["run_key"]: row["p50"] for row in rows}
 
 
-async def _baseline(conn: psycopg.AsyncConnection, product: int, country: str) -> int | None:
+async def latency_baseline(conn: psycopg.AsyncConnection, product: int, country: str) -> int | None:
+    """The latency baseline of a network in a country: the p50 of its latest done census run
+    there. This is the one place the baseline source is chosen; pulses never move it.
+
+    Follow-up PULSE-BASE-1 switches it to the daily-test runs (DAILY-1, which ingests them
+    without a batch, so they are not read here yet) once DAILY-1 has merged and how a daily-test
+    run is identified per network and country is a frozen contract.
+    """
     row = await (
         await conn.execute(
-            "SELECT br.run_key FROM batch_runs br JOIN test_batches b ON b.batch_id=br.batch_id "
-            "WHERE b.kind='census' AND br.product_id=%s AND b.country_code=%s "
-            "AND br.status='done' AND br.run_key IS NOT NULL ORDER BY b.start_at DESC LIMIT 1",
+            "SELECT br.run_key,b.start_at FROM batch_runs br JOIN test_batches b "
+            "ON b.batch_id=br.batch_id WHERE b.kind='census' AND br.product_id=%s "
+            "AND b.country_code=%s AND br.status='done' AND br.run_key IS NOT NULL "
+            "ORDER BY b.start_at DESC LIMIT 1",
             (product, country),
         )
     ).fetchone()
-    return (await _p50s(conn, [row["run_key"]])).get(row["run_key"]) if row else None
+    if row is None:
+        return None
+    return (await _p50s(conn, [row["run_key"]], row["start_at"] - WINDOW)).get(row["run_key"])
 
 
 async def _recent_pulses(
-    conn: psycopg.AsyncConnection, product: int, country: str, before: datetime, limit: int
+    conn: psycopg.AsyncConnection, product: int, country: str, before: datetime, slots: int
 ) -> list[dict]:
-    """The newest done pulse runs that started before `before`, newest first."""
+    """The done pulse runs of the last `slots` slots that started before `before`, newest
+    first: a streak is made of runs in consecutive slots, and older runs are never read."""
     return await (
         await conn.execute(
-            "SELECT br.run_key,b.region_id FROM batch_runs br JOIN test_batches b "
-            "ON b.batch_id=br.batch_id WHERE b.kind='pulse' AND br.product_id=%s "
-            "AND b.country_code=%s AND br.status='done' AND br.run_key IS NOT NULL "
-            "AND b.start_at<%s ORDER BY b.start_at DESC,b.batch_id DESC LIMIT %s",
-            (product, country, before, limit),
+            "SELECT br.run_key,b.region_id,b.start_at FROM test_batches b JOIN targets t "
+            "ON t.target_id=b.target_id JOIN batch_runs br ON br.batch_id=b.batch_id "
+            "WHERE b.kind='pulse' AND b.country_code=%(country)s AND br.product_id=%(product)s "
+            "AND br.status='done' AND br.run_key IS NOT NULL AND b.start_at<%(before)s "
+            "AND b.scheduled_for>=%(before)s"
+            "-make_interval(mins=>t.pulse_interval_minutes*%(slots)s::int) "
+            "ORDER BY b.start_at DESC,b.batch_id DESC LIMIT %(slots)s",
+            {"product": product, "country": country, "before": before, "slots": slots},
         )
     ).fetchall()
 
@@ -281,26 +343,19 @@ async def evaluate_latency(
     """latency_rise for each network and country whose newest done pulse run began in this
     window and completes a streak of latency_windows runs above ratio x baseline."""
     ratio, streak = float(cfg["latency_ratio"]), int(cfg["latency_windows"])
-    pairs = await (
-        await conn.execute(
-            "SELECT DISTINCT br.product_id,b.country_code FROM batch_runs br "
-            "JOIN test_batches b ON b.batch_id=br.batch_id WHERE b.kind='pulse' "
-            "AND br.status='done' AND (SELECT min(rb.bucket_start) FROM run_buckets rb "
-            "WHERE rb.run_key=br.run_key)=%s ORDER BY 1,2",
-            (start,),
-        )
-    ).fetchall()
+    pairs = await (await conn.execute(PAIRS_SQL, _range(start, cfg))).fetchall()
     fired = 0
     for pair in pairs:
         product, country = pair["product_id"], pair["country_code"].strip()
-        baseline = await _baseline(conn, product, country)
-        if baseline is None:
-            continue
+        baseline = await latency_baseline(conn, product, country)
         runs = await _recent_pulses(conn, product, country, start + WINDOW, streak + 1)
-        p50 = await _p50s(conn, [r["run_key"] for r in runs])
+        if baseline is None or len(runs) < streak:
+            continue
+        since = runs[-1]["start_at"] - WINDOW
+        p50 = await _p50s(conn, [r["run_key"] for r in runs], since, start + 2 * WINDOW)
         above = [_above(p50.get(r["run_key"]), baseline, ratio) for r in runs]
         # Fire once per streak: the run before the streak must not be above too.
-        if len(above) < streak or not all(above[:streak]) or (len(above) > streak and above[-1]):
+        if not all(above[:streak]) or (len(above) > streak and above[-1]):
             continue
         rise = LatencyRise(
             product_id=product,
