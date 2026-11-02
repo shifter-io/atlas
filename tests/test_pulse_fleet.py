@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import tarfile
@@ -231,6 +232,42 @@ async def test_a_node_no_longer_in_fleet_json_is_reported_and_left_alone(tmp_pat
     assert records(root)["pi-pulse-fra1-shifter"].status == "armed"
 
 
+async def test_a_node_no_longer_wanted_is_never_armed_again(tmp_path):
+    root = make_root(tmp_path, regions=("fra1", "lon1"))
+    fake, (remote, issuer, clock) = world(), services()
+    remote.ready = False
+    await reconcile(fake, root, remote, issuer, clock)
+    raw = json.loads((root / "fleet.json").read_text())
+    (root / "fleet.json").write_text(json.dumps({**raw, "regions": ["lon1"]}))
+    remote.ready = True
+    report = await reconcile(fake, root, remote, issuer, clock)
+    assert [name for name, _, _ in remote.pushed] == [NODE]
+    assert [call[3] for call in issuer.calls] == ["lon1"]
+    assert records(root)["pi-pulse-fra1-shifter"].status == "boot_failed"
+    assert [item["name"] for item in report["unknown"]] == ["pi-pulse-fra1-shifter"]
+
+
+async def test_arming_runs_a_bounded_number_of_nodes_at_once(tmp_path, monkeypatch):
+    regions = ("ams3", "fra1", "lon1")
+    root = make_root(tmp_path, networks=("geonode", "shifter"), regions=regions)
+    fake, (remote, issuer, clock) = world(), services()
+    monkeypatch.setattr(pulse_fleet, "ARM_AT_ONCE", 2)
+    original, inside, most = pulse_fleet.Fleet._arm_one, [0], [0]
+
+    async def counted(self, record):
+        inside[0] += 1
+        most[0] = max(most[0], inside[0])
+        await asyncio.sleep(0)
+        try:
+            await original(self, record)
+        finally:
+            inside[0] -= 1
+
+    monkeypatch.setattr(pulse_fleet.Fleet, "_arm_one", counted)
+    report = await reconcile(fake, root, remote, issuer, clock)
+    assert len(report["created"]) == 6 and len(remote.pushed) == 6 and most[0] == 2
+
+
 async def test_a_create_whose_answer_was_lost_is_adopted_not_doubled(tmp_path):
     root = make_root(tmp_path)
     fake = world()
@@ -453,6 +490,7 @@ async def test_a_node_still_shown_after_its_delete_is_not_counted_gone(tmp_path)
     "change, what",
     [
         ({"account": "someone"}, "account"),
+        ({"size": "s-2vcpu-2gb"}, "size"),
         ({"regions": []}, "none"),
         ({"networks": {}}, "none"),
         ({"regions": ["LON1"], "image_by_region": {"LON1": "1"}}, "region"),
@@ -484,9 +522,9 @@ def test_fleet_json_is_validated(tmp_path, change, what):
 
 
 def test_the_config_names_one_node_per_network_and_region(tmp_path):
-    root = make_root(tmp_path, networks=("shifter",), regions=("lon1",), size="s-2vcpu-2gb")
+    root = make_root(tmp_path, networks=("shifter",), regions=("lon1",))
     config = pulse_fleet.load_config(root)
-    assert config.wanted() == {NODE: ("shifter", "lon1")} and config.size == "s-2vcpu-2gb"
+    assert config.wanted() == {NODE: ("shifter", "lon1")} and config.size == "s-1vcpu-1gb-amd"
     assert config.networks["shifter"].provider == "shifter"
 
 
@@ -514,9 +552,11 @@ class Closing:
 @pytest.mark.parametrize(
     "action, report, code",
     [
-        ("reconcile", {"created": [NODE], "failed": []}, 0),
-        ("reconcile", {"created": [], "failed": [{"name": NODE}]}, 1),
+        ("reconcile", {"created": [NODE], "failed": [], "destroy_refused": []}, 0),
+        ("reconcile", {"created": [], "failed": [{"name": NODE}], "destroy_refused": []}, 1),
+        ("reconcile", {"created": [], "failed": [], "destroy_refused": [{"name": NODE}]}, 1),
         ("retire", {"name": NODE, "gone": True}, 0),
+        ("retire", {"name": NODE, "gone": False}, 1),
     ],
 )
 def test_cli_reconcile_and_retire(tmp_path, monkeypatch, capsys, action, report, code):

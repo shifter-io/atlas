@@ -11,9 +11,14 @@ did not record, or one no longer wanted, is reported as `unknown` and never touc
 never deletes anything (a node whose assignment was not confirmed ends `destroy_refused`, for
 the owner). `retire --name N` removes one recorded node, only through
 `scope.retire_pulse_node`, and checks it gone; a later reconcile creates it again unless
-`fleet.json` no longer lists it.
+`fleet.json` no longer lists it. Exit codes: reconcile 1 when a node failed or waits for the
+owner (`destroy_refused`), retire 1 when the node was not verified gone; otherwise 0.
 
-`fleet.json` keys: account, size, regions, image_by_region, ssh_key_id, identity (the SSH key
+The node service runs as root (decision PULSE-1b): the droplet is single-purpose, its secrets
+are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke test has
+checked its file permissions on a real node.
+
+`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region, ssh_key_id, identity (the SSH key
 file), wheel, orchestrator_url, database_file, and networks: {name: {product, provider_config,
 credentials, provider (default the name)}}. Paths are relative to the root. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
@@ -48,6 +53,8 @@ from .do_api import CreateError
 from .fanout import INSTALL_WHEEL
 
 DEFAULT_SIZE = "s-1vcpu-1gb-amd"
+SIZES = (DEFAULT_SIZE,)  # the approved pulse node size; another needs an owner decision
+ARM_AT_ONCE = 16  # concurrent SSH sessions and token issues while arming
 NODE_SECRETS = f"{WORKER_ROOT}/pulse-secrets"  # kept across reboots: the service restarts
 READY_LIMIT_SECONDS = 180
 READY_POLL_SECONDS = 2.0
@@ -162,6 +169,7 @@ def load_config(root: Path) -> FleetConfig:
         size=raw.get("size", DEFAULT_SIZE),
     )
     _need(config.account not in ACCOUNTS, "account")
+    _need(config.size not in SIZES, "size")
     _need(not regions or not networks, "regions or networks (none)")
     _need(any(not re.fullmatch(REGION_RE, r) for r in regions), "region")
     _need(any(r not in config.image_by_region for r in regions), "image_by_region")
@@ -218,7 +226,9 @@ class Fleet:
         missing = [n for n in wanted if n not in taken and await self._lost(n, shown)]
         await self._create(missing, wanted)
         await self._assign()
-        await asyncio.gather(*(self._arm(r) for r in self.records.values() if self._armable(r)))
+        gate = asyncio.Semaphore(ARM_AT_ONCE)
+        armable = [r for n, r in self.records.items() if n in wanted and self._armable(r)]
+        await asyncio.gather(*(self._arm(r, gate) for r in armable))
         self._sort(set(wanted))
         self.save()
         return self.report
@@ -302,7 +312,11 @@ class Fleet:
     def _armable(self, record: DropletRecord) -> bool:
         return bool(record.droplet_id) and record.status in ARMABLE
 
-    async def _arm(self, record: DropletRecord) -> None:
+    async def _arm(self, record: DropletRecord, gate: asyncio.Semaphore) -> None:
+        async with gate:
+            await self._arm_one(record)
+
+    async def _arm_one(self, record: DropletRecord) -> None:
         """Wait for SSH, then push and start the node; any error fails only this node."""
         try:
             record.status = "booting"
@@ -451,7 +465,9 @@ def _command(args) -> int:
 
     report = asyncio.run(main())
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if args.fleet_action == "retire" or not report["failed"] else 1
+    if args.fleet_action == "retire":
+        return 0 if report["gone"] else 1
+    return 1 if report["failed"] or report["destroy_refused"] else 0
 
 
 def register(subcommands, handlers: dict) -> None:

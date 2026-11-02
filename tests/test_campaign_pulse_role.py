@@ -253,12 +253,13 @@ async def test_assignment_and_its_fail_closed_path_refuse_a_role_scope_mismatch(
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "proxy_index"
 PULSE_HOMES = {"scope.py", "pulse_fleet.py"}  # in src/proxy_index/campaign/
-PULSE_NAMES = {"pulse_scope", "retire_pulse_node"}
+PULSE_NAMES = {"PULSE_SID", "pulse_scope", "retire_pulse_node"}
 
 
 def pulse_leaks(source: str) -> list[str]:
     """Uses of the pulse scope or of the pulse role: a reference (call, attribute or import) to
-    `pulse_scope` / `retire_pulse_node`, or the role literal "pulse"."""
+    `PULSE_SID` / `pulse_scope` / `retire_pulse_node`, a `Scope(...)` built with "pulse", or
+    the role literal "pulse"."""
     found = []
     for node in ast.walk(ast.parse(source)):
         name = (
@@ -271,12 +272,23 @@ def pulse_leaks(source: str) -> list[str]:
             found.append(name)
         if isinstance(node, ast.Constant) and node.value == "pulse":
             found.append('"pulse"')
+        if isinstance(node, ast.Call) and _called(node.func) == "Scope":
+            values = [*node.args, *(k.value for k in node.keywords)]
+            if any(isinstance(v, ast.Constant) and v.value == "pulse" for v in values):
+                found.append("Scope(pulse)")
     return found
+
+
+def _called(func: ast.expr) -> str | None:
+    return func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
 
 
 @pytest.mark.parametrize(
     "source",
     [
+        'Scope("pulse", "pulse", p, "", t)',
+        'scope.Scope(cid="pulse", sid=s, project=p, manager=m, spec=t)',
+        "from .scope import PULSE_SID",
         'guarded_delete(c, "droplet", i, s, ledger, audit, "pulse")',
         "from .scope import pulse_scope as owned",
         "scope.retire_pulse_node(c, i, p, ledger, audit)",
@@ -290,6 +302,11 @@ def test_the_pulse_scan_catches_a_use_of_the_pulse_role(source):
 
 def test_the_pulse_scan_ignores_other_words():
     assert pulse_leaks('TESTS = ("census", "pulse-fleet", "Pulse", "pulse node")') == []
+
+
+def test_a_pulse_scope_built_by_hand_is_caught_outside_campaign_too():
+    leaks = pulse_leaks('Scope("pulse", "pulse", p, "", t)')
+    assert [leak for leak in leaks if leak != '"pulse"'] == ["Scope(pulse)"]
 
 
 def test_only_scope_and_the_pulse_fleet_use_the_pulse_scope_and_role():
