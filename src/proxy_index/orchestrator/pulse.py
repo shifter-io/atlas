@@ -1,7 +1,6 @@
 """Pulse planning and the network-wide pulse evaluator.
 
-Planning: each runner region's enabled countries are spread evenly over a slot (interval / N
-apart), so a region's node runs one country at a time and never a burst of concurrent pulses.
+Planning: a region's countries are spread over a slot (interval / N apart), one at a time.
 
 Evaluation (job pulse_evaluate): pulse runs keep only their 5-minute run_buckets, no per-IP
 rows. Each complete window sums a network's connection errors (timeouts + proxy errors) over
@@ -12,8 +11,7 @@ a network outage is told apart from a per-batch one) and a pulse_down event list
 pulse.recover_windows healthy windows the rows close and pulse_recovered lists them. A window
 without pulse data is neutral. Latency: latency_rise fires when a network's last
 pulse.latency_windows done pulse runs in a country (runs, one per slot, not 5-minute windows)
-all have a p50 at least pulse.latency_ratio x latency_baseline(); a lower pulse never moves
-the baseline.
+all have a p50 at least pulse.latency_ratio x latency_baseline(), which a pulse never moves.
 
 A window is evaluated once, pulse.settle_seconds after it ends: buckets uploaded later never
 count toward its downtime, and a run that turns done later is never a latency candidate, so
