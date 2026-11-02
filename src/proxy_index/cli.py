@@ -182,9 +182,16 @@ def main(argv: list[str] | None = None) -> int:
     from .campaign import cli as campaign
 
     campaign.register(commands)
+    from .daily import cli as daily
+
+    daily.register(commands)
     args = parser.parse_args(argv)
     try:
-        private = {"onboarding": onboarding.dispatch, "campaign": campaign.dispatch}
+        private = {
+            "onboarding": onboarding.dispatch,
+            "campaign": campaign.dispatch,
+            "daily": daily.dispatch,
+        }
         if args.command in private:
             return private[args.command](args)
         if args.command in fleet.COMMANDS:

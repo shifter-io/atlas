@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..onboarding.files import atomic_json, digest, lock, read_json
-from ..onboarding.manifest import moment, timestamp
+from ..onboarding.manifest import moment, region_countries, timestamp
 from ..onboarding.scheduler import Clock
 from . import scope
 from .contracts import (
@@ -226,12 +226,11 @@ class _Launch(HourWork):
                 raise ValueError("a manifest's concurrency exceeds the campaign spec")
             if manifest.get("slot_minutes", 60) != spec.slot_minutes:
                 raise ValueError("a manifest's slot_minutes differs from the campaign spec")
-            countries = manifest["regions"]
+            # A daily test's manifest names the countries due; a region with none gets no worker.
+            due = {r: len(region_countries(manifest, r)) for r in spec.regions}
             record.traffic[network] = dict.fromkeys(TRAFFIC_KEYS, 0)
-            record.traffic[network]["countries_total"] = sum(
-                len(countries[r]) for r in spec.regions
-            )
-            for region in spec.regions:
+            record.traffic[network]["countries_total"] = sum(due.values())
+            for region in (r for r in spec.regions if due[r]):
                 record.droplets.append(
                     self._worker(
                         network,

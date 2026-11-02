@@ -86,6 +86,7 @@ class PlanOptions:
     grace_hours: int = 48
     allow_current_hour: bool = False
     slot_minutes: int = 60
+    due_countries: dict | None = None  # a daily test's {region: [codes]} (version 3 only)
 
 
 def _start(start: str, now: datetime | None, plan: PlanOptions) -> datetime:
@@ -197,6 +198,8 @@ def create(
         manifest["ends_at"] = timestamp(
             begins + 24 * slot + timedelta(hours=ephemeral_grace(manifest))
         )
+    if plan.due_countries is not None:
+        manifest["due_countries"] = {r: list(c) for r, c in plan.due_countries.items()}
     validate(manifest)
     directory = output / provider / product / campaign_id
     private_dir(directory.parent)
@@ -284,6 +287,7 @@ def validate(data: dict) -> dict:
         codes.extend(countries)
     if len(codes) != len(set(codes)) or set(codes) != set(load_countries()):
         raise ValueError("Each configured country must occur exactly once")
+    _due_countries(data)
     settings(data["settings"])
     if data["settings"].get("answer_classes") and data["schema_version"] != 3:
         raise ValueError("Answer classes require an ephemeral (version 3) manifest")
@@ -312,3 +316,26 @@ def ephemeral_grace(data: dict) -> int:
     if type(grace) is not int or not GRACE_HOURS[0] <= grace <= GRACE_HOURS[1]:
         raise ValueError("grace_hours must be an integer from 1 to 168")
     return grace
+
+
+def region_countries(manifest: dict, region: str) -> list[str]:
+    """The countries a region tests: its `due_countries` entry when the manifest has that key
+    (a region without one tests none), otherwise the region's whole list."""
+    due = manifest.get("due_countries")
+    return list(manifest["regions"][region] if due is None else due.get(region, []))
+
+
+def _due_countries(data: dict) -> None:
+    """Optional version 3 key {region: [codes]}: the daily test's subset of each region's list,
+    in the region's order. Regions with nothing due are left out; at least one is due."""
+    due = data.get("due_countries")
+    if due is None:
+        return
+    if data["schema_version"] != 3 or not isinstance(due, dict) or not due:
+        raise ValueError("due_countries must be a non-empty region map, ephemeral only")
+    for region, countries in due.items():
+        listed = data["regions"].get(region)
+        if listed is None or not isinstance(countries, list) or not countries:
+            raise ValueError("due_countries must name known regions with at least one country")
+        if countries != [code for code in listed if code in countries]:
+            raise ValueError("due_countries must be a subset of the region's list, in its order")
