@@ -13,6 +13,7 @@ import pytest
 from campaign_fakes import PROD_PROJECT, FakeDigitalOcean, Fault, running
 
 from proxy_index.campaign import pulse_fleet
+from proxy_index.campaign import scope as scope_module
 from proxy_index.campaign.contracts import PULSE_TAG, Droplet, DropletRecord
 from proxy_index.campaign.pulse_fleet import NODE_COMMAND, FleetError
 from proxy_index.campaign.scope import OwnershipError
@@ -347,6 +348,30 @@ async def test_an_unconfirmed_assignment_ends_destroy_refused_and_is_never_armed
     report = await reconcile(fake, root, remote, issuer, clock)  # left for the owner
     assert report["destroy_refused"] == [{"name": NODE, "id": rid}] and not remote.pushed
     assert not report["created"] and not fake.deleted
+
+
+async def test_a_late_dev_resources_membership_never_deletes_the_node(tmp_path, monkeypatch):
+    """The assignment landed but showed only after the retries: the fail-closed path must
+    still leave the node for the owner, never delete it, and report it truthfully."""
+    root = make_root(tmp_path)
+    fake, (remote, issuer, clock) = world(), services()
+    fake.faults.append(Fault("POST", f"/v2/projects/{DEV}/resources", 500, times=10**6))
+    original = scope_module.remove_unassigned
+
+    async def late(cloud, scope, records, audit_path, causes, *args, **kwargs):
+        for rid in causes:
+            fake.move(rid, DEV)
+        return await original(cloud, scope, records, audit_path, causes, *args, **kwargs)
+
+    monkeypatch.setattr(scope_module, "remove_unassigned", late)
+    report = await reconcile(fake, root, remote, issuer, clock)
+    rid = records(root)[NODE].droplet_id
+    assert not fake.deleted and ids_named(fake, NODE) == [rid]
+    assert not [r for r in fake.requests if r[0] == "DELETE"]
+    assert report["destroy_refused"] == [{"name": NODE, "id": rid}]
+    record = records(root)[NODE]
+    assert record.status == "destroy_refused" and record.assign_failed_at
+    assert record.destroyed_at is None and not remote.pushed and not issuer.calls
 
 
 async def retire(fake, root, name=NODE, prepare=None):
