@@ -257,23 +257,34 @@ def estimate(conn, expired):
     return {"rows": rows, "bytes": size, "total_bytes": sum(size.values())}
 
 
+def layer(conn):
+    """Name the calculated layer that retention accepts ("v6" or an unmodified "v5"), or raise.
+
+    A v5 database can expire before db-migrate, so that the migration moves only kept rows.
+    """
+    layers = {(SCHEMA_VERSION, schema()[1]): f"v{SCHEMA_VERSION}", (5, V5_CHECKSUM): "v5"}
+    rows = conn.execute("SELECT version,checksum FROM calculation_schema").fetchall()
+    if len(rows) != 1 or tuple(rows[0]) not in layers:
+        raise ValueError("Unknown calculated schema; run db-migrate before expiring builds")
+    return layers[tuple(rows[0])]
+
+
 def retention(database, days=None, per_day=None, *, dry_run=False):
-    """Apply the retention rule now (proxy-index calculate-expire); dry_run only reports it."""
+    """Apply the retention rule now (proxy-index calculate-expire); dry_run only reports it.
+
+    Both check the calculated layer first and report it as "schema".
+    """
     with connect(database) as conn:
         if dry_run:
             conn.execute("SET TRANSACTION READ ONLY")
-            kept, expired = retained(conn, days, per_day)
-            return {"kept_builds": kept, "expired_builds": expired, "dry_run": True} | estimate(
-                conn, expired
-            )
-        conn.execute("SELECT pg_advisory_xact_lock(817452902)")
-        # A v5 database can expire before db-migrate, so that the migration moves only kept rows.
-        layers = {(SCHEMA_VERSION, schema()[1]), (5, V5_CHECKSUM)}
-        if conn.execute("SELECT version,checksum FROM calculation_schema").fetchall() not in [
-            [layer] for layer in layers
-        ]:
-            raise ValueError("Unknown calculated schema; run db-migrate before expiring builds")
-        return expire(conn, days, per_day)
+        else:
+            conn.execute("SELECT pg_advisory_xact_lock(817452902)")
+        found = {"schema": layer(conn)}
+        if not dry_run:
+            return found | expire(conn, days, per_day)
+        kept, expired = retained(conn, days, per_day)
+        report = {"kept_builds": kept, "expired_builds": expired, "dry_run": True}
+        return found | report | estimate(conn, expired)
 
 
 def assign_role(database, run_id, role):

@@ -167,7 +167,11 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
         before = rows_by_build(conn)
     argv = ["calculate-expire", "--database-file", str(database)]
     estimate = output(capsys, [*argv, "--dry-run"])
-    assert (estimate["kept_builds"], estimate["expired_builds"]) == (kept, expired)
+    assert (estimate["schema"], estimate["kept_builds"], estimate["expired_builds"]) == (
+        "v6",
+        kept,
+        expired,
+    )
     assert estimate["rows"] == {
         t: sum(n for (table, build), n in before.items() if table == t and build in expired)
         for t in estimate["rows"]
@@ -175,7 +179,11 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
     assert estimate["total_bytes"] >= estimate["bytes"]["calculated_snapshots"] > 0
     with connect(database) as conn:
         assert rows_by_build(conn) == before  # the dry run changed nothing
-    assert output(capsys, argv) == {"kept_builds": kept, "expired_builds": expired}
+    assert output(capsys, argv) == {
+        "schema": "v6",
+        "kept_builds": kept,
+        "expired_builds": expired,
+    }
     with connect(database) as conn:
         # Kept builds keep every row; nothing of the others is left, and no orphans.
         assert rows_by_build(conn) == {k: n for k, n in before.items() if k[1] in kept}
@@ -187,7 +195,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
             "SELECT partdefid FROM pg_partitioned_table "
             "WHERE partrelid='calculated_breakdowns'::regclass"
         ).fetchone() == (0,)
-    assert output(capsys, argv) == {"kept_builds": kept, "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v6", "kept_builds": kept, "expired_builds": []}
     with pytest.raises(psycopg.errors.CheckViolation), connect(database) as conn:
         # No default partition: a breakdown of a build without a partition is rejected.
         conn.execute(
@@ -234,19 +242,26 @@ def test_retention_without_current_build_or_known_schema(database, capsys):
         )
     argv = ["calculate-expire", "--database-file", str(database)]
     # Nothing is current, so nothing can be dated: nothing expires.
-    assert output(capsys, argv) == {"kept_builds": [], "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v6", "kept_builds": [], "expired_builds": []}
     with connect(database) as conn:
         conn.execute("UPDATE calculation_schema SET checksum='edited'")
-    assert main(argv) == 2
-    assert "ValueError" in capsys.readouterr().err
+    # The dry run checks the layer exactly like the real run: unknown fails both.
+    for dry in ([], ["--dry-run"]):
+        assert main([*argv, *dry]) == 2
+        assert "ValueError" in capsys.readouterr().err
+        with pytest.raises(ValueError, match="db-migrate"):
+            store.retention(database, dry_run=bool(dry))
+    with connect(database) as conn:
+        conn.execute("INSERT INTO calculation_schema VALUES (7,'second row')")
     with pytest.raises(ValueError, match="db-migrate"):
-        store.retention(database)
-    assert output(capsys, [*argv, "--dry-run"])["rows"]["calculated_windows"] == 0
+        store.retention(database, dry_run=True)
     with connect(database) as conn:
         # A calculated v5 database may expire before its migration.
-        conn.execute("UPDATE calculation_schema SET version=5,checksum=%s", (store.V5_CHECKSUM,))
+        conn.execute("DELETE FROM calculation_schema")
+        conn.execute("INSERT INTO calculation_schema VALUES (5,%s)", (store.V5_CHECKSUM,))
         assert conn.execute("SELECT count(*) FROM calculation_builds").fetchone() == (1,)
-    assert store.retention(database) == {"kept_builds": [], "expired_builds": []}
+    assert output(capsys, [*argv, "--dry-run"])["schema"] == "v5"
+    assert store.retention(database) == {"schema": "v5", "kept_builds": [], "expired_builds": []}
 
 
 @pytest.mark.asyncio

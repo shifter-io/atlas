@@ -498,9 +498,14 @@ async def test_calculated_v5_expires_then_partitions_breakdowns_by_build(databas
     # On the v5 layer retention runs first, so that the migration moves only the kept builds.
     estimate = store.retention(database, 0, 0, dry_run=True)
     kept, expired = estimate["kept_builds"], estimate["expired_builds"]
+    assert estimate["schema"] == "v5"
     assert current in kept and expired
     assert estimate["rows"]["calculated_breakdowns"] == sum(counts.get(b, 0) for b in expired)
-    assert store.retention(database, 0, 0) == {"kept_builds": kept, "expired_builds": expired}
+    assert store.retention(database, 0, 0) == {
+        "schema": "v5",
+        "kept_builds": kept,
+        "expired_builds": expired,
+    }
     before = v5_state(database)
     bodies = await api_bodies(database, kept)
     result = migrate(database)
