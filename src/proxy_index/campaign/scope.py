@@ -509,7 +509,8 @@ async def remove_unassigned(
     cannot leave an unmarked worker. Its record ends `destroyed`, or `destroy_refused` /
     `destroy_failed` for the caller to flag (and save). An id that is not from this client's
     create raises `OwnershipError` and nothing is marked. A pulse node (role "pulse", pulse scope)
-    has no own-unassigned path: its delete is refused and its record ends `destroy_refused`.
+    has no own-unassigned path: no delete is attempted, even when its membership shows late,
+    and its record ends `destroy_refused` for the owner.
     """
     _same_kind(scope, role)
     ids = sorted(causes)
@@ -524,6 +525,10 @@ async def remove_unassigned(
         save()
     except Exception:  # never keep the delete from running; the caller's own save re-raises
         pass
+    if role == "pulse":  # never deleted here, whatever its membership shows by now
+        for rid in ids:
+            records[rid].status = "destroy_refused"
+        return
     ledger = Ledger({"droplet": ids}, records)
     for rid in ids:
         try:
