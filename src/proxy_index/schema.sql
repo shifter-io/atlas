@@ -389,6 +389,7 @@ CREATE TABLE IF NOT EXISTS estimated_hours (
 CREATE INDEX IF NOT EXISTS estimated_hours_unreleased ON estimated_hours(day,hour)
  WHERE released_at IS NULL;
 CREATE INDEX IF NOT EXISTS estimated_hours_run ON estimated_hours(run_key);
+CREATE INDEX IF NOT EXISTS estimated_hours_day ON estimated_hours(day);
 CREATE TABLE IF NOT EXISTS settings (
  key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
 );

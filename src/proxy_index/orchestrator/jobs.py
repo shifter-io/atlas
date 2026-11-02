@@ -4,16 +4,17 @@ census_plan / pulse_plan  every minute, on the minute: open due batches (batches
 reap                      every minute: fail runs that never started or went silent
 offline                   every 15 s: nodes without a heartbeat go offline
 calculate                 every minute, due by calculate.trigger: "hourly" (default) once per
-                          UTC hour, calculate.hour_offset_seconds past it (after the estimated
-                          hour's release), or "batch" debounced to calculate.min_interval_seconds
-                          and only after a batch finished; runs
-                          calculated.calculator.calculate(publish=True)
+                          UTC hour, calculate.hour_offset_seconds past it (at least
+                          MIN_HOUR_OFFSET_S, so the hour just released is in), or "batch"
+                          debounced to calculate.min_interval_seconds and only after a batch
+                          finished; runs calculated.calculator.calculate(publish=True)
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
                           hours that ended, with their estimate_hour_released events
 detect                    every minute: proxy_index.detect.detect(conn, now) writes the
                           incident events from finished pulse batches (optional module)
 retention                 daily: test_events older than retention.events_days (whole monthly
-                          partitions are dropped), job_runs older than retention.job_runs_days
+                          partitions are dropped), job_runs older than retention.job_runs_days,
+                          estimated_hours older than retention.estimates_days
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 
@@ -44,6 +45,11 @@ log = logging.getLogger(__name__)
 _REPORT_LOCKS: weakref.WeakKeyDictionary[Database, asyncio.Lock] = weakref.WeakKeyDictionary()
 METHODOLOGY = CONFIGS / "methodology.toml"
 PARTITION = re.compile(r"test_events_(\d{4})_(\d{2})")
+# The estimates_release job runs this often, so hour H is released by H+1:00 + RELEASE_EVERY_S.
+# The calculator floors as_of to 300 s and includes only hours released by as_of: an hourly
+# calculation sees hour H only at H+1:00 + 300 s + RELEASE_EVERY_S or later.
+RELEASE_EVERY_S = 60
+MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
 
 
 def _batch_skip(state: dict, now: datetime, interval: timedelta) -> str | None:
@@ -75,6 +81,13 @@ async def _calculate_skip(conn, now: datetime) -> str | None:
     ).fetchone()
     if trigger == "hourly":
         offset = float(await setting(conn, "calculate.hour_offset_seconds"))
+        if offset < MIN_HOUR_OFFSET_S:
+            log.warning(
+                "calculate.hour_offset_seconds %s would leave out the hour just released; using %s",
+                offset,
+                MIN_HOUR_OFFSET_S,
+            )
+            offset = MIN_HOUR_OFFSET_S
         return _hourly_skip(state, now, timedelta(seconds=offset))
     if trigger == "batch":
         interval = float(await setting(conn, "calculate.min_interval_seconds"))
@@ -138,7 +151,19 @@ async def retention(db: Database, now: datetime | None = None) -> dict[str, Any]
                 (now - timedelta(days=job_days),),
             )
         ).rowcount
-    return {"dropped_partitions": dropped, "events_deleted": events, "job_runs_deleted": jobs}
+        estimates_days = int(await setting(conn, "retention.estimates_days"))
+        estimates = (
+            await conn.execute(
+                "DELETE FROM estimated_hours WHERE day<%s",
+                ((now - timedelta(days=estimates_days)).date(),),
+            )
+        ).rowcount
+    return {
+        "dropped_partitions": dropped,
+        "events_deleted": events,
+        "job_runs_deleted": jobs,
+        "estimated_hours_deleted": estimates,
+    }
 
 
 async def write_reports(db: Database, batch_ids: list[int]) -> dict[str, Any] | None:
@@ -233,7 +258,7 @@ def register_jobs(
     scheduler.add("reap", reap, every_s=60)
     scheduler.add("offline", offline, every_s=15)
     scheduler.add("calculate", calculate_job, every_s=60)
-    scheduler.add("estimates_release", estimates_release_job, every_s=60)
+    scheduler.add("estimates_release", estimates_release_job, every_s=RELEASE_EVERY_S)
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
     scheduler.add("reports", reports_job, every_s=30)

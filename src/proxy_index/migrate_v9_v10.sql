@@ -18,3 +18,4 @@ CREATE TABLE estimated_hours (
 CREATE INDEX estimated_hours_unreleased ON estimated_hours(day,hour)
  WHERE released_at IS NULL;
 CREATE INDEX estimated_hours_run ON estimated_hours(run_key);
+CREATE INDEX estimated_hours_day ON estimated_hours(day);

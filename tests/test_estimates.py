@@ -22,8 +22,15 @@ from proxy_index.calculated import store
 from proxy_index.calculated.calculator import calculate as calculate_snapshot
 from proxy_index.daily import ingest as daily_ingest
 from proxy_index.estimates import compute, release, window
-from proxy_index.orchestrator.db import Database, put_setting
-from proxy_index.orchestrator.jobs import _batch_skip, _hourly_skip, calculate, register_jobs
+from proxy_index.orchestrator.db import DEFAULTS, Database, put_setting
+from proxy_index.orchestrator.jobs import (
+    _batch_skip,
+    _calculate_skip,
+    _hourly_skip,
+    calculate,
+    register_jobs,
+    retention,
+)
 from proxy_index.orchestrator.scheduler import Scheduler
 from proxy_index.storage import connect, ingest, seed
 
@@ -140,12 +147,11 @@ def test_place_flags_every_estimated_figure_with_its_formula_version():
         }
     }
     hours = [rows_of(1, version=1), rows_of(2, version=2), rows_of(3, country="FR")]
-    estimates = {
-        "hours": hours + [rows_of(9, product=2)],  # a run outside the calculation: ignored
-        "distinct": {"7d": [{"product_id": 1, "country_code": None, "ips": 2}]},
-    }
+    hours.append(rows_of(9, product=2))  # a run outside the calculation: ignored
     run_group = dict.fromkeys((1, 2, 3), (1, "c"))
-    window.place(groups, run_group, estimates, {"estimates": {"window_unique": "sum"}})
+    found = window.windows_with(groups, run_group, hours)
+    assert [len(rows) for _, rows in found] == [2, 3]  # 24h, 7d
+    window.place(found, [{}, {None: 2}], {"estimates": {"window_unique": "sum"}})
     week = groups[(1, "c")]["windows"]["7d"]["estimated"]
     day = groups[(1, "c")]["windows"]["24h"]["estimated"]
     assert week["estimated"] is True and week["formula_versions"] == [1, 2] and week["hours"] == 3
@@ -170,10 +176,11 @@ def test_place_flags_every_estimated_figure_with_its_formula_version():
     assert day["hours"] == 2  # the 24h window starts at the second hour
     groups[(1, "c")]["windows"]["24h"]["period"]["start"] = T2
     del groups[(1, "c")]["windows"]["24h"]["estimated"]
-    window.place(groups, run_group, estimates, {})
+    found = window.windows_with(groups, run_group, hours)
+    window.place(found, [{None: 2}], {})
     assert "estimated" not in groups[(1, "c")]["windows"]["24h"]
     assert groups[(1, "c")]["windows"]["7d"]["estimated"]["unique_ips"]["method"] == "distinct"
-    window.place(groups, run_group, {"hours": [], "distinct": {}}, {})  # nothing released
+    assert window.windows_with(groups, run_group, []) == []  # nothing released
 
 
 # --- stored rows and release ---------------------------------------------------------------
@@ -247,10 +254,11 @@ async def test_week_unique_ips_are_distinct_measured_ips_not_a_sum_of_days(tmp_p
     await release.release_due(db, T2 + timedelta(days=1))
     with connect(database) as conn:
         conn.row_factory = dict_row
-        fetched = window.fetch(conn, T2 + timedelta(days=1))
-    week = [d for d in fetched["distinct"]["7d"] if d["country_code"] is None]
-    assert [d["ips"] for d in week] == [1]  # the same IP both days
-    rows = fetched["hours"]
+        rows = window.fetch(conn, T2 + timedelta(days=1))
+        groups = {(1, "c"): {"windows": {"7d": product_window(T1 - timedelta(days=1))}}}
+        run_group = dict.fromkeys({r["run_key"] for r in rows}, (1, "c"))
+        found = window.windows_with(groups, run_group, rows)
+        assert window.distinct(conn, found) == [{"DE": 1, None: 1}]  # the same IP both days
     day_unique = 3.0 / (16 / 24)
     assert window.window_unique("distinct", rows, 1) == pytest.approx(day_unique)
     assert window.window_unique("sum", rows, 1) == pytest.approx(2 * day_unique)
@@ -281,6 +289,43 @@ async def test_the_snapshot_carries_released_estimates_with_their_flags(tmp_path
         estimated["series"][0]["start"] == hour.isoformat() and estimated["series"][0]["estimated"]
     )
     assert measured["pool"]["unique_ips"] == 1  # the measured figures are unchanged
+
+
+async def test_distinct_ips_count_only_each_windows_own_tests(tmp_path, database, db):
+    # One product's tests in two cohorts; the second test also saw a second IP. Each cohort's
+    # window counts its own test's IPs, never the union of both.
+    seed(database)
+    runs = [await imported(tmp_path, database, at) for at in (T1, T2)]
+    for run_id in runs:
+        compute.estimate_run(database, run_id, "DE", formula(DE={}))
+    await release.release_due(db, T2 + timedelta(days=1))
+    with connect(database) as conn:
+        conn.row_factory = dict_row
+        conn.execute(
+            "WITH ip AS (INSERT INTO ip_addresses(ip) VALUES ('192.0.2.77') RETURNING ip_id) "
+            "INSERT INTO ip_observations(bucket_start,run_key,ip_id,count,first_seen,last_seen) "
+            "SELECT o.bucket_start,o.run_key,ip.ip_id,1,o.first_seen,o.last_seen "
+            "FROM ip_observations o JOIN test_runs r USING(run_key), ip WHERE r.run_id=%s LIMIT 1",
+            (runs[1],),
+        )
+        rows = window.fetch(conn, T2 + timedelta(days=1))
+        keys = sorted({r["run_key"] for r in rows})
+        groups = {
+            (1, cohort): {"windows": {"30d": product_window(T1 - timedelta(days=1))}}
+            for cohort in "ab"
+        }
+        run_group = dict(zip(keys, [(1, "a"), (1, "b")], strict=True))
+        found = window.windows_with(groups, run_group, rows)
+        assert window.distinct(conn, found) == [{"DE": 1, None: 1}, {"DE": 2, None: 2}]
+        assert window.distinct(conn, []) == []
+
+
+async def test_retention_deletes_estimated_hours_past_the_longest_window(tmp_path, database, db):
+    seed(database)
+    compute.estimate_run(database, await imported(tmp_path, database, T1), "DE", formula(DE={}))
+    result = await retention(db, T2 + timedelta(days=30))  # keeps day 2 onwards
+    assert result["estimated_hours_deleted"] == 9  # day 1, hours 15..23
+    assert {r["day"].day for r in stored(database)} == {2}
 
 
 # --- ingest hook and orchestrator ----------------------------------------------------------
@@ -334,6 +379,42 @@ def test_the_hourly_trigger_runs_once_per_hour_after_the_release():
     finished = {"last": now - timedelta(minutes=10), "finished": now - timedelta(minutes=1)}
     assert _batch_skip(finished, now, timedelta(seconds=300)) is None
     assert _batch_skip(finished, now, timedelta(hours=1)) == "debounced"
+
+
+async def test_the_hourly_calculation_includes_the_hour_just_released(tmp_path, database, db):
+    # The real cadence: the release job runs every minute, so hour H is released by about
+    # H+1:00:30; the hourly calculation runs at the default offset and floors as_of to 5 minutes.
+    store.initialize(database)
+    run_id = await imported(tmp_path, database)
+    with connect(database) as conn:
+        started = conn.execute(
+            "SELECT started_at FROM test_runs WHERE run_id=%s", (run_id,)
+        ).fetchone()[0]
+    hour = started.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    compute.estimate_run(database, run_id, "DE", formula(DE={"hour_factors": [1.0] * 24}))
+    await release.release_due(db, hour + timedelta(hours=1, seconds=30))
+    offset = timedelta(seconds=DEFAULTS["calculate.hour_offset_seconds"])
+    previous = {"last": hour + offset}  # the calculation of hour H's own slot
+    minutes = (hour + timedelta(hours=1, minutes=m) for m in range(61))
+    now = next(at for at in minutes if _hourly_skip(previous, at, offset) is None)
+    windows = calculate_snapshot(database, POLICY, as_of=now)["products"][0]["windows"]
+    assert "estimated" in windows["24h"], f"hour {hour} released but not in the {now} calculation"
+    assert windows["24h"]["estimated"]["series"][0]["start"] == hour.isoformat()
+
+
+async def test_an_hourly_offset_too_short_for_the_release_is_raised(database, db, caplog):
+    hour = datetime(2026, 10, 1, 12, tzinfo=UTC)
+    with connect(database) as conn:
+        conn.execute(
+            "INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',%s)",
+            (hour - timedelta(minutes=53),),
+        )
+    async with db.connection() as conn:
+        await put_setting(conn, "calculate.hour_offset_seconds", 120)
+        # 120 s would be due at 12:03; raised to 360 s the calculation waits for 12:06.
+        assert (await _calculate_skip(conn, hour + timedelta(minutes=3))).startswith("already")
+        assert await _calculate_skip(conn, hour + timedelta(minutes=6)) is None
+    assert "would leave out the hour just released" in caplog.text
 
 
 async def test_calculate_follows_the_trigger_setting(database, db, monkeypatch):
