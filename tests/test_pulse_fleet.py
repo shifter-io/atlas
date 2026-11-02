@@ -178,8 +178,10 @@ async def test_reconcile_creates_assigns_and_arms_one_node_per_network_and_regio
     assert files["secrets/node-token"][1] == f"{TOKEN}\n".encode()
     assert files["secrets/credentials.toml"][1] == CREDENTIALS
     assert sorted(issuer.calls) == sorted(
-        (str(root / "db.toml"), n, "residential", r) for n in ("geonode", "shifter") for r in ("fra1", "lon1")
-    )  # fmt: skip
+        (str(root / "db.toml"), n, "residential", r)
+        for n in ("geonode", "shifter")
+        for r in ("fra1", "lon1")
+    )
     ledger = (root / "nodes.json").read_text()
     assert TOKEN not in ledger and "203.0.113" not in ledger and "credential" not in ledger
     assert {r.status for r in records(root).values()} == {"armed"}
@@ -435,14 +437,23 @@ async def test_a_node_still_shown_after_its_delete_is_not_counted_gone(tmp_path)
         ({"wheel": "proxy_index.tar.gz"}, "wheel"),
         ({"networks": {"Bad Name": {}}}, "network name"),
         (
-            {"networks": {"shifter": {"product": "res idential", "provider_config": "p",
-                                      "credentials": "c"}}},
+            {
+                "networks": {
+                    "shifter": {
+                        "product": "res idential",
+                        "provider_config": "p",
+                        "credentials": "c",
+                    }
+                }
+            },
             "shifter",
-        ),  # fmt: skip
+        ),
     ],
 )
 def test_fleet_json_is_validated(tmp_path, change, what):
-    root = make_root(tmp_path, **change)
+    root = make_root(tmp_path)
+    raw = json.loads((root / "fleet.json").read_text())
+    (root / "fleet.json").write_text(json.dumps({**raw, **change}))
     with pytest.raises(FleetError, match=what):
         pulse_fleet.load_config(root)
 
