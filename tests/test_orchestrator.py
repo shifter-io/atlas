@@ -235,7 +235,8 @@ async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
     node's proxy factory)."""
     prepare(database, ("DE", "AT", "GB"))
     a = issue_token(database, provider="alpha", product="res", region="fra1")
-    at = datetime.now(UTC)
+    # Inside the slot's grace, so the slot is spread whole whatever the wall clock says.
+    at = datetime(2026, 10, 1, 12, 0, 30, tzinfo=UTC)
     result = await batches.pulse_plan(db, at)
     assert (result["created"], result["load"]) == (6, 2)
     assert query(

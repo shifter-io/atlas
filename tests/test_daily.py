@@ -518,6 +518,7 @@ def test_observations_become_ip_rows_per_bucket_and_are_converted_once(tmp_path)
     assert rows[0]["first_seen"] == "2027-01-01T22:00:01.000000+00:00" and rows[0]["run_id"] == "r1"
     written = read_json(directory / "summary.json")
     assert written["artifacts"]["ips"]["rows"] == 3 and written["run_id"] == "r1"
+    assert written["test_kind"] == "daily"  # the daily-test marker (proxy_index.daily)
     (directory / "ips.jsonl.gz").write_bytes(b"kept")
     assert daily_ingest.convert_country(folder, tmp_path / "runs") == directory
     assert (directory / "ips.jsonl.gz").read_bytes() == b"kept"
@@ -573,6 +574,9 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     assert again["cells"]["shifter/fra1"]["events"] is True and again["complete"] is False
     assert kinds(database) == ["daily_test_finished"] * 2 + ["daily_test_started"] * 2
     assert len(list((root / "runs").iterdir())) == 2
+    with connect(database) as conn:
+        marked = "SELECT count(*) FROM test_runs WHERE summary->>'test_kind'='daily'"
+        assert conn.execute(marked).fetchone()[0] == 2
     text = (root / daily_ingest.REPORT).read_text()
     seen = set()
     for ips in (root / "runs").glob("*/ips.jsonl.gz"):
