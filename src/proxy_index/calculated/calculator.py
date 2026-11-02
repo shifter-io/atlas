@@ -57,7 +57,7 @@ from .policy import (
     uptime_settings,
 )
 from .slim import slim
-from .store import jsonable, prune, validate_payload
+from .store import discard, expire, jsonable, partition, prune, validate_payload
 
 SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
@@ -266,6 +266,8 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 (int(payload["snapshot_id"]),),
             )
         prune(conn)
+        if publish:
+            expire(conn)
         return payload
 
 
@@ -1096,24 +1098,6 @@ LABELS = {
     "asn_labels": ("asn_label_id", ("asn", "name", "usage_type"), ("bigint", "text", "text")),
     "score_reasons": ("reason_id", ("reason",), ("text",)),
 }
-DERIVED_TABLES = (
-    "calculated_score_reasons",
-    "calculated_score_components",
-    "calculated_scores",
-    "calculated_breakdowns",
-    "calculated_series",
-)
-
-
-def discard(conn, build_id):
-    for table in DERIVED_TABLES:
-        conn.execute(
-            f"DELETE FROM {table} WHERE result_id IN "
-            "(SELECT result_id FROM calculated_windows WHERE build_id=%s)",
-            (build_id,),
-        )
-    for table in ("calculated_windows", "calculated_overlaps", "calculation_builds"):
-        conn.execute(f"DELETE FROM {table} WHERE build_id=%s", (build_id,))
 
 
 def labels(conn, table, wanted):
@@ -1330,13 +1314,15 @@ def persist(conn, payload):
                     )
     places = labels(conn, "places", {b[3] for b in breakdowns if b[3]})
     networks = labels(conn, "asn_labels", {b[4] for b in breakdowns if b[4]})
+    partition(conn, build_id)
     with conn.cursor().copy(
-        "COPY calculated_breakdowns(result_id,dimension,position,place_id,asn_label_id,"
+        "COPY calculated_breakdowns(build_id,result_id,dimension,position,place_id,asn_label_id,"
         "ips,observations,completed,successes,challenges,blocks,p50,p90,p99) FROM STDIN"
     ) as copy:
         for result, code, position, place, network, row in breakdowns:
             copy.write_row(
                 (
+                    build_id,
                     result,
                     code,
                     position,

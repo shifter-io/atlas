@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS cohorts (
  timeout_seconds numeric, rate numeric, proxy_protocol text, session_policy text,
  ttl_seconds integer, parameters jsonb, flags jsonb, target_variant jsonb, extra jsonb
 );
--- Payloads of unpublished builds are pruned (store.prune); published ones are kept.
+-- Payloads of unpublished builds are pruned (store.prune). After each publication store.expire
+-- deletes every build except the current one, the newest published build per UTC day of the last
+-- 30 days and the drafts whose payload prune kept.
 CREATE TABLE IF NOT EXISTS calculation_builds (
  build_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  methodology_id text NOT NULL REFERENCES methodologies(methodology_id),
@@ -45,7 +47,9 @@ CREATE TABLE IF NOT EXISTS calculated_windows (
  readiness text NOT NULL CHECK(readiness IN ('ready','partial','unavailable')),
  challenge_rate double precision, block_rate double precision, uptime double precision,
  bytes_up bigint, bytes_down bigint,
- UNIQUE(build_id,product_id,cohort,target,window_hours)
+ UNIQUE(build_id,product_id,cohort,target,window_hours),
+ -- Lets breakdown rows carry their build (the partition key) consistently.
+ UNIQUE(result_id,build_id)
 );
 -- Coordinate-free breakdown labels, shared by every build.
 CREATE TABLE IF NOT EXISTS places (
@@ -61,8 +65,11 @@ CREATE TABLE IF NOT EXISTS asn_labels (
 -- asn_labels; x country x ASN and y city x ASN reference both. position is the payload
 -- order within the dimension. Request counters and percentiles come from run_geo_buckets; they
 -- are NULL on rows calculated before v3, which held IP counts only.
+-- One LIST partition per build (calculated_breakdowns_b<build_id>, created by
+-- calculator.persist); store.discard drops a build's partition instead of deleting its rows.
+-- There is no default partition: a row for a build without a partition is rejected.
 CREATE TABLE IF NOT EXISTS calculated_breakdowns (
- result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
+ build_id bigint NOT NULL, result_id bigint NOT NULL,
  ips bigint NOT NULL, observations bigint NOT NULL,
  place_id integer REFERENCES places(place_id), asn_label_id integer REFERENCES asn_labels(asn_label_id),
  position integer NOT NULL, dimension "char" NOT NULL CHECK(dimension IN ('g','c','a','r','x','y')),
@@ -70,8 +77,9 @@ CREATE TABLE IF NOT EXISTS calculated_breakdowns (
  p50 integer, p90 integer, p99 integer,
  CHECK((place_id IS NULL) = (dimension = 'a')
   AND (asn_label_id IS NULL) = (dimension IN ('g','c','r'))),
- PRIMARY KEY(result_id,dimension,position)
-);
+ PRIMARY KEY(result_id,dimension,position,build_id),
+ FOREIGN KEY(result_id,build_id) REFERENCES calculated_windows(result_id,build_id)
+) PARTITION BY LIST(build_id);
 CREATE TABLE IF NOT EXISTS calculated_series (
  result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
  bucket_start timestamptz NOT NULL,
@@ -166,3 +174,26 @@ SELECT s.*,
    LEFT JOIN score_reasons r USING(reason_id) WHERE (c.result_id,c.profile)=(s.result_id,s.profile)
    AND w.target='' AND c.weight>0 AND c.state<>'ready') u) AS reasons
 FROM calculated_scores s;
+-- Light browse views: none of them reads a payload (payload_bytes is its stored, compressed size,
+-- read from the TOAST pointer without fetching the value).
+CREATE OR REPLACE VIEW calculated_snapshots_list AS
+SELECT b.build_id,b.as_of,b.created_at,b.methodology_id,b.published,
+ b.build_id IN (SELECT build_id FROM current_calculation) AS is_current,
+ s.content_hash,pg_column_size(s.payload) AS payload_bytes
+FROM calculation_builds b LEFT JOIN calculated_snapshots s USING(build_id);
+CREATE OR REPLACE VIEW current_windows AS
+SELECT p.provider,p.name AS product,w.*
+FROM calculated_windows w JOIN products p USING(product_id)
+WHERE w.build_id=(SELECT build_id FROM current_calculation);
+CREATE OR REPLACE VIEW current_breakdowns AS
+SELECT b.build_id,b.result_id,pr.provider,pr.name AS product,w.cohort,w.window_hours,
+ CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country' WHEN 'r' THEN 'region'
+ WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END AS dimension,b.position,
+ p.country_code,p.country,p.region_code,p.region,p.city,a.asn,a.name AS asn_name,a.usage_type,
+ b.ips,b.observations,b.completed,b.successes,
+ b.successes::double precision/nullif(b.completed,0) AS success_rate,
+ b.challenges,b.blocks,b.p50,b.p90,b.p99
+FROM calculated_breakdowns b JOIN calculated_windows w USING(result_id,build_id)
+JOIN products pr USING(product_id)
+LEFT JOIN places p USING(place_id) LEFT JOIN asn_labels a USING(asn_label_id)
+WHERE b.build_id=(SELECT build_id FROM current_calculation);
