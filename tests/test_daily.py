@@ -397,7 +397,11 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     assert kinds(database) == ["daily_test_finished"] * 2 + ["daily_test_started"] * 2
     assert len(list((root / "runs").iterdir())) == 2
     text = (root / daily_ingest.REPORT).read_text()
-    assert "8.8.8.8" not in text and str(tmp_path) not in text
+    seen = set()
+    for ips in (root / "runs").glob("*/ips.jsonl.gz"):
+        with gzip.open(ips, "rt") as stream:
+            seen |= {json.loads(line)["ip"] for line in stream}
+    assert seen and not any(ip in text for ip in seen) and str(tmp_path) not in text
 
 
 def kinds(database):
