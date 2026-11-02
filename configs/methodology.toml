@@ -81,6 +81,12 @@ min_latency_successes = 30
 min_successes = 1
 min_batches = 10
 
+# Published snapshot size: each breakdown and pool list keeps its top rows (by requests, pool lists
+# by IPs) and its full row count (breakdown_entries, pool.list_entries); totals and
+# calculated_breakdowns stay whole. Defaults in calculated/policy.py PAYLOAD (country lists 1000,
+# region/city/asn/country_asn/city_asn 25, geo/asns_breakdown 50). An optional [payload] table
+# (e.g. city_asn = 100) overrides them and, like any setting here, changes the methodology id.
+
 # Live tape detection (proxy_index.detect). Not part of the methodology id: changing these
 # never changes a calculation. Rates are fractions; *_pp are percentage points as fractions.
 [events]
