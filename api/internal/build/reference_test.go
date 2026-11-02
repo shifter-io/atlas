@@ -357,11 +357,21 @@ func tapeCases() tapeCaseSet {
 		`{"success_rate": 0.42, "baseline": 0.95}`, `{"value": 0.5}`, `{}`, `{"p50": 1840, "baseline": 400}`, `{"value": 2500}`, `{}`,
 		`{"blocks": 12, "baseline": 0.02}`, `{}`, `{"source": "census"}`, `{"source": "pulse"}`, `{}`, `{"name": "Hetzner"}`, `{"value": 0.31}`, `{}`, `{}`, `{}`, `{"region": "ams3"}`,
 		`{"region": "fra1", "retry_of": 41, "reason": "no_success", "pulse_batch_id": 77}`, `{}`,
+		`{"region": "sgp1", "countries": ["SG", "MY"]}`, `{"countries": ["DE"]}`,
+		`{"region": "fra1", "countries": ["DE", "FR", "NL"], "status": "done", "requests": 120000, "unique_ips": 41000, "duration_s": 1800.5}`,
+		`{"countries": ["DE"], "status": "failed", "duration_s": 40}`, `{"status": "done"}`,
+		`{"day": "2026-11-02", "hour": 7, "formula_version": "f1", "unique_ips": 5200}`, `{"day": "2026-11-02", "hour": 13.5}`, `{}`,
+		`{"window_start": "2026-11-02T13:55:00+00:00", "window_minutes": 5, "errors": 640, "requests": 800, "regions": 1, "threshold": 0.5}`, `{"errors": 3}`,
+		`{"down_since": "2026-11-02T13:35:00+00:00", "duration_s": 5400}`, `{"duration_s": 30}`, `{}`,
+		`{"p50": 1840, "baseline": 400}`, `{"p50": 600}`, `{"baseline": 400}`,
 	}
 	kinds := []string{"census_finished", "census_finished", "census_finished", "census_skipped", "pulse_finished", "pulse_finished",
 		"success_drop", "success_drop", "success_drop", "latency_spike", "latency_spike", "latency_spike",
 		"block_spike", "block_spike", "down", "down", "recovered", "new_hosting_asn", "ip_overlap", "ip_overlap", "node_offline", "something_new", "no_node",
-		"census_retry", "census_retry"}
+		"census_retry", "census_retry",
+		"daily_test_started", "daily_test_started", "daily_test_finished", "daily_test_finished", "daily_test_finished",
+		"estimate_hour_released", "estimate_hour_released", "estimate_hour_released", "pulse_down", "pulse_down",
+		"pulse_recovered", "pulse_recovered", "pulse_recovered", "latency_rise", "latency_rise", "latency_rise"}
 	set := tapeCaseSet{generatedAt: "2026-10-01T12:00:05.123456+00:00", products: []build.TapeProduct{
 		{Provider: "acme", Name: "Acme", Kind: "residential"}, {Provider: "zeta", Name: "Zeta", Kind: "mobile"}, {Provider: "acme", Name: "Acme Two", Kind: "isp"}}}
 	set.events = append(set.events, store.EventJSON{ID: 100, At: "2026-10-01T11:00:00.000000+00:00", Kind: "census_started", Category: "census",

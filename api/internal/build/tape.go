@@ -2,6 +2,7 @@ package build
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 
@@ -45,6 +46,97 @@ func place(e *store.EventJSON, data map[string]any) string {
 
 type tapeText struct{ title, detail, value string }
 
+// runTime and joinParts are tape.ts runTime and joined (plural is in measured.go).
+func runTime(seconds float64) string {
+	if seconds < 60 {
+		return "<1 min"
+	}
+	return jsnum.Duration(seconds / 60)
+}
+
+func joinParts(parts ...string) string {
+	out := []string{}
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " · ")
+}
+
+// describeDaily is tape.ts describeDaily: the daily test and hourly estimate rows.
+func describeDaily(e *store.EventJSON, d map[string]any, inWhere string) (tapeText, bool) {
+	countries := ""
+	if list, ok := d["countries"].([]any); ok {
+		countries = plural(float64(len(list)), "country", "countries")
+	}
+	ipsText := jsnum.NA
+	if ips, ok := numOf(d["unique_ips"]); ok {
+		ipsText = jsnum.Count(ips) + " IPs"
+	}
+	switch e.Kind {
+	case "daily_test_started":
+		return tapeText{"Daily test started" + inWhere, countries, "Started"}, true
+	case "daily_test_finished":
+		requests, seconds := "", ""
+		if n, ok := numOf(d["requests"]); ok {
+			requests = jsnum.Count(n) + " requests"
+		}
+		if n, ok := numOf(d["duration_s"]); ok {
+			seconds = runTime(n)
+		}
+		detail := joinParts(countries, requests, seconds)
+		if s, _ := strOf(d["status"]); s == "failed" {
+			return tapeText{"Daily test failed" + inWhere, detail, "Failed"}, true
+		}
+		return tapeText{"Daily test done" + inWhere, detail, ipsText}, true
+	case "estimate_hour_released":
+		title := "Hourly estimate released"
+		if h, ok := numOf(d["hour"]); ok && h == math.Trunc(h) && h >= 0 && h <= 23 {
+			title = fmt.Sprintf("Estimate for %02d:00 UTC released", int(h))
+		}
+		day, _ := strOf(d["day"])
+		return tapeText{title, day, ipsText}, true
+	}
+	return tapeText{}, false
+}
+
+// describeOutage is tape.ts describeOutage: pulse outages and latency rises.
+func describeOutage(e *store.EventJSON, d map[string]any, inWhere string) (tapeText, bool) {
+	switch e.Kind {
+	case "pulse_down":
+		failed, window, regions := "", "", ""
+		errors, okErrors := numOf(d["errors"])
+		if requests, ok := numOf(d["requests"]); ok && okErrors {
+			failed = jsnum.Count(errors) + " of " + jsnum.Count(requests) + " failed"
+		}
+		if n, ok := numOf(d["window_minutes"]); ok {
+			window = jsnum.Duration(n) + " window"
+		}
+		if n, ok := numOf(d["regions"]); ok {
+			regions = plural(n, "region", "regions")
+		}
+		return tapeText{"Pulse down" + inWhere, joinParts(failed, window, regions), "Down"}, true
+	case "pulse_recovered":
+		detail := ""
+		if n, ok := numOf(d["duration_s"]); ok {
+			detail = "down " + runTime(n)
+		}
+		return tapeText{"Pulse recovered" + inWhere, detail, "Recovered"}, true
+	case "latency_rise":
+		detail := ""
+		if b, ok := numOf(d["baseline"]); ok {
+			detail = "baseline " + jsnum.Ms(b)
+		}
+		p50, ok := numOf(d["p50"])
+		if !ok {
+			return tapeText{"Latency rose" + inWhere, detail, jsnum.NA}, true
+		}
+		return tapeText{"Latency rose to " + jsnum.Ms(p50) + inWhere, detail, jsnum.Ms(p50)}, true
+	}
+	return tapeText{}, false
+}
+
 func describe(e *store.EventJSON, d map[string]any) tapeText {
 	where := place(e, d)
 	inWhere := ""
@@ -62,15 +154,13 @@ func describe(e *store.EventJSON, d map[string]any) tapeText {
 	if hasBaseline {
 		baselineText = "baseline " + jsnum.Pct(baseline, 0)
 	}
-	join := func(parts ...string) string {
-		out := []string{}
-		for _, p := range parts {
-			if p != "" {
-				out = append(out, p)
-			}
-		}
-		return strings.Join(out, " · ")
+	if t, ok := describeDaily(e, d, inWhere); ok {
+		return t
 	}
+	if t, ok := describeOutage(e, d, inWhere); ok {
+		return t
+	}
+	join := joinParts
 	switch e.Kind {
 	case "census_started":
 		extra := ""
@@ -88,11 +178,7 @@ func describe(e *store.EventJSON, d map[string]any) tapeText {
 			parts = append(parts, jsnum.Count(requests)+" requests")
 		}
 		if hasSeconds {
-			if seconds < 60 {
-				parts = append(parts, "<1 min")
-			} else {
-				parts = append(parts, jsnum.Duration(seconds/60))
-			}
+			parts = append(parts, runTime(seconds))
 		}
 		if s, _ := strOf(d["stop_reason"]); s == "stalled" {
 			return tapeText{"Census stopped" + inWhere + ": network down", join(parts...), "Down"}

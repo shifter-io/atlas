@@ -19,10 +19,12 @@ type EventFilter struct {
 	Limit    int
 }
 
-// Category is detect.category: the live tape tab of an event kind.
+// Category is detect.category: the live tape tab of an event kind. The daily
+// test and hour estimate kinds read as census rows; latency_rise is an incident.
 func Category(kind string) string {
 	switch {
-	case strings.HasPrefix(kind, "census_"):
+	case strings.HasPrefix(kind, "census_"), kind == "daily_test_started",
+		kind == "daily_test_finished", kind == "estimate_hour_released":
 		return "census"
 	case strings.HasPrefix(kind, "pulse_"):
 		return "pulse"
@@ -91,7 +93,9 @@ func QueryEvents(ctx context.Context, db interface {
 		add("e.kind=ANY(?)", f.Kinds)
 	}
 	if f.Category != "" {
-		add(`CASE WHEN left(e.kind,7)='census_' THEN 'census' WHEN left(e.kind,6)='pulse_' THEN 'pulse'
+		add(`CASE WHEN left(e.kind,7)='census_'
+ OR e.kind IN ('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census'
+ WHEN left(e.kind,6)='pulse_' THEN 'pulse'
  WHEN e.kind IN ('new_hosting_asn','ip_overlap') THEN 'audit' ELSE 'incident' END=?`, f.Category)
 	}
 	if f.Since != nil {
