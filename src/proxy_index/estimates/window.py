@@ -1,0 +1,168 @@
+"""The released estimated hours in the calculator windows (24h, 7d, 30d).
+
+Each product window whose cohort holds the daily tests gains an `estimated` block, built only
+from estimated_hours rows released by the cutoff whose hour starts inside the window; the
+measured figures of the window are not changed. Every figure in the block says it is estimated
+and carries its formula version:
+
+- requests: the sum of the released hours' estimated requests (hours never overlap);
+- unique_ips: by `window_unique()`. The default, "distinct", counts the exact distinct IPs the
+  window's measured tests saw (the tests of that product window, so of its cohort only) and
+  scales them by those tests' day factor (day unique IPs over measured IPs), so an IP seen on
+  several days counts once; "sum" adds each test's day unique IPs instead (counts it every day).
+  The methodology's `[estimates] window_unique` picks one;
+- countries and series: the same per requested country and per UTC hour;
+- breakdown_scale: estimated over measured unique IPs. City, region, ASN and country shares stay
+  the measured breakdowns'; multiply a breakdown's IPs by it for an estimate;
+- carried: overlap and datacenter ASN shares and latency are the measured window's, unchanged.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import timedelta
+
+WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
+METHODS = ("distinct", "sum")
+HOUR_START = "(day + make_interval(hours => hour::int)) AT TIME ZONE 'UTC'"
+
+# The day bounds only let the estimated_hours_day index narrow the scan.
+RELEASED = f"""SELECT product_id,country_code,day::text AS day,hour,run_key,measured_ips,
+ unique_ips,requests,day_unique_ips,formula_version,{HOUR_START} AS hour_start
+FROM estimated_hours WHERE day>=(%(start)s AT TIME ZONE 'UTC')::date
+ AND day<=(%(as_of)s AT TIME ZONE 'UTC')::date AND released_at<=%(as_of)s
+ AND {HOUR_START}>=%(start)s AND {HOUR_START}<%(as_of)s
+ORDER BY hour_start,product_id,country_code"""
+
+# Distinct measured IPs of each window's own tests (slot: the window, run_key and country: its
+# tests), per country and in all (country_code NULL).
+DISTINCT = """SELECT k.slot,k.country_code,count(DISTINCT o.ip_id) AS ips
+FROM unnest(%(slots)s::int[],%(keys)s::bigint[],%(countries)s::text[])
+ AS k(slot,run_key,country_code) JOIN ip_observations o USING(run_key)
+GROUP BY GROUPING SETS ((k.slot,k.country_code),(k.slot)) ORDER BY 1,2"""
+
+
+def fetch(conn, as_of) -> list[dict]:
+    """The released hours of the longest window."""
+    start = as_of - timedelta(hours=max(WINDOWS.values()))
+    return conn.execute(RELEASED, {"as_of": as_of, "start": start}).fetchall()
+
+
+def distinct(conn, found: list[tuple[dict, list[dict]]]) -> list[dict]:
+    """For each (window, hours) of found, the distinct measured IPs of those hours' tests by
+    country (None: all of them)."""
+    slots, keys, countries = [], [], []
+    for slot, (_, rows) in enumerate(found):
+        for run_key, country in sorted({(r["run_key"], r["country_code"]) for r in rows}):
+            slots.append(slot)
+            keys.append(run_key)
+            countries.append(country)
+    counts = [{} for _ in found]
+    if slots:
+        bounds = {"slots": slots, "keys": keys, "countries": countries}
+        for row in conn.execute(DISTINCT, bounds).fetchall():
+            counts[row["slot"]][row["country_code"]] = row["ips"]
+    return counts
+
+
+def window_unique(method: str, rows: list[dict], distinct_ips: int) -> float:
+    """A window's estimated unique IPs from its released hours (rows) of one or more tests."""
+    tests = {r["run_key"]: r for r in rows}.values()
+    if method == "sum":
+        return sum(t["day_unique_ips"] for t in tests)
+    if method != "distinct":
+        raise ValueError(f"estimates window_unique must be one of {METHODS}, not {method!r}")
+    measured = sum(t["measured_ips"] for t in tests)
+    return distinct_ips * sum(t["day_unique_ips"] for t in tests) / measured if measured else 0.0
+
+
+def _figure(value: float, versions: list[int], **extra) -> dict:
+    return {"value": value, "estimated": True, "formula_version": max(versions)} | extra
+
+
+def _series(rows: list[dict]) -> list[dict]:
+    hours = defaultdict(list)
+    for r in rows:
+        hours[r["hour_start"]].append(r)
+    return [
+        {
+            "start": start,
+            "unique_ips": sum(r["unique_ips"] for r in group),
+            "requests": sum(r["requests"] for r in group),
+            "estimated": True,
+            "formula_version": max(r["formula_version"] for r in group),
+        }
+        for start, group in sorted(hours.items())
+    ]
+
+
+def block(window: dict, rows: list[dict], distinct: dict, method: str) -> dict:
+    """The `estimated` block of one product window; distinct maps country (None: all) to IPs."""
+    versions = sorted({r["formula_version"] for r in rows})
+    by_country = defaultdict(list)
+    for r in rows:
+        by_country[r["country_code"]].append(r)
+    countries = [
+        {
+            "country_code": code,
+            "unique_ips": window_unique(method, group, distinct.get(code, 0)),
+            "requests": sum(r["requests"] for r in group),
+            "estimated": True,
+            "formula_version": max(r["formula_version"] for r in group),
+        }
+        for code, group in sorted(by_country.items())
+    ]
+    unique = window_unique(method, rows, distinct.get(None, 0))
+    measured = window["pool"]["unique_ips"]
+    return {
+        "estimated": True,
+        "formula_versions": versions,
+        "hours": len(rows),
+        "unique_ips": _figure(unique, versions, method=method),
+        "requests": _figure(sum(r["requests"] for r in rows), versions),
+        "countries": countries,
+        "series": _series(rows),
+        "breakdown_scale": unique / measured if measured else None,
+        "carried": {
+            "shared_share": window["overlap"]["shared_share"],
+            "datacenter_asn_share": window["pool"].get("datacenter_asn_share"),
+            "latency": "measured",
+        },
+    }
+
+
+def windows_with(groups: dict, run_group: dict, hours: list[dict]) -> list:
+    """Every product window with released hours in it, as (window, those hours).
+
+    A test's hours go to the product group its run was calculated in (run_group[run_key]).
+    """
+    rows_of = defaultdict(list)
+    for r in hours:
+        if r["run_key"] in run_group:
+            rows_of[run_group[r["run_key"]]].append(r)
+    found = []
+    for key, rows in rows_of.items():
+        for window in groups[key]["windows"].values():
+            inside = [r for r in rows if r["hour_start"] >= window["period"]["start"]]
+            if inside:
+                found.append((window, inside))
+    return found
+
+
+def place(found: list, counts: list[dict], config: dict) -> None:
+    """Add the `estimated` block to each found window; counts are distinct()'s."""
+    method = config.get("estimates", {}).get("window_unique", "distinct")
+    for (window, inside), ips in zip(found, counts, strict=True):
+        window["estimated"] = block(window, inside, ips, method)
+
+
+def attach(payload: dict, runs: list, conn, as_of, config: dict) -> dict:
+    """The built payload with the released estimated hours placed in its product windows.
+
+    build() records each run's product group (run["group"], the (product_id, cohort) key).
+    """
+    groups = {(p["product_id"], p["cohort"]): p for p in payload["products"]}
+    run_group = {r["run_key"]: r["group"] for r in runs if "group" in r}
+    found = windows_with(groups, run_group, fetch(conn, as_of))
+    place(found, distinct(conn, found), config)
+    return payload

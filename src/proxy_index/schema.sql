@@ -1,6 +1,6 @@
--- Schema v9: one canonical address, product membership, shared enrichment, typed test profiles,
--- the census/pulse/load scheduling, live progress, geography buckets and event tape, and one
--- shared list of place and ASN names.
+-- Schema v10: one canonical address, product membership, shared enrichment, typed test profiles,
+-- the census/pulse/load scheduling, live progress, geography buckets and event tape, one
+-- shared list of place and ASN names, and the daily tests' estimated hours.
 CREATE TABLE IF NOT EXISTS schema_versions (
  version integer PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz DEFAULT now()
 );
@@ -366,6 +366,30 @@ CREATE TABLE IF NOT EXISTS alerts (
  occurrences integer NOT NULL DEFAULT 1, first_at timestamptz NOT NULL DEFAULT now(),
  last_at timestamptz NOT NULL DEFAULT now(), acknowledged_at timestamptz
 );
+-- Estimates (ESTIMATE-1): the formula's hours after one daily test of a network and country,
+-- never mixed with the measured rows. Each row is one UTC hour: unique_ips = measured_ips x
+-- hour_factor (that hour's formula factor over the measured hour's), requests likewise from the
+-- request curve, day_unique_ips = measured_ips x the daily factor over the measured hour's.
+-- run_key is the measured test and measured_at its start; a later test replaces the hours an
+-- earlier one left unreleased. released_at stays NULL until the hour is released; then the row
+-- never changes.
+CREATE TABLE IF NOT EXISTS estimated_hours (
+ product_id integer NOT NULL REFERENCES products(product_id),
+ country_code char(2) NOT NULL CHECK(country_code ~ '^[A-Z]{2}$'),
+ day date NOT NULL, hour smallint NOT NULL CHECK(hour BETWEEN 0 AND 23),
+ run_key bigint NOT NULL REFERENCES test_runs(run_key),
+ measured_at timestamptz NOT NULL,
+ measured_ips bigint NOT NULL, measured_requests bigint NOT NULL,
+ hour_factor double precision NOT NULL, unique_ips double precision NOT NULL,
+ requests double precision NOT NULL, day_unique_ips double precision NOT NULL,
+ curve text NOT NULL CHECK(curve IN ('country','network')), formula_version integer NOT NULL,
+ computed_at timestamptz NOT NULL DEFAULT now(), released_at timestamptz,
+ PRIMARY KEY(product_id,country_code,day,hour)
+);
+CREATE INDEX IF NOT EXISTS estimated_hours_unreleased ON estimated_hours(day,hour)
+ WHERE released_at IS NULL;
+CREATE INDEX IF NOT EXISTS estimated_hours_run ON estimated_hours(run_key);
+CREATE INDEX IF NOT EXISTS estimated_hours_day ON estimated_hours(day);
 CREATE TABLE IF NOT EXISTS settings (
  key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now()
 );

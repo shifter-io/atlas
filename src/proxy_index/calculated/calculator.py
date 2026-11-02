@@ -13,7 +13,7 @@ from pathlib import Path
 from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
-from .. import detect, traffic
+from .. import detect, estimates, traffic
 from ..names import labels as shared_labels
 from ..storage import column, connect
 from ..targets import registry
@@ -248,7 +248,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 previous,
                 **scheduled,
             )
-            payload = jsonable(payload)
+            payload = jsonable(estimates.window.attach(payload, runs, conn, as_of, config))
             validate_payload(payload)
             persist(conn, payload)
             payload = slim(payload, config)

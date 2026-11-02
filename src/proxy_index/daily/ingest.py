@@ -15,6 +15,11 @@ whose events are recorded in `<root>/daily-ingest.json` gets no second pair. So 
 emitted is authoritative: a rerun that later imports a country that failed (or a network whose
 product had no row yet, which defers its events to the rerun) adds the data, never a corrected
 event. The report holds names and counts only, never an address.
+
+With `formulas` (the formulas/*.json directory), every imported country's 24 estimated hours
+are stored too (estimates.compute; a rerun replaces only unreleased hours) and the ended hours
+are released (estimates.release). A country without an estimate is an issue of its cell's
+`estimate_issues` and makes the report incomplete, never a failed test.
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ import psycopg
 from .. import storage
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
+from ..estimates import compute, release
 from ..onboarding.files import atomic_json, digest, read_json
 from ..onboarding.manifest import load, region_countries
 from ..onboarding.rounds import round_directory, verify_round
@@ -106,11 +112,28 @@ def _times(jobs: list[dict]) -> tuple[str | None, str | None]:
     return (min(started) if started else None), (max(finished) if finished else None)
 
 
-def ingest_cell(manifest_path: Path, region: str, runs: Path, credentials: Path, mmdb=None) -> dict:
-    """Verify, convert and import one network x region round; returns the cell's report."""
+def _estimate(cell: dict, formula: dict | None, run_id: str, country: str, credentials) -> None:
+    if formula is None:
+        return
+    try:
+        compute.estimate_run(credentials, run_id, country, formula)
+    except (KeyError, ValueError, ZeroDivisionError, psycopg.Error) as exc:
+        cell["estimate_issues"].append(f"{country}: no estimates ({type(exc).__name__})")
+        return
+    cell["estimated"].append(country)
+
+
+def ingest_cell(
+    manifest_path: Path, region: str, runs: Path, credentials: Path, mmdb=None, formula=None
+) -> dict:
+    """Verify, convert and import one network x region round; returns the cell's report.
+
+    With the network's formula, each imported country's estimated hours are stored too.
+    """
     countries = region_countries(load(manifest_path), region)
     cell = {"region": region, "countries": countries, "status": "failed", "ingested": []}
     cell |= {"requests": 0, "unique_ips": 0, "started_at": None, "finished_at": None}
+    cell |= {"estimated": [], "estimate_issues": []}
     try:
         verified = verify_round(manifest_path, region, ROUND)
         jobs = read_json(round_directory(manifest_path, region, ROUND) / "round.json")["jobs"]
@@ -125,11 +148,13 @@ def ingest_cell(manifest_path: Path, region: str, runs: Path, credentials: Path,
         if job["status"] != "completed" or job["country"] in bad:
             continue
         try:
-            _import(convert_country(job_directory(folder, job), runs), credentials, mmdb)
+            directory = convert_country(job_directory(folder, job), runs)
+            _import(directory, credentials, mmdb)
         except (OSError, ValueError, KeyError, psycopg.Error) as exc:
             issues.append(f"{job['country']}: not imported ({type(exc).__name__})")
             continue
         cell["ingested"].append(job["country"])
+        _estimate(cell, formula, directory.name, job["country"], credentials)
         cell["unique_ips"] += entry.get("unique_ips") or 0
     cell["started_at"], cell["finished_at"] = _times(jobs)
     cell["status"] = "done" if verified["complete"] and not issues else "failed"
@@ -194,8 +219,30 @@ async def _emit_once(db: Database, cell: dict, manifest: dict, fallback: datetim
     return True
 
 
-async def ingest_campaign(root: Path, credentials: Path, mmdb=None, *, database=None) -> dict:
-    """Import every cell of a collected daily test and emit the events not yet emitted."""
+def _formula(formulas: Path | None, network: str) -> tuple[dict | None, list[str]]:
+    """The network's formula, or None and why (no file, not a version 1 formula)."""
+    if formulas is None:
+        return None, []
+    try:
+        return compute.load_formula(formulas, network), []
+    except (OSError, ValueError) as exc:
+        return None, [f"{network}: no formula ({type(exc).__name__})"]
+
+
+async def _release(db: Database, report: dict) -> None:
+    try:
+        report["released_hours"] = len(await release.release_due(db))
+    except psycopg.Error as exc:
+        report["release_issue"] = f"estimated hours not released ({type(exc).__name__})"
+
+
+async def ingest_campaign(
+    root: Path, credentials: Path, mmdb=None, *, database=None, formulas: Path | None = None
+) -> dict:
+    """Import every cell of a collected daily test and emit the events not yet emitted.
+
+    With `formulas`, store each imported country's estimated hours, then release the ended ones.
+    """
     spec = load_spec(root)
     path = root / REPORT
     previous = read_json(path) if path.exists() else {"cells": {}}
@@ -205,20 +252,26 @@ async def ingest_campaign(root: Path, credentials: Path, mmdb=None, *, database=
     try:
         for network, manifest_path, manifest, region in _cells(root, spec):
             key = f"{network}/{region}"
+            formula, missing = _formula(formulas, network)
             cell = {"network": network} | ingest_cell(
-                manifest_path, region, root / "runs", credentials, mmdb
+                manifest_path, region, root / "runs", credentials, mmdb, formula
             )
+            cell["estimate_issues"] += missing if cell["ingested"] else []
             cell["events"] = previous["cells"].get(key, {}).get("events", False)
             if not cell["events"]:
                 cell["events"] = await _emit_once(db, cell, manifest, fallback)
             report["cells"][key] = cell
             # Saved after every cell, so an event pair is never emitted twice.
             atomic_json(path, report | {"cells": previous["cells"] | report["cells"]})
+        if formulas:
+            await _release(db, report)
     finally:
         if database is None:
             await db.close()
     cells = report["cells"].values()
-    report["complete"] = all(c["status"] == "done" and c["events"] for c in cells)
+    report["complete"] = "release_issue" not in report and all(
+        c["status"] == "done" and c["events"] and not c["estimate_issues"] for c in cells
+    )
     report["finished_at"] = datetime.now(UTC).isoformat()
     atomic_json(path, report)
     return report

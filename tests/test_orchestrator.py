@@ -966,6 +966,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
     module = types.ModuleType("proxy_index.calculated.calculator")
     module.calculate = fake
     monkeypatch.setitem(sys.modules, "proxy_index.calculated.calculator", module)
+    await set_setting(db, "calculate.trigger", "batch")  # the old schedule; hourly is the default
     assert (await calculate(db, database, "m.toml"))["skipped"].startswith("no batch")
     prepare(database, ("DE",), DE=time(12))
     issue_token(database, provider="alpha", product="res", region="fra1")

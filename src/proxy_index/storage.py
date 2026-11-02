@@ -23,8 +23,8 @@ from . import names
 from .providers.credentials import read_credentials
 from .stats import Histogram
 
-SCHEMA_VERSION = 9
-# Only an unmodified v4, v5, v6, v7 or v8 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 10
+# Only an unmodified v4 to v9 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
@@ -33,14 +33,9 @@ V8_CHECKSUM = "5986ee1ea743a34bf42cb49d3a7d5ded4d0b884bb653cb090e3d4b7f679a4552"
 # The same v8 schema before the framework rename (one comment differs); databases created then
 # record it.
 V8_PRE_RENAME_CHECKSUM = "315af82775eb32324307b33c7f88b18a7fd1a9b443ee1b8cb15d42fa7b1945ca"
-MIGRATABLE = {
-    (4, V4_CHECKSUM): 4,
-    (5, V5_CHECKSUM): 5,
-    (6, V6_CHECKSUM): 6,
-    (7, V7_CHECKSUM): 7,
-    (8, V8_CHECKSUM): 8,
-    (8, V8_PRE_RENAME_CHECKSUM): 8,
-}
+V9_CHECKSUM = "bf4c540376649ecf841e5207e2581cda29cba76473761b7e5c27e72cee98b0ee"
+MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
+MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
@@ -965,17 +960,17 @@ V6_CHECKS = {
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v8 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v9 database, and its calculated layer, in one transaction.
 
     v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql, migrate_v6_v7.sql,
-    migrate_v7_v8.sql and migrate_v8_v9.sql; v5 to v8 start at the step for their version (v7 only
-    adds a table; v8 moves names into the shared lists). A calculated v2 layer then runs
-    calculated/migrate_v2_v3.sql, then calculated v3 → v4 (availability), v4 → v5 (city/network
-    evidence), v5 → v6 (breakdowns partitioned by build) and v6 → v7 (breakdown names in the shared
-    lists); each step's rows are verified right after it. A v6 or later database with an older
-    calculated layer starts at its step. Every rebuilt pool, scope, bucket and run summary, every
-    test batch, location, network and per-IP enrichment, and every calculated window, breakdown and
-    score, must equal its original.
+    migrate_v7_v8.sql, migrate_v8_v9.sql and migrate_v9_v10.sql; v5 to v9 start at the step for
+    their version (v7 and v9 only add a table; v8 moves names into the shared lists). A
+    calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
+    (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build) and
+    v6 → v7 (breakdown names in the shared lists); each step's rows are verified right after it.
+    A v6 or later database with an older calculated layer starts at its step. Every rebuilt pool,
+    scope, bucket and run summary, every test batch, location, network and per-IP enrichment, and
+    every calculated window, breakdown and score, must equal its original.
     """
     from .calculated import store
 
@@ -1003,11 +998,11 @@ def migrate(credentials_file):
             start = MIGRATABLE.get(versions[0] if len(versions) == 1 else None)
             if start is None:
                 raise ValueError(
-                    "Only an unmodified v4, v5, v6, v7 or v8 schema can be migrated in place"
+                    "Only an unmodified v4, v5, v6, v7, v8 or v9 schema can be migrated in place"
                 )
-        # A v6, v7 or v8 database may already carry the current calculated layer, and a v6 or
+        # A v6 to v9 database may already carry the current calculated layer, and a v6 or
         # later one a calculated v3 to v6 layer (later is its version, else None).
-        upgraded = layered and start in (6, 7, 8) and layers == current_layer
+        upgraded = layered and start in (6, 7, 8, 9) and layers == current_layer
         known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in (3, 4, 5, 6)}
         later = known.get(layers[0]) if layered and start >= 6 and len(layers) == 1 else None
         expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
@@ -1034,14 +1029,9 @@ def migrate(credentials_file):
         if start == 6:
             checks |= V6_CHECKS
             conn.execute(V6_SNAPSHOT)
-        if start < 6:
-            conn.execute((root / "migrate_v5_v6.sql").read_text())
-        if start < 7:
-            conn.execute((root / "migrate_v6_v7.sql").read_text())
-        if start < 8:
-            conn.execute((root / "migrate_v7_v8.sql").read_text())
-        if start < SCHEMA_VERSION:
-            conn.execute((root / "migrate_v8_v9.sql").read_text())
+        for step in range(max(start, 5), SCHEMA_VERSION):  # migrate_v5_v6.sql .. v9_v10.sql
+            conn.execute((root / f"migrate_v{step}_v{step + 1}.sql").read_text())
+        if start < 9:
             checks |= names.V8_CHECKS
         if layered and not upgraded and not later:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
@@ -1070,9 +1060,9 @@ def migrate(credentials_file):
             )
     # Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
     # columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
-    # v5 → v6, v6 → v7, v7 → v8 and calculated v2 → v3 only add tables and nullable or
+    # v5 → v6, v6 → v7, v7 → v8, v9 → v10 and calculated v2 → v3 only add tables and nullable or
     # constant-default columns (and swap a check constraint): no rewrite.
-    tables = ["enrichment_locations", "enrichment_networks"] if start < SCHEMA_VERSION else []
+    tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:
         tables += ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
     if start == 4 and layered:

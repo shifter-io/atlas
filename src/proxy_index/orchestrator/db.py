@@ -92,8 +92,17 @@ DEFAULTS: dict[str, Any] = {
     "batch.stale_seconds": 900,
     "node.offline_seconds": 60,
     "calculate.min_interval_seconds": 300,
+    # "hourly": one calculation per UTC hour, hour_offset_seconds past it (after that hour's
+    # estimate is released); "batch": the old schedule, after each finished batch, debounced to
+    # min_interval_seconds. The calculator floors as_of to 5 minutes and the release job runs
+    # every minute, so an offset below 360 s would leave out the hour just released (jobs.py
+    # raises it to 360 with a warning).
+    "calculate.trigger": "hourly",
+    "calculate.hour_offset_seconds": 360,
     "retention.events_days": 90,
     "retention.job_runs_days": 30,
+    # Estimated hours older than the longest calculator window (30 days) are deleted.
+    "retention.estimates_days": 30,
     # Upload limits for /v1/results.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,
