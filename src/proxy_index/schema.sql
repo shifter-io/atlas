@@ -1,5 +1,6 @@
--- Schema v8: one canonical address, product membership, shared enrichment, typed test profiles,
--- and the census/pulse/load scheduling, live progress, geography buckets and event tape.
+-- Schema v9: one canonical address, product membership, shared enrichment, typed test profiles,
+-- the census/pulse/load scheduling, live progress, geography buckets and event tape, and one
+-- shared list of place and ASN names.
 CREATE TABLE IF NOT EXISTS schema_versions (
  version integer PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz DEFAULT now()
 );
@@ -155,20 +156,39 @@ CREATE TABLE IF NOT EXISTS dbip_releases (
  release_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  sha256 text NOT NULL UNIQUE, metadata jsonb NOT NULL
 );
+-- One list of place names and one of ASN names, shared by enrichment and the calculated layer
+-- (calculated_breakdowns); each name is stored once, and the all-NULL row is the unknown member.
+CREATE TABLE IF NOT EXISTS place_names (
+ place_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ country_code text, country text, region_code text, region text, city text,
+ UNIQUE NULLS NOT DISTINCT(country_code,country,region_code,region,city)
+);
+CREATE INDEX IF NOT EXISTS place_names_city ON place_names(country_code,city);
+CREATE TABLE IF NOT EXISTS asn_names (
+ asn_name_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ asn bigint, name text, UNIQUE NULLS NOT DISTINCT(asn,name)
+);
+-- A location is a place at one coordinate; a network is an ASN name with the per-IP network
+-- attributes. The *_fields views give both with their names, as the tables held them up to v8.
 CREATE TABLE IF NOT EXISTS enrichment_locations (
  location_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- country_code text, country text, region_code text, region text, city text,
+ place_id integer NOT NULL REFERENCES place_names(place_id),
  latitude double precision, longitude double precision,
- UNIQUE NULLS NOT DISTINCT(country_code,country,region_code,region,city,latitude,longitude)
+ UNIQUE NULLS NOT DISTINCT(place_id,latitude,longitude)
 );
-CREATE INDEX IF NOT EXISTS enrichment_locations_city ON enrichment_locations(country_code,city);
 CREATE TABLE IF NOT EXISTS enrichment_networks (
  network_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- isp text, organization text, asn bigint, asn_organization text,
- connection_type text, usage_type text,
- UNIQUE NULLS NOT DISTINCT(isp,organization,asn,asn_organization,connection_type,usage_type)
+ asn_name_id integer NOT NULL REFERENCES asn_names(asn_name_id),
+ isp text, organization text, connection_type text, usage_type text,
+ UNIQUE NULLS NOT DISTINCT(asn_name_id,isp,organization,connection_type,usage_type)
 );
-CREATE INDEX IF NOT EXISTS enrichment_networks_asn ON enrichment_networks(asn);
+CREATE OR REPLACE VIEW enrichment_location_fields AS
+SELECT l.location_id,p.country_code,p.country,p.region_code,p.region,p.city,l.latitude,l.longitude
+FROM enrichment_locations l JOIN place_names p USING(place_id);
+CREATE OR REPLACE VIEW enrichment_network_fields AS
+SELECT n.network_id,n.isp,n.organization,a.asn,a.name AS asn_organization,n.connection_type,
+ n.usage_type
+FROM enrichment_networks n JOIN asn_names a USING(asn_name_id);
 -- Outcome and latency per exit location x network x 5-minute bucket. Requests without an exit
 -- address use the all-NULL location and network rows.
 CREATE TABLE IF NOT EXISTS run_geo_buckets (
@@ -193,8 +213,8 @@ CREATE OR REPLACE VIEW ip_enrichment_fields AS
 SELECT e.ip_id,e.release_id,e.matched,l.country_code,l.country,l.region_code,l.region,l.city,
  l.latitude,l.longitude,n.isp,n.organization,n.asn,n.asn_organization,n.connection_type,n.usage_type,
  coalesce(e.extra_attributes,'{}'::jsonb) AS extra_attributes
-FROM ip_enrichment e JOIN enrichment_locations l USING(location_id)
-JOIN enrichment_networks n USING(network_id);
+FROM ip_enrichment e JOIN enrichment_location_fields l USING(location_id)
+JOIN enrichment_network_fields n USING(network_id);
 CREATE TABLE IF NOT EXISTS run_enrichments (
  run_key bigint REFERENCES test_runs(run_key), release_id integer REFERENCES dbip_releases(release_id),
  artifact_sha256 text NOT NULL, country_counts jsonb NOT NULL, PRIMARY KEY(run_key,release_id)

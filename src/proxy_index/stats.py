@@ -11,7 +11,7 @@ from typing import Any
 from .models import Outcome
 
 # LocalEnricher.lookup() fields, split the way storage keys them:
-# enrichment_locations and enrichment_networks.
+# enrichment_locations (with place_names) and enrichment_networks (with asn_names).
 LOCATION_FIELDS = (
     "country_code",
     "country",

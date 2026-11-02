@@ -380,8 +380,8 @@ def batch_data(conn: psycopg.Connection, batch_id: int) -> dict[str, Any] | None
     geo = (
         "FROM batch_runs br JOIN run_geo_buckets g ON g.run_key=br.run_key "
         "AND g.bucket_start>=%(since)s "
-        "JOIN enrichment_locations l ON l.location_id=g.location_id "
-        "JOIN enrichment_networks n ON n.network_id=g.network_id WHERE br.batch_id=%(batch)s"
+        "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
+        "JOIN enrichment_network_fields n ON n.network_id=g.network_id WHERE br.batch_id=%(batch)s"
     )
     city_keys = ["product_id", "region", "city"]
     cities = conn.execute(
@@ -428,7 +428,7 @@ def batch_data(conn: psycopg.Connection, batch_id: int) -> dict[str, Any] | None
             "JOIN LATERAL (SELECT max(release_id) AS release_id FROM run_enrichments re "
             " WHERE re.run_key=br.run_key) re ON true "
             "JOIN ip_enrichment e ON e.ip_id=o.ip_id AND e.release_id=re.release_id "
-            "JOIN enrichment_networks n ON n.network_id=e.network_id "
+            "JOIN enrichment_network_fields n ON n.network_id=e.network_id "
             "WHERE br.batch_id=%(batch)s GROUP BY 1,2",
             params,
         ).fetchall(),

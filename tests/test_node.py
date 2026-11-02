@@ -425,7 +425,7 @@ async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
     geo = query(
         database,
         "SELECT g.run_key,sum(g.completed),min(l.city),min(n.asn) FROM run_geo_buckets g "
-        "JOIN enrichment_locations l USING(location_id) JOIN enrichment_networks n "
+        "JOIN enrichment_location_fields l USING(location_id) JOIN enrichment_network_fields n "
         "USING(network_id) WHERE g.run_key=ANY(%s) GROUP BY 1 ORDER BY 1",
         (census_keys,),
     )

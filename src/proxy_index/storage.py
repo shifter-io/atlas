@@ -19,15 +19,17 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from . import names
 from .providers.credentials import read_credentials
 from .stats import Histogram
 
-SCHEMA_VERSION = 8
-# Only an unmodified v4, v5, v6 or v7 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 9
+# Only an unmodified v4, v5, v6, v7 or v8 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
 V7_CHECKSUM = "75eb7782f9700e6b57b42d59ef8ffd1f46976d9178432689131c0add5ae5f0a5"
+V8_CHECKSUM = "5986ee1ea743a34bf42cb49d3a7d5ded4d0b884bb653cb090e3d4b7f679a4552"
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
@@ -409,29 +411,14 @@ def _store_geo(conn, run_key, rows):
             copy.write_row(row)
     for bucket in {row[0] for row in rows}:
         partition(conn, "run_geo_buckets", bucket)
-    joins = []
-    for table, identity, fields in (
-        ("enrichment_locations", "location_id", LOCATION_FIELDS),
-        ("enrichment_networks", "network_id", NETWORK_FIELDS),
-    ):
-        columns = ",".join(fields)
-        # The same upsert as _enrich: the all-NULL row is the unknown member.
-        conn.execute(
-            f"INSERT INTO {table} ({columns}) SELECT DISTINCT {columns} "
-            "FROM incoming_geo_buckets ON CONFLICT DO NOTHING"
-        )
-        dimension = "jsonb_build_array(" + ",".join(f"d.{f}" for f in fields) + ")"
-        incoming = "jsonb_build_array(" + ",".join(f"g.{f}" for f in fields) + ")"
-        joins.append(
-            f"JOIN LATERAL (SELECT {identity} FROM {table} d WHERE "
-            f"{dimension}={incoming}) {identity} ON true"
-        )
+    # The same lists as _enrich: the all-NULL rows are the unknown member.
+    joins = names.resolve(conn, "incoming_geo_buckets g", lambda field: f"g.{field}")
     conn.execute(
         "INSERT INTO run_geo_buckets(bucket_start,run_key,location_id,network_id,completed,"
         "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
         "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
         "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
-        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + " ".join(joins),
+        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + joins,
         (run_key,),
     )
 
@@ -836,41 +823,9 @@ def _enrich(conn, directory, run_id, run_key, expected_rows):
             (release_id,),
         ).fetchone():
             raise ValueError("Enrichment release conflicts with prior data")
-        dimensions = {
-            "enrichment_locations": (
-                "location_id",
-                (
-                    "country_code",
-                    "country",
-                    "region_code",
-                    "region",
-                    "city",
-                    "latitude",
-                    "longitude",
-                ),
-            ),
-            "enrichment_networks": (
-                "network_id",
-                ("isp", "organization", "asn", "asn_organization", "connection_type", "usage_type"),
-            ),
-        }
-        joins = []
-        for table, (identity, fields) in dimensions.items():
-            columns = ",".join(fields)
-            expressions = [f"(g.attributes->>'{f}')::{ENRICHMENT_FIELDS[f]}" for f in fields]
-            conn.execute(
-                f"INSERT INTO {table} ({columns}) SELECT DISTINCT "
-                + ",".join(expressions)
-                + " FROM incoming_geo g ON CONFLICT DO NOTHING"
-            )
-            # A hashable NULL-safe tuple comparison avoids a nested scan for every IP.
-            # Values remain typed columns; these JSON arrays are transient join expressions.
-            dimension_tuple = "jsonb_build_array(" + ",".join(f"d.{f}" for f in fields) + ")"
-            incoming_tuple = "jsonb_build_array(" + ",".join(expressions) + ")"
-            joins.append(
-                f"JOIN LATERAL (SELECT {identity} FROM {table} d WHERE "
-                f"{dimension_tuple}={incoming_tuple}) {identity} ON true"
-            )
+        joins = names.resolve(
+            conn, "incoming_geo g", lambda f: f"(g.attributes->>'{f}')::{ENRICHMENT_FIELDS[f]}"
+        )
         conn.execute(
             "INSERT INTO ip_enrichment(ip_id,release_id,location_id,network_id,matched,"
             "extra_attributes) SELECT DISTINCT a.ip_id,%s,location_id.location_id,"
@@ -994,16 +949,15 @@ V6_CHECKS = {
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v7 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v8 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql,
-    migrate_v6_v7.sql and migrate_v7_v8.sql; v5, v6 and v7 start at the step for their version
-    (v7 only adds a table). A calculated v2 layer then runs calculated/migrate_v2_v3.sql, which is
-    followed by calculated v3 → v4 (availability) and v4 → v5 (city/network evidence).
-    A current (v8) database with an older calculated layer runs just those calculated migrations.
-    Every rebuilt pool,
-    scope, bucket and run summary, every test batch, and every calculated window, breakdown and
-    score, must equal its original.
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql, migrate_v6_v7.sql,
+    migrate_v7_v8.sql and migrate_v8_v9.sql; v5 to v8 start at the step for their version (v7 only
+    adds a table; v8 moves names into the shared lists). A calculated v2 layer then runs
+    calculated/migrate_v2_v3.sql, v3 → v4 (availability) and v4 → v5 (city/network evidence); a
+    current (v9) database with an older calculated layer runs just those calculated migrations.
+    Every rebuilt pool, scope, bucket and run summary, every test batch, location, network and
+    per-IP enrichment, and every calculated window, breakdown and score, must equal its original.
     """
     from .calculated import store
 
@@ -1033,13 +987,14 @@ def migrate(credentials_file):
                 (5, V5_CHECKSUM): 5,
                 (6, V6_CHECKSUM): 6,
                 (7, V7_CHECKSUM): 7,
+                (8, V8_CHECKSUM): 8,
             }.get(versions[0] if len(versions) == 1 else None)
             if start is None:
                 raise ValueError(
-                    "Only an unmodified v4, v5, v6 or v7 schema can be migrated in place"
+                    "Only an unmodified v4, v5, v6, v7 or v8 schema can be migrated in place"
                 )
-        # A v6 or v7 database may already carry the current calculated layer.
-        upgraded = layered and start in (6, 7) and layers == current_layer
+        # A v6, v7 or v8 database may already carry the current calculated layer.
+        upgraded = layered and start in (6, 7, 8) and layers == current_layer
         v3_layer = layered and start >= 6 and layers == [(3, store.V3_CHECKSUM)]
         v4_layer = layered and start >= 6 and layers == [(4, store.V4_CHECKSUM)]
         expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
@@ -1070,8 +1025,11 @@ def migrate(credentials_file):
             conn.execute((root / "migrate_v5_v6.sql").read_text())
         if start < 7:
             conn.execute((root / "migrate_v6_v7.sql").read_text())
-        if start < SCHEMA_VERSION:
+        if start < 8:
             conn.execute((root / "migrate_v7_v8.sql").read_text())
+        if start < SCHEMA_VERSION:
+            conn.execute((root / "migrate_v8_v9.sql").read_text())
+            checks |= names.V8_CHECKS
         if layered and not upgraded and not v3_layer and not v4_layer:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
         if layered and not upgraded and not v4_layer:
@@ -1104,14 +1062,16 @@ def migrate(credentials_file):
                 "INSERT INTO calculation_schema VALUES (%s,%s)",
                 (store.SCHEMA_VERSION, calculated_checksum),
             )
-    if start == 4:
-        # Dropped v4 columns keep their bytes until the rewritten tables are compacted. v5 → v6,
-        # v6 → v7, v7 → v8 and calculated v2 → v3 only add tables and nullable or
-        # constant-default columns (and swap a check constraint): no rewrite.
+    if start < SCHEMA_VERSION:
+        # Dropped columns keep their bytes until the rewritten tables are compacted: the v4 ones
+        # and the v8 names. v5 → v6, v6 → v7, v7 → v8 and calculated v2 → v3 only add tables and
+        # nullable or constant-default columns (and swap a check constraint): no rewrite.
         with connect(credentials_file) as conn:
             conn.autocommit = True
-            tables = ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
-            if layered:
+            tables = ["enrichment_locations", "enrichment_networks"]
+            if start == 4:
+                tables += ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
+            if start == 4 and layered:
                 tables += ["calculated_windows", "calculated_scores"]
             conn.execute("VACUUM (FULL, ANALYZE) " + ",".join(tables))
     return {

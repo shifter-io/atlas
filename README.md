@@ -96,11 +96,16 @@ target schedules once set (`--reset-times` restores the staggered default census
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
 replaces); schema v8 (`migrate_v7_v8.sql`) adds `load_references`, the daily reference country of
-each runner region. `db-init` verifies v8 and refuses other schemas. `proxy-index db-migrate
---database-file .secrets/database.toml` upgrades an unmodified v7, v6 or v5 database, or an
-unmodified v4 database (and calculated v1 layer) through v5, v6 and v7, in place, in one
-transaction that compares every rebuilt summary, scope, pool and bucket (from v6 every test
-batch, and from v4 every cohort, breakdown and score) with its original before committing. Run it on every
+each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names into the shared
+lists `place_names` and `asn_names`: `enrichment_locations` keeps a place id and coordinates,
+`enrichment_networks` an ASN name id and the per-IP network attributes, every location and network
+id is kept, and the views `enrichment_location_fields` and `enrichment_network_fields` give their
+old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged). `db-init` verifies
+v9 and refuses other schemas. `proxy-index db-migrate --database-file .secrets/database.toml`
+upgrades an unmodified v8, v7, v6 or v5 database, or an unmodified v4 database (and calculated v1
+layer) through v5 to v8, in place, in one transaction that compares every rebuilt summary, scope,
+pool, bucket, location, network and per-IP enrichment (from v6 every test batch, and from v4
+every cohort, breakdown and score) with its original before committing. Run it on every
 database (production and staging) before starting the new orchestrator. Locally, run
 `PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
 The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
