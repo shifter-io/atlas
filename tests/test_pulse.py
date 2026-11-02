@@ -277,9 +277,7 @@ async def test_the_latency_baseline_is_the_latest_daily_test_run_census_only_bef
         assert await pulse.latency_baseline(conn, gamma, "DE") is None
 
 
-async def test_a_latency_rise_over_the_daily_test_is_not_flagged_as_census(
-    database, db, tmp_path
-):
+async def test_a_latency_rise_over_the_daily_test_is_not_flagged_as_census(database, db, tmp_path):
     prepare(database, ("DE",))
     (alpha,) = products(database, "alpha")
     census = W0 - timedelta(hours=3)
