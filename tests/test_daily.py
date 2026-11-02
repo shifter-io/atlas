@@ -18,7 +18,7 @@ from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from campaign_fakes import CID, FakeDigitalOcean, running
+from campaign_fakes import CAMPAIGN_PROJECT, CID, FakeDigitalOcean, running
 from helpers import FakeTransport
 from test_campaign_hour import (
     PRE_CREATE,
@@ -44,7 +44,8 @@ from proxy_index.campaign.contracts import (
     hour_tag,
     spec_path,
 )
-from proxy_index.campaign.tick import save_hour
+from proxy_index.campaign.do_api import ApiError, ScopeError
+from proxy_index.campaign.tick import load_hour, save_hour
 from proxy_index.cli import main
 from proxy_index.daily import ingest as daily_ingest
 from proxy_index.daily.planner import Cell, load_schedules, plan_hour
@@ -315,6 +316,33 @@ async def test_a_held_hour_lock_says_why_nothing_was_removed(tmp_path):
     assert left == [str(worker)] and "locked by a launcher still running" in skipped
 
 
+@pytest.mark.parametrize("fault", [ApiError("GET", "/v2/droplets", 500), ScopeError("refused")])
+async def test_a_failed_take_of_in_flight_workers_still_retires_the_recorded_ones(tmp_path, fault):
+    """N1: an API or scope error while taking an in-flight worker stops no recorded removal."""
+    spec = make_spec()
+    root = make_root(tmp_path, spec)
+    fake = FakeDigitalOcean()
+    in_flight(root, fake, spec)
+    record = load_hour(root, spec, 0)
+    name = droplet_name(CID, 0, "lon1", spec.networks[1])
+    tags = [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)]
+    recorded = fake.add(name, tags, project=CAMPAIGN_PROJECT)
+    record.traffic[spec.networks[1]] = dict.fromkeys(launch.TRAFFIC_KEYS, 0)
+    record.droplets.append(
+        launch.DropletRecord(spec.networks[1], "lon1", 0, name, droplet_id=recorded, status="armed")
+    )
+    save_hour(root, record)
+
+    async def failing(names, tag):
+        raise fault
+
+    async with running(fake) as cloud:
+        cloud.adopt_uncertain = failing
+        left, skipped = await clean_up(root, spec, cloud, FakeClock(PRE_CREATE))
+    assert ("droplet", str(recorded)) in fake.deleted and str(recorded) not in left
+    assert type(fault).__name__ in skipped and "locked" not in skipped
+
+
 def hanging_run(tmp_path, cloud, clock, after_launch):
     """Services whose launcher records the hour's workers, then calls `after_launch`."""
     remote = FakeRemote(clock)
@@ -349,6 +377,25 @@ def test_the_time_limit_is_the_slot_plus_the_margin():
     begins = datetime(2027, 1, 1, 22, tzinfo=UTC)
     assert time_limit(begins, begins - timedelta(minutes=2), 60) == 92 * 60
     assert time_limit(begins, begins + timedelta(hours=5), 60) == 0.0
+
+
+async def test_a_timeout_inside_the_run_is_a_failure_not_the_time_limit(tmp_path):
+    """N2: a TimeoutError raised by the run itself is re-raised; the workers still go."""
+    root = template(tmp_path)
+    fake, clock = FakeDigitalOcean(), FakeClock(PRE_CREATE)
+
+    async def times_out():
+        raise TimeoutError("a socket timed out")
+
+    async with running(fake) as cloud:
+        services = hanging_run(tmp_path, cloud, clock, times_out)
+        due = inputs(tmp_path, root, GB=22, DE=22)
+        with pytest.raises(TimeoutError, match="socket"):
+            await run_hour(due, services=services, now=NOW, clock=clock, limit=3600.0)
+    (hour_root,) = hours(root)
+    outcome = read_json(hour_root / "daily.json")
+    assert outcome["error"] == "TimeoutError" and outcome["leftover"] == []
+    assert removed(fake, hour_root)
 
 
 def test_a_signal_during_the_run_still_removes_every_worker(tmp_path, monkeypatch, capsys):

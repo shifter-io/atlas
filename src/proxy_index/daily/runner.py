@@ -20,6 +20,7 @@ import asyncio
 import secrets
 import shutil
 from collections.abc import Callable
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -148,27 +149,39 @@ def prepare(
     return root
 
 
+async def _retire_recorded(root: Path, spec: CampaignSpec, record, cloud, clock) -> str | None:
+    """Under the hour lock: take the in-flight workers, then retire every recorded one. A
+    failure to take them never stops the retirement; it is returned as the reason they stay."""
+    skipped = None
+    try:
+        await take_in_flight(spec, record, root, cloud, clock)
+    except Exception as error:  # the recorded workers still go
+        skipped = f"in-flight workers not taken ({type(error).__name__}); recorded ones retired"
+    work = HourWork(spec, record, root, cloud, clock)
+    for worker in record.droplets:
+        if worker.droplet_id and worker.status != "destroyed":
+            await work.retire(worker)
+    work.save()
+    return skipped
+
+
 async def clean_up(
     root: Path, spec: CampaignSpec, cloud, clock=None
 ) -> tuple[list[str], str | None]:
     """Remove every recorded worker not yet destroyed (guarded), a worker whose create was in
     flight taken first by its exact name under the hour tag. Returns the ids of the hour's
-    workers (recorded or still tagged) not verified gone, and why none was removed, if so."""
+    workers (recorded or still tagged) not verified gone, and why some were not removed, if so."""
     if spec.synthetic or cloud is None:
         return [], None
     clock = clock or Clock()
     record = load_hour(root, spec, 0)
-    skipped = None
-    try:
-        with lock(hour_path(root, 0).parent / ".lock"):
-            await take_in_flight(spec, record, root, cloud, clock)
-            work = HourWork(spec, record, root, cloud, clock)
-            for worker in record.droplets:
-                if worker.droplet_id and worker.status != "destroyed":
-                    await work.retire(worker)
-            work.save()
-    except ValueError:  # the hour is locked by a launcher still running: only check
-        skipped = "not retired: the hour is locked by a launcher still running"
+    with ExitStack() as held:
+        try:
+            held.enter_context(lock(hour_path(root, 0).parent / ".lock"))
+        except ValueError:  # the hour is locked by a launcher still running: only check
+            skipped = "not retired: the hour is locked by a launcher still running"
+        else:
+            skipped = await _retire_recorded(root, spec, record, cloud, clock)
     ids = {str(d.droplet_id) for d in record.droplets if d.droplet_id}
     ids |= {d.id for d in await cloud.list_tag(hour_tag(spec.campaign_id, 0))}
     left = sorted(ids)
@@ -220,11 +233,17 @@ async def run_hour(
             pacing=pacing,
         )
 
+    bound = asyncio.timeout(limit)
     try:
-        await asyncio.wait_for(work(), limit)
+        async with bound:
+            await work()
         outcome["state"] = load_hour(root, spec, 0).state
-    except TimeoutError:
-        outcome["error"] = f"stopped at the time limit ({limit:.0f} s)"
+    except TimeoutError as caught:
+        if bound.expired():
+            outcome["error"] = f"stopped at the time limit ({limit:.0f} s)"
+        else:  # raised inside the run (a socket, say): a failure like any other
+            error = caught
+            outcome["error"] = type(caught).__name__
     except asyncio.CancelledError:
         outcome["error"] = "cancelled by a signal"
     except BaseException as caught:  # an interrupt too: the workers still go
