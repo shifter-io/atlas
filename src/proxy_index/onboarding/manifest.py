@@ -198,8 +198,7 @@ def create(
         manifest["ends_at"] = timestamp(
             begins + 24 * slot + timedelta(hours=ephemeral_grace(manifest))
         )
-    if plan.due_countries is not None:
-        manifest["due_countries"] = {r: list(c) for r, c in plan.due_countries.items()}
+    _set_due_countries(manifest, plan.due_countries)
     validate(manifest)
     directory = output / provider / product / campaign_id
     private_dir(directory.parent)
@@ -323,6 +322,11 @@ def region_countries(manifest: dict, region: str) -> list[str]:
     (a region without one tests none), otherwise the region's whole list."""
     due = manifest.get("due_countries")
     return list(manifest["regions"][region] if due is None else due.get(region, []))
+
+
+def _set_due_countries(manifest: dict, due: dict | None) -> None:
+    if due is not None:
+        manifest["due_countries"] = {region: list(codes) for region, codes in due.items()}
 
 
 def _due_countries(data: dict) -> None:

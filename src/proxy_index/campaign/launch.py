@@ -159,6 +159,15 @@ class HourWork:
         )
 
 
+async def take_in_flight(spec, record, root, cloud, clock) -> None:
+    """For a clean-up: workers whose create was in flight, taken by exact name under the hour
+    tag and put in the campaign project (one never confirmed is removed there), so the guard
+    can remove them."""
+    work = _Launch(spec, record, root, cloud, lambda hour: None, clock)
+    await work._adopt()
+    await work._assign([w for w in record.droplets if w.droplet_id in cloud.created_ids])
+
+
 async def launch_hour(
     spec: CampaignSpec,
     record: HourRecord,

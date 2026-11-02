@@ -7,12 +7,16 @@ campaign id, and per network a manifest re-created for this hour with the templa
 (same concurrency and stop rule as the 24-hour rounds, same target and HTTPS redirect) and the
 countries due (`due_countries`). `tick.run_tick` launches slot 0 (one worker per network and
 region with something due), `collector.run_collector` harvests it, and whatever happens every
-recorded worker still up is removed through `scope.guarded_delete` and checked gone. The run's
-outcome is written to `<root>/daily.json` (names and counts, never an address).
+recorded worker still up is removed through `scope.guarded_delete` and checked gone: after a
+failure, a signal (`daily run` cancels on SIGTERM, SIGHUP and SIGINT; the removal is shielded) or
+the run's time limit (the hour's slot plus `RUN_MARGIN_MINUTES`). A worker whose create was in
+flight is first taken by its exact name under the hour tag. The run's outcome is written to
+`<root>/daily.json` (names and counts, never an address).
 """
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import shutil
 from collections.abc import Callable
@@ -23,7 +27,7 @@ from pathlib import Path
 from ..campaign import collector
 from ..campaign.collector import Pacing, run_collector
 from ..campaign.contracts import CampaignSpec, hour_path, hour_tag, spec_path
-from ..campaign.launch import HourWork
+from ..campaign.launch import HourWork, take_in_flight
 from ..campaign.tick import load_hour, load_spec, run_tick, utc_now
 from ..onboarding import manifest
 from ..onboarding.files import atomic_bytes, atomic_json, lock
@@ -32,6 +36,7 @@ from .planner import HourPlan, load_schedules, plan_hour
 
 GONE_CHECKS = 6  # reads of a removed worker before it counts as left over
 GONE_POLL_SECONDS = 5.0
+RUN_MARGIN_MINUTES = 30  # after the slot's end the run stops waiting and cleans up
 
 
 class RunError(ValueError):
@@ -57,6 +62,12 @@ def start_hour(value: str, now: datetime) -> tuple[datetime, bool]:
         raise RunError("--start needs an explicit UTC offset")
     begins = begins.astimezone(UTC)
     return begins, begins == current
+
+
+def time_limit(begins: datetime, now: datetime, slot_minutes: int) -> float:
+    """Seconds the run may take: until the slot's end plus the margin."""
+    end = begins + timedelta(minutes=slot_minutes + RUN_MARGIN_MINUTES)
+    return max(0.0, (end - now).total_seconds())
 
 
 def hour_plan(inputs: RunInputs, now: datetime) -> tuple[CampaignSpec, HourPlan, datetime, bool]:
@@ -137,22 +148,27 @@ def prepare(
     return root
 
 
-async def clean_up(root: Path, spec: CampaignSpec, cloud, clock=None) -> list[str]:
-    """Remove every recorded worker not yet destroyed (guarded), then return the ids of the
-    hour's workers (recorded or still tagged) that are not verified gone."""
+async def clean_up(
+    root: Path, spec: CampaignSpec, cloud, clock=None
+) -> tuple[list[str], str | None]:
+    """Remove every recorded worker not yet destroyed (guarded), a worker whose create was in
+    flight taken first by its exact name under the hour tag. Returns the ids of the hour's
+    workers (recorded or still tagged) not verified gone, and why none was removed, if so."""
     if spec.synthetic or cloud is None:
-        return []
+        return [], None
     clock = clock or Clock()
     record = load_hour(root, spec, 0)
+    skipped = None
     try:
         with lock(hour_path(root, 0).parent / ".lock"):
+            await take_in_flight(spec, record, root, cloud, clock)
             work = HourWork(spec, record, root, cloud, clock)
             for worker in record.droplets:
                 if worker.droplet_id and worker.status != "destroyed":
                     await work.retire(worker)
             work.save()
     except ValueError:  # the hour is locked by a launcher still running: only check
-        pass
+        skipped = "not retired: the hour is locked by a launcher still running"
     ids = {str(d.droplet_id) for d in record.droplets if d.droplet_id}
     ids |= {d.id for d in await cloud.list_tag(hour_tag(spec.campaign_id, 0))}
     left = sorted(ids)
@@ -161,7 +177,7 @@ async def clean_up(root: Path, spec: CampaignSpec, cloud, clock=None) -> list[st
         if not left or attempt == GONE_CHECKS - 1:
             break
         await clock.sleep(GONE_POLL_SECONDS)
-    return left
+    return left, skipped
 
 
 async def run_hour(
@@ -171,14 +187,19 @@ async def run_hour(
     now: datetime | None = None,
     pacing: Pacing | None = None,
     clock=None,
+    limit: float | None = None,
 ) -> dict:
-    """Run the hour's daily test; returns the outcome written to `<root>/daily.json`."""
+    """Run the hour's daily test; returns the outcome written to `<root>/daily.json`.
+
+    `limit` (seconds) defaults to `time_limit`; a cancellation (a signal) or the limit ends the
+    run as failed, and the clean-up then runs to its end even if cancelled again."""
     now = now or utc_now()
     base, plan, begins, current = hour_plan(inputs, now)
     if not plan.cells:
         return {"state": "nothing_due", "plan": plan.to_dict()}
     root = prepare(inputs.template, base, plan, begins, current, now)
     spec = load_spec(root)
+    limit = time_limit(begins, now, spec.slot_minutes) if limit is None else limit
     cloud, remote_factory, launcher, harvester = services(root, spec)
     outcome = {
         "campaign_id": spec.campaign_id,
@@ -187,7 +208,8 @@ async def run_hour(
         "leftover": None,  # unknown until the clean-up has checked
     }
     error = None
-    try:
+
+    async def work() -> None:
         await run_tick(root, launcher=launcher, now_mode=True, slot=0)
         await run_collector(
             root,
@@ -197,12 +219,27 @@ async def run_hour(
             until_done=True,
             pacing=pacing,
         )
+
+    try:
+        await asyncio.wait_for(work(), limit)
         outcome["state"] = load_hour(root, spec, 0).state
-    except BaseException as caught:  # a signal too: the workers still go
+    except TimeoutError:
+        outcome["error"] = f"stopped at the time limit ({limit:.0f} s)"
+    except asyncio.CancelledError:
+        outcome["error"] = "cancelled by a signal"
+    except BaseException as caught:  # an interrupt too: the workers still go
         error = caught
         outcome["error"] = type(caught).__name__
+    cleanup = asyncio.ensure_future(clean_up(root, spec, cloud, clock))
     try:
-        outcome["leftover"] = await clean_up(root, spec, cloud, clock)
+        while not cleanup.done():  # a signal during the removal never interrupts it
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                outcome["error"] = "cancelled by a signal"
+        outcome["leftover"], skipped = cleanup.result()
+        if skipped:
+            outcome["cleanup"] = skipped
     finally:
         if cloud is not None:
             await cloud.close()

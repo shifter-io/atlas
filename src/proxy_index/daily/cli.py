@@ -51,9 +51,14 @@ def _plan(args) -> int:
 
 
 def _run(args) -> int:
+    from ..campaign.cli import cancel_on_signals
     from .runner import RunInputs, run_hour
 
-    outcome = asyncio.run(run_hour(RunInputs(args.template, args.formulas, args.start)))
+    async def run() -> dict:
+        cancel_on_signals()  # a signal cancels the run; its clean-up still removes the workers
+        return await run_hour(RunInputs(args.template, args.formulas, args.start))
+
+    outcome = asyncio.run(run())
     print(json.dumps(outcome, indent=2))
     if outcome["state"] == "nothing_due":
         return 0

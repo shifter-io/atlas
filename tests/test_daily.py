@@ -8,30 +8,56 @@ isolated PostgreSQL). No droplet, request or database outside the test is touche
 
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
+import os
 import shutil
+import signal
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from campaign_fakes import CID, FakeDigitalOcean, running
 from helpers import FakeTransport
-from test_campaign_hour import PRE_CREATE, FakeClock, FakeRemote, launched, make_root, make_spec
+from test_campaign_hour import (
+    PRE_CREATE,
+    SCHEDULED,
+    FakeClock,
+    FakeRemote,
+    launched,
+    make_root,
+    make_spec,
+)
 from test_onboarding import ROOT, START, Clock, Proxy
 from test_onboarding_round import TOR1, make
 
 from proxy_index import RunConfig, run
 from proxy_index.campaign import launch
 from proxy_index.campaign.collector import Pacing
-from proxy_index.campaign.contracts import hour_path, hour_tag, spec_path
+from proxy_index.campaign.contracts import (
+    WORKER_TAG,
+    HourRecord,
+    campaign_tag,
+    droplet_name,
+    hour_path,
+    hour_tag,
+    spec_path,
+)
 from proxy_index.campaign.tick import save_hour
 from proxy_index.cli import main
 from proxy_index.daily import ingest as daily_ingest
 from proxy_index.daily.planner import Cell, load_schedules, plan_hour
-from proxy_index.daily.runner import RunError, RunInputs, clean_up, run_hour, start_hour
+from proxy_index.daily.runner import (
+    RunError,
+    RunInputs,
+    clean_up,
+    run_hour,
+    start_hour,
+    time_limit,
+)
 from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import read_json
+from proxy_index.onboarding.files import lock, read_json
 from proxy_index.onboarding.rounds import execute_round, new_round
 from proxy_index.orchestrator.db import Database
 from proxy_index.storage import connect, seed
@@ -249,8 +275,112 @@ async def test_a_worker_still_tagged_for_the_hour_is_reported_left_over(tmp_path
     fake = FakeDigitalOcean()
     stray = fake.add("pic-stray", tags=[hour_tag(CID, 0)])
     async with running(fake) as cloud:
-        assert await clean_up(root, spec, cloud, FakeClock(PRE_CREATE)) == [str(stray)]
-        assert await clean_up(root, make_spec(synthetic=True), cloud) == []
+        assert await clean_up(root, spec, cloud, FakeClock(PRE_CREATE)) == ([str(stray)], None)
+        assert await clean_up(root, make_spec(synthetic=True), cloud) == ([], None)
+
+
+def in_flight(root, fake, spec):
+    """A recorded worker whose create answered after a crash: its name, but no id yet."""
+    record = HourRecord(CID, 0, SCHEDULED, state="launching")
+    record.traffic[spec.networks[0]] = dict.fromkeys(launch.TRAFFIC_KEYS, 0)
+    name = droplet_name(CID, 0, "lon1", spec.networks[0])
+    record.droplets.append(
+        launch.DropletRecord(spec.networks[0], "lon1", 0, name, attempts=1, requested_at=SCHEDULED)
+    )
+    save_hour(root, record)
+    return fake.add(name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)])
+
+
+async def test_a_worker_whose_create_was_in_flight_is_taken_by_name_and_removed(tmp_path):
+    spec = make_spec()
+    root = make_root(tmp_path, spec)
+    fake = FakeDigitalOcean()
+    worker = in_flight(root, fake, spec)
+    fake.add(droplet_name(CID, 0, "lon1", spec.networks[0]), ["pi-camp-other"])  # not ours
+    async with running(fake) as cloud:
+        assert await clean_up(root, spec, cloud, FakeClock(PRE_CREATE)) == ([], None)
+    assert ("droplet", str(worker)) in fake.deleted and str(worker) not in fake.droplets
+    assert len(fake.droplets) == 1  # the same name without our tags stays
+    assert read_json(hour_path(root, 0))["droplets"][0]["status"] == "destroyed"
+
+
+async def test_a_held_hour_lock_says_why_nothing_was_removed(tmp_path):
+    spec = make_spec()
+    root = make_root(tmp_path, spec)
+    fake = FakeDigitalOcean()
+    worker = in_flight(root, fake, spec)
+    async with running(fake) as cloud:
+        with lock(hour_path(root, 0).parent / ".lock"):
+            left, skipped = await clean_up(root, spec, cloud, FakeClock(PRE_CREATE))
+    assert left == [str(worker)] and "locked by a launcher still running" in skipped
+
+
+def hanging_run(tmp_path, cloud, clock, after_launch):
+    """Services whose launcher records the hour's workers, then calls `after_launch`."""
+    remote = FakeRemote(clock)
+
+    async def launcher(spec, record, hour_root):
+        await launch.launch_hour(
+            spec, record, hour_root, cloud=cloud, remote_factory=lambda h: remote, clock=clock
+        )
+        await after_launch()
+
+    return lambda hour_root, spec: (Borrowed(cloud), None, launcher, None)
+
+
+def removed(fake, hour_root):
+    ids = [d["droplet_id"] for d in read_json(hour_path(hour_root, 0))["droplets"]]
+    return len(ids) == 2 and all(("droplet", str(i)) in fake.deleted for i in ids)
+
+
+async def test_the_time_limit_stops_a_run_that_never_settles_and_removes_its_workers(tmp_path):
+    root = template(tmp_path)
+    fake, clock = FakeDigitalOcean(), FakeClock(PRE_CREATE)
+    async with running(fake) as cloud:
+        services = hanging_run(tmp_path, cloud, clock, lambda: asyncio.sleep(3600))
+        due = inputs(tmp_path, root, GB=22, DE=22)
+        outcome = await run_hour(due, services=services, now=NOW, clock=clock, limit=1.0)
+    (hour_root,) = hours(root)
+    assert outcome["error"] == "stopped at the time limit (1 s)" and outcome["leftover"] == []
+    assert read_json(hour_root / "daily.json") == outcome and removed(fake, hour_root)
+
+
+def test_the_time_limit_is_the_slot_plus_the_margin():
+    begins = datetime(2027, 1, 1, 22, tzinfo=UTC)
+    assert time_limit(begins, begins - timedelta(minutes=2), 60) == 92 * 60
+    assert time_limit(begins, begins + timedelta(hours=5), 60) == 0.0
+
+
+def test_a_signal_during_the_run_still_removes_every_worker(tmp_path, monkeypatch, capsys):
+    """SIGTERM through `daily run`: the run is cancelled and the clean-up still runs."""
+    import proxy_index.daily.runner as runner
+
+    root = template(tmp_path)
+    fake, clock = FakeDigitalOcean(), FakeClock(PRE_CREATE)
+    real = runner.run_hour
+
+    async def signalled():
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(2)
+        raise AssertionError("the signal did not stop the run")
+
+    async def run_with_fakes(due):
+        async with running(fake) as cloud:
+            services = hanging_run(tmp_path, cloud, clock, signalled)
+            return await real(due, services=services, now=NOW, clock=clock)
+
+    monkeypatch.setattr(runner, "run_hour", run_with_fakes)
+    folder = formulas(tmp_path, {"shifter": {"GB": 22, "DE": 22}})
+    args = ["daily", "run", "--formulas", str(folder), "--template", str(root)]
+    previous = signal.signal(signal.SIGTERM, lambda *_: None)  # never kill the test runner
+    try:
+        assert main(args + ["--start", "next-hour"]) == 3
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    outcome = json.loads(capsys.readouterr().out)
+    assert outcome["error"] == "cancelled by a signal" and outcome["leftover"] == []
+    (hour_root,) = hours(root)
+    assert removed(fake, hour_root)
 
 
 async def test_an_hour_with_nothing_due_writes_nothing(tmp_path):

@@ -88,6 +88,18 @@ async def _run(args: argparse.Namespace) -> int:
             loop.remove_signal_handler(sig)
 
 
+def _operator_groups(commands) -> dict:
+    """Register the operator command groups; returns each group's dispatcher by command."""
+    from .campaign import cli as campaign
+    from .daily import cli as daily
+    from .onboarding import cli as onboarding
+
+    groups = {"onboarding": onboarding, "campaign": campaign, "daily": daily}
+    for group in groups.values():
+        group.register(commands)
+    return {name: group.dispatch for name, group in groups.items()}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="proxy-index")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -176,22 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     from .orchestrator import cli as fleet
 
     fleet.register(commands)
-    from .onboarding import cli as onboarding
-
-    onboarding.register(commands)
-    from .campaign import cli as campaign
-
-    campaign.register(commands)
-    from .daily import cli as daily
-
-    daily.register(commands)
+    private = _operator_groups(commands)
     args = parser.parse_args(argv)
     try:
-        private = {
-            "onboarding": onboarding.dispatch,
-            "campaign": campaign.dispatch,
-            "daily": daily.dispatch,
-        }
         if args.command in private:
             return private[args.command](args)
         if args.command in fleet.COMMANDS:

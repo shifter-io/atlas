@@ -7,11 +7,14 @@ each country that completed and reconciles becomes an ingestible run directory u
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
 sink writes), enriched with DB-IP (`enrichment.enrich_run`) and imported with `storage.ingest`.
 Then each cell gets `daily_test_started` and `daily_test_finished` (done only when every due
-country was measured and imported, failed otherwise).
+country was measured and imported, failed otherwise). A database error fails its country or
+its cell's events, never the other cells.
 
 A rerun is safe: a converted run is reused, `storage.ingest` replays as a no-op, and a cell
-whose events are recorded in `<root>/daily-ingest.json` gets no second pair. The report holds
-names and counts only, never an address.
+whose events are recorded in `<root>/daily-ingest.json` gets no second pair. So the first pair
+emitted is authoritative: a rerun that later imports a country that failed (or a network whose
+product had no row yet, which defers its events to the rerun) adds the data, never a corrected
+event. The report holds names and counts only, never an address.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ import gzip
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+
+import psycopg
 
 from .. import storage
 from ..campaign.tick import load_spec
@@ -120,7 +125,7 @@ def ingest_cell(manifest_path: Path, region: str, runs: Path, credentials: Path,
             continue
         try:
             _import(convert_country(job_directory(folder, job), runs), credentials, mmdb)
-        except (OSError, ValueError, KeyError) as exc:
+        except (OSError, ValueError, KeyError, psycopg.Error) as exc:
             issues.append(f"{job['country']}: not imported ({type(exc).__name__})")
             continue
         cell["ingested"].append(job["country"])
@@ -165,6 +170,29 @@ async def emit_cell(db: Database, cell: dict, product_id: int, fallback: datetim
         await events.emit_daily_test_finished(conn, ended, test, result)
 
 
+def _cells(root: Path, spec):
+    """(network, manifest path, manifest, region) of every cell with something due."""
+    for network in spec.networks:
+        manifest_path = root / spec.manifests[network]
+        manifest = load(manifest_path)
+        for region in spec.regions:
+            if region_countries(manifest, region):
+                yield network, manifest_path, manifest, region
+
+
+async def _emit_once(db: Database, cell: dict, manifest: dict, fallback: datetime) -> bool:
+    """Emit the cell's pair; False when it must wait for a rerun (no product row, a DB error)."""
+    try:
+        product_id = await _product_id(db, manifest)
+        if product_id is None:  # the network was never imported
+            return False
+        await emit_cell(db, cell, product_id, fallback)
+    except psycopg.Error as exc:
+        cell["issues"].append(f"events not emitted ({type(exc).__name__})")
+        return False
+    return True
+
+
 async def ingest_campaign(root: Path, credentials: Path, mmdb=None, *, database=None) -> dict:
     """Import every cell of a collected daily test and emit the events not yet emitted."""
     spec = load_spec(root)
@@ -174,25 +202,17 @@ async def ingest_campaign(root: Path, credentials: Path, mmdb=None, *, database=
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
     try:
-        for network in spec.networks:
-            manifest_path = root / spec.manifests[network]
-            manifest = load(manifest_path)
-            for region in spec.regions:
-                if not region_countries(manifest, region):
-                    continue
-                key = f"{network}/{region}"
-                cell = {"network": network} | ingest_cell(
-                    manifest_path, region, root / "runs", credentials, mmdb
-                )
-                cell["events"] = previous["cells"].get(key, {}).get("events", False)
-                if not cell["events"]:
-                    product_id = await _product_id(db, manifest)
-                    if product_id is not None:  # None: the network was never imported
-                        await emit_cell(db, cell, product_id, fallback)
-                        cell["events"] = True
-                report["cells"][key] = cell
-                # Saved after every cell, so an event pair is never emitted twice.
-                atomic_json(path, report | {"cells": previous["cells"] | report["cells"]})
+        for network, manifest_path, manifest, region in _cells(root, spec):
+            key = f"{network}/{region}"
+            cell = {"network": network} | ingest_cell(
+                manifest_path, region, root / "runs", credentials, mmdb
+            )
+            cell["events"] = previous["cells"].get(key, {}).get("events", False)
+            if not cell["events"]:
+                cell["events"] = await _emit_once(db, cell, manifest, fallback)
+            report["cells"][key] = cell
+            # Saved after every cell, so an event pair is never emitted twice.
+            atomic_json(path, report | {"cells": previous["cells"] | report["cells"]})
     finally:
         if database is None:
             await db.close()
