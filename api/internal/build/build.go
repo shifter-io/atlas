@@ -385,6 +385,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	}
 	entries = append(entries, real...)
 	addCountryLatencyRanks(real)
+	addRanks(real, in.Snapshot)
 	names := map[string]string{}
 	slugOfFramework := map[string]string{}
 	for _, e := range entries {

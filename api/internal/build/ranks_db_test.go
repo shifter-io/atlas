@@ -1,0 +1,304 @@
+package build_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"math"
+	"math/rand"
+	"os"
+	"testing"
+
+	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+)
+
+// rankPlace is one row of a seeded place list.
+type rankPlace struct {
+	cc, regionCode, region, city string
+	asn, ips, successes, p50     int64
+}
+
+var rankPlacePool = map[string][]rankPlace{
+	"country": {{cc: "US"}, {cc: "DE"}, {cc: "RO"}, {cc: "FR"}, {cc: "GB"}},
+	"region": {{cc: "US", regionCode: "CA", region: "California"}, {cc: "US", regionCode: "NY", region: "New York"},
+		{cc: "DE", regionCode: "BE", region: "Berlin"}, {cc: "RO", regionCode: "B", region: "Bucharest"}},
+	"city": {{cc: "US", regionCode: "CA", region: "California", city: "Los Angeles"},
+		{cc: "US", regionCode: "CA", region: "California", city: "San Jose"},
+		{cc: "DE", regionCode: "BE", region: "Berlin", city: "Berlin"},
+		{cc: "RO", regionCode: "B", region: "Bucharest", city: "Bucharest"}},
+	"asn": {{asn: 3320}, {asn: 8708}, {asn: 7922}, {asn: 9050}, {asn: 1}},
+}
+
+var rankDimensionCode = map[string]string{"country": "c", "region": "r", "city": "g", "asn": "a"}
+
+// seededPlaces is a random whole list of a dimension: distinct places, with
+// zero IPs, zero successes and tied values among them.
+func seededPlaces(rng *rand.Rand, dimension string) []rankPlace {
+	var out []rankPlace
+	for _, i := range rng.Perm(len(rankPlacePool[dimension])) {
+		if rng.Intn(4) == 0 {
+			continue
+		}
+		p := rankPlacePool[dimension][i]
+		p.ips, p.successes, p.p50 = int64(rng.Intn(5)), int64(rng.Intn(3)), int64(50+rng.Intn(4))
+		out = append(out, p)
+	}
+	return out
+}
+
+func (p rankPlace) payloadRow() map[string]any {
+	row := map[string]any{"ips": p.ips, "observations": p.ips, "completed": p.successes, "successes": p.successes, "p50": p.p50}
+	if p.cc == "" {
+		row["asn"], row["name"], row["usage_type"] = p.asn, fmt.Sprint("AS", p.asn), "isp"
+		return row
+	}
+	row["country_code"], row["country"] = p.cc, p.cc
+	if p.region != "" {
+		row["region_code"], row["region"] = p.regionCode, p.region
+	}
+	if p.city != "" {
+		row["city"] = p.city
+	}
+	return row
+}
+
+// rankedSnapshot publishes the every-request fixture as four networks with
+// seeded coverage counts and place lists, the region, city and ASN lists capped
+// to 2 rows the way slim() caps them, and stores the typed rows of every whole
+// list. Returns the build id.
+func rankedSnapshot(t *testing.T, db *testdb.DB) int64 {
+	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	one := func(sql string, args ...any) int64 {
+		var v int64
+		if err := c.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
+			t.Fatalf("%v\n%s", err, sql)
+		}
+		return v
+	}
+	template, _ := json.Marshal(doc["products"].([]any)[0])
+	rng := rand.New(rand.NewSource(3))
+	var products []any
+	whole := map[[2]any]map[string][]rankPlace{} // product id, hours
+	for _, provider := range []string{"alpha", "beta", "gamma", "delta"} {
+		var p map[string]any
+		if err := json.Unmarshal(template, &p); err != nil {
+			t.Fatal(err)
+		}
+		db.Exec(t, "INSERT INTO providers VALUES ($1)", provider)
+		id := one("INSERT INTO products(provider,name) VALUES ($1,'residential') RETURNING product_id", provider)
+		p["provider"], p["name"], p["product_id"], p["id"] = provider, provider, id, fmt.Sprint(id, ":", p["cohort"])
+		for _, entry := range p["windows"].(map[string]any) {
+			w := entry.(map[string]any)
+			pool := w["pool"].(map[string]any)
+			for _, k := range []string{"unique_ips", "countries", "regions", "cities", "asns"} {
+				pool[k] = rng.Intn(4)
+			}
+			lists, entries := map[string]any{}, map[string]any{}
+			hours := int64(w["period"].(map[string]any)["hours"].(float64))
+			whole[[2]any{id, hours}] = map[string][]rankPlace{}
+			for dimension := range rankDimensionCode {
+				all := seededPlaces(rng, dimension)
+				whole[[2]any{id, hours}][dimension] = all
+				kept := all
+				if dimension != "country" && len(kept) > 2 {
+					kept = kept[:2]
+				}
+				rows := []any{}
+				for _, r := range kept {
+					rows = append(rows, r.payloadRow())
+				}
+				lists[dimension], entries[dimension] = rows, len(all)
+			}
+			w["breakdowns"], w["breakdown_entries"] = lists, entries
+		}
+		products = append(products, p)
+	}
+	doc["products"] = products
+	payload, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := db.Publish(t, payload)
+	storeRankRows(t, db, build, products[0].(map[string]any)["cohort"].(string), whole)
+	return build
+}
+
+// storeRankRows writes the typed rows calculate() persists for whole place lists.
+func storeRankRows(t *testing.T, db *testdb.DB, build int64, cohort string, whole map[[2]any]map[string][]rankPlace) {
+	ctx := context.Background()
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	one := func(sql string, args ...any) int64 {
+		var v int64
+		if err := c.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
+			t.Fatalf("%v\n%s", err, sql)
+		}
+		return v
+	}
+	null := func(s string) any {
+		if s == "" {
+			return nil
+		}
+		return s
+	}
+	db.Exec(t, "INSERT INTO cohorts(cohort) VALUES ($1) ON CONFLICT DO NOTHING", cohort)
+	db.Exec(t, fmt.Sprintf("CREATE TABLE calculated_breakdowns_b%d PARTITION OF calculated_breakdowns FOR VALUES IN (%d)", build, build))
+	for k, lists := range whole {
+		result := one(`INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,
+ body_bytes,coverage,readiness) VALUES ($1,$2,$3,'',$4,0,0,0,0,0,'ready') RETURNING result_id`, build, k[0], cohort, k[1])
+		for dimension, rows := range lists {
+			for i, r := range rows {
+				var place, label any
+				if dimension == "asn" {
+					name := one(`INSERT INTO asn_names(asn,name) VALUES ($1,$2) ON CONFLICT (asn,name) DO UPDATE SET asn=excluded.asn
+ RETURNING asn_name_id`, r.asn, fmt.Sprint("AS", r.asn))
+					label = one(`INSERT INTO asn_labels(asn_name_id,usage_type) VALUES ($1,'isp')
+ ON CONFLICT (asn_name_id,usage_type) DO UPDATE SET usage_type=excluded.usage_type RETURNING asn_label_id`, name)
+				} else {
+					place = one(`INSERT INTO place_names(country_code,country,region_code,region,city) VALUES ($1,$1,$2,$3,$4)
+ ON CONFLICT (country_code,country,region_code,region,city) DO UPDATE SET city=excluded.city RETURNING place_id`,
+						r.cc, null(r.regionCode), null(r.region), null(r.city))
+				}
+				db.Exec(t, `INSERT INTO calculated_breakdowns(build_id,result_id,dimension,position,ips,observations,place_id,
+ asn_label_id,completed,successes,p50) VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$8,$9)`,
+					build, result, rankDimensionCode[dimension], i, r.ips, place, label, r.successes, r.p50)
+			}
+		}
+	}
+}
+
+// directPlaceRanksSQL ranks every place row across networks with RANK(): IPs
+// when above zero, p50 when not negative with successes; rows without a value
+// get no rank and are not peers.
+const directPlaceRanksSQL = `WITH v AS (
+ SELECT pr.provider, w.window_hours AS hours,
+  CASE d.dimension WHEN 'geography' THEN 'city' ELSE d.dimension END AS dim,
+  CASE d.dimension WHEN 'asn' THEN d.label->>'asn' WHEN 'country' THEN upper(d.label->>'country_code')
+   WHEN 'region' THEN upper(d.label->>'country_code') || '|' || coalesce(d.label->>'region_code', '') || '|' || coalesce(d.label->>'region', '')
+   ELSE upper(d.label->>'country_code') || '|' || coalesce(d.label->>'region_code', '') || '|' || coalesce(d.label->>'region', '')
+    || '|' || coalesce(d.label->>'city', '') END AS key,
+  CASE WHEN d.ips > 0 THEN d.ips END AS ips,
+  CASE WHEN d.p50 >= 0 AND d.successes > 0 THEN d.p50 END AS p50
+ FROM calculated_windows w JOIN products pr USING (product_id)
+ JOIN calculated_breakdown_details d USING (result_id)
+ WHERE w.build_id = $1 AND w.target = '' AND d.dimension IN ('country', 'region', 'geography', 'asn'))
+SELECT provider, hours, dim, key,
+ CASE WHEN ips IS NOT NULL THEN rank() OVER (PARTITION BY hours, dim, key ORDER BY ips DESC NULLS LAST) END,
+ count(ips) OVER (PARTITION BY hours, dim, key),
+ CASE WHEN p50 IS NOT NULL THEN rank() OVER (PARTITION BY hours, dim, key ORDER BY p50 NULLS LAST) END,
+ count(p50) OVER (PARTITION BY hours, dim, key)
+FROM v`
+
+// directTileRanksSQL ranks every window's coverage counts above zero across
+// networks with RANK(), from the published payload.
+const directTileRanksSQL = `WITH v AS (
+ SELECT p->>'provider' AS provider, w.key AS range, t.name,
+  CASE WHEN (w.value->'pool'->>t.name)::float > 0 THEN (w.value->'pool'->>t.name)::float END AS value
+ FROM calculated_snapshots s, jsonb_array_elements(s.payload->'products') p, jsonb_each(p->'windows') w,
+  unnest(ARRAY['unique_ips', 'countries', 'regions', 'cities', 'asns']) t(name)
+ WHERE s.build_id = $1)
+SELECT provider, range, name,
+ CASE WHEN value IS NOT NULL THEN rank() OVER (PARTITION BY range, name ORDER BY value DESC NULLS LAST) END,
+ count(value) OVER (PARTITION BY range, name)
+FROM v`
+
+func sameDBRank(got model.Rank, rank *int64, peers int64) bool {
+	if rank == nil {
+		return math.IsNaN(float64(got.Rank)) && int64(got.Peers) == peers
+	}
+	return float64(got.Rank) == float64(*rank) && int64(got.Peers) == peers
+}
+
+func TestRanksMatchADirectSQLRanking(t *testing.T) {
+	db := testdb.New(t)
+	build := rankedSnapshot(t, db)
+	res := buildFrom(t, db)
+	ctx := context.Background()
+	c := db.Conn(t)
+	defer c.Close(ctx)
+	rangeOf := map[int64]string{24: "24h", 168: "7d", 720: "30d"}
+
+	rows, err := c.Query(ctx, directPlaceRanksSQL, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := map[string]int{}
+	for rows.Next() {
+		var provider, dim, key string
+		var hours, ipsPeers, latPeers int64
+		var ipsRank, latRank *int64
+		if err := rows.Scan(&provider, &hours, &dim, &key, &ipsRank, &ipsPeers, &latRank, &latPeers); err != nil {
+			t.Fatal(err)
+		}
+		ranks := res.Details[provider].Provider.PlaceRanks["residential"][rangeOf[hours]]
+		got, ok := map[string]map[string]model.PlaceRank{"country": ranks.Countries, "region": ranks.Regions,
+			"city": ranks.Cities, "asn": ranks.Asns}[dim][key]
+		if !ok || !sameDBRank(got.Ips, ipsRank, ipsPeers) || !sameDBRank(got.Latency, latRank, latPeers) {
+			t.Errorf("%s %dh %s %q: built %+v, SQL ips %v/%d latency %v/%d", provider, hours, dim, key, got,
+				deref(ipsRank), ipsPeers, deref(latRank), latPeers)
+		}
+		checked[dim]++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	built := map[string]int{}
+	for _, d := range res.Details {
+		for _, byRange := range d.Provider.PlaceRanks {
+			for _, r := range byRange {
+				built["country"] += len(r.Countries)
+				built["region"] += len(r.Regions)
+				built["city"] += len(r.Cities)
+				built["asn"] += len(r.Asns)
+			}
+		}
+	}
+	for _, dim := range []string{"country", "region", "city", "asn"} {
+		if checked[dim] < 10 || built[dim] != checked[dim] {
+			t.Errorf("%s: %d built ranks, %d SQL rows", dim, built[dim], checked[dim])
+		}
+	}
+
+	rows, err = c.Query(ctx, directTileRanksSQL, build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	tiles := 0
+	for rows.Next() {
+		var provider, rangeID, name string
+		var peers int64
+		var rank *int64
+		if err := rows.Scan(&provider, &rangeID, &name, &rank, &peers); err != nil {
+			t.Fatal(err)
+		}
+		tr := res.Details[provider].Provider.TileRanks["residential"][rangeID]
+		got := map[string]model.Rank{"unique_ips": tr.UniqueIps, "countries": tr.Countries, "regions": tr.Regions,
+			"cities": tr.Cities, "asns": tr.Asns}[name]
+		if !sameDBRank(got, rank, peers) {
+			t.Errorf("%s %s %s: built %+v, SQL %v/%d", provider, rangeID, name, got, deref(rank), peers)
+		}
+		tiles++
+	}
+	if tiles != 4*3*5 {
+		t.Errorf("%d tile ranks checked, want 60", tiles)
+	}
+}
+
+func deref(v *int64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}

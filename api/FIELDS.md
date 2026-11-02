@@ -211,6 +211,27 @@ percentile. Missing values are null and listed in `na`. Coverage evidence shows
 this country rank beneath each available local latency; its tooltip gives the
 country p50 and peer count. City/ASN percentiles are never averaged for ranking.
 
+`tileRanks[kind][range]` and `placeRanks[kind][range]` are calculated once per build
+(`build/ranks.go`); pages and `/api/geo` serve the cached values and do no database
+work. Peers are the measured products of the same category, cohort and reporting
+period (demo data gets neither field). A rank is `{rank, peers}`: `rank` is 1 plus the
+number of peers strictly better (ties share a rank, SQL `RANK()`), `peers` counts the
+valid values including self, and a missing value has `rank` null.
+- `tileRanks` ranks the window's `pool.unique_ips`, `countries`, `regions`, `cities`
+  and `asns` (higher is better, counted when above zero) and the headline latency p50
+  (lower is better, counted when not negative) as `uniqueIps`, `countries`, `regions`,
+  `cities`, `asns` and `latency`.
+- `placeRanks` has `countries`, `regions`, `cities` and `asns` maps from the
+  `breakdowns.country`, `region`, `city` and `asn` rows, keyed by the upper-case
+  country code, `CC|region_code|region`, `CC|region_code|region|city` and the decimal
+  ASN. Each value is the compact array `[ipsRank, ipsPeers, latencyRank,
+  latencyPeers]`: IPs higher is better (counted when above zero), p50 lower is better
+  (counted when not negative and the row has successes). Rows sharing a key add their
+  IPs and keep the p50 of the row with most successes. A list the snapshot capped is
+  ranked whole from the build's typed rows (`store/placerows.go`, read in the same
+  transaction) when their count matches `breakdown_entries`; otherwise as published.
+  `/api/geo` rows carry their place's ranks as `placeRanks`.
+
 The framework's every-request scoring (proxy-index branch `score-from-all-requests`) keeps
 `schema_version` 2 and adds fields; the API reads both shapes. A window's
 `metrics` with `time_slots` is every-request: `success_rate` is time-weighted

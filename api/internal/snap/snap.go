@@ -247,6 +247,11 @@ func (v *Uptime) UnmarshalJSON(d []byte) error {
 type BreakdownRow struct {
 	CountryCode *string `json:"country_code"`
 	Country     *string `json:"country"`
+	// Region and city rows label their place; ASN rows their network.
+	RegionCode  *string `json:"region_code"`
+	Region      *string `json:"region"`
+	City        *string `json:"city"`
+	Asn         Num     `json:"asn"`
 	Ips         Num     `json:"ips"`
 	Completed   Num     `json:"completed"`
 	Successes   Num     `json:"successes"`
@@ -284,6 +289,9 @@ type Window struct {
 	Overlap      WindowOverlap             `json:"overlap"`
 	Uptime       *Uptime                   `json:"uptime"`
 	Breakdowns   map[string][]BreakdownRow `json:"breakdowns"`
+	// BreakdownEntries is each capped list's full row count (absent when
+	// nothing was capped).
+	BreakdownEntries map[string]int `json:"breakdown_entries"`
 }
 
 func (v *Window) UnmarshalJSON(d []byte) error {

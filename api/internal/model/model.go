@@ -10,6 +10,7 @@ package model
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
 )
@@ -548,6 +549,57 @@ type CountryLatencyRank struct {
 	Peers int `json:"peers"`
 }
 
+// Rank is a competition rank among measured peers (ties share a rank). Rank
+// is NaN when the product has no value; Peers counts the products with one.
+type Rank struct {
+	Rank  Num `json:"rank"`
+	Peers int `json:"peers"`
+}
+
+// TileRanks ranks one measured product's coverage counts (higher is better)
+// and headline latency p50 (lower is better) within its product category,
+// cohort and reporting period.
+type TileRanks struct {
+	UniqueIps Rank `json:"uniqueIps"`
+	Countries Rank `json:"countries"`
+	Regions   Rank `json:"regions"`
+	Cities    Rank `json:"cities"`
+	Asns      Rank `json:"asns"`
+	Latency   Rank `json:"latency"`
+}
+
+// PlaceRank ranks one product in one country, region, city or ASN by IPs seen
+// there and by latency p50 there, among the same peers as TileRanks. It is
+// written as [ipsRank, ipsPeers, latencyRank, latencyPeers] to keep the long
+// lists small.
+type PlaceRank struct {
+	Ips, Latency Rank
+}
+
+func (r PlaceRank) MarshalJSON() ([]byte, error) {
+	b := []byte{'['}
+	for i, v := range [...]Rank{r.Ips, r.Latency} {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		rank, _ := v.Rank.MarshalJSON()
+		b = append(append(b, rank...), ',')
+		b = strconv.AppendInt(b, int64(v.Peers), 10)
+	}
+	return append(b, ']'), nil
+}
+
+// PlaceRanks holds a product window's PlaceRank per country ("US"), region
+// ("US|CA|California"), city ("US|CA|California|Los Angeles") and ASN
+// ("13335"); region and city keys use the row's region_code and region as
+// published, empty when null.
+type PlaceRanks struct {
+	Countries map[string]PlaceRank `json:"countries"`
+	Regions   map[string]PlaceRank `json:"regions"`
+	Cities    map[string]PlaceRank `json:"cities"`
+	Asns      map[string]PlaceRank `json:"asns"`
+}
+
 type ReviewSummary struct {
 	Count         Num    `json:"count"`
 	VerifiedCount Num    `json:"verifiedCount"`
@@ -581,6 +633,9 @@ type Provider struct {
 	// (measured providers only; null for demo fixtures).
 	Measurement         any                                                 `json:"measurement"`
 	CountryLatencyRanks map[string]map[string]map[string]CountryLatencyRank `json:"countryLatencyRanks,omitempty"`
+	// Precomputed measured ranks by proxy type and time range (null for demo).
+	TileRanks  map[string]map[string]TileRanks  `json:"tileRanks,omitempty"`
+	PlaceRanks map[string]map[string]PlaceRanks `json:"placeRanks,omitempty"`
 	// Framework identity, null for demo fixtures and unlinked catalog rows.
 	Framework *FrameworkLink `json:"framework"`
 	NA        []string       `json:"na"`

@@ -229,6 +229,9 @@ type SnapshotRow struct {
 	ContentHash string
 	Payload     []byte
 	full        []byte // Payload with its capped long lists restored (longtail.go)
+	// Places is every place list of a capped snapshot, read whole from the
+	// build's typed rows (placerows.go); nil when nothing was capped.
+	Places map[PlaceWindow][]PlaceRow
 }
 
 // Event is one public.test_events row in the framework's /v1/events shape.
@@ -473,7 +476,10 @@ func Load(ctx context.Context, db interface {
 				return err
 			}
 			in.Snapshot = &s
-			return s.readLongTail(ctx, tx)
+			if err := s.readLongTail(ctx, tx); err != nil {
+				return err
+			}
+			return s.readPlaceRows(ctx, tx)
 		},
 		func() (err error) {
 			in.Events, err = collect(ctx, tx, `SELECT `+EventColumns+` ORDER BY e.at DESC, e.event_id DESC LIMIT $1`, ScanEvent, EventWindow+1)

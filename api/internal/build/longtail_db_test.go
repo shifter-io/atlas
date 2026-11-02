@@ -64,7 +64,8 @@ func snapshotVariants(t *testing.T) (whole, capped []byte, products []map[string
 }
 
 // storeTypedRows writes the typed breakdown rows calculate() persists for the whole lists:
-// city x ASN rows by position and ASN rows in reverse IP order, plus an ASN without IPs.
+// city x ASN rows by position and ASN rows in reverse IP order, plus an ASN without IPs, in
+// the build's partition with the shared place and ASN names (proxy-index calculated/schema.sql).
 func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[string]any) {
 	ctx := context.Background()
 	c := db.Conn(t)
@@ -82,17 +83,18 @@ func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[s
 		return ids[key]
 	}
 	asn := func(r map[string]any) int64 {
-		return id("INSERT INTO asn_labels(asn,name,usage_type) VALUES ($1,$2,$3) RETURNING asn_label_id",
-			int64(r["asn"].(float64)), r["name"], r["usage_type"])
+		name := id("INSERT INTO asn_names(asn,name) VALUES ($1,$2) RETURNING asn_name_id", int64(r["asn"].(float64)), r["name"])
+		return id("INSERT INTO asn_labels(asn_name_id,usage_type) VALUES ($1,$2) RETURNING asn_label_id", name, r["usage_type"])
 	}
 	insert := func(result int64, dimension string, position int, r map[string]any, place any, counters ...any) {
-		args := append([]any{result, dimension, position, int64(r["ips"].(float64)), int64(r["observations"].(float64)), place, asn(r)}, counters...)
-		for len(args) < 14 {
+		args := append([]any{buildID, result, dimension, position, int64(r["ips"].(float64)), int64(r["observations"].(float64)), place, asn(r)}, counters...)
+		for len(args) < 15 {
 			args = append(args, nil)
 		}
-		db.Exec(t, `INSERT INTO calculated_breakdowns(result_id,dimension,position,ips,observations,place_id,asn_label_id,
- completed,successes,challenges,blocks,p50,p90,p99) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, args...)
+		db.Exec(t, `INSERT INTO calculated_breakdowns(build_id,result_id,dimension,position,ips,observations,place_id,asn_label_id,
+ completed,successes,challenges,blocks,p50,p90,p99) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, args...)
 	}
+	db.Exec(t, fmt.Sprintf("CREATE TABLE calculated_breakdowns_b%d PARTITION OF calculated_breakdowns FOR VALUES IN (%d)", buildID, buildID))
 	for _, p := range products {
 		product := id("SELECT product_id FROM products WHERE provider=$1 AND name=$2", p["provider"], p["product"])
 		db.Exec(t, "INSERT INTO cohorts(cohort) VALUES ($1) ON CONFLICT DO NOTHING", p["cohort"])
@@ -103,7 +105,7 @@ func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[s
  body_bytes,coverage,readiness) VALUES ($1,$2,$3,'',$4,0,0,0,0,0,'ready') RETURNING result_id`, buildID, product, p["cohort"], hours)
 			for i, entry := range window["breakdowns"].(map[string]any)["city_asn"].([]any) {
 				r := entry.(map[string]any)
-				place := id("INSERT INTO places(country_code,country,region_code,region,city) VALUES ($1,$2,$3,$4,$5) RETURNING place_id",
+				place := id("INSERT INTO place_names(country_code,country,region_code,region,city) VALUES ($1,$2,$3,$4,$5) RETURNING place_id",
 					r["country_code"], r["country"], r["region_code"], r["region"], r["city"])
 				var counters []any
 				for _, k := range []string{"completed", "successes", "challenges", "blocks", "p50", "p90", "p99"} {
