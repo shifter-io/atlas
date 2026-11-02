@@ -150,23 +150,24 @@ def thresholds(path=None):
     return event_settings(path or METHODOLOGY_FILE)
 
 
+# Median successful latency of each run (%s: run keys), exactly as stats.Histogram computes it.
+RUN_P50_SQL = (
+    "WITH h AS (SELECT b.run_key,x.ms,sum(x.n) AS n FROM run_buckets b CROSS JOIN LATERAL "
+    "histogram(b.histogram_steps,b.histogram_counts::bigint[]) x "
+    "WHERE b.run_key=ANY(%s) GROUP BY 1,2), c AS (SELECT run_key,ms,"
+    "sum(n) OVER (PARTITION BY run_key ORDER BY ms) AS seen,"
+    "sum(n) OVER (PARTITION BY run_key) AS total FROM h) "
+    "SELECT run_key,min(ms)::integer AS p50 FROM c WHERE seen>=ceil(total*0.5) "
+    "GROUP BY run_key"
+)
+
+
 def run_p50(cur, run_keys):
     """Median successful latency of each run, exactly as stats.Histogram computes it."""
     if not run_keys:
         return {}
-    return dict(
-        (row["run_key"], row["p50"])
-        for row in cur.execute(
-            "WITH h AS (SELECT b.run_key,x.ms,sum(x.n) AS n FROM run_buckets b CROSS JOIN LATERAL "
-            "histogram(b.histogram_steps,b.histogram_counts::bigint[]) x "
-            "WHERE b.run_key=ANY(%s) GROUP BY 1,2), c AS (SELECT run_key,ms,"
-            "sum(n) OVER (PARTITION BY run_key ORDER BY ms) AS seen,"
-            "sum(n) OVER (PARTITION BY run_key) AS total FROM h) "
-            "SELECT run_key,min(ms)::integer AS p50 FROM c WHERE seen>=ceil(total*0.5) "
-            "GROUP BY run_key",
-            (sorted(set(run_keys)),),
-        )
-    )
+    rows = cur.execute(RUN_P50_SQL, (sorted(set(run_keys)),))
+    return dict((row["run_key"], row["p50"]) for row in rows)
 
 
 class _Emitter:
@@ -262,11 +263,14 @@ def _still_down(cur, batch, product, now):
 
 
 def _close_outages(cur, batch, product, *, source=None):
-    """End the product's open outages in the country that began before this healthy batch."""
+    """End the product's open outages in the country that began before this healthy batch.
+
+    A network-wide pulse outage (batch_id NULL) is left to the pulse evaluator."""
     start = _batch_start(batch)
     return cur.execute(
         "UPDATE outages SET ended_at=greatest(started_at,%s) WHERE product_id=%s "
         "AND country_code=%s AND ended_at IS NULL AND started_at<%s "
+        "AND NOT (source='pulse' AND batch_id IS NULL) "
         + ("AND source=%s " if source else "")
         + "RETURNING outage_id,batch_id,started_at,ended_at",
         (start, product, batch["country_code"], start, *((source,) if source else ())),

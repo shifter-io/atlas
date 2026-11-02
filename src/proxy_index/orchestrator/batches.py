@@ -38,6 +38,7 @@ import psycopg
 from ..calculated.aggregate import blend, census_overlaps
 from .db import Database, mark_closed, setting
 from .events import emit, raise_alert
+from .pulse import open_slot
 
 log = logging.getLogger(__name__)
 
@@ -454,12 +455,12 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
     """Open the current slot of every pulse-enabled target that has no batch for it yet.
 
     Slots are aligned to the target's interval since the epoch (floor(now / interval)); a due
-    target gets one batch per enabled country, all with the same start_at. Targets added to
-    the table are picked up on the next tick. A census target's slot also gets one 'load'
-    batch per runner region, in the region's reference country of the day (load_references()),
-    with the same scheduled_for, starting load.delay_seconds after the pulses: the
-    latency-under-load wave, kept apart from the reference pulse so that pulse stays a
-    light-load measurement. load.enabled switches the wave off.
+    target gets one batch per enabled country, each region's countries spread over the slot
+    (pulse.spread). Targets added to the table are picked up on the next tick. A census target's
+    slot also gets one 'load' batch per runner region, in the region's reference country of the
+    day (load_references()), with the same scheduled_for, starting load.delay_seconds after the
+    slot opens: kept apart so the pulse stays a light-load measurement. load.enabled switches
+    the wave off.
     """
     now = _now(now)
     await db.ensure_partition("test_events", now)
@@ -481,7 +482,7 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
         opened = []
         loads = 0
         references: list[dict] | None = None
-        for target in targets:
+        for index, target in enumerate(targets):
             every = target["pulse_interval_minutes"] * 60
             slot = datetime.fromtimestamp(now.timestamp() // every * every, UTC)
             if await _row(
@@ -491,15 +492,9 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
                 (target["target_id"], slot),
             ):
                 continue
-            rows = await _rows(
-                conn,
-                "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-                "start_at) SELECT 'pulse',c.country_code,c.region_id,%s,%s,%s FROM countries c "
-                "JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled WHERE c.enabled "
-                "ORDER BY c.country_code ON CONFLICT DO NOTHING RETURNING batch_id",
-                (target["target_id"], slot, max(slot, now) + lead),
-            )
-            created.extend(row["batch_id"] for row in rows)
+            span, start = timedelta(seconds=every), max(slot, now) + lead
+            offset = index / len(targets)
+            created.extend(await open_slot(conn, target["target_id"], slot, span, now, offset))
             opened.append(target["target_id"])
             if target["census"] and loading:
                 if references is None:
@@ -516,7 +511,7 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
                             reference["region_id"],
                             target["target_id"],
                             slot,
-                            max(slot, now) + lead + delay,
+                            start + delay,
                         ),
                     )
                     if load:
@@ -875,6 +870,7 @@ async def assignments(db: Database, node: dict, now: datetime | None = None) -> 
         min_sample = int(await setting(conn, "census.min_sample"))
         stall = float(await setting(conn, "census.stall_seconds"))
         stall_seconds = int(stall) if stall.is_integer() else stall
+        pulse_timeout = int(await setting(conn, "pulse.timeout_ms"))
         rows = await _rows(
             conn,
             "SELECT b.batch_id,b.kind,b.country_code,b.target_id,b.start_at,r.slug AS region,"
@@ -919,7 +915,7 @@ async def assignments(db: Database, node: dict, now: datetime | None = None) -> 
                 "region": row["region"],
                 "target_id": row["target_id"],
                 "target_url": row["url"] or None,
-                "timeout_ms": row["timeout_ms"],
+                "timeout_ms": pulse_timeout if row["kind"] == "pulse" else row["timeout_ms"],
                 "concurrency": row["census_concurrency"]
                 if census or load
                 else row["pulse_concurrency"],

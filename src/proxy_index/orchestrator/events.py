@@ -6,6 +6,7 @@ test_events is partitioned by month on `at`: callers create the partition with
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -109,12 +110,17 @@ def _check_countries(countries: tuple[str, ...]) -> None:
 
 
 def _counts(**values: float | None) -> dict[str, float]:
-    """The given counters that are set; each must be a non-negative number."""
+    """The given counters that are set; each must be a finite non-negative number."""
     out = {}
     for key, value in values.items():
         if value is None:
             continue
-        if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+            or value < 0
+        ):
             raise ValueError(f"{key} must be a non-negative number")
         out[key] = value
     return out
@@ -176,7 +182,9 @@ class HourEstimate:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PulseWindow:
-    """A network's pulse connection errors summed over all regions in one window."""
+    """A network's pulse connection errors summed over all regions in one window that passed
+    the downtime threshold: errors / requests >= threshold, at most `requests` errors, and a
+    window of at least one minute and one region."""
 
     product_id: int
     window_start: datetime
@@ -190,6 +198,12 @@ class PulseWindow:
         if not 0 <= self.threshold <= 1:
             raise ValueError("threshold must be an error share between 0 and 1")
         self.counters()
+        if self.window_minutes <= 0 or self.regions <= 0:
+            raise ValueError("a window needs at least one minute and one region")
+        if self.requests <= 0 or self.errors > self.requests:
+            raise ValueError("a window needs requests and at most that many errors")
+        if self.errors < self.threshold * self.requests:
+            raise ValueError("the window's error share is below the threshold")
 
     def counters(self) -> dict[str, float]:
         return _counts(
@@ -212,6 +226,7 @@ class LatencyRise:
 
     def __post_init__(self) -> None:
         _check_countries((self.country_code,))
+        _counts(p50=self.p50, baseline=self.baseline)
         if not self.p50 > self.baseline >= 0:
             raise ValueError("a latency rise needs p50 above a non-negative baseline")
 
@@ -274,11 +289,18 @@ async def emit_estimate_hour_released(
     )
 
 
-async def emit_pulse_down(conn: psycopg.AsyncConnection, at: datetime, window: PulseWindow) -> int:
+async def emit_pulse_down(
+    conn: psycopg.AsyncConnection,
+    at: datetime,
+    window: PulseWindow,
+    *,
+    outage_ids: tuple[int, ...] = (),
+) -> int:
     """The window passed the downtime threshold; the outage opens.
 
     data: {"window_start" (ISO UTC), "window_minutes", "errors", "requests", "regions",
-    "threshold" (error share 0..1)}. Signal -1, severity major.
+    "threshold" (error share 0..1), "outage_ids" (the outages rows it opened)}. Signal -1,
+    severity major.
     """
     return await emit(
         conn,
@@ -290,17 +312,24 @@ async def emit_pulse_down(conn: psycopg.AsyncConnection, at: datetime, window: P
         data={
             "window_start": window.window_start.astimezone(UTC).isoformat(),
             "threshold": window.threshold,
+            "outage_ids": list(outage_ids),
         }
         | window.counters(),
     )
 
 
 async def emit_pulse_recovered(
-    conn: psycopg.AsyncConnection, at: datetime, *, product_id: int, down_since: datetime
+    conn: psycopg.AsyncConnection,
+    at: datetime,
+    *,
+    product_id: int,
+    down_since: datetime,
+    outage_ids: tuple[int, ...] = (),
 ) -> int:
     """The network's pulse is below the downtime threshold again; the outage closes.
 
-    data: {"down_since" (ISO UTC), "duration_s"}. Signal +1.
+    data: {"down_since" (ISO UTC), "duration_s", "outage_ids" (the outages rows it closed)}.
+    Signal +1.
     """
     duration = (at - down_since).total_seconds()
     if duration < 0:
@@ -311,7 +340,11 @@ async def emit_pulse_recovered(
         at,
         product_id=product_id,
         signal=1,
-        data={"down_since": down_since.astimezone(UTC).isoformat(), "duration_s": duration},
+        data={
+            "down_since": down_since.astimezone(UTC).isoformat(),
+            "duration_s": duration,
+            "outage_ids": list(outage_ids),
+        },
     )
 
 

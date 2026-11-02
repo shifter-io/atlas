@@ -249,7 +249,11 @@ async def results(request: web.Request) -> web.Response:
             raise _error(web.HTTPBadRequest, reason) from None
         try:
             imported = await asyncio.to_thread(
-                storage.ingest, directory, request.app[CREDENTIALS_KEY], batch_id=batch_id
+                storage.ingest,
+                directory,
+                request.app[CREDENTIALS_KEY],
+                batch_id=batch_id,
+                ip_rows=run["kind"] != "pulse",
             )
         except psycopg.OperationalError:
             # The database is unreachable: the node keeps the directory and retries.
