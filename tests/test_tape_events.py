@@ -53,41 +53,51 @@ class Recorder:
         return {"event_id": len(self.rows)}
 
 
-async def emit_all(conn, product_id, region_id, at=AT):
-    await events.emit_daily_test_started(
-        conn, at, product_id=product_id, region_id=region_id, region="fra1", countries=["DE", "FR"]
+def daily(product_id=7, region_id=3, countries=("DE", "FR")):
+    return events.DailyTest(
+        product_id=product_id, region_id=region_id, region="fra1", countries=countries
     )
+
+
+async def emit_all(conn, product_id, region_id, at=AT):
+    test = daily(product_id, region_id)
+    await events.emit_daily_test_started(conn, at, test)
     await events.emit_daily_test_finished(
         conn,
         at,
-        product_id=product_id,
-        region_id=region_id,
-        region="fra1",
-        countries=["DE", "FR"],
-        status="done",
-        requests=120000,
-        unique_ips=41000,
-        duration_s=1800.5,
+        test,
+        events.DailyTestResult(status="done", requests=120000, unique_ips=41000, duration_s=1800.5),
     )
     await events.emit_estimate_hour_released(
-        conn, at, product_id=product_id, day=date(2026, 11, 2), hour=13, formula_version="f1"
-    )
-    await events.emit_pulse_down(
         conn,
         at,
-        product_id=product_id,
-        window_start=at - timedelta(minutes=5),
-        window_minutes=5,
-        errors=640,
-        requests=800,
-        regions=8,
-        threshold=0.5,
+        events.HourEstimate(
+            product_id=product_id, day=date(2026, 11, 2), hour=13, formula_version="f1"
+        ),
     )
+    await events.emit_pulse_down(conn, at, window(product_id))
     await events.emit_pulse_recovered(
         conn, at, product_id=product_id, down_since=at - timedelta(minutes=25)
     )
     await events.emit_latency_rise(
-        conn, at, product_id=product_id, country_code="DE", p50=1840.0, baseline=400.0
+        conn,
+        at,
+        events.LatencyRise(product_id=product_id, country_code="DE", p50=1840.0, baseline=400.0),
+    )
+
+
+def window(product_id=7, **fields):
+    return events.PulseWindow(
+        **{
+            "product_id": product_id,
+            "window_start": AT - timedelta(minutes=5),
+            "window_minutes": 5,
+            "errors": 640,
+            "requests": 800,
+            "regions": 8,
+            "threshold": 0.5,
+        }
+        | fields
     )
 
 
@@ -157,9 +167,8 @@ async def test_helpers_write_the_payload_contract():
 
 async def test_failed_daily_test_is_bad_news_and_unknown_counters_are_left_out():
     conn = Recorder()
-    await events.emit_daily_test_finished(
-        conn, AT, product_id=1, region_id=2, region="sgp1", countries=["SG"], status="failed"
-    )
+    test = events.DailyTest(product_id=1, region_id=2, region="sgp1", countries=["SG"])
+    await events.emit_daily_test_finished(conn, AT, test, events.DailyTestResult(status="failed"))
     row = conn.rows[0]
     assert (row["signal"], row["severity"], row["data"]) == (
         -1,
@@ -168,43 +177,49 @@ async def test_failed_daily_test_is_bad_news_and_unknown_counters_are_left_out()
     )
 
 
-@pytest.mark.parametrize(
-    ("helper", "kwargs"),
-    [
-        (events.emit_daily_test_started, {"countries": []}),
-        (events.emit_daily_test_started, {"countries": ["de"]}),
-        (events.emit_daily_test_started, {"countries": ["DEU"]}),
-        (events.emit_daily_test_finished, {"status": "stalled"}),
-        (events.emit_daily_test_finished, {"status": "done", "requests": -1}),
-        (events.emit_daily_test_finished, {"status": "done", "unique_ips": True}),
-        (events.emit_estimate_hour_released, {"hour": 24}),
-        (events.emit_estimate_hour_released, {"hour": -1}),
-        (events.emit_estimate_hour_released, {"hour": 13, "formula_version": ""}),
-        (events.emit_pulse_down, {"threshold": 1.5}),
-        (events.emit_pulse_down, {"threshold": 0.5, "errors": -3}),
-        (events.emit_pulse_recovered, {"down_since": AT + timedelta(seconds=1)}),
-        (events.emit_latency_rise, {"p50": 300.0}),
-        (events.emit_latency_rise, {"p50": 500.0, "country_code": "xx"}),
-    ],
-)
-async def test_helpers_refuse_a_broken_payload(helper, kwargs):
-    defaults = {
-        events.emit_daily_test_started: {"region_id": 1, "region": "fra1", "countries": ["DE"]},
-        events.emit_daily_test_finished: {"region_id": 1, "region": "fra1", "countries": ["DE"]},
-        events.emit_estimate_hour_released: {"day": date(2026, 11, 2), "formula_version": "f1"},
-        events.emit_pulse_down: {
-            "window_start": AT,
-            "window_minutes": 5,
-            "errors": 1,
-            "requests": 2,
-            "regions": 8,
-        },
-        events.emit_pulse_recovered: {},
-        events.emit_latency_rise: {"country_code": "DE", "baseline": 400.0},
-    }[helper]
+def hour(**fields):
+    return events.HourEstimate(
+        **{"product_id": 1, "day": date(2026, 11, 2), "hour": 13, "formula_version": "f1"} | fields
+    )
+
+
+def rise(**fields):
+    return events.LatencyRise(
+        **{"product_id": 1, "country_code": "DE", "p50": 500.0, "baseline": 400.0} | fields
+    )
+
+
+BROKEN = {
+    "no countries": lambda: daily(1, 1, []),
+    "lower-case country": lambda: daily(1, 1, ["de"]),
+    "alpha-3 country": lambda: daily(1, 1, ["DEU"]),
+    "unknown status": lambda: events.DailyTestResult(status="stalled"),
+    "negative requests": lambda: events.DailyTestResult(status="done", requests=-1),
+    "boolean counter": lambda: events.DailyTestResult(status="done", unique_ips=True),
+    "hour 24": lambda: hour(hour=24),
+    "hour -1": lambda: hour(hour=-1),
+    "boolean hour": lambda: hour(hour=True),
+    "no formula": lambda: hour(formula_version=""),
+    "negative estimate": lambda: hour(unique_ips=-5),
+    "threshold above 1": lambda: window(threshold=1.5),
+    "negative errors": lambda: window(errors=-3),
+    "no rise": lambda: rise(p50=300.0),
+    "bad country": lambda: rise(country_code="xx"),
+}
+
+
+@pytest.mark.parametrize("build", BROKEN.values(), ids=BROKEN.keys())
+def test_payloads_refuse_broken_fields(build):
+    with pytest.raises(ValueError):
+        build()
+
+
+async def test_recovery_before_the_outage_is_refused():
     conn = Recorder()
     with pytest.raises(ValueError):
-        await helper(conn, AT, product_id=1, **(defaults | kwargs))
+        await events.emit_pulse_recovered(
+            conn, AT, product_id=1, down_since=AT + timedelta(seconds=1)
+        )
     assert conn.rows == []
 
 
