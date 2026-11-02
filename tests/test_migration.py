@@ -813,7 +813,9 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
             "enrichment_networks GROUP BY asn_name_id) a)"
         ).fetchone()
     assert after == before and lists == (places, asns) and min(shared) >= 2
-    assert len(before["locations"]) > places and len(before["ip enrichment"]) > 0
+    # Two coordinates of one city: more enrichment locations than enrichment place names.
+    assert len(before["locations"]) > len({row[1:6] for row in before["locations"]})
+    assert len(before["ip enrichment"]) > 0
     assert canonical(v5_state(database)) == canonical(state)
     assert await api_bodies(database, sorted(state["payloads"])) == bodies
     reference = databases()
