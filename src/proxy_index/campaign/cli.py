@@ -197,10 +197,11 @@ HANDLERS.update(limits=_limits, image=_image, guard=_guard)
 
 
 def _scheduler_parsers(actions) -> None:
-    """CAMP-1d: tick, watchdog, network pause, the collector and the Mac watch."""
-    from . import collector, tick, watch
+    """CAMP-1d: tick, watchdog, network pause, the collector and the Mac watch; PULSE-1b: the
+    pulse fleet."""
+    from . import collector, pulse_fleet, tick, watch
 
-    for module in (tick, collector, watch):
+    for module in (tick, collector, watch, pulse_fleet):
         module.register(actions, HANDLERS)
 
 

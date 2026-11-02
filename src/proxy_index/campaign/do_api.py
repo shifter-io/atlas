@@ -267,7 +267,7 @@ def parse_droplet(raw: dict[str, Any]) -> Droplet:
 def check_create(names: list[str], tags: list[str], ssh_keys: list[str]) -> None:
     """Refuse a create whose names, tags or keys do not carry all ownership markers."""
     roles = [(tag, pattern) for tag, pattern in ROLES.values() if tag in tags]
-    prefix = PULSE_PREFIX if roles == [ROLES["pulse"]] else RESOURCE_PREFIX
+    prefix = PULSE_PREFIX if [tag for tag, _ in roles] == [PULSE_TAG] else RESOURCE_PREFIX
     if len(roles) != 1 or any(not tag.startswith(prefix) for tag in tags):
         raise ScopeError("create needs exactly one role tag and only that role's tag prefix")
     if not names or not ssh_keys:
