@@ -167,12 +167,18 @@ def discard(conn, build_id):
     The current build cannot be discarded: current_calculation references its snapshot. On a
     calculated v5 database (no partitions yet) the breakdowns are deleted through their windows.
     """
+    partitioned = (
+        conn.cursor(row_factory=tuple_row)
+        .execute("SELECT relkind='p' FROM pg_class WHERE oid='calculated_breakdowns'::regclass")
+        .fetchone()[0]
+    )
     conn.execute(
         sql.SQL("DROP TABLE IF EXISTS {}").format(
             sql.Identifier(f"calculated_breakdowns_b{int(build_id)}")
         )
     )
-    for table in ("calculated_breakdowns", *DERIVED_TABLES):
+    # On v6 the dropped partition held every breakdown of the build.
+    for table in (*(() if partitioned else ("calculated_breakdowns",)), *DERIVED_TABLES):
         conn.execute(
             f"DELETE FROM {table} WHERE result_id IN "
             "(SELECT result_id FROM calculated_windows WHERE build_id=%s)",
