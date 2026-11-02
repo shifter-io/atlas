@@ -178,12 +178,8 @@ def validate(config):
     uptime = config.get("uptime", {})
     if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
         raise ValueError("Invalid uptime settings")
-    slots = config.get("slots", {})
-    if set(slots) - set(SLOTS) or any(type(v) is not int or v < 1 for v in slots.values()):
-        raise ValueError("Invalid slot settings")
-    sizes = config.get("payload", {})
-    if set(sizes) - set(PAYLOAD) or any(type(v) is not int or v < 0 for v in sizes.values()):
-        raise ValueError("Invalid payload settings")
+    _counts(config.get("slots", {}), SLOTS, 1, "slot")
+    _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
@@ -210,6 +206,14 @@ def uptime_settings(config):
 
 def slot_settings(config):
     return SLOTS | config.get("slots", {})
+
+
+def _counts(settings, defaults, minimum, name):
+    """Integer settings, each a known key and at least minimum."""
+    if set(settings) - set(defaults) or any(
+        type(v) is not int or v < minimum for v in settings.values()
+    ):
+        raise ValueError(f"Invalid {name} settings")
 
 
 def payload_limits(config):
