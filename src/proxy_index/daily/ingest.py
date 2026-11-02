@@ -37,6 +37,7 @@ from ..orchestrator import events
 from ..orchestrator.db import Database
 from ..regions import REGION_IDS
 from ..stats import bucket_of, iso
+from . import DAILY, MARKER
 
 REPORT = "daily-ingest.json"
 ROUND = 0  # a daily test is a one-slot campaign: round 00 only
@@ -87,7 +88,7 @@ def convert_country(folder: Path, runs: Path) -> Path:
             out.write((json.dumps(row, separators=(",", ":")) + "\n").encode())
     ips.chmod(0o600)
     artifacts = {"ips": {"file": ips.name, "rows": len(rows), "sha256": digest(ips)}}
-    atomic_json(directory / "summary.json", measured | {"artifacts": artifacts})
+    atomic_json(directory / "summary.json", measured | {"artifacts": artifacts, MARKER: DAILY})
     return directory
 
 
