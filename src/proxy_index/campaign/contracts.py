@@ -23,12 +23,19 @@ RESOURCE_PREFIX = "pi-camp-"
 WORKER_NAME_RE = r"^pic-[0-9a-f]{8}-h[0-9]{2}-[a-z0-9]+-[a-z0-9-]+$"
 MANAGER_NAME_RE = r"^pi-camp-manager-[0-9]{8}-[0-9a-f]{4}$"
 BUILDER_NAME_RE = r"^pi-camp-builder-[0-9]{8}-[0-9a-f]{4}$"
+# Always-on pulse nodes: never a campaign's, kept in project Dev Resources; only
+# scope.retire_pulse_node removes one.
+PULSE_TAG = "pi-pulse-node"
+PULSE_PREFIX = "pi-pulse-"
+PULSE_NAME_RE = r"^pi-pulse-[a-z0-9]+-[a-z0-9-]+$"
+PULSE_PROJECT_NAME = "Dev Resources"
 # Droplet role -> (role tag, name pattern); a droplet carries exactly one role tag.
-ROLES = {
+CAMPAIGN_ROLES = {
     "worker": (WORKER_TAG, WORKER_NAME_RE),
     "manager": (MANAGER_TAG, MANAGER_NAME_RE),
     "builder": (BUILDER_TAG, BUILDER_NAME_RE),
 }
+ROLES = {**CAMPAIGN_ROLES, "pulse": (PULSE_TAG, PULSE_NAME_RE)}
 CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
 # CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.

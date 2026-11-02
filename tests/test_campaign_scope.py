@@ -1033,6 +1033,7 @@ def test_scope_coverage_gate(tmp_path):
             str(Path(__file__).with_name("test_campaign_api.py")),
             str(Path(__file__).with_name("test_campaign_unassigned.py")),
             str(Path(__file__).with_name("test_campaign_assign_race.py")),
+            str(Path(__file__).with_name("test_campaign_pulse_role.py")),
             "--cov=proxy_index.campaign.scope",
             "--cov=proxy_index.campaign.do_api",
             "--cov-branch",
