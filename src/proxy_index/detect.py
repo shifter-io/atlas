@@ -55,17 +55,25 @@ CATEGORIES = {
     "recovered": "incident",
     "node_offline": "incident",
     "no_node": "incident",
+    "latency_rise": "incident",
     "new_hosting_asn": "audit",
     "ip_overlap": "audit",
+    # The daily peak-hour test and its hour estimates replace the census (orchestrator/events.py).
+    "daily_test_started": "census",
+    "daily_test_finished": "census",
+    "estimate_hour_released": "census",
 }
 CATEGORY_SQL = (
-    "CASE WHEN left(e.kind,7)='census_' THEN 'census' WHEN left(e.kind,6)='pulse_' THEN 'pulse' "
+    "CASE WHEN left(e.kind,7)='census_' OR e.kind IN "
+    "('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census' "
+    "WHEN left(e.kind,6)='pulse_' THEN 'pulse' "
     "WHEN e.kind IN ('new_hosting_asn','ip_overlap') THEN 'audit' ELSE 'incident' END"
 )
 
 
 def category(kind):
-    """Live tape tab of an event kind: census_* → census, pulse_* → pulse, audits, incidents."""
+    """Live tape tab of an event kind: census_* and the daily test → census, pulse_* (pulse_down
+    and pulse_recovered too) → pulse, audits, incidents."""
     if kind.startswith("census_"):
         return "census"
     if kind.startswith("pulse_"):

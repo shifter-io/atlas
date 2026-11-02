@@ -241,7 +241,9 @@ adds `breakdown_entries` and each pool `list_entries`, the full row count of eve
 `calculated_breakdowns` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
-methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
+methodology id). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`
+and `estimate_hour_released` (category `census`), `pulse_down` and `pulse_recovered` (`pulse`) and
+`latency_rise` (`incident`); each helper documents its `data` fields. The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
 `proxy-index report traffic --test census|pulse --database-file ...` prints GB per provider.
 TOML is data-only and versioned by SHA-256. The balanced profile uses `[weights]`;
