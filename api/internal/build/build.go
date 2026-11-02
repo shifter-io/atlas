@@ -244,7 +244,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	var s *snap.Snapshot
 	if in.Snapshot != nil {
 		s = &snap.Snapshot{}
-		if err := json.Unmarshal(in.Snapshot.Payload, s); err != nil {
+		if err := json.Unmarshal(in.Snapshot.Full(), s); err != nil {
 			return nil, fmt.Errorf("published snapshot %d: %w", in.Snapshot.BuildID, err)
 		}
 		res.SnapshotPayload = in.Snapshot.Payload

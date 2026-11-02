@@ -172,7 +172,7 @@ rows.
 | `ipSamples[]` | not published for measured providers (presentation.ts leaves it empty) | always | |
 | `incidents[]` | the product's `outages` (snapshot v2, newest 50 in 30d): `id` `outage:<product id>:<country>:<started_at>`, `startedAgoSeconds = as_of − started_at`, `durationMinutes = duration_s / 60` (an open outage runs to `as_of`), `severity` `"major"`, `scope` the country code, `summary` "Down in US, detected by pulse." (", still ongoing" while open), `impact = 1 / w.uptime.countries`, `troughSuccessRate` null | `incidents` always for a v1 snapshot; `incidents[].troughSuccessRate` always; `impact` without tested countries | ✱ |
 | `geo[]` | `w.pool.countries_breakdown` with `share = ips / unique_ips`, plus `w.breakdowns.country` p50/success rate (v2) | `latencyP50`/`successRate` data (always for v1) | ✱ |
-| `asns[]` | `w.pool.asns_breakdown`, with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
+| `asns[]` | `w.pool.asns_breakdown` (whole; see *Capped snapshots*), with `usage_type` mapped to hosting/mobile/business/eyeball | data | |
 | `overlap.exclusiveShare`, `sharedShare` | `w.overlap.exclusive_share`, `shared_share`; uniqueness is relative to the measured cohort. An observed pool with zero measured peers is 100% exclusive and 0% shared (`compared_products: 0`); no observed pool remains null | data (needs observed IPs) | ✱ |
 | `overlap.overlaps[]` | snapshot `overlap[]` rows for the product's cohort and 30d: `sharedIps`, `shareOfOurs = shared/ips_ours`, `shareOfTheirs`; `requestsBothSides` null | data / always for `requestsBothSides` | |
 | `overlap.likelyUpstream` | none (reseller detection is not computed) | always | |
@@ -183,8 +183,23 @@ The shared review Coverage evidence table reads `measurement.windows[range].brea
 Each row is one observed location/network intersection: `name`/`asn` fill ASN / ISP,
 `usage_type` supplies the observed network type, and `p50` is light-load median latency.
 Distinct IPs are that intersection's `ips`, not the city total repeated for every ASN.
-The snapshot field passes through the site API unchanged. Older snapshots keep their
+The snapshot field passes through the site API whole (see *Capped snapshots*). Older snapshots keep their
 location counts and matching `breakdowns.city` latency, with unknown ASN/type rendered N/A.
+
+### Capped snapshots
+
+The published snapshot keeps the top rows of each long list (proxy-index
+`calculated/slim.py`) and records every list's full row count in
+`windows[*].breakdown_entries` and `windows[*].pool.list_entries`; totals such as
+`pool.unique_ips`, `countries` and `asns` are counted from every row, and the typed
+`public.calculated_breakdowns` rows keep the whole lists. The country lists stay whole
+in the snapshot. The two other lists the site reads whole, `breakdowns.city_asn`
+(Coverage evidence) and `pool.asns_breakdown` (`asns[]`), are read back from the same
+build's typed rows (`public.calculated_breakdown_details` joined to
+`public.calculated_windows`) in the same read transaction (`store/longtail.go`), in
+the payload's row shape and order, for every window whose entry count says the list
+was capped and matches the typed rows. Otherwise the list is used as published.
+`/v1/snapshot` serves the published (capped) snapshot.
 
 `countryLatencyRanks[kind][range][country_code]` is calculated by the site API from
 the selected snapshot product's `breakdowns.country` p50, with one vote per measured

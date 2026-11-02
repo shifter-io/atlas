@@ -228,6 +228,7 @@ type SnapshotRow struct {
 	BuildID     int64
 	ContentHash string
 	Payload     []byte
+	full        []byte // Payload with its capped long lists restored (longtail.go)
 }
 
 // Event is one public.test_events row in the framework's /v1/events shape.
@@ -472,7 +473,7 @@ func Load(ctx context.Context, db interface {
 				return err
 			}
 			in.Snapshot = &s
-			return nil
+			return s.readLongTail(ctx, tx)
 		},
 		func() (err error) {
 			in.Events, err = collect(ctx, tx, `SELECT `+EventColumns+` ORDER BY e.at DESC, e.event_id DESC LIMIT $1`, ScanEvent, EventWindow+1)
