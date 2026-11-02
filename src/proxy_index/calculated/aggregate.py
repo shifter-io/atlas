@@ -8,6 +8,7 @@ from bisect import bisect_left
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
 
+from ..names import NETWORK, PLACE
 from ..stats import Histogram
 from .policy import (
     DIMENSIONS,
@@ -48,8 +49,6 @@ LIGHT_NONE = "No pulse with enough successes in this window"
 NOT_LATENCY_TARGET = "Latency is measured on the latency target only"
 LATENCY = ("p50", "p90", "p95", "p99")
 FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
-PLACE = ("country_code", "country", "region_code", "region", "city")
-NETWORK = ("asn", "name", "usage_type")
 # Payload breakdown name -> calculated_breakdowns dimension code.
 BREAKDOWNS = {
     "country": "c",

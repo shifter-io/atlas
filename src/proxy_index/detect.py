@@ -490,7 +490,7 @@ def _hosting(cur, cfg, batch, runs, emit, seen):
             params += [run["run_started"] - timedelta(minutes=5), run["run_finished"]]
         networks = cur.execute(
             "SELECT n.asn,min(n.asn_organization) AS name,min(n.usage_type) AS usage_type "
-            "FROM run_geo_buckets g JOIN enrichment_networks n USING(network_id) "
+            "FROM run_geo_buckets g JOIN enrichment_network_fields n USING(network_id) "
             "WHERE g.run_key=%s " + bounds + "AND g.successes>0 AND n.asn IS NOT NULL "
             "AND n.usage_type=ANY(%s) GROUP BY n.asn ORDER BY n.asn",
             (*params, cfg["hosting_usage_types"]),
