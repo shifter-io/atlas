@@ -1029,17 +1029,10 @@ def migrate(credentials_file):
         if start == 6:
             checks |= V6_CHECKS
             conn.execute(V6_SNAPSHOT)
-        if start < 6:
-            conn.execute((root / "migrate_v5_v6.sql").read_text())
-        if start < 7:
-            conn.execute((root / "migrate_v6_v7.sql").read_text())
-        if start < 8:
-            conn.execute((root / "migrate_v7_v8.sql").read_text())
+        for step in range(max(start, 5), SCHEMA_VERSION):  # migrate_v5_v6.sql .. v9_v10.sql
+            conn.execute((root / f"migrate_v{step}_v{step + 1}.sql").read_text())
         if start < 9:
-            conn.execute((root / "migrate_v8_v9.sql").read_text())
             checks |= names.V8_CHECKS
-        if start < SCHEMA_VERSION:
-            conn.execute((root / "migrate_v9_v10.sql").read_text())
         if layered and not upgraded and not later:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
         steps = []

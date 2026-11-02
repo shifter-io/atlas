@@ -223,7 +223,8 @@ async def test_stored_hours_are_released_in_order_and_never_rewritten(tmp_path, 
     assert await release.release_due(db, T1.replace(hour=18, minute=30)) == []
     with connect(database) as conn:
         events = conn.execute(
-            "SELECT data->>'hour' FROM test_events WHERE kind='estimate_hour_released' ORDER BY id"
+            "SELECT data->>'hour' FROM test_events WHERE kind='estimate_hour_released'"
+            " ORDER BY event_id"
         ).fetchall()
     assert [int(e[0]) for e in events] == [15, 16, 17]
     # A new formula version rewrites only the unreleased hours.
@@ -275,7 +276,9 @@ async def test_the_snapshot_carries_released_estimates_with_their_flags(tmp_path
     assert estimated["estimated"] is True and estimated["hours"] == 1
     assert estimated["unique_ips"]["formula_version"] == 1
     assert estimated["unique_ips"]["value"] == pytest.approx(3.0)  # 1 IP x daily factor 3
-    assert estimated["series"][0]["start"] == hour and estimated["series"][0]["estimated"]
+    assert (
+        estimated["series"][0]["start"] == hour.isoformat() and estimated["series"][0]["estimated"]
+    )
     assert measured["pool"]["unique_ips"] == 1  # the measured figures are unchanged
 
 
