@@ -187,6 +187,10 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
         )
 
     at = datetime(2026, 10, 1, 12, 31, tzinfo=UTC)
+
+    def at15(minutes, seconds=0):  # at + pulse.lead_seconds (15 s) + the given time
+        return at + timedelta(minutes=minutes, seconds=15 + seconds)
+
     first = await batches.pulse_plan(db, at)
     # One load wave, in fra1's reference country (its default, DE: no history yet).
     assert first == {
@@ -195,10 +199,12 @@ async def test_pulse_plan_intervals_new_targets_and_idempotence(database, db):
         "load": 1,
         "no_node": 0,
     }
-    lead = timedelta(seconds=15)
+    # Each region's countries are spread over the slot, one at a time: generic_http's slot
+    # opened on time (AT, DE 15 minutes apart, none before now + lead); generic_https's half an
+    # hour late, so over the rest of it, half a step after generic_http's.
     assert slots() == [
-        ("generic_https", datetime(2026, 10, 1, 12, tzinfo=UTC), 2, at + lead, at + lead),
-        ("generic_http", datetime(2026, 10, 1, 12, 30, tzinfo=UTC), 2, at + lead, at + lead),
+        ("generic_https", datetime(2026, 10, 1, 12, tzinfo=UTC), 2, at15(7, 15), at15(21, 45)),
+        ("generic_http", datetime(2026, 10, 1, 12, 30, tzinfo=UTC), 2, at15(0), at15(14)),
     ]
     assert (await batches.pulse_plan(db, at))["created"] == 0
     assert (await batches.pulse_plan(db, at + timedelta(minutes=14)))["created"] == 0
@@ -239,12 +245,14 @@ async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
     ) == [("fra1", "DE", "default", None, 0), ("lon1", "GB", "default", None, 0)]
     loads = query(
         database,
-        "SELECT l.country_code,l.target_id,l.scheduled_for=p.scheduled_for,l.start_at-p.start_at "
+        "SELECT l.country_code,l.target_id,l.scheduled_for=p.scheduled_for,"
+        "l.start_at-(SELECT min(f.start_at) FROM test_batches f WHERE f.kind='pulse' "
+        "AND f.region_id=l.region_id AND f.target_id=l.target_id) "
         "FROM test_batches l JOIN test_batches p ON p.kind='pulse' "
         "AND p.country_code=l.country_code AND p.target_id=l.target_id WHERE l.kind='load' "
         "ORDER BY 1",
     )
-    # Same slot; they start a minute after the pulses so the reference pulses stay light.
+    # Same slot; they start a minute after the region's first pulse so it stays light.
     assert loads == [
         ("DE", "generic_http", True, timedelta(seconds=60)),
         ("GB", "generic_http", True, timedelta(seconds=60)),
