@@ -79,7 +79,7 @@ async def daily(tmp_path, database, name, network, country, p50):
     with gzip.open(measured / "ips.jsonl.gz", "rt") as stream:
         seen = [json.loads(line) for line in stream]
     folder = tmp_path / f"{name}-round"
-    rows = [observation(row["ip"], row["first_seen"]) for row in seen]
+    rows = [observation(row["ip"], row["first_seen"]) for row in seen for _ in range(row["count"])]
     chunk(folder, "observations-000001.jsonl.gz", rows)
     summary = json.loads((measured / "summary.json").read_text())
     (folder / "summary.json").write_text(json.dumps({"measurement": summary}))
@@ -259,8 +259,8 @@ async def test_the_latency_baseline_is_the_latest_daily_test_run_census_only_bef
     prepare(database, ("DE",))
     alpha, beta, gamma = products(database, "alpha", "beta", "gamma")
     new = W0 - timedelta(hours=3)
-    for network in (alpha, beta):
-        await run(tmp_path, database, "census", new, network, "DE", [(new, 100, 0, 100)])
+    for network, target in ((alpha, "generic_http"), (beta, "generic_https")):
+        await run(tmp_path, database, "census", new, network, "DE", [(new, 100, 0, 100)], target)
     # alpha's daily tests: the latest in DE counts (its proxy asked for "de"), FR is not DE.
     await daily(tmp_path, database, "first", "alpha", "de", 300)
     await daily(tmp_path, database, "latest", "alpha", "de", 250)
