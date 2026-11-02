@@ -45,6 +45,22 @@ DEFAULTS: dict[str, Any] = {
     "census.every_minutes": None,
     # Seconds between a pulse slot opening and its synchronized start.
     "pulse.lead_seconds": 15,
+    # A pulse request's timeout (ms); census and load keep the target's timeout_ms.
+    "pulse.timeout_ms": 10000,
+    # The network pulse evaluator (orchestrator/pulse.py), per complete 5-minute window: down
+    # when connection errors / requests over all regions reach down_error_share and at least
+    # down_min_regions regions each reach it; the outage closes after recover_windows healthy
+    # windows. latency_rise when latency_windows consecutive pulse runs of a country (runs, one
+    # per slot, not 5-minute windows) have a p50 of at least latency_ratio x the baseline
+    # (pulse.latency_baseline). A window is evaluated settle_seconds after it ends, so it must
+    # cover the upload lag; evaluated_until is the evaluator's own watermark.
+    "pulse.down_error_share": 0.5,
+    "pulse.down_min_regions": 3,
+    "pulse.recover_windows": 1,
+    "pulse.latency_ratio": 1.5,
+    "pulse.latency_windows": 2,
+    "pulse.settle_seconds": 180,
+    "pulse.evaluated_until": None,
     # Latency under load: every pulse slot of a census target adds one 'load' batch per runner
     # region, in the region's reference country (load_references), where every product fires
     # census_concurrency requests at census concurrency. The reference is chosen once per UTC

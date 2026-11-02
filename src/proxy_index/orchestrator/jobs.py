@@ -35,7 +35,7 @@ from psycopg import sql
 
 from .. import storage
 from ..regions import CONFIGS
-from . import batches
+from . import batches, pulse
 from .db import Database, setting
 from .scheduler import Scheduler
 
@@ -201,6 +201,9 @@ def register_jobs(
     async def pulse_plan() -> dict[str, Any]:
         return await batches.pulse_plan(db)
 
+    async def pulse_evaluate() -> dict[str, Any]:
+        return await pulse.evaluate(db)
+
     async def reap() -> dict[str, Any]:
         return await batches.reap(db)
 
@@ -226,6 +229,7 @@ def register_jobs(
 
     scheduler.add("census_plan", census_plan, every_s=60, aligned=True)
     scheduler.add("pulse_plan", pulse_plan, every_s=60, aligned=True)
+    scheduler.add("pulse_evaluate", pulse_evaluate, every_s=60)
     scheduler.add("reap", reap, every_s=60)
     scheduler.add("offline", offline, every_s=15)
     scheduler.add("calculate", calculate_job, every_s=60)

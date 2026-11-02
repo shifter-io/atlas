@@ -75,9 +75,9 @@ async def emit_all(conn, product_id, region_id, at=AT):
             product_id=product_id, day=date(2026, 11, 2), hour=13, formula_version="f1"
         ),
     )
-    await events.emit_pulse_down(conn, at, window(product_id))
+    await events.emit_pulse_down(conn, at, window(product_id), outage_ids=(11, 12))
     await events.emit_pulse_recovered(
-        conn, at, product_id=product_id, down_since=at - timedelta(minutes=25)
+        conn, at, product_id=product_id, down_since=at - timedelta(minutes=25), outage_ids=(11, 12)
     )
     await events.emit_latency_rise(
         conn,
@@ -151,11 +151,12 @@ async def test_helpers_write_the_payload_contract():
             "requests": 800,
             "regions": 8,
             "threshold": 0.5,
+            "outage_ids": [11, 12],
         },
     )
     assert (recovered["signal"], recovered["data"]) == (
         1,
-        {"down_since": "2026-11-02T13:35:00+00:00", "duration_s": 1500.0},
+        {"down_since": "2026-11-02T13:35:00+00:00", "duration_s": 1500.0, "outage_ids": [11, 12]},
     )
     assert (rise["country_code"], rise["signal"], rise["severity"], rise["data"]) == (
         "DE",
@@ -203,6 +204,16 @@ BROKEN = {
     "negative estimate": lambda: hour(unique_ips=-5),
     "threshold above 1": lambda: window(threshold=1.5),
     "negative errors": lambda: window(errors=-3),
+    "more errors than requests": lambda: window(errors=801),
+    "no requests": lambda: window(errors=0, requests=0),
+    "zero-minute window": lambda: window(window_minutes=0),
+    "no region": lambda: window(regions=0),
+    "below the threshold": lambda: window(errors=399),
+    "NaN threshold": lambda: window(threshold=float("nan")),
+    "NaN counter": lambda: window(requests=float("nan")),
+    "infinite p50": lambda: rise(p50=float("inf")),
+    "NaN baseline": lambda: rise(baseline=float("nan")),
+    "infinite duration": lambda: events.DailyTestResult(status="done", duration_s=float("inf")),
     "no rise": lambda: rise(p50=300.0),
     "bad country": lambda: rise(country_code="xx"),
 }

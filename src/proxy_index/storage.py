@@ -448,11 +448,11 @@ def _check_bucket_histograms(buckets, histogram):
         raise ValueError("Bucket histograms differ from run histogram")
 
 
-def ingest(directory, credentials_file, *, batch_id=None):
+def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
     """Import one finished run directory; replaying the same artifacts is a no-op.
 
-    batch_id links the run to its test_batches row (census/pulse). A census summary may have
-    requested=null (unbounded); geo.jsonl.gz, when listed in artifacts, fills run_geo_buckets.
+    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
+    A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
     """
     directory = Path(directory)
     summary_path = directory / "summary.json"
@@ -545,7 +545,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
             conn.cursor().copy("COPY incoming_ips FROM STDIN") as copy,
             gzip.open(source, "rt") as f,
         ):
-            for line in f:
+            for line in f if ip_rows else ():
                 row = json.loads(line)
                 bucket, first, last = (
                     _time(row[k]) for k in ("bucket_start", "first_seen", "last_seen")
@@ -566,7 +566,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
         rows, observations, unique = conn.execute(
             "SELECT count(*),coalesce(sum(count),0),count(DISTINCT ip) FROM incoming_ips"
         ).fetchone()
-        if (
+        if ip_rows and (
             rows != summary["artifacts"]["ips"]["rows"]
             or observations != (in_country if summary["pool_eligible"] else 0)
             or unique != (summary["unique_ips"] or 0)
@@ -715,7 +715,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
                 (Jsonb(metrics), *_steps(histogram.export()["bins"]), scope_id),
             )
         run_key = existing[1] if existing else run_key
-        enriched = _enrich(conn, directory, run_id, run_key, rows)
+        enriched = _enrich(conn, directory, run_id, run_key, rows) if ip_rows else 0
     return {
         "run_id": run_id,
         "run_key": run_key,
