@@ -142,11 +142,11 @@ def _limits(args) -> int:
 async def limits(cloud, project_name: str, sizes: list[str]) -> dict:
     """Counts only: never lists production droplets, prints no IPs and no token."""
     from ..regions import REGION_IDS
-    from .contracts import ROLES
+    from .contracts import CAMPAIGN_ROLES
 
     async with cloud:
         account = await cloud.account()
-        ours = {tag: len(await cloud.list_tag(tag)) for tag, _ in ROLES.values()}
+        ours = {tag: len(await cloud.list_tag(tag)) for tag, _ in CAMPAIGN_ROLES.values()}
         in_project = len(await cloud.project_droplet_ids(await cloud.project_id(project_name)))
         offered = await cloud.sizes()
         return {
