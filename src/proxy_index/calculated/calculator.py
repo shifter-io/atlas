@@ -46,6 +46,7 @@ from .aggregate import (
     with_under_load,
 )
 from .aggregate import LATENCY as PERCENTILES
+from .inputs import group_by_product, previous_products, tested_by_product
 from .policy import (
     digest,
     effective,
@@ -55,13 +56,14 @@ from .policy import (
     slot_settings,
     uptime_settings,
 )
+from .slim import slim
 from .store import jsonable, prune, validate_payload
 
 SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()
-        for name in ("calculator.py", "aggregate.py", "policy.py")
+        for name in ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py")
     )
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic))
 ).hexdigest()
@@ -248,10 +250,9 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             payload = jsonable(payload)
             validate_payload(payload)
             persist(conn, payload)
-            conn.execute(
-                "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)",
-                (build_id, digest(payload), Jsonb(payload)),
-            )
+            payload = slim(payload, config)
+            insert = "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)"
+            conn.execute(insert, (build_id, digest(payload), Jsonb(payload)))
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -597,35 +598,11 @@ def build(
         )
         if key:
             geo_groups[key].append(g)
-    pulse_groups = defaultdict(list)
-    for b in pulses:
-        pulse_groups[b["product_id"]].append(b)
-    outage_groups = defaultdict(list)
-    for o in outages:
-        outage_groups[o["product_id"]].append(o)
-    tested_groups = defaultdict(dict)
-    monitored_groups = defaultdict(list)
-    for t in tested:
-        country = t["country"].strip()
-        group = tested_groups[t["product_id"]]
-        group[country] = max(group.get(country, t["last"]), t["last"])
-        monitored_groups[t["product_id"]].append(t | {"country": country})
-    census_groups = defaultdict(list)
-    for c in census:
-        census_groups[c["product_id"]].append({k: v for k, v in c.items() if k != "product_id"})
+    pulse_groups, outage_groups = group_by_product(pulses), group_by_product(outages)
+    census_groups = group_by_product(census, drop_id=True)
+    tested_groups, monitored_groups = tested_by_product(tested)
     threshold = uptime_settings(config)["min_successes"]
-    prev_products = (
-        {p["id"]: p for p in previous["products"]}
-        if previous and datetime.fromisoformat(previous["as_of"]) <= as_of
-        else {}
-    )
-    for old_product in prev_products.values():
-        for old_window in old_product["windows"].values():
-            old_scores = list(old_window["scores"].values()) + [
-                t["score"] for t in old_window["targets"].values()
-            ]
-            for old_score in old_scores:
-                old_score.setdefault("methodology_id", previous["methodology"]["id"])
+    prev_products = previous_products(previous, as_of)
     sets = {}
     fleet_groups = defaultdict(list)
     for key, p in groups.items():

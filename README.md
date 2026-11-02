@@ -229,6 +229,13 @@ distinct IP counts, ASN name/number, DB-IP usage type and light-load p50/p90/p99
 exits remain in the intersection with null network fields; no country-ASN join or advertised
 product type fills a gap. Calculated schema v5 stores these as dimension `y`, with nullable
 ASN labels; `db-migrate` preserves existing calculated rows and published snapshots.
+The published snapshot keeps only the top rows of each long list: every `breakdowns` dimension
+(by completed requests) and the pool's `geo`, `countries_breakdown` and `asns_breakdown` (by IPs),
+N per list from `calculated/policy.py` `PAYLOAD` or a `[payload]` methodology table. Each window
+adds `breakdown_entries` and each pool `list_entries`, the full row count of every list ("25 of
+61,497"). Counts, shares and metrics are computed from the full data first, and
+`calculated_breakdowns` keeps every row; the site API reads the full city x ASN and ASN lists
+from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and

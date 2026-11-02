@@ -815,12 +815,29 @@ def payload_mismatches(database, build_id):
                     ("asn", w["pool"]["asns_breakdown"]),
                 ]
             else:
-                # v2: every breakdown row is typed; the v1 pool lists derive from them.
+                # v2: every breakdown row is typed; the v1 pool lists derive from them. The
+                # payload keeps the top rows of each list and its full row count (slim.py);
+                # payloads without counts kept every row.
                 expected = [(VIEW_NAMES.get(n, n), rows) for n, rows in w["breakdowns"].items()]
-                if any(w["pool"][k] != v for k, v in pool_lists(w["breakdowns"]).items()):
+                full = {
+                    n: breakdowns.get((windows[key], VIEW_NAMES.get(n, n)), [])
+                    for n in w["breakdowns"]
+                }
+                counts = w.get("breakdown_entries", {n: len(r) for n, r in w["breakdowns"].items()})
+                if counts != {n: len(r) for n, r in full.items()}:
+                    missing.append(("breakdown entries", windows[key]))
+                lists = w["pool"].get("list_entries", {})
+                if any(
+                    w["pool"][k] != v[: len(w["pool"][k])]
+                    or lists.get(k, len(w["pool"][k])) != len(v)
+                    for k, v in pool_lists(full).items()
+                ):
                     missing.append(("pool lists", windows[key]))
             for dimension, rows in expected:
-                if canon(breakdowns.get((windows[key], dimension), [])) != canon(rows):
+                typed = breakdowns.get((windows[key], dimension), [])
+                if payload["schema_version"] == 2:
+                    typed = typed[: len(rows)]
+                if canon(typed) != canon(rows):
                     missing.append((dimension, windows[key]))
     return missing
 
