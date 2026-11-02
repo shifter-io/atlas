@@ -74,9 +74,7 @@ def read_hour_file(path: Path, sha256: str) -> Iterator[tuple[bytes, int, dict[s
     with path.open("rb", buffering=0) as raw:
         hashed = _HashingReader(raw)
         with gzip.GzipFile(fileobj=io.BufferedReader(hashed, _CHUNK)) as lines:
-            for line in lines:
-                if line.strip():
-                    yield parse_record(line)
+            yield from (parse_record(line) for line in lines if line.strip())
         while hashed.read(_CHUNK):
             pass
     if hashed.digest.hexdigest() != sha256:
