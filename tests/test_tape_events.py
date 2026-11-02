@@ -162,7 +162,7 @@ async def test_helpers_write_the_payload_contract():
         "DE",
         -1,
         "minor",
-        {"p50": 1840.0, "baseline": 400.0},
+        {"p50": 1840.0, "baseline": 400.0, "baseline_source": "daily"},
     )
 
 
@@ -216,6 +216,7 @@ BROKEN = {
     "infinite duration": lambda: events.DailyTestResult(status="done", duration_s=float("inf")),
     "no rise": lambda: rise(p50=300.0),
     "bad country": lambda: rise(country_code="xx"),
+    "unknown baseline source": lambda: rise(baseline_source="pulse"),
 }
 
 

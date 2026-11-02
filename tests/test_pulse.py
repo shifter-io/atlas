@@ -1,14 +1,18 @@
 """The pulse: countries spread over the slot, network outages from the errors of all regions,
 latency rises over the daily test's p50 and no per-IP rows."""
 
+import gzip
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from test_census_pulse import batch, batch_run, product
+from test_daily import chunk, observation
 from test_orchestrator import prepare, query
 from test_storage import measurement
 
 from proxy_index import detect
+from proxy_index.daily import ingest as daily_ingest
 from proxy_index.orchestrator import batches, pulse
 from proxy_index.orchestrator.db import Database, put_setting
 from proxy_index.orchestrator.nodes import issue_token
@@ -64,6 +68,27 @@ async def run(tmp_path, database, kind, at, network, country, rows, target="gene
         buckets(conn, key, rows)
         batch_id = batch(conn, kind, at, country=country, target=target)
         batch_run(conn, batch_id, network, at + timedelta(minutes=1), run_key=key)
+    return key
+
+
+async def daily(tmp_path, database, name, network, country, p50):
+    """A daily-test run ingested the way `daily ingest` does: the scheduler's measurement and
+    its observation chunk in a round country folder, convert_country, then storage.ingest
+    without a batch. Its network is its provider label, its p50 is `p50` ms."""
+    measured = await measurement(tmp_path / name, provider=network, requested_country=country)
+    with gzip.open(measured / "ips.jsonl.gz", "rt") as stream:
+        seen = [json.loads(line) for line in stream]
+    folder = tmp_path / f"{name}-round"
+    rows = [observation(row["ip"], row["first_seen"]) for row in seen]
+    chunk(folder, "observations-000001.jsonl.gz", rows)
+    summary = json.loads((measured / "summary.json").read_text())
+    (folder / "summary.json").write_text(json.dumps({"measurement": summary}))
+    key = ingest(daily_ingest.convert_country(folder, tmp_path / "runs"), database)["run_key"]
+    with connect(database) as conn:
+        start = conn.execute(
+            "SELECT min(bucket_start) FROM run_buckets WHERE run_key=%s", (key,)
+        ).fetchone()[0]
+        buckets(conn, key, [(start, 100, 0, p50)])
     return key
 
 
@@ -228,24 +253,45 @@ async def test_a_backlog_is_evaluated_over_several_ticks_without_skipping_a_wind
     ]
 
 
-async def test_the_latency_baseline_is_the_latest_census_run_until_pulse_base_1(
+async def test_the_latency_baseline_is_the_latest_daily_test_run_census_only_before_one(
     database, db, tmp_path
 ):
-    """The current baseline source (follow-up PULSE-BASE-1 switches it to the daily test)."""
     prepare(database, ("DE",))
-    alpha, beta = products(database, "alpha", "beta")
-    old, new = W0 - timedelta(hours=26), W0 - timedelta(hours=3)
-    await run(tmp_path, database, "census", old, alpha, "DE", [(old, 100, 0, 400)])
-    await run(tmp_path, database, "census", new, alpha, "DE", [(new, 100, 0, 100)])
-    # Newer pulses and a daily-test run (DAILY-1 ingests it without a batch) are not read.
+    alpha, beta, gamma = products(database, "alpha", "beta", "gamma")
+    new = W0 - timedelta(hours=3)
+    for network in (alpha, beta):
+        await run(tmp_path, database, "census", new, network, "DE", [(new, 100, 0, 100)])
+    # alpha's daily tests: the latest in DE counts (its proxy asked for "de"), FR is not DE.
+    await daily(tmp_path, database, "first", "alpha", "de", 300)
+    await daily(tmp_path, database, "latest", "alpha", "de", 250)
+    await daily(tmp_path, database, "france", "alpha", "FR", 999)
+    # Pulses and a batch-less run that is not a daily test never move it.
     await run(tmp_path, database, "pulse", W0, alpha, "DE", [(W0, 100, 0, 900)])
-    await run(tmp_path, database, "pulse", W0, beta, "DE", [(W0, 100, 0, 900)], "generic_https")
-    daily = ingest(await measurement(tmp_path / "daily"), database)["run_key"]
+    plain = await measurement(tmp_path / "plain", provider="gamma", requested_country="DE")
     with connect(database) as conn:
-        buckets(conn, daily, [(W0, 100, 0, 700)])
+        buckets(conn, ingest(plain, database)["run_key"], [(W0, 100, 0, 700)])
     async with db.connection() as conn:
-        assert await pulse.latency_baseline(conn, alpha, "DE") == 100
-        assert await pulse.latency_baseline(conn, beta, "DE") is None
+        assert await pulse.latency_baseline(conn, alpha, "DE") == (250, "daily")
+        assert await pulse.latency_baseline(conn, alpha, "FR") == (999, "daily")
+        assert await pulse.latency_baseline(conn, beta, "DE") == (100, "census")
+        assert await pulse.latency_baseline(conn, gamma, "DE") is None
+
+
+async def test_a_latency_rise_over_the_daily_test_is_not_flagged_as_census(
+    database, db, tmp_path
+):
+    prepare(database, ("DE",))
+    (alpha,) = products(database, "alpha")
+    census = W0 - timedelta(hours=3)
+    await run(tmp_path, database, "census", census, alpha, "DE", [(census, 100, 0, 100)])
+    await daily(tmp_path, database, "daily", "alpha", "DE", 40)
+    # 70 ms is under 1.5 x the census p50 but over 1.5 x the daily test's.
+    for k in range(2):
+        await run(tmp_path, database, "pulse", window(k), alpha, "DE", [(window(k), 100, 0, 70)])
+    assert (await evaluated(db, 1))["latency_rise"] == 1
+    assert tape(database, "latency_rise") == [
+        (alpha, {"p50": 70.0, "baseline": 40.0, "baseline_source": "daily"})
+    ]
 
 
 def nodes(plan):
@@ -304,8 +350,8 @@ async def test_latency_rise_fires_once_per_streak_only_above_the_baseline(databa
         "ORDER BY event_id",
     )
     assert rises == [
-        (alpha, "DE", {"p50": 170.0, "baseline": 100.0}),
-        (alpha, "DE", {"p50": 160.0, "baseline": 100.0}),
+        (alpha, "DE", {"p50": 170.0, "baseline": 100.0, "baseline_source": "census"}),
+        (alpha, "DE", {"p50": 160.0, "baseline": 100.0, "baseline_source": "census"}),
     ]
     assert query(database, "SELECT count(*) FROM outages") == [(0,)]
 
