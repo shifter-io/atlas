@@ -50,6 +50,22 @@ EVENTS = {
     "settle_seconds": 120,
     "initial_lookback_minutes": 60,
 }
+# Rows each list of the published snapshot keeps ([payload] in the methodology file): the
+# breakdowns (by completed requests) and the pool lists (by IPs), top first. calculated_breakdowns
+# keeps every row and every total is computed before capping (calculated/slim.py); 0 publishes
+# only the list's entry count. The country lists are bounded by the countries there are, so they
+# stay whole; the site API restores the full city x ASN and ASN lists from calculated_breakdowns.
+PAYLOAD = {
+    "country": 1000,
+    "region": 25,
+    "city": 25,
+    "asn": 25,
+    "country_asn": 25,
+    "city_asn": 25,
+    "geo": 50,
+    "countries_breakdown": 1000,
+    "asns_breakdown": 50,
+}
 # Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
 DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
@@ -123,6 +139,7 @@ def validate(config):
         "slots",
         "hosting_usage_types",
         "latency_target",
+        "payload",
     }
     if set(config) - known:
         raise ValueError("Unknown methodology setting")
@@ -161,9 +178,8 @@ def validate(config):
     uptime = config.get("uptime", {})
     if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
         raise ValueError("Invalid uptime settings")
-    slots = config.get("slots", {})
-    if set(slots) - set(SLOTS) or any(type(v) is not int or v < 1 for v in slots.values()):
-        raise ValueError("Invalid slot settings")
+    _counts(config.get("slots", {}), SLOTS, 1, "slot")
+    _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
@@ -190,6 +206,18 @@ def uptime_settings(config):
 
 def slot_settings(config):
     return SLOTS | config.get("slots", {})
+
+
+def _counts(settings, defaults, minimum, name):
+    """Integer settings, each a known key and at least minimum."""
+    if set(settings) - set(defaults) or any(
+        type(v) is not int or v < minimum for v in settings.values()
+    ):
+        raise ValueError(f"Invalid {name} settings")
+
+
+def payload_limits(config):
+    return PAYLOAD | config.get("payload", {})
 
 
 def hosting_usage_types(config):

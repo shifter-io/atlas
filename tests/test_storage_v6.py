@@ -136,8 +136,8 @@ async def census(tmp_path, *, location=BERLIN, network=NETWORK, **options):
 GEO_ROWS = (
     "SELECT l.country_code,l.city,l.latitude,n.asn,n.usage_type,g.completed,g.successes,"
     "g.timeouts,g.bytes_up,g.bytes_down,histogram_bins(g.histogram_steps,g.histogram_counts) "
-    "FROM run_geo_buckets g JOIN enrichment_locations l USING(location_id) "
-    "JOIN enrichment_networks n USING(network_id) ORDER BY g.completed DESC,g.run_key"
+    "FROM run_geo_buckets g JOIN enrichment_location_fields l USING(location_id) "
+    "JOIN enrichment_network_fields n USING(network_id) ORDER BY g.completed DESC,g.run_key"
 )
 
 
@@ -397,7 +397,7 @@ async def test_runner_geo_artifact_ingests(database, tmp_path, stop_rule):
     with connect(database) as conn:
         assert conn.execute(
             "SELECT sum(g.completed),min(l.city) FROM run_geo_buckets g "
-            "JOIN enrichment_locations l USING(location_id)"
+            "JOIN enrichment_location_fields l USING(location_id)"
         ).fetchone() == (summary["completed"], "Berlin")
         assert conn.execute("SELECT bool_and(outcome_counters) FROM run_buckets").fetchone() == (
             True,

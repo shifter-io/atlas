@@ -14,6 +14,7 @@ from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
 from .. import detect, traffic
+from ..names import labels as shared_labels
 from ..storage import column, connect
 from ..targets import registry
 from .aggregate import (
@@ -46,6 +47,7 @@ from .aggregate import (
     with_under_load,
 )
 from .aggregate import LATENCY as PERCENTILES
+from .inputs import group_by_product, previous_products, tested_by_product
 from .policy import (
     digest,
     effective,
@@ -55,13 +57,14 @@ from .policy import (
     slot_settings,
     uptime_settings,
 )
-from .store import jsonable, prune, validate_payload
+from .slim import slim
+from .store import discard, expire, jsonable, partition, prune, validate_payload
 
 SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()
-        for name in ("calculator.py", "aggregate.py", "policy.py")
+        for name in ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py")
     )
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic))
 ).hexdigest()
@@ -248,10 +251,9 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             payload = jsonable(payload)
             validate_payload(payload)
             persist(conn, payload)
-            conn.execute(
-                "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)",
-                (build_id, digest(payload), Jsonb(payload)),
-            )
+            payload = slim(payload, config)
+            insert = "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)"
+            conn.execute(insert, (build_id, digest(payload), Jsonb(payload)))
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -265,6 +267,8 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 (int(payload["snapshot_id"]),),
             )
         prune(conn)
+        if publish:
+            expire(conn)
         return payload
 
 
@@ -301,7 +305,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     source = (
         "FROM run_geo_buckets g JOIN test_runs r USING(run_key) "
         "JOIN scope_stats s ON s.scope_id=r.scope_id JOIN pool_stats ps ON ps.pool_id=s.pool_id "
-        "JOIN enrichment_locations l ON l.location_id=g.location_id "
+        "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
         "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     )
     window = "WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
@@ -352,14 +356,14 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     locations = {
         r["location_id"]: tuple(r[f] for f in PLACE)
         for r in conn.execute(
-            "SELECT * FROM enrichment_locations WHERE location_id=ANY(%s)",
+            "SELECT * FROM enrichment_location_fields WHERE location_id=ANY(%s)",
             (sorted({t["location_id"] for t in totals}),),
         )
     }
     networks = {
         r["network_id"]: (r["asn"], r["asn_organization"], r["usage_type"])
         for r in conn.execute(
-            "SELECT * FROM enrichment_networks WHERE network_id=ANY(%s)",
+            "SELECT * FROM enrichment_network_fields WHERE network_id=ANY(%s)",
             (sorted({t["network_id"] for t in totals}),),
         )
     }
@@ -408,10 +412,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
         "b.country_code AS country,rr.slug AS region,b.target_id AS target,br.started_at,"
         "br.finished_at,br.requests,br.successes,br.unique_ips,br.stop_reason,"
         "CASE WHEN br.run_key IS NOT NULL THEN (SELECT count(DISTINCT (l.country_code,"
-        "l.region_code,l.region,l.city)) FROM run_geo_buckets g JOIN enrichment_locations l "
+        "l.region_code,l.region,l.city)) FROM run_geo_buckets g JOIN enrichment_location_fields l "
         "USING(location_id) WHERE g.run_key=br.run_key AND g.successes>0 AND l.city IS NOT NULL) "
         "END AS cities,CASE WHEN br.run_key IS NOT NULL THEN (SELECT count(DISTINCT n.asn) "
-        "FROM run_geo_buckets g JOIN enrichment_networks n USING(network_id) "
+        "FROM run_geo_buckets g JOIN enrichment_network_fields n USING(network_id) "
         "WHERE g.run_key=br.run_key AND g.successes>0) END AS asns "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
         "JOIN runner_regions rr ON rr.region_id=b.region_id "
@@ -597,35 +601,11 @@ def build(
         )
         if key:
             geo_groups[key].append(g)
-    pulse_groups = defaultdict(list)
-    for b in pulses:
-        pulse_groups[b["product_id"]].append(b)
-    outage_groups = defaultdict(list)
-    for o in outages:
-        outage_groups[o["product_id"]].append(o)
-    tested_groups = defaultdict(dict)
-    monitored_groups = defaultdict(list)
-    for t in tested:
-        country = t["country"].strip()
-        group = tested_groups[t["product_id"]]
-        group[country] = max(group.get(country, t["last"]), t["last"])
-        monitored_groups[t["product_id"]].append(t | {"country": country})
-    census_groups = defaultdict(list)
-    for c in census:
-        census_groups[c["product_id"]].append({k: v for k, v in c.items() if k != "product_id"})
+    pulse_groups, outage_groups = group_by_product(pulses), group_by_product(outages)
+    census_groups = group_by_product(census, drop_id=True)
+    tested_groups, monitored_groups = tested_by_product(tested)
     threshold = uptime_settings(config)["min_successes"]
-    prev_products = (
-        {p["id"]: p for p in previous["products"]}
-        if previous and datetime.fromisoformat(previous["as_of"]) <= as_of
-        else {}
-    )
-    for old_product in prev_products.values():
-        for old_window in old_product["windows"].values():
-            old_scores = list(old_window["scores"].values()) + [
-                t["score"] for t in old_window["targets"].values()
-            ]
-            for old_score in old_scores:
-                old_score.setdefault("methodology_id", previous["methodology"]["id"])
+    prev_products = previous_products(previous, as_of)
     sets = {}
     fleet_groups = defaultdict(list)
     for key, p in groups.items():
@@ -1114,29 +1094,8 @@ FIELDS = {
 }
 COUNTERS = ("ips", "observations", "completed", "successes", "success_rate", "challenges", "blocks")
 LATENCY = ("p50", "p90", "p99")
-LABELS = {
-    "places": ("place_id", PLACE, ("text",) * 5),
-    "asn_labels": ("asn_label_id", ("asn", "name", "usage_type"), ("bigint", "text", "text")),
-    "score_reasons": ("reason_id", ("reason",), ("text",)),
-}
-DERIVED_TABLES = (
-    "calculated_score_reasons",
-    "calculated_score_components",
-    "calculated_scores",
-    "calculated_breakdowns",
-    "calculated_series",
-)
-
-
-def discard(conn, build_id):
-    for table in DERIVED_TABLES:
-        conn.execute(
-            f"DELETE FROM {table} WHERE result_id IN "
-            "(SELECT result_id FROM calculated_windows WHERE build_id=%s)",
-            (build_id,),
-        )
-    for table in ("calculated_windows", "calculated_overlaps", "calculation_builds"):
-        conn.execute(f"DELETE FROM {table} WHERE build_id=%s", (build_id,))
+# Place and ASN labels use the shared name lists (shared_labels); reasons stay calculator-only.
+LABELS = {"score_reasons": ("reason_id", ("reason",), ("text",))}
 
 
 def labels(conn, table, wanted):
@@ -1351,15 +1310,16 @@ def persist(conn, payload):
                             row["uptime"],
                         ),
                     )
-    places = labels(conn, "places", {b[3] for b in breakdowns if b[3]})
-    networks = labels(conn, "asn_labels", {b[4] for b in breakdowns if b[4]})
+    places, networks = shared_labels(conn, *({b[i] for b in breakdowns if b[i]} for i in (3, 4)))
+    partition(conn, build_id)
     with conn.cursor().copy(
-        "COPY calculated_breakdowns(result_id,dimension,position,place_id,asn_label_id,"
+        "COPY calculated_breakdowns(build_id,result_id,dimension,position,place_id,asn_label_id,"
         "ips,observations,completed,successes,challenges,blocks,p50,p90,p99) FROM STDIN"
     ) as copy:
         for result, code, position, place, network, row in breakdowns:
             copy.write_row(
                 (
+                    build_id,
                     result,
                     code,
                     position,

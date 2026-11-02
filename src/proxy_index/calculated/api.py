@@ -61,9 +61,13 @@ def project(payload, resource, query):
                 "readiness": p["windows"][window]["readiness"],
                 resource: p["windows"][window][key],
             }
-            # v2: success, latency and outcomes per country, region, city, ASN, country x ASN.
+            # v2: success, latency and outcomes per country, region, city, ASN, country x ASN,
+            # each capped to its top rows with the full row count in dimension_entries.
             | (
-                {"dimensions": p["windows"][window]["breakdowns"]}
+                {
+                    "dimensions": p["windows"][window]["breakdowns"],
+                    "dimension_entries": p["windows"][window].get("breakdown_entries"),
+                }
                 if resource == "breakdowns" and "breakdowns" in p["windows"][window]
                 else {}
             )

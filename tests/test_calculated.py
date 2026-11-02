@@ -106,7 +106,9 @@ def test_retained_score_expiry():
 
 
 @pytest.mark.asyncio
-async def test_calculation_publication_and_api(database, tmp_path):
+async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
+    # These assertions read older published builds; retention has its own tests.
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     store.initialize(database)
     d = await measurement(tmp_path, requests=10)
     ingest(d, database)
@@ -815,12 +817,29 @@ def payload_mismatches(database, build_id):
                     ("asn", w["pool"]["asns_breakdown"]),
                 ]
             else:
-                # v2: every breakdown row is typed; the v1 pool lists derive from them.
+                # v2: every breakdown row is typed; the v1 pool lists derive from them. The
+                # payload keeps the top rows of each list and its full row count (slim.py);
+                # payloads without counts kept every row.
                 expected = [(VIEW_NAMES.get(n, n), rows) for n, rows in w["breakdowns"].items()]
-                if any(w["pool"][k] != v for k, v in pool_lists(w["breakdowns"]).items()):
+                full = {
+                    n: breakdowns.get((windows[key], VIEW_NAMES.get(n, n)), [])
+                    for n in w["breakdowns"]
+                }
+                counts = w.get("breakdown_entries", {n: len(r) for n, r in w["breakdowns"].items()})
+                if counts != {n: len(r) for n, r in full.items()}:
+                    missing.append(("breakdown entries", windows[key]))
+                lists = w["pool"].get("list_entries", {})
+                if any(
+                    w["pool"][k] != v[: len(w["pool"][k])]
+                    or lists.get(k, len(w["pool"][k])) != len(v)
+                    for k, v in pool_lists(full).items()
+                ):
                     missing.append(("pool lists", windows[key]))
             for dimension, rows in expected:
-                if canon(breakdowns.get((windows[key], dimension), [])) != canon(rows):
+                typed = breakdowns.get((windows[key], dimension), [])
+                if payload["schema_version"] == 2:
+                    typed = typed[: len(rows)]
+                if canon(typed) != canon(rows):
                     missing.append((dimension, windows[key]))
     return missing
 
@@ -930,7 +949,9 @@ async def benchmark_scenario(database, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_path):
+async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_path, monkeypatch):
+    # These assertions read older published builds; retention has its own tests.
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     policy, last, first = await benchmark_scenario(database, tmp_path)
     ready = calculate(database, policy, as_of=last + timedelta(minutes=10), publish=True)
     later = calculate(database, policy, as_of=last + timedelta(days=2), publish=True)
@@ -949,8 +970,15 @@ async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_pa
         assert positions == {-1, 1}
         assert conn.execute("SELECT count(*) FROM cohorts").fetchone()[0] == 1
         # Labels are shared across builds instead of repeated per row: two cities, their
-        # (shared) region and country.
-        assert conn.execute("SELECT count(*) FROM places").fetchone()[0] == 4
+        # (shared) region and country. The cities and the ASN name are the enrichment's own rows.
+        assert conn.execute(
+            "SELECT count(DISTINCT place_id),count(DISTINCT l.place_id) FROM calculated_breakdowns "
+            "LEFT JOIN enrichment_locations l USING(place_id)"
+        ).fetchone() == (4, 2)
+        assert conn.execute(
+            "SELECT count(DISTINCT asn_name_id) FROM asn_labels "
+            "JOIN enrichment_networks USING(asn_name_id)"
+        ).fetchone() == (1,)
         assert conn.execute("SELECT count(*) FROM asn_labels").fetchone()[0] == 1
         # Only referenced texts are stored; "coverage not ready" style reasons are derived.
         assert not conn.execute(
@@ -987,7 +1015,9 @@ def test_cohort_criteria_keep_unusual_values(database):
 
 
 @pytest.mark.asyncio
-async def test_unpublished_payloads_are_pruned(database, tmp_path):
+async def test_unpublished_payloads_are_pruned(database, tmp_path, monkeypatch):
+    # These assertions read older published builds; retention has its own tests.
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     store.initialize(database)
     d = await measurement(tmp_path, requests=4)
     ingest(d, database)

@@ -194,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             "calculate",
             "snapshot-publish",
             "snapshot-export",
+            "calculate-expire",
             "run-role",
             "metric-evidence",
             "serve",

@@ -96,11 +96,16 @@ target schedules once set (`--reset-times` restores the staggered default census
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it
 replaces); schema v8 (`migrate_v7_v8.sql`) adds `load_references`, the daily reference country of
-each runner region. `db-init` verifies v8 and refuses other schemas. `proxy-index db-migrate
---database-file .secrets/database.toml` upgrades an unmodified v7, v6 or v5 database, or an
-unmodified v4 database (and calculated v1 layer) through v5, v6 and v7, in place, in one
-transaction that compares every rebuilt summary, scope, pool and bucket (from v6 every test
-batch, and from v4 every cohort, breakdown and score) with its original before committing. Run it on every
+each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names into the shared
+lists `place_names` and `asn_names`: `enrichment_locations` keeps a place id and coordinates,
+`enrichment_networks` an ASN name id and the per-IP network attributes, every location and network
+id is kept, and the views `enrichment_location_fields` and `enrichment_network_fields` give their
+old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged). `db-init` verifies
+v9 and refuses other schemas. `proxy-index db-migrate --database-file .secrets/database.toml`
+upgrades an unmodified v8, v7, v6 or v5 database, or an unmodified v4 database (and calculated v1
+layer) through v5 to v8, in place, in one transaction that compares every rebuilt summary, scope,
+pool, bucket, location, network and per-IP enrichment (from v6 every test batch, and from v4
+every cohort, breakdown and score) with its original before committing. Run it on every
 database (production and staging) before starting the new orchestrator. Locally, run
 `PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
 The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
@@ -129,7 +134,11 @@ The development API helper is `python scripts/measurements_local.py start|status
 Calculated schema v2 keeps cohorts, breakdown labels (`places`, `asn_labels`) and score
 components/reasons (`calculated_score_components`, `calculated_score_reasons`, `score_reasons`)
 as typed rows; `cohort_criteria`, `calculated_breakdown_details` and `calculated_score_details`
-rebuild the payload fragments. Snapshot payloads are kept for the current build, published builds
+rebuild the payload fragments. Calculated schema v7 (`calculated/migrate_v6_v7.sql`) moves the
+breakdown names into the main schema's shared lists: breakdown places are `place_names` rows
+(the same ids as enrichment locations; `places` is gone) and an `asn_labels` row is an
+`asn_names` id plus a usage type, shown with its ASN and name by the view `asn_label_names`.
+`calculated_breakdown_details` and `current_breakdowns` keep their columns and values. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
@@ -224,6 +233,13 @@ distinct IP counts, ASN name/number, DB-IP usage type and light-load p50/p90/p99
 exits remain in the intersection with null network fields; no country-ASN join or advertised
 product type fills a gap. Calculated schema v5 stores these as dimension `y`, with nullable
 ASN labels; `db-migrate` preserves existing calculated rows and published snapshots.
+The published snapshot keeps only the top rows of each long list: every `breakdowns` dimension
+(by completed requests) and the pool's `geo`, `countries_breakdown` and `asns_breakdown` (by IPs),
+N per list from `calculated/policy.py` `PAYLOAD` or a `[payload]` methodology table. Each window
+adds `breakdown_entries` and each pool `list_entries`, the full row count of every list ("25 of
+61,497"). Counts, shares and metrics are computed from the full data first, and
+`calculated_breakdowns` keeps every row; the site API reads the full city x ASN and ASN lists
+from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). The API also serves live `GET /v1/events?product=&kind=&category=&since=&limit=`
 and `GET /v1/traffic?test=&provider=&country=&region=&from=&to=`, and
