@@ -142,12 +142,17 @@ P50_SINCE_SQL = RUN_P50_SQL.replace(
     "b.run_key=ANY(%s)", "b.run_key=ANY(%s) AND b.bucket_start>=%s AND b.bucket_start<%s"
 )
 NEVER = datetime(9999, 1, 1, tzinfo=UTC)
-# A network's latest daily-test run in a country (test_runs_scope serves each scope).
+# A network's latest daily-test run in a country that finished after %s: test_runs_scope
+# serves each scope's (scope_id, finished_at) range, so only DAILY_RECENT of runs are read.
+# DAILY_ANY_SQL, unbounded, runs only when that finds none (a new network, a lapsed test).
+DAILY_RECENT = timedelta(days=2)  # the daily test's 24-hour cadence plus a day of slack
 DAILY_BASELINE_SQL = (
     "SELECT r.run_key,r.started_at AS start_at FROM test_runs r JOIN scope_stats s "
     "ON s.scope_id=r.scope_id JOIN pool_stats p ON p.pool_id=s.pool_id WHERE s.product_id=%s "
-    "AND upper(p.requested_country)=%s AND r.summary->>%s=%s ORDER BY r.finished_at DESC LIMIT 1"
+    "AND upper(p.requested_country)=%s AND r.summary->>%s=%s AND r.finished_at>%s "
+    "ORDER BY r.finished_at DESC LIMIT 1"
 )
+DAILY_ANY_SQL = DAILY_BASELINE_SQL.replace(" AND r.finished_at>%s", "")
 CENSUS_BASELINE_SQL = (
     "SELECT br.run_key,b.start_at FROM batch_runs br JOIN test_batches b "
     "ON b.batch_id=br.batch_id WHERE b.kind='census' AND br.product_id=%s "
@@ -172,6 +177,7 @@ async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     # run lasts well under a window: a window's buckets come from batches that began this far
     # before it at the most.
     cfg["lookback"] = grace + 2 * WINDOW
+    cfg["baselines"] = {}  # (product, country) -> latency_baseline(), for this evaluate call
     return cfg
 
 
@@ -309,15 +315,22 @@ async def _p50s(
 
 
 async def latency_baseline(
-    conn: psycopg.AsyncConnection, product: int, country: str
+    conn: psycopg.AsyncConnection, product: int, country: str, now: datetime | None = None
 ) -> tuple[int | None, str] | None:
     """(p50, source) of a network in a country: the p50 of its latest daily-test run there
     (source "daily", found by the proxy_index.daily contract), or of its latest done census
     run only while it has no daily-test run yet (source "census", flagged in latency_rise).
     None without either. The one place the baseline source is chosen; pulses never move it.
+    A latest daily-test run without a p50 (every request failed) gives (None, "daily"): the
+    network and country get no latency_rise until the next daily test, deliberately, rather
+    than falling back to an older daily run or the census. The first lookup is bounded to runs
+    finished after now - DAILY_RECENT; the unbounded one runs only when it finds none, so the
+    result is the same latest run either way.
     """
+    daily = (product, country, MARKER, DAILY)
     for source, sql, params in (
-        ("daily", DAILY_BASELINE_SQL, (product, country, MARKER, DAILY)),
+        ("daily", DAILY_BASELINE_SQL, (*daily, (now or datetime.now(UTC)) - DAILY_RECENT)),
+        ("daily", DAILY_ANY_SQL, daily),
         ("census", CENSUS_BASELINE_SQL, (product, country)),
     ):
         row = await (await conn.execute(sql, params)).fetchone()
@@ -360,9 +373,14 @@ async def evaluate_latency(
     fired = 0
     for pair in pairs:
         product, country = pair["product_id"], pair["country_code"].strip()
-        found = await latency_baseline(conn, product, country)
         runs = await _recent_pulses(conn, product, country, start + WINDOW, streak + 1)
-        if found is None or found[0] is None or len(runs) < streak:
+        if len(runs) < streak:
+            continue  # no streak yet: the baseline is never read
+        baselines = cfg["baselines"]
+        if (product, country) not in baselines:
+            baselines[product, country] = await latency_baseline(conn, product, country, now)
+        found = baselines[product, country]
+        if found is None or found[0] is None:
             continue
         baseline, source = found
         since = runs[-1]["start_at"] - WINDOW

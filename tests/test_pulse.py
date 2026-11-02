@@ -12,6 +12,7 @@ from test_orchestrator import prepare, query
 from test_storage import measurement
 
 from proxy_index import detect
+from proxy_index.daily import DAILY, MARKER
 from proxy_index.daily import ingest as daily_ingest
 from proxy_index.orchestrator import batches, pulse
 from proxy_index.orchestrator.db import Database, put_setting
@@ -275,6 +276,10 @@ async def test_the_latency_baseline_is_the_latest_daily_test_run_census_only_bef
         assert await pulse.latency_baseline(conn, alpha, "FR") == (999, "daily")
         assert await pulse.latency_baseline(conn, beta, "DE") == (100, "census")
         assert await pulse.latency_baseline(conn, gamma, "DE") is None
+        # Past DAILY_RECENT the bounded lookup finds none; the unbounded one finds the same run.
+        later = datetime.now(UTC) + 5 * pulse.DAILY_RECENT
+        assert await pulse.latency_baseline(conn, alpha, "DE", later) == (250, "daily")
+        assert await pulse.latency_baseline(conn, beta, "DE", later) == (100, "census")
 
 
 async def test_a_latency_rise_over_the_daily_test_is_not_flagged_as_census(database, db, tmp_path):
@@ -298,6 +303,11 @@ def nodes(plan):
         yield from nodes(child)
 
 
+async def explain(conn, statement, params):
+    explained = await conn.execute("EXPLAIN (FORMAT JSON) " + statement, params)
+    return list(nodes((await explained.fetchone())["QUERY PLAN"][0]["Plan"]))
+
+
 async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by_index(
     database, db
 ):
@@ -313,8 +323,7 @@ async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by
             (pulse.P50_SINCE_SQL, ([1], W0 - WINDOW, W0 + 2 * WINDOW)),
         )
         for statement, params in statements:
-            explained = await conn.execute("EXPLAIN (FORMAT JSON) " + statement, params)
-            plan = list(nodes((await explained.fetchone())["QUERY PLAN"][0]["Plan"]))
+            plan = await explain(conn, statement, params)
             relations = {n["Relation Name"] for n in plan if "Relation Name" in n}
             assert {r for r in relations if r.startswith("run_buckets")} == {
                 "run_buckets_2026_10"
@@ -323,9 +332,19 @@ async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by
                 scans = [n["Node Type"] for n in plan if n.get("Relation Name") == "test_batches"]
                 assert "Seq Scan" not in scans, statement
                 assert any("scheduled_for" in n.get("Index Cond", "") for n in plan), statement
+        # The bounded daily-test lookup reads each scope's recent runs through test_runs_scope.
+        params = (1, "DE", MARKER, DAILY, W0 - pulse.DAILY_RECENT)
+        plan = await explain(conn, pulse.DAILY_BASELINE_SQL, params)
+        assert "Seq Scan" not in [n["Node Type"] for n in plan if n.get("Relation Name")]
+        assert any(
+            n.get("Index Name") == "test_runs_scope" and "finished_at" in n.get("Index Cond", "")
+            for n in plan
+        )
 
 
-async def test_latency_rise_fires_once_per_streak_only_above_the_baseline(database, db, tmp_path):
+async def test_latency_rise_fires_once_per_streak_only_above_the_baseline(
+    database, db, tmp_path, monkeypatch
+):
     prepare(database, ("DE",))
     alpha, beta = products(database, "alpha", "beta")
     daily = W0 - timedelta(hours=3)
@@ -339,9 +358,18 @@ async def test_latency_rise_fires_once_per_streak_only_above_the_baseline(databa
     for k in range(7):
         rows = [(window(k), 100, 0, 60)]
         await run(tmp_path, database, "pulse", window(k), beta, "DE", rows, "generic_https")
+    looked_up, lookup = [], pulse.latency_baseline
+
+    async def counted(conn, product, country, now=None):
+        looked_up.append((product, country))
+        return await lookup(conn, product, country, now)
+
+    monkeypatch.setattr(pulse, "latency_baseline", counted)
     await evaluated(db, 0)
-    # Catching up evaluates each window with the runs up to it.
+    assert looked_up == []  # one run each, no streak: the baseline is never read
+    # Catching up evaluates each window with the runs up to it, reading each baseline once.
     assert (await evaluated(db, 6))["latency_rise"] == 2
+    assert sorted(looked_up) == [(alpha, "DE"), (beta, "DE")]
     rises = query(
         database,
         "SELECT product_id,country_code,data FROM test_events WHERE kind='latency_rise' "
