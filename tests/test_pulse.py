@@ -86,7 +86,9 @@ def test_spread_spaces_each_regions_countries_window_over_n_apart():
     assert shifted == {("FR", 1): base + hour / 4, ("GB", 1): base + hour * 3 / 4}
 
 
-async def test_open_slot_uses_the_whole_slot_and_only_its_rest_after_a_late_open(database, db):
+async def test_open_slot_keeps_the_spacing_and_skips_the_passed_starts_after_a_late_open(
+    database, db
+):
     prepare(database, ("DE", "AT", "CH", "PL"))  # all fra1
     slot, hour = datetime(2026, 10, 5, 12, tzinfo=UTC), timedelta(hours=1)
     lead = timedelta(seconds=15)  # pulse.lead_seconds
@@ -94,7 +96,13 @@ async def test_open_slot_uses_the_whole_slot_and_only_its_rest_after_a_late_open
         on_time = await pulse.open_slot(conn, "generic_http", slot, hour, slot + lead)
         late = await pulse.open_slot(conn, "generic_https", slot, hour, slot + 30 * lead)
         assert await pulse.open_slot(conn, "generic_http", slot, hour, slot) == []
-    assert len(on_time) == len(late) == 4
+        # Opened at minute 55 of the next slot: every start has passed, none is squeezed in.
+        next_slot = slot + hour
+        assert (
+            await pulse.open_slot(conn, "generic_http", next_slot, hour, next_slot + hour * 55 / 60)
+            == []
+        )
+    assert (len(on_time), len(late)) == (4, 3)
 
     def starts(target):
         return [
@@ -110,9 +118,9 @@ async def test_open_slot_uses_the_whole_slot_and_only_its_rest_after_a_late_open
     assert starts("generic_http") == [slot + 2 * lead] + [
         slot + lead + hour / 4 * i for i in (1, 2, 3)
     ]
-    # Opened 7.5 minutes late (a restart): the rest of the slot, from now + lead.
-    rest = hour - 30 * lead
-    assert starts("generic_https") == [slot + 31 * lead + rest / 4 * i for i in range(4)]
+    # Opened 7.5 minutes late (a restart): the first start has passed and waits for the next
+    # slot; the others keep their 15-minute spacing.
+    assert starts("generic_https") == [slot + lead + hour / 4 * i for i in (1, 2, 3)]
 
 
 async def test_regions_errors_open_one_network_outage_and_a_healthy_window_closes_it(
