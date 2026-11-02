@@ -216,19 +216,23 @@ class PulseWindow:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class LatencyRise:
-    """A pulse p50 (ms) above the daily test's p50 for that network and country."""
+    """A pulse p50 (ms) above the daily test's p50 for that network and country; the
+    baseline_source "census" flags a network with no daily-test run yet."""
 
     product_id: int
     country_code: str
     p50: float
     baseline: float
     region_id: int | None = None
+    baseline_source: str = "daily"
 
     def __post_init__(self) -> None:
         _check_countries((self.country_code,))
         _counts(p50=self.p50, baseline=self.baseline)
         if not self.p50 > self.baseline >= 0:
             raise ValueError("a latency rise needs p50 above a non-negative baseline")
+        if self.baseline_source not in ("daily", "census"):
+            raise ValueError("a latency baseline comes from the daily test or a census")
 
 
 def _daily_columns(test: DailyTest) -> dict[str, Any]:
@@ -352,7 +356,8 @@ async def emit_latency_rise(conn: psycopg.AsyncConnection, at: datetime, rise: L
     """A lower pulse p50 never raises one (100 concurrency is not comparable with the daily
     test's load).
 
-    data: {"p50", "baseline"} in milliseconds. Signal -1, severity minor.
+    data: {"p50", "baseline"} in milliseconds and "baseline_source" ("daily", or "census"
+    while the network has no daily-test run in that country). Signal -1, severity minor.
     """
     return await emit(
         conn,
@@ -363,5 +368,9 @@ async def emit_latency_rise(conn: psycopg.AsyncConnection, at: datetime, rise: L
         region_id=rise.region_id,
         signal=-1,
         severity="minor",
-        data={"p50": rise.p50, "baseline": rise.baseline},
+        data={
+            "p50": rise.p50,
+            "baseline": rise.baseline,
+            "baseline_source": rise.baseline_source,
+        },
     )

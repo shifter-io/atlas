@@ -11,7 +11,8 @@ a network outage is told apart from a per-batch one) and a pulse_down event list
 pulse.recover_windows healthy windows the rows close and pulse_recovered lists them. A window
 without pulse data is neutral. Latency: latency_rise fires when a network's last
 pulse.latency_windows done pulse runs in a country (runs, one per slot, not 5-minute windows)
-all have a p50 at least pulse.latency_ratio x latency_baseline(), which a pulse never moves.
+all have a p50 at least pulse.latency_ratio x latency_baseline() (the daily test's p50), which
+a pulse never moves.
 
 A window is evaluated once, pulse.settle_seconds after it ends: buckets uploaded later never
 count toward its downtime, and a run that turns done later is never a latency candidate, so
@@ -27,6 +28,7 @@ from typing import Any
 
 import psycopg
 
+from ..daily import DAILY, MARKER
 from ..detect import LOCK as DETECT_LOCK
 from ..detect import RUN_P50_SQL
 from .db import Database, put_setting, setting
@@ -140,6 +142,23 @@ P50_SINCE_SQL = RUN_P50_SQL.replace(
     "b.run_key=ANY(%s)", "b.run_key=ANY(%s) AND b.bucket_start>=%s AND b.bucket_start<%s"
 )
 NEVER = datetime(9999, 1, 1, tzinfo=UTC)
+# A network's latest daily-test run in a country that finished after %s: test_runs_scope
+# serves each scope's (scope_id, finished_at) range, so only DAILY_RECENT of runs are read.
+# DAILY_ANY_SQL, unbounded, runs only when that finds none (a new network, a lapsed test).
+DAILY_RECENT = timedelta(days=2)  # the daily test's 24-hour cadence plus a day of slack
+DAILY_BASELINE_SQL = (
+    "SELECT r.run_key,r.started_at AS start_at FROM test_runs r JOIN scope_stats s "
+    "ON s.scope_id=r.scope_id JOIN pool_stats p ON p.pool_id=s.pool_id WHERE s.product_id=%s "
+    "AND upper(p.requested_country)=%s AND r.summary->>%s=%s AND r.finished_at>%s "
+    "ORDER BY r.finished_at DESC LIMIT 1"
+)
+DAILY_ANY_SQL = DAILY_BASELINE_SQL.replace(" AND r.finished_at>%s", "")
+CENSUS_BASELINE_SQL = (
+    "SELECT br.run_key,b.start_at FROM batch_runs br JOIN test_batches b "
+    "ON b.batch_id=br.batch_id WHERE b.kind='census' AND br.product_id=%s "
+    "AND b.country_code=%s AND br.status='done' AND br.run_key IS NOT NULL "
+    "ORDER BY b.start_at DESC LIMIT 1"
+)
 
 
 async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
@@ -158,6 +177,7 @@ async def _settings(conn: psycopg.AsyncConnection) -> dict[str, Any]:
     # run lasts well under a window: a window's buckets come from batches that began this far
     # before it at the most.
     cfg["lookback"] = grace + 2 * WINDOW
+    cfg["baselines"] = {}  # (product, country) -> latency_baseline(), for this evaluate call
     return cfg
 
 
@@ -294,26 +314,30 @@ async def _p50s(
     return {row["run_key"]: row["p50"] for row in rows}
 
 
-async def latency_baseline(conn: psycopg.AsyncConnection, product: int, country: str) -> int | None:
-    """The latency baseline of a network in a country: the p50 of its latest done census run
-    there. This is the one place the baseline source is chosen; pulses never move it.
-
-    Follow-up PULSE-BASE-1 switches it to the daily-test runs (DAILY-1, which ingests them
-    without a batch, so they are not read here yet) once DAILY-1 has merged and how a daily-test
-    run is identified per network and country is a frozen contract.
+async def latency_baseline(
+    conn: psycopg.AsyncConnection, product: int, country: str, now: datetime | None = None
+) -> tuple[int | None, str] | None:
+    """(p50, source) of a network in a country: the p50 of its latest daily-test run there
+    (source "daily", found by the proxy_index.daily contract), or of its latest done census
+    run only while it has no daily-test run yet (source "census", flagged in latency_rise).
+    None without either. The one place the baseline source is chosen; pulses never move it.
+    A latest daily-test run without a p50 (every request failed) gives (None, "daily"): the
+    network and country get no latency_rise until the next daily test, deliberately, rather
+    than falling back to an older daily run or the census. The first lookup is bounded to runs
+    finished after now - DAILY_RECENT; the unbounded one runs only when it finds none, so the
+    result is the same latest run either way.
     """
-    row = await (
-        await conn.execute(
-            "SELECT br.run_key,b.start_at FROM batch_runs br JOIN test_batches b "
-            "ON b.batch_id=br.batch_id WHERE b.kind='census' AND br.product_id=%s "
-            "AND b.country_code=%s AND br.status='done' AND br.run_key IS NOT NULL "
-            "ORDER BY b.start_at DESC LIMIT 1",
-            (product, country),
-        )
-    ).fetchone()
-    if row is None:
-        return None
-    return (await _p50s(conn, [row["run_key"]], row["start_at"] - WINDOW)).get(row["run_key"])
+    daily = (product, country, MARKER, DAILY)
+    for source, sql, params in (
+        ("daily", DAILY_BASELINE_SQL, (*daily, (now or datetime.now(UTC)) - DAILY_RECENT)),
+        ("daily", DAILY_ANY_SQL, daily),
+        ("census", CENSUS_BASELINE_SQL, (product, country)),
+    ):
+        row = await (await conn.execute(sql, params)).fetchone()
+        if row is not None:
+            key = row["run_key"]
+            return (await _p50s(conn, [key], row["start_at"] - WINDOW)).get(key), source
+    return None
 
 
 async def _recent_pulses(
@@ -349,10 +373,16 @@ async def evaluate_latency(
     fired = 0
     for pair in pairs:
         product, country = pair["product_id"], pair["country_code"].strip()
-        baseline = await latency_baseline(conn, product, country)
         runs = await _recent_pulses(conn, product, country, start + WINDOW, streak + 1)
-        if baseline is None or len(runs) < streak:
+        if len(runs) < streak:
+            continue  # no streak yet: the baseline is never read
+        baselines = cfg["baselines"]
+        if (product, country) not in baselines:
+            baselines[product, country] = await latency_baseline(conn, product, country, now)
+        found = baselines[product, country]
+        if found is None or found[0] is None:
             continue
+        baseline, source = found
         since = runs[-1]["start_at"] - WINDOW
         p50 = await _p50s(conn, [r["run_key"] for r in runs], since, start + 2 * WINDOW)
         above = [_above(p50.get(r["run_key"]), baseline, ratio) for r in runs]
@@ -365,6 +395,7 @@ async def evaluate_latency(
             p50=float(p50[runs[0]["run_key"]]),
             baseline=float(baseline),
             region_id=runs[0]["region_id"],
+            baseline_source=source,
         )
         await emit_latency_rise(conn, now, rise)
         fired += 1
