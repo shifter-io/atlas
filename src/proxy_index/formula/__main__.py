@@ -1,0 +1,98 @@
+"""Command line: python -m proxy_index.formula {aggregate,build}.
+
+aggregate reads the private hour enrichment (one directory per network) and writes one counts
+file per network (no IPs); build turns those counts into the public formulas/<network>.json files
+and formulas/SUMMARY.md. Each written file replaces the old one atomically.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+from proxy_index.formula.aggregate import FormulaError, aggregate_network
+from proxy_index.formula.build import (
+    DEFAULT_MIN_HOURS,
+    DEFAULT_MIN_PEAK_IPS,
+    build_formula,
+    dumps,
+    summary_markdown,
+)
+
+
+def _write(path: Path, text: str) -> None:
+    temporary = path.with_name(f".{path.name}.partial")
+    temporary.write_text(text)
+    os.replace(temporary, path)
+
+
+def _networks(directory: Path, names: list[str], marker: str) -> list[Path]:
+    if names:
+        return [directory / name for name in names]
+    return sorted(path.parent for path in directory.glob(f"*/{marker}"))
+
+
+def run_aggregate(args: argparse.Namespace) -> None:
+    args.out.mkdir(parents=True, exist_ok=True)
+    for network_dir in _networks(args.enrich_dir, args.network, "manifest.json"):
+        target = args.out / f"{network_dir.name}.json"
+        if target.exists() and not args.force:
+            print(f"{network_dir.name}: kept {target.name}", flush=True)
+            continue
+        counts = aggregate_network(network_dir)
+        _write(target, json.dumps(counts, sort_keys=True) + "\n")
+        print(
+            f"{network_dir.name}: {counts['day_unique_ips']} day IPs, "
+            f"{len(counts['countries'])} countries",
+            flush=True,
+        )
+
+
+def run_build(args: argparse.Namespace) -> None:
+    args.out.mkdir(parents=True, exist_ok=True)
+    documents = []
+    for path in sorted(args.aggregates.glob("*.json")):
+        counts = json.loads(path.read_text())
+        document = build_formula(counts, args.version, args.min_peak_ips, args.min_hours)
+        _write(args.out / f"{document['network']}.json", dumps(document))
+        documents.append(document)
+    if not documents:
+        raise FormulaError(f"no counts files in {args.aggregates}")
+    _write(args.out / "SUMMARY.md", summary_markdown(documents))
+    print(f"built {len(documents)} formulas", flush=True)
+
+
+def parser() -> argparse.ArgumentParser:
+    root = argparse.ArgumentParser(prog="python -m proxy_index.formula")
+    commands = root.add_subparsers(dest="command", required=True)
+    aggregate = commands.add_parser("aggregate", help="count hour files per country (no IPs)")
+    aggregate.add_argument("--enrich-dir", type=Path, required=True)
+    aggregate.add_argument("--out", type=Path, required=True)
+    aggregate.add_argument("--network", action="append", default=[])
+    aggregate.add_argument("--force", action="store_true", help="recount existing counts files")
+    aggregate.set_defaults(run=run_aggregate)
+    build = commands.add_parser("build", help="write the public formula files")
+    build.add_argument("--aggregates", type=Path, required=True)
+    build.add_argument("--out", type=Path, required=True)
+    build.add_argument("--version", type=int, required=True)
+    build.add_argument("--min-peak-ips", type=int, default=DEFAULT_MIN_PEAK_IPS)
+    build.add_argument("--min-hours", type=int, default=DEFAULT_MIN_HOURS)
+    build.set_defaults(run=run_build)
+    return root
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    try:
+        args.run(args)
+    except FormulaError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
