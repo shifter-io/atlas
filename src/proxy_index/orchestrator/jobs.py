@@ -3,8 +3,13 @@
 census_plan / pulse_plan  every minute, on the minute: open due batches (batches.py)
 reap                      every minute: fail runs that never started or went silent
 offline                   every 15 s: nodes without a heartbeat go offline
-calculate                 every minute, debounced to calculate.min_interval_seconds and only
-                          after a batch finished: calculated.calculator.calculate(publish=True)
+calculate                 every minute, due by calculate.trigger: "hourly" (default) once per
+                          UTC hour, calculate.hour_offset_seconds past it (after the estimated
+                          hour's release), or "batch" debounced to calculate.min_interval_seconds
+                          and only after a batch finished; runs
+                          calculated.calculator.calculate(publish=True)
+estimates_release         every minute: estimates.release.release_due(db) releases the estimated
+                          hours that ended, with their estimate_hour_released events
 detect                    every minute: proxy_index.detect.detect(conn, now) writes the
                           incident events from finished pulse batches (optional module)
 retention                 daily: test_events older than retention.events_days (whole monthly
@@ -41,22 +46,48 @@ METHODOLOGY = CONFIGS / "methodology.toml"
 PARTITION = re.compile(r"test_events_(\d{4})_(\d{2})")
 
 
-async def calculate(db: Database, credentials_file: str, methodology: Path) -> dict[str, Any]:
-    async with db.connection() as conn:
-        interval = timedelta(seconds=float(await setting(conn, "calculate.min_interval_seconds")))
-        state = await (
-            await conn.execute(
-                "SELECT (SELECT max(started_at) FROM job_runs WHERE job='calculate' "
-                "AND status='ok') AS last,(SELECT max(finished_at) FROM test_batches "
-                "WHERE status='done') AS finished"
-            )
-        ).fetchone()
-    now = datetime.now(UTC)
+def _batch_skip(state: dict, now: datetime, interval: timedelta) -> str | None:
+    """The old schedule: after a batch finished, at most once per interval."""
     last, finished = state["last"], state["finished"]
     if finished is None or (last is not None and finished <= last):
-        return {"skipped": "no batch finished since the last calculation"}
+        return "no batch finished since the last calculation"
     if last is not None and now - last < interval:
-        return {"skipped": "debounced"}
+        return "debounced"
+    return None
+
+
+def _hourly_skip(state: dict, now: datetime, offset: timedelta) -> str | None:
+    """Once per UTC hour, `offset` past the hour (when that hour's estimate is released)."""
+    slot = (now - offset).replace(minute=0, second=0, microsecond=0) + offset
+    if state["last"] is not None and state["last"] >= slot:
+        return "already calculated this hour"
+    return None
+
+
+async def _calculate_skip(conn, now: datetime) -> str | None:
+    trigger = await setting(conn, "calculate.trigger")
+    state = await (
+        await conn.execute(
+            "SELECT (SELECT max(started_at) FROM job_runs WHERE job='calculate' "
+            "AND status='ok') AS last,(SELECT max(finished_at) FROM test_batches "
+            "WHERE status='done') AS finished"
+        )
+    ).fetchone()
+    if trigger == "hourly":
+        offset = float(await setting(conn, "calculate.hour_offset_seconds"))
+        return _hourly_skip(state, now, timedelta(seconds=offset))
+    if trigger == "batch":
+        interval = float(await setting(conn, "calculate.min_interval_seconds"))
+        return _batch_skip(state, now, timedelta(seconds=interval))
+    raise ValueError(f"calculate.trigger must be 'hourly' or 'batch', not {trigger!r}")
+
+
+async def calculate(db: Database, credentials_file: str, methodology: Path) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    async with db.connection() as conn:
+        skipped = await _calculate_skip(conn, now)
+    if skipped:
+        return {"skipped": skipped}
     from ..calculated.calculator import calculate as run_calculation
 
     payload = await asyncio.to_thread(
@@ -179,6 +210,11 @@ def register_jobs(
     async def calculate_job() -> dict[str, Any]:
         return await calculate(db, credentials_file, methodology)
 
+    async def estimates_release_job() -> dict[str, Any]:
+        from ..estimates.release import release_due
+
+        return {"released": len(await release_due(db))}
+
     async def detect_job() -> dict[str, Any]:
         return await detect(credentials_file)
 
@@ -193,6 +229,7 @@ def register_jobs(
     scheduler.add("reap", reap, every_s=60)
     scheduler.add("offline", offline, every_s=15)
     scheduler.add("calculate", calculate_job, every_s=60)
+    scheduler.add("estimates_release", estimates_release_job, every_s=60)
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
     scheduler.add("reports", reports_job, every_s=30)

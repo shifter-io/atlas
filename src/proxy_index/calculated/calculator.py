@@ -14,6 +14,7 @@ from psycopg.rows import dict_row, tuple_row
 from psycopg.types.json import Jsonb
 
 from .. import detect, traffic
+from ..estimates import window as estimate_window
 from ..names import labels as shared_labels
 from ..storage import column, connect
 from ..targets import registry
@@ -192,6 +193,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             "SELECT * FROM metric_evidence ORDER BY evidence_id"
         ).fetchall()
         scheduled = scheduled_inputs(conn, as_of, latency_target(config))
+        scheduled["estimates"] = estimate_window.fetch(conn, as_of)
         previous_row = conn.execute(
             "SELECT payload FROM calculated_snapshots JOIN current_calculation USING(build_id)"
         ).fetchone()
@@ -503,6 +505,7 @@ def build(
     tested=(),
     events=(),
     traffic=None,
+    estimates=None,
 ):
     slot_minutes = slot_length(pulse_minutes)
     slot_seconds = slot_minutes * 60
@@ -895,6 +898,7 @@ def build(
                     if target in p["windows"][label]["targets"]
                 ]
             )
+    estimate_window.attach(groups, run_map, estimates, config)
     return {
         "schema_version": SCHEMA_VERSION,
         "implementation_id": IMPLEMENTATION_ID,

@@ -1,4 +1,5 @@
-"""In-place v4 → … → v9, v5 → … → v9, v6 → … → v9, v7 → v8 → v9 and v8 → v9 migrations against
+"""In-place v4 → … → v10, v5 → … → v10, v6 → … → v10, v7 → … → v10, v8 → v9 → v10 and v9 → v10
+migrations against
 a pg_dump of a v4 database.
 
 fixtures/database_v4.sql.gz was produced by proxy-index 0.8.0 (schema v4, calculated v1): two
@@ -12,7 +13,8 @@ schemas except for one SQL comment each that the rename (#3) changed, so their o
 V6_FIXTURE_SHA256 and V7_FIXTURE_SHA256, while the loaders record storage.V6_CHECKSUM and
 V7_CHECKSUM as a real v6 or v7 database does; fixtures/schema_v8.sql is the exact v8 schema
 (storage.V8_CHECKSUM), and fixtures/calculated_v6.sql the exact calculated v6 schema
-(store.V6_CHECKSUM). Every path ends at schema v9 with calculated v7.
+(store.V6_CHECKSUM); fixtures/schema_v9.sql is the exact v9 schema (storage.V9_CHECKSUM). Every
+path ends at schema v10 with calculated v7.
 """
 
 import gzip
@@ -37,6 +39,7 @@ from proxy_index.storage import (
     V7_CHECKSUM,
     V8_CHECKSUM,
     V8_PRE_RENAME_CHECKSUM,
+    V9_CHECKSUM,
     connect,
     ingest,
     initialize,
@@ -53,6 +56,7 @@ SCHEMA_V5 = Path(__file__).parent / "fixtures/schema_v5.sql"
 SCHEMA_V6 = Path(__file__).parent / "fixtures/schema_v6.sql"
 SCHEMA_V7 = Path(__file__).parent / "fixtures/schema_v7.sql"
 SCHEMA_V8 = Path(__file__).parent / "fixtures/schema_v8.sql"
+SCHEMA_V9 = Path(__file__).parent / "fixtures/schema_v9.sql"
 # The fixtures' own SHA-256: the shipped v6 and v7 schemas except for one SQL comment that the
 # rename (#3) changed. A real v6 or v7 database records storage.V6_CHECKSUM or V7_CHECKSUM, which
 # the loaders below still insert into schema_versions.
@@ -159,7 +163,7 @@ async def test_v4_database_migrates_in_place(databases, tmp_path):
     api_before = await api_bodies(database, builds)
     result = migrate(database)
     assert result["migrated"] and result["calculated_schema_version"] == 7
-    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 9
+    assert result["from_schema_version"] == 4 and result["schema_version"] == SCHEMA_VERSION == 10
     assert result["from_calculated_schema_version"] == 1
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -420,14 +424,14 @@ def load_v7(database):
         conn.execute("INSERT INTO schema_versions(version,checksum) VALUES (7,%s)", (V7_CHECKSUM,))
 
 
-def test_v7_database_migrates_to_v9(databases):
+def test_v7_database_migrates_to_v10(databases):
     database = databases()
     load_v7(database)
     with pytest.raises(ValueError, match="db-migrate"):
         initialize(database)
     before = batches(database)
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (7, 9)
+    assert (result["from_schema_version"], result["schema_version"]) == (7, 10)
     assert result["verified"] == [
         *names.V8_CHECKS,
         *store.V3_CHECKS,
@@ -794,7 +798,7 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
     state = v5_state(database)
     bodies = await api_bodies(database, sorted(state["payloads"]))
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (8, 9)
+    assert (result["from_schema_version"], result["schema_version"]) == (8, 10)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (5, 7)
     assert result["verified"] == [*names.V8_CHECKS, *store.V5_CHECKS, *store.V6_CHECKS]
     assert migrate(database)["migrated"] is False
@@ -838,3 +842,56 @@ def test_failed_v8_check_rolls_back(databases, monkeypatch):
             "SELECT count(*) FROM information_schema.columns WHERE table_name="
             "'enrichment_locations' AND column_name='city'"
         ).fetchone() == (1,)
+
+
+def load_v9(database):
+    """The live shape: the v9 release's database (its exact schema) with the calculated v7 layer."""
+    load_calculated(database, 6)
+    schema = SCHEMA_V9.read_text()
+    assert hashlib.sha256(schema.encode()).hexdigest() == V9_CHECKSUM
+    calculated, calculated_checksum = store.schema()
+    with connect(database) as conn:
+        conn.execute((SOURCE / "migrate_v8_v9.sql").read_text())
+        conn.execute(store.V6_SNAPSHOT)
+        conn.execute((SOURCE / "calculated/migrate_v6_v7.sql").read_text())
+        conn.execute(schema)
+        conn.execute(calculated)
+        conn.execute("UPDATE schema_versions SET version=9,checksum=%s", (V9_CHECKSUM,))
+        conn.execute(
+            "UPDATE calculation_schema SET version=%s,checksum=%s",
+            (store.SCHEMA_VERSION, calculated_checksum),
+        )
+
+
+def test_v9_database_adds_estimated_hours(databases):
+    database = databases()
+    load_v9(database)
+    with pytest.raises(ValueError, match="db-migrate"):
+        initialize(database)
+    with connect(database) as conn:
+        runs = conn.execute("SELECT * FROM test_runs ORDER BY run_key").fetchall()
+        assert conn.execute("SELECT to_regclass('estimated_hours')").fetchone() == (None,)
+    result = migrate(database)
+    assert (result["from_schema_version"], result["schema_version"]) == (9, 10)
+    assert result["verified"] == []
+    assert migrate(database)["migrated"] is False
+    initialize(database)
+    store.initialize(database)
+    reference = databases()
+    store.initialize(reference)
+    assert catalog(database) == catalog(reference)
+    with connect(database) as conn:
+        assert conn.execute("SELECT * FROM test_runs ORDER BY run_key").fetchall() == runs and runs
+        conn.execute(
+            "INSERT INTO estimated_hours(product_id,country_code,day,hour,run_key,measured_at,"
+            "measured_ips,measured_requests,hour_factor,unique_ips,requests,day_unique_ips,curve,"
+            "formula_version) SELECT product_id,'DE','2026-11-02',5,run_key,started_at,10,100,"
+            "0.5,5,50,20,'country',1 FROM test_runs JOIN scope_stats USING(scope_id) "
+            "ORDER BY run_key LIMIT 1"
+        )
+        with pytest.raises(Exception, match="estimated_hours_hour_check"):
+            conn.execute(
+                "INSERT INTO estimated_hours SELECT product_id,country_code,day,24,run_key,"
+                "measured_at,measured_ips,measured_requests,hour_factor,unique_ips,requests,"
+                "day_unique_ips,curve,formula_version FROM estimated_hours"
+            )

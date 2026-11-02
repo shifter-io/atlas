@@ -624,7 +624,7 @@ def test_ingest_cli_downloads_once_then_imports(tmp_path, monkeypatch, capsys):
         downloads.append(campaign_id)
         (dest / collect.REPORT).write_text(json.dumps({"clean": True}))
 
-    async def fake_ingest(root, credentials, mmdb):
+    async def fake_ingest(root, credentials, mmdb, *, formulas=None):
         return {"campaign_id": CID, "complete": len(downloads) == 1}
 
     monkeypatch.setattr(collect, "collect", fake_collect)

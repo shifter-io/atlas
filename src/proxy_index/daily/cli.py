@@ -2,8 +2,9 @@
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
-`ingest` downloads a finished test (`campaign collect`), imports it and emits its events; it
-exits 3 when a cell failed or the download did not verify.
+`ingest` downloads a finished test (`campaign collect`), imports it and emits its events (with
+`--formulas`, also its estimated hours); it exits 3 when a cell failed, an imported country got
+no estimates or the download did not verify.
 """
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ def register(commands) -> None:
     ingest.add_argument("--dest", type=Path, required=True)
     ingest.add_argument("--database-file", type=Path, required=True)
     ingest.add_argument("--mmdb", type=Path)
+    ingest.add_argument(
+        "--formulas", type=Path, help="formulas/*.json: also store and release the estimated hours"
+    )
 
 
 def _plan(args) -> int:
@@ -76,7 +80,9 @@ def _ingest(args) -> int:
     if not json.loads(collected.read_text())["clean"]:
         print("Not ingested: the download did not verify", file=sys.stderr)
         return 3
-    report = asyncio.run(ingest_campaign(dest, args.database_file, args.mmdb))
+    report = asyncio.run(
+        ingest_campaign(dest, args.database_file, args.mmdb, formulas=args.formulas)
+    )
     print(json.dumps({k: report[k] for k in ("campaign_id", "complete")}, indent=2))
     return 0 if report["complete"] else 3
 
