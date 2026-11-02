@@ -232,6 +232,19 @@ async def test_a_pulse_assignment_into_a_project_not_named_dev_resources_is_refu
     assert rid in fake.projects[PROD_PROJECT] and not fake.deleted
 
 
+async def test_an_unassigned_pulse_node_is_never_deleted_even_inside_dev_resources(tmp_path):
+    fake, *_ = world()
+    async with running(fake) as cloud:
+        rid, records = await created_pulse_node(cloud)
+        fake.move(rid, DEV_PROJECT)  # the membership shows only after the assign gave up
+        await remove_unassigned(
+            cloud, pulse_scope(DEV_PROJECT), records, tmp_path / "a", {rid: {}}, "pulse"
+        )
+    assert records[rid].status == "destroy_refused" and records[rid].assign_failed_at
+    assert rid in fake.droplets and not fake.deleted
+    assert not [r for r in fake.requests if r[0] == "DELETE"]
+
+
 @pytest.mark.parametrize("role, use_pulse_scope", [("pulse", False), ("worker", True)])
 async def test_assignment_and_its_fail_closed_path_refuse_a_role_scope_mismatch(
     tmp_path, role, use_pulse_scope

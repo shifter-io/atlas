@@ -18,9 +18,10 @@ The node service runs as root (decision PULSE-1b): the droplet is single-purpose
 are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke test has
 checked its file permissions on a real node.
 
-`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region, ssh_key_id, identity (the SSH key
-file), wheel, orchestrator_url, database_file, and networks: {name: {product, provider_config,
-credentials, provider (default the name)}}. Paths are relative to the root. The ledger
+`fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region,
+ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, and
+networks: {name: {product, provider_config, credentials, provider (default the name)}}.
+Paths are relative to the root. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
 stdin tar.
 """
