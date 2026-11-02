@@ -266,7 +266,7 @@ async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by
         statements = (
             (pulse.WINDOW_STATS_SQL, pulse._range(W0, cfg)),
             (pulse.PAIRS_SQL, pulse._range(W0, cfg)),
-            (pulse.P50_SINCE_SQL, (["k"], W0 - WINDOW, W0 + 2 * WINDOW)),
+            (pulse.P50_SINCE_SQL, ([1], W0 - WINDOW, W0 + 2 * WINDOW)),
         )
         for statement, params in statements:
             explained = await conn.execute("EXPLAIN (FORMAT JSON) " + statement, params)
