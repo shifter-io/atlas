@@ -106,7 +106,9 @@ def test_retained_score_expiry():
 
 
 @pytest.mark.asyncio
-async def test_calculation_publication_and_api(database, tmp_path):
+async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
+    # These assertions read older published builds; retention has its own tests.
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     store.initialize(database)
     d = await measurement(tmp_path, requests=10)
     ingest(d, database)
@@ -930,7 +932,9 @@ async def benchmark_scenario(database, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_path):
+async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_path, monkeypatch):
+    # These assertions read older published builds; retention has its own tests.
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     policy, last, first = await benchmark_scenario(database, tmp_path)
     ready = calculate(database, policy, as_of=last + timedelta(minutes=10), publish=True)
     later = calculate(database, policy, as_of=last + timedelta(days=2), publish=True)
@@ -987,7 +991,9 @@ def test_cohort_criteria_keep_unusual_values(database):
 
 
 @pytest.mark.asyncio
-async def test_unpublished_payloads_are_pruned(database, tmp_path):
+async def test_unpublished_payloads_are_pruned(database, tmp_path, monkeypatch):
+    # These assertions read older published builds; retention has its own tests.
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     store.initialize(database)
     d = await measurement(tmp_path, requests=4)
     ingest(d, database)

@@ -39,6 +39,11 @@ def register(commands):
         elif name == "serve":
             p.add_argument("--host", default="127.0.0.1")
             p.add_argument("--port", type=int, default=8081)
+    expire = commands.add_parser("calculate-expire", help="Delete builds outside retention")
+    expire.add_argument("--database-file", required=True)
+    expire.add_argument("--days", type=int, default=store.RETAIN_DAYS)
+    expire.add_argument("--per-day", type=int, default=store.RETAIN_PER_DAY)
+    expire.add_argument("--dry-run", action="store_true", help="Only report what would go")
     report = commands.add_parser("report", help="Operator reports over census and pulse runs")
     kinds = report.add_subparsers(dest="report", required=True)
     traffic = kinds.add_parser("traffic", help="Wire GB per provider and test")
@@ -86,6 +91,10 @@ def dispatch(args):
                 end=traffic.parse_time(args.end),
             )
         print(json.dumps(report, indent=2, default=iso) if args.json else traffic.table(report))
+        return 0
+    if args.command == "calculate-expire":
+        result = store.retention(db, args.days, args.per_day, dry_run=args.dry_run)
+        print(json.dumps(result, indent=2))
         return 0
     if args.command == "calculate-init":
         result = store.initialize(db)
