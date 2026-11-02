@@ -19,7 +19,7 @@ from pathlib import Path
 from ..runner import run
 from .export import verify_chunk
 from .files import atomic_json, fingerprint, lock, read_json
-from .manifest import load, moment, settings, timestamp
+from .manifest import load, moment, region_countries, settings, timestamp
 from .scheduler import Clock, JobContext, job_directory, peak_memory_mb, run_job
 
 EARLY_START_SECONDS = 300
@@ -66,7 +66,7 @@ def new_round(manifest: dict, region: str, index: int) -> dict:
         "progress": {},
         "jobs": [
             {"round": index, "country": country, "scheduled_at": scheduled, "status": "pending"}
-            for country in manifest["regions"][region]
+            for country in region_countries(manifest, region)
         ],
     }
 
