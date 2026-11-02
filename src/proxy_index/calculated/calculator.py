@@ -55,13 +55,14 @@ from .policy import (
     slot_settings,
     uptime_settings,
 )
+from .slim import slim
 from .store import jsonable, prune, validate_payload
 
 SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()
-        for name in ("calculator.py", "aggregate.py", "policy.py")
+        for name in ("calculator.py", "aggregate.py", "policy.py", "slim.py")
     )
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic))
 ).hexdigest()
@@ -248,10 +249,9 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             payload = jsonable(payload)
             validate_payload(payload)
             persist(conn, payload)
-            conn.execute(
-                "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)",
-                (build_id, digest(payload), Jsonb(payload)),
-            )
+            payload = slim(payload, config)
+            insert = "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)"
+            conn.execute(insert, (build_id, digest(payload), Jsonb(payload)))
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
