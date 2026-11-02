@@ -8,6 +8,7 @@ the hourly calculation trigger. No database outside the test is touched.
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -236,7 +237,7 @@ async def test_stored_hours_are_released_in_order_and_never_rewritten(tmp_path, 
     assert compute.estimate_run(database, older, "DE", formula(3, DE={})) == 1  # only hour 14
     assert {r["formula_version"] for r in stored(database) if r["hour"] == 20} == {2}
     with pytest.raises(ValueError, match="not imported"):
-        compute.estimate_run(database, "no-such-run", "DE", formula(DE={}))
+        compute.estimate_run(database, str(uuid.uuid4()), "DE", formula(DE={}))
 
 
 async def test_week_unique_ips_are_distinct_measured_ips_not_a_sum_of_days(tmp_path, database, db):
