@@ -63,7 +63,7 @@ Kind = Literal["droplet", "ssh_key", "firewall", "snapshot"]
 Role = Literal["worker", "manager", "builder", "pulse"]
 # The scope of the always-on pulse nodes: no campaign's short id (always 8 hex digits) equals it.
 PULSE_SID = "pulse"
-# Per client: project membership cache and the project ids whose name was checked.
+# Per client: project membership cache, and the (project id, name) pairs whose name was checked.
 _projects: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _named: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 monotonic = time.monotonic  # the project cache's clock; tests replace it
@@ -150,6 +150,12 @@ def scope_for(spec: CampaignSpec) -> Scope:
 def pulse_scope(project_id: str) -> Scope:
     """The scope of the pulse nodes in project `project_id` (which must be Dev Resources)."""
     return Scope(PULSE_SID, PULSE_SID, project_id, "", datetime.min.replace(tzinfo=UTC))
+
+
+def _same_kind(scope: Scope, role: Role) -> None:
+    """The pulse role goes only with the pulse scope, and the pulse scope only with it."""
+    if (role == "pulse") != (scope.sid == PULSE_SID):
+        raise ValueError("the pulse role needs the pulse scope, and only the pulse role may use it")
 
 
 def role_checks(droplet: Droplet, scope: Scope, role: Role) -> dict[str, bool]:
@@ -405,13 +411,15 @@ async def _shown(
         await retry.sleep(delay)
 
 
-async def _assign(cloud: DigitalOcean, project_id: str, missing: set[str], retry: Retry) -> None:
+async def _assign(
+    cloud: DigitalOcean, project_id: str, missing: set[str], retry: Retry, name: str
+) -> None:
     """Assign and re-read the project until `missing` is empty or the attempts run out. A failed
-    call leaves its ids unconfirmed; only a project that is not Proxy Index raises."""
+    call leaves its ids unconfirmed; only a project that is not `name` raises."""
 
     async def attempt() -> bool:
         try:
-            named = await _project_named(cloud, project_id)
+            named = await _project_named(cloud, project_id, name)
         except Exception:  # unconfirmed this time: retried, then fail closed
             return False
         if not named:
@@ -437,7 +445,8 @@ async def assign_and_verify_project(
     role: Role = "worker",
     retry: Retry = ASSIGN_RETRY,
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """The only assignment path: move droplets we just created into project Proxy Index.
+    """The only assignment path: move droplets we just created into project Proxy Index (Dev
+    Resources for role "pulse", whose scope must be `pulse_scope`; a mismatch is a ValueError).
 
     Before any POST, every id must be recorded, come from this client's create, and show every
     marker on a fresh GET; an id that is not ours and fails a check raises `OwnershipError` at
@@ -447,13 +456,15 @@ async def assign_and_verify_project(
     confirmed (still not shown, an error, a project that never lists it) goes to
     `remove_unassigned`.
     """
+    _same_kind(scope, role)
     ids = sorted({str(i) for i in droplet_ids})
     if not ids:
         return frozenset(), frozenset()
     reads = await _shown(cloud, scope, ids, records, role, retry)
     missing = {rid for rid in ids if not reads[rid]}
     if missing:
-        await _assign(cloud, scope.project_id, missing, retry)
+        name = PULSE_PROJECT_NAME if role == "pulse" else PROJECT_NAME
+        await _assign(cloud, scope.project_id, missing, retry, name)
     unconfirmed = sorted(missing | {rid for rid in ids if reads[rid]})
     _require_own(cloud, unconfirmed, records)
     now = utcnow().isoformat()
@@ -497,8 +508,10 @@ async def remove_unassigned(
     caller's `save` writes the mark to its ledger before any delete, so a crash in between
     cannot leave an unmarked worker. Its record ends `destroyed`, or `destroy_refused` /
     `destroy_failed` for the caller to flag (and save). An id that is not from this client's
-    create raises `OwnershipError` and nothing is marked.
+    create raises `OwnershipError` and nothing is marked. A pulse node (role "pulse", pulse scope)
+    has no own-unassigned path: its delete is refused and its record ends `destroy_refused`.
     """
+    _same_kind(scope, role)
     ids = sorted(causes)
     _require_own(cloud, ids, records)
     now = utcnow().isoformat()

@@ -3,9 +3,11 @@ only `scope.retire_pulse_node` removes one, through the guard (fakes only)."""
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 from campaign_deploy_fakes import Shell, clean_report, fast_assign, make_job, owned_world
@@ -18,6 +20,7 @@ from campaign_fakes import (
     SID,
     SPEC_TIME,
     FakeDigitalOcean,
+    no_sleep,
     running,
 )
 
@@ -27,14 +30,18 @@ from proxy_index.campaign.contracts import (
     MANAGER_TAG,
     PULSE_TAG,
     WORKER_TAG,
+    DropletRecord,
     Scope,
 )
 from proxy_index.campaign.do_api import ScopeError
 from proxy_index.campaign.scope import (
     Ledger,
     OwnershipError,
+    Retry,
+    assign_and_verify_project,
     guarded_delete,
     pulse_scope,
+    remove_unassigned,
     retire_pulse_node,
 )
 
@@ -184,3 +191,122 @@ async def test_teardown_ignores_a_live_pulse_node(tmp_path, monkeypatch):
         )
     assert done["clean"] is True and PULSE_TAG not in done["tag_counts"]
     assert node in fake.droplets and ("droplet", node) not in fake.deleted
+
+
+FAST = Retry(sleep=no_sleep)
+
+
+async def created_pulse_node(cloud):
+    """A pulse node from this client's own create (it lands in the default project)."""
+    [droplet] = await cloud.create(
+        [PULSE_NAME], region="lon1", size="s-1vcpu-1gb-amd", image="1", tags=[PULSE_TAG],
+        ssh_keys=["9"],
+    )  # fmt: skip
+    return droplet.id, {droplet.id: DropletRecord("shifter", "lon1", 0, PULSE_NAME, droplet.id)}
+
+
+async def test_a_pulse_node_is_assigned_into_dev_resources_with_the_pulse_scope(tmp_path):
+    fake, *_ = world()
+    async with running(fake) as cloud:
+        rid, records = await created_pulse_node(cloud)
+        confirmed, failed = await assign_and_verify_project(
+            cloud, pulse_scope(DEV_PROJECT), [rid], records, tmp_path / "a", "pulse", FAST
+        )
+    assert (confirmed, failed) == ({rid}, set()) and records[rid].status == "assigned"
+    assert rid in fake.projects[DEV_PROJECT] and not fake.deleted
+
+
+@pytest.mark.parametrize("project", [CAMPAIGN_PROJECT, PROD_PROJECT])
+async def test_a_pulse_assignment_into_a_project_not_named_dev_resources_is_refused(
+    tmp_path, project
+):
+    fake, *_ = world()
+    async with running(fake) as cloud:
+        rid, records = await created_pulse_node(cloud)
+        with pytest.raises(OwnershipError) as refused:
+            await assign_and_verify_project(
+                cloud, pulse_scope(project), [rid], records, tmp_path / "a", "pulse", FAST
+            )
+    assert refused.value.failed == ["project_id"]
+    assert not [r for r in fake.requests if r[0] == "POST" and r[1].endswith("/resources")]
+    assert rid in fake.projects[PROD_PROJECT] and not fake.deleted
+
+
+@pytest.mark.parametrize("role, use_pulse_scope", [("pulse", False), ("worker", True)])
+async def test_assignment_and_its_fail_closed_path_refuse_a_role_scope_mismatch(
+    tmp_path, role, use_pulse_scope
+):
+    fake, *_ = world()
+    role_scope = pulse_scope(DEV_PROJECT) if use_pulse_scope else SCOPE
+    async with running(fake) as cloud:
+        rid, records = await created_pulse_node(cloud)
+        with pytest.raises(ValueError, match="pulse scope"):
+            await assign_and_verify_project(
+                cloud, role_scope, [rid], records, tmp_path / "a", role, FAST
+            )
+        with pytest.raises(ValueError, match="pulse scope"):
+            await remove_unassigned(cloud, role_scope, records, tmp_path / "a", {rid: {}}, role)
+    assert records[rid].status == "requested" and records[rid].assign_failed_at is None
+    assert not fake.deleted
+    assert [r[1] for r in fake.requests if r[0] == "POST"] == ["/v2/droplets"]
+
+
+SRC = Path(__file__).resolve().parents[1] / "src" / "proxy_index"
+PULSE_HOMES = {"scope.py", "pulse_fleet.py"}  # in src/proxy_index/campaign/
+PULSE_NAMES = {"pulse_scope", "retire_pulse_node"}
+
+
+def pulse_leaks(source: str) -> list[str]:
+    """Uses of the pulse scope or of the pulse role: a reference (call, attribute or import) to
+    `pulse_scope` / `retire_pulse_node`, or the role literal "pulse"."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        name = (
+            node.id if isinstance(node, ast.Name)
+            else node.attr if isinstance(node, ast.Attribute)
+            else node.name if isinstance(node, ast.alias)
+            else None
+        )  # fmt: skip
+        if name in PULSE_NAMES:
+            found.append(name)
+        if isinstance(node, ast.Constant) and node.value == "pulse":
+            found.append('"pulse"')
+    return found
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'guarded_delete(c, "droplet", i, s, ledger, audit, "pulse")',
+        "from .scope import pulse_scope as owned",
+        "scope.retire_pulse_node(c, i, p, ledger, audit)",
+        "action = scope.pulse_scope",
+        'role = "pulse"',
+    ],
+)
+def test_the_pulse_scan_catches_a_use_of_the_pulse_role(source):
+    assert pulse_leaks(source)
+
+
+def test_the_pulse_scan_ignores_other_words():
+    assert pulse_leaks('TESTS = ("census", "pulse-fleet", "Pulse", "pulse node")') == []
+
+
+def test_only_scope_and_the_pulse_fleet_use_the_pulse_scope_and_role():
+    """The pulse scope anywhere in src, and the role literal in the code that reaches the
+    guard (campaign/ and daily/; elsewhere "pulse" names the pulse test), stay in scope.py and
+    the pulse fleet module. contracts.py names the role once, in ROLES."""
+    homes = {SRC / "campaign" / name for name in PULSE_HOMES}
+    assert all(home.exists() for home in homes)
+    for path in sorted(SRC.rglob("*.py")):
+        if path in homes:
+            continue
+        leaks = pulse_leaks(path.read_text())
+        if path.relative_to(SRC).parts[0] not in ("campaign", "daily"):
+            leaks = [leak for leak in leaks if leak != '"pulse"']
+        if path == SRC / "campaign" / "contracts.py":
+            assert leaks.count('"pulse"') == 1
+            leaks = [leak for leak in leaks if leak != '"pulse"']
+        assert leaks == [], path.relative_to(SRC)
+    for home in homes:
+        assert pulse_leaks(home.read_text())
