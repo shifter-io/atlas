@@ -8,12 +8,13 @@ ALTER TABLE calculated_windows ADD UNIQUE(result_id,build_id);
 DROP VIEW IF EXISTS calculated_breakdown_details;
 ALTER TABLE calculated_breakdowns RENAME TO calculated_breakdowns_v5;
 ALTER INDEX calculated_breakdowns_pkey RENAME TO calculated_breakdowns_v5_pkey;
--- Generated constraint names are unique per schema: free them for the new table.
+-- Generated constraint names are unique per schema: free the CHECK and FOREIGN KEY names for
+-- the new table. PostgreSQL 18 also lists NOT NULL constraints (contype 'n'); revisit then.
 DO $$
 DECLARE name text;
 BEGIN
  FOR name IN SELECT conname FROM pg_constraint
-  WHERE conrelid='calculated_breakdowns_v5'::regclass AND contype<>'p' LOOP
+  WHERE conrelid='calculated_breakdowns_v5'::regclass AND contype IN ('c','f') LOOP
   EXECUTE format('ALTER TABLE calculated_breakdowns_v5 DROP CONSTRAINT %I', name);
  END LOOP;
 END $$;
