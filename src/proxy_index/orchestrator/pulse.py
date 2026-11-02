@@ -42,22 +42,29 @@ from .events import (
 
 WINDOW = timedelta(minutes=5)
 MAX_WINDOWS = 12  # windows evaluated per tick; a backlog continues on the next ticks
-GRACE = timedelta(seconds=60)  # a start passed by at most this much still runs, a bit late
+GRACE = timedelta(seconds=60)  # a slot opened this late still uses its whole interval
+MIN_GAP = timedelta(seconds=60)  # pulse starts of one region never closer: 10 s timeout + margin
 
 
 def spread(
-    countries: list[tuple[str, int]], base: datetime, window: timedelta, offset: float = 0.0
+    countries: list[tuple[str, int]],
+    base: datetime,
+    window: timedelta,
+    offset: float = 0.0,
+    min_step: timedelta = timedelta(0),
 ) -> dict[tuple[str, int], datetime]:
     """Start times for (country, region_id) pairs: each region's countries, in code order,
-    window / N apart from base, shifted by offset (0..1) of a step."""
+    window / N apart from base (at least min_step), shifted by offset (0..1) of a step.
+    Countries whose start would fall outside the window get none."""
     by_region: dict[int, list[str]] = {}
     for country, region in sorted(countries):
         by_region.setdefault(region, []).append(country)
     starts = {}
     for region, codes in by_region.items():
-        step = window / len(codes)
+        step = max(window / len(codes), min_step)
         for i, country in enumerate(codes):
-            starts[(country, region)] = base + step * (i + offset)
+            if step * (i + offset) < window:
+                starts[(country, region)] = base + step * (i + offset)
     return starts
 
 
@@ -71,9 +78,9 @@ async def open_slot(
 ) -> list[int]:
     """Insert a pulse batch per enabled country, each region's countries every / N apart from
     pulse.lead_seconds after the slot start; offset (0..1 of a step) keeps the targets of one
-    slot apart. No start is before begin + lead: a start at most GRACE earlier moves to it, and
-    a country whose start passed longer ago (a slot opened late, after a restart) is skipped
-    until the next slot, so the spacing never shrinks and pulses never overlap.
+    slot apart; no start is before begin + lead. A slot opened later than GRACE (a restart)
+    spreads over its rest from begin, never closer than MIN_GAP, so pulses never overlap;
+    countries that no longer fit wait for the next slot.
 
     Returns the new batch ids.
     """
@@ -84,13 +91,10 @@ async def open_slot(
             "ON r.region_id=c.region_id AND r.enabled WHERE c.enabled"
         )
     ).fetchall()
+    origin = slot if begin - slot <= GRACE else min(begin, slot + every)
     countries = [(r["country_code"].strip(), r["region_id"]) for r in rows]
-    first = begin + lead
-    starts = {
-        key: max(start, first)
-        for key, start in spread(countries, slot + lead, every, offset).items()
-        if start >= first - GRACE
-    }
+    starts = spread(countries, origin + lead, slot + every - origin, offset, MIN_GAP)
+    starts = {key: max(start, begin + lead) for key, start in starts.items()}
     keys = sorted(starts)
     inserted = await (
         await conn.execute(

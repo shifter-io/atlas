@@ -86,41 +86,58 @@ def test_spread_spaces_each_regions_countries_window_over_n_apart():
     assert shifted == {("FR", 1): base + hour / 4, ("GB", 1): base + hour * 3 / 4}
 
 
-async def test_open_slot_keeps_the_spacing_and_skips_the_passed_starts_after_a_late_open(
+async def test_open_slot_uses_the_rest_of_a_late_slot_but_never_starts_closer_than_a_minute(
     database, db
 ):
     prepare(database, ("DE", "AT", "CH", "PL"))  # all fra1
     slot, hour = datetime(2026, 10, 5, 12, tzinfo=UTC), timedelta(hours=1)
-    lead = timedelta(seconds=15)  # pulse.lead_seconds
+    lead, gap = timedelta(seconds=15), timedelta(seconds=60)  # pulse.lead_seconds, MIN_GAP
+    next_slot = slot + hour
     async with db.transaction() as conn:
         on_time = await pulse.open_slot(conn, "generic_http", slot, hour, slot + lead)
         late = await pulse.open_slot(conn, "generic_https", slot, hour, slot + 30 * lead)
         assert await pulse.open_slot(conn, "generic_http", slot, hour, slot) == []
-        # Opened at minute 55 of the next slot: every start has passed, none is squeezed in.
-        next_slot = slot + hour
-        assert (
-            await pulse.open_slot(conn, "generic_http", next_slot, hour, next_slot + hour * 55 / 60)
-            == []
+        # Opened at minute 58: 4 countries at 2 minutes / 4 would overlap, so 2 run a minute
+        # apart and the other 2 wait for the next slot.
+        very_late = await pulse.open_slot(
+            conn, "generic_http", next_slot, hour, next_slot + hour * 58 / 60
         )
-    assert (len(on_time), len(late)) == (4, 3)
+    assert (len(on_time), len(late), len(very_late)) == (4, 4, 2)
 
-    def starts(target):
+    def starts(target, scheduled):
         return [
             row[0]
             for row in query(
                 database,
-                "SELECT start_at FROM test_batches WHERE target_id=%s ORDER BY start_at",
-                (target,),
+                "SELECT start_at FROM test_batches WHERE target_id=%s AND scheduled_for=%s "
+                "ORDER BY start_at",
+                (target, scheduled),
             )
         ]
 
     # On time: 60 / 4 = 15 minutes apart from slot + lead, never before the planner's now + lead.
-    assert starts("generic_http") == [slot + 2 * lead] + [
+    assert starts("generic_http", slot) == [slot + 2 * lead] + [
         slot + lead + hour / 4 * i for i in (1, 2, 3)
     ]
-    # Opened 7.5 minutes late (a restart): the first start has passed and waits for the next
-    # slot; the others keep their 15-minute spacing.
-    assert starts("generic_https") == [slot + lead + hour / 4 * i for i in (1, 2, 3)]
+    # Opened 7.5 minutes late (a restart): the rest of the slot, from now + lead.
+    rest = hour - 30 * lead
+    assert starts("generic_https", slot) == [slot + 31 * lead + rest / 4 * i for i in range(4)]
+    begin = next_slot + hour * 58 / 60 + lead
+    assert starts("generic_http", next_slot) == [begin, begin + gap]
+
+
+def test_spread_never_spaces_a_regions_starts_closer_than_min_step():
+    base, window = datetime(2026, 10, 5, 12, tzinfo=UTC), timedelta(minutes=3)
+    codes = [("AT", 1), ("CH", 1), ("DE", 1), ("PL", 1), ("FR", 2)]
+    got = pulse.spread(codes, base, window, 0.5, timedelta(minutes=1))
+    # Region 1: max(45 s, 60 s) steps at 0.5, 1.5, 2.5 minutes; PL (3.5) is past the window.
+    minute = timedelta(minutes=1)
+    assert got == {
+        ("AT", 1): base + minute / 2,
+        ("CH", 1): base + minute * 1.5,
+        ("DE", 1): base + minute * 2.5,
+        ("FR", 2): base + window / 2,
+    }
 
 
 async def test_regions_errors_open_one_network_outage_and_a_healthy_window_closes_it(
@@ -252,7 +269,7 @@ async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by
             (pulse.P50_SINCE_SQL, (["k"], W0 - WINDOW, W0 + 2 * WINDOW)),
         )
         for statement, params in statements:
-            explained = await (await conn.execute("EXPLAIN (FORMAT JSON) " + statement, params))
+            explained = await conn.execute("EXPLAIN (FORMAT JSON) " + statement, params)
             plan = list(nodes((await explained.fetchone())["QUERY PLAN"][0]["Plan"]))
             relations = {n["Relation Name"] for n in plan if "Relation Name" in n}
             assert {r for r in relations if r.startswith("run_buckets")} == {
