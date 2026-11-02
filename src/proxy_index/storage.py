@@ -30,6 +30,17 @@ V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
 V7_CHECKSUM = "75eb7782f9700e6b57b42d59ef8ffd1f46976d9178432689131c0add5ae5f0a5"
 V8_CHECKSUM = "5986ee1ea743a34bf42cb49d3a7d5ded4d0b884bb653cb090e3d4b7f679a4552"
+# The same v8 schema before the framework rename (one comment differs); databases created then
+# record it.
+V8_PRE_RENAME_CHECKSUM = "315af82775eb32324307b33c7f88b18a7fd1a9b443ee1b8cb15d42fa7b1945ca"
+MIGRATABLE = {
+    (4, V4_CHECKSUM): 4,
+    (5, V5_CHECKSUM): 5,
+    (6, V6_CHECKSUM): 6,
+    (7, V7_CHECKSUM): 7,
+    (8, V8_CHECKSUM): 8,
+    (8, V8_PRE_RENAME_CHECKSUM): 8,
+}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
@@ -423,6 +434,18 @@ def _store_geo(conn, run_key, rows):
     )
 
 
+def _check_bucket_histograms(buckets, histogram):
+    """Each bucket's histogram counts its successes, and together they equal the run's."""
+    merged = Histogram(Counter())
+    for bucket in buckets.values():
+        part = _histogram(bucket["latency_histogram"])
+        if part.counts.total() != bucket["successes"]:
+            raise ValueError("Bucket histogram does not reconcile")
+        merged.merge(part)
+    if merged.export() != histogram.export():
+        raise ValueError("Bucket histograms differ from run histogram")
+
+
 def ingest(directory, credentials_file, *, batch_id=None):
     """Import one finished run directory; replaying the same artifacts is a no-op.
 
@@ -476,14 +499,7 @@ def ingest(directory, credentials_file, *, batch_id=None):
         or sum(b["successes"] for b in buckets.values()) != successes
     ):
         raise ValueError("Bucket counters do not reconcile")
-    bucket_histogram = Histogram(Counter())
-    for bucket in buckets.values():
-        part = _histogram(bucket["latency_histogram"])
-        if part.counts.total() != bucket["successes"]:
-            raise ValueError("Bucket histogram does not reconcile")
-        bucket_histogram.merge(part)
-    if bucket_histogram.export() != histogram.export():
-        raise ValueError("Bucket histograms differ from run histogram")
+    _check_bucket_histograms(buckets, histogram)
     bucket_rows = {bucket: _bucket(bucket, counters) for bucket, counters in buckets.items()}
     if any(key in summary for key in OUTCOME_KEYS):
         if not all(_count(summary.get(key)) for key in OUTCOME_KEYS) or (
@@ -832,7 +848,7 @@ def _enrich(conn, directory, run_id, run_key, expected_rows):
             "network_id.network_id,(g.attributes->>'matched')::boolean,nullif(("
             + extras
             + "),'{}'::jsonb) FROM incoming_geo g JOIN ip_addresses a USING(ip) "
-            + " ".join(joins)
+            + joins
             + " ON CONFLICT DO NOTHING",
             (release_id,),
         )
@@ -982,13 +998,7 @@ def migrate(credentials_file):
                 return {"schema_version": SCHEMA_VERSION, "migrated": False}
             start = SCHEMA_VERSION
         else:
-            start = {
-                (4, V4_CHECKSUM): 4,
-                (5, V5_CHECKSUM): 5,
-                (6, V6_CHECKSUM): 6,
-                (7, V7_CHECKSUM): 7,
-                (8, V8_CHECKSUM): 8,
-            }.get(versions[0] if len(versions) == 1 else None)
+            start = MIGRATABLE.get(versions[0] if len(versions) == 1 else None)
             if start is None:
                 raise ValueError(
                     "Only an unmodified v4, v5, v6, v7 or v8 schema can be migrated in place"

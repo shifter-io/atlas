@@ -35,6 +35,7 @@ from proxy_index.storage import (
     V6_CHECKSUM,
     V7_CHECKSUM,
     V8_CHECKSUM,
+    V8_PRE_RENAME_CHECKSUM,
     connect,
     ingest,
     initialize,
@@ -605,10 +606,14 @@ def v8_rows(conn, locations, networks):
     return rows
 
 
+# A database created before the framework rename records the same v8 schema under its old checksum.
 @pytest.mark.asyncio
-async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path):
+@pytest.mark.parametrize("recorded", [V8_CHECKSUM, V8_PRE_RENAME_CHECKSUM])
+async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, recorded):
     database = databases()
     load_v8(database)
+    with connect(database) as conn:
+        conn.execute("UPDATE schema_versions SET checksum=%s", (recorded,))
     with pytest.raises(ValueError, match="db-migrate"):
         initialize(database)
     with connect(database) as conn:
