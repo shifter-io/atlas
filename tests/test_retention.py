@@ -252,7 +252,9 @@ def test_retention_without_current_build_or_known_schema(database, capsys):
         with pytest.raises(ValueError, match="db-migrate"):
             store.retention(database, dry_run=bool(dry))
     with connect(database) as conn:
-        conn.execute("INSERT INTO calculation_schema VALUES (7,'second row')")
+        conn.execute(
+            "INSERT INTO calculation_schema VALUES (%s,'second row')", (store.SCHEMA_VERSION + 1,)
+        )
     with pytest.raises(ValueError, match="db-migrate"):
         store.retention(database, dry_run=True)
     with connect(database) as conn:

@@ -324,8 +324,8 @@ def test_base_only_v5_database_migrates(databases):
         conn.execute(
             "DROP TABLE current_calculation,calculated_snapshots,calculated_overlaps,"
             "calculated_scores,calculated_series,calculated_breakdowns,calculated_windows,"
-            "calculation_builds,metric_evidence,calculation_roles,methodologies,calculation_schema "
-            "CASCADE"
+            "calculation_builds,metric_evidence,calculation_roles,methodologies,calculation_schema,"
+            "places,asn_labels CASCADE"
         )
     assert migrate(database)["calculated_schema_version"] is None
     for run_id, summary in summaries.items():
@@ -789,11 +789,8 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
     with connect(database) as conn:
         before = v8_rows(conn, "enrichment_locations", "enrichment_networks")
         counts = breakdowns_by_build(conn)
-        places, asns = conn.execute(
-            "SELECT (SELECT count(DISTINCT jsonb_build_array(country_code,country,region_code,"
-            "region,city)) FROM enrichment_locations),(SELECT count(DISTINCT "
-            "jsonb_build_array(asn,asn_organization)) FROM enrichment_networks)"
-        ).fetchone()
+        # The lists also take the calculated layer's own places and ASN names.
+        places, asns, _ = conn.execute(V6_NAMES).fetchone()
     state = v5_state(database)
     bodies = await api_bodies(database, sorted(state["payloads"]))
     result = migrate(database)
