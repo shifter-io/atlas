@@ -1,8 +1,10 @@
-"""Readers follow `dbip update` (DBIP-DAILY-1): the `current` link, LocalEnricher.reload, the
-node's reopen between runs and the orchestrator's daily `dbip_update` job."""
+"""Readers follow `dbip update` (DBIP-DAILY-1): discovery of db-ip/dbip-full.mmdb,
+LocalEnricher.reload after the file is replaced, the node's reopen between runs and the
+orchestrator's daily `dbip_update` job."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,50 +21,80 @@ from proxy_index.orchestrator.jobs import dbip_update, register_jobs
 from proxy_index.orchestrator.scheduler import Scheduler
 
 pytest_plugins = ["test_storage"]
+NAME = "dbip-full.mmdb"
 
 
 def releases(root: Path) -> Path:
-    """db-ip/ with release a (low: US) behind `current` and release b (low: DE) beside it."""
+    """db-ip/ with release a (low half: US) under the fixed name."""
     root.mkdir()
-    (root / "a.mmdb").write_bytes(tiny_mmdb(low=US, marker="a"))
-    (root / "b.mmdb").write_bytes(tiny_mmdb(low=DE, marker="b"))
-    (root / "current").symlink_to("a.mmdb")
+    (root / NAME).write_bytes(tiny_mmdb(low=US, marker="a"))
     return root
 
 
-def swing(root: Path, name: str) -> None:
-    (root / "next").symlink_to(name)
-    (root / "next").replace(root / "current")
+def replace(root: Path, data: bytes) -> None:
+    """What `dbip update` does: a new file renamed over the fixed name."""
+    (root / ".next").write_bytes(data)
+    (root / ".next").replace(root / NAME)
 
 
-def test_discovery_prefers_the_current_link(tmp_path, monkeypatch):
+def sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_discovery_prefers_the_fixed_name(tmp_path, monkeypatch):
     monkeypatch.delenv("DBIP_MMDB", raising=False)
     monkeypatch.chdir(tmp_path)
-    root = releases(tmp_path / "db-ip")  # two *.mmdb files: only the link makes it unambiguous
-    assert find_source() == root / "current"
-    assert find_database() == (root / "a.mmdb").resolve()
-    monkeypatch.setenv("DBIP_MMDB", str(root / "current"))
-    assert find_source() == root / "current"
-
-
-def test_the_enricher_reopens_when_current_moves(tmp_path):
     root = releases(tmp_path / "db-ip")
-    with LocalEnricher(root / "current") as enricher:
+    (root / "dbip-full-2026-09-14.mmdb").write_bytes(b"an older manual copy")  # two *.mmdb
+    assert find_source() == root / NAME and find_database() == (root / NAME).resolve()
+    monkeypatch.setenv("DBIP_MMDB", str(root / NAME))
+    assert find_source() == root / NAME
+
+
+def test_the_enricher_reopens_the_replaced_file(tmp_path):
+    root = releases(tmp_path / "db-ip")
+    with LocalEnricher(root / NAME) as enricher:
         assert enricher.lookup("127.0.0.1")["country_code"] == "US"
         first = enricher.release
         assert not enricher.stale() and enricher.reload() is False
-        swing(root, "b.mmdb")
+        replace(root, tiny_mmdb(low=DE, marker="b"))
         assert enricher.stale() and enricher.reload() is True
-        assert enricher.path == (root / "b.mmdb").resolve() and enricher.release["file"] == "b.mmdb"
+        assert enricher.release["file"] == NAME and enricher.release["sha256"] == sha(root / NAME)
         assert enricher.release["sha256"] != first["sha256"]
         assert enricher.lookup("127.0.0.1")["country_code"] == "DE"  # the cache was cleared
-        (root / "broken.mmdb").write_bytes(b"not a database")
-        swing(root, "broken.mmdb")
+        replace(root, b"not a database")
         with pytest.raises(maxminddb.InvalidDatabaseError):
             enricher.reload()
         assert enricher.lookup("198.51.100.7")["country_code"] == "DE"  # b is still open
-        (root / "current").unlink()
-        assert enricher.stale() is False  # mid-swap: keep the open release
+        (root / NAME).unlink()
+        assert enricher.stale() is False  # gone: keep the open release
+
+
+def test_a_file_replaced_while_it_is_opened_is_opened_again(tmp_path, monkeypatch):
+    root = releases(tmp_path / "db-ip")
+    real, opened = maxminddb.open_database, []
+
+    def racing(path):
+        reader = real(path)
+        opened.append(path)
+        if len(opened) == 1:  # the update renames a new release over it mid-open
+            replace(root, tiny_mmdb(low=DE, marker="b"))
+        return reader
+
+    monkeypatch.setattr("proxy_index.enrichment.maxminddb.open_database", racing)
+    with LocalEnricher(root / NAME) as enricher:
+        assert len(opened) == 2 and enricher.release["sha256"] == sha(root / NAME)
+        assert enricher.lookup("127.0.0.1")["country_code"] == "DE"
+
+    def always(path):
+        reader = real(path)
+        opened.append(path)
+        replace(root, tiny_mmdb(marker=chr(ord("c") + len(opened))))
+        return reader
+
+    monkeypatch.setattr("proxy_index.enrichment.maxminddb.open_database", always)
+    with pytest.raises(OSError, match="kept changing"):
+        LocalEnricher(root / NAME)
 
 
 def agent(tmp_path, enricher) -> NodeAgent:
@@ -82,20 +114,21 @@ def agent(tmp_path, enricher) -> NodeAgent:
 async def test_a_node_reopens_the_database_only_between_runs(tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="proxy_index.node")
     root = releases(tmp_path / "db-ip")
-    with LocalEnricher(root / "current") as enricher:
+    with LocalEnricher(root / NAME) as enricher:
         node = agent(tmp_path, enricher)
-        assert node.mmdb == root / "current"  # finished runs are enriched with the newest
-        swing(root, "b.mmdb")
+        first = enricher.release["sha256"]
+        assert node.mmdb == root / NAME  # finished runs are enriched with the file's release
+        replace(root, tiny_mmdb(low=DE, marker="b"))
         node.active[1] = object()
         await node.reopen_database()
-        assert enricher.path.name == "a.mmdb"  # a run is active: it keeps its release
+        assert enricher.release["sha256"] == first  # a run is active: it keeps its release
         node.active.clear()
         await node.reopen_database()
-        assert enricher.path.name == "b.mmdb" and "reopened: b.mmdb" in caplog.text
-        (root / "broken.mmdb").write_bytes(b"x")
-        swing(root, "broken.mmdb")
+        second = sha(root / NAME)
+        assert enricher.release["sha256"] == second and f"reopened: {second[:12]}" in caplog.text
+        replace(root, b"x")
         await node.reopen_database()
-        assert enricher.path.name == "b.mmdb" and "could not reopen" in caplog.text
+        assert enricher.release["sha256"] == second and "could not reopen" in caplog.text
     await agent(tmp_path, None).reopen_database()  # no enricher: nothing to do
 
 
@@ -121,10 +154,11 @@ async def test_the_daily_job_updates_records_and_skips(tmp_path, database, db, m
             await put_setting(conn, "dbip.dir", str(tmp_path / "db-ip"))
             await put_setting(conn, "dbip.base_url", cdn.url)
         done = await scheduler.run_now("dbip_update")
-        assert done["dbip"] == "updated" and done["removed"] == []
-        assert (tmp_path / "db-ip" / "current").resolve().name == done["file"]
+        name = f"dbip-full-{today - timedelta(days=3)}.mmdb"
+        assert done["dbip"] == "updated" and done["release"] == name
+        assert sha(tmp_path / "db-ip" / NAME) == done["sha256"]
         again = await dbip_update(db, str(database))
-        assert again == {"skipped": "release unchanged", "file": done["file"]}
+        assert again == {"skipped": "release unchanged", "release": name}
         cdn.status[f"dbip-full-{today}.mmdb"] = 503
         assert await scheduler.run_now("dbip_update") is None  # failed, recorded and alerted
         async with db.connection() as conn:

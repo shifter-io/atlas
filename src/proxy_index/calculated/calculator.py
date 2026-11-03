@@ -167,8 +167,12 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             "LEFT JOIN runner_regions rr ON rr.region_id=b.region_id "
             "LEFT JOIN calculation_roles cr USING(run_key) ORDER BY r.run_key"
         ).fetchall()
+        # Each run keeps the DB-IP release it was enriched with (its newest, when re-enriched),
+        # so a new release (the daily update) never blanks older runs. The payload names the
+        # newest release any run uses; a release no run was enriched with yet changes nothing.
         release = conn.execute(
-            "SELECT release_id,sha256,metadata FROM dbip_releases ORDER BY release_id DESC LIMIT 1"
+            "SELECT release_id,sha256,metadata FROM dbip_releases WHERE release_id IN "
+            "(SELECT release_id FROM run_enrichments) ORDER BY release_id DESC LIMIT 1"
         ).fetchone()
         buckets = conn.execute(
             "SELECT bucket_start,run_key,run_bucket_counters(b) AS counters,"
@@ -177,16 +181,19 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             (start, as_of),
         ).fetchall()
         observations = conn.execute(
+            "WITH run_release AS (SELECT run_key,max(release_id) AS release_id "
+            "FROM run_enrichments GROUP BY run_key) "
             "SELECT o.*,host(a.ip) AS ip,e.matched,e.country_code,e.country,e.region_code,e.region,"
             "e.city,e.latitude,e.longitude,e.isp,e.organization,e.asn,e.asn_organization,"
             "e.connection_type,e.usage_type,m.first_seen AS product_first_seen "
             "FROM ip_observations o JOIN ip_addresses a USING(ip_id) "
             "JOIN test_runs r USING(run_key) JOIN scope_stats s USING(scope_id) "
             "JOIN product_ips m ON m.product_id=s.product_id AND m.ip_id=o.ip_id "
-            "LEFT JOIN ip_enrichment_fields e ON e.ip_id=o.ip_id AND e.release_id=%s "
+            "LEFT JOIN run_release rel ON rel.run_key=o.run_key "
+            "LEFT JOIN ip_enrichment_fields e ON e.ip_id=o.ip_id AND e.release_id=rel.release_id "
             "WHERE o.bucket_start>=%s AND o.bucket_start<%s "
             "ORDER BY o.run_key,o.bucket_start,o.ip_id",
-            (release["release_id"] if release else None, start, as_of),
+            (start, as_of),
         ).fetchall()
         evidence_rows = conn.execute(
             "SELECT * FROM metric_evidence ORDER BY evidence_id"

@@ -33,9 +33,7 @@ def register(commands) -> None:
     node.add_argument(
         "--credentials-file", help="Private credential TOML (owner-only); overrides env"
     )
-    node.add_argument(
-        "--mmdb", help="DB-IP MMDB or the dbip `current` link (default $DBIP_MMDB or db-ip/)"
-    )
+    node.add_argument("--mmdb", help="Local DB-IP MMDB (default $DBIP_MMDB or db-ip/)")
     node.add_argument("--work-dir", default="node-runs")
     node.add_argument("--verbose", action="store_true")
 
@@ -145,7 +143,7 @@ def dispatch(args) -> int:
             proxy_factory=factory,
             work_dir=args.work_dir,
             enricher=enricher,
-            # The configured path (db-ip/current follows updates), not today's file.
+            # The configured path as given: a link is followed again for every run.
             mmdb=enricher.source,
         )
         asyncio.run(serve(agent))

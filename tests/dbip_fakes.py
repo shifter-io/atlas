@@ -67,12 +67,13 @@ def tiny_mmdb(
 
 class FakeCdn:
     """A loopback CDN directory: `files` maps a name to its bytes, `status` forces an answer
-    for a name, `hits` counts (method, name)."""
+    for a name, `redirects` sends a name elsewhere, `hits` counts (method, name)."""
 
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
         self.status: dict[str, int] = {}
         self.cut: dict[str, int] = {}  # serve only this many bytes of a file
+        self.redirects: dict[str, str] = {}
         self.hits: Counter[tuple[str, str]] = Counter()
         cdn = self
 
@@ -80,6 +81,12 @@ class FakeCdn:
             def _answer(self, body: bool) -> None:
                 name = self.path.removeprefix("/dbip/")
                 cdn.hits[self.command, name] += 1
+                if name in cdn.redirects:
+                    self.send_response(302)
+                    self.send_header("Location", cdn.redirects[name])
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 status = cdn.status.get(name, 200 if name in cdn.files else 404)
                 data = cdn.files.get(name, b"") if status == 200 else b""
                 self.send_response(status)

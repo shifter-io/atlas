@@ -599,48 +599,57 @@ async def test_with_a_dbip_base_url_the_node_is_told_where_releases_are(tmp_path
     assert node["dbip_base_url"] == "https://cdn.invalid/dbip/"
 
 
-def arm_script(tmp_path, node, databases=(), current=None):
-    """Runs NODE_SCRIPT after its wheel install on a fake worker root; returns the systemd units
-    written and the systemctl steps."""
+def arm_script(tmp_path, node, databases=(), units=None):
+    """Runs NODE_SCRIPT after its wheel install on a fake worker root; returns the root, the
+    systemd units left in place and the systemctl calls. `units` are already installed."""
     root = tmp_path / "worker"
     (root / "pulse").mkdir(parents=True)
     (root / "db-ip").mkdir()
     for name in databases:
-        (root / "db-ip" / name).write_bytes(b"mmdb")
-    if current:
-        (root / "db-ip" / "current").symlink_to(current)
+        (root / "db-ip" / name).write_bytes(name.encode())
     (root / "pulse" / "node.json").write_text(json.dumps(node))
-    units, steps = tmp_path / "systemd", []
-    units.mkdir()
+    systemd, steps = tmp_path / "systemd", []
+    systemd.mkdir()
+    for name in units or ():
+        (systemd / name).write_text("old")
     shim = SimpleNamespace(
-        Path=lambda p: units / Path(p).name if p.startswith("/etc/systemd/") else Path(p)
+        Path=lambda p: systemd / Path(p).name if p.startswith("/etc/systemd/") else Path(p)
     )
-    run = SimpleNamespace(run=lambda command, check: steps.append(command[1:]))
+    run = SimpleNamespace(run=lambda command, check: steps.append((command[1:], check)))
     tail = pulse_fleet.NODE_SCRIPT.split(pulse_fleet.INSTALL_WHEEL)[1]
     exec(tail, {"json": json, "pathlib": shim, "subprocess": run, "root": root, "secrets": root})
-    return root, {p.name: p.read_text() for p in units.iterdir()}, steps
+    return root, {p.name: p.read_text() for p in systemd.iterdir()}, steps
 
 
 NODE_JSON = {"orchestrator": "http://o", "provider": "p", "product": "q", "region": "lon1"}
+UPDATER = ("pi-dbip-update.service", "pi-dbip-update.timer")
 
 
-def test_arming_links_the_image_database_and_installs_the_daily_update(tmp_path):
+def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path):
     base = "https://cdn.invalid/dbip/"
     root, units, steps = arm_script(
         tmp_path, NODE_JSON | {"dbip_base_url": base}, ["dbip-full-2026-11-02.mmdb"]
     )
-    assert (root / "db-ip" / "current").resolve().name == "dbip-full-2026-11-02.mmdb"
-    assert f"--mmdb {root}/db-ip/current" in units["pi-pulse-node.service"]
-    update = f"bin/proxy-index dbip update --dest {root}/db-ip --base-url {base}"
+    db = root / "db-ip"
+    assert sorted(p.name for p in db.iterdir()) == ["dbip-full.mmdb"]
+    assert (db / "dbip-full.mmdb").read_bytes() == b"dbip-full-2026-11-02.mmdb"  # renamed
+    assert f"--mmdb {db}/dbip-full.mmdb" in units["pi-pulse-node.service"]
+    update = f"bin/proxy-index dbip update --dest {db} --base-url {base}"
     assert update in units["pi-dbip-update.service"]
     assert "OnCalendar=*-*-* 05:41:00 UTC" in units["pi-dbip-update.timer"]
-    assert steps[-1] == ["enable", "--now", "pi-dbip-update.timer"]
+    assert steps[-1] == (["enable", "--now", "pi-dbip-update.timer"], True)
 
 
-def test_arming_keeps_an_updated_current_and_needs_no_timer_without_a_base_url(tmp_path):
-    names = ["dbip-full-2026-11-02.mmdb", "dbip-full-2026-12-01.mmdb"]
-    root, units, steps = arm_script(tmp_path, NODE_JSON, names, current=names[1])
-    assert (root / "db-ip" / "current").resolve().name == names[1]
-    assert set(units) == {"pi-pulse-node.service"} and len(steps) == 3
+def test_arming_keeps_an_updated_database_and_removes_a_timer_no_longer_wanted(tmp_path):
+    names = ["dbip-full-2026-09-14.mmdb", "dbip-full.mmdb"]  # the update's file and an old one
+    root, units, steps = arm_script(tmp_path, NODE_JSON, names, units=UPDATER)
+    assert (root / "db-ip" / "dbip-full.mmdb").read_bytes() == b"dbip-full.mmdb"
+    assert set(units) == {"pi-pulse-node.service"}  # the earlier arming's timer is gone
+    assert steps[0] == (["disable", "--now", "pi-dbip-update.timer"], False)
+    assert [s for s, _ in steps[1:]] == [
+        ["daemon-reload"],
+        ["enable", "pi-pulse-node"],
+        ["restart", "pi-pulse-node"],
+    ]
     _, units, _ = arm_script(tmp_path / "bare", NODE_JSON)
     assert "--mmdb" not in units["pi-pulse-node.service"]

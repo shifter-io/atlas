@@ -6,10 +6,12 @@ wanted node `pi-pulse-<region>-<network>` that the pulse tag does not list is cr
 `scope.assign_and_verify_project` and armed. Arming issues the node's token (rotated), pushes
 the wheel, the network's provider config, its credentials and the token on stdin, and installs
 the `pi-pulse-node` service, which runs `proxy-index node` registered for that network and
-region; the orchestrator hands it one country at a time. The node reads the image's DB-IP MMDB
-through the `db-ip/current` link; with `dbip_base_url`, arming also installs the
-`pi-dbip-update` timer, which runs `proxy-index dbip update` daily against that CDN directory,
-and the node reopens the database when the link moves (DBIP-DAILY-1).
+region; the orchestrator hands it one country at a time. The node reads the DB-IP MMDB as
+`db-ip/dbip-full.mmdb` (arming renames the image's file to that name); with `dbip_base_url`,
+arming also installs the `pi-dbip-update` timer, which runs `proxy-index dbip update` daily
+against that CDN directory and renames each new release over the same name, and the node
+reopens the replaced file between runs (DBIP-DAILY-1). Without it, arming disables and removes
+a timer an earlier arming installed.
 
 Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
 `unknown` and never touched, and it never deletes anything (a node whose assignment was not
@@ -92,11 +94,11 @@ wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
     + INSTALL_WHEEL
     + r"""node = json.loads((root / "pulse" / "node.json").read_text())
 db, cli = root / "db-ip", str(root / "venv" / "bin" / "proxy-index")
+mmdb = db / "dbip-full.mmdb"  # the one name `dbip update` replaces atomically
 databases = sorted(db.glob("*.mmdb"))
-if not (db / "current").exists() and len(databases) == 1:  # the image's release, until updated
-    (db / "current").unlink(missing_ok=True)
-    (db / "current").symlink_to(databases[0].name)
-country_check = ["--mmdb", str(db / "current")] if (db / "current").exists() else []
+if not mmdb.exists() and len(databases) == 1:  # the image's release, until the first update
+    databases[0].replace(mmdb)
+country_check = ["--mmdb", str(mmdb)] if mmdb.exists() else []
 command = [cli, "node",
            "--orchestrator", node["orchestrator"], "--token-file", str(secrets / "node-token"),
            "--provider", node["provider"], "--product", node["product"],
@@ -109,7 +111,12 @@ unit = ["[Unit]", "Description=proxy-index pulse node", "After=network-online.ta
         "LimitNOFILE=65536", "", "[Install]", "WantedBy=multi-user.target", ""]
 units = {"pi-pulse-node.service": unit}
 steps = [["daemon-reload"], ["enable", "pi-pulse-node"], ["restart", "pi-pulse-node"]]
-if node.get("dbip_base_url"):
+updater = ("pi-dbip-update.service", "pi-dbip-update.timer")
+if not node.get("dbip_base_url"):  # no longer wanted: stop an earlier arming's timer
+    subprocess.run(["systemctl", "disable", "--now", updater[1]], check=False)
+    for name in updater:
+        pathlib.Path("/etc/systemd/system/" + name).unlink(missing_ok=True)
+else:
     update = [cli, "dbip", "update", "--dest", str(db), "--base-url", node["dbip_base_url"]]
     units["pi-dbip-update.service"] = ["[Unit]", "Description=proxy-index DB-IP update",
         "After=network-online.target", "Wants=network-online.target", "", "[Service]",

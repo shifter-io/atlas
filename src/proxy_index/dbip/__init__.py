@@ -2,15 +2,17 @@
 
 DB-IP releases are dated files on a CDN (`<base URL>/dbip-full-YYYY-MM-DD.mmdb`, source.py).
 `update` finds the newest one (tomorrow back to the installed release, or `lookback_days` when
-none is installed), downloads it only when it differs from the installed release, verifies it
-(the announced size, at least `min_bytes` and half the installed release, the MaxMind reader
-and a spread of test lookups), installs it atomically behind the `current` link (files.py),
-keeps the previous two releases, deletes older ones and records it in `dbip_releases`. A
-second run on the same release downloads and changes nothing.
+none is installed) and downloads it only when it differs from the installed release. It
+verifies it (the announced size, at least `min_bytes` and half the installed release, the
+MaxMind reader and a spread of test lookups) and renames it over `dest/dbip-full.mmdb` in one
+step: the file always has the same name, and the download goes to a temporary file in the same
+directory, never into the file in use (files.py). It records the release in `dbip_releases`.
+A second run on the same release downloads and changes nothing. Runs already stored keep the
+release they were enriched with (calculated/calculator.py).
 
 The orchestrator runs it once a day on its server (jobs.py, `dbip_update`) and each pulse node
-runs it from a daily timer (campaign/pulse_fleet.py); readers follow `current`
-(enrichment.LocalEnricher.reload).
+runs it from a daily timer (campaign/pulse_fleet.py); long-lived readers reopen the replaced
+file (enrichment.LocalEnricher.reload).
 
 Exit codes: 0 updated or unchanged, 2 configuration, 3 probe, download, verification or
 recording failed, 4 another update holds the directory's lock. Every run prints one JSON
@@ -26,7 +28,8 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .files import STATE, directory_lock, inspect, install, prune, read_state, write_json
+from ..enrichment import CURRENT
+from .files import PARTIAL, STATE, directory_lock, inspect, install, read_state, write_json
 from .source import (
     BASE_URL_ENV,
     PREFIX,
@@ -91,7 +94,7 @@ def update(
         if release is None or release.identity() == state.get("source"):
             state["checked_at"] = now.isoformat()
             write_json(dest / STATE, state)
-            result = _health("unchanged", state, [])
+            result = _health("unchanged", state)
         else:
             result = _replace(dest, release, state, checks, now)
     result["recorded"] = None
@@ -104,30 +107,29 @@ def update(
     return result
 
 
-def _health(status: str, state: dict[str, Any], removed: list[str]) -> dict[str, Any]:
-    return {"dbip": status, **{k: state[k] for k in (*_RELEASE, "source")}, "removed": removed}
+def _health(status: str, state: dict[str, Any]) -> dict[str, Any]:
+    return {"dbip": status, **{k: state[k] for k in (*_RELEASE, "source")}}
 
 
 def _replace(
     dest: Path, release: Release, state: dict[str, Any], checks: Checks, now: datetime
 ) -> dict[str, Any]:
-    partial = dest / ".download.partial"
+    partial = dest / PARTIAL
     try:
         size, sha256 = download(release, partial)
         _check_size(size, state, checks)
         record_ = inspect(partial, sha256, checks.min_coverage)
-        if state.get("sha256") == sha256:  # the same bytes, new headers
-            status, target = "unchanged", dest / state["file"]
-        else:
-            status, target = "updated", install(dest, partial, sha256, release.name)
+        status = "unchanged" if state.get("sha256") == sha256 else "updated"  # same bytes?
+        if status == "updated":
+            install(dest, partial)
     finally:
         partial.unlink(missing_ok=True)
     stamp = now.isoformat()
-    new_state = record_ | {"file": target.name, "size": size, "source": release.identity()}
+    new_state = record_ | {"file": CURRENT, "size": size, "source": release.identity()}
     new_state["updated_at"] = state.get("updated_at") if status == "unchanged" else stamp
     new_state["checked_at"] = stamp
     write_json(dest / STATE, new_state)
-    return _health(status, new_state, prune(dest))
+    return _health(status, new_state)
 
 
 def _check_size(size: int, state: dict[str, Any], checks: Checks) -> None:
@@ -159,7 +161,7 @@ def register(commands) -> None:
     run = actions.add_parser(
         "update", help="Download, verify and install the newest dated MMDB when it changed"
     )
-    run.add_argument("--dest", type=Path, required=True, help="Directory of releases + current")
+    run.add_argument("--dest", type=Path, required=True, help="Directory of dbip-full.mmdb")
     run.add_argument(
         "--base-url", help=f"CDN directory of dbip-full-YYYY-MM-DD.mmdb (default ${BASE_URL_ENV})"
     )

@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .. import __version__
 
@@ -59,10 +59,33 @@ def base_url(value: str | None = None) -> str:
     if not url:
         raise ConfigError(f"no DB-IP base URL: set --base-url or ${BASE_URL_ENV}")
     parts = urlsplit(url)
-    secure = parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK)
-    if not secure or parts.query or parts.fragment:
+    if not _secure(url) or parts.query or parts.fragment:
         raise ConfigError("the DB-IP base URL must be https, without a query")
     return url.rstrip("/") + "/"
+
+
+def _secure(url: str) -> bool:
+    """https, or plain http to this machine (the tests' loopback CDN)."""
+    parts = urlsplit(url)
+    return parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK)
+
+
+class _InsecureRedirect(Exception):
+    pass
+
+
+class _SecureRedirects(HTTPRedirectHandler):
+    """Follow a redirect only to another secure URL, so base_url's https promise holds for the
+    whole request and not only its first hop."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _secure(newurl):
+            fp.close()
+            raise _InsecureRedirect
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = build_opener(_SecureRedirects)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +109,9 @@ class Release:
 def _open(url: str, step: str, method: str = "GET"):
     request = Request(url, method=method, headers={"User-Agent": f"proxy-index/{__version__}"})
     try:
-        return urlopen(request, timeout=TIMEOUT_S)  # noqa: S310 - https only (base_url)
+        return _OPENER.open(request, timeout=TIMEOUT_S)
+    except _InsecureRedirect:
+        raise UpdateError(f"{step}: redirected to a URL that is not https") from None
     except HTTPError as exc:
         exc.close()
         raise (Missing if exc.code == 404 else UpdateError)(f"{step}: HTTP {exc.code}") from None

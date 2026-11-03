@@ -1,10 +1,9 @@
-"""The installed releases in the destination directory: verification, the lock, the state
-file, the atomic install behind the `current` link and pruning."""
+"""The installed release in the destination directory: verification, the lock, the state file
+and the atomic install under the one name `dbip-full.mmdb`."""
 
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 from contextlib import contextmanager
@@ -14,11 +13,11 @@ from typing import Any
 import maxminddb
 
 from ..enrichment import CURRENT, release_record
-from .source import PREFIX, Busy, UpdateError, private_file
+from .source import Busy, UpdateError, private_file
 
 STATE = "release.json"
 LOCK = ".update.lock"
-KEEP = 3  # the current release and the previous two
+PARTIAL = f".{CURRENT}.partial"  # the download, in the same directory as its target
 
 
 def inspect(path: Path, sha256: str, min_coverage: float) -> dict[str, Any]:
@@ -62,10 +61,10 @@ def read_state(dest: Path) -> dict[str, Any]:
     """The installed release (release.json), or {} when nothing usable is installed."""
     try:
         state = json.loads((dest / STATE).read_text())
-        current = (dest / CURRENT).resolve(strict=True)
+        size = (dest / CURRENT).stat().st_size
     except (OSError, ValueError):
         return {}
-    if current.name != state.get("file") or current.stat().st_size != state.get("size"):
+    if state.get("file") != CURRENT or size != state.get("size"):
         return {}
     return state
 
@@ -78,45 +77,16 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     partial.replace(path)
 
 
-def install(dest: Path, partial: Path, sha256: str, name: str) -> Path:
-    """Rename the verified MMDB into place as `name` (another file of that name with other
-    bytes is kept: the new one gets its SHA-256 prefix) and swing `current` to it, atomically."""
-    target = dest / name
-    if target.exists() and _sha256(target) != sha256:
-        target = target.with_name(f"{target.stem}-{sha256[:8]}.mmdb")
+def install(dest: Path, partial: Path) -> Path:
+    """Rename the verified download over `dbip-full.mmdb` in one step (same directory, so the
+    same filesystem): a reader sees the old file or the new one, never a partial one, and a
+    reader that has the old one open keeps it until it reopens."""
+    target = dest / CURRENT
     os.chmod(partial, 0o644)  # licensed data, not a secret: every local service reads it
     partial.replace(target)
-    link = dest / f".{CURRENT}.partial"
-    link.unlink(missing_ok=True)
-    os.symlink(target.name, link)
-    link.replace(dest / CURRENT)
-    _sync_dir(dest)
-    return target
-
-
-def _sha256(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def _sync_dir(dest: Path) -> None:
     fd = os.open(dest, os.O_RDONLY)
     try:
         os.fsync(fd)
     finally:
         os.close(fd)
-
-
-def prune(dest: Path) -> list[str]:
-    """Delete releases beyond the current one and the previous KEEP - 1; returns their names."""
-    current = (dest / CURRENT).resolve()
-    others = [
-        p
-        for p in dest.glob(f"{PREFIX}*.mmdb")
-        if p.is_file() and not p.is_symlink() and p.resolve() != current
-    ]
-    others.sort(key=lambda p: (p.stat().st_mtime_ns, p.name), reverse=True)
-    removed = others[KEEP - 1 :]
-    for path in removed:
-        path.unlink()
-    return sorted(p.name for p in removed)
+    return target

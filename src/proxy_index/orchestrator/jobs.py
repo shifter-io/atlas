@@ -18,8 +18,8 @@ retention                 daily: test_events older than retention.events_days (w
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
-                          installs the newest dated DB-IP MMDB from `dbip.base_url` behind
-                          `dbip.dir`/current and records it; an unchanged release is 'skipped'
+                          renames the newest dated DB-IP MMDB from `dbip.base_url` over
+                          `dbip.dir`/dbip-full.mmdb and records it; unchanged is 'skipped'
 
 Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
 and the index are written there (report_html.write, in a thread; install_reports).
@@ -230,8 +230,8 @@ async def dbip_update(db: Database, credentials_file: str) -> dict[str, Any]:
     if result.get("error"):
         raise dbip.UpdateError(result["error"])
     if result["dbip"] == "unchanged":
-        return {"skipped": "release unchanged", "file": result["file"]}
-    return {k: result[k] for k in ("dbip", "file", "sha256", "removed")}
+        return {"skipped": "release unchanged", "release": result["source"]["name"]}
+    return {"dbip": result["dbip"], "release": result["source"]["name"], "sha256": result["sha256"]}
 
 
 def install_reports(db: Database) -> None:

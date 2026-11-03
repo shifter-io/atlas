@@ -217,7 +217,7 @@ class NodeAgent:
             return
         try:
             if await asyncio.to_thread(reload):
-                log.info("DB-IP database reopened: %s", self.enricher.release["file"])
+                log.info("DB-IP database reopened: %s", self.enricher.release["sha256"][:12])
         except Exception as exc:  # noqa: BLE001 - the open release stays in use
             log.warning("could not reopen the DB-IP database (%s)", type(exc).__name__)
 

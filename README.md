@@ -364,32 +364,50 @@ challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs
 ## Daily DB-IP update
 
 DB-IP releases are dated files in one CDN directory: `<base URL>/dbip-full-YYYY-MM-DD.mmdb`
-(the release date). `proxy-index dbip update --dest DIR --base-url URL` keeps `DIR` at the
-newest one. It probes (HEAD) from tomorrow (UTC) back to the installed release, or back
-`--lookback-days` (default 62) when none is installed, and takes the newest file that exists
-(404 means no release that day; any other answer fails the run). Only when its name, size or
-ETag differs from the installed release does it download it, then checks the size (the
-announced length, at least `--min-bytes`, default 100 MiB, and at least half the installed
-release), opens it with the MaxMind reader (a DB-IP database type) and looks up one address in
-every public /8 (`--min-coverage`, default 90 %, must have a country). It renames it into place
-under its CDN name (a file replaced on the CDN under the same name with other bytes gets the
-first 8 hex characters of its SHA-256 appended), swings the `current` link to it atomically,
-keeps the previous two releases, deletes older ones and records the release in
-`dbip_releases` (with `--database-file`, default `$PROXY_INDEX_DATABASE_FILE`). `release.json`
-holds the installed release, so a run on an unchanged release downloads nothing. Every run
-prints one JSON health line (`"dbip": "updated" | "unchanged" | "failed"`); exit codes: 0
-updated or unchanged, 2 configuration, 3 probe, download, verification or recording failed (a
+(the release date). `proxy-index dbip update --dest DIR --base-url URL` keeps
+`DIR/dbip-full.mmdb` at the newest one. The file always has that one name.
+
+- **Finding the release.** It probes (HEAD) from tomorrow (UTC) back to the installed release,
+  or back `--lookback-days` (default 62) when none is installed, and takes the newest file that
+  exists. A 404 means no release that day; any other answer fails the run.
+- **Downloading.** It downloads only when the release's name, size, ETag or Last-Modified
+  differs from the installed one. The download goes to a temporary file in `DIR`, never into
+  the file in use.
+- **Checking.** The size must match the announced length, be at least `--min-bytes` (default
+  100 MiB) and at least half the installed release. The file must open with the MaxMind reader
+  as a DB-IP database, and of one test address per public /8, at least `--min-coverage`
+  (default 90 %) must have a country.
+- **Installing.** It renames the checked file over `dbip-full.mmdb` in one step, so a reader sees
+  the old file or the new one and never a partial one. A reader that has the old file open keeps
+  it until it reopens. Earlier releases are not kept. The same bytes under new headers leave
+  the file untouched.
+- **Recording.** It records the release in `dbip_releases` (with `--database-file`, default
+  `$PROXY_INDEX_DATABASE_FILE`). `release.json` holds the installed release, so a run on an
+  unchanged release downloads nothing.
+
+Every run prints one JSON health line (`"dbip": "updated" | "unchanged" | "failed"`). Exit
+codes: 0 updated or unchanged, 2 configuration, 3 probe, download, check or recording failed (a
 release installed but not recorded is recorded by the next run), 4 another update of the
 directory is running.
 
 The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL`, the
 orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It must be https
-without a query; errors name the file and the HTTP status or error type, never the URL.
+without a query, and a redirect is followed only to another https URL. Errors name the file and
+the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
+path), so it also appears in the pulse nodes' update unit
+(`/etc/systemd/system/pi-dbip-update.service`, mode 0644) and in its process arguments. If the
+CDN ever needs a token, that has to change first.
 
-**On the manager** (where the orchestrator runs), the orchestrator's `dbip_update` job runs it
-daily at 05:23 UTC once the `dbip.dir` setting names the directory. A failure fails the job and
-raises a `job_failed` alert; an unchanged release records the run as `skipped`. Run it now with
-`POST /admin/api/jobs/run {"job": "dbip_update"}`.
+**Each test keeps the locations it was saved with.** Enrichment is stored per run with the
+release it used, and the calculation reads each run's observations with that run's own release
+(its newest one, if it was enriched again). A new release therefore changes only the runs
+enriched with it, never older ones. The snapshot's `dbip_release` names the newest release that
+some run uses; a release recorded by the update before any run used it changes nothing.
+
+**On the manager** (where the orchestrator runs), the orchestrator's `dbip_update` job runs the
+update daily at 05:23 UTC once the `dbip.dir` setting names the directory. A failure fails the
+job and raises a `job_failed` alert; an unchanged release records the run as `skipped`. Run it
+now with `POST /admin/api/jobs/run {"job": "dbip_update"}`.
 
 ```sql
 INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/proxy-index/db-ip"'),
@@ -397,24 +415,25 @@ INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/proxy-index/db-ip"'),
   ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now();
 ```
 
-Readers use the `current` link: point `--mmdb` or `DBIP_MMDB` at `DIR/current` (without either,
-`db-ip/current` wins over a lone `db-ip/*.mmdb`). `daily ingest` and `enrich` open the database
-per run, so each run uses the newest release. A long-running `proxy-index node` reopens it when
-the link moves, between runs only (a run keeps one release), and enriches finished runs with the
-link's release; no restart is needed.
+Readers name the file: point `--mmdb` or `DBIP_MMDB` at `DIR/dbip-full.mmdb`. Without either,
+`db-ip/dbip-full.mmdb` wins over other `db-ip/*.mmdb` files. `daily ingest` and `enrich` open the
+database per run, so each run uses the release installed when it is enriched. A long-running
+`proxy-index node` reopens the replaced file between runs only (a run keeps one release), with no
+restart.
 
-**On the pulse droplets**, each node fetches the release itself from the CDN (nothing is pushed
-from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over
-1 GB). With `dbip_base_url` in `fleet.json`, arming installs `pi-dbip-update.timer`: `proxy-index
-dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming and then daily at
-05:41 UTC plus up to 30 minutes of random delay (spreading the downloads). Arming points
-`db-ip/current` at the image's release when no link exists yet and starts the node with
-`--mmdb .../db-ip/current`, so the node runs on the image's release until the first update and
-reopens the database after each one. A node keeps at most three releases (about 4 GB) plus one
-download in flight. Nodes armed before `dbip_base_url` was set get the timer only when armed
-again (re-created). Hourly campaign workers keep the release baked into their image (`campaign
-image build --mmdb DIR/current`, which records the dated file the link resolves to); rebuilding
-the image refreshes them.
+**On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
+from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
+- With `dbip_base_url` in `fleet.json`, arming installs `pi-dbip-update.timer`. It runs
+  `proxy-index dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming, then
+  daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
+- Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
+  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
+  release until the first update and reopens the file after each one.
+- A node holds one release (about 1.4 GB) plus one download in flight.
+- Without `dbip_base_url`, arming disables and removes a timer an earlier arming installed.
+  Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
+- Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
+  DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
 
 ## Private network onboarding
 

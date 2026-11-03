@@ -5,6 +5,7 @@ No test reaches DB-IP or a real CDN: every file comes from dbip_fakes.FakeCdn.""
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from datetime import date, timedelta
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import maxminddb
 import pytest
-from dbip_fakes import DE, NO_COUNTRY, FakeCdn, tiny_mmdb
+from dbip_fakes import DE, NO_COUNTRY, US, FakeCdn, tiny_mmdb
 
 from proxy_index import dbip
 from proxy_index.cli import main
@@ -53,8 +54,8 @@ def cli(tmp_path, cdn, capsys, monkeypatch):
     return run
 
 
-def releases(dest: Path) -> list[str]:
-    return sorted(p.name for p in dest.glob("dbip-full-*.mmdb"))
+def installed(dest: Path) -> list[str]:
+    return sorted(p.name for p in dest.glob("*.mmdb"))
 
 
 def test_the_newest_dated_release_is_installed_once(tmp_path, cdn, cli):
@@ -62,66 +63,74 @@ def test_the_newest_dated_release_is_installed_once(tmp_path, cdn, cli):
     cdn.files[name(DAY - timedelta(days=9))] = tiny_mmdb(marker="n")
     code, health = cli()
     dest = tmp_path / "db-ip"
-    assert code == 0 and health["dbip"] == "updated" and health["removed"] == []
-    assert health["file"] == name(DAY - timedelta(days=9)) and releases(dest) == [health["file"]]
+    assert code == 0 and health["dbip"] == "updated" and health["file"] == "dbip-full.mmdb"
+    assert installed(dest) == ["dbip-full.mmdb"]
+    assert health["source"]["name"] == name(DAY - timedelta(days=9))
     assert health["source"]["date"] == "2026-10-24" and health["recorded"] is None
     # Tomorrow back to the newest: 11 probes, one download.
     assert sum(n for (method, _), n in cdn.hits.items() if method == "HEAD") == 11
-    assert cdn.downloads(health["file"]) == 1
-    assert os.readlink(dest / "current") == health["file"]  # relative: the directory can move
-    assert (dest / "current").stat().st_mode & 0o777 == 0o644
-    with maxminddb.open_database(str(dest / "current")) as reader:
+    assert cdn.downloads(health["source"]["name"]) == 1
+    assert (dest / "dbip-full.mmdb").stat().st_mode & 0o777 == 0o644
+    with maxminddb.open_database(str(dest / "dbip-full.mmdb")) as reader:
         assert reader.get("198.51.100.7") == DE
     state = json.loads((dest / "release.json").read_text())
     assert state["sha256"] == health["sha256"] and state["size"] > 0
     assert health["database_type"].startswith("DBIP")
     assert sorted(p.name for p in dest.iterdir()) == [
         ".update.lock",
-        "current",
-        health["file"],
+        "dbip-full.mmdb",
         "release.json",
     ]
 
     cdn.hits.clear()
     code, again = cli()
     assert code == 0 and again["dbip"] == "unchanged" and again["sha256"] == health["sha256"]
-    assert cdn.downloads(health["file"]) == 0 and len(cdn.hits) == 11  # back to the installed
+    assert cdn.downloads(health["source"]["name"]) == 0 and len(cdn.hits) == 11
 
 
-def test_new_releases_swing_current_and_keep_the_previous_two(tmp_path, cdn, cli):
+def test_each_new_release_replaces_the_file_under_the_same_name(tmp_path, cdn, cli):
     dest = tmp_path / "db-ip"
-    days = [DAY - timedelta(days=d) for d in (90, 60, 30, 0)]
-    for n, day in enumerate(days):
-        cdn.files[name(day)] = tiny_mmdb(marker="abcd"[n])
+    shas = []
+    for n, day in enumerate(DAY - timedelta(days=d) for d in (90, 30, 0)):
+        cdn.files[name(day)] = tiny_mmdb(marker="abc"[n])
         code, health = cli("--lookback-days", "100")
-        assert code == 0 and health["dbip"] == "updated" and health["file"] == name(day)
-    assert releases(dest) == [name(day) for day in days[1:]]
-    assert health["removed"] == [name(days[0])]
-    assert (dest / "current").resolve().name == name(DAY)
-
-
-def test_a_file_replaced_under_the_same_name_is_installed_beside_the_old_one(tmp_path, cdn, cli):
-    cdn.files[name(DAY)] = tiny_mmdb(marker="a")
-    first = cli()[1]
-    cdn.files[name(DAY)] = tiny_mmdb(marker="b")  # new bytes, so a new ETag
+        assert code == 0 and health["dbip"] == "updated" and health["source"]["name"] == name(day)
+        shas.append(health["sha256"])
+    assert len(set(shas)) == 3 and installed(dest) == ["dbip-full.mmdb"]
+    assert hashlib.sha256((dest / "dbip-full.mmdb").read_bytes()).hexdigest() == shas[-1]
+    # A file replaced on the CDN under the same name (new bytes, new ETag) replaces it too.
+    cdn.files[name(DAY)] = tiny_mmdb(marker="d")
     code, health = cli()
-    assert code == 0 and health["dbip"] == "updated" and health["sha256"] != first["sha256"]
-    assert health["file"] == f"dbip-full-{DAY}-{health['sha256'][:8]}.mmdb"
-    assert releases(tmp_path / "db-ip") == sorted([first["file"], health["file"]])
+    assert code == 0 and health["dbip"] == "updated" and health["sha256"] not in shas
+
+
+def test_a_reader_of_the_old_file_keeps_it_until_it_reopens(tmp_path, cdn, cli):
+    cdn.files[name(DAY - timedelta(days=1))] = tiny_mmdb(high=DE, marker="a")
+    cli()
+    current = tmp_path / "db-ip" / "dbip-full.mmdb"
+    with maxminddb.open_database(str(current)) as reader:
+        cdn.files[name(DAY)] = tiny_mmdb(high=US, marker="b")
+        assert cli()[1]["dbip"] == "updated"
+        assert reader.get("198.51.100.7") == DE  # the replaced file, still open
+    with maxminddb.open_database(str(current)) as reader:
+        assert reader.get("198.51.100.7") == US
 
 
 def test_new_headers_over_the_same_bytes_change_nothing(tmp_path, cdn, cli):
     cdn.files[name(DAY)] = tiny_mmdb()
     first = cli()[1]
     state = tmp_path / "db-ip" / "release.json"
-    installed = json.loads(state.read_text())
-    installed["source"]["etag"] = '"older"'
-    state.write_text(json.dumps(installed))
+    installed_state = json.loads(state.read_text())
+    installed_state["source"]["etag"] = '"older"'
+    state.write_text(json.dumps(installed_state))
+    inode = (tmp_path / "db-ip" / "dbip-full.mmdb").stat().st_ino
     code, health = cli()
-    assert code == 0 and health["dbip"] == "unchanged" and health["file"] == first["file"]
+    assert code == 0 and health["dbip"] == "unchanged" and health["sha256"] == first["sha256"]
     after = json.loads(state.read_text())
-    assert after["source"]["etag"] != '"older"' and after["updated_at"] == installed["updated_at"]
-    assert releases(tmp_path / "db-ip") == [first["file"]]
+    assert after["source"]["etag"] != '"older"'
+    assert after["updated_at"] == installed_state["updated_at"]
+    assert (tmp_path / "db-ip" / "dbip-full.mmdb").stat().st_ino == inode  # not replaced
+    assert installed(tmp_path / "db-ip") == ["dbip-full.mmdb"]
 
 
 @pytest.mark.parametrize(
@@ -157,7 +166,9 @@ def test_size_checks_refuse_a_small_or_shrunken_release(tmp_path, cdn):
     cdn.files[name(DAY)] = tiny_mmdb(marker="b")
     with pytest.raises(dbip.UpdateError, match="under half the installed release"):
         update(dest, cdn.url, checks=Checks(min_bytes=1, shrink_limit=2), today=DAY)
-    assert releases(dest) == [name(DAY - timedelta(days=1))]
+    state = json.loads((dest / "release.json").read_text())
+    assert state["source"]["name"] == name(DAY - timedelta(days=1))  # still the first one
+    assert installed(dest) == ["dbip-full.mmdb"]
 
 
 def test_no_release_in_the_window_fails_and_errors_name_only_the_file(tmp_path, cdn, cli):
@@ -174,6 +185,19 @@ def test_no_release_in_the_window_fails_and_errors_name_only_the_file(tmp_path, 
     code, health = cli()
     assert code == 3 and health["error"] == f"probe {name(DAY + timedelta(days=1))}: URLError"
     assert cdn.url not in json.dumps(health)
+
+
+def test_a_redirect_to_plain_http_is_refused(tmp_path, cdn, cli):
+    cdn.files[name(DAY)] = tiny_mmdb()
+    cdn.redirects[name(DAY)] = "http://cdn.invalid/elsewhere.mmdb"
+    code, health = cli()
+    assert (
+        code == 3 and health["error"] == f"probe {name(DAY)}: redirected to a URL that is not https"
+    )
+    cdn.redirects[name(DAY)] = cdn.url + "moved.mmdb"  # another secure URL is followed
+    cdn.files["moved.mmdb"] = cdn.files[name(DAY)]
+    code, health = cli()
+    assert code == 0 and health["dbip"] == "updated" and cdn.downloads("moved.mmdb") == 1
 
 
 def test_a_failed_get_after_the_probe_names_the_status(tmp_path, cdn, cli):

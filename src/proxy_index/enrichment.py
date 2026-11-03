@@ -13,12 +13,14 @@ from typing import Any
 
 import maxminddb
 
-CURRENT = "current"  # the link `dbip update` points at the newest verified release
+# The one file name `dbip update` keeps the current release under (replaced atomically).
+CURRENT = "dbip-full.mmdb"
+OPEN_ATTEMPTS = 3  # the file replaced while it was being opened: open the new one
 
 
 def find_source(path: str | Path | None = None) -> Path:
-    """The configured MMDB as given: --mmdb, else $DBIP_MMDB, else db-ip/current, else the only
-    *.mmdb in db-ip/. A link (db-ip/current) is returned unresolved, so a reader can follow it."""
+    """The configured MMDB as given: --mmdb, else $DBIP_MMDB, else db-ip/dbip-full.mmdb, else
+    the only *.mmdb in db-ip/. A link is returned unresolved, so a reader can follow it."""
     configured = path or os.environ.get("DBIP_MMDB")
     if configured:
         result = Path(configured).expanduser().absolute()
@@ -59,9 +61,9 @@ def _identity(path: Path) -> tuple[int, int, int]:
 class LocalEnricher:
     """Memory-mapped database; bounded lookup cache shared across result rows.
 
-    `source` is the path as configured (often the db-ip/current link); `path` is the file open
-    now. `reload()` reopens the database when the link moved to another release or the file was
-    replaced, so a long-lived process follows `dbip update` without a restart."""
+    `source` is the path as configured (often db-ip/dbip-full.mmdb); `path` is the file open now.
+    `reload()` reopens the database when the file was replaced (another inode) or a link moved,
+    so a long-lived process follows `dbip update` without a restart."""
 
     def __init__(self, path: str | Path | None = None, *, cache_size: int = 100_000):
         self.source = find_source(path)
@@ -70,17 +72,23 @@ class LocalEnricher:
         self.path, self.reader, self.release, self._opened = self._open()
 
     def _open(self) -> tuple[Path, Any, dict[str, Any], tuple[int, int, int]]:
-        path = self.source.resolve()
-        opened = _identity(path)
-        reader = maxminddb.open_database(str(path))
-        try:
-            with path.open("rb") as stream:
-                checksum = hashlib.file_digest(stream, "sha256").hexdigest()
-            release = release_record(path, reader.metadata(), checksum)
-        except BaseException:
+        """Open the reader and hash the same file: when it is replaced in between (the update
+        renames a new release over it), the identities differ and the new file is opened."""
+        for _ in range(OPEN_ATTEMPTS):
+            path = self.source.resolve()
+            opened = _identity(path)
+            reader = maxminddb.open_database(str(path))
+            try:
+                with path.open("rb") as stream:
+                    checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+                release = release_record(path, reader.metadata(), checksum)
+                if _identity(path) == opened:
+                    return path, reader, release, opened
+            except BaseException:
+                reader.close()
+                raise
             reader.close()
-            raise
-        return path, reader, release, opened
+        raise OSError("The MMDB file kept changing while it was opened")
 
     def stale(self) -> bool:
         """True when `source` now names another file than the one open (cheap: two stats)."""
