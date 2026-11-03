@@ -113,6 +113,10 @@ DEFAULTS: dict[str, Any] = {
     "scheduler.pulse_enabled": True,
     # Directory for the HTML batch reports written when a batch closes; None writes none.
     "reports.dir": None,
+    # The daily DB-IP update (jobs.dbip_update): the release directory (None runs no update) and
+    # the CDN directory holding dbip-full-YYYY-MM-DD.mmdb (None: $DBIP_BASE_URL).
+    "dbip.dir": None,
+    "dbip.base_url": None,
 }
 
 
