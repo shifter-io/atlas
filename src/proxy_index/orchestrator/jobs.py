@@ -17,6 +17,8 @@ retention                 daily: test_events older than retention.events_days (w
                           estimated_hours older than retention.estimates_days
 archive                   daily at 00:40 UTC, when `archive.enabled`: proxy_index.archive.job
                           archives the due days to Spaces and deletes their raw rows
+raw_upload                every 5 minutes, when `archive.enabled` and `raw.spool_dir`: each
+                          ended hour's raw files to Spaces, hours older than 30 days removed
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 
@@ -181,6 +183,19 @@ async def archive(db: Database, credentials_file: str) -> dict[str, Any]:
     return await asyncio.to_thread(run_due, credentials_file, spaces, work_dir, datetime.now(UTC))
 
 
+async def raw_upload(db: Database) -> dict[str, Any]:
+    from ..archive.rawfiles import upload_hours
+    from ..archive.spaces import Spaces
+
+    async with db.connection() as conn:
+        root = await setting(conn, "raw.spool_dir")
+        if not (await setting(conn, "archive.enabled") and root):
+            return {"skipped": "archive.enabled or raw.spool_dir is off"}
+        spaces_file = await setting(conn, "archive.spaces_file")
+    spaces = await asyncio.to_thread(Spaces.from_file, spaces_file)
+    return await asyncio.to_thread(upload_hours, root, spaces, datetime.now(UTC))
+
+
 async def write_reports(db: Database, batch_ids: list[int]) -> dict[str, Any] | None:
     """The HTML reports for batches that just closed, and the index; None when reports.dir is
     unset. Errors are logged, never raised: a report must not fail the barrier."""
@@ -267,6 +282,9 @@ def register_jobs(
     async def archive_job() -> dict[str, Any]:
         return await archive(db, credentials_file)
 
+    async def raw_upload_job() -> dict[str, Any]:
+        return await raw_upload(db)
+
     async def reports_job() -> dict[str, Any]:
         return await live_reports(db)
 
@@ -280,4 +298,5 @@ def register_jobs(
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
     scheduler.add("archive", archive_job, at_utc_minute=40)
+    scheduler.add("raw_upload", raw_upload_job, every_s=300)
     scheduler.add("reports", reports_job, every_s=30)

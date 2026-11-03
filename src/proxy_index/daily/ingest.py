@@ -32,6 +32,7 @@ from pathlib import Path
 import psycopg
 
 from .. import storage
+from ..archive import rawfiles
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
 from ..estimates import compute, release
@@ -98,12 +99,16 @@ def convert_country(folder: Path, runs: Path) -> Path:
     return directory
 
 
-def _import(directory: Path, credentials: Path, mmdb: Path | None) -> None:
+def _import(directory: Path, credentials: Path, mmdb: Path | None, spool: Path | None) -> None:
     try:
         enrich_run(directory, mmdb)
     except FileExistsError:
         pass  # enriched by an earlier attempt
     storage.ingest(directory, credentials)
+    if spool:  # the raw files this update used (ARCHIVE-1: 30 days here, then Spaces)
+        rawfiles.spool(
+            spool, datetime.now(UTC), f"daily-{directory.name}.tar.gz", directory, move=False
+        )
 
 
 def _times(jobs: list[dict]) -> tuple[str | None, str | None]:
@@ -124,12 +129,14 @@ def _estimate(cell: dict, formula: dict | None, run_id: str, country: str, crede
 
 
 def ingest_cell(
-    manifest_path: Path, region: str, runs: Path, credentials: Path, mmdb=None, formula=None
+    manifest_path: Path, region: str, runs: Path, credentials: Path, *, mmdb=None, **options
 ) -> dict:
     """Verify, convert and import one network x region round; returns the cell's report.
 
-    With the network's formula, each imported country's estimated hours are stored too.
+    With the network's `formula`, each imported country's estimated hours are stored too; with
+    a `spool` directory, each imported run directory is filed there (rawfiles.spool).
     """
+    formula, spool = options.get("formula"), options.get("spool")
     countries = region_countries(load(manifest_path), region)
     cell = {"region": region, "countries": countries, "status": "failed", "ingested": []}
     cell |= {"requests": 0, "unique_ips": 0, "started_at": None, "finished_at": None}
@@ -149,7 +156,7 @@ def ingest_cell(
             continue
         try:
             directory = convert_country(job_directory(folder, job), runs)
-            _import(directory, credentials, mmdb)
+            _import(directory, credentials, mmdb, spool)
         except (OSError, ValueError, KeyError, psycopg.Error) as exc:
             issues.append(f"{job['country']}: not imported ({type(exc).__name__})")
             continue
@@ -237,7 +244,7 @@ async def _release(db: Database, report: dict) -> None:
 
 
 async def ingest_campaign(
-    root: Path, credentials: Path, mmdb=None, *, database=None, formulas: Path | None = None
+    root: Path, credentials: Path, mmdb=None, *, database=None, formulas=None, spool=None
 ) -> dict:
     """Import every cell of a collected daily test and emit the events not yet emitted.
 
@@ -254,7 +261,13 @@ async def ingest_campaign(
             key = f"{network}/{region}"
             formula, missing = _formula(formulas, network)
             cell = {"network": network} | ingest_cell(
-                manifest_path, region, root / "runs", credentials, mmdb, formula
+                manifest_path,
+                region,
+                root / "runs",
+                credentials,
+                mmdb=mmdb,
+                formula=formula,
+                spool=spool,
             )
             cell["estimate_issues"] += missing if cell["ingested"] else []
             cell["events"] = previous["cells"].get(key, {}).get("events", False)

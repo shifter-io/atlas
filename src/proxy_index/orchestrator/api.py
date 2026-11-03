@@ -228,6 +228,7 @@ async def results(request: web.Request) -> web.Response:
     async with db.connection() as conn:
         upload_limit = int(await setting(conn, "results.max_upload_bytes"))
         extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
+        spool_dir = await setting(conn, "raw.spool_dir")
     with tempfile.TemporaryDirectory(prefix="proxy-index-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         await _receive(request, archive, upload_limit)
@@ -263,6 +264,8 @@ async def results(request: web.Request) -> web.Response:
             log.warning("ingest of batch %s rejected: %s", batch_id, exc)
             await _reject(request, batch_id, f"ingest: {exc}"[:500], "ingest_failed")
             raise _error(web.HTTPUnprocessableEntity, f"ingest rejected: {exc}"[:300]) from None
+        if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
+            await asyncio.to_thread(_spool, spool_dir, run["kind"], batch_id, summary, archive)
     status = await batches.finish_run(db, node, batch_id, summary, imported["run_key"])
     return web.json_response(
         {
@@ -273,6 +276,15 @@ async def results(request: web.Request) -> web.Response:
             "imported": imported["imported"],
         }
     )
+
+
+def _spool(root: str, kind: str, batch_id: int, summary: dict, archive: Path) -> None:
+    from datetime import UTC, datetime
+
+    from ..archive.rawfiles import spool
+
+    name = f"{kind}-b{batch_id}-{summary.get('run_id')}.tar.gz"
+    spool(root, datetime.now(UTC), name, archive, move=True)
 
 
 def add_routes(app: web.Application) -> None:

@@ -569,8 +569,12 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     # fra1 comes first, before shifter's product exists: its events wait for the rerun.
     assert fra1["events"] is False and report["complete"] is False
     assert kinds(database) == ["daily_test_finished", "daily_test_started"]
-    again = await daily_ingest.ingest_campaign(root, database, mmdb)
+    spool = tmp_path / "spool"
+    again = await daily_ingest.ingest_campaign(root, database, mmdb, spool=spool)
     assert again["cells"]["shifter/tor1"]["ingested"] == ["CA", "PM"]
+    # The rerun's update used both runs: each is spooled once, as a .tar.gz of its directory.
+    spooled = sorted(p.name for p in spool.glob("*/*/*/*/daily-*.tar.gz"))
+    assert spooled == sorted(f"daily-{d.name}.tar.gz" for d in (root / "runs").iterdir())
     assert again["cells"]["shifter/fra1"]["events"] is True and again["complete"] is False
     assert kinds(database) == ["daily_test_finished"] * 2 + ["daily_test_started"] * 2
     assert len(list((root / "runs").iterdir())) == 2
@@ -628,7 +632,7 @@ def test_ingest_cli_downloads_once_then_imports(tmp_path, monkeypatch, capsys):
         downloads.append(campaign_id)
         (dest / collect.REPORT).write_text(json.dumps({"clean": True}))
 
-    async def fake_ingest(root, credentials, mmdb, *, formulas=None):
+    async def fake_ingest(root, credentials, mmdb, *, formulas=None, spool=None):
         return {"campaign_id": CID, "complete": len(downloads) == 1}
 
     monkeypatch.setattr(collect, "collect", fake_collect)

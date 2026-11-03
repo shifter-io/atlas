@@ -117,6 +117,8 @@ DEFAULTS: dict[str, Any] = {
     "archive.enabled": False,
     "archive.spaces_file": ".secrets/spaces.toml",
     "archive.work_dir": ".state/archive",
+    # The raw files of each update, kept 30 days and uploaded hourly (None keeps none).
+    "raw.spool_dir": None,
 }
 
 
