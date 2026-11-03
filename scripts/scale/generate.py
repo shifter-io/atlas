@@ -9,8 +9,10 @@ Usage:
 Every network x country gets one daily test a day at its formula test hour and one pulse an
 hour; README.md in this folder describes the data. Only synthetic data is written: no real IP,
 proxy traffic or credential is used. The first call records the settings in the settings row
-`scale.generator`; later calls continue with them and refuse different ones. Each day commits in
-its own transaction, in order, so an interrupted step is resumed by running it again.
+`scale.generator`; later calls continue with them and refuse different ones. Days go in order. A
+day's shared rows (partitions, DB-IP release, pulse batches) commit first, then each network's
+rows in its own transaction, --jobs networks at a time in worker processes; the settings row
+records each finished network, so an interrupted step is resumed by running it again.
 
 Guards: the database must be named proxy_scale, its storage schema must be this framework's, and
 it must not hold any test_runs row this generator did not write (each of its runs carries the
@@ -21,7 +23,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -61,20 +65,51 @@ def guard(conn, expected: str = DATABASE) -> None:
         raise Refused(f"the database holds {foreign} test runs this generator did not write")
 
 
-def stored(conn) -> tuple[Settings, int] | None:
-    """The recorded settings and the last generated day, if any."""
+def stored(conn) -> tuple[Settings, dict] | None:
+    """The recorded settings and progress (days_done, prepared day, its finished networks)."""
     if conn.execute("SELECT to_regclass('public.settings')").fetchone()[0] is None:
         return None
     row = conn.execute("SELECT value FROM settings WHERE key=%s", (SETTING,)).fetchone()
-    return (Settings.from_json(row[0]), row[0]["days_done"]) if row else None
+    return (Settings.from_json(row[0]), row[0]) if row else None
 
 
-def record(conn, settings: Settings, done: int) -> None:
+def record(conn, settings: Settings, done: int, prepared: int | None = None) -> None:
+    progress = {"days_done": done, "prepared": prepared, "parts": []}
     conn.execute(
         "INSERT INTO settings(key,value) VALUES (%s,%s) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()",
-        (SETTING, Jsonb(settings.to_json() | {"days_done": done})),
+        (SETTING, Jsonb(settings.to_json() | progress)),
     )
+
+
+def part(database: str, formulas: str, settings: dict, regions: dict, step: tuple) -> None:
+    """Write one network's day (step: day, network) and record it, in one transaction."""
+    day, network = step
+    found, names = load(formulas)
+    with storage.connect(database) as conn:
+        conn.autocommit = True
+        writer = Writer(conn, Model(Settings.from_json(settings), found, names), regions)
+        with conn.transaction():
+            writer.network(day, network)
+            conn.execute(
+                "UPDATE settings SET value=jsonb_set(value,'{parts}',(value->'parts')||%s) "
+                "WHERE key=%s",
+                (Jsonb([network]), SETTING),
+            )
+
+
+def parts(args, settings: Settings, regions: dict, day: int, todo: list[int]) -> None:
+    """The networks of a day not yet written, --jobs at a time (in this process for 1)."""
+    work = [(args.database, args.formulas, settings.to_json(), regions, (day, n)) for n in todo]
+    if args.jobs == 1:
+        for item in work:
+            part(*item)
+        return
+    # Spawned workers never inherit this process's database connection.
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(min(args.jobs, len(work)) or 1, mp_context=context) as pool:
+        for future in [pool.submit(part, *item) for item in work]:
+            future.result()
 
 
 def sequences(conn) -> None:
@@ -107,10 +142,10 @@ def pick(value: str | None, available: list[str]) -> tuple[str, ...]:
     return chosen
 
 
-def inputs(args) -> tuple[dict, dict[str, str]]:
+def load(directory: str) -> tuple[dict, dict[str, str]]:
     """Every formula by network name, and the country names."""
     formulas = {}
-    for path in sorted(Path(args.formulas).glob("*.json")):
+    for path in sorted(Path(directory).glob("*.json")):
         formula = load_formula(path.parent, path.stem)
         formulas[formula["network"]] = formula
     return formulas, load_countries()
@@ -128,10 +163,10 @@ def requested(args, formulas: dict, names: dict) -> Settings:
     )
 
 
-def resolve(args, previous, formulas, names) -> tuple[Settings, int]:
-    """The settings to use and the last day done; refuse a change of recorded settings."""
+def resolve(args, previous, formulas, names) -> tuple[Settings, dict]:
+    """The settings to use and the progress so far; refuse a change of recorded settings."""
     if previous is None:
-        return requested(args, formulas, names), 0
+        return requested(args, formulas, names), {"days_done": 0, "prepared": None, "parts": []}
     settings, done = previous
     given = {
         "seed": args.seed,
@@ -148,13 +183,14 @@ def resolve(args, previous, formulas, names) -> tuple[Settings, int]:
 
 
 def generate(args, expected: str = DATABASE) -> dict:
-    """Run one step (args.days); returns the settings and the days it generated."""
-    formulas, names = inputs(args)
+    """Run one step (args.days); returns the settings and the days it finished."""
+    formulas, names = load(args.formulas)
     first, last = args.days
     with storage.connect(args.database) as conn:
         conn.autocommit = True
         guard(conn, expected)
-        settings, done = resolve(args, stored(conn), formulas, names)
+        settings, progress = resolve(args, stored(conn), formulas, names)
+        done = progress["days_done"]
         if last > settings.days:
             raise Refused(f"day {last} is past the {settings.days} days of this data set")
         if first > done + 1:
@@ -175,13 +211,20 @@ def generate(args, expected: str = DATABASE) -> dict:
         writer = Writer(conn, Model(settings, formulas, names), regions)
         generated = []
         for day in range(max(first, done + 1), last + 1):
+            if progress["prepared"] != day:
+                with conn.transaction():
+                    guard(conn, expected)
+                    if day == 1:
+                        writer.setup()
+                    writer.prepare(day)
+                    record(conn, settings, day - 1, day)
+                progress = stored(conn)[1]
+            todo = [n for n in range(len(settings.networks)) if n not in progress["parts"]]
+            parts(args, settings, regions, day, todo)
             with conn.transaction():
-                guard(conn, expected)
-                if day == 1:
-                    writer.setup()
-                writer.day(day)
                 sequences(conn)
                 record(conn, settings, day)
+            progress = stored(conn)[1]
             generated.append(day)
     return {"settings": settings.to_json(), "generated": generated, "days_done": max(done, last)}
 
@@ -197,6 +240,7 @@ def arguments(argv=None):
     parser.add_argument("--end-date", help="UTC date the last day ends at (default today)")
     parser.add_argument("--scale", type=float, help="multiplies every test's unique IPs")
     parser.add_argument("--formulas", default=str(FORMULAS))
+    parser.add_argument("--jobs", type=int, default=4, help="networks written at once")
     return parser.parse_args(argv)
 
 

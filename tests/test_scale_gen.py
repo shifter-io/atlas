@@ -57,6 +57,7 @@ def options(config, days, **changes):
         "end_date": END,
         "scale": 0.004,
         "formulas": str(generate.FORMULAS),
+        "jobs": 1,
     }
     return Namespace(**(values | changes))
 
@@ -68,7 +69,7 @@ def run(config, days, **changes):
 
 def model(config, **changes):
     args = options(config, "1", **changes)
-    formulas, names = generate.inputs(args)
+    formulas, names = generate.load(args.formulas)
     return synthetic.Model(generate.requested(args, formulas, names), formulas, names)
 
 
@@ -121,15 +122,40 @@ def test_the_miniature_has_the_rows_the_plan_counts(databases):
         assert conn.execute("SELECT nextval('test_runs_run_key_seq')").fetchone()[0] == last + 1
 
 
-def test_steps_give_the_same_rows_as_one_run_and_a_seed_its_own(databases):
+def test_steps_and_parallel_networks_give_the_same_rows_and_a_seed_its_own(databases):
     whole, steps, other = databases(), databases(), databases()
     run(whole, "1..2")
-    assert run(steps, "1")["generated"] == [1]
-    assert run(steps, "1..2")["generated"] == [2]
+    assert run(steps, "1", jobs=2)["generated"] == [1]
+    assert run(steps, "1..2", jobs=2)["generated"] == [2]
     assert run(steps, "2")["generated"] == []
     assert fingerprint(whole) == fingerprint(steps)
     run(other, "1..2", seed=8)
     assert fingerprint(other)["ip_observations"] != fingerprint(whole)["ip_observations"]
+
+
+def test_an_interrupted_day_resumes_with_its_remaining_networks(databases, monkeypatch):
+    whole, broken = databases(), databases()
+    run(whole, "1")
+    real, done = generate.part, []
+
+    def lost_after_one(*item):
+        if done:
+            raise RuntimeError("worker lost")
+        done.append(real(*item))
+
+    monkeypatch.setattr(generate, "part", lost_after_one)
+    with pytest.raises(RuntimeError, match="worker lost"):
+        run(broken, "1")
+    with connect(broken) as conn:
+        progress = conn.execute("SELECT value FROM settings WHERE key='scale.generator'").fetchone()
+    assert {k: progress[0][k] for k in ("days_done", "prepared", "parts")} == {
+        "days_done": 0,
+        "prepared": 1,
+        "parts": [0],
+    }
+    monkeypatch.setattr(generate, "part", real)
+    assert run(broken, "1")["generated"] == [1]
+    assert fingerprint(broken) == fingerprint(whole)
 
 
 def test_the_calculator_reads_the_miniature(databases):

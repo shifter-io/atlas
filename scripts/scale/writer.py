@@ -147,39 +147,56 @@ class Writer:
 
     # One day.
 
-    def day(self, day: int) -> None:
+    def release(self, day: int) -> str:
+        return hashlib.sha256(f"scale-gen:{self.settings.seed}:{day}".encode()).hexdigest()
+
+    def prepare(self, day: int) -> None:
+        """The rows a day's networks share: partitions, the DB-IP release and the pulse batches."""
+        conn, codes = self.conn, self.settings.countries
         start = self.settings.day_start(day)
-        end = start + timedelta(days=1)
-        conn = self.conn
         for table in DAILY:
             partition(conn, table, start)
-        sha = hashlib.sha256(f"scale-gen:{self.settings.seed}:{day}".encode()).hexdigest()
         conn.execute(
             "INSERT INTO dbip_releases(release_id,sha256,metadata) OVERRIDING SYSTEM VALUE "
             "VALUES (%s,%s,%s)",
-            (day, sha, Jsonb({"synthetic": True, "date": start.date().isoformat()})),
+            (day, self.release(day), Jsonb({"synthetic": True, "date": start.date().isoformat()})),
         )
-        copy_lines(conn, "ip_addresses", "ip_id,ip", self.addresses(day))
+        batches = []
+        for hour in range(24):
+            slot = start + timedelta(hours=hour)
+            ended = (slot + timedelta(seconds=1), slot + timedelta(seconds=45), "done")
+            for c, code in enumerate(codes):
+                row = (batch_id(day, hour, c, len(codes)), "pulse", code, self.regions[code][0])
+                batches.append((*row, TARGET, slot, slot, *ended))
+        copy_rows(conn, "test_batches", BATCH_COLUMNS, batches)
+
+    def network(self, day: int, network: int) -> None:
+        """Every other row of one network's day; networks share no IP, run, pool or product."""
+        conn, count = self.conn, len(self.settings.countries)
+        start = self.settings.day_start(day)
+        end, sha = start + timedelta(days=1), self.release(day)
+        lanes = self.model.lanes[network * count : (network + 1) * count]
+        copy_lines(conn, "ip_addresses", "ip_id,ip", self.addresses(day, lanes))
         columns = "ip_id,release_id,location_id,network_id,matched"
-        copy_lines(conn, "ip_enrichment", columns, self.enrichment(day))
+        copy_lines(conn, "ip_enrichment", columns, self.enrichment(day, lanes))
         estimated = []
-        for lane in self.model.lanes:
+        for lane in lanes:
             estimated += self.daily_test(lane, day, sha)
-        conn.execute(RELEASE, (end,))
+        conn.execute(RELEASE, (network + 1, end))
         copy_rows(conn, "estimated_hours", ESTIMATE_COLUMNS, estimated)
         for hour in range(24):
-            self.pulses(day, hour, sha)
-        conn.execute(PRODUCT_IPS, (start, end))
-        conn.execute(POOL_IPS, (start, end))
+            self.pulses(day, hour, lanes)
+        conn.execute(PRODUCT_IPS, (network + 1, start, end))
+        conn.execute(POOL_IPS, (network + 1, start, end))
 
-    def addresses(self, day: int):
-        for lane in self.model.lanes:
+    def addresses(self, day: int, lanes):
+        for lane in lanes:
             first, after = self.model.new(lane, day)
             for n in range(lane.offset + first, lane.offset + after):
                 yield f"{n + 1}\t{address(n)}"
 
-    def enrichment(self, day: int):
-        for lane in self.model.lanes:
+    def enrichment(self, day: int, lanes):
+        for lane in lanes:
             places = self.model.places[lane.country]
             start, size = self.model.window(lane, day)
             for n in range(lane.offset + start, lane.offset + start + size):
@@ -264,27 +281,20 @@ class Writer:
             rows.append((*fixed, row["day"], row["hour"], *measured, *figures, released))
         return rows
 
-    def pulses(self, day: int, hour: int, release: str) -> None:
-        """One hour of pulses: a batch per country, a run per network, one bucket per run."""
-        model, settings = self.model, self.settings
-        slot = settings.day_start(day) + timedelta(hours=hour)
-        ended = (slot + timedelta(seconds=1), slot + timedelta(seconds=45), "done")
-        batches, runs, members, buckets, geo = [], [], [], [], []
-        for c, code in enumerate(settings.countries):
-            batch = ((day - 1) * 24 + hour) * len(settings.countries) + c + 1
-            batches.append(
-                (batch, "pulse", code, self.regions[code][0], TARGET, slot, slot, *ended)
-            )
-            for n in range(len(settings.networks)):
-                lane = model.lane(n, c)
-                run_key = model.run_key(day, len(model.lanes) * (hour + 1) + lane.position)
-                errors, rows = model.pulse(lane, day, hour)
-                run, member, bucket = self.pulse_run(lane, slot, (run_key, batch), errors, rows)
-                runs.append(run)
-                members.append(member)
-                buckets.append(bucket)
-                geo += [geo_line(slot, run_key, row) for row in rows]
-        copy_rows(self.conn, "test_batches", BATCH_COLUMNS, batches)
+    def pulses(self, day: int, hour: int, lanes) -> None:
+        """One hour of the lanes' pulses: a run with one bucket per lane, in its country's batch."""
+        model, count = self.model, len(self.settings.countries)
+        slot = self.settings.day_start(day) + timedelta(hours=hour)
+        runs, members, buckets, geo = [], [], [], []
+        for lane in lanes:
+            run_key = model.run_key(day, len(model.lanes) * (hour + 1) + lane.position)
+            batch = batch_id(day, hour, lane.country, count)
+            errors, rows = model.pulse(lane, day, hour)
+            run, member, bucket = self.pulse_run(lane, slot, (run_key, batch), errors, rows)
+            runs.append(run)
+            members.append(member)
+            buckets.append(bucket)
+            geo += [geo_line(slot, run_key, row) for row in rows]
         copy_rows(self.conn, "test_runs", RUN_COLUMNS, runs)
         copy_rows(self.conn, "batch_runs", MEMBER_COLUMNS, members)
         copy_rows(self.conn, "run_buckets", BUCKET_COLUMNS, buckets)
@@ -353,6 +363,10 @@ class Writer:
         marks = ",".join(["%s"] * len(values))
         sql = f"INSERT INTO test_runs({RUN_COLUMNS}) OVERRIDING SYSTEM VALUE VALUES ({marks})"
         self.conn.execute(sql, values)
+
+
+def batch_id(day: int, hour: int, country: int, countries: int) -> int:
+    return ((day - 1) * 24 + hour) * countries + country + 1
 
 
 def bucket_row(moment, run_key, successes, errors, bins) -> tuple:
@@ -425,14 +439,14 @@ ESTIMATE_COLUMNS = (
 # Hours a test left unreleased are released once the day that holds their end is generated.
 RELEASE = (
     "UPDATE estimated_hours SET released_at=day+make_interval(hours=>hour+1) "
-    "WHERE released_at IS NULL AND day+make_interval(hours=>hour+1)<=%s"
+    "WHERE product_id=%s AND released_at IS NULL AND day+make_interval(hours=>hour+1)<=%s"
 )
-# The per-IP caches storage.ingest keeps, from the day's IP rows.
+# The per-IP caches storage.ingest keeps, from one product's IP rows of the day.
 PRODUCT_IPS = (
     "INSERT INTO product_ips SELECT s.product_id,o.ip_id,min(o.first_seen),max(o.last_seen),"
     "sum(o.count),count(DISTINCT o.run_key) FROM ip_observations o JOIN test_runs r "
     "USING(run_key) JOIN scope_stats s USING(scope_id) "
-    "WHERE o.bucket_start>=%s AND o.bucket_start<%s GROUP BY 1,2 "
+    "WHERE s.product_id=%s AND o.bucket_start>=%s AND o.bucket_start<%s GROUP BY 1,2 "
     "ON CONFLICT(product_id,ip_id) DO UPDATE SET "
     "first_seen=least(product_ips.first_seen,excluded.first_seen),"
     "last_seen=greatest(product_ips.last_seen,excluded.last_seen),"
@@ -442,7 +456,8 @@ PRODUCT_IPS = (
 POOL_IPS = (
     "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT s.pool_id,o.ip_id "
     "FROM ip_observations o JOIN test_runs r USING(run_key) JOIN scope_stats s USING(scope_id) "
-    "WHERE o.bucket_start>=%s AND o.bucket_start<%s ON CONFLICT DO NOTHING RETURNING pool_id) "
+    "WHERE s.product_id=%s AND o.bucket_start>=%s AND o.bucket_start<%s "
+    "ON CONFLICT DO NOTHING RETURNING pool_id) "
     "UPDATE pool_stats p SET unique_ips=p.unique_ips+a.n "
     "FROM (SELECT pool_id,count(*) AS n FROM added GROUP BY 1) a WHERE p.pool_id=a.pool_id"
 )
