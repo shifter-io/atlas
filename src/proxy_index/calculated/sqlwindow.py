@@ -179,16 +179,20 @@ def window_inputs(
         raise ValueError("window spec keys must be distinct")
     parts = [{"combos": [], "first_seen": {}, "totals": {}} for _ in specs]
     statement, params = window_query(specs, release_mode=release_mode, release_id=release_id)
-    if params["slots"]:
-        for row in conn.cursor(row_factory=dict_row).execute(statement, params):
-            part = parts[row["slot"]]
-            if row["part"] == COMBO:
-                part["combos"].append(_combo(row))
-            elif row["part"] == BIN:
-                part["first_seen"][row["bin"]] = row["ips"]
-            else:
-                part["totals"] = row
+    rows = conn.cursor(row_factory=dict_row).execute(statement, params) if params["slots"] else ()
+    for row in rows:
+        _add(parts[row["slot"]], row)
     return {spec.key: _inputs(part) for spec, part in zip(specs, parts, strict=True)}
+
+
+def _add(part: dict, row: dict) -> None:
+    """One result row into its window's combinations, first-seen bins or totals."""
+    if row["part"] == COMBO:
+        part["combos"].append(_combo(row))
+    elif row["part"] == BIN:
+        part["first_seen"][row["bin"]] = row["ips"]
+    else:
+        part["totals"] = row
 
 
 def _combo(row: dict) -> Combo:
