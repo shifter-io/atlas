@@ -13,39 +13,100 @@ from typing import Any
 
 import maxminddb
 
+# The one file name `dbip update` keeps the current release under (replaced atomically).
+CURRENT = "dbip-full.mmdb"
+OPEN_ATTEMPTS = 3  # the file replaced while it was being opened: open the new one
 
-def find_database(path: str | Path | None = None) -> Path:
+
+def find_source(path: str | Path | None = None) -> Path:
+    """The configured MMDB as given: --mmdb, else $DBIP_MMDB, else db-ip/dbip-full.mmdb, else
+    the only *.mmdb in db-ip/. A link is returned unresolved, so a reader can follow it."""
     configured = path or os.environ.get("DBIP_MMDB")
     if configured:
-        result = Path(configured).expanduser().resolve()
+        result = Path(configured).expanduser().absolute()
         if not result.is_file():
             raise FileNotFoundError("Configured MMDB file does not exist")
         return result
     roots = [Path.cwd() / "db-ip", Path(__file__).resolve().parents[2] / "db-ip"]
+    for root in roots:
+        if (root / CURRENT).is_file():
+            return (root / CURRENT).absolute()
     candidates = {p.resolve() for root in roots for p in root.glob("*.mmdb")}
     if len(candidates) != 1:
         raise ValueError("Set DBIP_MMDB or --mmdb to select exactly one local MMDB file")
     return candidates.pop()
 
 
+def find_database(path: str | Path | None = None) -> Path:
+    """The MMDB file itself (find_source with every link resolved)."""
+    return find_source(path).resolve()
+
+
+def release_record(path: Path, metadata: Any, sha256: str) -> dict[str, Any]:
+    """What identifies a release in enrichment artifacts and `dbip_releases.metadata`."""
+    return {
+        "file": path.name,
+        "sha256": sha256,
+        "database_type": metadata.database_type,
+        "build_epoch": metadata.build_epoch,
+        "built_at": datetime.fromtimestamp(metadata.build_epoch, UTC).isoformat(),
+    }
+
+
+def _identity(path: Path) -> tuple[int, int, int]:
+    info = path.stat()
+    return info.st_dev, info.st_ino, info.st_mtime_ns
+
+
 class LocalEnricher:
-    """Memory-mapped database; bounded lookup cache shared across result rows."""
+    """Memory-mapped database; bounded lookup cache shared across result rows.
+
+    `source` is the path as configured (often db-ip/dbip-full.mmdb); `path` is the file open now.
+    `reload()` reopens the database when the file was replaced (another inode) or a link moved,
+    so a long-lived process follows `dbip update` without a restart."""
 
     def __init__(self, path: str | Path | None = None, *, cache_size: int = 100_000):
-        self.path = find_database(path)
-        self.reader = maxminddb.open_database(str(self.path))
+        self.source = find_source(path)
         self.cache_size = cache_size
         self.cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
-        metadata = self.reader.metadata()
-        with self.path.open("rb") as stream:
-            checksum = hashlib.file_digest(stream, "sha256").hexdigest()
-        self.release = {
-            "file": self.path.name,
-            "sha256": checksum,
-            "database_type": metadata.database_type,
-            "build_epoch": metadata.build_epoch,
-            "built_at": datetime.fromtimestamp(metadata.build_epoch, UTC).isoformat(),
-        }
+        self.path, self.reader, self.release, self._opened = self._open()
+
+    def _open(self) -> tuple[Path, Any, dict[str, Any], tuple[int, int, int]]:
+        """Open the reader and hash the same file: when it is replaced in between (the update
+        renames a new release over it), the identities differ and the new file is opened."""
+        for _ in range(OPEN_ATTEMPTS):
+            path = self.source.resolve()
+            opened = _identity(path)
+            reader = maxminddb.open_database(str(path))
+            try:
+                with path.open("rb") as stream:
+                    checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+                release = release_record(path, reader.metadata(), checksum)
+                if _identity(path) == opened:
+                    return path, reader, release, opened
+            except BaseException:
+                reader.close()
+                raise
+            reader.close()
+        raise OSError("The MMDB file kept changing while it was opened")
+
+    def stale(self) -> bool:
+        """True when `source` now names another file than the one open (cheap: two stats)."""
+        try:
+            return _identity(self.source.resolve()) != self._opened
+        except OSError:
+            return False  # mid-swap or gone: keep the open release
+
+    def reload(self) -> bool:
+        """Reopen when stale; True when it did. The old reader stays open if the new one fails.
+        Call it only while no lookup runs (it closes the old reader)."""
+        if not self.stale():
+            return False
+        old = self.reader
+        self.path, self.reader, self.release, self._opened = self._open()
+        self.cache.clear()
+        old.close()
+        return True
 
     def __enter__(self) -> LocalEnricher:
         return self

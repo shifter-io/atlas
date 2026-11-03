@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
-from .models import ErrorCode, VerdictName
+from .models import ErrorCode, RequestContext, VerdictName
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
 
 
@@ -67,6 +67,74 @@ class EchoIpTarget:
             if sniffed is not None:
                 return Assessment(error=BODY_CODES[sniffed], verdict=sniffed)
             return Assessment(error="invalid_body", verdict=Verdict.ERROR)
+
+
+@dataclass(frozen=True, slots=True)
+class PageSpec:
+    """A browser try's page, the selector that shows it loaded, and the settle time after it."""
+
+    url: str
+    wait_for: str | None = None
+    settle_ms: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class PageView:
+    """What a try saw after interact(): main-document status (None if none), title, the first
+    4 KB of visible text and the match count of each named selector. Judges read only this."""
+
+    final_url: str
+    status: int | None
+    title: str
+    text_head: str
+    found: dict[str, int] = field(default_factory=dict)
+    timings_ms: dict[str, int | None] = field(default_factory=dict)
+
+
+class PageDriver(Protocol):
+    """All a browser target may do to a page (over the real browser or a fake site; ms)."""
+
+    async def goto(self, url: str, timeout_ms: int) -> int | None: ...
+    async def fill(self, selector: str, value: str) -> None: ...
+    async def press(self, selector: str, key: str) -> None: ...
+    async def click(self, selector: str) -> None: ...
+    async def wait_for(self, selector: str, timeout_ms: int) -> bool: ...
+    async def count(self, selector: str) -> int: ...
+    async def text(self, selector: str) -> str: ...
+    async def url(self) -> str: ...
+    async def title(self) -> str: ...
+    async def screenshot(self) -> bytes: ...
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserTarget(Target):
+    """A target measured with a real browser (K-BP1): page() from the settings inputs, an
+    optional interact() through the driver, then judge(). build_request() only names the base
+    URL; the HTTP runner never runs one. It records no exit IP, so it feeds no pool metric."""
+
+    id: str
+    url: str
+    version: str = "1"
+    engine: str = "browser"
+    pool_eligible: bool = False
+
+    def build_request(self) -> RequestSpec:
+        return RequestSpec(self.url)
+
+    def assess(self, status: int, body: bytes) -> Assessment:
+        raise TypeError("A browser target is judged from a PageView, not an HTTP body")
+
+    def page(self, context: RequestContext, inputs: tuple[Any, ...]) -> PageSpec:
+        """The page for try context.request_index, from the target's settings inputs."""
+        raise NotImplementedError
+
+    async def interact(self, driver: PageDriver, spec: PageSpec) -> None:
+        """Act on the loaded page before it is read; most targets only read it."""
+        return None
+
+    def judge(self, view: PageView) -> Assessment:
+        """The target's pass condition, after navigation errors and the shared markers."""
+        raise NotImplementedError
 
 
 def https_only(target: Target) -> Target:

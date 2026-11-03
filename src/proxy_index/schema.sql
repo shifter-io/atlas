@@ -47,9 +47,10 @@ CREATE TABLE IF NOT EXISTS nodes (
 -- A batch is one synchronized slot: every provider in the region starts it at start_at. A 'load'
 -- batch is the latency-under-load wave a pulse slot adds in the reference country (same
 -- scheduled_for). retry_of names the census a provider-outage rerun replaces (one product).
+-- A 'browser' batch is one browser-pulse slot of a browser target (schema v11).
 CREATE TABLE IF NOT EXISTS test_batches (
  batch_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
- kind text NOT NULL CHECK(kind IN ('census','pulse','load')),
+ kind text NOT NULL CHECK(kind IN ('census','pulse','load','browser')),
  country_code char(2) NOT NULL REFERENCES countries(country_code),
  region_id smallint NOT NULL REFERENCES runner_regions(region_id),
  target_id text NOT NULL REFERENCES targets(target_id),
