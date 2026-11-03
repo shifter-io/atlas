@@ -222,6 +222,9 @@ def load_targets(path: str | Path | None = None) -> list[dict[str, Any]]:
             raise ValueError("Target URL must be http or https")
         if any(row[key] <= 0 for key in POSITIVE):
             raise ValueError("Target timeouts, intervals, counts and concurrency must be > 0")
+        # The browser settings file schedules browser targets (K-BP1, browser.contracts).
+        if row["engine"] == "browser" and (row["pulse_enabled"] or row["census"]):
+            raise ValueError("A browser target needs pulse_enabled = false and census = false")
         seen.add(row["id"])
         rows.append({"target_id": row.pop("id")} | row)
     return rows
