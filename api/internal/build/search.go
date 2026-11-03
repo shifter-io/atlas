@@ -1,15 +1,12 @@
 package build
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"gopkg.in/yaml.v3"
 )
 
 // SearchItem is src/lib/search.ts SearchItem; every field is always written.
@@ -41,15 +38,18 @@ type SearchIndex struct {
 }
 
 // GroupBonus, MaxResults and PerGroup are CommandPalette.astro's constants;
-// Countries is new in the API index.
-var GroupBonus = map[string]int{"Networks": 6, "Guides": 4, "Pages": 3, "Targets": 2, "Countries": 2, "Actions": 1}
+// Countries is new in the API index. The index has no articles (guides and
+// network reviews), so there is no Guides group.
+var GroupBonus = map[string]int{"Networks": 6, "Pages": 3, "Targets": 2, "Countries": 2, "Actions": 1}
 
 const (
 	MaxResults = 16
 	PerGroup   = 5
 )
 
-var startingPointIDs = []string{"page:/networks", "page:/compare", "page:/overlap", "page:/pricing", "action:dataset"}
+// startingPointIDs drops the palette's action:dataset, which downloaded the
+// old website's demo file (/data/design-preview.json).
+var startingPointIDs = []string{"page:/networks", "page:/compare", "page:/overlap", "page:/pricing"}
 
 type navItem struct{ href, label, icon, match string }
 type navGroup struct {
@@ -57,11 +57,13 @@ type navGroup struct {
 	items []navItem
 }
 
-// navGroups is src/lib/nav.ts NAV_GROUPS with the English labels of src/i18n/ui/en.ts.
+// navGroups is src/lib/nav.ts NAV_GROUPS with the English labels of src/i18n/ui/en.ts,
+// without the pages only the old website had: Guides (its articles),
+// Contribute (its run submission form) and Disclosure (its editorial page).
 var navGroups = []navGroup{
 	{"Measure", []navItem{{"/", "Overview", "grid", "overview"}, {"/networks", "Networks", "server", "networks"}, {"/compare", "Compare", "scale", "compare"}, {"/overlap", "Pool overlap", "percent", "overlap"}, {"/pricing", "True cost", "tag", "pricing"}}},
-	{"Method", []navItem{{"/targets", "Targets", "flag", "targets"}, {"/guides", "Guides", "beaker", "guides"}, {"/methodology", "Methodology", "beaker", "methodology"}}},
-	{"Record", []navItem{{"/changelog", "What changed", "clock", "changelog"}, {"/contribute", "Contribute", "copy", "contribute"}, {"/disclosure", "Disclosure", "shield", "disclosure"}}},
+	{"Method", []navItem{{"/targets", "Targets", "flag", "targets"}, {"/methodology", "Methodology", "beaker", "methodology"}}},
+	{"Record", []navItem{{"/changelog", "What changed", "clock", "changelog"}}},
 }
 
 func pageBlurbs(targets int) map[string]string {
@@ -72,106 +74,29 @@ func pageBlurbs(targets int) map[string]string {
 		"overlap":     "How much of each pool turns up inside a rival network",
 		"pricing":     "Dollars per 1,000 successful requests, not sticker price",
 		"targets":     "The " + jsnum.Locale(float64(targets)) + " endpoints every network is tested against",
-		"guides":      "How to buy, test and read proxy measurements",
 		"methodology": "Scoring formula, request schedule and window",
 		"changelog":   "What moved since the previous run",
-		"contribute":  "Submit a collector run of your own",
-		"disclosure":  "Funding, conflicts and why ranking cannot be bought",
 	}
 }
 
 func sp(s string) *string { return &s }
 
 var actions = []SearchItem{
-	{ID: "action:dataset", Group: "Actions", Title: "Download the raw dataset", Subtitle: "Every figure on this site, as one JSON file", Href: "/data/design-preview.json", Icon: "download", Keywords: "json export raw data file api schema", Download: true, Command: sp("dataset")},
 	{ID: "action:apply", Group: "Actions", Title: "List your proxy network", Subtitle: "Apply to be measured and published", Href: "#", Icon: "plus", Keywords: "submit apply listing add provider vendor join measure register signup sign up", Command: sp("apply")},
 	{ID: "action:theme", Group: "Actions", Title: "Toggle dark / light theme", Subtitle: "Switch the colour scheme for this browser", Href: "#", Icon: "moon", Keywords: "dark light appearance colour color scheme contrast", Command: sp("theme")},
 	{ID: "action:copy", Group: "Actions", Title: "Copy link to this page", Subtitle: "Puts the current URL on the clipboard", Href: "#", Icon: "copy", Keywords: "share url clipboard permalink", Command: sp("copy")},
 }
 
-// Content is the frontmatter of src/content guides and reviews.
-type Content struct {
-	Guides  []Guide
-	Reviews []EditorialReview
-}
-
-type Guide struct {
-	ID             string
-	Title          string   `yaml:"title"`
-	Description    string   `yaml:"description"`
-	Category       string   `yaml:"category"`
-	ReadingMinutes int      `yaml:"readingMinutes"`
-	Order          *int     `yaml:"order"`
-	Takeaways      []string `yaml:"takeaways"`
-}
-
-type EditorialReview struct {
-	ID             string
-	Provider       string `yaml:"provider"`
-	Product        string `yaml:"product"`
-	Title          string `yaml:"title"`
-	BottomLine     string `yaml:"bottomLine"`
-	Verdict        string `yaml:"verdict"`
-	ReadingMinutes int    `yaml:"readingMinutes"`
-}
-
-func frontmatter(path string, v any) error {
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	text := strings.ReplaceAll(string(body), "\r\n", "\n")
-	if !strings.HasPrefix(text, "---\n") {
-		return nil
-	}
-	end := strings.Index(text[4:], "\n---")
-	if end < 0 {
-		return nil
-	}
-	return yaml.Unmarshal([]byte(text[4:4+end]), v)
-}
-
-// ReadContent loads guide and review frontmatter from a src/content directory.
-// A missing directory yields empty content.
-func ReadContent(dir string) (*Content, error) {
-	c := &Content{}
-	if dir == "" {
-		return c, nil
-	}
-	guides, _ := filepath.Glob(filepath.Join(dir, "guides", "*.md"))
-	sort.Strings(guides)
-	for _, f := range guides {
-		var g Guide
-		if err := frontmatter(f, &g); err != nil {
-			return nil, err
-		}
-		g.ID = strings.TrimSuffix(filepath.Base(f), ".md")
-		c.Guides = append(c.Guides, g)
-	}
-	reviews, _ := filepath.Glob(filepath.Join(dir, "reviews", "*.md"))
-	sort.Strings(reviews)
-	for _, f := range reviews {
-		var r EditorialReview
-		if err := frontmatter(f, &r); err != nil {
-			return nil, err
-		}
-		r.ID = strings.TrimSuffix(filepath.Base(f), ".md")
-		c.Reviews = append(c.Reviews, r)
-	}
-	return c, nil
-}
-
 func dash(s string) string  { return strings.ReplaceAll(s, "-", " ") }
 func under(s string) string { return strings.ReplaceAll(s, "_", " ") }
 
-// buildSearchIndex ports search.ts buildSearchIndex (English paths), plus a
-// Countries group built from where measured exits were seen.
-func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta, content *Content, generatedAt string) *SearchIndex {
+// buildSearchIndex ports search.ts buildSearchIndex (English paths) without
+// its articles (guides and network reviews), plus a Countries group built from
+// where measured exits were seen.
+func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta, generatedAt string) *SearchIndex {
 	idx := &SearchIndex{GeneratedAt: generatedAt, StartingPointIDs: startingPointIDs, GroupBonus: GroupBonus, MaxResults: MaxResults, PerGroup: PerGroup, TopNetworkIDs: []string{}}
 	items := []SearchItem{}
-	listed := map[string]bool{}
 	for i, p := range leaderboard {
-		listed[p.Slug] = true
 		if i < 5 {
 			idx.TopNetworkIDs = append(idx.TopNetworkIDs, "network:"+p.Slug)
 		}
@@ -204,30 +129,6 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 		items = append(items, SearchItem{ID: "network:" + p.Slug, Group: "Networks", Title: p.Name,
 			Subtitle: model.KindLabels[p.PrimaryKind] + " · " + model.ProductLabels[p.MeasuredProduct] + " · " + hq,
 			Href:     "/networks/" + p.Slug, Icon: "server", Meta: sp(rank + " · " + composite), Keywords: strings.Join(kw, " ")})
-	}
-	if content != nil {
-		guides := append([]Guide{}, content.Guides...)
-		order := func(g Guide) int {
-			if g.Order == nil {
-				return 50
-			}
-			return *g.Order
-		}
-		sort.SliceStable(guides, func(i, j int) bool { return order(guides[i]) < order(guides[j]) })
-		for _, g := range guides {
-			items = append(items, SearchItem{ID: "guide:" + g.ID, Group: "Guides", Title: g.Title,
-				Subtitle: g.Category + " · " + jsnum.Locale(float64(g.ReadingMinutes)) + " min read", Href: "/guides/" + g.ID, Icon: "beaker",
-				Keywords: strings.Join(append([]string{dash(g.ID), g.Description}, g.Takeaways...), " ")})
-		}
-		for _, r := range content.Reviews {
-			if !listed[r.Provider] {
-				continue
-			}
-			items = append(items, SearchItem{ID: "review:" + r.ID, Group: "Guides", Title: r.Title,
-				Subtitle: "Network review · " + jsnum.Locale(float64(r.ReadingMinutes)) + " min · opens on the network page",
-				Href:     "/networks/" + r.Provider + "#analysis", Icon: "shield",
-				Keywords: strings.Join([]string{dash(r.ID), dash(r.Provider), r.BottomLine, r.Verdict, r.Product}, " ")})
-		}
 	}
 	blurbs := pageBlurbs(len(targets))
 	for _, g := range navGroups {

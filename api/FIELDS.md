@@ -347,7 +347,11 @@ the website lived in this repository; it went with the website.
    `LiveTape.astro` shows). In the site today, `dataset.tape` holds only the demo
    rows. `source` tells the two apart.
 9. **Search.** The meta of an unscored network is `"Unranked · N/A"`, and there is
-   a new `Countries` group.
+   a new `Countries` group. There are no articles: guides and network reviews are
+   not searched and `groupBonus` has no `Guides` group. The Pages group lists
+   no page only the old website had (`/guides`, `/contribute`, `/disclosure`), and
+   the old site's "Download the raw dataset" action (`/data/design-preview.json`)
+   is gone, from the items and from `startingPointIds`.
 
 `measuredTotals` uses the same fields as `totals`, aggregated by the API over
 `source = "measured"` providers only. Overview insight descriptions read these

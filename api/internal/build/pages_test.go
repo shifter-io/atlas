@@ -18,7 +18,7 @@ func smallPages(t *testing.T) *Pages {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Build(in, Options{})
+	res, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestTheCoverageIndexKeepsOnlyAnEntryPerProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Build(in, Options{})
+	res, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}

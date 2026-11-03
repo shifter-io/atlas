@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/config"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/server"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
@@ -44,11 +43,7 @@ func TestServeFromDatabase(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO site.targets(target_id) VALUES ('nope')"); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("runtime pool could write: %v", err)
 	}
-	content, err := build.ReadContent(config.FindUp(filepath.Join("fixtures", "content")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := server.New(server.DBSource{Pool: pool}, server.Options{Content: content, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if _, err := s.Refresh(ctx, true); err != nil {
 		t.Fatal(err)
 	}

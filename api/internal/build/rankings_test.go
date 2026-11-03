@@ -20,7 +20,7 @@ func shapePages(t *testing.T, shape testscale.Shape, edit func(doc map[string]an
 	if edit != nil {
 		in.Snapshot = editSnapshot(t, in.Snapshot, edit)
 	}
-	res, err := Build(in, Options{})
+	res, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}

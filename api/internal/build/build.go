@@ -236,13 +236,8 @@ func providerForProduct(p *model.Provider, kind string) *model.Provider {
 	return &cp
 }
 
-// Options tune a build.
-type Options struct {
-	Content *Content
-}
-
 // Build assembles every response from one consistent read.
-func Build(in *store.Inputs, opts Options) (*Result, error) {
+func Build(in *store.Inputs) (*Result, error) {
 	res := &Result{Fingerprint: in.Fingerprint, BuiltAt: time.Now().UTC(), Details: map[string]*ProviderDetail{}}
 	var s *snap.Snapshot
 	if in.Snapshot != nil {
@@ -683,7 +678,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	}
 	res.Pages = buildPages(ds.GeneratedAt, entries, stats, res.Details, s, in.Snapshot)
 	res.Pages.Published = publishedProducts(s, entries, in.Providers)
-	res.Search = buildSearchIndex(leader, ds.Targets, opts.Content, ds.GeneratedAt)
+	res.Search = buildSearchIndex(leader, ds.Targets, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, records)
 	return res, nil
 }

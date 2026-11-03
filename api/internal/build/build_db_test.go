@@ -55,7 +55,7 @@ func buildFrom(t testing.TB, db *testdb.DB) *build.Result {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := build.Build(in, build.Options{})
+	res, err := build.Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}

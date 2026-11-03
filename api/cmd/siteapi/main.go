@@ -1,7 +1,7 @@
 // Command siteapi serves every piece of data the website needs from the
 // proxy_reviews database, precomputed and precompressed in memory.
 //
-//	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s] [--content-dir D]
+//	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s]
 //	siteapi migrate      [--database-file F]
 //	siteapi seed-demo    [--file fixtures/demo/design-demo.json] [--force] [--no-backup] [--backup-dir D]
 //	siteapi unseed-demo  [--no-backup]
@@ -103,23 +103,12 @@ func main() {
 	}
 }
 
-func contentDir(flagValue string) string {
-	if flagValue == "-" {
-		return ""
-	}
-	if flagValue != "" {
-		return flagValue
-	}
-	return config.FindUp(filepath.Join("src", "content"))
-}
-
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	var c common
 	c.register(fs)
 	listen := fs.String("listen", env("SITEAPI_LISTEN", "127.0.0.1:8090"), "listen address")
 	interval := fs.Duration("interval", 10*time.Second, "change-detection interval")
-	content := fs.String("content-dir", os.Getenv("SITEAPI_CONTENT_DIR"), "src/content directory for guide/review search entries (default: found above the working directory; - disables)")
 	fs.Parse(args) //nolint:errcheck
 	dsn, err := c.dsn()
 	if err != nil {
@@ -132,13 +121,9 @@ func serve(args []string) error {
 		return err
 	}
 	defer pool.Close()
-	cnt, err := build.ReadContent(contentDir(*content))
-	if err != nil {
-		return fmt.Errorf("content: %w", err)
-	}
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
-	srv := server.New(server.DBSource{Pool: pool}, server.Options{Interval: *interval, Content: cnt})
+	srv := server.New(server.DBSource{Pool: pool}, server.Options{Interval: *interval})
 	if _, err := srv.Refresh(ctx, true); err != nil {
 		return fmt.Errorf("initial build: %w", err)
 	}
@@ -304,7 +289,6 @@ func dump(args []string) error {
 	out := fs.String("out", "", "output file (required)")
 	endpoint := fs.String("endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/snapshot, /v1/networks, /v1/rankings/<range>, /v1/countries")
 	pretty := fs.Bool("pretty", false, "indent the JSON")
-	content := fs.String("content-dir", os.Getenv("SITEAPI_CONTENT_DIR"), "src/content directory for guide/review search entries (default: found above the working directory; - disables)")
 	fs.Parse(args) //nolint:errcheck
 	if *out == "" {
 		return errors.New("--out is required")
@@ -323,11 +307,7 @@ func dump(args []string) error {
 	if err != nil {
 		return err
 	}
-	cnt, err := build.ReadContent(contentDir(*content))
-	if err != nil {
-		return fmt.Errorf("content: %w", err)
-	}
-	res, err := build.Build(in, build.Options{Content: cnt})
+	res, err := build.Build(in)
 	if err != nil {
 		return err
 	}

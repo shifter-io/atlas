@@ -73,7 +73,6 @@ func (d DBSource) Events(ctx context.Context, f store.EventFilter) ([]store.Even
 // Options configure a Server.
 type Options struct {
 	Interval  time.Duration
-	Content   *build.Content
 	SearchLRU int
 	EventsLRU int
 	Logger    *slog.Logger
@@ -179,7 +178,7 @@ func (s *Server) build(ctx context.Context) (*Version, error) {
 		return nil, fmt.Errorf("load: %w", err)
 	}
 	t1 := time.Now()
-	res, err := build.Build(in, build.Options{Content: s.opts.Content})
+	res, err := build.Build(in)
 	if err != nil {
 		return nil, fmt.Errorf("build: %w", err)
 	}

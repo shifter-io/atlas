@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -25,14 +24,8 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Guides and reviews like those the served build indexes (fixtures/content
-	// keeps the website's as test input; serve reads --content-dir).
-	content, err := build.ReadContent(filepath.Join("..", "..", "..", "fixtures", "content"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	t0 := time.Now()
-	res, err := build.Build(in, build.Options{Content: content})
+	res, err := build.Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}

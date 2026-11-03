@@ -15,7 +15,7 @@ func TestANetworkAnswerCarriesItsProfileWithoutTheLongLists(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Build(in, Options{})
+	res, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, err := Build(in, Options{})
+	res, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}
