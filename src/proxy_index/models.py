@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlsplit
 
+from .errors import UserError
 from .outcome import from_error
 
 ErrorCode = Literal[
@@ -159,6 +160,24 @@ class AnswerClasses:
         return {"rate_limits": list(self.rate_limits), "no_inventory": list(self.no_inventory)}
 
 
+class LabelError(UserError, ValueError):
+    """A run label (--provider, --product, --country) that differs from the provider config."""
+
+    FLAGS = {"provider": "--provider", "product": "--product", "requested_country": "--country"}
+
+    def __init__(self, name: str, supplied: str, effective: str | None):
+        flag = self.FLAGS[name]
+        what = "country parameter (lowercase)" if name == "requested_country" else name
+        if effective is None:
+            fix = f"the provider config sets no {what}; leave {flag} out"
+        else:
+            fix = f"it must equal the provider's {what} {effective!r}: use {flag} {effective}"
+            fix += " or leave it out"
+        super().__init__(
+            f"{name} label conflicts with provider configuration: {flag} {supplied!r} given, {fix}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class RunConfig:
     target: str
@@ -234,7 +253,7 @@ class RunConfig:
             effective = metadata.get(name)
             supplied = getattr(self, name)
             if supplied is not None and supplied != effective and name in metadata:
-                raise ValueError(f"{name} label conflicts with provider configuration")
+                raise LabelError(name, supplied, effective)
             if name in metadata:
                 object.__setattr__(self, name, effective)
         if self.stop_rule not in ("count", "unique_ratio"):

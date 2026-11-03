@@ -48,7 +48,7 @@ from .aggregate import (
 )
 from .aggregate import LATENCY as PERCENTILES
 from .fleet import fleet_entry, fleet_totals
-from .inputs import group_by_product, previous_products, tested_by_product
+from .inputs import cutoff, group_by_product, previous_products, tested_by_product
 from .policy import (
     digest,
     effective,
@@ -143,18 +143,17 @@ def retain(score, previous, as_of, valid_hours, observed, method_id=None):
 
 def calculate(database, methodology, *, as_of=None, publish=False):
     config, method_id = load(methodology)
-    as_of = as_of or datetime.now(UTC)
+    as_of, latest = as_of or datetime.now(UTC), as_of is None
     if isinstance(as_of, str):
         as_of = datetime.fromisoformat(as_of)
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
-    # Existing facts have 5-minute resolution. Exact half-open windows use closed buckets.
-    as_of = datetime.fromtimestamp(int(as_of.timestamp() // 300) * 300, UTC)
-    start = as_of - timedelta(hours=1440)
     with connect(database) as conn:
         conn.row_factory = dict_row
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         conn.execute("SELECT pg_advisory_xact_lock(817452902)")
+        as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
+        start = as_of - timedelta(hours=1440)
         runs = conn.execute(
             "SELECT r.run_key,r.run_id::text,r.summary_sha256,r.summary,r.started_at,"
             "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"

@@ -22,6 +22,7 @@ from typing import Any
 
 import aiohttp
 
+from ..errors import UserError
 from ..regions import REGION_IDS
 from .contracts import (
     BUILDER_NAME_RE,
@@ -160,8 +161,8 @@ class ScopeError(ValueError):
     """A create, list or delete request outside the campaign's ownership markers."""
 
 
-class TokenError(RuntimeError):
-    pass
+class TokenError(UserError, RuntimeError):
+    """No usable DigitalOcean token. The message names where it was expected, never a token."""
 
 
 class Uncertain(ApiError):
@@ -228,7 +229,11 @@ def keychain_token(account: Account) -> TokenSource:
         ]
         found = subprocess.run(command, capture_output=True, text=True, check=False)
         if found.returncode != 0 or not found.stdout.strip():
-            raise TokenError(f"no keychain token for account {account.key}")
+            raise TokenError(
+                f"no DigitalOcean token for account {account.key}: expected a keychain "
+                f"generic password with service {account.keychain_service!r} and account "
+                f"{account.keychain_account!r}"
+            )
         return found.stdout.strip()
 
     return read

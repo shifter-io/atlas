@@ -44,15 +44,19 @@ campaign or the rules change.
 - **Peak hour**: the hour with the most unique IPs. Ties go to the hour with more requests, then
   to the earlier hour.
 - **Low hour**: the hour with the fewest unique IPs. Ties go to the hour with fewer requests, then
-  to the earlier hour. A `missing` hour (no request at all) is never the peak or the low.
+  to the earlier hour. An hour without IPs is never the peak or the low.
 - **Hour factor**: the hour's unique IPs divided by the peak hour's unique IPs, so the peak is
-  exactly `1.0`. A `missing` hour's factor is `null`. A `requests_no_ips` hour counts as 0 IPs, so
-  its factor is `0.0`, and it is flagged in `status`.
+  exactly `1.0`. An hour in which the campaign saw no exit IP, `missing` (no request at all) or
+  `requests_no_ips` (requests answered, no exit IP reported), is no data: its factor is `null`,
+  never `0.0`, and `network_curve.no_data_reasons` says why. Its estimate is "not estimated"
+  (null figures, never stored), so no sum or average counts it as 0. Version 1 published `0.0`
+  for `requests_no_ips` hours. A borrowed curve (below) has a factor for every hour instead.
 - **Daily factor**: the whole-day unique IPs (the union of the 24 hours) divided by the peak hour's
   unique IPs. The day can be larger than any single hour because IPs rotate.
 
 Factors are stored at full float precision. `round(factor * peak-hour unique IPs)` gives back each
-measured hour and the whole day exactly.
+measured hour and the whole day exactly (for a country, each hour whose `hour_basis` is `country`
+or `country_low_sample`).
 
 ## Fallback to the network curve
 
@@ -71,6 +75,31 @@ The 100-IP floor keeps the sampling noise of an hour to about 10% (1/√100). Th
 day's swing of the network curves in version 1, where the low hour has a median 0.78 times the
 peak's IPs (0.43 to 0.82 across the 17 networks with IPs in all 24 hours).
 
+## Missing and low-sample country hours
+
+A country on its own curve can still lack one of the network's covered hours (an hour in which the
+network itself reported IPs, status `present`). The sample of a country hour is its request rows,
+compared with the median request rows of the country's covered hours:
+
+- no request row at all: `hour_basis` is `network_missing`;
+- fewer than `rules.min_sample_share` (0.25) times the median: `network_low_sample`;
+- fewer than `rules.low_sample_share` (0.5) times the median: `country_low_sample`, a flag only;
+- otherwise `country`.
+
+A `network_missing` or `network_low_sample` hour did not measure the pool, so its factor comes from
+the network curve, scaled to the country's level: the network's unique IPs that hour, times the
+country's unique IPs over the network's in the country's other covered hours, divided by the
+country's peak-hour IPs, and at most 1.0 so that the measured peak stays the largest factor.
+Such an hour is never the country's peak or low hour, and its own counts stay in `unique_ips` and
+`requests`. A `country_low_sample` hour keeps its own factor. The estimate
+of a fallback hour scales the measured requests by the hour factor, not by the country's request
+curve. A country on the network curve has `hour_basis` `network` in every covered hour; an hour
+the network did not cover has `hour_basis` null and a null factor.
+
+In version 1 such hours had a factor of 0.0 or near it (shifter: US hour 08 had no US request row,
+CA hours 18 and 23 about a twentieth of the usual rows), so an estimate for that hour was close to
+0. Version 2 is the first built with these rules.
+
 ## Daily test schedule
 
 `schedule` maps each country to its `test_hour`, the peak hour of the curve it uses. Testing at
@@ -80,9 +109,53 @@ other hour, and the daily factor scales it to the whole day.
 A network's formula is only as complete as the campaign behind it. Every new network gets a full
 24-hour test first, and its formula is built from that test. A network whose `network_curve` has
 fewer than 24 hours with IPs needs a new 24-hour campaign before its schedule means more than "the
-hour that had data". In version 1 that network is **byteful**: its proxy answered every hour, but
-reported exit IPs only in hour 16. Its other 23 hours are `requests_no_ips`, so every byteful
-country is scheduled at 16.
+hour that had data". That network is **byteful**: its proxy answered every hour, but reported
+exit IPs only in hour 16. Its other 23 hours are `requests_no_ips`, so in version 1 every byteful
+country was scheduled at 16 with a factor of 0.0 in every other hour. Since version 2 it has a
+borrowed curve (below).
+
+## Borrowed curve (temporary)
+
+`build --borrow <network>` gives a network whose campaign measured too few hours the average
+24-hour shape of all the other networks in the build (the donors). Version 2 borrows for
+**byteful** only, until its own 24-hour data is fixed; rebuilding without `--borrow` then gives it
+its own curve again. The current files are built with:
+
+```sh
+python -m proxy_index.formula build --aggregates <counts dir> --out formulas --version 2 --borrow byteful
+```
+
+- A curve's shape is its hour factors divided by their mean, so each donor weighs the same
+  whatever its size. The borrowed shape S[h] of an hour is the mean of the donors' shapes that
+  hour.
+- A country uses the shape of the donors that have it on their own curve (`curve` `country`) when
+  at least `borrowed.min_country_networks` (3) donors do; its `curve` is then `country`. Otherwise
+  it uses the all-country shape, and its `curve` is `network`.
+- The measured hour m (the measured peak; for byteful hour 16, its only hour with IPs) keeps its
+  real unique IPs M and request rows R. Every other hour h is estimated as M x S[h] / S[m] (and
+  R x S[h] / S[m]): `estimated_unique_ips` and `estimated_requests`.
+- The peak hour (and test hour) is the hour where S is highest, the low hour where it is lowest,
+  and the hour factors are S[h] / max(S).
+- The daily factor comes from the donors too: the mean of their daily factor / mean hour factor,
+  divided by max(S).
+- The measured counts (`unique_ips`, `requests`, `status`, `no_data_reasons`) stay as measured.
+- The document has `borrowed` (`source`, `note` "borrowed: average of all networks, temporary
+  until <network> data is fixed", donor `networks`, `min_country_networks`). Each country's
+  `fallback_reason` repeats the note, and every `hour_basis` is `borrowed`, so the estimates scale
+  requests by the hour factor. SUMMARY.md marks the network "(borrowed curve)".
+
+Worked example (made-up numbers). The donors' average shape has S[16] = 1.10, a highest
+S[20] = 1.25 and a lowest S[04] = 0.80, and their mean daily factor / mean hour factor is 3.0.
+The network measured M = 1,000 unique IPs in hour 16. Then:
+
+| Hour | Estimated unique IPs | Hour factor |
+|---|---|---|
+| 16 (measured) | 1,000 | 1.10 / 1.25 = 0.88 |
+| 20 (peak) | 1,000 x 1.25 / 1.10 = 1,136 | 1.0 |
+| 04 (low) | 1,000 x 0.80 / 1.10 = 727 | 0.80 / 1.25 = 0.64 |
+
+The daily factor is 3.0 / 1.25 = 2.4, so the day is about 1,136 x 2.4 = 2,727 unique IPs. A daily
+test at the test hour 20 that measures 1,100 IPs gives 1,100 x 0.64 = 704 for hour 04.
 
 ## Latency
 
@@ -103,7 +176,7 @@ Lists marked [24] are indexed by UTC hour 0-23.
 | `source.hour_runs` | [24] of [string] | The run ids behind each hour. |
 | `source.enrichment_manifest_sha256` | string | sha256 of the input `manifest.json`. |
 | `source.dbip_release_sha256` | string | sha256 of the IP database release used by the enrichment. |
-| `rules` | object | Hour and country basis, request definition, fallback thresholds. |
+| `rules` | object | Hour and country basis, request definition, fallback thresholds, hour sample shares (`min_sample_share`, `low_sample_share`). |
 | `latency` | object | `available` (bool) and `note`. |
 | `network_curve.status` | [24] string | `present`, `requests_no_ips` (requests answered, no exit IP reported) or `missing`. |
 | `network_curve.unique_ips`, `.requests`, `.attempted_requests` | [24] int | The hour's counts. |
@@ -118,6 +191,10 @@ Lists marked [24] are indexed by UTC hour 0-23.
 | `countries.<CC>.curve` | string | `country` (own curve) or `network` (fallback). |
 | `countries.<CC>.fallback_reason` | string or null | Why the network curve is used. |
 | `countries.<CC>.hour_factors`, `.daily_factor`, `.test_hour` | as above | From the curve used. |
+| `countries.<CC>.hour_basis` | [24] string or null | `country`, `country_low_sample`, `network_missing`, `network_low_sample`, `network` or `borrowed`; see Missing and low-sample country hours. |
+| `network_curve.no_data_reasons` | [24] string or null | Why the campaign has no data for the hour (its factor is null, unless the curve is borrowed); null for an hour with IPs. |
+| `borrowed` | object | Present only for a borrowed curve: `source`, `note`, donor `networks`, `min_country_networks`. |
+| `network_curve.estimated_unique_ips`, `countries.<CC>.estimated_unique_ips` | [24] number | Borrowed curve only: the anchored hourly estimate (the measured hour exact). |
 | `schedule` | object | Country to test hour (UTC). |
 
 Country codes are the campaign's requested codes (ISO 3166-1 alpha-2).

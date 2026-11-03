@@ -73,13 +73,20 @@ def test_every_committed_formula_gives_measured_times_factor_at_its_test_hour(ne
         rows = compute.hours(f, code, at, 200, 1000)
         assert rows[0]["hour"] == entry["test_hour"] and rows[0]["unique_ips"] == 200
         for row in rows:
-            assert row["unique_ips"] == pytest.approx(200 * entry["hour_factors"][row["hour"]])
+            factor = entry["hour_factors"][row["hour"]]
+            assert row["estimated"] is (factor is not None) and row["curve"] == entry["curve"]
+            if factor is None:  # no data: not estimated, never 0
+                assert row["unique_ips"] is row["requests"] is None and row["reason"]
+                continue
+            assert row["unique_ips"] > 0
+            assert row["unique_ips"] == pytest.approx(200 * factor)
             assert row["day_unique_ips"] == pytest.approx(200 * entry["daily_factor"])
-            assert row["curve"] == entry["curve"]
         network = entry["curve"] == "network"
         curve = f["network_curve"]["requests"] if network else entry["requests"]
-        if curve[entry["test_hour"]]:  # else requests follow the IP factors
-            last = rows[-1]
+        last = [row for row in rows if row["estimated"]][-1]
+        if entry["hour_basis"][last["hour"]] in compute.FALLBACK_HOURS:
+            assert last["requests"] == pytest.approx(1000 * last["hour_factor"])
+        elif curve[entry["test_hour"]]:  # else requests follow the IP factors
             expected = 1000 * curve[last["hour"]] / curve[entry["test_hour"]]
             assert last["requests"] == pytest.approx(expected)
 
@@ -88,19 +95,40 @@ def test_hours_roll_into_the_next_day_and_skip_hours_without_a_factor():
     f = formula(DE={}, FR={"curve": "network"})
     rows = compute.hours(f, "DE", datetime(2026, 10, 1, 21, 59, tzinfo=UTC), 30, 600)
     assert [(r["day"].day, r["hour"]) for r in rows[:4]] == [(1, 21), (1, 22), (1, 23), (2, 0)]
-    assert len(rows) == 23 and 3 not in {r["hour"] for r in rows}  # hour 3 has no factor
+    assert len(rows) == 24 and [r["hour"] for r in rows if not r["estimated"]] == [3]
+    unset = next(r for r in rows if r["hour"] == 3)  # no factor: not estimated, not 0
+    assert unset["unique_ips"] is unset["requests"] is unset["hour_factor"] is None
+    assert unset["reason"].startswith("no data")
     assert rows[0]["hour_factor"] == 1.0 and rows[0]["requests"] == 600
     assert rows[1]["unique_ips"] == pytest.approx(30 * 23 / 22)
     assert rows[1]["requests"] == pytest.approx(600 * 2300 / 2200)
     assert rows[0]["day_unique_ips"] == pytest.approx(30 * 3.0 / (22 / 24))
     network = compute.hours(f, "FR", datetime(2026, 10, 1, 21, tzinfo=UTC), 30, 600)
-    assert {r["requests"] for r in network} == {600} and network[0]["curve"] == "network"
+    assert {r["requests"] for r in network} == {600, None} and network[0]["curve"] == "network"
     local = datetime(2026, 10, 2, 1, 30, tzinfo=UTC).astimezone(timezone(timedelta(hours=4)))
     assert compute.hours(f, "DE", local, 1, 1)[0]["hour"] == 1  # UTC hours, whatever the zone
     with pytest.raises(ValueError, match="hour 3 has no factor"):
         compute.hours(f, "DE", datetime(2026, 10, 1, 3, tzinfo=UTC), 1, 1)
     with pytest.raises(ValueError, match="not in the formula"):
         compute.hours(f, "XX", T1, 1, 1)
+
+
+def test_an_hour_on_the_network_curve_scales_requests_by_its_factor():
+    basis = ["country"] * 24
+    basis[8] = "network_missing"
+    entry = {"hour_basis": basis}
+    entry["requests"] = [100] * 24
+    entry["requests"][8] = 0
+    f = formula(DE=entry)
+    f["countries"]["DE"]["hour_factors"][8] = 0.5
+    rows = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=23), 30, 600)}
+    base = 1.0  # factor at hour 23
+    assert rows[8]["unique_ips"] == pytest.approx(30 * 0.5 / base)
+    assert rows[8]["requests"] == pytest.approx(600 * 0.5)
+    assert rows[9]["requests"] == pytest.approx(600)  # own request curve elsewhere
+    # Measured in a fallback hour: every hour's requests follow the factors.
+    measured = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=8), 30, 600)}
+    assert measured[23]["requests"] == pytest.approx(600 * 1.0 / 0.5)
 
 
 def test_only_a_version_1_hour_formula_loads(tmp_path):

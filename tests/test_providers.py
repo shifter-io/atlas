@@ -288,6 +288,17 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
         ["--provider-config", str(CONFIG), "--param", "country=us", "--param", "country=de"],
     ):
         assert main(["run", "--target", "generic_http", *args]) == 2
+    capsys.readouterr()
+    # A country label that differs from the provider's parameter names both and the fix.
+    label = ["--provider-config", str(CONFIG), "--param", "country=us", "--country", "US"]
+    assert main(["run", "--target", "generic_http", *label]) == 2
+    error = capsys.readouterr().err
+    assert "--country 'US'" in error and "use --country us" in error
+    assert "ValueError" not in error and "private-password" not in error
+    from proxy_index.models import LabelError  # here, so the base code fails the assertion above
+
+    unset = str(LabelError("requested_country", "us", None))
+    assert "--country 'us'" in unset and "sets no country parameter" in unset
 
 
 class LoopbackProvider:

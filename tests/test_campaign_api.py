@@ -374,6 +374,18 @@ async def test_limits_reports_counts_only():
     assert listed and all(q["tag_name"].startswith("pi-camp-") for q in listed)
 
 
+def test_a_missing_keychain_token_names_the_expected_item(monkeypatch, capsys):
+    def run(command, **_):
+        return type("Missing", (), {"returncode": 44, "stdout": ""})
+
+    monkeypatch.setattr(do_api.subprocess, "run", run)
+    assert main_cli.main(["campaign", "limits", "--account", "leftclick"]) == 2
+    error = capsys.readouterr().err
+    assert "Command failed: no DigitalOcean token for account leftclick" in error
+    assert "'Leftclick DigitalOcean'" in error and "'team: Leftclick'" in error
+    assert "(TokenError)" not in error
+
+
 def test_campaign_limits_command_is_wired(monkeypatch, capsys):
     seen = {}
 

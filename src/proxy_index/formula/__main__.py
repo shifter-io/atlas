@@ -2,7 +2,8 @@
 
 aggregate reads the private hour enrichment (one directory per network) and writes one counts
 file per network (no IPs); build turns those counts into the public formulas/<network>.json files
-and formulas/SUMMARY.md. Each written file replaces the old one atomically.
+and formulas/SUMMARY.md; `--borrow <network>` gives that network the other networks' average curve
+(formula/borrow.py). Each written file replaces the old one atomically.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 
+from proxy_index.formula import borrow
 from proxy_index.formula.aggregate import FormulaError, aggregate_network
 from proxy_index.formula.build import (
     DEFAULT_MIN_HOURS,
@@ -56,11 +58,17 @@ def run_build(args: argparse.Namespace) -> None:
     documents = []
     for path in sorted(args.aggregates.glob("*.json")):
         counts = json.loads(path.read_text())
-        document = build_formula(counts, args.version, args.min_peak_ips, args.min_hours)
-        _write(args.out / f"{document['network']}.json", dumps(document))
-        documents.append(document)
+        documents.append(build_formula(counts, args.version, args.min_peak_ips, args.min_hours))
     if not documents:
         raise FormulaError(f"no counts files in {args.aggregates}")
+    unknown = set(args.borrow) - {document["network"] for document in documents}
+    if unknown:
+        raise FormulaError(f"--borrow names networks without counts: {sorted(unknown)}")
+    donors = [document for document in documents if document["network"] not in args.borrow]
+    for document in documents:
+        if document["network"] in args.borrow:
+            borrow.apply(document, donors)
+        _write(args.out / f"{document['network']}.json", dumps(document))
     _write(args.out / "SUMMARY.md", summary_markdown(documents))
     print(f"built {len(documents)} formulas", flush=True)
 
@@ -80,6 +88,13 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--version", type=int, required=True)
     build.add_argument("--min-peak-ips", type=int, default=DEFAULT_MIN_PEAK_IPS)
     build.add_argument("--min-hours", type=int, default=DEFAULT_MIN_HOURS)
+    build.add_argument(
+        "--borrow",
+        action="append",
+        default=[],
+        metavar="NETWORK",
+        help="temporary: give NETWORK the average curve of the other networks (see borrow.py)",
+    )
     build.set_defaults(run=run_build)
     return root
 
