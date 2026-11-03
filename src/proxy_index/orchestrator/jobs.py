@@ -14,7 +14,8 @@ detect                    every minute: proxy_index.detect.detect(conn, now) wri
                           incident events from finished pulse batches (optional module)
 retention                 daily: test_events older than retention.events_days (whole monthly
                           partitions are dropped), job_runs older than retention.job_runs_days,
-                          estimated_hours older than retention.estimates_days
+                          estimated_hours older than retention.estimates_days (not while
+                          archive.enabled: the archive deletes them with their run)
 archive                   daily at 00:40 UTC, when `archive.enabled`: proxy_index.archive.job
                           archives the due days to Spaces and deletes their raw rows
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
@@ -154,12 +155,16 @@ async def retention(db: Database, now: datetime | None = None) -> dict[str, Any]
             )
         ).rowcount
         estimates_days = int(await setting(conn, "retention.estimates_days"))
-        estimates = (
-            await conn.execute(
-                "DELETE FROM estimated_hours WHERE day<%s",
-                ((now - timedelta(days=estimates_days)).date(),),
-            )
-        ).rowcount
+        estimates = 0
+        # With the raw archive on, estimated hours go only with their run, after its day file
+        # is verified in the bucket (ARCHIVE-1); this fallback would delete them unarchived.
+        if not await setting(conn, "archive.enabled"):
+            estimates = (
+                await conn.execute(
+                    "DELETE FROM estimated_hours WHERE day<%s",
+                    ((now - timedelta(days=estimates_days)).date(),),
+                )
+            ).rowcount
     return {
         "dropped_partitions": dropped,
         "events_deleted": events,

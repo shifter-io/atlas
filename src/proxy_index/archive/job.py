@@ -9,24 +9,30 @@ same (dimension rows, such as a product added since, may differ); different fact
 day alone and fail the run (`archive_changed`). Objects are never overwritten or deleted.
 Days are taken oldest first, at most `max_days` per run, stopping at the first that is not due.
 Only days that still hold rows are archived: a day without any batch or run gets no file.
+The run fails (`archive stalled`) while the oldest day still holding rows is more than
+RAW_DAYS + STALL_DAYS old, whatever the reason (an open batch, an unreachable bucket).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from ..partitions import RAW_DAYS
 from ..storage import connect
 from . import ArchiveError
 from .export import export_day, file_digests
 from .purge import pending, purge_day
 from .spaces import Spaces
-from .tables import select_day
+from .tables import day_range, select_day
 
 MAX_DAYS = 3
+# The job fails (job_failed:archive) while the oldest day holding rows is older than this:
+# normally that day is about RAW_DAYS + 1 old, so a stall shows within a few days.
+STALL_DAYS = 3
 
 
 def object_key(day: date) -> str:
@@ -102,4 +108,7 @@ def run_due(database, spaces: Spaces, workdir: Path, now: datetime, max_days: in
         archived.append(archive_day(database, spaces, day, workdir, now))
     summary = {"archived": [a["day"] for a in archived], "waiting": reason}
     summary["deleted_rows"] = sum(sum(a["deleted"].values()) for a in archived)
+    oldest = oldest_day(database)
+    if oldest and day_range(oldest)[0] < now - timedelta(days=RAW_DAYS + STALL_DAYS):
+        raise ArchiveError(f"archive stalled: {oldest} still holds rows ({summary})")
     return summary
