@@ -234,7 +234,7 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, s
 			return
 		}
 		var err error
-		if body, err = Render(http.StatusOK, res, CacheStatic, LevelFast); err != nil {
+		if body, err = Render(http.StatusOK, res, CacheData, LevelFast); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

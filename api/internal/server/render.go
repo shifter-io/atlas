@@ -16,12 +16,17 @@ import (
 
 // Cache-Control values.
 const (
-	CacheStatic = "public, max-age=60, stale-while-revalidate=600"
-	CacheEvents = "public, max-age=15, stale-while-revalidate=60"
-	// CacheVersion is short: /v1/version is how open pages notice new data
-	// (and /v1/dataset, which redirects to the current dataset file).
-	CacheVersion = "public, max-age=5"
-	CacheNone    = "no-store"
+	// CacheData marks a data answer (pages, search, coverage): write replaces
+	// it with a TTL that ends at the next scheduled data update (dataCache).
+	// The value itself is the floor, used only if that is skipped.
+	CacheData = "public, max-age=30, s-maxage=30"
+	// CacheVersion is short: /v1/version is how open pages notice that the
+	// data changed (a new snapshot, but also a new test event or a catalog
+	// edit), and /v1/dataset redirects to the current dataset file.
+	CacheVersion = "public, max-age=5, s-maxage=5"
+	// CacheEvents is the live tape: test events arrive at any time.
+	CacheEvents = "public, max-age=15, s-maxage=15"
+	CacheNone   = "no-store"
 	// CacheFile is for a file named by its content hash: it never changes.
 	CacheFile = "public, max-age=31536000, immutable"
 )

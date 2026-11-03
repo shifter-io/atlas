@@ -102,7 +102,12 @@ func serve(args []string) error {
 	c.register(fs)
 	listen := fs.String("listen", env("SITEAPI_LISTEN", "127.0.0.1:8090"), "listen address")
 	interval := fs.Duration("interval", 10*time.Second, "change-detection interval")
+	dataPeriod := fs.Duration("data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
+	cacheFloor := fs.Duration("cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
 	fs.Parse(args) //nolint:errcheck
+	if err := server.ValidDataPeriod(*dataPeriod); err != nil {
+		return err
+	}
 	dsn, err := c.dsn()
 	if err != nil {
 		return err
@@ -116,7 +121,7 @@ func serve(args []string) error {
 	defer pool.Close()
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
-	srv := server.New(server.DBSource{Pool: pool}, server.Options{Interval: *interval})
+	srv := server.New(server.DBSource{Pool: pool}, server.Options{Interval: *interval, DataPeriod: *dataPeriod, CacheFloor: *cacheFloor})
 	if _, err := srv.Refresh(ctx, true); err != nil {
 		return fmt.Errorf("initial build: %w", err)
 	}

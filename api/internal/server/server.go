@@ -49,6 +49,10 @@ type Version struct {
 	// (cached for up to 5 s, or racing the swap) still gets its file.
 	previous     *Rendered
 	previousPath string
+	// NextData is when the next data update is due (the published snapshot's
+	// cutoff plus Options.DataPeriod, on its grid); zero when unknown. Data
+	// answers are cached until then (dataCache).
+	NextData time.Time
 }
 
 // Source loads inputs; the database in production, fixtures in tests.
@@ -77,6 +81,12 @@ type Options struct {
 	SearchLRU int
 	EventsLRU int
 	Logger    *slog.Logger
+	// DataPeriod is the data update schedule (default DefaultDataPeriod) and
+	// CacheFloor the TTL when the next update is unknown or overdue (default
+	// DefaultCacheFloor). Now is the clock (default time.Now).
+	DataPeriod time.Duration
+	CacheFloor time.Duration
+	Now        func() time.Time
 }
 
 // Server holds the current Version and refresh state.
@@ -116,6 +126,15 @@ func New(src Source, opts Options) *Server {
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
+	}
+	if opts.DataPeriod <= 0 {
+		opts.DataPeriod = DefaultDataPeriod
+	}
+	if opts.CacheFloor <= 0 {
+		opts.CacheFloor = DefaultCacheFloor
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
 	}
 	return &Server{src: src, opts: opts, log: opts.Logger}
 }
@@ -203,7 +222,8 @@ func (s *Server) build(ctx context.Context) (*Version, error) {
 // RenderVersion pre-renders every static response of a build.
 func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error) {
 	v := &Version{ID: id, Fingerprint: res.Fingerprint.Key(), BuiltAt: res.BuiltAt, Result: res, Static: map[string]*Rendered{},
-		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU)}
+		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU),
+		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod)}
 	type job struct {
 		path  string
 		value any
@@ -211,14 +231,14 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	}
 	jobs := []job{
 		{datasetJob, res.Dataset, CacheFile},
-		{"/v1/search-index", res.Search, CacheStatic},
-		{"/v1/coverage", res.Coverage.Index(), CacheStatic},
+		{"/v1/search-index", res.Search, CacheData},
+		{"/v1/coverage", res.Coverage.Index(), CacheData},
 	}
 	for _, p := range res.Coverage.Providers {
-		jobs = append(jobs, job{"/v1/coverage/" + p.ID, p, CacheStatic})
+		jobs = append(jobs, job{"/v1/coverage/" + p.ID, p, CacheData})
 	}
 	for path, value := range pageAnswers(res.Pages) {
-		jobs = append(jobs, job{path, value, CacheStatic})
+		jobs = append(jobs, job{path, value, CacheData})
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -345,6 +365,9 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, v *Version, body 
 	h.Set("Vary", "Accept-Encoding")
 	h.Set("ETag", etag)
 	h.Set("Cache-Control", body.CacheControl)
+	if body.CacheControl == CacheData {
+		s.setDataCache(h, v)
+	}
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Access-Control-Allow-Origin", "*")
 	if v != nil {
@@ -400,7 +423,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	body, ok := v.search.Get(key)
 	if !ok {
 		var err error
-		body, err = Render(http.StatusOK, v.Result.Search.Search(key), CacheStatic, LevelFast)
+		body, err = Render(http.StatusOK, v.Result.Search.Search(key), CacheData, LevelFast)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

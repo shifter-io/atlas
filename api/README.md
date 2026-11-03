@@ -50,6 +50,8 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--listen`, `SITEAPI_LISTEN` | `127.0.0.1:8090` | serve |
 | `--database-file`, `SITEAPI_DATABASE_FILE`; `DATABASE_URL` wins | `proxy-index/.secrets/database.toml` | all |
 | `--interval` | `10s` | serve: change-detection poll |
+| `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
+| `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 
 ### Where the site schema comes from
@@ -74,7 +76,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 
 | Path | Body |
 |---|---|
-| `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
+| `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
 | `/v1/files/dataset-<sha256>.json` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"): a static file rendered (and compressed) once per data update, named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current build's file and, until the next rebuild, the previous one are served as they are (a client may hold the old redirect for 5 s or race a rebuild); any older `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
 | `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
@@ -90,7 +92,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/countries` | Every country any network was seen in (30d): networks and `ipsSum`. |
 | `/v1/countries/{cc}` | That country's row of every network and category per range, with `ipsSumRank` and `latencyRank` among the networks of the same category, and the city count per range. |
 | `/v1/countries/{cc}/cities?range=&q=&page=` | One page of that country's cities across networks (each row names its network and category). |
-| `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
+| `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
 | `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes, `unserved`, `siteGaps` and `binary`. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders a QA-1-sized
@@ -121,12 +123,28 @@ editorial ones.
   headers also carry `Vary: Accept-Encoding`, `Content-Length`,
   `X-Content-Type-Options: nosniff`, and `X-Site-Version`. `If-None-Match` uses the
   weak comparison and matches any coding's tag (or `*`), returning `304` with no
-  body. Every `/v1/*` response is
-  `Cache-Control: public, max-age=60, stale-while-revalidate=600`. The exceptions
-  are `/v1/events`, which is `public, max-age=15, stale-while-revalidate=60`,
-  `/v1/version` and the `/v1/dataset` redirect, which are `public, max-age=5`, and
-  the dataset file, which is `public, max-age=31536000, immutable` (its name
-  changes with its bytes).
+  body.
+- **Cache lifetime.** Data answers (search, coverage and every page answer, `304`s
+  included) are cached by browsers and the CDN until the next data update:
+  `Cache-Control: public, max-age=N, s-maxage=N` and `Expires`, where N is the whole
+  seconds until the update after the published snapshot is due. That is the end of the
+  snapshot cutoff's (`as_of`) period on the UTC grid of `--data-period` (default `1h`,
+  which must divide 24 h: a cutoff of 13:00 or 13:05 means the next update is due at
+  14:00). While no snapshot is published, or once that time has passed and the new
+  snapshot has not been loaded yet (the update is late), N is `--cache-floor` (default
+  30 s), so the new snapshot shows within about 30 s plus the 10 s change detection.
+  The CDN's copy never outlives the update; a browser that got its copy from the CDN
+  late in that copy's life can keep it up to N more unless the CDN sends `Age`.
+  Not everything in a data answer comes from the snapshot: the network answers' tape
+  and changelog are built from test events and site rows, and catalog edits change
+  names and texts. Those change at any time (each change rebuilds the cache at once),
+  but cached copies of the data answers show them only after they expire, at most at
+  the next update. `/v1/version` and the `/v1/dataset` redirect stay
+  `public, max-age=5, s-maxage=5`, so open pages notice every change, a new event
+  included, within seconds and always get the current dataset file.
+  `/v1/events` (the live tape) is `public, max-age=15, s-maxage=15`; the dataset file
+  is `public, max-age=31536000, immutable` (its name changes with its bytes);
+  `/healthz` and errors are `no-store`.
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id`
   - `max(test_events.event_id)`
