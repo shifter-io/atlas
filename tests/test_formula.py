@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import statistics
 from pathlib import Path
 
 import pytest
@@ -432,18 +433,13 @@ def test_borrow_gives_the_average_shape_anchored_on_the_measured_hour():
     ]
     document = borrow.apply(_one_hour_network(), donors)
 
-    def shape(curves, dailies):
-        normal = [[f / (sum(c) / 24) for f in c] for c in curves]
-        hours = [sum(n[h] for n in normal) / len(normal) for h in range(24)]
-        days = [d / (sum(c) / 24) for c, d in zip(curves, dailies, strict=True)]
-        return hours, sum(days) / len(days)
-
+    normal = [[f / (sum(c) / 24) for f in c] for c in (rising, falling, flat)]
+    s = [sum(n[h] for n in normal) / len(normal) for h in range(24)]
     network = document["network_curve"]
-    s, day = shape([rising, falling, flat], [3.0, 2.0, 1.5])
     peak, low = s.index(max(s)), s.index(min(s))
     assert (network["peak_hour"], network["low_hour"]) == (peak, low)
     assert network["hour_factors"] == pytest.approx([v / s[peak] for v in s])
-    assert network["daily_factor"] == pytest.approx(day / s[peak])
+    assert network["daily_factor"] == 2.0  # the median of 3.0, 2.0 and 1.5
     assert network["estimated_unique_ips"][16] == 50  # the measured hour keeps its real value
     assert network["estimated_unique_ips"] == pytest.approx([50 * v / s[16] for v in s])
     assert network["estimated_requests"][16] == 100 and network["unique_ips"][16] == 50
@@ -465,6 +461,39 @@ def test_borrow_gives_the_average_shape_anchored_on_the_measured_hour():
     assert all(factor > 0 for factor in fr_entry["hour_factors"])
     with pytest.raises(FormulaError, match="no other network"):
         borrow.apply(_one_hour_network(), [])
+
+
+def test_borrowed_daily_factor_is_the_donors_median_not_their_mean():
+    from proxy_index.formula import borrow
+
+    flat = [1.0] * 24
+
+    def donor(name, daily, us_daily):
+        document = _donor(name, flat, daily, {"FR": (flat, False)})
+        document["countries"]["US"] = {"curve": "country", "hour_factors": flat}
+        document["countries"]["US"]["daily_factor"] = us_daily
+        return document
+
+    # One outlier per curve: its day would pull a mean far up (6.875 and 3.8).
+    donors = [donor("a", 2.0, 1.0), donor("b", 3.0, 1.2), donor("c", 2.5, 9.0)]
+    donors.append(donor("d", 20.0, 4.0))
+    document = borrow.apply(_one_hour_network(), donors)
+    assert document["network_curve"]["daily_factor"] == 2.75  # median of 2.0, 2.5, 3.0, 20.0
+    assert document["countries"]["US"]["daily_factor"] == 2.6  # its own donors: 1.0 to 9.0
+    assert document["countries"]["FR"]["daily_factor"] == 2.75  # the all-country median
+
+
+def test_byteful_daily_factors_are_the_donors_median():
+    documents = {path.stem: json.loads(path.read_text()) for path in PUBLISHED}
+    byteful = documents.pop("byteful")
+    donors = [documents[name] for name in byteful["borrowed"]["networks"]]
+    network = statistics.median(d["network_curve"]["daily_factor"] for d in donors)
+    assert byteful["network_curve"]["daily_factor"] == network
+    for code, entry in byteful["countries"].items():
+        own = [d["countries"][code] for d in donors if code in d["countries"]]
+        own = [other["daily_factor"] for other in own if other["curve"] == "country"]
+        expected = statistics.median(own) if entry["curve"] == "country" else network
+        assert entry["daily_factor"] == expected, code
 
 
 def test_cli_build_borrows_only_for_the_named_network(tmp_path, capsys):

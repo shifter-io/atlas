@@ -136,8 +136,12 @@ python -m proxy_index.formula build --aggregates <counts dir> --out formulas --v
   R x S[h] / S[m]): `estimated_unique_ips` and `estimated_requests`.
 - The peak hour (and test hour) is the hour where S is highest, the low hour where it is lowest,
   and the hour factors are S[h] / max(S).
-- The daily factor comes from the donors too: the mean of their daily factor / mean hour factor,
-  divided by max(S).
+- The daily factor is the median of the donors' daily factors (each a whole day over its own peak
+  hour, so here a day over the borrowed peak hour). A country on its own donors' shape takes the
+  median of those donors' daily factors for it; otherwise the all-country median. The median, not
+  the mean, so one network with an unusually large day does not raise every borrowed day: in
+  version 2 the 17 donors' daily factors run from 2.25 to 11.29, with a median of 3.11 and a mean of
+  3.88.
 - The measured counts (`unique_ips`, `requests`, `status`, `no_data_reasons`) stay as measured.
 - The document has `borrowed` (`source`, `note` "borrowed: average of all networks, temporary
   until <network> data is fixed", donor `networks`, `min_country_networks`). Each country's
@@ -145,8 +149,8 @@ python -m proxy_index.formula build --aggregates <counts dir> --out formulas --v
   requests by the hour factor. SUMMARY.md marks the network "(borrowed curve)".
 
 Worked example (made-up numbers). The donors' average shape has S[16] = 1.10, a highest
-S[20] = 1.25 and a lowest S[04] = 0.80, and their mean daily factor / mean hour factor is 3.0.
-The network measured M = 1,000 unique IPs in hour 16. Then:
+S[20] = 1.25 and a lowest S[04] = 0.80, and their daily factors are 2.0, 2.4, 2.6 and 9.0. The
+network measured M = 1,000 unique IPs in hour 16. Then:
 
 | Hour | Estimated unique IPs | Hour factor |
 |---|---|---|
@@ -154,8 +158,9 @@ The network measured M = 1,000 unique IPs in hour 16. Then:
 | 20 (peak) | 1,000 x 1.25 / 1.10 = 1,136 | 1.0 |
 | 04 (low) | 1,000 x 0.80 / 1.10 = 727 | 0.80 / 1.25 = 0.64 |
 
-The daily factor is 3.0 / 1.25 = 2.4, so the day is about 1,136 x 2.4 = 2,727 unique IPs. A daily
-test at the test hour 20 that measures 1,100 IPs gives 1,100 x 0.64 = 704 for hour 04.
+The daily factor is the median of the donors' daily factors, (2.4 + 2.6) / 2 = 2.5 (their mean,
+4.0, is pulled up by the one 9.0), so the day is about 1,136 x 2.5 = 2,840 unique IPs. A daily test
+at the test hour 20 that measures 1,100 IPs gives 1,100 x 0.64 = 704 for hour 04.
 
 ## Latency
 

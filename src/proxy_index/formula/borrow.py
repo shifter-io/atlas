@@ -8,7 +8,9 @@ is given, on request (`build --borrow <network>`), the average shape of every ot
 - a country takes the shape of the donors that have it on their own curve (`curve` "country")
   when there are at least MIN_COUNTRY_NETWORKS of them (its `curve` is then "country"), else the
   all-country shape (`curve` "network");
-- the daily factor is the donors' mean of daily factor / mean hour factor, on the same scale;
+- the daily factor is the median of the donors' daily factors (each a whole day over its own
+  peak hour, so here over the borrowed peak hour); the median, not the mean, so one network
+  with an unusually large day does not raise every borrowed day;
 - the shape S is anchored on the measured hour m (the measured peak; for byteful the one hour
   with IPs) with M unique IPs: every hour h is estimated as M x S[h] / S[m], hour m keeps M
   exactly (`estimated_unique_ips`, and `estimated_requests` likewise). The peak hour is where S
@@ -22,7 +24,7 @@ without `--borrow` once the network's own data is complete replaces all of it.
 
 from __future__ import annotations
 
-from statistics import fmean
+from statistics import fmean, median
 
 from proxy_index.formula.aggregate import FormulaError
 
@@ -34,20 +36,19 @@ def note(network: str) -> str:
     return f"borrowed: {SOURCE}, temporary until {network} data is fixed"
 
 
-def _shape(entry: dict) -> tuple[list, float]:
-    """An entry's hour factors over their mean (None stays None) and its daily factor likewise."""
+def _shape(entry: dict) -> list:
+    """An entry's hour factors over their mean (None stays None)."""
     mean = fmean(factor for factor in entry["hour_factors"] if factor is not None)
-    shape = [None if factor is None else factor / mean for factor in entry["hour_factors"]]
-    return shape, entry["daily_factor"] / mean
+    return [None if factor is None else factor / mean for factor in entry["hour_factors"]]
 
 
 def average_shape(entries: list[dict]) -> tuple[list[float], float]:
-    """The hour-by-hour mean of the entries' shapes and the mean of their daily factors."""
+    """The hour-by-hour mean of the entries' shapes and the median of their daily factors."""
     shapes = [_shape(entry) for entry in entries]
     hours = [
-        fmean(shape[hour] for shape, _ in shapes if shape[hour] is not None) for hour in range(24)
+        fmean(shape[hour] for shape in shapes if shape[hour] is not None) for hour in range(24)
     ]
-    return hours, fmean(daily for _, daily in shapes)
+    return hours, median(entry["daily_factor"] for entry in entries)
 
 
 def anchored(shape: tuple[list[float], float], entry: dict) -> dict:
@@ -65,7 +66,7 @@ def anchored(shape: tuple[list[float], float], entry: dict) -> dict:
 
     return {
         "hour_factors": [value / hours[peak] for value in hours],
-        "daily_factor": daily / hours[peak],
+        "daily_factor": daily,
         "peak_hour": peak,
         "low_hour": min(range(24), key=lambda hour: (hours[hour], hour)),
         "estimated_unique_ips": scaled(entry["unique_ips"][anchor]),
