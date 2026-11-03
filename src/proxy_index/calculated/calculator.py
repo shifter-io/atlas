@@ -47,6 +47,7 @@ from .aggregate import (
     with_under_load,
 )
 from .aggregate import LATENCY as PERCENTILES
+from .fleet import fleet_entry, fleet_totals
 from .inputs import group_by_product, previous_products, tested_by_product
 from .policy import (
     digest,
@@ -837,20 +838,7 @@ def build(
     for (cohort, label), members in fleet_groups.items():
         # A cohort holds one kind of product, so its members are each other's peers.
         score_window(members, label, config, as_of, method_id)
-        all_rows = [r for _, rows, _, _ in members for r in rows]
-        all_seen = [o for _, _, obs, _ in members for o in obs]
-        hours = members[0][0]["windows"][label]["period"]["hours"]
-        fm = timed(all_rows, hours, minimum, slot_minutes=slot_minutes)
-        fleets.append(
-            {
-                "cohort": cohort,
-                "window": label,
-                "products": len(members),
-                "providers": len({p["provider"] for p, *_ in members}),
-                "metrics": fm,
-                "unique_ips": len({o["ip_id"] for o in all_seen}),
-            }
-        )
+        fleets.append(fleet_entry(cohort, label, members, minimum, slot_minutes))
         for p, *_ in members:
             own = sets[((p["product_id"], cohort), label)]
             peers = [
@@ -895,6 +883,7 @@ def build(
                     if target in p["windows"][label]["targets"]
                 ]
             )
+    fleets += fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target)
     return {
         "schema_version": SCHEMA_VERSION,
         "implementation_id": IMPLEMENTATION_ID,

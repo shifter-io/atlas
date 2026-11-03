@@ -133,6 +133,30 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     assert second["fleet"][0]["unique_ips"] < sum(
         p["windows"]["24h"]["pool"]["unique_ips"] for p in second["products"]
     )
+    # Cohort "*": every product group together, each exit IP counted once.
+    totals = {f["window"]: f for f in second["fleet"] if f["cohort"] == "*"}
+    assert list(totals) == ["24h", "7d", "30d"]
+    day = totals["24h"]
+    assert (day["products"], day["providers"]) == (2, 2)
+    assert day["metrics"]["completed"] == 20
+    period = second["periods"]["24h"]
+    with connect(database) as conn:
+        distinct = conn.execute(
+            "SELECT count(DISTINCT ip_id) FROM ip_observations "
+            "WHERE bucket_start >= %s AND bucket_start < %s",
+            (period["start"], period["end"]),
+        ).fetchone()[0]
+    assert (
+        day["unique_ips"]
+        == distinct
+        < sum(p["windows"]["24h"]["pool"]["unique_ips"] for p in second["products"])
+    )
+    assert len(day["series"]) == 288
+    assert sum(r["completed"] for r in day["series"]) == 20
+    assert max(r["unique_ips"] or 0 for r in day["series"]) <= day["unique_ips"]
+    assert [r["at"] for r in totals["30d"]["series"]] == [
+        r["at"] for r in second["products"][0]["windows"]["30d"]["series"]
+    ]
     assert store.read(database, first["snapshot_id"]) == first
     # Failure, including an attempt to rewind publication, leaves the current pointer intact.
     with pytest.raises(ValueError):

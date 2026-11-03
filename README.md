@@ -134,7 +134,10 @@ Refreshes use the same-origin `/api/measurements/v1/snapshots/current` endpoint.
 `/v1/snapshots/{current|id}` is the snapshot's summary (ids, times, readiness, methodology,
 periods) with one page of its product-group index, and every resource (`products`, `series`,
 `breakdowns`, `scores`, `fleet`, `runs`, ...) is paged with `?page=N` (`page`, `pages`, `total`
-in the answer). Each answer is at most 200 KB (`calculated/answers.py`, enforced by
+in the answer). `fleet` holds one entry per cohort and window, plus one per window with cohort
+`*`: every product group together, each exit IP counted once however many networks or cohorts
+saw it, success and light-load latency over all of them, and a `series` (5-minute buckets for
+24h, days otherwise) with distinct IPs per bucket. Each answer is at most 200 KB (`calculated/answers.py`, enforced by
 `tests/test_calculated_answers.py`) and is kept in memory per build, so a request reads the
 database at most once per build plus a current-build check every 10 s.
 The development API helper is `python scripts/measurements_local.py start|status|stop`.
