@@ -150,7 +150,13 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
         response = await client.get("/v1/snapshots/current")
         assert response.status == 200
         etag = response.headers["ETag"]
-        assert (await response.json()) == second
+        # The bare snapshot is its summary and a page of its product groups, never the payload.
+        current = await response.json()
+        assert current["snapshot_id"] == second["snapshot_id"]
+        assert current["methodology"] == second["methodology"]
+        assert [p["id"] for p in current["data"]] == [p["id"] for p in second["products"]]
+        assert current["products"] == len(second["products"])
+        assert all("windows" not in p for p in current["data"])
         assert (
             await client.get("/v1/snapshots/current", headers={"If-None-Match": etag})
         ).status == 304

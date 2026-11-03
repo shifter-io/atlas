@@ -130,6 +130,13 @@ proxy-index serve --database-file .secrets/database.toml
 From the website root, `npm run build` exports the measured dataset and builds the site;
 `astro dev --background` serves it locally. `MEASUREMENTS_URL` defaults to `http://127.0.0.1:8081`.
 Refreshes use the same-origin `/api/measurements/v1/snapshots/current` endpoint.
+`proxy-index serve` never sends a whole payload (a daily build's runs to hundreds of MB):
+`/v1/snapshots/{current|id}` is the snapshot's summary (ids, times, readiness, methodology,
+periods) with one page of its product-group index, and every resource (`products`, `series`,
+`breakdowns`, `scores`, `fleet`, `runs`, ...) is paged with `?page=N` (`page`, `pages`, `total`
+in the answer). Each answer is at most 200 KB (`calculated/answers.py`, enforced by
+`tests/test_calculated_answers.py`) and is kept in memory per build, so a request reads the
+database at most once per build plus a current-build check every 10 s.
 The development API helper is `python scripts/measurements_local.py start|status|stop`.
 Calculated schema v2 keeps cohorts, breakdown labels (`places`, `asn_labels`) and score
 components/reasons (`calculated_score_components`, `calculated_score_reasons`, `score_reasons`)

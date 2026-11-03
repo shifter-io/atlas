@@ -1,16 +1,25 @@
-"""Local read-only JSON API backed exclusively by immutable prepared snapshots."""
+"""Local read-only JSON API backed exclusively by immutable prepared snapshots.
+
+Answers are small and cached (answers.py): the bare snapshot is its summary with a page of its
+product groups, and every list resource is paged so no answer passes answers.MAX_ANSWER_BYTES.
+A request does no database work: the current build id is looked up at most every HEAD_SECONDS,
+a build's payload is read once, and each rendered answer is kept for its build.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
+import time
+from collections import OrderedDict
 
 from aiohttp import web
 
 from .. import detect, traffic
 from . import store
 from .aggregate import iso
+from .answers import paged, summary
 
 RESOURCES = {
     "products",
@@ -24,6 +33,10 @@ RESOURCES = {
     "runs",
 }
 DATABASE = web.AppKey("database", object)
+CACHE = web.AppKey("cache", object)
+HEAD_SECONDS = 10
+PAYLOADS = 2
+ANSWERS = 512
 EVENT_PARAMETERS = {"product", "kind", "category", "since", "limit"}
 TRAFFIC_PARAMETERS = {"test", "provider", "country", "region", "from", "to"}
 CATEGORIES = {"census", "pulse", "incident", "audit"}
@@ -31,11 +44,24 @@ MAX_EVENTS = 500
 LIVE = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
 
 
+def page_number(query):
+    page = query.get("page", "1")
+    if not page.isdigit() or not 1 <= int(page) <= 100000:
+        raise ValueError("page must be a positive number")
+    return int(page)
+
+
 def project(payload, resource, query):
+    """One answer: the snapshot summary (no resource) or a page of a resource."""
+    page = page_number(query)
+    if resource is None:
+        if set(query) - {"page"}:
+            raise ValueError("Unknown query parameter")
+        return summary(payload, page)
     window = query.get("window", "30d")
     if window not in payload["periods"]:
         raise ValueError("window must be 24h, 7d or 30d")
-    unknown = set(query) - {"window", "product", "cohort"}
+    unknown = set(query) - {"window", "product", "cohort", "page"}
     if unknown:
         raise ValueError("Unknown query parameter")
     products = [
@@ -85,14 +111,58 @@ def project(payload, resource, query):
             ]
     else:
         data = payload[resource]
+    if isinstance(data, list):
+        return paged(envelope, data, page)
     return envelope | {"data": data}
+
+
+class Cache:
+    """What the API keeps between requests: build ids (for HEAD_SECONDS), the newest PAYLOADS
+    payloads and the newest ANSWERS rendered answers, each keyed by its immutable build."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.heads = {}
+        self.payloads = OrderedDict()
+        self.answers = OrderedDict()
+
+    async def head(self, database, snapshot):
+        now = self.clock()
+        hit = self.heads.get(snapshot)
+        if hit and hit[0] > now:
+            return hit[1]
+        token = await asyncio.to_thread(store.head, database, snapshot)
+        if len(self.heads) >= 64:
+            self.heads.clear()
+        self.heads[snapshot] = (now + HEAD_SECONDS, token)
+        return token
+
+    async def answer(self, database, build_id, resource, query):
+        key = (build_id, resource, tuple(sorted(query.items())))
+        if key in self.answers:
+            self.answers.move_to_end(key)
+            return self.answers[key]
+        payload = self.payloads.get(build_id)
+        if payload is None:
+            payload = await asyncio.to_thread(store.read, database, str(build_id))
+            self.payloads[build_id] = payload
+            while len(self.payloads) > PAYLOADS:
+                self.payloads.popitem(last=False)
+        self.payloads.move_to_end(build_id)
+        result = project(payload, resource, query)
+        body = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
+        self.answers[key] = body
+        while len(self.answers) > ANSWERS:
+            self.answers.popitem(last=False)
+        return body
 
 
 async def handle(request):
     snapshot = request.match_info.get("snapshot", "current")
     if snapshot != "current" and (not snapshot.isdigit() or len(snapshot) > 18):
         raise web.HTTPBadRequest(text="Invalid snapshot id")
-    token = await asyncio.to_thread(store.head, request.app[DATABASE], snapshot)
+    cache = request.app[CACHE]
+    token = await cache.head(request.app[DATABASE], snapshot)
     if token is None:
         raise web.HTTPNotFound(text="Snapshot unavailable")
     resource = request.match_info.get("resource")
@@ -116,12 +186,10 @@ async def handle(request):
     if request.headers.get("If-None-Match") == etag:
         return web.Response(status=304, headers=headers)
     # Pin the body to the token's immutable version if publication moves between reads.
-    payload = await asyncio.to_thread(store.read, request.app[DATABASE], str(token[0]))
     try:
-        result = project(payload, resource, request.query) if resource else payload
+        body = await cache.answer(request.app[DATABASE], token[0], resource, request.query)
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
-    body = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
     return web.Response(body=body, content_type="application/json", headers=headers)
 
 
@@ -192,6 +260,7 @@ async def traffic_report(request):
 def app(database):
     application = web.Application()
     application[DATABASE] = database
+    application[CACHE] = Cache()
     application.router.add_get("/v1/events", events)
     application.router.add_get("/v1/traffic", traffic_report)
     application.router.add_get("/v1/snapshots/{snapshot}", handle)
