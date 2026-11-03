@@ -20,6 +20,8 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from . import names
+from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
+from .partitions import partition
 from .providers.credentials import read_credentials
 from .stats import Histogram
 
@@ -306,22 +308,7 @@ def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     )
 
 
-def partition(conn, table, moment):
-    """Create the monthly partition of a range-partitioned table that holds this UTC moment.
-
-    Used for run_buckets, ip_observations, run_geo_buckets and test_events (by `at`).
-    """
-    start = moment.astimezone(UTC).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    end = (start + timedelta(days=32)).replace(day=1)
-    name = f"{table}_{start:%Y_%m}"
-    conn.execute(
-        sql.SQL(
-            "CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES FROM ({}) TO ({})"
-        ).format(sql.Identifier(name), sql.Identifier(table), sql.Literal(start), sql.Literal(end))
-    )
-
-
-_partition = partition
+_partition = partition  # daily for the raw tables (partitions.py)
 
 
 def _dimension(value, fields):

@@ -101,8 +101,10 @@ DEFAULTS: dict[str, Any] = {
     "calculate.hour_offset_seconds": 360,
     "retention.events_days": 90,
     "retention.job_runs_days": 30,
-    # Estimated hours older than the longest calculator window (30 days) are deleted.
-    "retention.estimates_days": 30,
+    # Estimated hours older than this are deleted. The archive (proxy_index.archive) moves them
+    # with their run once the longest calculator window (30 days) has passed; this is the
+    # fallback without it, kept longer so a late archive run still finds them.
+    "retention.estimates_days": 35,
     # Upload limits for /v1/results.
     "results.max_upload_bytes": 1 << 30,
     "results.max_extracted_bytes": 4 << 30,

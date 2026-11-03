@@ -1,0 +1,16 @@
+"""Raw-data archive: one compressed, re-importable file per UTC day (ARCHIVE-1).
+
+Raw measurement rows stay `partitions.RAW_DAYS` (30) days in the database. Once everything
+tied to a day is older than that, the day is exported (export.py) into `YYYY-MM-DD.tar.gz`:
+a `manifest.json` and one COPY-format CSV per table (tables.py lists them, their roles and
+which rows belong to the day); restore.py loads a file back into a database with the same
+storage schema. Deleting an archived day's rows, only once its file is stored and verified,
+is the archive job's step (not in this module yet).
+"""
+
+FORMAT = "proxy-index-raw-day"
+FORMAT_VERSION = 1
+
+
+class ArchiveError(RuntimeError):
+    """A day cannot be archived, deleted or restored as asked; nothing was changed."""
