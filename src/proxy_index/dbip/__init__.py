@@ -94,6 +94,7 @@ def update(
             result = _health("unchanged", state, [])
         else:
             result = _replace(dest, release, state, checks, now)
+    result["recorded"] = None
     if database_file:
         try:
             record(database_file, {k: result[k] for k in _RELEASE})

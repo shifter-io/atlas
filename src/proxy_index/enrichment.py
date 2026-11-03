@@ -13,7 +13,6 @@ from typing import Any
 
 import maxminddb
 
-
 CURRENT = "current"  # the link `dbip update` points at the newest verified release
 
 

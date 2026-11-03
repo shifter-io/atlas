@@ -100,9 +100,7 @@ def test_new_releases_swing_current_and_keep_the_previous_two(tmp_path, cdn, cli
     assert (dest / "current").resolve().name == name(DAY)
 
 
-def test_a_file_replaced_under_the_same_name_is_installed_beside_the_old_one(
-    tmp_path, cdn, cli
-):
+def test_a_file_replaced_under_the_same_name_is_installed_beside_the_old_one(tmp_path, cdn, cli):
     cdn.files[name(DAY)] = tiny_mmdb(marker="a")
     first = cli()[1]
     cdn.files[name(DAY)] = tiny_mmdb(marker="b")  # new bytes, so a new ETag

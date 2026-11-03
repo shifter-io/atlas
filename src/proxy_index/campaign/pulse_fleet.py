@@ -13,10 +13,10 @@ and the node reopens the database when the link moves (DBIP-DAILY-1).
 
 Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
 `unknown` and never touched, and it never deletes anything (a node whose assignment was not
-confirmed ends `destroy_refused`, for the owner). `retire --name N` removes one recorded node, only through
-`scope.retire_pulse_node`, and checks it gone; a later reconcile creates it again unless
-`fleet.json` no longer lists it. Exit codes: reconcile 1 when a node failed or waits for the
-owner (`destroy_refused`), retire 1 when the node was not verified gone; otherwise 0.
+confirmed ends `destroy_refused`, for the owner). `retire --name N` removes one recorded node,
+only through `scope.retire_pulse_node`, and checks it gone; a later reconcile creates it again
+unless `fleet.json` no longer lists it. Exit codes: reconcile 1 when a node failed or waits for
+the owner (`destroy_refused`), retire 1 when the node was not verified gone; otherwise 0.
 
 The node service runs as root (decision PULSE-1b): the droplet is single-purpose, its secrets
 are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke test has
