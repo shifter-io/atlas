@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 from psycopg.rows import dict_row
+from test_census_pulse import product
 from test_daily import daily_root
 from test_onboarding import START
-from test_census_pulse import product
 from test_storage import measurement
 
 from proxy_index.calculated import store
@@ -263,7 +263,7 @@ async def test_a_full_hour_writes_one_release_event_per_network_not_per_country(
     with connect(database) as conn:
         run_key = conn.execute(run_key_sql, (await imported(tmp_path, database, T1),)).fetchone()[0]
         networks = [product(conn, f"net{n:02d}") for n in range(18)]
-        conn.executemany(
+        conn.cursor().executemany(
             "INSERT INTO estimated_hours(product_id,country_code,day,hour,run_key,measured_at,"
             "measured_ips,measured_requests,hour_factor,unique_ips,requests,day_unique_ips,curve,"
             "formula_version) VALUES (%s,%s,%s,15,%s,%s,1,1,1,2.5,1,1,'country',1)",
