@@ -94,9 +94,11 @@ def _operator_groups(commands) -> dict:
     from .archive import cli as archive
     from .campaign import cli as campaign
     from .daily import cli as daily
+    from .dbserver import cli as dbserver
     from .onboarding import cli as onboarding
 
     groups = {"onboarding": onboarding, "campaign": campaign, "daily": daily, "archive": archive}
+    groups["db-server"] = dbserver
     for group in groups.values():
         group.register(commands)
     return {name: group.dispatch for name, group in groups.items()}
