@@ -142,6 +142,24 @@ def upload_hours(root, spaces: Spaces, now: datetime, keep_days: int = KEEP_DAYS
     return {"uploaded": uploaded, "removed_hours": removed}
 
 
+def _batch(database, batch: str | None) -> int | None:
+    """The run's batch id when the target database has that batch, else None."""
+    if batch is None:
+        return None
+    with storage.connect(database) as conn:
+        known = conn.execute("SELECT 1 FROM test_batches WHERE batch_id=%s", (int(batch),))
+        return int(batch) if known.fetchone() else None
+
+
+def _import(path: Path, database, batch: int | None, kind: str) -> bool:
+    from ..orchestrator.archive import unpack
+
+    with tempfile.TemporaryDirectory(prefix="proxy-index-rebuild-") as temporary:
+        unpack(path, temporary, max_bytes=MAX_EXTRACTED)
+        done = storage.ingest(Path(temporary), database, batch_id=batch, ip_rows=kind != "pulse")
+    return bool(done["imported"])
+
+
 def rebuild(root, database, first: date, last: date) -> dict:
     """Import the spooled runs of the days first..last (by import hour), oldest first."""
     report = {"runs": 0, "imported": 0, "unlinked": []}
@@ -150,20 +168,9 @@ def rebuild(root, database, first: date, last: date) -> dict:
             continue
         for path in _files(folder):
             match = FILE.fullmatch(path.name)
-            batch = int(match["batch"]) if match["batch"] else None
-            if batch is not None:
-                with storage.connect(database) as conn:
-                    known = conn.execute("SELECT 1 FROM test_batches WHERE batch_id=%s", (batch,))
-                    if known.fetchone() is None:
-                        report["unlinked"].append(path.name)
-                        batch = None
-            with tempfile.TemporaryDirectory(prefix="proxy-index-rebuild-") as temporary:
-                from ..orchestrator.archive import unpack
-
-                unpack(path, temporary, max_bytes=MAX_EXTRACTED)
-                done = storage.ingest(
-                    Path(temporary), database, batch_id=batch, ip_rows=match["kind"] != "pulse"
-                )
+            batch = _batch(database, match["batch"])
+            if match["batch"] and batch is None:
+                report["unlinked"].append(path.name)
             report["runs"] += 1
-            report["imported"] += bool(done["imported"])
+            report["imported"] += _import(path, database, batch, match["kind"])
     return report
