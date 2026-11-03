@@ -300,7 +300,7 @@ func dump(args []string) error {
 	var c common
 	c.register(fs)
 	out := fs.String("out", "", "output file (required)")
-	endpoint := fs.String("endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/overview, /v1/providers, /v1/providers/<slug>, /v1/search-index, /v1/coverage, /v1/snapshot")
+	endpoint := fs.String("endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/overview, /v1/providers, /v1/providers/<slug>, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/snapshot, /v1/networks, /v1/countries")
 	pretty := fs.Bool("pretty", false, "indent the JSON")
 	content := fs.String("content-dir", os.Getenv("SITEAPI_CONTENT_DIR"), "src/content directory for guide/review search entries (default: found above the working directory; - disables)")
 	fs.Parse(args) //nolint:errcheck

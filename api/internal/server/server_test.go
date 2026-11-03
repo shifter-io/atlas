@@ -173,7 +173,12 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		t.Fatalf("HEAD: %d %d", head.Code, head.Body.Len())
 	}
 	for path, code := range map[string]int{"/v1/overview": 200, "/v1/providers": 200, "/v1/providers/alpha-net": 200, "/v1/providers/nope": 404,
-		"/v1/coverage": 200, "/v1/search-index": 200, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200} {
+		"/v1/coverage": 200, "/v1/search-index": 200, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200,
+		"/v1/coverage/alpha-net": 200, "/v1/coverage/nope": 404, "/v1/networks": 200, "/v1/networks/alpha-net": 200, "/v1/networks/alpha-net?kind=mobile": 404, "/v1/networks/nope": 404,
+		"/v1/networks/Bad_Slug": 400, "/v1/networks?x=1": 400, "/v1/networks/alpha-net/places": 200,
+		"/v1/networks/alpha-net/places?dimension=asn&range=7d&q=x&page=2": 200, "/v1/networks/alpha-net/places?dimension=street": 404,
+		"/v1/networks/alpha-net/places?page=0": 400, "/v1/networks/alpha-net/places?range=1y": 400, "/v1/countries": 200,
+		"/v1/countries/DE": 404, "/v1/countries/DEU": 400, "/v1/countries/DE/cities": 404, "/v1/countries/D1/cities": 400} {
 		if r := get(h, path); r.Code != code {
 			t.Errorf("%s: %d, want %d", path, r.Code, code)
 		}
@@ -459,5 +464,27 @@ func TestVersionNamesTheDatasetAndAnswersConditionally(t *testing.T) {
 	}
 	if v3, _ := readVersion(); v3.Revision != v2.Revision {
 		t.Fatal("identical data produced a new revision")
+	}
+}
+
+func TestPageRoutesRefuseBadInputAndWaitForTheFirstBuild(t *testing.T) {
+	cold := New(&fakeSource{rev: 1}, Options{}).Handler()
+	for _, path := range []string{"/v1/networks/alpha-net", "/v1/networks/alpha-net/places", "/v1/countries/DE/cities"} {
+		if r := get(cold, path); r.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s before the first build: %d", path, r.Code)
+		}
+	}
+	h := newTestServer(t, &fakeSource{rev: 1}).Handler()
+	for path, code := range map[string]int{"/v1/networks/alpha-net/places?q=" + strings.Repeat("x", 201): 400,
+		"/v1/networks/Bad_Slug/places": 400, "/v1/networks/alpha-net/places?sort=ips": 400, "/v1/countries/DE/cities?page=x": 400,
+		"/v1/countries/DE/cities?range=2d": 400, "/v1/countries/DE?x=1": 400, "/v1/countries?x=1": 400, "/v1/networks/alpha-net?x=1": 400} {
+		if r := get(h, path); r.Code != code {
+			t.Errorf("%s: %d, want %d", path, r.Code, code)
+		}
+	}
+	// A page is rendered once per version and served from the LRU after that.
+	first, again := get(h, "/v1/networks/alpha-net/places?q=a"), get(h, "/v1/networks/alpha-net/places?q=+A+")
+	if first.Code != 200 || first.Header().Get("ETag") != again.Header().Get("ETag") {
+		t.Fatalf("cached page: %d %q %q", first.Code, first.Header().Get("ETag"), again.Header().Get("ETag"))
 	}
 }

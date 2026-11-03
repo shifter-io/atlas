@@ -252,6 +252,7 @@ type BreakdownRow struct {
 	Region      *string `json:"region"`
 	City        *string `json:"city"`
 	Asn         Num     `json:"asn"`
+	Name        *string `json:"name"`
 	Ips         Num     `json:"ips"`
 	Completed   Num     `json:"completed"`
 	Successes   Num     `json:"successes"`
@@ -362,6 +363,7 @@ type Product struct {
 	Name      string            `json:"name"`
 	Kind      string            `json:"kind"`
 	Cohort    string            `json:"cohort"`
+	Criteria  Criteria          `json:"criteria"`
 	Windows   map[string]Window `json:"windows"`
 	Census    []Census          `json:"census"`
 	// Pricing is the every-request snapshot's list prices in effect (nil before).
@@ -379,6 +381,12 @@ func (v *Product) UnmarshalJSON(d []byte) error {
 	}
 	v.Raw = append(json.RawMessage(nil), d...)
 	return nil
+}
+
+// Criteria is what makes a product group's cohort; Country is the requested
+// country of a daily test's cohort (nil for census/pulse cohorts).
+type Criteria struct {
+	Country *string `json:"country"`
 }
 
 // Window returns a window or an empty one.
@@ -409,6 +417,16 @@ type Methodology struct {
 	Settings struct {
 		Weights map[string]float64 `json:"weights"`
 	} `json:"settings"`
+	Raw json.RawMessage `json:"-"`
+}
+
+func (m *Methodology) UnmarshalJSON(d []byte) error {
+	type plain Methodology
+	if err := json.Unmarshal(d, (*plain)(m)); err != nil {
+		return err
+	}
+	m.Raw = append(json.RawMessage(nil), d...)
+	return nil
 }
 
 type Snapshot struct {

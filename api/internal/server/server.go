@@ -8,9 +8,7 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,6 +36,7 @@ type Version struct {
 	Result                             *build.Result
 	search                             *LRU
 	events                             *LRU
+	pages                              *LRU
 }
 
 // Source loads inputs; the database in production, fixtures in tests.
@@ -174,7 +173,7 @@ func (s *Server) build(ctx context.Context) (*Version, error) {
 // RenderVersion pre-renders every static response of a build.
 func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error) {
 	v := &Version{ID: id, Fingerprint: res.Fingerprint.Key(), BuiltAt: res.BuiltAt, Result: res, Static: map[string]*Rendered{},
-		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1))}
+		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU)}
 	type job struct {
 		path  string
 		value any
@@ -185,10 +184,16 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 		{"/v1/overview", res.Overview, CacheStatic},
 		{"/v1/providers", map[string]any{"generatedAt": res.Dataset.GeneratedAt, "providers": res.Providers}, CacheStatic},
 		{"/v1/search-index", res.Search, CacheStatic},
-		{"/v1/coverage", res.Coverage, CacheStatic},
+		{"/v1/coverage", res.Coverage.Index(), CacheStatic},
 	}
 	for slug, d := range res.Details {
 		jobs = append(jobs, job{"/v1/providers/" + slug, d, CacheStatic})
+	}
+	for _, p := range res.Coverage.Providers {
+		jobs = append(jobs, job{"/v1/coverage/" + p.ID, p, CacheStatic})
+	}
+	for path, value := range pageAnswers(res.Pages) {
+		jobs = append(jobs, job{path, value, CacheStatic})
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -207,28 +212,17 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 			mu.Unlock()
 		}(j)
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		var r *Rendered
-		if res.SnapshotPayload != nil {
-			r = RenderBytes(http.StatusOK, compactJSON(res.SnapshotPayload), CacheStatic, LevelBest)
-		} else {
-			var err error
-			r, err = Render(http.StatusNotFound, map[string]any{"error": "no published snapshot", "available": false}, CacheStatic, LevelFast)
-			if err != nil {
-				errs <- err
-				return
-			}
-		}
-		mu.Lock()
-		v.Static["/v1/snapshot"] = r
-		mu.Unlock()
-	}()
 	wg.Wait()
 	close(errs)
 	if err := <-errs; err != nil {
 		return nil, err
+	}
+	if res.Pages.Snapshot == nil {
+		r, err := Render(http.StatusNotFound, map[string]any{"error": "no published snapshot", "available": false}, CacheStatic, LevelFast)
+		if err != nil {
+			return nil, err
+		}
+		v.Static["/v1/snapshot"] = r
 	}
 	// What a browser polls to learn that the data changed. The revision is the
 	// dataset body's own hash (its ETag without quotes), so it changes exactly
@@ -293,10 +287,14 @@ func (s *Server) Handler() http.Handler {
 	for _, p := range []string{"/v1/dataset", "/v1/overview", "/v1/providers", "/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
+	mux.HandleFunc("GET /v1/coverage/{slug}", func(w http.ResponseWriter, r *http.Request) {
+		s.serveStatic(w, r, "/v1/coverage/"+r.PathValue("slug"))
+	})
 	mux.HandleFunc("GET /v1/providers/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		s.serveStatic(w, r, "/v1/providers/"+r.PathValue("slug"))
 	})
 	mux.HandleFunc("GET /v1/search", s.serveSearch)
+	s.pageRoutes(mux)
 	mux.HandleFunc("GET /v1/events", s.serveEvents)
 	mux.HandleFunc("GET /healthz", s.serveHealth)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -578,13 +576,4 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodHead {
 		w.Write(body) //nolint:errcheck
 	}
-}
-
-// compactJSON strips insignificant whitespace (Postgres jsonb text has some).
-func compactJSON(b []byte) []byte {
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, b); err != nil {
-		return b
-	}
-	return buf.Bytes()
 }

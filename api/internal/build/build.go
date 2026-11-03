@@ -23,16 +23,18 @@ const MeasuredTapeRows = 200
 
 // Result is every response body of one build, as Go values.
 type Result struct {
-	Fingerprint     store.Fingerprint
-	BuiltAt         time.Time
-	Dataset         *model.Dataset
-	Overview        *Overview
-	Providers       []ProviderSummary
-	Details         map[string]*ProviderDetail
-	Search          *SearchIndex
-	Coverage        *Coverage
-	SnapshotPayload []byte
-	Events          EventWindow
+	Fingerprint store.Fingerprint
+	BuiltAt     time.Time
+	Dataset     *model.Dataset
+	Overview    *Overview
+	Providers   []ProviderSummary
+	Details     map[string]*ProviderDetail
+	Search      *SearchIndex
+	Coverage    *Coverage
+	// Pages is the small per-page answers (pages.go); it replaces serving the
+	// published snapshot payload whole.
+	Pages  *Pages
+	Events EventWindow
 }
 
 // JSISO is Date.prototype.toISOString.
@@ -245,7 +247,6 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		if err := json.Unmarshal(in.Snapshot.Full(), s); err != nil {
 			return nil, fmt.Errorf("published snapshot %d: %w", in.Snapshot.BuildID, err)
 		}
-		res.SnapshotPayload = in.Snapshot.Payload
 	}
 	var demoMeta *store.DatasetRow
 	for i := range in.Datasets {
@@ -644,6 +645,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	}
 	res.Overview = ov
 	res.Providers = ov.Leaderboard
+	res.Pages = buildPages(ds.GeneratedAt, entries, s, in.Snapshot)
 
 	for _, e := range entries {
 		p := e.P

@@ -199,7 +199,7 @@ build's typed rows (`public.calculated_breakdown_details` joined to
 `public.calculated_windows`) in the same read transaction (`store/longtail.go`), in
 the payload's row shape and order, for every window whose entry count says the list
 was capped and matches the typed rows. Otherwise the list is used as published.
-`/v1/snapshot` serves the published (capped) snapshot.
+`/v1/snapshot` serves a summary of the published snapshot, not the payload (see README, Endpoints).
 
 `countryLatencyRanks[kind][range][country_code]` is calculated by the site API from
 the selected snapshot product's `breakdowns.country` p50, with one vote per measured

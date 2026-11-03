@@ -134,18 +134,15 @@ func TestCappedSnapshotServesTheSameProviderAsTheWholeOne(t *testing.T) {
 		diff(want, got, "shifter", &diffs, map[string]bool{})
 		t.Fatalf("the capped snapshot changed the provider:\n%v", diffs)
 	}
-	// /v1/snapshot stays the published (capped) snapshot.
-	var served struct {
-		Products []struct {
-			Windows map[string]struct {
-				Breakdowns map[string][]any `json:"breakdowns"`
-			} `json:"windows"`
-		} `json:"products"`
-	}
-	if err := json.Unmarshal(res.SnapshotPayload, &served); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(served.Products[0].Windows["30d"].Breakdowns["city_asn"]); n != 1 {
-		t.Errorf("served snapshot has %d city x ASN rows, want the published 1", n)
+	// The place lists the pages serve are read whole from the typed rows, so a
+	// capped snapshot pages through the same rows as the whole one.
+	for _, r := range []string{"24h", "7d", "30d"} {
+		for _, d := range []string{"country", "region", "city", "asn"} {
+			w, _ := expected.Pages.List("", "shifter/residential", r, d, "", 1)
+			g, ok := res.Pages.List("", "shifter/residential", r, d, "", 1)
+			if !ok || !reflect.DeepEqual(generic(t, w), generic(t, g)) {
+				t.Errorf("%s %s: capped page %+v, whole page %+v", r, d, g, w)
+			}
+		}
 	}
 }

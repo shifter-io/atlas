@@ -318,6 +318,41 @@ type Coverage struct {
 	Fields      map[string]CoverageFieldUse `json:"fields"`
 }
 
+// CoverageIndex is /v1/coverage: the report without the per-provider gap
+// lists, which /v1/coverage/{slug} serves one provider at a time (the whole
+// report grows with every network: 325 KB for the 21 providers of QA-1).
+type CoverageIndex struct {
+	GeneratedAt string                      `json:"generatedAt"`
+	BuiltAt     string                      `json:"builtAt"`
+	Summary     CoverageSummary             `json:"summary"`
+	Dataset     CoverageEntity              `json:"dataset"`
+	Providers   []CoverageEntry             `json:"providers"`
+	Targets     []CoverageEntity            `json:"targets"`
+	Scopes      []CoverageEntity            `json:"scopes"`
+	Profiles    []CoverageEntity            `json:"profiles"`
+	Records     map[string]CoverageRecords  `json:"records"`
+	Fields      map[string]CoverageFieldUse `json:"fields"`
+}
+
+// CoverageEntry names one provider's report in the index.
+type CoverageEntry struct {
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Source  string `json:"source,omitempty"`
+	NACount int    `json:"naCount"`
+}
+
+// Index is the report with each provider reduced to its entry.
+func (c *Coverage) Index() *CoverageIndex {
+	out := &CoverageIndex{GeneratedAt: c.GeneratedAt, BuiltAt: c.BuiltAt, Summary: c.Summary, Dataset: c.Dataset,
+		Providers: make([]CoverageEntry, len(c.Providers)), Targets: c.Targets, Scopes: c.Scopes, Profiles: c.Profiles,
+		Records: c.Records, Fields: c.Fields}
+	for i, p := range c.Providers {
+		out.Providers[i] = CoverageEntry{ID: p.ID, Name: p.Name, Source: p.Source, NACount: p.NACount}
+	}
+	return out
+}
+
 type CoverageSummary struct {
 	Providers         int            `json:"providers"`
 	ProvidersBySource map[string]int `json:"providersBySource"`
