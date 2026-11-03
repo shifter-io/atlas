@@ -6,10 +6,12 @@ hour's (exactly the hour factor when the test ran at the peak, as scheduled), it
 measured requests x the request curve's ratio, and the day's unique IPs the measured IPs x the
 daily factor over the measured hour's. A country on the network curve (`curve` "network") takes
 the network's request curve too; its hour and daily factors already come from that curve. An
-hour whose factor is null (no data in the formula) gets no row. A country hour whose factor comes
-from the network curve (`hour_basis` network_missing or network_low_sample) has too few request
-rows of its own to scale requests by, so its requests follow its hour factor instead; the same
-holds for every hour when the measured hour is such an hour.
+hour whose factor is null (no data in the formula: the network's campaign saw no exit IP then) is
+not estimated: its row has null figures, `estimated` false and the formula's reason, and it is
+never stored, so no sum or average counts it as 0. A country hour whose factor comes from the
+network curve or a borrowed curve (`hour_basis` network_missing, network_low_sample or borrowed)
+has too few request rows of its own to scale requests by, so its requests follow its hour factor
+instead; the same holds for every hour when the measured hour is such an hour.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from pathlib import Path
 from .. import storage
 
 SCHEMA = "proxy-index-hour-formula"
-FALLBACK_HOURS = ("network_missing", "network_low_sample")
+FALLBACK_HOURS = ("network_missing", "network_low_sample", "borrowed")
 
 
 def load_formula(directory: Path, network: str) -> dict:
@@ -60,6 +62,7 @@ def hours(formula: dict, country: str, measured_at: datetime, ips: int, requests
     for offset in range(24):
         at = start + timedelta(hours=offset)
         if factors[at.hour] is None:
+            rows.append(_not_estimated(formula, at, curve))
             continue
         factor = factors[at.hour] / base
         own = base_requests and not fallback[at.hour]
@@ -73,9 +76,20 @@ def hours(formula: dict, country: str, measured_at: datetime, ips: int, requests
                 "requests": requests * ratio,
                 "day_unique_ips": ips * daily / base,
                 "curve": curve,
+                "estimated": True,
             }
         )
     return rows
+
+
+def _not_estimated(formula: dict, at: datetime, curve: str) -> dict:
+    reasons = formula["network_curve"].get("no_data_reasons") or [None] * 24
+    figures = dict.fromkeys(("hour_factor", "unique_ips", "requests", "day_unique_ips"))
+    reason = reasons[at.hour] or "no data: the formula has no factor for this hour"
+    return {"day": at.date(), "hour": at.hour, **figures, "curve": curve} | {
+        "estimated": False,
+        "reason": reason,
+    }
 
 
 MEASURED = """SELECT r.run_key,r.started_at,s.product_id,
@@ -119,7 +133,8 @@ def estimate_run(credentials, run_id: str, country: str, formula: dict) -> int:
             "measured_requests": requests,
             "formula_version": formula["formula_version"],
         }
-        rows = [common | row for row in hours(formula, country, measured_at, ips, requests)]
+        found = hours(formula, country, measured_at, ips, requests)
+        rows = [common | row for row in found if row["estimated"]]
         written = 0
         for row in rows:
             written += conn.execute(UPSERT, row).rowcount
