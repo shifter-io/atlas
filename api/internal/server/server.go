@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,6 +96,9 @@ type Server struct {
 		// unserved is the serving version's pages that a published product
 		// should have and that do not answer 200 (unservedPages).
 		unserved []string
+		// siteGaps is the last build's missing site tables, logged when
+		// they change (so once, not every rebuild).
+		siteGaps []string
 	}
 	log *slog.Logger
 }
@@ -153,7 +157,12 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	s.state.builds++
 	s.state.lastError = ""
 	s.state.unserved = unserved
+	gapsChanged := !slices.Equal(s.state.siteGaps, v.Result.SiteGaps)
+	s.state.siteGaps = v.Result.SiteGaps
 	s.state.Unlock()
+	if gapsChanged && len(v.Result.SiteGaps) > 0 {
+		s.log.Warn("site tables missing; serving them empty", "version", v.ID, "gaps", v.Result.SiteGaps)
+	}
 	s.log.Info("cache rebuilt", "version", v.ID, "build_ms", v.BuildTime.Milliseconds(), "load_ms", v.LoadTime.Milliseconds(),
 		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", len(v.Dataset.Identity))
 	if len(unserved) > 0 {
@@ -236,13 +245,6 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	v.Dataset = v.Static[datasetJob]
 	delete(v.Static, datasetJob)
 	v.DatasetPath = "/v1/files/dataset-" + strings.Trim(v.Dataset.ETag, `"`) + ".json"
-	if res.Pages.Snapshot == nil {
-		r, err := Render(http.StatusNotFound, map[string]any{"error": "no published snapshot", "available": false}, CacheStatic, LevelFast)
-		if err != nil {
-			return nil, err
-		}
-		v.Static["/v1/snapshot"] = r
-	}
 	// What a browser polls to learn that the data changed. The revision is the
 	// dataset body's own hash (its ETag without quotes), so it changes exactly
 	// when the published data does, and a site built from a `siteapi dump` file
@@ -304,7 +306,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /v1/dataset", s.serveDataset)
 	mux.HandleFunc("GET /v1/files/{name}", s.serveFile)
-	for _, p := range []string{"/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
+	for _, p := range []string{"/v1/search-index", "/v1/coverage", "/v1/version"} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
 	mux.HandleFunc("GET /v1/coverage/{slug}", func(w http.ResponseWriter, r *http.Request) {
@@ -561,6 +563,9 @@ type Health struct {
 	// Unserved lists the pages a published product's network should have
 	// that do not answer 200; any makes the status degraded.
 	Unserved []string `json:"unserved"`
+	// SiteGaps lists the site tables (or columns) the database lacks, served
+	// as empty; informational, the status stays ok (`siteapi migrate` adds them).
+	SiteGaps []string `json:"siteGaps"`
 	// Binary is the source revision this siteapi was built from.
 	Binary Binary `json:"binary"`
 }
@@ -568,7 +573,8 @@ type Health struct {
 func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	s.state.Lock()
-	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]string{}, s.state.unserved...), Binary: BinaryInfo()}
+	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]string{}, s.state.unserved...),
+		SiteGaps: append([]string{}, s.state.siteGaps...), Binary: BinaryInfo()}
 	if len(h.Unserved) > 0 {
 		h.Status = "degraded"
 	}

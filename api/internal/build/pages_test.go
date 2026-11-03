@@ -97,14 +97,6 @@ func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
 	}
 }
 
-func TestTheSnapshotSummaryHasNoGroupWindows(t *testing.T) {
-	pg := smallPages(t)
-	s := pg.Snapshot
-	if s == nil || !s.Available || s.ProductGroups != 4 || len(s.Methodology) == 0 || len(s.Periods) == 0 || len(s.Scores) != 2 {
-		t.Fatalf("summary %+v", s)
-	}
-}
-
 func TestTheCoverageIndexKeepsOnlyAnEntryPerProvider(t *testing.T) {
 	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 30, Unmeasured: 1, Events: 5})
 	if err != nil {

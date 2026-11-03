@@ -114,9 +114,9 @@ func TestEveryRequestSnapshotsMapLatencyPricingAndCopy(t *testing.T) {
 	if p.Trust.ResidentialAuthenticity != 0.987 || p.Trust.ClaimGap.OK() {
 		t.Errorf("trust %+v", p.Trust)
 	}
-	for _, b := range res.Overview.CostBoards {
-		if b.Ranks["shifter"] == 0 {
-			t.Errorf("%s cost board leaves the priced measured network out: %+v", b.Range, b.Ranks)
+	for _, r := range build.Ranges {
+		if valueRank(res, r.ID, "shifter") == 0 {
+			t.Errorf("%s rankings leave the priced measured network without a value rank", r.ID)
 		}
 	}
 }
@@ -168,8 +168,8 @@ func withOutages(t *testing.T) []byte {
 	return out
 }
 
-// The committed v1 fixture published over the demo data: the insight totals
-// count only the measured network.
+// The committed v1 fixture published over the test catalog (with its
+// leftover is_demo network): the insight totals count only the measured network.
 func TestMeasuredTotalsCountOnlyTheMeasuredNetwork(t *testing.T) {
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
 	if err != nil {
@@ -178,12 +178,12 @@ func TestMeasuredTotalsCountOnlyTheMeasuredNetwork(t *testing.T) {
 	publishedBuild(t, snapshot)
 }
 
-// publishedBuild publishes snapshot over the seeded demo data, builds it and
+// publishedBuild publishes snapshot over the test catalog, builds it and
 // checks that the measured-only insight totals cover exactly the one measured
 // provider.
 func publishedBuild(t *testing.T, snapshot []byte) *build.Result {
 	t.Helper()
-	db := seeded(t)
+	db := catalogued(t)
 	db.Publish(t, snapshot)
 	res := buildFrom(t, db)
 	var measured *model.Provider
@@ -196,7 +196,7 @@ func publishedBuild(t *testing.T, snapshot []byte) *build.Result {
 		t.Fatal("the published snapshot gives no measured provider")
 	}
 	if res.Dataset.MeasuredTotals.Providers != 1 {
-		t.Errorf("insight totals include demo providers: %+v", res.Dataset.MeasuredTotals)
+		t.Errorf("insight totals include other providers: %+v", res.Dataset.MeasuredTotals)
 	}
 	if res.Dataset.MeasuredTotals.MisclassifiedShare != measured.Trust.DatacenterAsnShare {
 		t.Errorf("insight misclassification %v, measured provider %v", res.Dataset.MeasuredTotals.MisclassifiedShare, measured.Trust.DatacenterAsnShare)

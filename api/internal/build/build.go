@@ -15,7 +15,7 @@ import (
 )
 
 // DatasetSchemaVersion is the Dataset contract version this API implements
-// (src/lib/types.ts; the design fixtures carry the same value).
+// (src/lib/types.ts).
 const DatasetSchemaVersion = "0.6.0"
 
 // MeasuredTapeRows caps how many measured events the dataset's tape carries.
@@ -26,11 +26,8 @@ type Result struct {
 	Fingerprint store.Fingerprint
 	BuiltAt     time.Time
 	Dataset     *model.Dataset
-	// Overview and Details are no longer served (/v1/overview and
-	// /v1/providers are gone). Details feed the network answers and charts;
-	// Overview stays the Go port of overview.ts that the TypeScript parity
-	// test checks (rankings and the measured market reuse its functions).
-	Overview *Overview
+	// Details are not served whole (/v1/providers is gone): they feed the
+	// network answers and charts.
 	Details  map[string]*ProviderDetail
 	Search   *SearchIndex
 	Coverage *Coverage
@@ -38,15 +35,14 @@ type Result struct {
 	// published snapshot payload whole.
 	Pages  *Pages
 	Events EventWindow
+	// SiteGaps is store.Inputs.SiteGaps: the site tables read as empty
+	// because the database lacks them (none once `siteapi migrate` ran).
+	SiteGaps []string
 }
 
 // JSISO is Date.prototype.toISOString.
 func JSISO(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
-}
-
-func secondsBetween(later, earlier time.Time) Num {
-	return Num(later.Sub(earlier).Seconds())
 }
 
 func jsMin(v []float64) float64 {
@@ -238,7 +234,7 @@ func providerForProduct(p *model.Provider, kind string) *model.Provider {
 
 // Build assembles every response from one consistent read.
 func Build(in *store.Inputs) (*Result, error) {
-	res := &Result{Fingerprint: in.Fingerprint, BuiltAt: time.Now().UTC(), Details: map[string]*ProviderDetail{}}
+	res := &Result{Fingerprint: in.Fingerprint, BuiltAt: time.Now().UTC(), Details: map[string]*ProviderDetail{}, SiteGaps: in.SiteGaps}
 	var s *snap.Snapshot
 	if in.Snapshot != nil {
 		s = &snap.Snapshot{}
@@ -246,56 +242,23 @@ func Build(in *store.Inputs) (*Result, error) {
 			return nil, fmt.Errorf("published snapshot %d: %w", in.Snapshot.BuildID, err)
 		}
 	}
-	var demoMeta *store.DatasetRow
-	for i := range in.Datasets {
-		if in.Datasets[i].Name == store.DemoDatasetName {
-			demoMeta = &in.Datasets[i]
-		}
-	}
-
 	ds := &model.Dataset{SchemaVersion: DatasetSchemaVersion, Seed: nan, WindowHours: 24}
-	switch {
-	case s != nil:
+	ds.GeneratedAt = JSISO(in.ReadAt)
+	if s != nil {
 		ds.GeneratedAt = s.AsOf
-	case demoMeta != nil:
-		ds.GeneratedAt = JSISO(demoMeta.GeneratedAt)
-	default:
-		ds.GeneratedAt = JSISO(in.ReadAt)
 	}
 	generated, _ := snap.ParseTime(ds.GeneratedAt)
-	demoGenerated := generated
-	if demoMeta != nil {
-		demoGenerated = demoMeta.GeneratedAt
-		if demoMeta.Seed != nil {
-			ds.Seed = Num(*demoMeta.Seed)
-		}
-		ds.RunID, ds.CollectorVersion = demoMeta.RunID, demoMeta.CollectorVersion
-		if demoMeta.WindowHours != nil {
-			ds.WindowHours = Num(*demoMeta.WindowHours)
-		}
-	}
 	if s != nil {
 		ds.RunID = model.S("preview-" + s.SnapshotID)
-		if ds.CollectorVersion == nil {
-			ds.CollectorVersion = s.ImplementationID
-		}
+		ds.CollectorVersion = s.ImplementationID
 		ds.Snapshot = model.SnapshotMeta{Available: true, SnapshotID: model.S(s.SnapshotID), SchemaVersion: s.SchemaVersion,
 			AsOf: model.S(s.AsOf), GeneratedAt: model.S(s.GeneratedAt), RefreshSeconds: s.RefreshSeconds,
 			MethodologyID: model.S(s.Methodology.ID), Readiness: model.S(s.Readiness), ContentHash: model.S(in.Snapshot.ContentHash)}
 	} else {
 		ds.Snapshot = model.SnapshotMeta{SchemaVersion: nan, RefreshSeconds: nan}
 	}
-	ageOf := func(isDemo bool, at time.Time) Num {
-		if isDemo {
-			return secondsBetween(demoGenerated, at)
-		}
+	ageOf := func(at time.Time) Num {
 		return Num(math.Max(0, jsnum.Round(generated.Sub(at).Seconds())))
-	}
-	source := func(isDemo bool) string {
-		if isDemo {
-			return model.SourceDemo
-		}
-		return model.SourceMeasured
 	}
 
 	// Targets: catalog rows first (their order), then framework targets without one.
@@ -316,9 +279,6 @@ func Build(in *store.Inputs) (*Result, error) {
 			if t.PassCondition == nil {
 				t.PassCondition = ft.PassCondition
 			}
-		}
-		if r.IsDemo {
-			t.Source = model.SourceDemo
 		}
 		ds.Targets = append(ds.Targets, t)
 		seen[r.ID] = true
@@ -362,27 +322,12 @@ func Build(in *store.Inputs) (*Result, error) {
 
 	// Providers.
 	c := newCatalog(in)
-	entries := []*entry{}
-	demoEntries := []*entry{}
-	for i := range in.Providers {
-		r := &in.Providers[i]
-		if !r.IsDemo {
-			continue
-		}
-		e, err := demoProvider(r, c)
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, e)
-		demoEntries = append(demoEntries, e)
-	}
-	real, err := realProviders(in, s, c, ds.Targets)
+	entries, err := realProviders(in, s, c, ds.Targets)
 	if err != nil {
 		return nil, err
 	}
-	entries = append(entries, real...)
-	addCountryLatencyRanks(real)
-	addRanks(real, in.Snapshot)
+	addCountryLatencyRanks(entries)
+	addRanks(entries, in.Snapshot)
 	names := map[string]string{}
 	slugOfFramework := map[string]string{}
 	for _, e := range entries {
@@ -404,7 +349,7 @@ func Build(in *store.Inputs) (*Result, error) {
 		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
 			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
 			Verification: r.Verification, InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
-			ProviderReply: r.ProviderReply, AgoSeconds: ageOf(r.IsDemo, r.PostedAt), Source: source(r.IsDemo)})
+			ProviderReply: r.ProviderReply, AgoSeconds: ageOf(r.PostedAt), Source: model.SourceMeasured})
 	}
 	sortByAge(ds.Reviews, func(r model.UserReview) Num { return r.AgoSeconds })
 	ds.CommunityRuns = []model.CommunityRun{}
@@ -413,7 +358,7 @@ func Build(in *store.Inputs) (*Result, error) {
 			Region: r.Region, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
 			RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
 			UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), DeltaSuccessPts: ptrNum(r.DeltaSuccessPts),
-			DeltaLatencyPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: ageOf(r.IsDemo, r.SubmittedAt), Source: source(r.IsDemo)}
+			DeltaLatencyPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: ageOf(r.SubmittedAt), Source: model.SourceMeasured}
 		if run.Targets, err = decodeRaw[model.TargetBenchmark](r.Targets, "community run "+r.ID+" targets"); err != nil {
 			return nil, err
 		}
@@ -429,7 +374,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	ds.Changelog = []model.ChangeEvent{}
 	for _, r := range in.Changelog {
 		ch := model.ChangeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, Headline: r.Headline, Detail: r.Detail,
-			Delta: ptrNum(r.Delta), Unit: r.Unit, AgoSeconds: ageOf(r.IsDemo, r.OccurredAt), Severity: r.Severity, Source: source(r.IsDemo)}
+			Delta: ptrNum(r.Delta), Unit: r.Unit, AgoSeconds: ageOf(r.OccurredAt), Severity: r.Severity, Source: model.SourceMeasured}
 		if r.ProviderSlug != nil {
 			ch.ProviderName = model.S(nameOrSlug(*r.ProviderSlug))
 		}
@@ -437,7 +382,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	}
 	sortByAge(ds.Changelog, func(r model.ChangeEvent) Num { return r.AgoSeconds })
 
-	// Tape: measured events first (newest first), then the editorial/demo rows.
+	// Tape: measured events first (newest first), then the editorial rows.
 	products := []TapeProduct{}
 	if s != nil {
 		for _, p := range s.Products {
@@ -471,7 +416,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	for _, r := range in.Tape {
 		editorial = append(editorial, model.TapeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, ProviderName: nameOrSlug(r.ProviderSlug),
 			Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal), Value: r.Value,
-			AgoSeconds: ageOf(r.IsDemo, r.OccurredAt), Source: source(r.IsDemo)})
+			AgoSeconds: ageOf(r.OccurredAt), Source: model.SourceMeasured})
 	}
 	sortByAge(editorial, func(r model.TapeEvent) Num { return r.AgoSeconds })
 	ds.Tape = append(ds.Tape, editorial...)
@@ -484,22 +429,8 @@ func Build(in *store.Inputs) (*Result, error) {
 	for i, e := range entries {
 		ds.Providers[i] = e.P
 	}
-	ds.Simulated = len(demoEntries) > 0
-
-	// Fleet basis: the fixtures while any exist (the site never mixes simulated
-	// and measured numbers in a fleet figure), otherwise the measured providers.
-	fleet, basis := demoEntries, "demo"
-	if len(fleet) == 0 {
-		fleet, basis = entries, "measured"
-	}
-	ds.Totals = fleetTotals(entries, fleet, ds.Reviews, ds.CommunityRuns)
-	measuredEntries := []*entry{}
-	for _, e := range entries {
-		if e.P.Source == model.SourceMeasured {
-			measuredEntries = append(measuredEntries, e)
-		}
-	}
-	ds.MeasuredTotals = fleetTotals(measuredEntries, measuredEntries, nil, nil)
+	ds.Totals = fleetTotals(entries, entries, ds.Reviews, ds.CommunityRuns)
+	ds.MeasuredTotals = fleetTotals(entries, entries, nil, nil)
 
 	// Window statistics for every provider (headline) and every category.
 	stats := map[string]map[string]*WindowStats{}
@@ -510,28 +441,23 @@ func Build(in *store.Inputs) (*Result, error) {
 		}
 	}
 
-	ds.MeasuredMarket, err = measuredMarket(measuredEntries, stats, ds.MeasuredTotals, ds.Targets)
+	ds.MeasuredMarket, err = measuredMarket(entries, stats, ds.MeasuredTotals, ds.Targets)
 	if err != nil {
 		return nil, err
 	}
 
 	// N/A manifests.
 	for _, e := range entries {
-		measured := e.P.Source == model.SourceMeasured
 		declared := append([]string{}, e.Declared...)
-		if measured {
-			declared = append(declared, "overlap.likelyUpstream")
-			for _, k := range e.P.ProductMeasurements.Keys {
-				declared = append(declared, "productMeasurements."+k+".overlap.likelyUpstream")
-			}
+		declared = append(declared, "overlap.likelyUpstream")
+		for _, k := range e.P.ProductMeasurements.Keys {
+			declared = append(declared, "productMeasurements."+k+".overlap.likelyUpstream")
 		}
-		e.P.NA, err = naOf(e.P, declared, measured, "measurement", "framework")
+		e.P.NA, err = naOf(e.P, declared, true, "measurement", "framework")
 		if err != nil {
 			return nil, err
 		}
-		if measured {
-			e.P.NA = withoutPublishedEmpties(e)
-		}
+		e.P.NA = withoutPublishedEmpties(e)
 	}
 	for i := range ds.Targets {
 		if ds.Targets[i].NA, err = naOf(ds.Targets[i], nil, false); err != nil {
@@ -603,12 +529,9 @@ func Build(in *store.Inputs) (*Result, error) {
 		MeasuredMarket   model.MeasuredMarket `json:"measuredMarket"`
 		Snapshot         model.SnapshotMeta   `json:"snapshot"`
 	}{ds.SchemaVersion, ds.GeneratedAt, ds.Seed, ds.RunID, ds.CollectorVersion, ds.WindowHours, ds.Weights, ds.Totals, ds.MeasuredTotals, ds.MeasuredMarket, ds.Snapshot}
-	declaredMeta := []string{}
-	if !ds.Simulated {
-		// A measured-only dataset has no seed by design.
-		meta.Seed = 0
-	}
-	if ds.NA, err = naOf(meta, declaredMeta, false); err != nil {
+	// The dataset has no seed by design (only the removed demo fixtures had one).
+	meta.Seed = 0
+	if ds.NA, err = naOf(meta, []string{}, false); err != nil {
 		return nil, err
 	}
 	res.Dataset = ds
@@ -622,26 +545,6 @@ func Build(in *store.Inputs) (*Result, error) {
 		}
 		return a-b < 0
 	})
-
-	boards := make([]CostBoard, 0, len(Ranges))
-	for _, r := range Ranges {
-		boards = append(boards, costBoard(entries, stats, r.ID))
-	}
-	tapeHead := overviewTape(ds.Tape, sorted, 60)
-	ov := &Overview{GeneratedAt: ds.GeneratedAt, Simulated: ds.Simulated, Snapshot: ds.Snapshot, Totals: ds.Totals, Weights: ds.Weights,
-		Profiles: ds.Profiles, Ranges: Ranges, FleetViews: fleetViews(fleet, stats, ds.Totals, basis), CostBoards: boards,
-		Leaderboard: []ProviderSummary{}, Tape: tapeHead, NA: ds.NA}
-	bySlug := map[string]*entry{}
-	for _, e := range entries {
-		bySlug[e.P.Slug] = e
-	}
-	for _, p := range leader {
-		sum := ProviderSummary{Source: p.Source, Slug: p.Slug, Name: p.Name, Tagline: p.Tagline, Kinds: p.Kinds, PrimaryKind: p.PrimaryKind,
-			MeasuredProduct: p.MeasuredProduct, HQ: p.HQ, Score: p.Score, PricePerGb: p.Pricing.PricePerGb, Windows: stats[p.Slug],
-			ProductKinds: append([]string{}, p.ProductMeasurements.Keys...), NACount: len(p.NA)}
-		ov.Leaderboard = append(ov.Leaderboard, sum)
-	}
-	res.Overview = ov
 
 	for _, e := range entries {
 		p := e.P
@@ -690,8 +593,8 @@ func sortByAge[T any](rows []T, age func(T) Num) {
 
 func coverage(ds *model.Dataset, builtAt time.Time, records map[string]CoverageRecords) *Coverage {
 	cov := &Coverage{GeneratedAt: ds.GeneratedAt, BuiltAt: builtAt.Format(time.RFC3339Nano),
-		Summary: CoverageSummary{Providers: len(ds.Providers), ProvidersBySource: map[string]int{model.SourceDemo: 0, model.SourceMeasured: 0},
-			NAFieldsBySource: map[string]int{model.SourceDemo: 0, model.SourceMeasured: 0}, SnapshotPublished: ds.Snapshot.Available},
+		Summary: CoverageSummary{Providers: len(ds.Providers), ProvidersBySource: map[string]int{model.SourceMeasured: 0},
+			NAFieldsBySource: map[string]int{model.SourceMeasured: 0}, SnapshotPublished: ds.Snapshot.Available},
 		Dataset: coverageEntity("dataset", "", "", ds.NA, false), Providers: []CoverageEntity{}, Targets: []CoverageEntity{},
 		Scopes: []CoverageEntity{}, Profiles: []CoverageEntity{}, Records: records, Fields: map[string]CoverageFieldUse{}}
 	cov.Summary.NAFields += len(ds.NA)

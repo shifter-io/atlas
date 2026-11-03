@@ -19,8 +19,6 @@ type entry struct {
 	Snap map[string]*snap.Product
 	// Declared N/A paths beyond null leaves.
 	Declared []string
-	// Order is the catalog sort order (demo) used to keep the fixtures' order.
-	Order int
 }
 
 func ptrNum[T ~int16 | ~int32 | ~int64 | ~float64](v *T) Num {
@@ -82,13 +80,12 @@ type catalog struct {
 	pricing map[[2]string]*store.PricingRow
 	trust   map[[2]string]*store.TrustRow
 	plans   []store.PlanRow
-	meas    map[string][]*store.MeasurementRow
 	prods   map[string][]store.ProductRow
 }
 
 func newCatalog(in *store.Inputs) *catalog {
 	c := &catalog{pricing: map[[2]string]*store.PricingRow{}, trust: map[[2]string]*store.TrustRow{}, plans: in.Plans,
-		meas: map[string][]*store.MeasurementRow{}, prods: map[string][]store.ProductRow{}}
+		prods: map[string][]store.ProductRow{}}
 	for i := range in.Pricing {
 		r := &in.Pricing[i]
 		c.pricing[[2]string{r.ProviderSlug, r.Category}] = r
@@ -96,10 +93,6 @@ func newCatalog(in *store.Inputs) *catalog {
 	for i := range in.Trust {
 		r := &in.Trust[i]
 		c.trust[[2]string{r.ProviderSlug, r.Category}] = r
-	}
-	for i := range in.Measurements {
-		r := &in.Measurements[i]
-		c.meas[r.ProviderSlug] = append(c.meas[r.ProviderSlug], r)
 	}
 	for _, r := range in.Products {
 		c.prods[r.ProviderSlug] = append(c.prods[r.ProviderSlug], r)
@@ -115,106 +108,13 @@ func (c *catalog) products(slug string) []model.ProviderProduct {
 	return out
 }
 
-func strOr(s *string, fallback string) model.Str {
-	if s != nil {
-		return s
-	}
-	if fallback == "" {
-		return nil
-	}
-	return model.S(fallback)
-}
-
-// demoProvider assembles a provider whose measurements are stored in site.measurements.
-func demoProvider(row *store.ProviderRow, c *catalog) (*entry, error) {
-	p := &model.Provider{
-		Source: model.SourceDemo, Slug: row.Slug, Name: row.Name, Tagline: row.Tagline, Kinds: row.Kinds,
-		PrimaryKind: model.SV(row.PrimaryKind), HQ: row.HQ, Founded: ptrNum(row.Founded), Claim: row.Claim,
-		Verdict: row.Verdict, Strengths: row.Strengths, Weaknesses: row.Weaknesses, BestFor: row.BestFor,
-		Website: row.Website, Products: c.products(row.Slug), MeasuredProduct: model.SV(row.MeasuredProduct),
-		ProductMeasurements: model.NewMeasurementMap(),
-	}
-	if !row.IsDemo {
-		p.Source = model.SourceMeasured
-	}
-	e := &entry{P: p, Order: int(row.SortOrder)}
-	for _, fix := range []*[]string{&p.Kinds, &p.Strengths, &p.Weaknesses, &p.BestFor} {
-		if *fix == nil {
-			*fix = []string{}
-		}
-	}
-	if row.Strengths == nil {
-		e.Declared = append(e.Declared, "strengths")
-	}
-	if row.Weaknesses == nil {
-		e.Declared = append(e.Declared, "weaknesses")
-	}
-	if row.BestFor == nil {
-		e.Declared = append(e.Declared, "bestFor")
-	}
-	for _, mr := range c.meas[row.Slug] {
-		pm := &model.ProductMeasurement{Kind: mr.Category, Product: mr.ProductKind}
-		m := &pm.Measured
-		jsnum.FillNaN(&m.Pool)
-		jsnum.FillNaN(&m.Performance)
-		jsnum.FillNaN(&m.Overlap)
-		for _, d := range []struct {
-			raw  json.RawMessage
-			v    any
-			what string
-		}{
-			{mr.Pool, &m.Pool, "pool"}, {mr.Performance, &m.Performance, "performance"}, {mr.Targets, &m.Targets, "targets"},
-			{mr.Series, &m.Series, "series"}, {mr.IPSamples, &m.IPSamples, "ip_samples"}, {mr.Incidents, &m.Incidents, "incidents"},
-			{mr.Geo, &m.Geo, "geo"}, {mr.Asns, &m.Asns, "asns"}, {mr.Overlap, &m.Overlap, "overlap"},
-		} {
-			if err := decodeInto(d.raw, d.v, row.Slug+"/"+mr.Category+" "+d.what); err != nil {
-				return nil, err
-			}
-		}
-		m.Pricing = pricingFrom(c.pricing[[2]string{row.Slug, mr.Category}], c.plans)
-		t, err := trustFrom(c.trust[[2]string{row.Slug, mr.Category}])
-		if err != nil {
-			return nil, err
-		}
-		m.Trust = t
-		m.Normalize()
-		p.ProductMeasurements.Set(mr.Category, pm)
-	}
-	if head := p.ProductMeasurements.Get(p.PrimaryKind); head != nil {
-		p.Measured = head.Measured
-		if len(row.HeadlineOverlap) > 0 {
-			var o model.OverlapSummary
-			jsnum.FillNaN(&o)
-			if err := decodeInto(row.HeadlineOverlap, &o, row.Slug+" headline_overlap"); err != nil {
-				return nil, err
-			}
-			p.Overlap = o
-		}
-	} else {
-		p.Measured = model.EmptyMeasured()
-		e.Declared = append(e.Declared, "productMeasurements")
-	}
-	p.Measured.Normalize()
-	p.Score = model.ScoreView{Composite: ptrNum(row.ScoreComposite), Rank: ptrNum(row.ScoreRank), PreviousRank: ptrNum(row.ScorePreviousRank),
-		Breakdown: model.NewBreakdown(), Grade: row.ScoreGrade}
-	if len(row.ScoreBreakdown) > 0 {
-		if err := decodeInto(row.ScoreBreakdown, &p.Score.Breakdown, row.Slug+" score_breakdown"); err != nil {
-			return nil, err
-		}
-	}
-	return e, nil
-}
-
-// realProviders builds every framework provider (and every non-demo catalog
-// row) from the framework identity, the published snapshot and the catalog.
+// realProviders builds every framework provider (and every catalog row) from
+// the framework identity, the published snapshot and the catalog.
 func realProviders(in *store.Inputs, s *snap.Snapshot, c *catalog, targets []model.TargetMeta) ([]*entry, error) {
 	catalogBy := map[string]*store.ProviderRow{}
 	unlinked := []*store.ProviderRow{}
 	for i := range in.Providers {
 		r := &in.Providers[i]
-		if r.IsDemo {
-			continue
-		}
 		if r.FrameworkProvider != nil {
 			catalogBy[*r.FrameworkProvider] = r
 		} else {

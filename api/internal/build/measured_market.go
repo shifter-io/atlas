@@ -9,7 +9,7 @@ import (
 	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
 )
 
-// measuredMarket is the public All market panel. Demo entries never enter it.
+// measuredMarket is the public All market panel.
 func measuredMarket(fleet []*entry, stats map[string]map[string]*WindowStats, totals model.FleetTotals, targets []model.TargetMeta) (model.MeasuredMarket, error) {
 	views := fleetViews(fleet, stats, totals, "measured")
 	for i := range views {

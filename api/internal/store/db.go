@@ -1,5 +1,5 @@
 // Package store owns every SQL statement of the site API: the `site` schema
-// migrations, demo seeding, and the read-only queries the cache is built from.
+// migrations and the read-only queries the cache is built from.
 package store
 
 import (

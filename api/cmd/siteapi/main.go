@@ -3,12 +3,12 @@
 //
 //	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s]
 //	siteapi migrate      [--database-file F]
-//	siteapi seed-demo    [--file fixtures/demo/design-demo.json] [--force] [--no-backup] [--backup-dir D]
-//	siteapi unseed-demo  [--no-backup]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //
 // The database comes from DATABASE_URL, --database-file, or
 // proxy-index/.secrets/database.toml found above the working directory.
+// serve and dump need only the framework's schema: site tables that are
+// missing (before the first `siteapi migrate`) are served empty.
 package main
 
 import (
@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -37,9 +36,7 @@ func usage() {
 
 commands:
   serve        serve the cached JSON API (read-only database access)
-  migrate      create or upgrade the "site" schema
-  seed-demo    load the four design fixtures as is_demo rows (pg_dump backup first)
-  unseed-demo  delete every is_demo row (pg_dump backup first)
+  migrate      create or upgrade the "site" schema (catalog, pricing, trust, reviews)
   dump         write one response (default /v1/dataset) to a file, for static builds
 
 run "siteapi <command> -h" for flags`)
@@ -84,10 +81,6 @@ func main() {
 		err = serve(args)
 	case "migrate":
 		err = migrate(args)
-	case "seed-demo":
-		err = seedDemo(args)
-	case "unseed-demo":
-		err = unseedDemo(args)
 	case "dump":
 		err = dump(args)
 	case "-h", "--help", "help":
@@ -168,126 +161,12 @@ func migrate(args []string) error {
 	return nil
 }
 
-type backupFlags struct {
-	noBackup    bool
-	backupDir   string
-	runtimeFile string
-}
-
-func (b *backupFlags) register(fs *flag.FlagSet) {
-	fs.BoolVar(&b.noBackup, "no-backup", false, "skip the pg_dump taken before writing")
-	fs.StringVar(&b.backupDir, "backup-dir", "", "backup folder (default: proxy-index/.state/postgres/backups above the working directory)")
-	fs.StringVar(&b.runtimeFile, "runtime-file", "", "Postgres runtime.json with bin_dir (default: proxy-index/.state/postgres/runtime.json)")
-}
-
-func (b *backupFlags) run(dsn, label string) (*store.BackupResult, error) {
-	if b.noBackup {
-		return nil, nil
-	}
-	runtime := b.runtimeFile
-	if runtime == "" {
-		runtime = config.FrameworkPath(".state", "postgres", "runtime.json")
-	}
-	if runtime == "" {
-		return nil, errors.New("cannot find proxy-index/.state/postgres/runtime.json for pg_dump; pass --runtime-file or --no-backup")
-	}
-	dir := b.backupDir
-	if dir == "" {
-		dir = filepath.Join(filepath.Dir(runtime), "backups")
-	}
-	bin, err := store.PgBinDir(runtime)
-	if err != nil {
-		return nil, err
-	}
-	res, err := store.Backup(dsn, bin, dir, label)
-	if err != nil {
-		return nil, fmt.Errorf("backup: %w", err)
-	}
-	slog.Info("database backed up", "path", res.Path, "bytes", res.Bytes)
-	return res, nil
-}
-
-func seedDemo(args []string) error {
-	fs := flag.NewFlagSet("seed-demo", flag.ExitOnError)
-	var c common
-	c.register(fs)
-	var b backupFlags
-	b.register(fs)
-	file := fs.String("file", "", "fixture file (default: fixtures/demo/design-demo.json above the working directory)")
-	force := fs.Bool("force", false, "reload even when the same file is already loaded")
-	fs.Parse(args) //nolint:errcheck
-	if *file == "" {
-		*file = config.FindUp(filepath.Join("fixtures", "demo", "design-demo.json"))
-		if *file == "" {
-			return errors.New("cannot find fixtures/demo/design-demo.json; pass --file")
-		}
-	}
-	dsn, err := c.dsn()
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	conn, err := store.OpenWrite(ctx, dsn)
-	if err != nil {
-		return err
-	}
-	defer conn.Close(ctx)
-	if err := store.CheckSchema(ctx, conn); err != nil {
-		return err
-	}
-	var backup *store.BackupResult
-	if loaded, err := store.DemoLoaded(ctx, conn, *file); err != nil {
-		return err
-	} else if !loaded || *force {
-		// Nothing is written when the same file is already loaded, so only a real load is backed up.
-		if backup, err = b.run(dsn, "before_seed_demo"); err != nil {
-			return err
-		}
-	}
-	res, err := store.SeedDemo(ctx, conn, *file, *force)
-	if err != nil {
-		return err
-	}
-	res.Backup = backup
-	printJSON(res)
-	return nil
-}
-
-func unseedDemo(args []string) error {
-	fs := flag.NewFlagSet("unseed-demo", flag.ExitOnError)
-	var c common
-	c.register(fs)
-	var b backupFlags
-	b.register(fs)
-	fs.Parse(args) //nolint:errcheck
-	dsn, err := c.dsn()
-	if err != nil {
-		return err
-	}
-	backup, err := b.run(dsn, "before_unseed_demo")
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	conn, err := store.OpenWrite(ctx, dsn)
-	if err != nil {
-		return err
-	}
-	defer conn.Close(ctx)
-	deleted, err := store.UnseedDemo(ctx, conn)
-	if err != nil {
-		return err
-	}
-	printJSON(map[string]any{"deleted": deleted, "backup": backup})
-	return nil
-}
-
 func dump(args []string) error {
 	fs := flag.NewFlagSet("dump", flag.ExitOnError)
 	var c common
 	c.register(fs)
 	out := fs.String("out", "", "output file (required)")
-	endpoint := fs.String("endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/snapshot, /v1/networks, /v1/rankings/<range>, /v1/countries")
+	endpoint := fs.String("endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/networks, /v1/rankings/<range>, /v1/countries")
 	pretty := fs.Bool("pretty", false, "indent the JSON")
 	fs.Parse(args) //nolint:errcheck
 	if *out == "" {

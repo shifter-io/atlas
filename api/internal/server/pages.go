@@ -39,9 +39,6 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	for key, ans := range pg.Charts {
 		out["/v1/charts/"+key] = ans
 	}
-	if pg.Snapshot != nil {
-		out["/v1/snapshot"] = pg.Snapshot
-	}
 	return out
 }
 

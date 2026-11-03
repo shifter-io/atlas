@@ -12,9 +12,9 @@ import (
 // (patterns: array positions written as [], product categories as *).
 var contractNull = map[string]bool{
 	"pricing.plans[].catalog.tier": true, // untiered pools have no tier selector
-	"measurement":                  true, // raw snapshot product: null for fixtures
-	"framework":                    true, // framework identity: null for fixtures
-	"overlap.likelyUpstream":       true, // fixtures: no reseller signature (measured providers declare it N/A)
+	"measurement":                  true, // raw snapshot product: null without a snapshot product
+	"framework":                    true, // framework identity: null for an unlinked catalog row
+	"overlap.likelyUpstream":       true, // no reseller signature (measured providers declare it N/A)
 	"pricing.plans[].gb":           true, // per-IP plans have no GB allowance
 	"pricing.plans[].ips":          true, // per-GB plans have no IP count
 	"at":                           true, // tape: only measured events carry an ISO stamp
@@ -262,9 +262,9 @@ var reasons = map[string]string{
 	"score.grade":                          "No ready balanced score in the published snapshot",
 	"reviews.mean":                         "No published reviews",
 	"reviews.verifiedMean":                 "No verified reviews",
-	"seed":                                 "Only simulated datasets have a seed",
-	"runId":                                "No published snapshot and no fixture run id",
-	"collectorVersion":                     "No published snapshot implementation id and no fixture collector version",
+	"seed":                                 "The dataset has no seed (only the removed demo fixtures had one)",
+	"runId":                                "No published snapshot",
+	"collectorVersion":                     "No published snapshot implementation id",
 	"category":                             "No site.targets.category for this framework target",
 	"difficulty":                           "No site.targets.difficulty for this framework target",
 }
@@ -281,7 +281,7 @@ func reasonFor(path string) string {
 		return "No published framework calculation (public.current_calculation is empty)"
 	}
 	if strings.HasPrefix(p, "totals.") {
-		return "Fleet total needs fixture or measured inputs that are missing"
+		return "Fleet total needs measured inputs that are missing"
 	}
 	if strings.HasPrefix(p, "weights.") {
 		return "No weight in the snapshot methodology or site.score_weights"

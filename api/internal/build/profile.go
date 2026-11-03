@@ -39,7 +39,7 @@ type NetworkProfile struct {
 	IPSamples   []model.IPSample        `json:"ipSamples"`
 	Incidents   []model.Incident        `json:"incidents"`
 	Overlap     model.OverlapSummary    `json:"overlap"`
-	// TileRanks is the category's precomputed ranks by range (null for demo).
+	// TileRanks is the category's precomputed ranks by range.
 	TileRanks map[string]model.TileRanks `json:"tileRanks"`
 	NA        []string                   `json:"na"`
 }

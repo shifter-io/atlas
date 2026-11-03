@@ -1,7 +1,6 @@
 package build
 
 import (
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 )
 
@@ -53,21 +52,6 @@ func (w *EventWindow) measuredTape() []store.EventJSON {
 	for _, i := range pick {
 		_, j := w.row(i)
 		out = append(out, *j)
-	}
-	return out
-}
-
-// overviewTape is the first n rows of the dataset tape: its measured rows (one per
-// event of measured, in the same order), then the editorial ones. When the
-// measured rows alone fill it they are chosen like the tape itself
-// (store.Prioritize), so a routine burst cannot take the overview's whole head.
-func overviewTape(tape []model.TapeEvent, measured []store.EventJSON, n int) []model.TapeEvent {
-	if len(measured) < n {
-		return tape[:min(n, len(tape))]
-	}
-	out := make([]model.TapeEvent, 0, n)
-	for _, i := range store.Prioritize(len(measured), n, func(i int) string { return measured[i].Kind }) {
-		out = append(out, tape[i])
 	}
 	return out
 }

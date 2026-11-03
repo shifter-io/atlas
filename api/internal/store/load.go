@@ -16,9 +16,11 @@ type Fingerprint struct {
 	MaxEventID    *int64     `json:"max_event_id"`
 	SiteRevision  int64      `json:"site_revision"`
 	SiteUpdatedAt *time.Time `json:"site_updated_at"`
-	DemoProviders int64      `json:"demo_providers"`
-	Products      int64      `json:"framework_products"`
-	TargetsDigest *string    `json:"framework_targets_digest"`
+	// SiteTables is the site tables that exist (comma separated), so a site
+	// schema created or changed under a running server is picked up.
+	SiteTables    string  `json:"site_tables"`
+	Products      int64   `json:"framework_products"`
+	TargetsDigest *string `json:"framework_targets_digest"`
 }
 
 // Key is a comparable string form.
@@ -30,36 +32,26 @@ func (f Fingerprint) Key() string {
 const fingerprintSQL = `SELECT
  (SELECT build_id FROM public.current_calculation WHERE singleton),
  (SELECT max(event_id) FROM public.test_events),
- (SELECT value FROM site.revision),
- (SELECT max(u) FROM (
-   SELECT max(updated_at) u FROM site.datasets UNION ALL SELECT max(updated_at) FROM site.targets
-   UNION ALL SELECT max(updated_at) FROM site.scopes UNION ALL SELECT max(updated_at) FROM site.score_weights
-   UNION ALL SELECT max(updated_at) FROM site.ranking_profiles UNION ALL SELECT max(updated_at) FROM site.providers
-   UNION ALL SELECT max(updated_at) FROM site.provider_products UNION ALL SELECT max(updated_at) FROM site.pricing
-   UNION ALL SELECT max(updated_at) FROM site.pricing_plans UNION ALL SELECT max(updated_at) FROM site.trust_signals
-   UNION ALL SELECT max(updated_at) FROM site.measurements UNION ALL SELECT max(updated_at) FROM site.reviews
-   UNION ALL SELECT max(updated_at) FROM site.community_runs UNION ALL SELECT max(updated_at) FROM site.changelog
-   UNION ALL SELECT max(updated_at) FROM site.tape_events) x),
- (SELECT count(*) FROM site.providers WHERE is_demo),
+ %s,
+ %s,
  (SELECT count(*) FROM public.products),
  (SELECT md5(string_agg(target_id || '|' || coalesce(label,'') || '|' || coalesce(pass_condition,'') || '|' || sort_order, ',' ORDER BY target_id)) FROM public.targets)`
 
-// ReadFingerprint runs the change-detection query.
+// ReadFingerprint runs the change-detection queries: the site layout, then
+// one query over the framework tables and the site tables that exist.
 func ReadFingerprint(ctx context.Context, q Querier) (Fingerprint, error) {
-	var f Fingerprint
-	err := q.QueryRow(ctx, fingerprintSQL).Scan(&f.BuildID, &f.MaxEventID, &f.SiteRevision, &f.SiteUpdatedAt, &f.DemoProviders, &f.Products, &f.TargetsDigest)
-	return f, err
+	l, err := ReadSiteLayout(ctx, q)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	return readFingerprint(ctx, q, l)
 }
 
-type DatasetRow struct {
-	Name             string
-	SchemaVersion    string
-	GeneratedAt      time.Time
-	Seed             *int64
-	RunID            *string
-	CollectorVersion *string
-	WindowHours      *int32
-	IsDemo           bool
+func readFingerprint(ctx context.Context, q Querier, l SiteLayout) (Fingerprint, error) {
+	revision, updated, tables := siteFingerprintSQL(l)
+	f := Fingerprint{SiteTables: tables}
+	err := q.QueryRow(ctx, fmt.Sprintf(fingerprintSQL, revision, updated)).Scan(&f.BuildID, &f.MaxEventID, &f.SiteRevision, &f.SiteUpdatedAt, &f.Products, &f.TargetsDigest)
+	return f, err
 }
 
 type TargetRow struct {
@@ -69,7 +61,6 @@ type TargetRow struct {
 	PassCondition *string
 	Difficulty    *int16
 	SortOrder     int32
-	IsDemo        bool
 }
 
 type FrameworkTarget struct {
@@ -86,7 +77,6 @@ type ScopeRow struct {
 	TargetIDs                                              []string
 	LiveIPSampling, PoolTracking, OverlapAudit, Stickiness *bool
 	GeoCoverage, Rationale                                 *string
-	IsDemo                                                 bool
 }
 
 type WeightRow struct {
@@ -99,28 +89,21 @@ type ProfileRow struct {
 	Label       *string
 	Description *string
 	Weights     json.RawMessage
-	IsDemo      bool
 }
 
 type ProviderRow struct {
-	Slug                            string
-	Name                            string
-	Tagline                         *string
-	Kinds                           []string
-	PrimaryKind, MeasuredProduct    *string
-	HQ                              *string
-	Founded                         *int32
-	Claim, Verdict                  *string
-	Strengths, Weaknesses, BestFor  []string // nil when the column is NULL
-	Website                         *string
-	FrameworkProvider               *string
-	Listed                          bool
-	SortOrder                       int32
-	ScoreComposite                  *float64
-	ScoreRank, ScorePreviousRank    *int32
-	ScoreGrade                      *string
-	ScoreBreakdown, HeadlineOverlap json.RawMessage
-	IsDemo                          bool
+	Slug                           string
+	Name                           string
+	Tagline                        *string
+	Kinds                          []string
+	PrimaryKind, MeasuredProduct   *string
+	HQ                             *string
+	Founded                        *int32
+	Claim, Verdict                 *string
+	Strengths, Weaknesses, BestFor []string // nil when the column is NULL
+	Website                        *string
+	FrameworkProvider              *string
+	Listed                         bool
 }
 
 type ProductRow struct {
@@ -131,7 +114,6 @@ type ProductRow struct {
 	URL, PriceLabel  *string
 	Note             *string
 	FrameworkProduct *string
-	IsDemo           bool
 }
 
 type PricingRow struct {
@@ -142,7 +124,6 @@ type PricingRow struct {
 	CostPer1kSuccess, AvgPayloadKb           *float64
 	CostBasis                                *string
 	HeadlinePriceRank, ValueRank             *int32
-	IsDemo                                   bool
 }
 
 type PlanRow struct {
@@ -163,16 +144,6 @@ type TrustRow struct {
 	ClaimedPoolSize                                                                             *int64
 	LeakChecks                                                                                  json.RawMessage
 	KycVerified, ConsentDisclosed                                                               *bool
-	IsDemo                                                                                      bool
-}
-
-type MeasurementRow struct {
-	ProviderSlug, Category, ProductKind string
-	Position                            int32
-	Pool, Performance, Targets, Series  json.RawMessage
-	IPSamples, Incidents, Geo, Asns     json.RawMessage
-	Overlap                             json.RawMessage
-	IsDemo                              bool
 }
 
 type ReviewRow struct {
@@ -185,7 +156,6 @@ type ReviewRow struct {
 	HelpfulCount                             int32
 	ProviderReply                            *string
 	PostedAt                                 time.Time
-	IsDemo                                   bool
 }
 
 type CommunityRunRow struct {
@@ -197,7 +167,6 @@ type CommunityRunRow struct {
 	OverlapShare, DeltaSuccessPts, DeltaLatencyPct                                         *float64
 	Targets, SuccessSeries, LatencySeries                                                  json.RawMessage
 	SubmittedAt                                                                            time.Time
-	IsDemo                                                                                 bool
 }
 
 type ChangeRow struct {
@@ -207,7 +176,6 @@ type ChangeRow struct {
 	Delta            *float64
 	Unit, Severity   string
 	OccurredAt       time.Time
-	IsDemo           bool
 }
 
 type TapeRow struct {
@@ -215,7 +183,6 @@ type TapeRow struct {
 	Signal                                         int16
 	Value                                          string
 	OccurredAt                                     time.Time
-	IsDemo                                         bool
 }
 
 type FrameworkProduct struct {
@@ -254,7 +221,6 @@ type Event struct {
 type Inputs struct {
 	Fingerprint        Fingerprint
 	ReadAt             time.Time
-	Datasets           []DatasetRow
 	Targets            []TargetRow
 	FrameworkTargets   []FrameworkTarget
 	Scopes             []ScopeRow
@@ -265,7 +231,6 @@ type Inputs struct {
 	Pricing            []PricingRow
 	Plans              []PlanRow
 	Trust              []TrustRow
-	Measurements       []MeasurementRow
 	Reviews            []ReviewRow
 	CommunityRuns      []CommunityRunRow
 	Changelog          []ChangeRow
@@ -281,6 +246,9 @@ type Inputs struct {
 	// NotableComplete is true when it holds every such row.
 	Notable         []Event
 	NotableComplete bool
+	// SiteGaps is one line per site table read as empty because the table or
+	// a column it reads is missing (SiteLayout); none on a migrated database.
+	SiteGaps []string
 }
 
 // loadEvents reads the newest EventWindow events and, past them, the newest
@@ -355,7 +323,47 @@ func trimSpace(s string) string {
 	return s
 }
 
-// Load reads every input in one consistent read-only snapshot.
+// The optional site reads; a read whose table or columns are missing is empty.
+var (
+	readTargets   = siteRead{"targets", []string{"target_id", "label", "category", "pass_condition", "difficulty", "sort_order"}, "sort_order, target_id"}
+	readScopes    = siteRead{"scopes", []string{"product_kind", "label", "summary", "cadence", "all_targets", "target_ids", "live_ip_sampling", "pool_tracking", "overlap_audit", "stickiness_test", "geo_coverage", "rationale"}, "sort_order, product_kind"}
+	readWeights   = siteRead{"score_weights", []string{"component", "weight"}, "component"}
+	readProfiles  = siteRead{"ranking_profiles", []string{"profile_id", "label", "description", "weights"}, "sort_order, profile_id"}
+	readProviders = siteRead{"providers", []string{"slug", "name", "tagline", "kinds", "primary_kind", "measured_product", "hq", "founded", "claim", "verdict",
+		"strengths", "weaknesses", "best_for", "website", "framework_provider", "listed"}, "sort_order, slug"}
+	readProducts = siteRead{"provider_products", []string{"provider_slug", "product_kind", "name", "measured", "url", "price_label", "note", "framework_product"}, "provider_slug, sort_order, product_kind"}
+	readPricing  = siteRead{"pricing", []string{"provider_slug", "category", "model", "price_per_gb", "price_per_gb_at_scale", "min_commit", "trial",
+		"cost_per_1k_success", "avg_payload_kb", "cost_basis", "headline_price_rank", "value_rank"}, "provider_slug, category"}
+	readPlans = siteRead{"pricing_plans", []string{"provider_slug", "category", "position", "name", "price", "gb", "ips", "note", "recommended", "discount_pct", "catalog"}, "provider_slug, category, position"}
+	readTrust = siteRead{"trust_signals", []string{"provider_slug", "category", "residential_authenticity", "datacenter_asn_share", "claim_gap", "blacklist_hit_rate",
+		"stickiness_hold_rate", "stickiness_advertised", "claimed_pool_size", "leak_checks", "kyc_verified", "consent_disclosed"}, "provider_slug, category"}
+	readReviews = siteRead{"reviews", []string{"review_id", "provider_slug", "author", "role", "rating", "title", "body", "product_kind", "use_case", "monthly_spend",
+		"months_used", "verification", "invoice_month", "linked_run_id", "helpful_count", "provider_reply", "posted_at"}, "posted_at DESC, position NULLS LAST, review_id"}
+	readRuns = siteRead{"community_runs", []string{"run_id", "provider_slug", "submitted_by", "region", "product_kind", "plan_tier", "collector_version", "status",
+		"rejection_reason", "requests", "success_rate", "latency_p50", "unique_ips", "overlap_share", "delta_success_pts", "delta_latency_pct", "targets",
+		"success_series", "latency_series", "submitted_at"}, "submitted_at DESC, position NULLS LAST, run_id"}
+	readChangelog = siteRead{"changelog", []string{"change_id", "kind", "provider_slug", "headline", "detail", "delta", "unit", "severity", "occurred_at"}, "occurred_at DESC, position NULLS LAST, change_id"}
+	readTape      = siteRead{"tape_events", []string{"tape_id", "kind", "provider_slug", "product", "title", "detail", "signal", "value", "occurred_at"}, "occurred_at DESC, position NULLS LAST, tape_id"}
+
+	siteReads = []siteRead{readTargets, readScopes, readWeights, readProfiles, readProviders, readProducts, readPricing, readPlans, readTrust,
+		readReviews, readRuns, readChangelog, readTape}
+)
+
+// readSite reads one optional site table, or nothing when the layout cannot serve it.
+func readSite[T any](ctx context.Context, tx pgx.Tx, l SiteLayout, r siteRead, scan func(pgx.Rows, *T) error) ([]T, error) {
+	if len(r.missing(l)) > 0 {
+		return []T{}, nil
+	}
+	out, err := collect(ctx, tx, r.sql(l), scan)
+	if err != nil {
+		return nil, fmt.Errorf("site.%s: %w", r.table, err)
+	}
+	return out, nil
+}
+
+// Load reads every input in one consistent read-only snapshot. Only the
+// framework schema is required; site tables that are missing read as empty
+// (Inputs.SiteGaps names them).
 func Load(ctx context.Context, db interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 }) (*Inputs, error) {
@@ -365,10 +373,12 @@ func Load(ctx context.Context, db interface {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	in := &Inputs{}
-	if err := CheckSchema(ctx, tx); err != nil {
-		return nil, err
+	l, err := ReadSiteLayout(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("site layout: %w", err)
 	}
-	if in.Fingerprint, err = ReadFingerprint(ctx, tx); err != nil {
+	in.SiteGaps = siteGaps(l, siteReads)
+	if in.Fingerprint, err = readFingerprint(ctx, tx, l); err != nil {
 		return nil, fmt.Errorf("fingerprint: %w", err)
 	}
 	if err := tx.QueryRow(ctx, "SELECT now()").Scan(&in.ReadAt); err != nil {
@@ -376,17 +386,9 @@ func Load(ctx context.Context, db interface {
 	}
 	steps := []func() error{
 		func() (err error) {
-			in.Datasets, err = collect(ctx, tx, `SELECT name, schema_version, generated_at, seed, run_id, collector_version, window_hours, is_demo FROM site.datasets ORDER BY is_demo, name`,
-				func(r pgx.Rows, v *DatasetRow) error {
-					return r.Scan(&v.Name, &v.SchemaVersion, &v.GeneratedAt, &v.Seed, &v.RunID, &v.CollectorVersion, &v.WindowHours, &v.IsDemo)
-				})
-			return
-		},
-		func() (err error) {
-			in.Targets, err = collect(ctx, tx, `SELECT target_id, label, category, pass_condition, difficulty, sort_order, is_demo FROM site.targets ORDER BY sort_order, target_id`,
-				func(r pgx.Rows, v *TargetRow) error {
-					return r.Scan(&v.ID, &v.Label, &v.Category, &v.PassCondition, &v.Difficulty, &v.SortOrder, &v.IsDemo)
-				})
+			in.Targets, err = readSite(ctx, tx, l, readTargets, func(r pgx.Rows, v *TargetRow) error {
+				return r.Scan(&v.ID, &v.Label, &v.Category, &v.PassCondition, &v.Difficulty, &v.SortOrder)
+			})
 			return
 		},
 		func() (err error) {
@@ -397,92 +399,73 @@ func Load(ctx context.Context, db interface {
 			return
 		},
 		func() (err error) {
-			in.Scopes, err = collect(ctx, tx, `SELECT product_kind, label, summary, cadence, all_targets, target_ids, live_ip_sampling, pool_tracking, overlap_audit, stickiness_test, geo_coverage, rationale, is_demo FROM site.scopes ORDER BY sort_order, product_kind`,
-				func(r pgx.Rows, v *ScopeRow) error {
-					return r.Scan(&v.Kind, &v.Label, &v.Summary, &v.Cadence, &v.AllTargets, &v.TargetIDs, &v.LiveIPSampling, &v.PoolTracking, &v.OverlapAudit, &v.Stickiness, &v.GeoCoverage, &v.Rationale, &v.IsDemo)
-				})
+			in.Scopes, err = readSite(ctx, tx, l, readScopes, func(r pgx.Rows, v *ScopeRow) error {
+				return r.Scan(&v.Kind, &v.Label, &v.Summary, &v.Cadence, &v.AllTargets, &v.TargetIDs, &v.LiveIPSampling, &v.PoolTracking, &v.OverlapAudit, &v.Stickiness, &v.GeoCoverage, &v.Rationale)
+			})
 			return
 		},
 		func() (err error) {
-			in.Weights, err = collect(ctx, tx, `SELECT component, weight FROM site.score_weights`,
-				func(r pgx.Rows, v *WeightRow) error { return r.Scan(&v.Component, &v.Weight) })
+			in.Weights, err = readSite(ctx, tx, l, readWeights, func(r pgx.Rows, v *WeightRow) error { return r.Scan(&v.Component, &v.Weight) })
 			return
 		},
 		func() (err error) {
-			in.Profiles, err = collect(ctx, tx, `SELECT profile_id, label, description, weights, is_demo FROM site.ranking_profiles ORDER BY sort_order, profile_id`,
-				func(r pgx.Rows, v *ProfileRow) error {
-					return r.Scan(&v.ID, &v.Label, &v.Description, &v.Weights, &v.IsDemo)
-				})
+			in.Profiles, err = readSite(ctx, tx, l, readProfiles, func(r pgx.Rows, v *ProfileRow) error {
+				return r.Scan(&v.ID, &v.Label, &v.Description, &v.Weights)
+			})
 			return
 		},
 		func() (err error) {
-			in.Providers, err = collect(ctx, tx, `SELECT slug, name, tagline, kinds, primary_kind, measured_product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, framework_provider, listed, sort_order, score_composite, score_rank, score_previous_rank, score_grade, score_breakdown, headline_overlap, is_demo FROM site.providers ORDER BY sort_order, slug`,
-				func(r pgx.Rows, v *ProviderRow) error {
-					return r.Scan(&v.Slug, &v.Name, &v.Tagline, &v.Kinds, &v.PrimaryKind, &v.MeasuredProduct, &v.HQ, &v.Founded, &v.Claim, &v.Verdict, &v.Strengths, &v.Weaknesses, &v.BestFor, &v.Website, &v.FrameworkProvider, &v.Listed, &v.SortOrder, &v.ScoreComposite, &v.ScoreRank, &v.ScorePreviousRank, &v.ScoreGrade, &v.ScoreBreakdown, &v.HeadlineOverlap, &v.IsDemo)
-				})
+			in.Providers, err = readSite(ctx, tx, l, readProviders, func(r pgx.Rows, v *ProviderRow) error {
+				return r.Scan(&v.Slug, &v.Name, &v.Tagline, &v.Kinds, &v.PrimaryKind, &v.MeasuredProduct, &v.HQ, &v.Founded, &v.Claim, &v.Verdict, &v.Strengths, &v.Weaknesses, &v.BestFor, &v.Website, &v.FrameworkProvider, &v.Listed)
+			})
 			return
 		},
 		func() (err error) {
-			in.Products, err = collect(ctx, tx, `SELECT provider_slug, product_kind, name, measured, url, price_label, note, framework_product, is_demo FROM site.provider_products ORDER BY provider_slug, sort_order, product_kind`,
-				func(r pgx.Rows, v *ProductRow) error {
-					return r.Scan(&v.ProviderSlug, &v.Kind, &v.Name, &v.Measured, &v.URL, &v.PriceLabel, &v.Note, &v.FrameworkProduct, &v.IsDemo)
-				})
+			in.Products, err = readSite(ctx, tx, l, readProducts, func(r pgx.Rows, v *ProductRow) error {
+				return r.Scan(&v.ProviderSlug, &v.Kind, &v.Name, &v.Measured, &v.URL, &v.PriceLabel, &v.Note, &v.FrameworkProduct)
+			})
 			return
 		},
 		func() (err error) {
-			in.Pricing, err = collect(ctx, tx, `SELECT provider_slug, category, model, price_per_gb, price_per_gb_at_scale, min_commit, trial, cost_per_1k_success, avg_payload_kb, cost_basis, headline_price_rank, value_rank, is_demo FROM site.pricing`,
-				func(r pgx.Rows, v *PricingRow) error {
-					return r.Scan(&v.ProviderSlug, &v.Category, &v.Model, &v.PricePerGb, &v.PricePerGbAtScale, &v.MinCommit, &v.Trial, &v.CostPer1kSuccess, &v.AvgPayloadKb, &v.CostBasis, &v.HeadlinePriceRank, &v.ValueRank, &v.IsDemo)
-				})
+			in.Pricing, err = readSite(ctx, tx, l, readPricing, func(r pgx.Rows, v *PricingRow) error {
+				return r.Scan(&v.ProviderSlug, &v.Category, &v.Model, &v.PricePerGb, &v.PricePerGbAtScale, &v.MinCommit, &v.Trial, &v.CostPer1kSuccess, &v.AvgPayloadKb, &v.CostBasis, &v.HeadlinePriceRank, &v.ValueRank)
+			})
 			return
 		},
 		func() (err error) {
-			in.Plans, err = collect(ctx, tx, `SELECT provider_slug, category, position, name, price, gb, ips, note, recommended, discount_pct, catalog FROM site.pricing_plans ORDER BY provider_slug, category, position`,
-				func(r pgx.Rows, v *PlanRow) error {
-					return r.Scan(&v.ProviderSlug, &v.Category, &v.Position, &v.Name, &v.Price, &v.Gb, &v.Ips, &v.Note, &v.Recommended, &v.DiscountPct, &v.Catalog)
-				})
+			in.Plans, err = readSite(ctx, tx, l, readPlans, func(r pgx.Rows, v *PlanRow) error {
+				return r.Scan(&v.ProviderSlug, &v.Category, &v.Position, &v.Name, &v.Price, &v.Gb, &v.Ips, &v.Note, &v.Recommended, &v.DiscountPct, &v.Catalog)
+			})
 			return
 		},
 		func() (err error) {
-			in.Trust, err = collect(ctx, tx, `SELECT provider_slug, category, residential_authenticity, datacenter_asn_share, claim_gap, blacklist_hit_rate, stickiness_hold_rate, stickiness_advertised, claimed_pool_size, leak_checks, kyc_verified, consent_disclosed, is_demo FROM site.trust_signals`,
-				func(r pgx.Rows, v *TrustRow) error {
-					return r.Scan(&v.ProviderSlug, &v.Category, &v.ResidentialAuthenticity, &v.DatacenterAsnShare, &v.ClaimGap, &v.BlacklistHitRate, &v.StickinessHoldRate, &v.StickinessAdvertised, &v.ClaimedPoolSize, &v.LeakChecks, &v.KycVerified, &v.ConsentDisclosed, &v.IsDemo)
-				})
+			in.Trust, err = readSite(ctx, tx, l, readTrust, func(r pgx.Rows, v *TrustRow) error {
+				return r.Scan(&v.ProviderSlug, &v.Category, &v.ResidentialAuthenticity, &v.DatacenterAsnShare, &v.ClaimGap, &v.BlacklistHitRate, &v.StickinessHoldRate, &v.StickinessAdvertised, &v.ClaimedPoolSize, &v.LeakChecks, &v.KycVerified, &v.ConsentDisclosed)
+			})
 			return
 		},
 		func() (err error) {
-			in.Measurements, err = collect(ctx, tx, `SELECT provider_slug, category, product_kind, position, pool, performance, targets, series, ip_samples, incidents, geo, asns, overlap, is_demo FROM site.measurements ORDER BY provider_slug, position, category`,
-				func(r pgx.Rows, v *MeasurementRow) error {
-					return r.Scan(&v.ProviderSlug, &v.Category, &v.ProductKind, &v.Position, &v.Pool, &v.Performance, &v.Targets, &v.Series, &v.IPSamples, &v.Incidents, &v.Geo, &v.Asns, &v.Overlap, &v.IsDemo)
-				})
+			in.Reviews, err = readSite(ctx, tx, l, readReviews, func(r pgx.Rows, v *ReviewRow) error {
+				return r.Scan(&v.ID, &v.ProviderSlug, &v.Author, &v.Role, &v.Rating, &v.Title, &v.Body, &v.ProductKind, &v.UseCase, &v.Spend, &v.MonthsUsed, &v.Verification, &v.InvoiceMonth, &v.LinkedRunID, &v.HelpfulCount, &v.ProviderReply, &v.PostedAt)
+			})
 			return
 		},
 		func() (err error) {
-			in.Reviews, err = collect(ctx, tx, `SELECT review_id, provider_slug, author, role, rating, title, body, product_kind, use_case, monthly_spend, months_used, verification, invoice_month, linked_run_id, helpful_count, provider_reply, posted_at, is_demo FROM site.reviews ORDER BY posted_at DESC, position NULLS LAST, review_id`,
-				func(r pgx.Rows, v *ReviewRow) error {
-					return r.Scan(&v.ID, &v.ProviderSlug, &v.Author, &v.Role, &v.Rating, &v.Title, &v.Body, &v.ProductKind, &v.UseCase, &v.Spend, &v.MonthsUsed, &v.Verification, &v.InvoiceMonth, &v.LinkedRunID, &v.HelpfulCount, &v.ProviderReply, &v.PostedAt, &v.IsDemo)
-				})
+			in.CommunityRuns, err = readSite(ctx, tx, l, readRuns, func(r pgx.Rows, v *CommunityRunRow) error {
+				return r.Scan(&v.ID, &v.ProviderSlug, &v.SubmittedBy, &v.Region, &v.ProductKind, &v.PlanTier, &v.CollectorVersion, &v.Status, &v.RejectionReason, &v.Requests, &v.SuccessRate, &v.LatencyP50, &v.UniqueIps, &v.OverlapShare, &v.DeltaSuccessPts, &v.DeltaLatencyPct, &v.Targets, &v.SuccessSeries, &v.LatencySeries, &v.SubmittedAt)
+			})
 			return
 		},
 		func() (err error) {
-			in.CommunityRuns, err = collect(ctx, tx, `SELECT run_id, provider_slug, submitted_by, region, product_kind, plan_tier, collector_version, status, rejection_reason, requests, success_rate, latency_p50, unique_ips, overlap_share, delta_success_pts, delta_latency_pct, targets, success_series, latency_series, submitted_at, is_demo FROM site.community_runs ORDER BY submitted_at DESC, position NULLS LAST, run_id`,
-				func(r pgx.Rows, v *CommunityRunRow) error {
-					return r.Scan(&v.ID, &v.ProviderSlug, &v.SubmittedBy, &v.Region, &v.ProductKind, &v.PlanTier, &v.CollectorVersion, &v.Status, &v.RejectionReason, &v.Requests, &v.SuccessRate, &v.LatencyP50, &v.UniqueIps, &v.OverlapShare, &v.DeltaSuccessPts, &v.DeltaLatencyPct, &v.Targets, &v.SuccessSeries, &v.LatencySeries, &v.SubmittedAt, &v.IsDemo)
-				})
+			in.Changelog, err = readSite(ctx, tx, l, readChangelog, func(r pgx.Rows, v *ChangeRow) error {
+				return r.Scan(&v.ID, &v.Kind, &v.ProviderSlug, &v.Headline, &v.Detail, &v.Delta, &v.Unit, &v.Severity, &v.OccurredAt)
+			})
 			return
 		},
 		func() (err error) {
-			in.Changelog, err = collect(ctx, tx, `SELECT change_id, kind, provider_slug, headline, detail, delta, unit, severity, occurred_at, is_demo FROM site.changelog ORDER BY occurred_at DESC, position NULLS LAST, change_id`,
-				func(r pgx.Rows, v *ChangeRow) error {
-					return r.Scan(&v.ID, &v.Kind, &v.ProviderSlug, &v.Headline, &v.Detail, &v.Delta, &v.Unit, &v.Severity, &v.OccurredAt, &v.IsDemo)
-				})
-			return
-		},
-		func() (err error) {
-			in.Tape, err = collect(ctx, tx, `SELECT tape_id, kind, provider_slug, product, title, detail, signal, value, occurred_at, is_demo FROM site.tape_events ORDER BY occurred_at DESC, position NULLS LAST, tape_id`,
-				func(r pgx.Rows, v *TapeRow) error {
-					return r.Scan(&v.ID, &v.Kind, &v.ProviderSlug, &v.Product, &v.Title, &v.Detail, &v.Signal, &v.Value, &v.OccurredAt, &v.IsDemo)
-				})
+			in.Tape, err = readSite(ctx, tx, l, readTape, func(r pgx.Rows, v *TapeRow) error {
+				return r.Scan(&v.ID, &v.Kind, &v.ProviderSlug, &v.Product, &v.Title, &v.Detail, &v.Signal, &v.Value, &v.OccurredAt)
+			})
 			return
 		},
 		func() (err error) {

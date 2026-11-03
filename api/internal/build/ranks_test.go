@@ -161,9 +161,6 @@ func TestPlaceRanksMatchADirectRanking(t *testing.T) {
 		}
 		entries = append(entries, rankEntry(kind, cohort, func(string) snap.Window { return seededWindow(rng) }))
 	}
-	demo := rankEntry("residential", "pool", func(string) snap.Window { return seededWindow(rng) })
-	demo.P.Source = model.SourceDemo
-	entries = append(entries, demo)
 	addRanks(entries, nil)
 	want := directRanks(entries)
 	ranked := 0
@@ -192,9 +189,6 @@ func TestPlaceRanksMatchADirectRanking(t *testing.T) {
 	}
 	if ranked < 50 {
 		t.Fatalf("fixture ranked only %d rows", ranked)
-	}
-	if demo.P.PlaceRanks != nil || demo.P.TileRanks != nil {
-		t.Error("demo data was ranked")
 	}
 }
 

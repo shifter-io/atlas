@@ -2,24 +2,13 @@ package store_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/config"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
 )
-
-func demoFile(t *testing.T) string {
-	t.Helper()
-	f := config.FindUp(filepath.Join("fixtures", "demo", "design-demo.json"))
-	if f == "" {
-		t.Fatal("fixtures/demo/design-demo.json not found above the test directory")
-	}
-	return f
-}
 
 func count(t *testing.T, db *testdb.DB, sql string) int {
 	t.Helper()
@@ -30,6 +19,36 @@ func count(t *testing.T, db *testdb.DB, sql string) int {
 		t.Fatalf("%s: %v", sql, err)
 	}
 	return n
+}
+
+func load(t *testing.T, db *testdb.DB) *store.Inputs {
+	t.Helper()
+	ctx := context.Background()
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	in, err := store.Load(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return in
+}
+
+func fingerprint(t *testing.T, db *testdb.DB) store.Fingerprint {
+	t.Helper()
+	ctx := context.Background()
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	f, err := store.ReadFingerprint(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
@@ -48,9 +67,6 @@ func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
 	if len(res.Applied) != 0 || res.Current != migrations[len(migrations)-1].Version {
 		t.Fatalf("second migrate applied %v (current %d)", res.Applied, res.Current)
 	}
-	if err := store.CheckSchema(ctx, c); err != nil {
-		t.Fatal(err)
-	}
 	if n := count(t, db, "SELECT count(*) FROM information_schema.tables WHERE table_schema='site'"); n < 16 {
 		t.Fatalf("site schema has %d tables", n)
 	}
@@ -62,123 +78,83 @@ func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
 		t.Fatalf("revision %d -> %d, want +2", before, after)
 	}
 	// A database migrated by an older siteapi, whose 0001 differed only in a
-	// comment, is served, and migrate rewrites its checksum to the current one.
+	// comment: migrate rewrites its checksum to the current one.
 	db.Exec(t, "UPDATE site.schema_versions SET checksum='8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec' WHERE version=1")
-	if err := store.CheckSchema(ctx, c); err != nil {
-		t.Fatalf("comment-only checksum refused: %v", err)
-	}
 	if res, err := store.Migrate(ctx, c); err != nil || len(res.Rechecked) != 1 || res.Rechecked[0] != migrations[0].Name {
 		t.Fatalf("migrate over a comment-only checksum: %+v %v", res, err)
 	}
 	if n := count(t, db, "SELECT count(*) FROM site.schema_versions WHERE version=1 AND checksum='"+migrations[0].Checksum+"'"); n != 1 {
 		t.Fatal("checksum not rewritten")
 	}
-	// An edited migration is refused, by migrate and by the read-only check.
+	// An edited migration is refused.
 	db.Exec(t, "UPDATE site.schema_versions SET checksum='tampered' WHERE version=1")
 	if _, err := store.Migrate(ctx, c); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("tampered checksum accepted: %v", err)
 	}
-	if err := store.CheckSchema(ctx, c); err == nil {
-		t.Fatal("CheckSchema accepted a tampered checksum")
-	}
 }
 
-func TestSeedAndUnseedAreIdempotent(t *testing.T) {
-	db := testdb.New(t)
-	ctx := context.Background()
+// A database with only the framework's schema (no `siteapi migrate` yet) is
+// read with every site table empty, named once in SiteGaps; migrating it
+// changes the fingerprint, so a running server rebuilds.
+func TestLoadReadsADatabaseWithoutTheSiteSchema(t *testing.T) {
+	db := testdb.NewFramework(t)
+	in := load(t, db)
+	if len(in.SiteGaps) != 1 || !strings.Contains(in.SiteGaps[0], "site schema missing") || !strings.Contains(in.SiteGaps[0], "siteapi migrate") {
+		t.Fatalf("site gaps %q", in.SiteGaps)
+	}
+	if len(in.Providers)+len(in.Products)+len(in.Pricing)+len(in.Plans)+len(in.Trust)+len(in.Reviews)+len(in.CommunityRuns)+
+		len(in.Changelog)+len(in.Tape)+len(in.Targets)+len(in.Scopes)+len(in.Weights)+len(in.Profiles) != 0 {
+		t.Fatal("site rows read from a database without a site schema")
+	}
+	if len(in.FrameworkTargets) != 2 {
+		t.Fatalf("framework targets %d, want 2", len(in.FrameworkTargets))
+	}
+	before := fingerprint(t, db)
+	if before.SiteTables != "" || before.SiteRevision != 0 || before.SiteUpdatedAt != nil {
+		t.Fatalf("fingerprint without a site schema %+v", before)
+	}
 	c := db.Conn(t)
-	defer c.Close(ctx)
-	file := demoFile(t)
-	first, err := store.SeedDemo(ctx, c, file, false)
-	if err != nil {
+	defer c.Close(context.Background())
+	if _, err := store.Migrate(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
-	if first.Skipped {
-		t.Fatal("first seed skipped")
+	if after := fingerprint(t, db); after.Key() == before.Key() || after.SiteTables == "" {
+		t.Fatalf("migrating did not change the fingerprint: %+v", after)
 	}
-	want := map[string]int{"providers": 4, "tape_events": 49, "changelog": 31, "reviews": 32, "community_runs": 25, "measurements": 8, "pricing": 8, "trust_signals": 8, "provider_products": 11, "pricing_plans": 48}
-	for table, n := range want {
-		if first.Rows[table] != n {
-			t.Errorf("seeded %d rows into %s, want %d", first.Rows[table], table, n)
-		}
-		if got := count(t, db, "SELECT count(*) FROM site."+table+" WHERE is_demo"); got != n {
-			t.Errorf("site.%s has %d demo rows, want %d", table, got, n)
-		}
-	}
-	revision := count(t, db, "SELECT value FROM site.revision")
-	second, err := store.SeedDemo(ctx, c, file, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !second.Skipped || count(t, db, "SELECT value FROM site.revision") != revision {
-		t.Fatalf("reseeding the same file was not a no-op: %+v", second)
-	}
-	forced, err := store.SeedDemo(ctx, c, file, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for table, n := range want {
-		if forced.Rows[table] != n || count(t, db, "SELECT count(*) FROM site."+table+" WHERE is_demo") != n {
-			t.Errorf("forced reseed: site.%s has %d rows, want %d", table, forced.Rows[table], n)
-		}
-	}
-	catalog := count(t, db, "SELECT count(*) FROM site.scopes") + count(t, db, "SELECT count(*) FROM site.ranking_profiles") + count(t, db, "SELECT count(*) FROM site.score_weights")
-	if catalog != 5+5+8 {
-		t.Fatalf("catalog rows %d, want 18", catalog)
-	}
-	deleted, err := store.UnseedDemo(ctx, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if deleted["providers"] != 4 {
-		t.Fatalf("unseed deleted %v", deleted)
-	}
-	demoRows := 0
-	for _, table := range []string{"datasets", "targets", "providers", "provider_products", "pricing", "pricing_plans", "trust_signals", "measurements", "reviews", "community_runs", "changelog", "tape_events"} {
-		demoRows += count(t, db, "SELECT count(*) FROM site."+table+" WHERE is_demo")
-	}
-	if demoRows != 0 {
-		t.Fatalf("%d demo rows left after unseed", demoRows)
-	}
-	// Reference catalog stays: scopes, weights, profiles and the framework's own targets.
-	if count(t, db, "SELECT count(*) FROM site.scopes")+count(t, db, "SELECT count(*) FROM site.ranking_profiles")+count(t, db, "SELECT count(*) FROM site.score_weights") != catalog {
-		t.Fatal("unseed removed catalog rows")
-	}
-	if got := count(t, db, "SELECT count(*) FROM site.targets"); got != 2 {
-		t.Fatalf("site.targets has %d rows after unseed, want the 2 framework targets", got)
-	}
-	again, err := store.UnseedDemo(ctx, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again["providers"] != 0 {
-		t.Fatal("second unseed deleted rows")
-	}
-	if res, err := store.SeedDemo(ctx, c, file, false); err != nil || res.Skipped {
-		t.Fatalf("seed after unseed: %+v %v", res, err)
+	if gaps := load(t, db).SiteGaps; len(gaps) != 0 {
+		t.Fatalf("site gaps after migrate %q", gaps)
 	}
 }
 
-func TestBackupWritesARestorableDump(t *testing.T) {
+// A missing table or column empties only that table's rows; rows a fixture
+// loader marked is_demo are never read.
+func TestLoadSkipsWhatTheSiteSchemaLacksAndDemoRows(t *testing.T) {
 	db := testdb.New(t)
-	runtime := config.FrameworkPath(".state", "postgres", "runtime.json")
-	if runtime == "" {
-		t.Skip("no proxy-index/.state/postgres/runtime.json with pg_dump")
+	db.Exec(t, `INSERT INTO site.providers(slug,name,framework_provider) VALUES ('acme','Acme','acme');
+INSERT INTO site.providers(slug,name,is_demo) VALUES ('nimbus','Nimbus',true);
+INSERT INTO site.pricing(provider_slug,category,price_per_gb) VALUES ('acme','residential',3);
+INSERT INTO site.pricing_plans(provider_slug,category,position,name) VALUES ('acme','residential',0,'Starter');
+INSERT INTO site.reviews(review_id,provider_slug,author,role,rating,title,body,product_kind,use_case,monthly_spend,months_used,verification,posted_at)
+ VALUES ('r1','acme','A','dev',4,'t','b','residential_rotating','scraping','$100',2,'unverified',now());
+DROP TABLE site.changelog;
+ALTER TABLE site.pricing_plans DROP COLUMN catalog;`)
+	in := load(t, db)
+	if len(in.Providers) != 1 || in.Providers[0].Slug != "acme" {
+		t.Fatalf("providers %+v (the demo row must be skipped)", in.Providers)
 	}
-	bin, err := store.PgBinDir(runtime)
-	if err != nil {
-		t.Fatal(err)
+	if len(in.Pricing) != 1 || len(in.Reviews) != 1 || len(in.Plans) != 0 || len(in.Changelog) != 0 {
+		t.Fatalf("pricing %d reviews %d plans %d changelog %d", len(in.Pricing), len(in.Reviews), len(in.Plans), len(in.Changelog))
 	}
-	dir := t.TempDir()
-	res, err := store.Backup(db.DSN, bin, dir, "test")
-	if err != nil {
-		t.Fatal(err)
+	want := []string{"site.pricing_plans: missing columns catalog", "site.changelog: table missing"}
+	for _, w := range want {
+		if !slices.Contains(in.SiteGaps, w) {
+			t.Errorf("site gaps %q lack %q", in.SiteGaps, w)
+		}
 	}
-	info, err := os.Stat(res.Path)
-	if err != nil || info.Size() == 0 || info.Mode().Perm() != 0o600 {
-		t.Fatalf("dump %s: %v %v", res.Path, info, err)
+	if len(in.SiteGaps) != len(want) {
+		t.Errorf("site gaps %q, want %q", in.SiteGaps, want)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(res.Path), "backup.json")); err != nil {
-		t.Fatal(err)
+	if f := fingerprint(t, db); strings.Contains(f.SiteTables, "changelog") || !strings.Contains(f.SiteTables, "pricing_plans") {
+		t.Errorf("fingerprint site tables %q", f.SiteTables)
 	}
 }

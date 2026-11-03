@@ -3,10 +3,10 @@
 Every field of `/v1/dataset` (the website's `Dataset`, `src/lib/types.ts` in the website repository) with its
 source. The columns are:
 
-- **Demo**: where the four `is_demo` fixtures get the value. They were seeded from
-  `fixtures/demo/design-demo.json` (formerly `src/data/design-demo.json`).
-- **Measured**: where a real provider gets it. Snapshot paths are relative to the
-  provider's product in the published calculation (`public.calculated_snapshots.payload`
+- **Measured** (or **Source**): where a provider gets it. There are no demo
+  providers: the four design fixtures (`is_demo` rows, once loaded by `seed-demo`)
+  are gone, and `is_demo` rows left in a database are never read. Snapshot paths
+  are relative to the provider's product in the published calculation (`public.calculated_snapshots.payload`
   via `public.current_calculation`). `w` is `windows["30d"]` and `day` is
   `windows["24h"]`.
 - **N/A for measured**: whether the field is null for a real provider with a
@@ -22,10 +22,6 @@ source. The columns are:
   and `snapshot` as published. Every formatter in `src/lib/format.ts` shows both
   `null` and `NaN` as `N/A`.
 
-Today the real database has the four fixtures and no published snapshot, so the
-only N/A paths are each fixture's `website` and the dataset's `snapshot.*` block
-(`/v1/coverage`).
-
 General rules:
 
 - Every field is always present. Missing → `null`. Lists are never `null`; an empty
@@ -37,9 +33,7 @@ General rules:
   `products[<kind>]` for keyed lists, `productMeasurements.<category>.…`.
 - Null by contract (never in `na`):
   - `pricing.plans[].gb` / `.ips`: per-IP / per-GB plans.
-  - `overlap.likelyUpstream` for fixtures: no reseller signature. It *is* N/A for
-    measured providers.
-  - `measurement` and `framework` for fixtures.
+  - `framework` for a catalog row not linked to a framework provider.
   - tape `at` for non-measured rows.
   - review `invoiceMonth`, `linkedRunId`, `providerReply`.
   - community run `rejectionReason`, `overlapShare`.
@@ -48,43 +42,40 @@ General rules:
 
 ## Dataset (top level)
 
-| Field | Demo | Measured / API | N/A |
-|---|---|---|---|
-| `schemaVersion` | constant `0.6.0` (the contract version; equals the fixture's) | same | never |
-| `generatedAt` | `site.datasets.generated_at` (as `toISOString`) | snapshot `as_of` verbatim when a snapshot is published (as `presentationDataset`), else the demo's, else read time | never |
-| `seed` | `site.datasets.seed` | (no seed for measured-only data) | null when there are no fixtures, by design |
-| `simulated` | true while any `is_demo` provider exists | false otherwise | never |
-| `runId` | `site.datasets.run_id` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
-| `collectorVersion` | `site.datasets.collector_version` | snapshot `implementation_id` when there are no fixtures | data |
-| `windowHours` | `site.datasets.window_hours` | 24 | never |
-| `targets[]` | `site.targets` | plus `public.targets` (label, pass_condition) for framework targets without a site row | `category`, `difficulty`: catalog (`site.targets`) |
-| `scopes[]` | `site.scopes` | same (catalog) | catalog |
-| `weights` | `site.score_weights` | snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
-| `profiles[]` | `site.ranking_profiles` | same (catalog) | catalog |
-| `totals` | computed (below) | computed | data |
-| `providers[]` | below | below | |
-| `tape[]` | `site.tape_events` | `public.test_events` (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then editorial and demo rows | never |
-| `changelog[]` | `site.changelog` | same | never |
-| `reviews[]` | `site.reviews` | same | never |
-| `communityRuns[]` | `site.community_runs` | same | never |
-| `snapshot` *(added)* | | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, readiness, contentHash}` of the published calculation | all null while nothing is published |
-| `na` *(added)* | | dataset-level N/A paths (meta, weights, totals, snapshot) | |
+| Field | Source | N/A |
+|---|---|---|
+| `schemaVersion` | constant `0.6.0` (the contract version) | never |
+| `generatedAt` | snapshot `as_of` verbatim when a snapshot is published (as `presentationDataset`), else read time | never |
+| `seed` | none (the seed was the removed fixtures') | null, by design |
+| `simulated` | always false (it was true while demo fixtures existed) | never |
+| `runId` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
+| `collectorVersion` | snapshot `implementation_id` | data |
+| `windowHours` | 24 | never |
+| `targets[]` | `site.targets`, plus `public.targets` (label, pass_condition) for framework targets without a site row | `category`, `difficulty`: catalog (`site.targets`) |
+| `scopes[]` | `site.scopes` (catalog) | catalog |
+| `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
+| `profiles[]` | `site.ranking_profiles` (catalog) | catalog |
+| `totals` | computed (below) | data |
+| `providers[]` | below | |
+| `tape[]` | `public.test_events` (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then the editorial `site.tape_events` rows | never |
+| `changelog[]` | `site.changelog` | never |
+| `reviews[]` | `site.reviews` | never |
+| `communityRuns[]` | `site.community_runs` | never |
+| `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, readiness, contentHash}` of the published calculation | all null while nothing is published |
+| `na` *(added)* | dataset-level N/A paths (meta, weights, totals, snapshot) | |
 
 ### totals (FleetTotals)
 
 Computed at build time with the formulas of `scripts/prepare-design-demo.mjs` (a website
 script, removed from this repository with the website; it is in this repository's history,
 in the parent of the commit that removed the website). They
-run over the **fleet basis**: the fixtures while any exist, matching the site, which
-never mixes simulated and measured numbers in a fleet figure (`window.ts
-fleetWindow`). Otherwise they run over the measured providers. The site uses the
-same basis (`data.ts fleetProviders`/`fleetBasis`, `FleetWindow.basis`) for the
-fleet windows, the Overview's fleet views and insight cards, the Pricing page
-and the Targets page. With an empty fleet, `fleetViews[].fastest`/`mostReliable`
+run over the **fleet basis**: every provider (all are measured or catalog rows;
+the demo fixtures that once formed a separate basis are gone, so
+`FleetWindow.basis` is always `"measured"`). With an empty fleet, the
+`measuredMarket` views' `fastest`/`mostReliable`
 are `{provider: null, stats: null}`, `cheapest`/`dearest` (picked by the lowest list
 rate, `listRate`: `pricePerGbAtScale`, else `pricePerGb`; unpriced networks last) have a null provider and
-a null cost, and `bills.best`/`worst` are null. The demo round-trip
-test proves the computed values equal the fixture's stored ones.
+a null cost, and `bills.best`/`worst` are null.
 
 | Field | Formula (fleet basis) |
 |---|---|
@@ -103,38 +94,37 @@ With no providers, everything except the record counts is null (`na`).
 
 ## Provider
 
-| Field | Demo | Measured | N/A for measured | NaN in TS |
-|---|---|---|---|---|
-| `source` *(always present)* | `"demo"` | `"measured"` | never | |
-| `slug` | `site.providers.slug` | `site.providers.slug` linked by `framework_provider`, else `public.providers.id` | never | |
-| `name` | `site.providers.name` | catalog, else snapshot product `name`, else the capitalised id | never | |
-| `tagline` | `site.providers.tagline` | catalog, else generated `"<Kind> proxies · measured HTTP pool sample"` (presentation.ts) | never with a snapshot | |
-| `kinds` | `site.providers.kinds` | catalog, else the measured categories (headline first) | never | |
-| `primaryKind` | `site.providers.primary_kind` | catalog when that category is measured, else the category with the most 30d requests | never | |
-| `hq` | `site.providers.hq` | `site.providers.hq` | catalog (TS used the placeholder `"Not verified"`) | |
-| `founded` | `site.providers.founded` | `site.providers.founded` | catalog | ✱ |
-| `claim` | `site.providers.claim` | `site.providers.claim` | catalog (TS hard-coded `"Country-US rotating residential sample"`) | |
-| `verdict`, `strengths`, `weaknesses` | `site.providers.*` | catalog, else generated from the snapshot exactly as presentation.ts (completed requests, successes, unique IPs, census totals, untested HTTPS/uptime/sticky sessions) | without a snapshot | |
-| `bestFor` | `site.providers.best_for` | `site.providers.best_for` | catalog | |
-| `website` *(added)* | `site.providers.website` | `site.providers.website` | catalog; the fixtures have none either | |
-| `products[]` | `site.provider_products` | catalog rows, else one entry per measured category (`kind` = default product, `name` = category label, `measured: true`, `url`/`priceLabel`/`note` null) plus unmeasured framework products | `url`, `priceLabel`, `note`: catalog (TS hard-coded Shifter's URL and `"Not collected"`) | |
-| `measuredProduct` | `site.providers.measured_product` | catalog if it belongs to the headline category, else the category default (`residential_rotating`, `isp_static`, `datacenter`, `mobile`) | never | |
-| `productMeasurements.<category>` | one per `site.measurements` row (+ `site.pricing`, `site.trust_signals`) | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
-| `score.composite` / `rank` / `previousRank` | `site.providers.score_*` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
-| `score.grade` | `site.providers.score_grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
-| `score.breakdown.*` | `site.providers.score_breakdown` (scored by `src/lib/score-curves.ts` against the other demo providers of the same kind) | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target), reachable through `measurement` | data | ✱ |
-| `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement; `overlap` from `site.providers.headline_overlap` when the fixture's differs | the headline category's measurement | as below | |
-| `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in this repository's history before the website was removed) | same | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
-| `measurement` *(TS optional; always present)* | null | the raw snapshot `ProductResult` of the headline product, unchanged | | |
-| `framework` *(added)* | null | `{provider: public.providers.id, products: [public.products.name]}` | | |
-| `na` *(added)* | | | | |
+| Field | Measured | N/A for measured | NaN in TS |
+|---|---|---|---|
+| `source` *(always present)* | `"measured"` | never | |
+| `slug` | `site.providers.slug` linked by `framework_provider`, else `public.providers.id` | never | |
+| `name` | catalog, else snapshot product `name`, else the capitalised id | never | |
+| `tagline` | catalog, else generated `"<Kind> proxies · measured HTTP pool sample"` (presentation.ts) | never with a snapshot | |
+| `kinds` | catalog, else the measured categories (headline first) | never | |
+| `primaryKind` | catalog when that category is measured, else the category with the most 30d requests | never | |
+| `hq` | `site.providers.hq` | catalog (TS used the placeholder `"Not verified"`) | |
+| `founded` | `site.providers.founded` | catalog | ✱ |
+| `claim` | `site.providers.claim` | catalog (TS hard-coded `"Country-US rotating residential sample"`) | |
+| `verdict`, `strengths`, `weaknesses` | catalog, else generated from the snapshot exactly as presentation.ts (completed requests, successes, unique IPs, census totals, untested HTTPS/uptime/sticky sessions) | without a snapshot | |
+| `bestFor` | `site.providers.best_for` | catalog | |
+| `website` *(added)* | `site.providers.website` | catalog | |
+| `products[]` | catalog rows, else one entry per measured category (`kind` = default product, `name` = category label, `measured: true`, `url`/`priceLabel`/`note` null) plus unmeasured framework products | `url`, `priceLabel`, `note`: catalog (TS hard-coded Shifter's URL and `"Not collected"`) | |
+| `measuredProduct` | catalog if it belongs to the headline category, else the category default (`residential_rotating`, `isp_static`, `datacenter`, `mobile`) | never | |
+| `productMeasurements.<category>` | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
+| `score.composite` / `rank` / `previousRank` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
+| `score.grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
+| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target), reachable through `measurement` | data | ✱ |
+| `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement | as below | |
+| `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in this repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
+| `measurement` *(TS optional; always present)* | the raw snapshot `ProductResult` of the headline product, unchanged | | |
+| `framework` *(added)* | `{provider: public.providers.id, products: [public.products.name]}` | | |
+| `na` *(added)* | | | |
 
 ### Measurement blocks (top level and each `productMeasurements` entry)
 
-Demo values come from the JSONB documents in `site.measurements`
-(`pool`, `performance`, `targets`, `series`, `ip_samples`, `incidents`, `geo`, `asns`,
-`overlap`) and the typed `site.pricing`, `site.pricing_plans` and `site.trust_signals`
-rows.
+Catalog values come from the typed `site.pricing`, `site.pricing_plans` and
+`site.trust_signals` rows (`site.measurements`, the removed fixtures' documents, is
+not read).
 
 | Field | Measured source | N/A for measured | NaN in TS |
 |---|---|---|---|
@@ -201,12 +191,13 @@ build's typed rows (`public.calculated_breakdown_details` joined to
 `public.calculated_windows`) in the same read transaction (`store/longtail.go`), in
 the payload's row shape and order, for every window whose entry count says the list
 was capped and matches the typed rows. Otherwise the list is used as published.
-`/v1/snapshot` serves a summary of the published snapshot, not the payload (see README, Endpoints).
+No endpoint serves the published snapshot or a summary of it (`/v1/snapshot` is gone);
+the per-page answers below carry what pages need from it.
 
 `countryLatencyRanks[kind][range][country_code]` is calculated by the site API from
 the selected snapshot product's `breakdowns.country` p50, with one vote per measured
 provider and proxy category. Peers must have the same cohort, reporting period and
-country; demo data and missing/invalid latency or zero-success rows are excluded.
+country; missing/invalid latency or zero-success rows are excluded.
 `rank` is 1 plus the number of peers with a strictly lower p50 (ties share a rank),
 `peers` counts valid comparisons including self, and `p50` preserves the country
 percentile. Missing values are null and listed in `na`. Coverage evidence shows
@@ -216,7 +207,7 @@ country p50 and peer count. City/ASN percentiles are never averaged for ranking.
 `tileRanks[kind][range]` and `placeRanks[kind][range]` are calculated once per build
 (`build/ranks.go`); pages and `/api/geo` serve the cached values and do no database
 work. Peers are the measured products of the same category, cohort and reporting
-period (demo data gets neither field). A rank is `{rank, peers}`: `rank` is 1 plus the
+period. A rank is `{rank, peers}`: `rank` is 1 plus the
 number of peers strictly better (ties share a rank, SQL `RANK()`), `peers` counts the
 valid values including self, and a missing value has `rank` null.
 - `tileRanks` ranks the window's `pool.unique_ips`, `countries`, `regions`, `cities`
@@ -277,14 +268,14 @@ is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 `/chart` answers) reads the snapshot window: `successRate = metrics.success_rate`,
 `latencyP50/P90/P99` the `generic_http` target's headline latency (under load
 in every-request snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` its
-light-load `latency_ms` in every-request snapshots (null otherwise, and always
-for demo networks), `latencyTarget` `"generic_http"` (null for demo networks),
+light-load `latency_ms` in every-request snapshots (null otherwise),
+`latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
-(so a priced measured network enters `costBoards` and the fleet bills),
+(so a priced measured network gets a `valueRank` and enters the fleet bills),
 `uptimePct = metrics.uptime × 100` and
 `downtimeMinutes` as `performance.downtimeMinutes24h` above, for that window.
 With outages published (v2), `bands` and `incidentCount` come from `incidents`
-exactly as for a demo network (each outage's overlap with the window, as a
+(each outage's overlap with the window, as a
 fraction of it, labelled `major · <country>`), so the charts shade real outages.
 For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
 empty.
@@ -294,15 +285,14 @@ empty.
 are five minutes for 24h and one day for 7d/30d. The calculator unions and clips
 recorded outages per country, using countries with a started census/pulse run
 or an active outage in that bucket. Buckets without monitoring evidence, and
-older snapshots without this field, remain null. Demo histories use the same
-weighted incident intervals as their totals. The shared Availability metric
+older snapshots without this field, remain null. The shared Availability metric
 card displays this series for every tested product category.
 
 ## Records
 
 | Entity | Fields | Source |
 |---|---|---|
-| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `at`, `source`, `na` | Measured: `public.test_events`, mapped by the port of `tape.ts`. `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Demo: `site.tape_events`, `agoSeconds = demo generatedAt − occurred_at`. `providerName` comes from the provider list. |
+| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `at`, `source`, `na` | Measured: `public.test_events`, mapped by the port of `tape.ts`. `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial: `site.tape_events`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
 | `UserReview` | all + `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
@@ -310,9 +300,8 @@ card displays this series for every tested product category.
 | `TestScope` | all + `na` | `site.scopes` (`targets` is `"all"` when `all_targets`, else `target_ids`) |
 | `RankingProfile` | all + `na` | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
 
-`agoSeconds` of fixture rows is always relative to the fixture's own
-`generatedAt`. Rows from different sources therefore keep the ages they were
-written with, exactly as the site does today.
+`agoSeconds` of every `site.*` record is the dataset's `generatedAt` (the snapshot's
+`as_of`, else the read time) minus its timestamp, never negative.
 
 ## Deviations from the TypeScript
 
@@ -343,9 +332,8 @@ the website lived in this repository; it went with the website.
    snapshot product, so a provider with two products would get two entries with
    the same slug.
 8. **The tape is merged.** `Dataset.tape` holds the measured events from
-   `public.test_events` first, then the editorial and demo rows (what
-   `LiveTape.astro` shows). In the site today, `dataset.tape` holds only the demo
-   rows. `source` tells the two apart.
+   `public.test_events` first, then the editorial `site.tape_events` rows (what
+   `LiveTape.astro` shows).
 9. **Search.** The meta of an unscored network is `"Unranked · N/A"`, and there is
    a new `Countries` group. There are no articles: guides and network reviews are
    not searched and `groupBonus` has no `Guides` group. The Pages group lists
@@ -354,8 +342,8 @@ the website lived in this repository; it went with the website.
    is gone, from the items and from `startingPointIds`.
 
 `measuredTotals` uses the same fields as `totals`, aggregated by the API over
-`source = "measured"` providers only. Overview insight descriptions read these
-totals even while demo providers remain in the database.
+every provider without the record counts (with the demo fixtures gone, every
+provider is `source = "measured"`).
 
 `measuredMarket` supplies the All market panel without simulated inputs: three
 window views with measured requests, pool sizes, latency, success, observed wire
@@ -378,19 +366,19 @@ the API does not have are `null`, as everywhere else.
 ### `/v1/rankings?range=24h|7d|30d`
 
 The overview list in its final order, so a page renders it at once. One row
-per network (measured and demo). `position` is the list order: measured
+per network. `position` is the list order: measured
 networks by the `balanced` score of their headline product group for that
 range (`windows[range].scores.balanced`: `score`, `grade`, `rank`,
 `previous_rank`, the component values as `breakdown`, `peers` from the
 components' `inputs.peers`), highest first; networks without a score follow by
 name. `rank` stays the framework's rank among the ready networks of the same
-kind, so two kinds can each have a `rank` 1. A demo network's score and rank
-are its catalog values (the same for every range). The other numbers are that
+kind, so two kinds can each have a `rank` 1. A catalog network without a
+snapshot product has no score or rank. The other numbers are that
 range's `windowStats` (see "Window statistics of a measured provider"):
 `successRate`, `successDeltaPts`, `latencyP50` (the headline basis, under load
 in every-request snapshots), `latencyDeltaPct`, `uniqueIps` (the headline
 group's distinct IPs), `costPer1kSuccess`, `valueRank` (the position in that
-range's `costBoards`, null when unpriced), `trend` (the window's success
+range's cost board, null when unpriced), `trend` (the window's success
 history thinned to at most 26 values); `countries` and `datacenterAsnShare` are
 the provider's `pool.countries` and `trust.datacenterAsnShare`.
 

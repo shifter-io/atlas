@@ -12,7 +12,7 @@ type countryLatencyGroup struct {
 }
 
 // Use country percentiles published by the framework, never a mean of city
-// percentiles. Each selected provider/product votes once, excluding demo data.
+// percentiles. Each selected provider/product votes once.
 func addCountryLatencyRanks(entries []*entry) {
 	groups := map[countryLatencyGroup][]Num{}
 	byProduct := map[*snap.Product]map[string]map[string]model.CountryLatencyRank{}
@@ -21,9 +21,6 @@ func addCountryLatencyRanks(entries []*entry) {
 		return countryLatencyGroup{kind, p.Cohort, rangeID, w.Period.Start, w.Period.End, country}
 	}
 	for _, e := range entries {
-		if e.P.Source != model.SourceMeasured {
-			continue
-		}
 		e.P.CountryLatencyRanks = map[string]map[string]map[string]model.CountryLatencyRank{}
 		for kind, p := range e.Snap {
 			windows := map[string]map[string]model.CountryLatencyRank{}

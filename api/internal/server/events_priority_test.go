@@ -80,13 +80,6 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 	if tape := tapeIDs(t, s, "/v1/dataset"); !tape["event-1"] || !tape["event-2"] || len(tape) < build.MeasuredTapeRows {
 		t.Fatalf("tape lost the incidents: %d rows", len(tape))
 	}
-	head := map[string]bool{}
-	for _, r := range s.current.Load().Result.Overview.Tape {
-		head[r.ID] = true
-	}
-	if !head["event-1"] || !head["event-2"] || len(head) != 60 {
-		t.Fatalf("overview tape lost the incidents: %d rows", len(head))
-	}
 
 	hour := append([]store.Event{event(21, releaseHour.Add(time.Minute), "pulse_down", "net00")}, releaseBurst(3, 18)...)
 	s = newTestServer(t, &fakeSource{rev: 2, events: hour, complete: true})

@@ -25,8 +25,6 @@ func TestCountryLatencyRanks(t *testing.T) {
 	otherKind := makeEntry("mobile", "pool", "2026-10-01", 10)
 	otherCohort := makeEntry("residential", "other", "2026-10-01", 10)
 	otherPeriod := makeEntry("residential", "pool", "2026-09-30", 10)
-	demo := makeEntry("residential", "pool", "2026-10-01", 1)
-	demo.P.Source = model.SourceDemo
 	noSuccess := makeEntry("residential", "pool", "2026-10-01", 20)
 	w := noSuccess.Snap["residential"].Windows["30d"]
 	w.Breakdowns["country"][0].Successes = 0
@@ -42,7 +40,7 @@ func TestCountryLatencyRanks(t *testing.T) {
 		w.Breakdowns = map[string][]snap.BreakdownRow{"country": {{CountryCode: &country, P50: value, Successes: 10}}}
 		e.Snap["residential"].Windows["7d"] = w
 	}
-	addCountryLatencyRanks([]*entry{fast, tied, slow, missing, otherKind, otherCohort, otherPeriod, demo, noSuccess, negative})
+	addCountryLatencyRanks([]*entry{fast, tied, slow, missing, otherKind, otherCohort, otherPeriod, noSuccess, negative})
 	for _, c := range []struct {
 		e             *entry
 		kind, rangeID string
@@ -62,9 +60,6 @@ func TestCountryLatencyRanks(t *testing.T) {
 		if got.P50.OK() || got.Rank.OK() || got.Peers != 3 {
 			t.Errorf("invalid country latency was ranked: %+v", got)
 		}
-	}
-	if demo.P.CountryLatencyRanks != nil {
-		t.Error("demo data was included in measured rankings")
 	}
 	if _, ok := fast.P.CountryLatencyRanks["residential"]["30d"]["RO"]; ok {
 		t.Error("invented a rank for an unmeasured country")

@@ -42,6 +42,22 @@ func FrameworkDir() string {
 // schema migrated. Skips when PG_TEST_ADMIN_FILE is unset.
 func New(t testing.TB) *DB {
 	t.Helper()
+	db := NewFramework(t)
+	w := db.Conn(t)
+	defer w.Close(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if _, err := store.Migrate(ctx, w); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
+}
+
+// NewFramework creates a scratch database with the framework schema and its
+// reference rows only: no site schema, as a database looks before `siteapi
+// migrate` first runs. Skips when PG_TEST_ADMIN_FILE is unset.
+func NewFramework(t testing.TB) *DB {
+	t.Helper()
 	file := os.Getenv("PG_TEST_ADMIN_FILE")
 	if file == "" {
 		t.Skip("database tests skipped: set PG_TEST_ADMIN_FILE=<path to proxy-index/.secrets/postgres-admin.toml> to run them against a scratch database")
@@ -102,9 +118,6 @@ INSERT INTO targets(target_id,label,url,pass_condition,sort_order) VALUES
 INSERT INTO runner_regions(region_id,slug,pattern) VALUES (1,'fra1','fra1-*');
 INSERT INTO countries(country_code,name,region_id,census_time) VALUES ('US','United States',1,'06:00'),('DE','Germany',1,'07:00');`); err != nil {
 		t.Fatalf("scratch reference rows: %v", err)
-	}
-	if _, err := store.Migrate(ctx, w); err != nil {
-		t.Fatalf("migrate: %v", err)
 	}
 	return db
 }

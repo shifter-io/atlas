@@ -34,10 +34,9 @@ func SV(s Str) string {
 	return *s
 }
 
-const (
-	SourceDemo     = "demo"
-	SourceMeasured = "measured"
-)
+// SourceMeasured is the source of every provider and record (a target with
+// only a catalog row is "catalog"); the demo fixtures' "demo" is gone.
+const SourceMeasured = "measured"
 
 var ProxyKinds = []string{"residential", "datacenter", "mobile", "isp"}
 
@@ -630,13 +629,13 @@ type Provider struct {
 	Measured
 	Reviews ReviewSummary `json:"reviews"`
 	// Measurement is the raw snapshot ProductResult of the headline product
-	// (measured providers only; null for demo fixtures).
+	// (null without a published snapshot product).
 	Measurement         any                                                 `json:"measurement"`
 	CountryLatencyRanks map[string]map[string]map[string]CountryLatencyRank `json:"countryLatencyRanks,omitempty"`
-	// Precomputed measured ranks by proxy type and time range (null for demo).
+	// Precomputed measured ranks by proxy type and time range.
 	TileRanks  map[string]map[string]TileRanks  `json:"tileRanks,omitempty"`
 	PlaceRanks map[string]map[string]PlaceRanks `json:"placeRanks,omitempty"`
-	// Framework identity, null for demo fixtures and unlinked catalog rows.
+	// Framework identity, null for unlinked catalog rows.
 	Framework *FrameworkLink `json:"framework"`
 	NA        []string       `json:"na"`
 }
@@ -771,7 +770,7 @@ type Dataset struct {
 	SchemaVersion    string           `json:"schemaVersion"`
 	GeneratedAt      string           `json:"generatedAt"`
 	Seed             Num              `json:"seed"`
-	Simulated        bool             `json:"simulated"`
+	Simulated        bool             `json:"simulated"` // always false (the demo fixtures are gone)
 	RunID            Str              `json:"runId"`
 	CollectorVersion Str              `json:"collectorVersion"`
 	WindowHours      Num              `json:"windowHours"`

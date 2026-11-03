@@ -157,7 +157,7 @@ func availabilityAt(incidents []model.Incident, days int) availability {
 }
 
 // windowStats ports window.ts windowStats. sp is the snapshot product behind
-// a measured provider's headline (nil for fixtures).
+// a measured provider's headline (nil without a snapshot product).
 func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowStats {
 	meta := rangeMeta(rangeID)
 	if sp != nil {
@@ -298,8 +298,7 @@ func costBoard(entries []*entry, stats map[string]map[string]*WindowStats, range
 	return b
 }
 
-// fleetWindow ports window.ts fleetWindow over the fleet basis (the demo
-// fixtures while any exist, as the site does, otherwise measured providers).
+// fleetWindow ports window.ts fleetWindow over the measured providers.
 func fleetWindow(fleet []*entry, stats map[string]map[string]*WindowStats, totals model.FleetTotals, rangeID, basis string) FleetWindow {
 	meta := rangeMeta(rangeID)
 	fw := FleetWindow{Range: meta, Requests: 0, UniqueIps: 0, MedianLatency: nan, MedianSuccessRate: nan, BandwidthGb: nan,

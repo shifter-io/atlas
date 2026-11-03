@@ -46,15 +46,12 @@ type rankedWindow struct {
 
 // addRanks sets every measured provider's TileRanks and PlaceRanks once per
 // build. A place list the snapshot capped is read whole from the build's typed
-// rows (store.SnapshotRow.Places). Demo providers keep nil.
+// rows (store.SnapshotRow.Places).
 func addRanks(entries []*entry, s *store.SnapshotRow) {
 	var windows []rankedWindow
 	tilePeers := map[rankGroup]*[tileCount][]Num{}
 	placePeers := map[rankGroup]map[placeKey]*[2][]Num{}
 	for _, e := range entries {
-		if e.P.Source != model.SourceMeasured {
-			continue
-		}
 		windows = append(windows, measuredWindows(e, s)...)
 	}
 	for _, w := range windows {

@@ -73,25 +73,18 @@ func (f *fakeSource) Events(_ context.Context, filter store.EventFilter) ([]stor
 	return store.Pick(append(append([]store.Event{}, f.events...), f.notable...), filter), nil
 }
 
-func doc(v string) json.RawMessage { return json.RawMessage(v) }
-
+// fixture is two catalog networks without a measurement (unlinked site
+// rows), plus a site target.
 func fixture(rev int64, events []store.Event, complete bool) *store.Inputs {
 	gen := time.Date(2026, 9, 26, 14, 56, 8, 606e6, time.UTC)
 	in := &store.Inputs{Fingerprint: store.Fingerprint{SiteRevision: rev}, ReadAt: gen, Events: events, EventsComplete: complete,
-		Datasets: []store.DatasetRow{{Name: store.DemoDatasetName, SchemaVersion: "0.6.0", GeneratedAt: gen, IsDemo: true}},
-		Targets:  []store.TargetRow{{ID: "generic_http", Label: sptr("Generic HTTP"), Category: sptr("Baseline"), PassCondition: sptr("GET"), IsDemo: false}},
+		Targets: []store.TargetRow{{ID: "generic_http", Label: sptr("Generic HTTP"), Category: sptr("Baseline"), PassCondition: sptr("GET")}},
 	}
-	for i, slug := range []string{"alpha-net", "beta-proxy"} {
+	for _, slug := range []string{"alpha-net", "beta-proxy"} {
 		name := fmt.Sprintf("%s r%d", strings.Title(strings.Split(slug, "-")[0]), rev) //nolint:staticcheck
 		in.Providers = append(in.Providers, store.ProviderRow{Slug: slug, Name: name, Kinds: []string{"residential"}, PrimaryKind: sptr("residential"),
-			MeasuredProduct: sptr("residential_rotating"), HQ: sptr("Somewhere"), Listed: true, SortOrder: int32(i), IsDemo: true,
+			MeasuredProduct: sptr("residential_rotating"), HQ: sptr("Somewhere"), Listed: true,
 			Strengths: []string{"fast"}, Weaknesses: []string{}, BestFor: []string{"scraping"}})
-		in.Measurements = append(in.Measurements, store.MeasurementRow{ProviderSlug: slug, Category: "residential", ProductKind: "residential_rotating",
-			Pool:        doc(`{"uniqueIps24h": 1000, "uniqueIps30d": 9000, "churnRate": 0.5, "recurringShare": 0.2}`),
-			Performance: doc(fmt.Sprintf(`{"successRate": 0.9%d, "latencyP50": %d, "latencyP90": 900, "latencyP99": 2000, "requests24h": 1000}`, i, 400+i*100)),
-			Targets:     doc(`[]`), Series: doc(`{"success24h": [{"t": 5, "v": 0.9}], "success30d": [{"t": 1440, "v": 0.9}], "latency30d": [{"t": 1440, "v": 400}]}`),
-			IPSamples: doc(`[]`), Incidents: doc(`[]`), Geo: doc(`[{"countryCode": "DE", "country": "Germany", "ips": 10, "share": 1}]`), Asns: doc(`[]`),
-			Overlap: doc(`{"exclusiveShare": 1, "sharedShare": 0, "overlaps": [], "likelyUpstream": null}`), IsDemo: true})
 	}
 	return in
 }
@@ -187,9 +180,10 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		t.Fatalf("HEAD: %d %d", head.Code, head.Body.Len())
 	}
 	for path, code := range map[string]int{"/v1/overview": 404, "/v1/providers": 404, "/v1/providers/alpha-net": 404, "/v1/providers/nope": 404,
-		"/v1/networks/alpha-net/chart": 200, "/v1/networks/alpha-net/chart?range=24h": 200, "/v1/networks/alpha-net/chart?range=1y": 400,
+		// alpha-net is a catalog network without a measurement, so it has no chart.
+		"/v1/networks/alpha-net/chart": 404, "/v1/networks/alpha-net/chart?range=24h": 404, "/v1/networks/alpha-net/chart?range=1y": 400,
 		"/v1/networks/alpha-net/chart?kind=mobile": 404, "/v1/networks/alpha-net/chart?x=1": 400, "/v1/networks/nope/chart": 404,
-		"/v1/networks/all/chart?range=7d": 200, "/v1/charts/all/all/7d": 404,
+		"/v1/networks/all/chart": 200, "/v1/networks/all/chart?range=7d": 200, "/v1/charts/all/all/7d": 404,
 		"/v1/coverage": 200, "/v1/search-index": 200, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200,
 		"/v1/coverage/alpha-net": 200, "/v1/coverage/nope": 404, "/v1/networks": 200, "/v1/networks/alpha-net": 200, "/v1/networks/alpha-net?kind=mobile": 404, "/v1/networks/nope": 404,
 		"/v1/networks/Bad_Slug": 400, "/v1/networks?x=1": 400, "/v1/networks/alpha-net/places": 200,

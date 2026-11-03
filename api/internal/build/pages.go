@@ -1,7 +1,6 @@
 package build
 
 import (
-	"encoding/json"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
@@ -30,7 +29,6 @@ type Pages struct {
 	Primary   map[string]string         // slug -> its headline kind
 	Countries CountriesAnswer
 	Country   map[string]*CountryAnswer  // by upper-case country code
-	Snapshot  *SnapshotSummary           // nil while nothing is published
 	Rankings  map[string]*RankingsAnswer // by range
 	Charts    map[string]*ChartAnswer    // by slug + "/" + kind + "/" + range
 	// Published is every product group of the published snapshot and the
@@ -65,7 +63,7 @@ func publishedProducts(s *snap.Snapshot, entries []*entry, rows []store.Provider
 	}
 	hidden := map[string]bool{}
 	for _, r := range rows {
-		if !r.IsDemo && r.FrameworkProvider != nil && !r.Listed {
+		if r.FrameworkProvider != nil && !r.Listed {
 			hidden[*r.FrameworkProvider] = true
 		}
 	}
@@ -210,34 +208,6 @@ type CountryAnswer struct {
 	Cities      map[string]int        `json:"cities"`
 }
 
-// SnapshotSummary is /v1/snapshot: what the published calculation is (its id,
-// times, readiness and methodology settings) and every network's peer scores,
-// without the per-group windows (those are paged by the answers above).
-type SnapshotSummary struct {
-	Available        bool                   `json:"available"`
-	SnapshotID       string                 `json:"snapshotId"`
-	SchemaVersion    Num                    `json:"schemaVersion"`
-	ImplementationID *string                `json:"implementationId"`
-	AsOf             string                 `json:"asOf"`
-	GeneratedAt      string                 `json:"generatedAt"`
-	Readiness        string                 `json:"readiness"`
-	RefreshSeconds   Num                    `json:"refreshSeconds"`
-	ContentHash      string                 `json:"contentHash"`
-	Methodology      json.RawMessage        `json:"methodology"`
-	Periods          map[string]snap.Period `json:"periods"`
-	ProductGroups    int                    `json:"productGroups"`
-	Scores           []PeerScores           `json:"scores"`
-}
-
-// PeerScores is one network's headline product group scores per range and
-// profile, as the snapshot publishes them.
-type PeerScores struct {
-	Network string                           `json:"network"`
-	Kind    string                           `json:"kind"`
-	Cohort  string                           `json:"cohort"`
-	Ranges  map[string]map[string]snap.Score `json:"ranges"`
-}
-
 // buildPages computes every per-page answer of a build.
 func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
 	s *snap.Snapshot, row *store.SnapshotRow) *Pages {
@@ -277,9 +247,6 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 		pg.allCharts(generatedAt, s)
 	}
 	pg.addDetails(generatedAt, details)
-	if s != nil {
-		pg.Snapshot = snapshotSummary(s, row, entries)
-	}
 	return pg
 }
 
@@ -327,32 +294,6 @@ func groupsOfKind(e *entry, groups map[string][]*snap.Product, kind string) []*s
 	for _, p := range groups[e.P.Framework.Provider] {
 		if proxyKind(p.Kind) == kind {
 			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func snapshotSummary(s *snap.Snapshot, row *store.SnapshotRow, entries []*entry) *SnapshotSummary {
-	out := &SnapshotSummary{Available: true, SnapshotID: s.SnapshotID, SchemaVersion: s.SchemaVersion, ImplementationID: s.ImplementationID,
-		AsOf: s.AsOf, GeneratedAt: s.GeneratedAt, Readiness: s.Readiness, RefreshSeconds: s.RefreshSeconds, ContentHash: row.ContentHash,
-		Methodology: s.Methodology.Raw, Periods: map[string]snap.Period{}, ProductGroups: len(s.Products), Scores: []PeerScores{}}
-	// Every group shares the build's reporting periods.
-	for _, p := range s.Products[:min(len(s.Products), 1)] {
-		for label, w := range p.Windows {
-			out.Periods[label] = w.Period
-		}
-	}
-	for _, e := range entries {
-		for _, kind := range e.P.ProductMeasurements.Keys {
-			p := e.Snap[kind]
-			if p == nil {
-				continue
-			}
-			ps := PeerScores{Network: e.P.Slug, Kind: kind, Cohort: p.Cohort, Ranges: map[string]map[string]snap.Score{}}
-			for _, r := range Ranges {
-				ps.Ranges[r.ID] = p.Window(r.ID).Scores
-			}
-			out.Scores = append(out.Scores, ps)
 		}
 	}
 	return out

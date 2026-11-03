@@ -56,13 +56,13 @@ type WindowStats struct {
 	LatencyP90      Num       `json:"latencyP90"`
 	LatencyP99      Num       `json:"latencyP99"`
 	// Light-load latency (pulses only) of an every-request snapshot, shown next
-	// to the headline latency under load; NaN otherwise (demo, older snapshots).
+	// to the headline latency under load; NaN otherwise (older snapshots).
 	LightLatencyP50 Num `json:"lightLatencyP50"`
 	LightLatencyP90 Num `json:"lightLatencyP90"`
 	LightLatencyP99 Num `json:"lightLatencyP99"`
 	// LatencyTarget names the target the latency fields are for (measured
 	// networks: generic_http, the only target with a latency, see
-	// latencyMetrics); null for demo networks.
+	// latencyMetrics); null without a snapshot product.
 	LatencyTarget    *string              `json:"latencyTarget"`
 	LatencyDeltaPct  Num                  `json:"latencyDeltaPct"`
 	UniqueIps        Num                  `json:"uniqueIps"`
@@ -150,39 +150,6 @@ type FleetView struct {
 	Cheapest      CostPick    `json:"cheapest"`
 	Dearest       CostPick    `json:"dearest"`
 	Bills         Bills       `json:"bills"`
-}
-
-// ProviderSummary is one leaderboard row.
-type ProviderSummary struct {
-	Source          string                  `json:"source"`
-	Slug            string                  `json:"slug"`
-	Name            string                  `json:"name"`
-	Tagline         model.Str               `json:"tagline"`
-	Kinds           []string                `json:"kinds"`
-	PrimaryKind     string                  `json:"primaryKind"`
-	MeasuredProduct string                  `json:"measuredProduct"`
-	HQ              model.Str               `json:"hq"`
-	Score           model.ScoreView         `json:"score"`
-	PricePerGb      Num                     `json:"pricePerGb"`
-	Windows         map[string]*WindowStats `json:"windows"`
-	ProductKinds    []string                `json:"productKinds"`
-	NACount         int                     `json:"naCount"`
-}
-
-// Overview is everything the Overview page reads.
-type Overview struct {
-	GeneratedAt string                 `json:"generatedAt"`
-	Simulated   bool                   `json:"simulated"`
-	Snapshot    model.SnapshotMeta     `json:"snapshot"`
-	Totals      model.FleetTotals      `json:"totals"`
-	Weights     model.Breakdown        `json:"weights"`
-	Profiles    []model.RankingProfile `json:"profiles"`
-	Ranges      []RangeMeta            `json:"ranges"`
-	FleetViews  []FleetView            `json:"fleetViews"`
-	CostBoards  []CostBoard            `json:"costBoards"`
-	Leaderboard []ProviderSummary      `json:"leaderboard"`
-	Tape        []model.TapeEvent      `json:"tape"`
-	NA          []string               `json:"na"`
 }
 
 // ProviderDetail is a Provider plus everything its network page lists about

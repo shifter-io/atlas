@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -32,15 +30,44 @@ func repoFile(t testing.TB, rel ...string) string {
 	return f
 }
 
-func seeded(t testing.TB) *testdb.DB {
+// testCatalog is test-only site data: target presentation for the two
+// framework targets plus a catalog-only target, and the rows a fixture loader
+// once marked is_demo (a network, its pricing and a target), which the API
+// must never serve.
+const testCatalog = `INSERT INTO site.targets(target_id,label,category,pass_condition,difficulty,sort_order) VALUES
+ ('generic_http','Generic HTTP','Baseline',NULL,1,0),('generic_https','Generic HTTPS','Baseline',NULL,1,10),
+ ('google_search','Google Search','Search','Organic results render without a CAPTCHA.',3,20);
+INSERT INTO site.targets(target_id,label,sort_order,is_demo) VALUES ('ticketing_queue','Ticketing queue',30,true);
+INSERT INTO site.providers(slug,name,kinds,primary_kind,is_demo) VALUES ('nimbus-residential','Nimbus','{residential}','residential',true);
+INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,is_demo) VALUES ('nimbus-residential','residential','per_gb',2.5,true);
+INSERT INTO site.tape_events(tape_id,kind,provider_slug,product,title,detail,occurred_at,is_demo) VALUES ('demo-1','pool','nimbus-residential','residential','Demo','x',now(),true);`
+
+// catalogued is a migrated scratch database with testCatalog loaded.
+func catalogued(t testing.TB) *testdb.DB {
 	t.Helper()
 	db := testdb.New(t)
-	c := db.Conn(t)
-	defer c.Close(context.Background())
-	if _, err := store.SeedDemo(context.Background(), c, repoFile(t, "fixtures", "demo", "design-demo.json"), false); err != nil {
+	db.Exec(t, testCatalog)
+	return db
+}
+
+// marketViews is the dataset's measured market, one fleet view per range.
+func marketViews(t testing.TB, res *build.Result) []build.FleetView {
+	t.Helper()
+	var views []build.FleetView
+	if err := json.Unmarshal(res.Dataset.MeasuredMarket.Views, &views); err != nil {
 		t.Fatal(err)
 	}
-	return db
+	return views
+}
+
+// valueRank is slug's value (cost) rank in the range's rankings, 0 when unranked.
+func valueRank(res *build.Result, rangeID, slug string) int {
+	for _, n := range res.Pages.Rankings[rangeID].Networks {
+		if n.Slug == slug && n.ValueRank != nil {
+			return *n.ValueRank
+		}
+	}
+	return 0
 }
 
 func buildFrom(t testing.TB, db *testdb.DB) *build.Result {
@@ -83,142 +110,18 @@ func generic(t testing.TB, v any) any {
 	return out
 }
 
-var index = regexp.MustCompile(`\[\d+\]`)
-
-// diff compares expected (the fixture) against actual (the API) field for
-// field. Keys the API adds are collected in extras rather than reported.
-func diff(expected, actual any, path string, diffs *[]string, extras map[string]bool) {
-	if len(*diffs) > 40 {
-		return
-	}
-	switch e := expected.(type) {
-	case map[string]any:
-		a, ok := actual.(map[string]any)
-		if !ok {
-			*diffs = append(*diffs, fmt.Sprintf("%s: want object, got %v", path, actual))
-			return
-		}
-		for k, ev := range e {
-			av, ok := a[k]
-			if !ok {
-				*diffs = append(*diffs, fmt.Sprintf("%s.%s: missing", path, k))
-				continue
-			}
-			diff(ev, av, path+"."+k, diffs, extras)
-		}
-		for k := range a {
-			if _, ok := e[k]; !ok {
-				extras[index.ReplaceAllString(path, "[]")+"."+k] = true
-			}
-		}
-	case []any:
-		a, ok := actual.([]any)
-		if !ok || len(a) != len(e) {
-			*diffs = append(*diffs, fmt.Sprintf("%s: want array of %d, got %v", path, len(e), lenOf(actual)))
-			return
-		}
-		for i := range e {
-			diff(e[i], a[i], fmt.Sprintf("%s[%d]", path, i), diffs, extras)
-		}
-	case json.Number:
-		a, ok := actual.(json.Number)
-		ef, _ := e.Float64()
-		if !ok {
-			*diffs = append(*diffs, fmt.Sprintf("%s: want %s, got %v", path, e, actual))
-			return
-		}
-		if af, _ := a.Float64(); af != ef {
-			*diffs = append(*diffs, fmt.Sprintf("%s: want %s, got %s", path, e, a))
-		}
-	default:
-		if expected != actual {
-			*diffs = append(*diffs, fmt.Sprintf("%s: want %v, got %v", path, expected, actual))
-		}
-	}
-}
-
-func lenOf(v any) any {
-	if a, ok := v.([]any); ok {
-		return len(a)
-	}
-	return v
-}
-
-// The API's additions to the fixture shape (documented in FIELDS.md).
-var allowedExtras = map[string]bool{
-	".snapshot": true, ".na": true, ".measuredTotals": true, ".measuredMarket": true,
-	".targets[].source": true, ".targets[].na": true, ".scopes[].na": true, ".profiles[].na": true,
-	".providers[].na": true, ".providers[].measurement": true, ".providers[].framework": true, ".providers[].website": true,
-	".tape[].source": true, ".tape[].na": true, ".tape[].at": true,
-	".changelog[].source": true, ".changelog[].na": true,
-	".reviews[].source": true, ".reviews[].na": true,
-	".communityRuns[].source": true, ".communityRuns[].na": true,
-}
-
-func TestDemoRoundTripReproducesTheFixture(t *testing.T) {
-	db := seeded(t)
-	res := buildFrom(t, db)
-	body, err := os.ReadFile(repoFile(t, "fixtures", "demo", "design-demo.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := generic(t, body)
-	actual := generic(t, res.Dataset)
-	if res.Dataset.MeasuredTotals.Providers != 0 || res.Dataset.MeasuredTotals.MisclassifiedShare.OK() {
-		t.Fatalf("demo-only data supplied measured insight figures: %+v", res.Dataset.MeasuredTotals)
-	}
-	var diffs []string
-	extras := map[string]bool{}
-	diff(expected, actual, "", &diffs, extras)
-	if len(diffs) > 0 {
-		t.Fatalf("API dataset differs from design-demo.json:\n%s", strings.Join(diffs, "\n"))
-	}
-	var unexpected []string
-	for k := range extras {
-		if !allowedExtras[k] {
-			unexpected = append(unexpected, k)
-		}
-	}
-	sort.Strings(unexpected)
-	if len(unexpected) > 0 {
-		t.Fatalf("undocumented extra fields: %v", unexpected)
-	}
-	for _, p := range res.Dataset.Providers {
-		if p.Source != "demo" {
-			t.Fatalf("%s source %q", p.Slug, p.Source)
-		}
-		// Fixtures are complete except for the website the fixture never had.
-		if strings.Join(p.NA, ",") != "website" {
-			t.Errorf("%s na = %v, want [website]", p.Slug, p.NA)
-		}
-	}
-	if len(res.Dataset.NA) != 4 { // snapshot.* (nothing published in the scratch database)
-		t.Logf("dataset na: %v", res.Dataset.NA)
-	}
-	for _, na := range res.Dataset.NA {
-		if !strings.HasPrefix(na, "snapshot.") && !strings.HasPrefix(na, "measuredTotals.") && !strings.HasPrefix(na, "measuredMarket.") {
-			t.Errorf("unexpected dataset-level N/A %s", na)
-		}
-	}
-	if res.Coverage.Summary.ProvidersBySource["demo"] != 4 || res.Coverage.Summary.ProvidersBySource["measured"] != 0 {
-		t.Fatalf("coverage summary %+v", res.Coverage.Summary)
-	}
-}
-
-func TestUnseedLeavesAnHonestEmptyDataset(t *testing.T) {
-	db := seeded(t)
-	c := db.Conn(t)
-	defer c.Close(context.Background())
-	if _, err := store.UnseedDemo(context.Background(), c); err != nil {
-		t.Fatal(err)
-	}
+// A database with only the framework's schema and nothing published (no
+// `siteapi migrate` yet) builds an honest empty dataset: no networks, the
+// framework's targets, and null fleet figures listed as N/A.
+func TestAFrameworkOnlyDatabaseBuildsAnHonestEmptyDataset(t *testing.T) {
+	db := testdb.NewFramework(t)
 	res := buildFrom(t, db)
 	ds := res.Dataset
 	if len(ds.Providers) != 0 || len(ds.Tape) != 0 || len(ds.Reviews) != 0 || ds.Simulated {
-		t.Fatalf("demo data survived unseed: %d providers, %d tape, simulated=%v", len(ds.Providers), len(ds.Tape), ds.Simulated)
+		t.Fatalf("%d providers, %d tape, simulated=%v", len(ds.Providers), len(ds.Tape), ds.Simulated)
 	}
-	if len(ds.Targets) != 2 || len(ds.Scopes) != 5 || len(ds.Profiles) != 5 {
-		t.Fatalf("catalog after unseed: %d targets %d scopes %d profiles", len(ds.Targets), len(ds.Scopes), len(ds.Profiles))
+	if len(ds.Targets) != 2 || len(ds.Scopes) != 0 || len(ds.Profiles) != 0 {
+		t.Fatalf("%d targets %d scopes %d profiles", len(ds.Targets), len(ds.Scopes), len(ds.Profiles))
 	}
 	g := generic(t, ds).(map[string]any)
 	totals := g["totals"].(map[string]any)
@@ -227,6 +130,9 @@ func TestUnseedLeavesAnHonestEmptyDataset(t *testing.T) {
 	}
 	if !contains(ds.NA, "totals.medianLatency") || !contains(ds.NA, "snapshot.snapshotId") {
 		t.Fatalf("dataset na %v", ds.NA)
+	}
+	if len(res.SiteGaps) != 1 {
+		t.Fatalf("site gaps %q", res.SiteGaps)
 	}
 }
 
@@ -293,7 +199,7 @@ const partialSnapshot = `{
 }`
 
 func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
-	db := seeded(t)
+	db := catalogued(t)
 	db.Publish(t, []byte(partialSnapshot))
 	db.Exec(t, `INSERT INTO site.providers(slug,name,hq,website,framework_provider,kinds,primary_kind) VALUES ('acme-proxies','Acme Proxies','Berlin, DE','https://acme.example','acme','{residential}','residential');
 INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,avg_payload_kb) VALUES ('acme-proxies','residential','per_gb',4.5,180);
@@ -394,8 +300,8 @@ INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_
 	if res.Dataset.Snapshot.SnapshotID == nil || *res.Dataset.Snapshot.SnapshotID != "77" || res.Dataset.GeneratedAt != "2026-10-01T12:00:00+00:00" {
 		t.Fatalf("snapshot meta %+v", res.Dataset.Snapshot)
 	}
-	// Demo fixtures are untouched by the measured provider and keep the fleet totals.
-	if res.Dataset.Totals.Providers.F() != 5 || res.Dataset.Totals.Requests24h.F() != 187263 {
+	// The fleet is the measured network alone: leftover is_demo rows are not served.
+	if res.Dataset.Totals.Providers.F() != 1 || res.Dataset.Totals.Requests24h != prov.Performance.Requests24h || len(res.Dataset.Providers) != 1 {
 		t.Fatalf("totals %+v", res.Dataset.Totals)
 	}
 	if w := p.Windows["residential"]["24h"]; w.UptimePct.F() != 99 || w.SuccessDeltaPts.OK() {
@@ -466,9 +372,9 @@ func collectNulls(v any, path string, out map[string]bool) {
 // Keep the pgxpool import used by helpers in other test files of this package.
 var _ *pgxpool.Pool
 
-// measuredOnly builds from a database the way staging looks before any demo
-// seeding: the framework's published snapshot and nothing else (no demo
-// networks, no catalog scopes, profiles or pricing). With
+// measuredOnly builds from a database the way staging looks before any
+// catalog rows: the framework's published snapshot and nothing else (no
+// catalog scopes, profiles or pricing). With
 // SITEAPI_TEST_DUMP=<file> it also writes the /v1/dataset body there, for an
 // offline `SITE_API_DATASET_FILE` site build over measured-only data.
 func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
@@ -488,7 +394,7 @@ func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
 	return res
 }
 
-func TestMeasuredOnlyDatasetHasNoDemoFigures(t *testing.T) {
+func TestMeasuredOnlyDatasetHasNoPriceFigures(t *testing.T) {
 	// The fixture as v2 with outages, so the dump also shows real outage bands.
 	res := measuredOnly(t, withOutages(t))
 	ds := res.Dataset
@@ -498,12 +404,12 @@ func TestMeasuredOnlyDatasetHasNoDemoFigures(t *testing.T) {
 	if len(ds.Providers) != 1 || ds.Providers[0].Source != "measured" || ds.Simulated {
 		t.Fatalf("providers %d, simulated %v", len(ds.Providers), ds.Simulated)
 	}
-	for _, b := range res.Overview.CostBoards {
-		if len(b.Ranks) != 0 || b.Best.OK() || b.Dearest.OK() {
-			t.Errorf("cost board %s with no prices: %+v", b.Range, b)
+	for _, r := range build.Ranges {
+		if rank := valueRank(res, r.ID, "shifter"); rank != 0 {
+			t.Errorf("%s value rank %d with no prices", r.ID, rank)
 		}
 	}
-	for _, v := range res.Overview.FleetViews {
+	for _, v := range marketViews(t, res) {
 		if v.Fleet.Basis != "measured" {
 			t.Errorf("%s fleet basis %q", v.Range.ID, v.Fleet.Basis)
 		}
@@ -524,12 +430,12 @@ func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := measuredOnly(t, snapshot)
-	for _, b := range res.Overview.CostBoards {
-		if b.Ranks["shifter"] != 1 || !b.Best.OK() {
-			t.Errorf("%s cost board %+v", b.Range, b)
+	for _, r := range build.Ranges {
+		if rank := valueRank(res, r.ID, "shifter"); rank != 1 {
+			t.Errorf("%s value rank %d, want 1", r.ID, rank)
 		}
 	}
-	for _, v := range res.Overview.FleetViews {
+	for _, v := range marketViews(t, res) {
 		if v.Cheapest.Cost != 0.75 || v.Bills.Best == nil || !v.Bills.Best.Bill.OK() {
 			t.Errorf("%s fleet view: cheapest %v, bills %+v", v.Range.ID, v.Cheapest.Cost, v.Bills.Best)
 		}
@@ -541,7 +447,7 @@ func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := seeded(t)
+	db := catalogued(t)
 	db.Publish(t, snapshot)
 	before := buildFrom(t, db).Details["shifter"].Provider
 	catalog, err := os.ReadFile(repoFile(t, "api", "scripts", "catalog-shifter.sql"))
@@ -601,18 +507,30 @@ func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T
 	}
 }
 
-func TestMeasuredMarketExcludesDemoNetworks(t *testing.T) {
-	db := seeded(t)
+// Rows a fixture loader once marked is_demo are never served: not as a
+// network, a target, a tape row or in the measured market.
+func TestLeftoverDemoRowsAreNotServed(t *testing.T) {
+	db := catalogued(t)
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	db.Publish(t, snapshot)
 	res := buildFrom(t, db)
-	var views []build.FleetView
-	if err := json.Unmarshal(res.Dataset.MeasuredMarket.Views, &views); err != nil {
-		t.Fatal(err)
+	if len(res.Dataset.Providers) != 1 || res.Details["nimbus-residential"] != nil || res.Pages.Network["nimbus-residential/residential"] != nil {
+		t.Fatalf("a demo network is served: %v", keys(res.Details))
 	}
+	for _, x := range res.Dataset.Targets {
+		if x.ID == "ticketing_queue" {
+			t.Error("a demo target is served")
+		}
+	}
+	for _, x := range res.Dataset.Tape {
+		if x.ID == "demo-1" {
+			t.Error("a demo tape row is served")
+		}
+	}
+	views := marketViews(t, res)
 	if len(views) != 3 {
 		t.Fatalf("market windows %d, want 3", len(views))
 	}
@@ -639,7 +557,7 @@ func TestMeasuredMarketExcludesDemoNetworks(t *testing.T) {
 		t.Errorf("authenticity is not the measured country match")
 	}
 	if res.Dataset.MeasuredMarket.TargetCount != 2 {
-		t.Errorf("target count includes demo targets: %v", res.Dataset.MeasuredMarket.TargetCount)
+		t.Errorf("target count includes catalog-only targets: %v", res.Dataset.MeasuredMarket.TargetCount)
 	}
 }
 
@@ -684,14 +602,10 @@ func TestMeasuredMarketDrawsFromFirstObservedSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := seeded(t)
+	db := catalogued(t)
 	db.Publish(t, raw)
 	res := buildFrom(t, db)
-	var views []build.FleetView
-	if err := json.Unmarshal(res.Dataset.MeasuredMarket.Views, &views); err != nil {
-		t.Fatal(err)
-	}
-	for _, view := range views {
+	for _, view := range marketViews(t, res) {
 		if len(view.HeadlineSpark.Values) < 2 {
 			t.Fatalf("%s has no early trend: %+v", view.Range.ID, view.HeadlineSpark)
 		}

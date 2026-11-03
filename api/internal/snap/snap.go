@@ -450,16 +450,6 @@ type Methodology struct {
 	Settings struct {
 		Weights map[string]float64 `json:"weights"`
 	} `json:"settings"`
-	Raw json.RawMessage `json:"-"`
-}
-
-func (m *Methodology) UnmarshalJSON(d []byte) error {
-	type plain Methodology
-	if err := json.Unmarshal(d, (*plain)(m)); err != nil {
-		return err
-	}
-	m.Raw = append(json.RawMessage(nil), d...)
-	return nil
 }
 
 type Snapshot struct {
