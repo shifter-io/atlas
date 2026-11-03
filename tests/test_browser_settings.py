@@ -136,7 +136,7 @@ CASES = [
     ),
     (lambda d: d["networks"].update(other=[]), r"networks: unknown fields \['other'\]"),
     (lambda d: d["host"][1].update(name="browser-1"), r"host\[1\]\.name: is used by another"),
-    (lambda d: d["host"][1].update(name="mac-mini-one"), r"host\[1\]\.name: must be browser-<n>"),
+    (lambda d: d["host"][1].update(name="studio-host"), r"host\[1\]\.name: must be browser-<n>"),
     # Targets must be known browser run targets, once each.
     (lambda d: target(d, "amazon_pdp").update(id="generic_http"), r"target\[0\]\.id: is not"),
     (lambda d: target(d, "amazon_pdp").update(id="ai_answers"), r"target\[0\]\.id: is not"),

@@ -274,7 +274,7 @@ def test_manifest_refusals():
         ({"network": {"provider": "a"}}, "missing fields"),
         ({"target": "ai_answers"}, "target"),
         ({"country": "usa"}, "country"),
-        ({"host": "mac-mini-one"}, "host"),
+        ({"host": "studio-host"}, "host"),
         ({"slot": datetime(2026, 11, 4, 13, 0)}, "slot"),
         ({"slot": "2026-11-04T13:00:30Z"}, "whole minute"),
         ({"started_at": "2026-11-04T17:00:00+04:00"}, "UTC"),
