@@ -91,11 +91,12 @@ async def _run(args: argparse.Namespace) -> int:
 
 def _operator_groups(commands) -> dict:
     """Register the operator command groups; returns each group's dispatcher by command."""
+    from .archive import cli as archive
     from .campaign import cli as campaign
     from .daily import cli as daily
     from .onboarding import cli as onboarding
 
-    groups = {"onboarding": onboarding, "campaign": campaign, "daily": daily}
+    groups = {"onboarding": onboarding, "campaign": campaign, "daily": daily, "archive": archive}
     for group in groups.values():
         group.register(commands)
     return {name: group.dispatch for name, group in groups.items()}

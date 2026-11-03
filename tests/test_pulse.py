@@ -312,8 +312,8 @@ async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by
     database, db
 ):
     with connect(database) as conn:
-        for month in range(7, 13):
-            partition(conn, "run_buckets", datetime(2026, month, 15, tzinfo=UTC))
+        for day in range(-6, 7):  # daily partitions around W0
+            partition(conn, "run_buckets", W0 + timedelta(days=day))
     async with db.transaction() as conn:
         cfg = await pulse._settings(conn)
         await conn.execute("SET LOCAL enable_seqscan=off")
@@ -326,7 +326,7 @@ async def test_the_evaluator_reads_one_run_buckets_partition_and_test_batches_by
             plan = await explain(conn, statement, params)
             relations = {n["Relation Name"] for n in plan if "Relation Name" in n}
             assert {r for r in relations if r.startswith("run_buckets")} == {
-                "run_buckets_2026_10"
+                "run_buckets_2026_10_05"
             }, statement
             if "test_batches" in relations:
                 scans = [n["Node Type"] for n in plan if n.get("Relation Name") == "test_batches"]

@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 
 from .. import detect, estimates, traffic
 from ..names import labels as shared_labels
-from ..storage import column, connect
+from ..storage import RAW_DAYS, column, connect
 from ..targets import registry
 from .aggregate import (
     BREAKDOWNS,
@@ -153,7 +153,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         conn.execute("SELECT pg_advisory_xact_lock(817452902)")
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
-        start = as_of - timedelta(hours=1440)
+        start = as_of - timedelta(days=RAW_DAYS)  # older raw rows are archived
         runs = conn.execute(
             "SELECT r.run_key,r.run_id::text,r.summary_sha256,r.summary,r.started_at,"
             "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
