@@ -44,7 +44,7 @@ func TestServeFromDatabase(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO site.targets(target_id) VALUES ('nope')"); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("runtime pool could write: %v", err)
 	}
-	content, err := build.ReadContent(config.FindUp(filepath.Join("src", "content")))
+	content, err := build.ReadContent(config.FindUp(filepath.Join("fixtures", "content")))
 	if err != nil {
 		t.Fatal(err)
 	}

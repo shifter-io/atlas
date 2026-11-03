@@ -1,6 +1,6 @@
 # Dataset fields and where they come from
 
-Every field of `/v1/dataset` (the site's `Dataset`, `src/lib/types.ts`) with its
+Every field of `/v1/dataset` (the website's `Dataset`, `src/lib/types.ts` in the website repository) with its
 source. The columns are:
 
 - **Demo**: where the four `is_demo` fixtures get the value. They were seeded from
@@ -72,7 +72,9 @@ General rules:
 
 ### totals (FleetTotals)
 
-Computed at build time with the formulas of `scripts/prepare-design-demo.mjs`. They
+Computed at build time with the formulas of `scripts/prepare-design-demo.mjs` (a website
+script, removed from this repository with the website; it is in this repository's history,
+in the parent of the commit that removed the website). They
 run over the **fleet basis**: the fixtures while any exist, matching the site, which
 never mixes simulated and measured numbers in a fleet figure (`window.ts
 fleetWindow`). Otherwise they run over the measured providers. The site uses the
@@ -122,7 +124,7 @@ With no providers, everything except the record counts is null (`na`).
 | `score.grade` | `site.providers.score_grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
 | `score.breakdown.*` | `site.providers.score_breakdown` (scored by `src/lib/score-curves.ts` against the other demo providers of the same kind) | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target), reachable through `measurement` | data | ✱ |
 | `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement; `overlap` from `site.providers.headline_overlap` when the fixture's differs | the headline category's measurement | as below | |
-| `reviews` (summary) | computed from `site.reviews` (`generate-demo-data.ts summariseReviews`) | same | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
+| `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in this repository's history before the website was removed) | same | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
 | `measurement` *(TS optional; always present)* | null | the raw snapshot `ProductResult` of the headline product, unchanged | | |
 | `framework` *(added)* | null | `{provider: public.providers.id, products: [public.products.name]}` | | |
 | `na` *(added)* | | | | |
@@ -314,9 +316,9 @@ written with, exactly as the site does today.
 
 ## Deviations from the TypeScript
 
-`internal/build/reference_test.go` enforces these. The test runs the site's own
-`presentation.ts`, `window.ts`, `overview.ts` and `tape.ts` and allows only these
-differences:
+The Go port differs from the website's `presentation.ts`, `window.ts`,
+`overview.ts` and `tape.ts` only in these ways. A parity test enforced them while
+the website lived in this repository; it went with the website.
 
 1. **Placeholders become null.** For measured providers, `hq`, `claim`,
    `pricing.model`/`trial`/`costBasis`, `trust.stickinessAdvertised`/`kycVerified`/`consentDisclosed`,

@@ -1,18 +1,17 @@
 # siteapi
 
-A Go service that returns every piece of data the website needs from the
-`proxy_reviews` Postgres database. The site reads nothing else: `src/lib/site-api.ts`
-fetches the dataset once per static build (`/v1/dataset` redirects to the build's
-dataset file, a static file named by its hash; a dev server or the on-demand
-`/api/live` route revalidates it every few seconds with `If-None-Match`), and the
-browser reaches `/v1/version`, `/v1/events`, `/v1/snapshot`, `/v1/search-index` and the per-page answers (`/v1/rankings`, `/v1/networks…`, `/v1/countries…`)
-through the same-origin `/api/site/*` route. Open pages poll `/v1/version` to
-update in place when the data changes (see "Live updates" in AGENTS.md). The
-former `src/data/*.json` imports are gone; the files now live in `fixtures/` as
-seed and test input only.
+A Go service that returns every piece of data the Proxy Index website needs from the
+`proxy_reviews` Postgres database. The website lives in its own repository and reads
+nothing else: it fetches the dataset once per static build (`/v1/dataset` redirects
+to the build's dataset file, a static file named by its hash; a long-lived site
+process revalidates it every few seconds with `If-None-Match`), and its pages reach
+`/v1/version`, `/v1/events`, `/v1/snapshot`, `/v1/search-index` and the per-page
+answers (`/v1/rankings`, `/v1/networks…`, `/v1/countries…`) through a same-origin
+passthrough. Open pages poll `/v1/version` to update in place when the data changes.
+`fixtures/` holds seed and test input only.
 
-- Its main output is the site's `Dataset` type (`src/lib/types.ts`); `src/lib/data.ts`
-  exports it unchanged (numeric nulls become the site's NaN sentinel, see `site-api.ts`).
+- Its main output is the website's `Dataset` type (`src/lib/types.ts` in the website
+  repository); `internal/model` is that contract in Go.
 - Missing data is explicit. Every field is always present. A value the API does not
   have is JSON `null`, and every entity carries an `na` array listing the paths of its
   missing fields. `/v1/coverage` reports every gap with the reason and the table
@@ -22,7 +21,7 @@ seed and test input only.
 - Every response is precomputed and precompressed in memory. Requests never touch
   the database (except an uncommon `/v1/events` filter, see below).
 
-Module: `github.com/Zeus-Development/proxy-index-website/api`, Go 1.27 (`/opt/homebrew/bin/go`).
+Module: `github.com/Zeus-Development/proxy-index-website/api`, Go 1.27.
 
 ## Commands
 
@@ -31,19 +30,19 @@ All commands find the database the same way: `DATABASE_URL`, else
 else `proxy-index/.secrets/database.toml` in or above the working directory.
 
 ```sh
-cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # or: npm run api:build (→ api/bin/siteapi)
+cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from the current checkout
 
 /tmp/siteapi migrate                        # create/upgrade the "site" schema
 /tmp/siteapi seed-demo                      # pg_dump backup, then load fixtures/demo/design-demo.json as is_demo rows
 /tmp/siteapi seed-demo --force              # reload even if the same file is already loaded
 /tmp/siteapi unseed-demo                    # pg_dump backup, then delete every is_demo row
 /tmp/siteapi serve --listen 127.0.0.1:8090  # the cached API (read-only DB sessions)
-/tmp/siteapi dump --out dataset.json        # write /v1/dataset for a static build
+/tmp/siteapi dump --out dataset.json        # write /v1/dataset to a file (an offline website build)
 /tmp/siteapi dump --endpoint /v1/coverage --out coverage.json --pretty
 ```
 
-`api/bin/siteapi` is a build output and is not rebuilt by `npm run api:serve`: build it
-from the current checkout first. An old binary serves only the routes it was built
+Never run a prebuilt or older binary (`api/bin/` is ignored by git and nothing
+rebuilds it): build from the current checkout first. An old binary serves only the routes it was built
 with (other paths answer 404) and writes its own migration checksums. `/healthz`
 `binary.revision` and the `siteapi starting` log line name the commit it was built from.
 
@@ -52,7 +51,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--listen`, `SITEAPI_LISTEN` | `127.0.0.1:8090` | serve |
 | `--database-file`, `SITEAPI_DATABASE_FILE`; `DATABASE_URL` wins | `proxy-index/.secrets/database.toml` | all |
 | `--interval` | `10s` | serve: change-detection poll |
-| `--content-dir`, `SITEAPI_CONTENT_DIR` (`-` disables) | `src/content` above cwd | serve, dump: guide/review search entries |
+| `--content-dir`, `SITEAPI_CONTENT_DIR` (`-` disables) | `src/content` above cwd (none in this repository: point it at the website's `src/content`; without one search has no guides or reviews) | serve, dump: guide/review search entries |
 | `--file` | `fixtures/demo/design-demo.json` above cwd | seed-demo |
 | `--force` | false | seed-demo |
 | `--no-backup`, `--backup-dir`, `--runtime-file` | backups in `proxy-index/.state/postgres/backups/`, `pg_dump` from `bin_dir` in `proxy-index/.state/postgres/runtime.json` | seed-demo, unseed-demo |
@@ -71,9 +70,9 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
-| `/v1/files/dataset-<sha256>.json` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"): a static file rendered (and compressed) once per data update, named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current build's file and, until the next rebuild, the previous one are served as they are (a client may hold the old redirect for 5 s or race a rebuild); any older `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The site's `/api/site/*` passthrough, which this change leaves untouched (the site is being retired), does not forward the redirect. |
-| `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (`src/lib/measured-types.ts` `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
-| `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like `CommandPalette.astro` (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
+| `/v1/files/dataset-<sha256>.json` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"): a static file rendered (and compressed) once per data update, named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current build's file and, until the next rebuild, the previous one are served as they are (a client may hold the old redirect for 5 s or race a rebuild); any older `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
+| `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
+| `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex`: networks, guides, network reviews, pages, targets, actions, plus a new `Countries` group) and the palette's constants. |
 | `/v1/coverage` | The N/A report index: summary counts, dataset-level gaps, per-target/scope/profile gaps, record counts, a per-field index of which providers lack it, and one entry (`id`, `name`, `source`, `naCount`) per provider. |
 | `/v1/coverage/{slug}` | One provider's gaps grouped by section with a reason for each. |
@@ -87,12 +86,12 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/countries` | Every country any network was seen in (30d): networks and `ipsSum`. |
 | `/v1/countries/{cc}` | That country's row of every network and category per range, with `ipsSumRank` and `latencyRank` among the networks of the same category, and the city count per range. |
 | `/v1/countries/{cc}/cities?range=&q=&page=` | One page of that country's cities across networks (each row names its network and category). |
-| `/v1/version` | `{revision, builtAt}`: what open pages poll (through `/api/site/v1/version`) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
+| `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
 | `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes, `unserved` and `binary`. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders a QA-1-sized
 build (`internal/testscale`: 21 framework providers, 18 with 40 per-country product groups, the framework
-targets, 559 test events and the site's own content) and fails when any answer or page is larger. It has no
+targets, 559 test events and the guides and reviews in `fixtures/content`) and fails when any answer or page is larger. It has no
 exemptions: the dataset is not an answer but the file `/v1/dataset` redirects to (11.5 MB at the QA-1
 scale; the test logs its identity, gzip and brotli sizes). `/v1/overview`, `/v1/providers` and `/v1/providers/{slug}` are gone:
 `/v1/rankings`, `/v1/networks/{slug}` and `/v1/networks/{slug}/chart` answer what a page needs. A place row adds the requests of every product group that saw the place and keeps the latency
@@ -249,20 +248,13 @@ touched. The suite covers:
     (staging before demo seeding) gives a measured fleet basis, empty cost boards
     and N/A price picks. `SITEAPI_TEST_DUMP=<file>` writes that `/v1/dataset`
     body, for an offline `SITE_API_DATASET_FILE` build of every page over it.
-  - **parity with the site's TypeScript**: `scripts/reference.mjs` bundles
-    `src/lib/{data,window,overview,tape}.ts` with the site's esbuild, with the
-    site's API loader swapped for `src/lib/site-api.fixture.ts`
-    (`presentationDataset` over `fixtures/demo/design-demo.json` and
-    `fixtures/measured/snapshot.json`), so TypeScript is still compared with Go. The test
-    compares `presentationDataset`, `windowStats` (every provider and range),
-    `fleetWindows`, `costBoards`, `fleetViews` and `tapeFromEvents` with the Go
-    port. It only allows the deviations listed in FIELDS.md. It runs three times:
-    over the committed v1 fixture, over that fixture as v2 with outages and
-    time-based uptime, and over `fixtures/measured/snapshot-every-request.json`
-    (the framework's every-request shape: latency under load, list prices,
-    per-IP shares). `REFERENCE_SNAPSHOT` points the TypeScript at the same file.
-    It also checks how a 2-hour outage lands in incidents, bands and downtime,
-    and that a priced measured network enters the cost boards. Skipped without node and `node_modules`.
+  - **snapshot mapping**: the committed v1 fixture as v2 with outages and
+    time-based uptime lands in incidents, bands and downtime as expected, and
+    `fixtures/measured/snapshot-every-request.json` (the framework's every-request
+    shape: latency under load, list prices, per-IP shares) maps its latency
+    target, pricing, copy and cost boards. Until the website moved out, these
+    also compared the Go port with the site's TypeScript; that parity test went
+    with it.
 - `server`:
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
@@ -277,10 +269,6 @@ touched. The suite covers:
 - `jsnum`: `toFixed`, `toLocaleString` and `JSON.stringify` number formatting
   checked against node's output.
 
-The parity test reads the live `src/lib`, which is still changing. If it fails after
-a site change, the Go port needs the same change, or FIELDS.md needs a new documented
-deviation.
-
 ## Rollback
 
 From least to most drastic:
@@ -292,7 +280,7 @@ From least to most drastic:
    `proxy-index/.state/postgres/backups/20261001_163955_before_seed_demo/database.dump`.
    Its `backup.json` has the sha256 and the exact command. It was taken after
    `migrate`, so it holds an empty `site` schema. To restore it, stop anything using
-   the database, then run from the website folder, with `<bin_dir>` taken from
+   the database, then run from this repository's folder, with `<bin_dir>` taken from
    `proxy-index/.state/postgres/runtime.json`:
 
    ```sh
@@ -306,7 +294,6 @@ From least to most drastic:
    `20261001_155607_before_site_api/database.dump`, the backup taken before any of
    this work, the same way.
 4. **Code:** `git tag pre-site-api` (commit `0084db6`) marks the website before
-   the API, when pages imported `src/data/design-demo.json` and `src/data/dataset.json`
-   (both still in that commit, and now in `fixtures/`). The site needs the API to
-   build since it switched over; a static build without one uses
-   `SITE_API_DATASET_FILE=<siteapi dump output>`.
+   the API, when pages imported `src/data/design-demo.json` and `src/data/dataset.json`.
+   The Astro website was removed from this repository afterwards; its last
+   version here is the parent of the commit that removed it.
