@@ -309,7 +309,8 @@ def test_a_country_hour_without_requests_or_with_too_few_takes_the_network_curve
     assert entry["hour_factors"][5] == pytest.approx(120 / 300)  # flagged, own count kept
     kept = [hour for hour in range(24) if hour != 18]
     level = sum(ca[hour] for hour in kept) / sum(hour_ips[hour] for hour in kept)
-    assert entry["hour_factors"][18] == pytest.approx(hour_ips[18] * level / 300)
+    assert hour_ips[18] * level / 300 > 1.0  # never above the measured peak
+    assert entry["hour_factors"][18] == 1.0
     assert entry["low_hour"] == 5  # a fallback hour is neither peak nor low
     assert entry["hour_basis"].count("country") == 22
     # Every factor of a covered hour rests on a measurement: none is 0.

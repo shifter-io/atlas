@@ -1,7 +1,7 @@
 {
   "schema": "proxy-index-hour-formula",
   "schema_version": 1,
-  "formula_version": 1,
+  "formula_version": 2,
   "network": "byteful",
   "product": "residential",
   "source": {
@@ -40,7 +40,10 @@
     "country": "requested country (the test's country parameter)",
     "requests": "request rows: successful requests with an exit IP",
     "min_peak_unique_ips": 100,
-    "min_hours_with_ips": 20
+    "min_hours_with_ips": 20,
+    "hour_sample": "a country hour's request rows / the median of its covered hours",
+    "min_sample_share": 0.25,
+    "low_sample_share": 0.5
   },
   "latency": {
     "available": false,
@@ -69,6 +72,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 61 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -82,6 +86,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -95,6 +100,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -108,6 +114,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -121,6 +128,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -134,6 +142,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -147,6 +156,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -160,6 +170,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -173,6 +184,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -186,6 +198,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -199,6 +212,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -212,6 +226,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -225,6 +240,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -238,6 +254,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -251,6 +268,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -264,6 +282,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -277,6 +296,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 38 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -290,6 +310,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -303,6 +324,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -316,6 +338,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -329,6 +352,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -342,6 +366,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -355,6 +380,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -368,6 +394,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -381,6 +408,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -394,6 +422,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -407,6 +436,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -420,6 +450,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 32 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -433,6 +464,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -446,6 +478,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -459,6 +492,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -472,6 +506,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -485,6 +520,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -498,6 +534,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -511,6 +548,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -524,6 +562,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 25 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -537,6 +576,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 5 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -550,6 +590,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -563,6 +604,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -576,6 +618,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -589,6 +632,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 65 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -602,6 +646,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 56 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -615,6 +660,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 4 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -628,6 +674,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -641,6 +688,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -654,6 +702,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 48 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -667,6 +716,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 60 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -680,6 +730,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -693,6 +744,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -706,6 +758,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -719,6 +772,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -732,6 +786,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -745,6 +800,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -758,6 +814,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -771,6 +828,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 1 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -784,6 +842,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -797,6 +856,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -810,6 +870,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -823,6 +884,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -836,6 +898,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -849,6 +912,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -862,6 +926,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -875,6 +940,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 7 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -888,6 +954,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -901,6 +968,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -914,6 +982,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -927,6 +996,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -940,6 +1010,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 6 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -953,6 +1024,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -966,6 +1038,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -979,6 +1052,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -992,6 +1066,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1005,6 +1080,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1018,6 +1094,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1031,6 +1108,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1044,6 +1122,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1057,6 +1136,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 1 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1070,6 +1150,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1083,6 +1164,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1096,6 +1178,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1109,6 +1192,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1122,6 +1206,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1135,6 +1220,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1148,6 +1234,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1161,6 +1248,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1174,6 +1262,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1187,6 +1276,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1200,6 +1290,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1213,6 +1304,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 23 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1226,6 +1318,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1239,6 +1332,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1252,6 +1346,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1265,6 +1360,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1278,6 +1374,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1291,6 +1388,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 13 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1304,6 +1402,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 7 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1317,6 +1416,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1330,6 +1430,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1343,6 +1444,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1356,6 +1458,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 2 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1369,6 +1472,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1382,6 +1486,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1395,6 +1500,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1408,6 +1514,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1421,6 +1528,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1434,6 +1542,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1447,6 +1556,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1460,6 +1570,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1473,6 +1584,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 5 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1486,6 +1598,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1499,6 +1612,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 13 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1512,6 +1626,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1525,6 +1640,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1538,6 +1654,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1551,6 +1668,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1564,6 +1682,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1577,6 +1696,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1590,6 +1710,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 88 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1603,6 +1724,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1616,6 +1738,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1629,6 +1752,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 10 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1642,6 +1766,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 1 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1655,6 +1780,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 1 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1668,6 +1794,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1681,6 +1808,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1694,6 +1822,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1707,6 +1836,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1720,6 +1850,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1733,6 +1864,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1746,6 +1878,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1759,6 +1892,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 2 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1772,6 +1906,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 1 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1785,6 +1920,7 @@
       "curve": "country",
       "fallback_reason": null,
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "country", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     },
@@ -1798,6 +1934,7 @@
       "curve": "network",
       "fallback_reason": "peak hour has 16 unique IPs (< 100)",
       "hour_factors": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "hour_basis": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, "network", null, null, null, null, null, null, null],
       "daily_factor": 1.0,
       "test_hour": 16
     }

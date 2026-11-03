@@ -116,7 +116,7 @@ def test_an_hour_on_the_network_curve_scales_requests_by_its_factor():
     rows = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=23), 30, 600)}
     base = 1.0  # factor at hour 23
     assert rows[8]["unique_ips"] == pytest.approx(30 * 0.5 / base)
-    assert rows[8]["requests"] == pytest.approx(600 * 0.5) > 0
+    assert rows[8]["requests"] == pytest.approx(600 * 0.5)
     assert rows[9]["requests"] == pytest.approx(600)  # own request curve elsewhere
     # Measured in a fallback hour: every hour's requests follow the factors.
     measured = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=8), 30, 600)}
