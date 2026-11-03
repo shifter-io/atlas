@@ -47,6 +47,7 @@ from .aggregate import (
     with_under_load,
 )
 from .aggregate import LATENCY as PERCENTILES
+from .fleet import fleet_entry, fleet_totals
 from .inputs import group_by_product, previous_products, tested_by_product
 from .policy import (
     digest,
@@ -837,20 +838,7 @@ def build(
     for (cohort, label), members in fleet_groups.items():
         # A cohort holds one kind of product, so its members are each other's peers.
         score_window(members, label, config, as_of, method_id)
-        all_rows = [r for _, rows, _, _ in members for r in rows]
-        all_seen = [o for _, _, obs, _ in members for o in obs]
-        hours = members[0][0]["windows"][label]["period"]["hours"]
-        fm = timed(all_rows, hours, minimum, slot_minutes=slot_minutes)
-        fleets.append(
-            {
-                "cohort": cohort,
-                "window": label,
-                "products": len(members),
-                "providers": len({p["provider"] for p, *_ in members}),
-                "metrics": fm,
-                "unique_ips": len({o["ip_id"] for o in all_seen}),
-            }
-        )
+        fleets.append(fleet_entry(cohort, label, members, minimum, slot_minutes))
         for p, *_ in members:
             own = sets[((p["product_id"], cohort), label)]
             peers = [
@@ -960,35 +948,6 @@ def build(
             if r.get("batch_id") is None
         ],
     }
-
-
-def fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target):
-    """Every product group of every cohort together, per window (fleet entries with cohort "*"):
-    requests and successes added, success time-weighted and light-load latency merged over all
-    of them as timed() does within a cohort, and every exit IP counted once however many products
-    or cohorts saw it. The series is the window's (5-minute buckets for 24h, days otherwise) with
-    distinct IPs per bucket; it has no availability, which is a per-product fact."""
-    out = []
-    for label in dict.fromkeys(label for _, label in fleet_groups):
-        members = [m for (_, w), ms in fleet_groups.items() if w == label for m in ms]
-        rows = [r for _, rows, _, _ in members for r in rows]
-        seen = [o for _, _, obs, _ in members for o in obs]
-        hours = members[0][0]["windows"][label]["period"]["hours"]
-        since = as_of - timedelta(hours=hours)
-        out.append(
-            {
-                "cohort": "*",
-                "window": label,
-                "products": len(members),
-                "providers": len({p["provider"] for p, *_ in members}),
-                "metrics": timed(rows, hours, minimum, slot_minutes=slot_minutes),
-                "unique_ips": len({o["ip_id"] for o in seen}),
-                "series": series(
-                    rows, seen, since, as_of, hours, latency_target=timed_target, minimum=minimum
-                ),
-            }
-        )
-    return out
 
 
 def slot_length(pulse_minutes):
