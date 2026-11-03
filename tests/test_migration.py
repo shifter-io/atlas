@@ -894,4 +894,3 @@ def test_v9_database_adds_estimated_hours(databases):
                 "measured_at,measured_ips,measured_requests,hour_factor,unique_ips,requests,"
                 "day_unique_ips,curve,formula_version FROM estimated_hours"
             )
-
