@@ -198,6 +198,7 @@ def test_a_redirect_to_plain_http_is_refused(tmp_path, cdn, cli):
     cdn.files["moved.mmdb"] = cdn.files[name(DAY)]
     code, health = cli()
     assert code == 0 and health["dbip"] == "updated" and cdn.downloads("moved.mmdb") == 1
+    assert cdn.hits["HEAD", "moved.mmdb"] == 1  # the probe stayed a HEAD after the redirect
 
 
 def test_a_failed_get_after_the_probe_names_the_status(tmp_path, cdn, cli):
@@ -283,4 +284,6 @@ def test_the_release_is_recorded_in_postgres(tmp_path, cdn, database):
     with connect(database) as conn:
         rows = conn.execute("SELECT sha256,metadata FROM dbip_releases").fetchall()
     assert len(rows) == 1 and rows[0][0] == health["sha256"]
-    assert rows[0][1] == {k: health[k] for k in rows[0][1]} and rows[0][1]["file"] == name(DAY)
+    assert (
+        rows[0][1] == {k: health[k] for k in rows[0][1]} and rows[0][1]["file"] == "dbip-full.mmdb"
+    )

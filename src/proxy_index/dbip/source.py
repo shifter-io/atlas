@@ -76,13 +76,17 @@ class _InsecureRedirect(Exception):
 
 class _SecureRedirects(HTTPRedirectHandler):
     """Follow a redirect only to another secure URL, so base_url's https promise holds for the
-    whole request and not only its first hop."""
+    whole request and not only its first hop. A probe stays a HEAD (urllib would follow it
+    with a GET, starting the whole download)."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not _secure(newurl):
             fp.close()
             raise _InsecureRedirect
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
+        followed = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if followed is not None and req.get_method() == "HEAD":
+            followed.method = "HEAD"
+        return followed
 
 
 _OPENER = build_opener(_SecureRedirects)
