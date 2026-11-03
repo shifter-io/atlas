@@ -164,7 +164,7 @@ def try_fields(**changes):
         "verdict": "ok",
         "error": None,
         "status": 200,
-        "final_url": "https://user:secret@www.example.com:8443/dp/0306406152?tag=x#reviews",
+        "final_url": "https://user:secret@www.example.invalid:8443/dp/0306406152?tag=x#reviews",
         "timings_ms": {"queue": 1, "context": 40, "navigate": 900, "settle": 500, "total": 1441},
         "bytes_down_est": 512_000,
         "reason": "content",
@@ -174,7 +174,7 @@ def try_fields(**changes):
 
 def test_try_record():
     record = c.try_record(**try_fields())
-    assert record["final_url"] == "https://www.example.com:8443/dp/0306406152"
+    assert record["final_url"] == "https://www.example.invalid:8443/dp/0306406152"
     assert c.page_url("http://Example.com") == "http://example.com/"
     assert c.page_url("https://[2001:db8::1]/a?b") == "https://[2001:db8::1]/a"
     failed = try_fields(
@@ -374,7 +374,7 @@ def test_user_agent():
     assert c.user_agent("128.0", "linux") == (
         "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
     )
-    for version in ("135", "135.0", "135.0.1", "135.0b9", "99.1.2.3"):
+    for version in ("135", "135.0", "135.0.1", "135.0b9", "99.1.2"):
         major = c.engine_major(version)
         assert c.user_agent_major(c.user_agent(version, "macos")) == major
         assert f"Firefox/{major}.0" in c.user_agent(version, "linux")

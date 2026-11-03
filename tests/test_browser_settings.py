@@ -175,7 +175,7 @@ CASES = [
     ),
     (
         lambda d: target(d, "cloudflare_challenge").update(
-            inputs=[{"url": f"https://{SECRET}:pw@example.com/", "expect": "x"}]
+            inputs=[{"url": f"https://{SECRET}:pw@example.invalid/", "expect": "x"}]
         ),
         r"target\[4\]\.inputs\[0\]\.url",
     ),
