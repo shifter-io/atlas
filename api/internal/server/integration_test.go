@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -112,6 +113,58 @@ func TestServeFromDatabase(t *testing.T) {
 		if p99 > 2*time.Millisecond && os.Getenv("SITEAPI_SKIP_LATENCY") == "" {
 			t.Errorf("%s p99 %v exceeds 2ms", p, p99)
 		}
+	}
+}
+
+// TestAFreshDatabaseServesEveryPageOfOnePublishedProduct is the database
+// DROPLET-1 left (API-ROUTE-CHECK-1): framework data only, no site catalog
+// rows, one published product group (Shifter residential, requested country
+// US), and a site schema migrated by an older siteapi whose 0001 file differed
+// in a comment (the checksum a 2026-10-24 build wrote).
+func TestAFreshDatabaseServesEveryPageOfOnePublishedProduct(t *testing.T) {
+	db := testdb.New(t)
+	ctx := context.Background()
+	snap, err := os.ReadFile(config.FindUp(filepath.Join("fixtures", "measured", "snapshot-every-request.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Publish(t, snap)
+	db.Exec(t, "UPDATE site.schema_versions SET checksum='8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec' WHERE version=1")
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var catalog int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM site.providers").Scan(&catalog); err != nil || catalog != 0 {
+		t.Fatalf("site.providers has %d rows (%v)", catalog, err)
+	}
+	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if _, err := s.Refresh(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	for _, p := range []string{"/v1/networks", "/v1/networks/shifter", "/v1/networks/shifter/chart", "/v1/networks/shifter/places",
+		"/v1/countries", "/v1/countries/us", "/v1/rankings", "/v1/networks/all"} {
+		resp, err := http.Get(ts.URL + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Errorf("%s: %d %s", p, resp.StatusCode, body)
+		}
+	}
+	resp, err := http.Get(ts.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var h server.Health
+	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil || h.Status != "ok" || len(h.Unserved) != 0 {
+		t.Fatalf("healthz %+v (%v)", h, err)
 	}
 }
 

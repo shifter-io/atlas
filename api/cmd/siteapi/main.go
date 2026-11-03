@@ -136,6 +136,8 @@ func serve(args []string) error {
 	if err != nil {
 		return fmt.Errorf("content: %w", err)
 	}
+	b := server.BinaryInfo()
+	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
 	srv := server.New(server.DBSource{Pool: pool}, server.Options{Interval: *interval, Content: cnt})
 	if _, err := srv.Refresh(ctx, true); err != nil {
 		return fmt.Errorf("initial build: %w", err)
@@ -359,4 +361,12 @@ func dump(args []string) error {
 		"generatedAt": res.Dataset.GeneratedAt, "snapshotPublished": res.Dataset.Snapshot.Available,
 		"naFields": res.Coverage.Summary.NAFields, "naFieldsBySource": res.Coverage.Summary.NAFieldsBySource})
 	return nil
+}
+
+// deref is *p, or def when p is nil.
+func deref(p *string, def string) string {
+	if p == nil {
+		return def
+	}
+	return *p
 }

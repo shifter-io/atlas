@@ -61,6 +61,18 @@ func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
 	if after := count(t, db, "SELECT value FROM site.revision"); after != before+2 {
 		t.Fatalf("revision %d -> %d, want +2", before, after)
 	}
+	// A database migrated by an older siteapi, whose 0001 differed only in a
+	// comment, is served, and migrate rewrites its checksum to the current one.
+	db.Exec(t, "UPDATE site.schema_versions SET checksum='8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec' WHERE version=1")
+	if err := store.CheckSchema(ctx, c); err != nil {
+		t.Fatalf("comment-only checksum refused: %v", err)
+	}
+	if res, err := store.Migrate(ctx, c); err != nil || len(res.Rechecked) != 1 || res.Rechecked[0] != migrations[0].Name {
+		t.Fatalf("migrate over a comment-only checksum: %+v %v", res, err)
+	}
+	if n := count(t, db, "SELECT count(*) FROM site.schema_versions WHERE version=1 AND checksum='"+migrations[0].Checksum+"'"); n != 1 {
+		t.Fatal("checksum not rewritten")
+	}
 	// An edited migration is refused, by migrate and by the read-only check.
 	db.Exec(t, "UPDATE site.schema_versions SET checksum='tampered' WHERE version=1")
 	if _, err := store.Migrate(ctx, c); err == nil || !strings.Contains(err.Error(), "checksum") {

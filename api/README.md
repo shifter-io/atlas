@@ -42,6 +42,11 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # or: npm run api:bu
 /tmp/siteapi dump --endpoint /v1/coverage --out coverage.json --pretty
 ```
 
+`api/bin/siteapi` is a build output and is not rebuilt by `npm run api:serve`: build it
+from the current checkout first. An old binary serves only the routes it was built
+with (other paths answer 404) and writes its own migration checksums. `/healthz`
+`binary.revision` and the `siteapi starting` log line name the commit it was built from.
+
 | Flag / env | Default | Used by |
 |---|---|---|
 | `--listen`, `SITEAPI_LISTEN` | `127.0.0.1:8090` | serve |
@@ -83,7 +88,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/countries/{cc}` | That country's row of every network and category per range, with `ipsSumRank` and `latencyRank` among the networks of the same category, and the city count per range. |
 | `/v1/countries/{cc}/cities?range=&q=&page=` | One page of that country's cities across networks (each row names its network and category). |
 | `/v1/version` | `{revision, builtAt}`: what open pages poll (through `/api/site/v1/version`) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
-| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes. |
+| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes, `unserved` and `binary`. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders a QA-1-sized
 build (`internal/testscale`: 21 framework providers, 18 with 40 per-country product groups, the framework
@@ -161,9 +166,13 @@ fixture-only targets, and `"catalog"` for editorial ones.
 `siteapi migrate` applies the embedded `internal/store/migrations/NNNN_*.sql` in
 one transaction under an advisory lock and records `site.schema_versions(version,
 name, checksum)`. An applied migration whose checksum no longer matches the embedded
-file is refused. Write a new migration instead of editing one, as the framework does.
+file is refused. Write a new migration instead of editing one, as the framework does;
+`TestAppliedMigrationsAreNeverEdited` fails when an embedded file's checksum changes.
 `serve` and `dump` check the same checksums read-only and refuse to start on a
-mismatch.
+mismatch. One exception: `0001_site_schema.sql` changed twice in its header comment
+only (the Go module path, 2026-10-24 and 2026-10-27), so its two earlier checksums
+(`commentOnlyEdits` in `migrate.go`) are accepted as the same schema, and `migrate`
+rewrites them to the current one (`rechecked` in its output).
 
 | Table | Holds |
 |---|---|

@@ -93,6 +93,9 @@ type Server struct {
 		lastCheck   time.Time
 		builds      int
 		failures    int
+		// unserved is the serving version's pages that a published product
+		// should have and that do not answer 200 (unservedPages).
+		unserved []string
 	}
 	log *slog.Logger
 }
@@ -146,12 +149,17 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		v.previous, v.previousPath = cur.Dataset, cur.DatasetPath
 	}
 	s.current.Store(v)
+	unserved := s.unservedPages(v)
 	s.state.Lock()
 	s.state.builds++
 	s.state.lastError = ""
+	s.state.unserved = unserved
 	s.state.Unlock()
 	s.log.Info("cache rebuilt", "version", v.ID, "build_ms", v.BuildTime.Milliseconds(), "load_ms", v.LoadTime.Milliseconds(),
 		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", len(v.Dataset.Identity))
+	if len(unserved) > 0 {
+		s.log.Warn("published products without their network pages", "version", v.ID, "pages", unserved)
+	}
 	return true, nil
 }
 
@@ -551,12 +559,20 @@ type Health struct {
 	Failures    int        `json:"failures"`
 	SearchCache int        `json:"searchCacheEntries"`
 	EventsCache int        `json:"eventsCacheEntries"`
+	// Unserved lists the pages a published product's network should have
+	// that do not answer 200; any makes the status degraded.
+	Unserved []string `json:"unserved"`
+	// Binary is the source revision this siteapi was built from.
+	Binary Binary `json:"binary"`
 }
 
 func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	s.state.Lock()
-	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures}
+	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]string{}, s.state.unserved...), Binary: BinaryInfo()}
+	if len(h.Unserved) > 0 {
+		h.Status = "degraded"
+	}
 	if !s.state.lastCheck.IsZero() {
 		t := s.state.lastCheck
 		h.LastCheck = &t

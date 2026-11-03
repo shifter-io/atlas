@@ -28,6 +28,33 @@ type Migration struct {
 	Checksum string
 }
 
+// commentOnlyEdits lists the earlier checksums of applied migrations whose
+// files later changed in comments only: 0001's header names the Go module path,
+// which moved twice (2026-10-24 and 2026-10-27). A database migrated by an
+// older siteapi carries one of these checksums for the same schema, so it is
+// accepted, and `siteapi migrate` rewrites it to the current one. Never add a
+// checksum here for an SQL change: write a new migration.
+var commentOnlyEdits = map[string][]string{
+	"0001_site_schema.sql": {
+		"78404cdaea81a0e58379d7ce47132b8b098f0f6df9c091ce50c7915b57ae8916", // header names ice-zeus/milf-website
+		"8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec", // header names ice-zeus/proxy-index-website
+	},
+}
+
+// SameSchema reports whether a migration applied with checksum sum has m's
+// schema: the current file, or an earlier version that differed in comments.
+func (m Migration) SameSchema(sum string) bool {
+	if sum == m.Checksum {
+		return true
+	}
+	for _, old := range commentOnlyEdits[m.Name] {
+		if sum == old {
+			return true
+		}
+	}
+	return false
+}
+
 // Migrations lists the embedded migrations in version order.
 func Migrations() ([]Migration, error) {
 	entries, err := fs.ReadDir(migrationFiles, "migrations")
@@ -59,7 +86,10 @@ func Migrations() ([]Migration, error) {
 // MigrateResult reports what Migrate did.
 type MigrateResult struct {
 	Applied []string `json:"applied"`
-	Current int      `json:"current_version"`
+	// Rechecked is the applied migrations whose stored checksum was an
+	// earlier comment-only version of the file, now rewritten.
+	Rechecked []string `json:"rechecked,omitempty"`
+	Current   int      `json:"current_version"`
 }
 
 // Migrate applies pending migrations in one transaction under an advisory
@@ -103,8 +133,14 @@ func Migrate(ctx context.Context, conn *pgx.Conn) (MigrateResult, error) {
 		for _, m := range migrations {
 			known[m.Version] = true
 			if sum, ok := applied[m.Version]; ok {
-				if sum != m.Checksum {
+				if !m.SameSchema(sum) {
 					return fmt.Errorf("site schema migration %s was applied with checksum %s but the embedded file is %s; write a new migration instead of editing an applied one", m.Name, sum, m.Checksum)
+				}
+				if sum != m.Checksum {
+					if _, err := tx.Exec(ctx, "UPDATE site.schema_versions SET checksum=$1 WHERE version=$2", m.Checksum, m.Version); err != nil {
+						return err
+					}
+					res.Rechecked = append(res.Rechecked, m.Name)
 				}
 				continue
 			}
@@ -142,7 +178,7 @@ type Querier interface {
 }
 
 // CheckSchema verifies (read-only) that every embedded migration is applied
-// with a matching checksum.
+// with a matching checksum (or an earlier comment-only one, SameSchema).
 func CheckSchema(ctx context.Context, q Querier) error {
 	migrations, err := Migrations()
 	if err != nil {
@@ -177,8 +213,8 @@ func CheckSchema(ctx context.Context, q Querier) error {
 		if !ok {
 			return fmt.Errorf("site schema migration %s is not applied: run `siteapi migrate`", m.Name)
 		}
-		if sum != m.Checksum {
-			return fmt.Errorf("site schema migration %s checksum differs from the binary", m.Name)
+		if !m.SameSchema(sum) {
+			return fmt.Errorf("site schema migration %s was applied with checksum %s, which differs from this binary's %s: the database was migrated by a different siteapi build", m.Name, sum, m.Checksum)
 		}
 	}
 	return nil

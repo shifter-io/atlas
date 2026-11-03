@@ -33,7 +33,47 @@ type Pages struct {
 	Snapshot  *SnapshotSummary           // nil while nothing is published
 	Rankings  map[string]*RankingsAnswer // by range
 	Charts    map[string]*ChartAnswer    // by slug + "/" + kind + "/" + range
+	// Published is every product group of the published snapshot and the
+	// network that should serve it. It is not an answer: the server checks
+	// after each build that each one has its network pages.
+	Published []PublishedProduct
 	lists     map[listKey][]PlaceRow
+}
+
+// PublishedProduct is one product group of the published snapshot.
+type PublishedProduct struct {
+	ID       string
+	Provider string // the framework provider id
+	Kind     string // its category, as the network answers are keyed
+	// Slug is the network that shows it; empty when no network does.
+	Slug string
+	// Hidden is a provider kept off the site on purpose (a catalog row with
+	// listed = false); it has no pages and that is not a gap.
+	Hidden bool
+}
+
+// publishedProducts pairs each snapshot product group with its network.
+func publishedProducts(s *snap.Snapshot, entries []*entry, rows []store.ProviderRow) []PublishedProduct {
+	if s == nil {
+		return nil
+	}
+	slugOf := map[string]string{}
+	for _, e := range entries {
+		if e.P.Framework != nil {
+			slugOf[e.P.Framework.Provider] = e.P.Slug
+		}
+	}
+	hidden := map[string]bool{}
+	for _, r := range rows {
+		if !r.IsDemo && r.FrameworkProvider != nil && !r.Listed {
+			hidden[*r.FrameworkProvider] = true
+		}
+	}
+	out := make([]PublishedProduct, 0, len(s.Products))
+	for _, p := range s.Products {
+		out = append(out, PublishedProduct{ID: p.ID, Provider: p.Provider, Kind: proxyKind(p.Kind), Slug: slugOf[p.Provider], Hidden: hidden[p.Provider]})
+	}
+	return out
 }
 
 // NetworkRow is one network in the overview: the headline numbers the site's
