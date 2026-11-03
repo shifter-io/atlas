@@ -307,6 +307,7 @@ class DeployJob:
     mac_ipv4: str
     token: TokenSource
     size: str | None = None  # a new manager's size; None: the recorded one, else MANAGER_SIZE
+    spaces: bytes | None = None  # the raw-data archive's [spaces] file (ARCHIVE-1), if given
 
     def payload(self) -> bytes:
         assets = files("proxy_index.campaign").joinpath("assets")
@@ -374,6 +375,8 @@ async def deploy(
     await remote.put_secret("do-token", job.token().encode())
     for network, data in job.credentials.items():
         await remote.put_secret(f"credentials/{network}.toml", data)
+    if job.spaces:
+        await remote.put_secret("spaces.toml", job.spaces)
     key_id, key_name, _ = await ops_api.ensure_ssh_key(
         cloud, await _worker_key_name(cloud, now, worker_public), worker_public
     )

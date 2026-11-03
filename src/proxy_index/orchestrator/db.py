@@ -113,6 +113,10 @@ DEFAULTS: dict[str, Any] = {
     "scheduler.pulse_enabled": True,
     # Directory for the HTML batch reports written when a batch closes; None writes none.
     "reports.dir": None,
+    # The daily raw-data archive (proxy_index.archive): off until the bucket is set up.
+    "archive.enabled": False,
+    "archive.spaces_file": ".secrets/spaces.toml",
+    "archive.work_dir": ".state/archive",
 }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import configparser
+import dataclasses
 import io
 import json
 import re
@@ -135,6 +136,17 @@ async def test_the_token_travels_only_on_stdin(job, tmp_path, capsys, caplog):
     secret = "customer-a"
     assert all(secret not in " ".join(argv) for argv, _ in shell.calls)
     assert secret not in job.inventory.read_text()
+
+
+async def test_the_archive_spaces_settings_travel_only_on_stdin(job):
+    shell = Shell()
+    settings = b'[spaces]\nsecret_access_key = "spaces-secret"\n'
+    await run_deploy(Fake(), dataclasses.replace(job, spaces=settings), shell)
+    assert shell.commands()[-1].split("&&")[1].strip() == (
+        "cat > /opt/proxy-index-campaign/.secrets/spaces.toml.partial"
+    )
+    assert all("spaces-secret" not in " ".join(argv) for argv, _ in shell.calls)
+    assert [stdin for _, stdin in shell.calls if b"spaces-secret" in stdin] == [settings]
 
 
 async def test_the_provision_payload(job):
