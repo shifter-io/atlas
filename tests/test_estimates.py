@@ -78,7 +78,8 @@ def test_every_committed_formula_gives_measured_times_factor_at_its_test_hour(ne
             if factor is None:  # no data: not estimated, never 0
                 assert row["unique_ips"] is row["requests"] is None and row["reason"]
                 continue
-            assert row["unique_ips"] == pytest.approx(200 * factor) > 0
+            assert row["unique_ips"] > 0
+            assert row["unique_ips"] == pytest.approx(200 * factor)
             assert row["day_unique_ips"] == pytest.approx(200 * entry["daily_factor"])
         network = entry["curve"] == "network"
         curve = f["network_curve"]["requests"] if network else entry["requests"]

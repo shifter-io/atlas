@@ -51,6 +51,7 @@
   },
   "network_curve": {
     "status": ["present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present", "present"],
+    "no_data_reasons": [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
     "unique_ips": [1204926, 1259200, 1320360, 1340223, 1369536, 1407093, 1439785, 1462595, 1462020, 1266951, 1463624, 1486681, 1484421, 1487500, 1444369, 1422234, 1413446, 1391130, 1351644, 1276850, 1259598, 1228322, 1185823, 1166286],
     "requests": [2789869, 2890704, 3025025, 3047107, 3112736, 3188653, 3264014, 3298923, 3292903, 2851604, 3293902, 3338450, 3335430, 3341498, 3241397, 3211369, 3192734, 3159843, 3065993, 2931820, 2900419, 2841785, 2760631, 2706737],
     "attempted_requests": [2974064, 3074147, 3204340, 3237674, 3292734, 3372015, 3441671, 3482787, 3484478, 3100205, 3486777, 3530337, 3529636, 3532399, 3447079, 3404343, 3386652, 3346747, 3266190, 3125272, 3093488, 3031742, 2942446, 2890628],
