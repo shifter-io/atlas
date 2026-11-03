@@ -63,7 +63,7 @@ General rules:
 | `profiles[]` | `site.ranking_profiles` | same (catalog) | catalog |
 | `totals` | computed (below) | computed | data |
 | `providers[]` | below | below | |
-| `tape[]` | `site.tape_events` | `public.test_events` (newest 200, mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then editorial and demo rows | never |
+| `tape[]` | `site.tape_events` | `public.test_events` (200 rows, newest first: the newest non-routine rows up to 100, then the newest of any kind, as `/v1/events` picks them; mapped by the port of `tape.ts tapeFromEvents`); measured rows first, then editorial and demo rows | never |
 | `changelog[]` | `site.changelog` | same | never |
 | `reviews[]` | `site.reviews` | same | never |
 | `communityRuns[]` | `site.community_runs` | same | never |

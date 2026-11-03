@@ -276,10 +276,40 @@ type Inputs struct {
 	Events             []Event
 	// EventsComplete is true when Events holds every row of test_events.
 	EventsComplete bool
+	// Notable holds the newest non-routine events older than Events (at most
+	// NotableWindow), so routine bursts never push them out of memory;
+	// NotableComplete is true when it holds every such row.
+	Notable         []Event
+	NotableComplete bool
+}
+
+// loadEvents reads the newest EventWindow events and, past them, the newest
+// NotableWindow non-routine ones.
+func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
+	const order = ` ORDER BY e.at DESC, e.event_id DESC LIMIT `
+	in.Events, err = collect(ctx, tx, `SELECT `+EventColumns+order+`$1`, ScanEvent, EventWindow+1)
+	if err != nil {
+		return err
+	}
+	in.EventsComplete, in.NotableComplete = len(in.Events) <= EventWindow, true
+	if in.EventsComplete {
+		return nil
+	}
+	in.Events = in.Events[:EventWindow]
+	last := in.Events[EventWindow-1]
+	in.Notable, err = collect(ctx, tx, `SELECT `+EventColumns+` WHERE NOT `+routineSQL+
+		` AND e.at <= $1 AND (e.at, e.event_id) < ($1, $2)`+order+`$3`, ScanEvent, last.At, last.ID, NotableWindow+1)
+	if len(in.Notable) > NotableWindow {
+		in.Notable, in.NotableComplete = in.Notable[:NotableWindow], false
+	}
+	return err
 }
 
 // EventWindow is how many of the newest events are held in memory.
 const EventWindow = 2000
+
+// NotableWindow is how many non-routine events older than the window are held.
+const NotableWindow = 500
 
 func collect[T any](ctx context.Context, tx pgx.Tx, sql string, scan func(pgx.Rows, *T) error, args ...any) ([]T, error) {
 	rows, err := tx.Query(ctx, sql, args...)
@@ -481,16 +511,7 @@ func Load(ctx context.Context, db interface {
 			}
 			return s.readPlaceRows(ctx, tx)
 		},
-		func() (err error) {
-			in.Events, err = collect(ctx, tx, `SELECT `+EventColumns+` ORDER BY e.at DESC, e.event_id DESC LIMIT $1`, ScanEvent, EventWindow+1)
-			if err == nil {
-				in.EventsComplete = len(in.Events) <= EventWindow
-				if !in.EventsComplete {
-					in.Events = in.Events[:EventWindow]
-				}
-			}
-			return
-		},
+		func() error { return in.loadEvents(ctx, tx) },
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {

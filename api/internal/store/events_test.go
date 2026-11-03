@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"context"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
@@ -53,5 +55,127 @@ func TestQueryEventsCategoryMatchesCategory(t *testing.T) {
 				t.Errorf("%s missing from the %s tab", kind, tab)
 			}
 		}
+	}
+}
+
+func kindsOf(rows []store.Event) []string {
+	out := []string{}
+	for _, e := range rows {
+		out = append(out, e.Kind)
+	}
+	return out
+}
+
+func TestRoutineKinds(t *testing.T) {
+	for kind, tab := range tapeKinds {
+		want := tab == "census" || kind == "pulse_finished"
+		if store.Routine(kind) != want {
+			t.Errorf("Routine(%q) = %v", kind, !want)
+		}
+	}
+}
+
+// Prioritize keeps the newest notable rows up to half the page, then fills it
+// with the newest rows of any kind, newest first.
+func TestPrioritize(t *testing.T) {
+	kinds := []string{"estimate_hour_released", "pulse_finished", "estimate_hour_released", "pulse_down",
+		"latency_rise", "estimate_hour_released", "down", "recovered", "new_hosting_asn"}
+	kind := func(i int) string { return kinds[i] }
+	for _, c := range []struct {
+		limit int
+		want  []int
+	}{
+		{1, []int{3}},
+		{2, []int{0, 3}},
+		{4, []int{0, 1, 3, 4}},
+		{6, []int{0, 1, 2, 3, 4, 6}},
+		{9, []int{0, 1, 2, 3, 4, 5, 6, 7, 8}},
+		{20, []int{0, 1, 2, 3, 4, 5, 6, 7, 8}},
+	} {
+		if got := store.Prioritize(len(kinds), c.limit, kind); !slices.Equal(got, c.want) {
+			t.Errorf("limit %d: %v, want %v", c.limit, got, c.want)
+		}
+	}
+	if got := store.Prioritize(0, 5, kind); len(got) != 0 {
+		t.Errorf("no rows: %v", got)
+	}
+}
+
+// A named kind or tab gets exactly the newest rows; the tape's filters get the choice.
+func TestPickPrioritizesOnlyUnnamedFilters(t *testing.T) {
+	at := time.Date(2026, 11, 2, 16, 0, 0, 0, time.UTC)
+	rows := []store.Event{}
+	for i, k := range []string{"estimate_hour_released", "estimate_hour_released", "estimate_hour_released", "pulse_down"} {
+		rows = append(rows, store.Event{ID: int64(10 - i), At: at.Add(-time.Duration(i) * time.Minute), Kind: k})
+	}
+	if got := kindsOf(store.Pick(rows, store.EventFilter{Limit: 2})); !slices.Equal(got, []string{"estimate_hour_released", "pulse_down"}) {
+		t.Errorf("tape filter: %v", got)
+	}
+	if got := store.Pick(rows, store.EventFilter{Category: "census", Limit: 2}); len(got) != 2 || got[1].ID != 9 {
+		t.Errorf("census tab: %v", kindsOf(got))
+	}
+	if got := store.Pick(rows, store.EventFilter{Kinds: []string{"estimate_hour_released", "pulse_down"}, Limit: 2}); got[1].ID != 9 {
+		t.Errorf("named kinds: %v", kindsOf(got))
+	}
+}
+
+// TAPE-2 against the database: a release burst bigger than the in-memory window
+// leaves the older pulse down and latency rise in memory (Inputs.Notable) and on
+// the database fallback's first page.
+func TestNotableEventsSurviveAReleaseBurst(t *testing.T) {
+	db := testdb.New(t)
+	ctx := context.Background()
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T15:00:00Z','pulse_down',-1,'major'),"+
+		"('2026-11-02T14:00:00Z','latency_rise',-1,'minor'),('2026-11-02T13:00:00Z','estimate_hour_released',0,'info')")
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) SELECT '2026-11-02T16:00:30Z','estimate_hour_released',0,'info'"+
+		" FROM generate_series(1,$1::int)", store.EventWindow+1)
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	in, err := store.Load(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(in.Events) != store.EventWindow || in.EventsComplete || !in.NotableComplete ||
+		!slices.Equal(kindsOf(in.Notable), []string{"pulse_down", "latency_rise"}) {
+		t.Fatalf("window %d complete %v, notable %v complete %v", len(in.Events), in.EventsComplete, kindsOf(in.Notable), in.NotableComplete)
+	}
+	page, err := store.QueryEvents(ctx, pool, store.EventFilter{Limit: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := kindsOf(page); !slices.Equal(got, []string{"estimate_hour_released", "estimate_hour_released", "pulse_down", "latency_rise"}) {
+		t.Fatalf("first page %v", got)
+	}
+	tab, err := store.QueryEvents(ctx, pool, store.EventFilter{Category: "incident", Limit: 4})
+	if err != nil || !slices.Equal(kindsOf(tab), []string{"latency_rise"}) {
+		t.Fatalf("incident tab %v %v", kindsOf(tab), err)
+	}
+	since := time.Date(2026, 11, 2, 14, 30, 0, 0, time.UTC)
+	named, err := store.QueryEvents(ctx, pool, store.EventFilter{Kinds: []string{"pulse_down", "latency_rise"}, Since: &since, Limit: 4})
+	if err != nil || !slices.Equal(kindsOf(named), []string{"pulse_down"}) {
+		t.Fatalf("named kinds since 14:30 %v %v", kindsOf(named), err)
+	}
+	if none, err := store.QueryEvents(ctx, pool, store.EventFilter{Product: "nobody/residential", Limit: 4}); err != nil || len(none) != 0 {
+		t.Fatalf("unknown product %v %v", kindsOf(none), err)
+	}
+}
+
+// Two lists held newest first merge into one, a row in both kept once.
+func TestMergeNewest(t *testing.T) {
+	at := time.Date(2026, 11, 2, 16, 0, 0, 0, time.UTC)
+	row := func(id int64, minutes int) store.Event {
+		return store.Event{ID: id, At: at.Add(time.Duration(minutes) * time.Minute)}
+	}
+	a := []store.Event{row(9, 5), row(7, 0), row(6, 0), row(2, -9)}
+	b := []store.Event{row(8, 3), row(7, 0), row(3, -5)}
+	ids := []int64{}
+	for _, e := range store.MergeNewest(a, b) {
+		ids = append(ids, e.ID)
+	}
+	if !slices.Equal(ids, []int64{9, 8, 7, 6, 3, 2}) {
+		t.Fatalf("merged %v", ids)
 	}
 }

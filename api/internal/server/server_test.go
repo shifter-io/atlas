@@ -25,14 +25,18 @@ func sptr(s string) *string { return &s }
 
 // fakeSource serves synthetic inputs; rev changes both the fingerprint and the data.
 type fakeSource struct {
-	mu        sync.Mutex
-	rev       int64
-	fail      error
-	loads     atomic.Int64
-	events    []store.Event
-	complete  bool
-	dbQueries atomic.Int64
-	slowLoad  time.Duration
+	mu       sync.Mutex
+	rev      int64
+	fail     error
+	loads    atomic.Int64
+	events   []store.Event
+	complete bool
+	// notable is the non-routine rows past the window (store.Inputs.Notable);
+	// notableCut marks that list as truncated.
+	notable    []store.Event
+	notableCut bool
+	dbQueries  atomic.Int64
+	slowLoad   time.Duration
 }
 
 func (f *fakeSource) Fingerprint(context.Context) (store.Fingerprint, error) {
@@ -57,18 +61,14 @@ func (f *fakeSource) Load(context.Context) (*store.Inputs, error) {
 	if f.fail != nil {
 		return nil, f.fail
 	}
-	return fixture(f.rev, f.events, f.complete), nil
+	in := fixture(f.rev, f.events, f.complete)
+	in.Notable, in.NotableComplete = f.notable, !f.notableCut
+	return in, nil
 }
 
 func (f *fakeSource) Events(_ context.Context, filter store.EventFilter) ([]store.Event, error) {
 	f.dbQueries.Add(1)
-	out := []store.Event{}
-	for i := range f.events {
-		if filter.Match(&f.events[i]) && len(out) < filter.Limit {
-			out = append(out, f.events[i])
-		}
-	}
-	return out, nil
+	return store.Pick(append(append([]store.Event{}, f.events...), f.notable...), filter), nil
 }
 
 func doc(v string) json.RawMessage { return json.RawMessage(v) }

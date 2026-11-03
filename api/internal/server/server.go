@@ -466,25 +466,10 @@ type eventsResponse struct {
 	Events []store.EventJSON `json:"events"`
 }
 
-// eventsFromWindow answers from the in-memory newest-events window when it
-// provably holds the whole answer; ok=false means the database must be asked.
+// eventsFromWindow answers from the build's in-memory events when they
+// provably hold the whole answer; ok=false means the database must be asked.
 func eventsFromWindow(res *build.Result, f store.EventFilter) (out []store.EventJSON, ok bool) {
-	out = []store.EventJSON{}
-	for i := range res.RawEvents {
-		if f.Match(&res.RawEvents[i]) {
-			out = append(out, res.Events[i])
-			if len(out) == f.Limit {
-				return out, true
-			}
-		}
-	}
-	if res.EventsComplete {
-		return out, true
-	}
-	if f.Since != nil && len(res.RawEvents) > 0 && !res.RawEvents[len(res.RawEvents)-1].At.After(*f.Since) {
-		return out, true
-	}
-	return out, false
+	return res.Events.Answer(f)
 }
 
 func eventsBody(res *build.Result, f store.EventFilter) (*eventsResponse, error) {

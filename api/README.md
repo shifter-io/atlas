@@ -65,10 +65,10 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | Path | Body |
 |---|---|
 | `/v1/dataset` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"). |
-| `/v1/overview` | What the Overview page computes: `totals`, `weights`, `profiles`, `ranges`, `fleetViews` (port of `overview.ts` and `window.ts fleetWindow`), `costBoards`, a `leaderboard` of provider summaries with `windows` (`windowStats` for 24h/7d/30d), the first 60 `tape` rows, `snapshot`, `na`. |
+| `/v1/overview` | What the Overview page computes: `totals`, `weights`, `profiles`, `ranges`, `fleetViews` (port of `overview.ts` and `window.ts fleetWindow`), `costBoards`, a `leaderboard` of provider summaries with `windows` (`windowStats` for 24h/7d/30d), 60 `tape` rows (the first 60, or when measured rows fill them, chosen among those like `/v1/events` chooses), `snapshot`, `na`. |
 | `/v1/providers` | `{generatedAt, providers: ProviderSummary[]}` in leaderboard order (rank, unranked last). |
 | `/v1/providers/{slug}` | `{provider, windows: {category: {range: WindowStats}}, reviews (published), communityRuns, changelog, tape, generatedAt}`. Gives 404 for an unknown slug. |
-| `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (`src/lib/measured-types.ts` `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. |
+| `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (`src/lib/measured-types.ts` `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like `CommandPalette.astro` (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex`: networks, guides, network reviews, pages, targets, actions, plus a new `Countries` group) and the palette's constants. |
 | `/v1/coverage` | The N/A report: summary counts, dataset-level gaps, per-provider gaps grouped by section with a reason for each, per-target/scope/profile gaps, record counts, and a per-field index of which providers lack it. |
@@ -115,12 +115,15 @@ fixture-only targets, and `"catalog"` for editorial ones.
   scores it against the in-memory index, and keeps the rendered response in a
   bounded LRU of 1,024 entries. The LRU is per version, so a rebuild cannot serve
   stale results.
-- **Events.** The newest 2,000 events are held in memory. The default query is
-  pre-rendered. Other filters are answered from memory when the window provably
-  contains the whole answer:
+- **Events.** The newest 2,000 events are held in memory, and past them the newest
+  500 non-routine events (so a burst of hourly estimate releases never evicts a
+  pulse down or an incident). The default query is pre-rendered. Other filters are
+  answered from memory when the window provably contains the whole answer:
   - `limit` matches were found,
   - or the table has no more rows,
-  - or `since` is newer than the window's oldest event.
+  - or `since` is newer than the window's oldest event;
+  - and for a filter without `kind` or `category`, also the newest half-`limit`
+    non-routine matches were found (or all of them are held).
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version.

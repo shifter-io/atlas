@@ -66,8 +66,104 @@ func (f EventFilter) Match(e *Event) bool {
 	return true
 }
 
+// Routine reports whether a kind is a routine milestone: the census tab (census_*,
+// the daily test and the hourly estimate releases) and pulse_finished. They come in
+// bursts (an hour's release writes one row per network, a catch-up after a gap many
+// hours of them), so the live tape's lists keep a share for the other kinds: pulse
+// down and recovered, incidents such as latency_rise and outages, and audits.
+func Routine(kind string) bool {
+	return Category(kind) == "census" || kind == "pulse_finished"
+}
+
+// routineSQL is Routine in SQL for the row alias e.
+const routineSQL = `(left(e.kind,7)='census_' OR e.kind IN
+ ('daily_test_started','daily_test_finished','estimate_hour_released','pulse_finished'))`
+
+// Prioritized reports whether f is answered with Prioritize: it names no kind and
+// no tab, as the live tape's polls do. A filter that names kinds or a tab gets
+// exactly the newest matching rows.
+func (f EventFilter) Prioritized() bool { return len(f.Kinds) == 0 && f.Category == "" }
+
+// NotableQuota is how many of a prioritized answer's `limit` rows the newest
+// non-routine rows may take before routine rows (half, rounded up).
+func NotableQuota(limit int) int { return (limit + 1) / 2 }
+
+// Prioritize picks at most `limit` of n rows held newest first (kind(i) is row i's
+// kind) and returns their indices, newest first: the newest non-routine rows up to
+// NotableQuota(limit), then the newest remaining rows of any kind. So routine rows
+// never push the newest notable ones off a page, and notable rows never take more
+// than half of it while routine rows are waiting. The rows must hold the newest
+// `limit` rows of the answer and its newest NotableQuota(limit) non-routine rows.
+func Prioritize(n, limit int, kind func(int) string) []int {
+	take := make([]bool, n)
+	picked := 0
+	for i := 0; i < n && picked < NotableQuota(limit); i++ {
+		if !Routine(kind(i)) {
+			take[i] = true
+			picked++
+		}
+	}
+	for i := 0; i < n && picked < limit; i++ {
+		if !take[i] {
+			take[i] = true
+			picked++
+		}
+	}
+	out := make([]int, 0, picked)
+	for i, ok := range take {
+		if ok {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// Pick answers f from rows held newest first: the newest f.Limit matching rows, or
+// for a prioritized filter the Prioritize choice among them (see its precondition).
+func Pick(rows []Event, f EventFilter) []Event {
+	matched := []Event{}
+	for i := range rows {
+		if f.Match(&rows[i]) {
+			matched = append(matched, rows[i])
+		}
+	}
+	if !f.Prioritized() {
+		return matched[:min(len(matched), f.Limit)]
+	}
+	out := []Event{}
+	for _, i := range Prioritize(len(matched), f.Limit, func(i int) string { return matched[i].Kind }) {
+		out = append(out, matched[i])
+	}
+	return out
+}
+
+// Newer is the events' order, newest first: time, then id.
+func Newer(a, b *Event) bool {
+	if !a.At.Equal(b.At) {
+		return a.At.After(b.At)
+	}
+	return a.ID > b.ID
+}
+
+// mergeNewest merges two lists held newest first, dropping rows present in both.
+func mergeNewest(a, b []Event) []Event {
+	out := make([]Event, 0, len(a)+len(b))
+	for len(a) > 0 || len(b) > 0 {
+		switch {
+		case len(b) == 0 || (len(a) > 0 && Newer(&a[0], &b[0])):
+			out, a = append(out, a[0]), a[1:]
+		case len(a) == 0 || Newer(&b[0], &a[0]):
+			out, b = append(out, b[0]), b[1:]
+		default: // the same row
+			out, a, b = append(out, a[0]), a[1:], b[1:]
+		}
+	}
+	return out
+}
+
 // QueryEvents is the database fallback when the in-memory window cannot
-// answer a filter on its own (read-only pool).
+// answer a filter on its own (read-only pool). A prioritized filter reads the
+// newest rows and the newest non-routine rows, and picks among both.
 func QueryEvents(ctx context.Context, db interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 }, f EventFilter) ([]Event, error) {
@@ -76,8 +172,19 @@ func QueryEvents(ctx context.Context, db interface {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	clauses := []string{}
-	args := []any{}
+	clauses, args := eventClauses(f)
+	rows, err := newestEvents(ctx, tx, clauses, args, f.Limit)
+	if err != nil || !f.Prioritized() {
+		return rows, err
+	}
+	notable, err := newestEvents(ctx, tx, append(clauses, "NOT "+routineSQL), args, NotableQuota(f.Limit))
+	if err != nil {
+		return nil, err
+	}
+	return Pick(mergeNewest(rows, notable), f), nil
+}
+
+func eventClauses(f EventFilter) (clauses []string, args []any) {
 	add := func(sql string, v any) {
 		args = append(args, v)
 		clauses = append(clauses, strings.ReplaceAll(sql, "?", "$"+itoa(len(args))))
@@ -101,11 +208,15 @@ func QueryEvents(ctx context.Context, db interface {
 	if f.Since != nil {
 		add("e.at>?", *f.Since)
 	}
+	return clauses, args
+}
+
+func newestEvents(ctx context.Context, tx pgx.Tx, clauses []string, args []any, limit int) ([]Event, error) {
 	where := ""
 	if len(clauses) > 0 {
 		where = " WHERE " + strings.Join(clauses, " AND ")
 	}
-	args = append(args, f.Limit)
+	args = append(args[:len(args):len(args)], limit)
 	return collect(ctx, tx, "SELECT "+EventColumns+where+" ORDER BY e.at DESC, e.event_id DESC LIMIT $"+itoa(len(args)), ScanEvent, args...)
 }
 

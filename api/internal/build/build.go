@@ -32,9 +32,7 @@ type Result struct {
 	Search          *SearchIndex
 	Coverage        *Coverage
 	SnapshotPayload []byte
-	Events          []store.EventJSON
-	RawEvents       []store.Event
-	EventsComplete  bool
+	Events          EventWindow
 }
 
 // JSISO is Date.prototype.toISOString.
@@ -455,15 +453,8 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	for _, fp := range in.FrameworkProducts {
 		products = append(products, TapeProduct{Provider: fp.Provider, Name: nameOrSlug(slugOfFramework[fp.Provider]), Kind: fp.Name})
 	}
-	res.RawEvents, res.EventsComplete = in.Events, in.EventsComplete
-	res.Events = make([]store.EventJSON, len(in.Events))
-	for i := range in.Events {
-		res.Events[i] = in.Events[i].JSON()
-	}
-	tapeEvents := res.Events
-	if len(tapeEvents) > MeasuredTapeRows {
-		tapeEvents = tapeEvents[:MeasuredTapeRows]
-	}
+	res.Events = newEventWindow(in)
+	tapeEvents := res.Events.measuredTape()
 	tapeRef := ds.GeneratedAt
 	if s != nil {
 		tapeRef = s.GeneratedAt
@@ -637,10 +628,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	for _, r := range Ranges {
 		boards = append(boards, costBoard(entries, stats, r.ID))
 	}
-	tapeHead := ds.Tape
-	if len(tapeHead) > 60 {
-		tapeHead = tapeHead[:60]
-	}
+	tapeHead := overviewTape(ds.Tape, sorted, 60)
 	ov := &Overview{GeneratedAt: ds.GeneratedAt, Simulated: ds.Simulated, Snapshot: ds.Snapshot, Totals: ds.Totals, Weights: ds.Weights,
 		Profiles: ds.Profiles, Ranges: Ranges, FleetViews: fleetViews(fleet, stats, ds.Totals, basis), CostBoards: boards,
 		Leaderboard: []ProviderSummary{}, Tape: tapeHead, NA: ds.NA}
