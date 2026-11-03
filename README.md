@@ -100,12 +100,14 @@ each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names in
 lists `place_names` and `asn_names`: `enrichment_locations` keeps a place id and coordinates,
 `enrichment_networks` an ASN name id and the per-IP network attributes, every location and network
 id is kept, and the views `enrichment_location_fields` and `enrichment_network_fields` give their
-old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged). `db-init` verifies
-v9 and refuses other schemas. `proxy-index db-migrate --database-file .secrets/database.toml`
-upgrades an unmodified v8, v7, v6 or v5 database, or an unmodified v4 database (and calculated v1
-layer) through v5 to v8, in place, in one transaction that compares every rebuilt summary, scope,
-pool, bucket, location, network and per-IP enrichment (from v6 every test batch, and from v4
-every cohort, breakdown and score) with its original before committing. Run it on every
+old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged); schema v10
+(`migrate_v9_v10.sql`) adds `estimated_hours`; schema v11 (`migrate_v10_v11.sql`) adds the batch
+kind `browser` (the browser pulse) and changes no row. `db-init` verifies v11 and refuses other
+schemas. `proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5
+to v10 database, or an unmodified v4 database (and calculated v1 layer) through v5 to v11, in
+place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
+network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
+score) with its original before committing. Run it on every
 database (production and staging) before starting the new orchestrator. Locally, run
 `PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
 The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
