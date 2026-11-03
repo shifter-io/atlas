@@ -1,7 +1,7 @@
 """Test doubles for the DB-IP update: a tiny real MMDB and a loopback CDN.
 
-`tiny_mmdb` writes a valid MaxMind DB (IPv4, one search-tree node): addresses below 128.0.0.0
-resolve to `low`, the rest to `high`. `FakeCdn` serves dated files over HEAD and GET on
+`tiny_mmdb` writes a valid MaxMind DB (IPv4, one search-tree node): addresses in the lower half
+of IPv4 resolve to `low`, the rest to `high`. `FakeCdn` serves dated files over HEAD and GET on
 127.0.0.1 and counts the requests.
 """
 
