@@ -400,7 +400,10 @@ async def test_distinct_ips_count_only_each_windows_own_tests(tmp_path, database
 async def test_retention_deletes_estimated_hours_past_the_longest_window(tmp_path, database, db):
     seed(database)
     compute.estimate_run(database, await imported(tmp_path, database, T1), "DE", formula(DE={}))
-    result = await retention(db, T2 + timedelta(days=30))  # keeps day 2 onwards
+    # The default keeps 35 days: the longest window (30) and the days until the raw archive
+    # takes the run's day (ARCHIVE-1).
+    assert DEFAULTS["retention.estimates_days"] == 35
+    result = await retention(db, T2 + timedelta(days=35))  # keeps day 2 onwards
     assert result["estimated_hours_deleted"] == 9  # day 1, hours 15..23
     assert {r["day"].day for r in stored(database)} == {2}
 
