@@ -29,8 +29,9 @@ type Pages struct {
 	Network   map[string]*NetworkAnswer // by slug + "/" + kind
 	Primary   map[string]string         // slug -> its headline kind
 	Countries CountriesAnswer
-	Country   map[string]*CountryAnswer // by upper-case country code
-	Snapshot  *SnapshotSummary          // nil while nothing is published
+	Country   map[string]*CountryAnswer  // by upper-case country code
+	Snapshot  *SnapshotSummary           // nil while nothing is published
+	Rankings  map[string]*RankingsAnswer // by range
 	lists     map[listKey][]PlaceRow
 }
 
@@ -87,22 +88,32 @@ type PlaceRow struct {
 
 // DayRow is one UTC day of a network's 30-day window, summed over its
 // product groups. IpsSum adds each group's distinct IPs (an upper bound of
-// the day's distinct IPs, not a distinct count).
+// the day's distinct IPs, not a distinct count); UniqueIps is the day's
+// distinct exit IPs where they are known (one product group, or the
+// all-networks answer), else null.
 type DayRow struct {
 	Day         string `json:"day"`
 	Requests    Num    `json:"requests"`
 	Successes   Num    `json:"successes"`
 	SuccessRate Num    `json:"successRate"`
 	IpsSum      Num    `json:"ipsSum"`
+	UniqueIps   Num    `json:"uniqueIps"`
 }
 
 // RangeTotals sums a network's product groups over one range; IpsSum adds
-// each group's distinct IPs (an upper bound, not a distinct count).
+// each group's distinct IPs (an upper bound, not a distinct count). UniqueIps
+// and the latency percentiles cannot be added up: they are the group's own
+// with one product group, the snapshot's every-group fleet for the
+// all-networks answer, and null otherwise.
 type RangeTotals struct {
 	Requests      Num            `json:"requests"`
 	Successes     Num            `json:"successes"`
 	SuccessRate   Num            `json:"successRate"`
 	IpsSum        Num            `json:"ipsSum"`
+	UniqueIps     Num            `json:"uniqueIps"`
+	LatencyP50    Num            `json:"latencyP50"`
+	LatencyP90    Num            `json:"latencyP90"`
+	LatencyP99    Num            `json:"latencyP99"`
 	ExitCountries int            `json:"exitCountries"`
 	Countries     []PlaceRow     `json:"countries"`
 	Lists         map[string]int `json:"lists"`
@@ -118,6 +129,7 @@ type NetworkAnswer struct {
 	RequestedCountries []string                `json:"requestedCountries"`
 	Days               []DayRow                `json:"days"`
 	Ranges             map[string]*RangeTotals `json:"ranges"`
+	Networks           int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
 }
 
 // CountryIndexRow is one country of /v1/countries (30-day window); IpsSum
@@ -175,7 +187,7 @@ type PeerScores struct {
 }
 
 // buildPages computes every per-page answer of a build.
-func buildPages(generatedAt string, entries []*entry, s *snap.Snapshot, row *store.SnapshotRow) *Pages {
+func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, s *snap.Snapshot, row *store.SnapshotRow) *Pages {
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
 		lists: map[listKey][]PlaceRow{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
@@ -202,6 +214,14 @@ func buildPages(generatedAt string, entries []*entry, s *snap.Snapshot, row *sto
 	}
 	sort.SliceStable(pg.Networks.Networks, func(i, j int) bool { return rankLess(pg.Networks.Networks[i], pg.Networks.Networks[j]) })
 	pg.countryAnswers(generatedAt, byCountry)
+	pg.Rankings = rankings(generatedAt, entries, stats)
+	if pg.Primary[AllNetworks] == "" {
+		ans, places := allAnswer(generatedAt, s, row)
+		pg.Network[AllNetworks+"/"+AllNetworks], pg.Primary[AllNetworks] = ans, AllNetworks
+		for key, rows := range places {
+			pg.lists[listKey{scope: AllNetworks + "/" + AllNetworks, rangeID: key.rangeID, dimension: key.dimension}] = rows
+		}
+	}
 	if s != nil {
 		pg.Snapshot = snapshotSummary(s, row, entries)
 	}

@@ -362,3 +362,81 @@ fifth with the opening fifth of observed samples in the selected window. Finer
 Success is a percentage-point difference; latency is a percentage change in the
 HTTP headline basis (under load for every-request snapshots). Two observations
 are required; an under-load comparison never substitutes light-load latency.
+
+## Per-page answers
+
+These small answers (each at most 200 KB, `build.MaxAnswerBytes`) are computed
+once per build from the published snapshot and the dataset's providers. Numbers
+the API does not have are `null`, as everywhere else.
+
+### `/v1/rankings?range=24h|7d|30d`
+
+The overview list in its final order, so a page renders it at once. One row
+per network (measured and demo). `position` is the list order: measured
+networks by the `balanced` score of their headline product group for that
+range (`windows[range].scores.balanced`: `score`, `grade`, `rank`,
+`previous_rank`, the component values as `breakdown`, `peers` from the
+components' `inputs.peers`), highest first; networks without a score follow by
+name. `rank` stays the framework's rank among the ready networks of the same
+kind, so two kinds can each have a `rank` 1. A demo network's score and rank
+are its catalog values (the same for every range). The other numbers are that
+range's `windowStats` (see "Window statistics of a measured provider"):
+`successRate`, `successDeltaPts`, `latencyP50` (the headline basis, under load
+in every-request snapshots), `latencyDeltaPct`, `uniqueIps` (the headline
+group's distinct IPs), `costPer1kSuccess`, `valueRank` (the position in that
+range's `costBoards`, null when unpriced), `trend` (the window's success
+history thinned to at most 26 values); `countries` and `datacenterAsnShare` are
+the provider's `pool.countries` and `trust.datacenterAsnShare`.
+
+```json
+{"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced","networks":[
+ {"position":1,"slug":"net00","name":"Net 00","source":"measured","kind":"residential","kinds":["residential"],
+  "rank":1,"peers":18,"previousRank":2,"score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
+  "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyDeltaPct":-2.1,"uniqueIps":15320,"countries":212,
+  "datacenterAsnShare":0.012,"costPer1kSuccess":0.31,"valueRank":3,"trend":[0.97,0.98,0.99]},
+ {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
+  "rank":null,"peers":null,"previousRank":null,"score":null,"grade":null,"breakdown":{"reliability":null,"...":null},
+  "successRate":null,"successDeltaPts":null,"latencyP50":null,"latencyDeltaPct":null,"uniqueIps":null,"countries":null,
+  "datacenterAsnShare":null,"costPer1kSuccess":null,"valueRank":null,"trend":[]}]}
+```
+
+### `/v1/networks/all`
+
+Every network together, as one more network in the shape of
+`/v1/networks/{slug}`: `network` (`slug`, `kind` `"all"`, `kinds` every tested
+category, `rank`/`score` null; `uniqueIps`, `countries`, `latencyP50`,
+`successRate` of the 30d range), `networks` (how many networks published a
+product group), `productGroups`, `requestedCountries`, `days` and `ranges`.
+
+- Summed over every product group, exactly: `requests`, `successes`,
+  `successRate` (successes ÷ requests), per day as well.
+- Distinct, from the snapshot's every-group `fleet` entry of the range
+  (`cohort` `"*"`, proxy-index `fleet_totals`): `uniqueIps` (`unique_ips`: an
+  exit IP seen by several networks or requested countries counts once),
+  `latencyP50/P90/P99` (`metrics.latency_ms`: light-load latency over every
+  group, merged as within a cohort) and each day's `uniqueIps` (the 30d entry's
+  `series[].unique_ips`). A snapshot without that entry leaves them null; they
+  are never a sum of the networks' figures, and the summed `ipsSum` totals are
+  null here.
+- Places: `exitCountries`, `lists` and the top 50 `countries` are the union of
+  every network's places (so `lists.country`, `.region`, `.city`, `.asn` are the
+  distinct places seen); a place row adds the networks' requests and its
+  `ipsSum` adds their IPs (an upper bound, as on a network's rows).
+  `/v1/networks/all/places?dimension=&range=&q=&page=` pages them.
+
+A network's own answer has the same distinct fields: with one product group in
+the category they are that group's (`pool.unique_ips`, `metrics.latency_ms`,
+`series[].unique_ips`); with several they are null, because the groups' IPs
+can repeat and percentiles do not add up.
+
+```json
+{"generatedAt":"2026-11-03T09:00:00.000Z","kind":"all","networks":18,"productGroups":720,"requestedCountries":["AA","AB","..."],
+ "network":{"slug":"all","name":"All networks","source":"measured","kind":"all","kinds":["residential"],"rank":null,"score":null,
+  "uniqueIps":4321,"countries":240,"latencyP50":1113,"successRate":0.981},
+ "days":[{"day":"2026-10-05","requests":120000,"successes":117700,"successRate":0.981,"ipsSum":null,"uniqueIps":2210}],
+ "ranges":{"24h":{"requests":4000,"successes":3925,"successRate":0.981,"ipsSum":null,"uniqueIps":1630,
+  "latencyP50":1113,"latencyP90":1395,"latencyP99":3292,"exitCountries":240,
+  "countries":[{"key":"US","countryCode":"US","country":"United States","ipsSum":5100,"requests":900,"successes":880,
+   "successRate":0.978,"latencyP50":980}],
+  "lists":{"country":240,"region":1800,"city":9000,"asn":2500}},"7d":{"...":null},"30d":{"...":null}}}
+```

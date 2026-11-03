@@ -90,7 +90,8 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 	srv.current.Store(v)
 	h := srv.Handler()
 	for _, path := range []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
-		"/v1/networks/net00/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1"} {
+		"/v1/networks/net00/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
+		"/v1/networks/all/places?dimension=city&range=24h"} {
 		rec := get(h, path)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body)

@@ -33,6 +33,9 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	for cc, ans := range pg.Country {
 		out["/v1/countries/"+cc] = ans
 	}
+	for r, ans := range pg.Rankings {
+		out["/v1/rankings/"+r] = ans
+	}
 	if pg.Snapshot != nil {
 		out["/v1/snapshot"] = pg.Snapshot
 	}
@@ -49,6 +52,21 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 		if onlyParams(w, r.URL.Query()) {
 			s.serveStatic(w, r, "/v1/countries")
 		}
+	})
+	mux.HandleFunc("GET /v1/rankings", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if !onlyParams(w, q, "range") {
+			return
+		}
+		rangeID := q.Get("range")
+		if rangeID == "" {
+			rangeID = "30d"
+		}
+		if !rangeIDs[rangeID] {
+			writeError(w, http.StatusBadRequest, "range must be 24h, 7d or 30d")
+			return
+		}
+		s.serveStatic(w, r, "/v1/rankings/"+rangeID)
 	})
 	mux.HandleFunc("GET /v1/networks/{slug}", s.serveNetwork)
 	mux.HandleFunc("GET /v1/networks/{slug}/places", s.serveNetworkPlaces)

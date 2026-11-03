@@ -412,6 +412,39 @@ func (v *OverlapRow) UnmarshalJSON(d []byte) error {
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
+// FleetRow is one `fleet` entry: a cohort's product groups together in one
+// window or, with cohort "*" (AllCohorts), every product group of the build,
+// each exit IP counted once however many networks or cohorts saw it. Only the
+// "*" entries carry a series (5-minute buckets for 24h, days otherwise).
+type FleetRow struct {
+	Cohort    string      `json:"cohort"`
+	Window    string      `json:"window"`
+	Products  Num         `json:"products"`
+	Providers Num         `json:"providers"`
+	Metrics   Metrics     `json:"metrics"`
+	UniqueIps Num         `json:"unique_ips"`
+	Series    []SeriesRow `json:"series"`
+}
+
+func (v *FleetRow) UnmarshalJSON(d []byte) error {
+	type plain FleetRow
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// AllCohorts is the fleet cohort of every product group together.
+const AllCohorts = "*"
+
+// FleetAll is the window's every-group fleet entry, nil when the snapshot
+// does not publish one (builds before it did).
+func (v *Snapshot) FleetAll(window string) *FleetRow {
+	for i := range v.Fleet {
+		if f := &v.Fleet[i]; f.Cohort == AllCohorts && f.Window == window {
+			return f
+		}
+	}
+	return nil
+}
+
 type Methodology struct {
 	ID       string `json:"id"`
 	Settings struct {
@@ -439,6 +472,7 @@ type Snapshot struct {
 	RefreshSeconds   Num          `json:"refresh_seconds"`
 	Methodology      Methodology  `json:"methodology"`
 	Products         []Product    `json:"products"`
+	Fleet            []FleetRow   `json:"fleet"`
 	Overlap          []OverlapRow `json:"overlap"`
 }
 

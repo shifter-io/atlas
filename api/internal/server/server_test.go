@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 	"github.com/andybalholm/brotli"
 )
@@ -178,7 +179,9 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		"/v1/networks/Bad_Slug": 400, "/v1/networks?x=1": 400, "/v1/networks/alpha-net/places": 200,
 		"/v1/networks/alpha-net/places?dimension=asn&range=7d&q=x&page=2": 200, "/v1/networks/alpha-net/places?dimension=street": 404,
 		"/v1/networks/alpha-net/places?page=0": 400, "/v1/networks/alpha-net/places?range=1y": 400, "/v1/countries": 200,
-		"/v1/countries/DE": 404, "/v1/countries/DEU": 400, "/v1/countries/DE/cities": 404, "/v1/countries/D1/cities": 400} {
+		"/v1/countries/DE": 404, "/v1/countries/DEU": 400, "/v1/countries/DE/cities": 404, "/v1/countries/D1/cities": 400,
+		"/v1/rankings": 200, "/v1/rankings?range=24h": 200, "/v1/rankings?range=1y": 400, "/v1/rankings?x=1": 400,
+		"/v1/networks/all": 200, "/v1/networks/all/places?dimension=city": 200, "/v1/networks/all?kind=residential": 404} {
 		if r := get(h, path); r.Code != code {
 			t.Errorf("%s: %d, want %d", path, r.Code, code)
 		}
@@ -469,7 +472,7 @@ func TestVersionNamesTheDatasetAndAnswersConditionally(t *testing.T) {
 
 func TestPageRoutesRefuseBadInputAndWaitForTheFirstBuild(t *testing.T) {
 	cold := New(&fakeSource{rev: 1}, Options{}).Handler()
-	for _, path := range []string{"/v1/networks/alpha-net", "/v1/networks/alpha-net/places", "/v1/countries/DE/cities"} {
+	for _, path := range []string{"/v1/networks/alpha-net", "/v1/networks/alpha-net/places", "/v1/countries/DE/cities", "/v1/rankings"} {
 		if r := get(cold, path); r.Code != http.StatusServiceUnavailable {
 			t.Errorf("%s before the first build: %d", path, r.Code)
 		}
@@ -486,5 +489,24 @@ func TestPageRoutesRefuseBadInputAndWaitForTheFirstBuild(t *testing.T) {
 	first, again := get(h, "/v1/networks/alpha-net/places?q=a"), get(h, "/v1/networks/alpha-net/places?q=+A+")
 	if first.Code != 200 || first.Header().Get("ETag") != again.Header().Get("ETag") {
 		t.Fatalf("cached page: %d %q %q", first.Code, first.Header().Get("ETag"), again.Header().Get("ETag"))
+	}
+}
+
+func TestRankingsAnswerPerRangeInOrder(t *testing.T) {
+	h := newTestServer(t, &fakeSource{rev: 1}).Handler()
+	for _, rangeID := range []string{"24h", "7d", "30d"} {
+		path := "/v1/rankings?range=" + rangeID
+		if rangeID == "30d" {
+			path = "/v1/rankings"
+		}
+		var ans build.RankingsAnswer
+		if err := json.Unmarshal(get(h, path).Body.Bytes(), &ans); err != nil || ans.Range != rangeID || len(ans.Networks) == 0 {
+			t.Fatalf("%s: %+v (%v)", path, ans, err)
+		}
+		for i, n := range ans.Networks {
+			if n.Position != i+1 || n.Slug == "" {
+				t.Fatalf("%s row %d: %+v", path, i, n)
+			}
+		}
 	}
 }

@@ -645,7 +645,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 	}
 	res.Overview = ov
 	res.Providers = ov.Leaderboard
-	res.Pages = buildPages(ds.GeneratedAt, entries, s, in.Snapshot)
+	res.Pages = buildPages(ds.GeneratedAt, entries, stats, s, in.Snapshot)
 
 	for _, e := range entries {
 		p := e.P

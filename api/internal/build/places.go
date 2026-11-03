@@ -24,7 +24,8 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}}
 	lists := map[placeList][]PlaceRow{}
 	for _, r := range Ranges {
-		t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, Lists: map[string]int{}}
+		t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
+			Lists: map[string]int{}}
 		merged := map[string]map[string]*PlaceRow{}
 		for _, d := range placeDimensions {
 			merged[d] = map[string]*PlaceRow{}
@@ -39,6 +40,11 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 			t.Requests, t.Successes = nan, nan
 		}
 		t.SuccessRate = ratio(t.Successes, t.Requests)
+		if len(groups) == 1 {
+			// One group: its own distinct IPs and latency are the network's.
+			w := groups[0].Window(r.ID)
+			t.UniqueIps, t.LatencyP50, t.LatencyP90, t.LatencyP99 = w.Pool.UniqueIps, w.Metrics.LatencyMs.P50, w.Metrics.LatencyMs.P90, w.Metrics.LatencyMs.P99
+		}
 		for _, d := range placeDimensions {
 			rows := sortedRows(merged[d])
 			lists[placeList{r.ID, d}] = rows
@@ -65,21 +71,23 @@ func requestedCountries(groups []*snap.Product) []string {
 	return out
 }
 
-// days sums the groups' 30-day series (one row per UTC day) by day.
+// days sums the groups' 30-day series (one row per UTC day) by day. A day's
+// distinct IPs are known for a single group only (allAnswer sets them from
+// the snapshot's every-group fleet).
 func days(groups []*snap.Product) []DayRow {
 	byDay := map[string]*DayRow{}
 	for _, p := range groups {
 		for _, s := range p.Window("30d").Series {
-			day := s.At
-			if len(day) >= 10 {
-				day = day[:10]
-			}
+			day := dayOf(s.At)
 			d := byDay[day]
 			if d == nil {
-				d = &DayRow{Day: day, Requests: 0, Successes: 0, IpsSum: nan}
+				d = &DayRow{Day: day, Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan}
 				byDay[day] = d
 			}
 			d.Requests, d.Successes, d.IpsSum = addNum(d.Requests, s.Completed), addNum(d.Successes, s.Successes), addNum(d.IpsSum, s.UniqueIps)
+			if len(groups) == 1 {
+				d.UniqueIps = s.UniqueIps
+			}
 		}
 	}
 	out := make([]DayRow, 0, len(byDay))

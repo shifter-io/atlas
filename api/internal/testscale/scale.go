@@ -34,7 +34,18 @@ type Shape struct {
 	// Unmeasured framework providers: a product, no published group.
 	Unmeasured int
 	Events     int // test events
+	// NoFleetAll leaves out the every-group fleet entries (cohort "*"), as
+	// in snapshots built before the framework published them.
+	NoFleetAll bool
 }
+
+// FleetUniqueIps is the distinct IPs of every every-group fleet entry, and
+// FleetBucketIps the distinct IPs of its first series bucket (the next bucket
+// has one more, and so on).
+const (
+	FleetUniqueIps = 4321
+	FleetBucketIps = 100
+)
 
 // QA1 is the QA-1 build: 18 networks x 40 requested countries, about 240
 // exit countries per window.
@@ -85,6 +96,13 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		}
 	}
 	doc["products"] = products
+	if !shape.NoFleetAll {
+		fleet, err := fleetAll(doc["fleet"], template, shape)
+		if err != nil {
+			return nil, err
+		}
+		doc["fleet"] = fleet
+	}
 	payload, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err
@@ -122,6 +140,28 @@ func events(shape Shape) []store.Event {
 			Provider: &provider, Product: &product, Country: &country, Signal: 1, Severity: severity, Data: json.RawMessage(data)})
 	}
 	return out
+}
+
+// fleetAll appends the every-group fleet entries (proxy-index fleet_totals):
+// per window the template's metrics and series, with the distinct IP counts
+// above in place of the template's.
+func fleetAll(fleet any, template map[string]any, shape Shape) ([]any, error) {
+	out, _ := fleet.([]any)
+	for _, label := range []string{"24h", "7d", "30d"} {
+		w := template["windows"].(map[string]any)[label].(map[string]any)
+		series := []any{}
+		for i, r := range w["series"].([]any) {
+			row, err := clone(r.(map[string]any))
+			if err != nil {
+				return nil, err
+			}
+			row["unique_ips"] = FleetBucketIps + i
+			series = append(series, row)
+		}
+		out = append(out, map[string]any{"cohort": "*", "window": label, "products": shape.Networks * shape.Countries,
+			"providers": shape.Networks, "metrics": w["metrics"], "unique_ips": FleetUniqueIps, "series": series})
+	}
+	return out, nil
 }
 
 func clone(v map[string]any) (map[string]any, error) {
