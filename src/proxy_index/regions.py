@@ -18,6 +18,8 @@ from typing import Any
 
 import yaml
 
+from .browser.contracts import BROWSER_ENGINE
+
 # A source checkout keeps them in framework/configs; a wheel ships copies inside the package.
 _PACKAGED = Path(__file__).resolve().parent / "configs"
 CONFIGS = _PACKAGED if _PACKAGED.is_dir() else Path(__file__).resolve().parents[2] / "configs"
@@ -222,6 +224,9 @@ def load_targets(path: str | Path | None = None) -> list[dict[str, Any]]:
             raise ValueError("Target URL must be http or https")
         if any(row[key] <= 0 for key in POSITIVE):
             raise ValueError("Target timeouts, intervals, counts and concurrency must be > 0")
+        # The browser settings file schedules browser targets (K-BP1).
+        if row["engine"] == BROWSER_ENGINE and (row["pulse_enabled"] or row["census"]):
+            raise ValueError("A browser target needs pulse_enabled = false and census = false")
         seen.add(row["id"])
         rows.append({"target_id": row.pop("id")} | row)
     return rows
