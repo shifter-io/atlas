@@ -182,6 +182,25 @@ def resolve(args, previous, formulas, names) -> tuple[Settings, dict]:
     return settings, done
 
 
+def one_day(conn, writer: Writer, args, progress: dict, day: int, expected: str) -> dict:
+    """Prepare the day once, write its networks not yet done, then close it; the new progress."""
+    settings = writer.settings
+    if progress["prepared"] != day:
+        with conn.transaction():
+            guard(conn, expected)
+            if day == 1:
+                writer.setup()
+            writer.prepare(day)
+            record(conn, settings, day - 1, day)
+        progress = stored(conn)[1]
+    todo = [n for n in range(len(settings.networks)) if n not in progress["parts"]]
+    parts(args, settings, writer.regions, day, todo)
+    with conn.transaction():
+        sequences(conn)
+        record(conn, settings, day)
+    return stored(conn)[1]
+
+
 def generate(args, expected: str = DATABASE) -> dict:
     """Run one step (args.days); returns the settings and the days it finished."""
     formulas, names = load(args.formulas)
@@ -211,20 +230,7 @@ def generate(args, expected: str = DATABASE) -> dict:
         writer = Writer(conn, Model(settings, formulas, names), regions)
         generated = []
         for day in range(max(first, done + 1), last + 1):
-            if progress["prepared"] != day:
-                with conn.transaction():
-                    guard(conn, expected)
-                    if day == 1:
-                        writer.setup()
-                    writer.prepare(day)
-                    record(conn, settings, day - 1, day)
-                progress = stored(conn)[1]
-            todo = [n for n in range(len(settings.networks)) if n not in progress["parts"]]
-            parts(args, settings, regions, day, todo)
-            with conn.transaction():
-                sequences(conn)
-                record(conn, settings, day)
-            progress = stored(conn)[1]
+            progress = one_day(conn, writer, args, progress, day, expected)
             generated.append(day)
     return {"settings": settings.to_json(), "generated": generated, "days_done": max(done, last)}
 
