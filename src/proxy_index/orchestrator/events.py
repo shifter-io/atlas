@@ -163,13 +163,15 @@ class DailyTestResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class HourEstimate:
-    """One estimated UTC hour of a network's day (measured IPs x hour factor)."""
+    """One estimated UTC hour of a network's day (measured IPs x hour factor), over its
+    `countries` estimated countries."""
 
     product_id: int
     day: date
     hour: int
     formula_version: str
     unique_ips: int | None = None
+    countries: int | None = None
 
     def __post_init__(self) -> None:
         hour = self.hour
@@ -177,7 +179,7 @@ class HourEstimate:
             raise ValueError("hour must be 0..23")
         if not self.formula_version:
             raise ValueError("formula_version is required")
-        _counts(unique_ips=self.unique_ips)
+        _counts(unique_ips=self.unique_ips, countries=self.countries)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -276,8 +278,9 @@ async def emit_daily_test_finished(
 async def emit_estimate_hour_released(
     conn: psycopg.AsyncConnection, at: datetime, estimate: HourEstimate
 ) -> int:
-    """data: {"day": "2026-11-02", "hour": 0..23, "formula_version", and the estimated
-    "unique_ips" over all countries when known}. Signal 0.
+    """One event per network hour, never one per country: data: {"day": "2026-11-02",
+    "hour": 0..23, "formula_version", and when known the estimated "unique_ips" over all
+    countries and "countries", how many countries the hour covers}. Signal 0.
     """
     return await emit(
         conn,
@@ -289,7 +292,7 @@ async def emit_estimate_hour_released(
             "hour": estimate.hour,
             "formula_version": estimate.formula_version,
         }
-        | _counts(unique_ips=estimate.unique_ips),
+        | _counts(unique_ips=estimate.unique_ips, countries=estimate.countries),
     )
 
 
