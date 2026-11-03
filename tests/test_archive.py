@@ -16,7 +16,7 @@ from proxy_index.archive.tables import TABLES
 from proxy_index.calculated import store
 from proxy_index.cli import main
 from proxy_index.partitions import children, partition
-from proxy_index.storage import connect, ingest, initialize, seed
+from proxy_index.storage import SCHEMA_VERSION, connect, ingest, initialize, seed
 
 pytest_plugins = ["test_storage"]
 
@@ -150,7 +150,7 @@ async def test_a_day_exports_deterministically_and_restores_into_an_empty_databa
     assert counts["run_buckets"] and counts["ip_observations"] and counts["run_geo_buckets"] == 2
     assert (counts["test_events"], counts["estimated_hours"], counts["nodes"]) == (2, 1, 1)
     assert b"secret-token-hash" not in files["nodes.csv"] and b"archived-" in files["nodes.csv"]
-    assert manifest["day"] == "2026-10-01" and manifest["storage_schema"] == 10
+    assert manifest["day"] == "2026-10-01" and manifest["storage_schema"] == SCHEMA_VERSION
     first = file_digests(path)
     assert first["bytes"] == path.stat().st_size
     assert file_digests(export_day(database, DAY, tmp_path / "again")[0]) == first
@@ -205,8 +205,8 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(database, dat
     refused(empty_database(databases, calculated=False), "no table calculation_roles")
     stale = empty_database(databases)
     with connect(stale) as conn:
-        conn.execute("UPDATE schema_versions SET version=9")
-    refused(stale, "storage schema v10, the database v9")
+        conn.execute("UPDATE schema_versions SET version=%s", (SCHEMA_VERSION - 1,))
+    refused(stale, f"storage schema v{SCHEMA_VERSION}, the database v{SCHEMA_VERSION - 1}")
     other = empty_database(databases)
     with connect(other) as conn:
         conn.execute("INSERT INTO providers VALUES ('other')")
@@ -241,6 +241,9 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(database, dat
 
     manifest(lambda m: m.update(version=99))
     refused(target, "not a proxy-index raw day archive")
+    # A file of the previous storage schema does not load into the current one either.
+    manifest(lambda m: m.update(storage_schema=SCHEMA_VERSION - 1))
+    refused(target, f"storage schema v{SCHEMA_VERSION - 1}, the database v{SCHEMA_VERSION}")
     manifest(lambda m: m["tables"][0].update(name="pg_authid"))
     refused(target, "unknown table entry")
     manifest(lambda m: m["tables"][0].update(columns=["id; DROP TABLE x"]))

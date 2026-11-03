@@ -143,7 +143,8 @@ def dispatch(args) -> int:
             proxy_factory=factory,
             work_dir=args.work_dir,
             enricher=enricher,
-            mmdb=enricher.path,
+            # The configured path as given: a link is followed again for every run.
+            mmdb=enricher.source,
         )
         asyncio.run(serve(agent))
     return 0
