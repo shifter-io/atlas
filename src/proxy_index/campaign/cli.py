@@ -351,7 +351,7 @@ async def _manager_step(args) -> dict:
         address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
         if args.manager_action == "allow-me":
             return await deploy.allow_me(cloud, args.inventory, address)
-        from ..archive.spaces import manager_settings
+        from ..archive.spaces import manager_settings, push_settings
         from .contracts import ACCOUNTS
         from .do_api import keychain_token
         from .image import ensure_mac_key
@@ -367,9 +367,12 @@ async def _manager_step(args) -> dict:
             address,
             keychain_token(ACCOUNTS[args.account]),  # read only when streamed
             args.size,
-            manager_settings(args.spaces_file) if args.spaces_file else None,
         )
-        return await deploy.deploy(cloud, job)
+        spaces = manager_settings(args.spaces_file) if args.spaces_file else None
+        result = await deploy.deploy(cloud, job)
+        if spaces:  # the raw-data archive's settings (ARCHIVE-1), after the manager is up
+            await push_settings(args.inventory, spaces)
+        return result
 
 
 def _manager(args) -> int:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import configparser
-import dataclasses
 import io
 import json
 import re
@@ -139,9 +138,12 @@ async def test_the_token_travels_only_on_stdin(job, tmp_path, capsys, caplog):
 
 
 async def test_the_archive_spaces_settings_travel_only_on_stdin(job):
+    from proxy_index.archive.spaces import push_settings
+
     shell = Shell()
     settings = b'[spaces]\nsecret_access_key = "spaces-secret"\n'
-    await run_deploy(Fake(), dataclasses.replace(job, spaces=settings), shell)
+    await run_deploy(Fake(), job, shell)
+    await push_settings(job.inventory, settings, shell)
     assert shell.commands()[-1].split("&&")[1].strip() == (
         "cat > /opt/proxy-index-campaign/.secrets/spaces.toml.partial"
     )

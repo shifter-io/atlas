@@ -101,6 +101,15 @@ def manager_settings(path: str | Path) -> bytes:
     return toml_table("spaces", values)
 
 
+async def push_settings(inventory: Path, data: bytes, shell=None) -> None:
+    """Write the [spaces] file to the recorded manager's root-only .secrets/spaces.toml over
+    SSH stdin (campaign.deploy.Manager.put_secret); nothing in argv."""
+    from ..campaign import deploy
+
+    remote = deploy.Manager(deploy.load_inventory(inventory), inventory, shell or deploy.run_shell)
+    await remote.put_secret("spaces.toml", data)
+
+
 class Spaces:
     """One bucket. Raises ArchiveError on any answer other than the expected one."""
 
