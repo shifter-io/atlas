@@ -197,6 +197,27 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     assert at_start["products"][0]["windows"]["24h"]["metrics"]["completed"] == 10
 
 
+@pytest.mark.asyncio
+async def test_a_calculation_right_after_a_run_includes_it_once(database, tmp_path):
+    store.initialize(database)
+    d = await measurement(tmp_path, requests=10)
+    ingest(d, database)
+    finished = datetime.fromisoformat(json.loads((d / "summary.json").read_text())["finished_at"])
+    # REAL-CYCLE-1: the cutoff was floored to 5 minutes, before the run's own bucket.
+    snap = calculate(database, POLICY, as_of=finished)
+    assert datetime.fromisoformat(snap["as_of"]) > finished
+    assert snap["products"][0]["windows"]["24h"]["metrics"]["completed"] == 10
+    assert snap["fleet"][0]["metrics"]["completed"] == 10
+    latest = calculate(database, POLICY)  # now: every stored run has finished
+    assert latest["products"][0]["windows"]["24h"]["metrics"]["completed"] == 10
+    # A run that ended after the requested time keeps its bucket out of that cutoff.
+    with connect(database) as conn:
+        conn.execute("UPDATE test_runs SET finished_at=finished_at+interval '10 minutes'")
+    earlier = calculate(database, POLICY, as_of=finished)
+    assert datetime.fromisoformat(earlier["as_of"]) <= finished
+    assert earlier["products"][0]["windows"]["24h"]["metrics"]["completed"] == 0
+
+
 def test_saved_shifter_reconciliation(database):
     if not LIVE.exists():
         pytest.skip("Private saved Shifter artifact is not in community checkout")

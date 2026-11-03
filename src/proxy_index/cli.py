@@ -8,6 +8,7 @@ import signal
 import sys
 from contextlib import nullcontext
 
+from .errors import UserError
 from .models import NETWORK_PROTOCOLS, ProxyConfig, RunConfig
 from .providers import load_provider
 from .providers import registry as providers
@@ -275,6 +276,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except KeyboardInterrupt:
         return 130
+    except UserError as exc:
+        # Written for the user with public values only (errors.py).
+        print(f"Command failed: {exc}", file=sys.stderr)
+        return 2
     except Exception as exc:
         # Libraries can put proxy URLs into exception messages; expose only types.
         print(

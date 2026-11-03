@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -284,6 +285,63 @@ def test_sparse_countries_fall_back_to_the_network_curve():
         assert entry["test_hour"] == network["peak_hour"] == 23
         assert entry["unique_ips"] == countries[code]["unique_ips"]
     assert document["countries"]["JP"]["peak_hour"] == 12
+
+
+def test_a_country_hour_without_requests_or_with_too_few_takes_the_network_curve():
+    hour_ips = [1000 + 10 * hour for hour in range(24)]
+    us = [200 + hour for hour in range(24)]
+    us[8] = 0  # no request row of US in hour 8 (REAL-CYCLE-1: factor 0.0)
+    ca = [300] * 24
+    ca[18], ca[5] = 20, 120  # request rows 60 and 360 against a median of 900
+    countries = {"US": _country(us), "CA": _country(ca)}
+    document = build_formula(_counts(hour_ips, countries), 2, 30, 20)
+    assert document["rules"]["min_sample_share"] == 0.25
+    assert document["rules"]["low_sample_share"] == 0.5
+    entry = document["countries"]["US"]
+    assert entry["curve"] == "country" and entry["hour_basis"][8] == "network_missing"
+    kept = [hour for hour in range(24) if hour != 8]
+    level = sum(us[hour] for hour in kept) / sum(hour_ips[hour] for hour in kept)
+    assert entry["hour_factors"][8] == pytest.approx(hour_ips[8] * level / us[23])
+    assert entry["low_hour"] == 0 and entry["peak_hour"] == entry["test_hour"] == 23
+    entry = document["countries"]["CA"]
+    assert entry["hour_basis"][18] == "network_low_sample"
+    assert entry["hour_basis"][5] == "country_low_sample"
+    assert entry["hour_factors"][5] == pytest.approx(120 / 300)  # flagged, own count kept
+    kept = [hour for hour in range(24) if hour != 18]
+    level = sum(ca[hour] for hour in kept) / sum(hour_ips[hour] for hour in kept)
+    assert entry["hour_factors"][18] == pytest.approx(hour_ips[18] * level / 300)
+    assert entry["low_hour"] == 5  # a fallback hour is neither peak nor low
+    assert entry["hour_basis"].count("country") == 22
+    # Every factor of a covered hour rests on a measurement: none is 0.
+    for code in ("US", "CA"):
+        assert all(factor > 0 for factor in document["countries"][code]["hour_factors"])
+
+
+def test_hour_basis_follows_the_network_and_the_country_curve_used():
+    hour_ips = [0] * 24
+    hour_ips[16] = 50
+    status = ["requests_no_ips"] * 24
+    status[16], status[2] = "present", "missing"
+    countries = {"US": _country(hour_ips), "FR": _country([1] * 24)}
+    document = build_formula(_counts(hour_ips, countries, status=status), 1, 30, 20)
+    basis = [None] * 24
+    basis[16] = "country"
+    assert document["countries"]["US"]["hour_basis"] == basis
+    basis[16] = "network"
+    assert document["countries"]["FR"]["hour_basis"] == basis
+
+
+@pytest.mark.parametrize("path", sorted(Path("formulas").glob("*.json")), ids=lambda p: p.stem)
+def test_no_published_factor_is_zero_for_a_covered_hour(path):
+    document = json.loads(path.read_text())
+    covered = [state == "present" for state in document["network_curve"]["status"]]
+    for code, entry in document["countries"].items():
+        for hour, factor in enumerate(entry["hour_factors"]):
+            assert not covered[hour] or (factor or 0) > 0, (code, hour, factor)
+        peak = entry["unique_ips"][entry["peak_hour"]]
+        for hour, basis in enumerate(entry["hour_basis"]):
+            if basis in ("country", "country_low_sample"):
+                assert round(entry["hour_factors"][hour] * peak) == entry["unique_ips"][hour]
 
 
 def test_build_rejects_short_or_empty_curves():

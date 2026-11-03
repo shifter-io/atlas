@@ -78,8 +78,10 @@ def test_every_committed_formula_gives_measured_times_factor_at_its_test_hour(ne
             assert row["curve"] == entry["curve"]
         network = entry["curve"] == "network"
         curve = f["network_curve"]["requests"] if network else entry["requests"]
-        if curve[entry["test_hour"]]:  # else requests follow the IP factors
-            last = rows[-1]
+        last = rows[-1]
+        if entry["hour_basis"][last["hour"]] in compute.FALLBACK_HOURS:
+            assert last["requests"] == pytest.approx(1000 * last["hour_factor"])
+        elif curve[entry["test_hour"]]:  # else requests follow the IP factors
             expected = 1000 * curve[last["hour"]] / curve[entry["test_hour"]]
             assert last["requests"] == pytest.approx(expected)
 
@@ -101,6 +103,24 @@ def test_hours_roll_into_the_next_day_and_skip_hours_without_a_factor():
         compute.hours(f, "DE", datetime(2026, 10, 1, 3, tzinfo=UTC), 1, 1)
     with pytest.raises(ValueError, match="not in the formula"):
         compute.hours(f, "XX", T1, 1, 1)
+
+
+def test_an_hour_on_the_network_curve_scales_requests_by_its_factor():
+    basis = ["country"] * 24
+    basis[8] = "network_missing"
+    entry = {"hour_basis": basis}
+    entry["requests"] = [100] * 24
+    entry["requests"][8] = 0
+    f = formula(DE=entry)
+    f["countries"]["DE"]["hour_factors"][8] = 0.5
+    rows = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=23), 30, 600)}
+    base = 1.0  # factor at hour 23
+    assert rows[8]["unique_ips"] == pytest.approx(30 * 0.5 / base)
+    assert rows[8]["requests"] == pytest.approx(600 * 0.5) > 0
+    assert rows[9]["requests"] == pytest.approx(600)  # own request curve elsewhere
+    # Measured in a fallback hour: every hour's requests follow the factors.
+    measured = {r["hour"]: r for r in compute.hours(f, "DE", T1.replace(hour=8), 30, 600)}
+    assert measured[23]["requests"] == pytest.approx(600 * 1.0 / 0.5)
 
 
 def test_only_a_version_1_hour_formula_loads(tmp_path):
