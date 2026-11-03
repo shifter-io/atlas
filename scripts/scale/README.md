@@ -13,7 +13,7 @@ counter is generated from a seed.
 ```sh
 # Once, as the admin role: an empty database for the test.
 createdb proxy_scale
-# Then in steps of a few days (each day commits on its own; a step can be rerun).
+# Then in steps of one or a few days (a step can be rerun; it continues where it stopped).
 uv run python scripts/scale/generate.py --database proxy_scale.toml --days 1..4
 uv run python scripts/scale/generate.py --database proxy_scale.toml --days 5..8
 # ...
@@ -37,6 +37,7 @@ names a different value is refused):
 | `--end-date` | today (UTC) | the last day ends at 00:00 of this date |
 | `--scale` | 1.0 | multiplies every daily test's unique IPs (for smaller trials) |
 | `--formulas` | `formulas/` | the hour formulas |
+| `--jobs` | 4 | networks written at once, each in its own worker and connection (not recorded) |
 
 The first call creates the storage schema (`db-init`'s storage half) and seeds regions,
 countries and targets (`db-seed`). The calculated schema is created by `proxy-index db-init`, as
@@ -47,7 +48,10 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
 - It writes only to a database named `proxy_scale`.
 - It refuses a database holding any `test_runs` row it did not write (its runs carry the summary
   key `scale_generator`), and a storage schema other than this framework's.
-- A day is one transaction: an interrupted step leaves whole days only.
+- A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
+  network's rows in its own transaction; the settings row records each finished network, so an
+  interrupted step resumes with the networks the day lacks. Networks share no IP, run, pool or
+  product, so the order and `--jobs` do not change the rows.
 
 ## What one day holds
 
@@ -75,6 +79,14 @@ Per network and country:
 At full size a day is about 23 M `ip_observations` rows, 15-17 M `ip_enrichment` rows, 107,568
 pulse runs with about 7.6 M `run_geo_buckets` rows and 4,482 daily tests, matching the DB-AUDIT-2
 scale model.
+
+## Time and size
+
+One full-size day (18 networks × 249 countries) took 20 min 40 s with `--jobs 4` on a 4-CPU
+disposable server that also ran PostgreSQL 17 (day 1, so every IP was new). Almost all of it is
+database work, mostly index and foreign-key upkeep. On one connection the same day took about 30
+minutes. A machine with more CPUs, or the database on its own server, can take a larger
+`--jobs`; SCALE-RUN-1 records the time per step on the real servers.
 
 ## Not generated
 
