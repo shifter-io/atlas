@@ -107,7 +107,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
         f"ALTER TABLE public.run_buckets_2026_01_15 OWNER TO {runtime};"
         in (gaps["partition_owner"]["statements"])
     )
-    assert f"GRANT SELECT ON public.runs TO {api};" in gaps["api_select"]["statements"]
+    assert f"GRANT SELECT ON public.run_buckets TO {api};" in gaps["api_select"]["statements"]
 
     # Before the fix: the run-time role can neither partition nor ANALYZE.
     with dbserver.connect(files[roles.runtime]) as conn:
