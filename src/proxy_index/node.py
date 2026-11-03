@@ -197,6 +197,7 @@ class NodeAgent:
             beat = asyncio.create_task(self._heartbeats(stop))
             try:
                 while not stop.is_set():
+                    await self.reopen_database()
                     await self.poll()
                     with contextlib.suppress(TimeoutError):
                         await asyncio.wait_for(stop.wait(), self.poll_interval)
@@ -207,6 +208,18 @@ class NodeAgent:
                     await asyncio.gather(*self.tasks, return_exceptions=True)
                 beat.cancel()
                 await asyncio.gather(beat, return_exceptions=True)
+
+    async def reopen_database(self) -> None:
+        """Follow `dbip update`: reopen the MMDB when its link moved, only while no run is
+        active (poll() alone starts runs, and it waits for this), so a run keeps one release."""
+        reload = getattr(self.enricher, "reload", None)
+        if self.active or reload is None:
+            return
+        try:
+            if await asyncio.to_thread(reload):
+                log.info("DB-IP database reopened: %s", self.enricher.release["file"])
+        except Exception as exc:  # noqa: BLE001 - the open release stays in use
+            log.warning("could not reopen the DB-IP database (%s)", type(exc).__name__)
 
     async def poll(self) -> None:
         try:

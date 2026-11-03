@@ -111,6 +111,11 @@ DEFAULTS: dict[str, Any] = {
     "scheduler.pulse_enabled": True,
     # Directory for the HTML batch reports written when a batch closes; None writes none.
     "reports.dir": None,
+    # The daily DB-IP update (jobs.dbip_update): the release directory (None runs no update) and
+    # the owner-only file holding the account URL (None: $DBIP_ACCOUNT_URL_FILE). A path only:
+    # the URL itself is a secret and never goes into the database.
+    "dbip.dir": None,
+    "dbip.account_url_file": None,
 }
 
 

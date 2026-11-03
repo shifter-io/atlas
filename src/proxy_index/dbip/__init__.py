@@ -1,0 +1,179 @@
+"""`proxy-index dbip update`: keep the local DB-IP MMDB current (DBIP-DAILY-1).
+
+The owner's DB-IP account URL answers JSON describing the current downloadable database
+({"mmdb": {"url", "name", "date", "version", "size", "md5sum", "sha1sum"}, ...}, possibly one
+level deeper per product). `update` fetches it, downloads the MMDB only when the release differs
+from the installed one, verifies it (size, any checksum given, the MaxMind reader and a spread of
+test lookups), installs it atomically as `dbip-full-YYYY-MM-DD.mmdb` behind the `current` link,
+keeps the previous two releases, deletes older ones and records the release in `dbip_releases`.
+A second run on the same release downloads and changes nothing.
+
+The account URL carries the account key, a secret: it comes from an owner-only file
+(`--url-file` or $DBIP_ACCOUNT_URL_FILE) or $DBIP_ACCOUNT_URL, never from argv, and it is never
+printed, logged or stored (source.py). The orchestrator runs `update` once a day (jobs.py,
+`dbip_update`); readers follow the `current` link (enrichment.LocalEnricher.reload).
+
+Exit codes: 0 updated or unchanged, 2 configuration, 3 fetch, verification or recording failed,
+4 another update holds the directory's lock. Every run prints one JSON health line.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from .files import STATE, directory_lock, inspect, install, prune, read_state, write_json
+from .source import (
+    URL_ENV,
+    URL_FILE_ENV,
+    Busy,
+    ConfigError,
+    UpdateError,
+    account_url,
+    download,
+    fetch_index,
+    identity,
+)
+
+__all__ = [
+    "DEFAULT_CHECKS",
+    "Busy",
+    "Checks",
+    "ConfigError",
+    "UpdateError",
+    "account_url",
+    "update",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class Checks:
+    min_bytes: int = 100 << 20  # a full DB-IP MMDB is over a gigabyte
+    min_coverage: float = 0.9  # share of the test lookups that must find a country
+    shrink_limit: float = 0.5  # a release under half the installed one's size is refused
+
+
+DEFAULT_CHECKS = Checks()
+
+
+def update(
+    dest: Path, url: str, *, database_file: str | Path | None = None, checks: Checks = DEFAULT_CHECKS
+) -> dict[str, Any]:
+    """Bring `dest` to the account's current release; the health record (public fields).
+
+    Raises UpdateError before anything is installed; a failure to record an installed release
+    is returned as `error` (the next run records it)."""
+    dest.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC).replace(microsecond=0)
+    with directory_lock(dest):
+        state = read_state(dest)
+        entry = fetch_index(url)
+        source = identity(entry)
+        if state and source and state.get("source") == source:
+            state["checked_at"] = now.isoformat()
+            write_json(dest / STATE, state)
+            result = _health("unchanged", state, [])
+        else:
+            result = _replace(dest, entry, state, checks, now)
+    if database_file:
+        try:
+            record(database_file, {k: result[k] for k in _RELEASE})
+            result["recorded"] = True
+        except UpdateError as exc:
+            result |= {"recorded": False, "error": str(exc)}
+    return result
+
+
+_RELEASE = ("file", "sha256", "database_type", "build_epoch", "built_at")
+
+
+def _health(status: str, state: dict[str, Any], removed: list[str]) -> dict[str, Any]:
+    return {"dbip": status, **{k: state[k] for k in (*_RELEASE, "source")}, "removed": removed}
+
+
+def _replace(
+    dest: Path, entry: dict[str, Any], state: dict[str, Any], checks: Checks, now: datetime
+) -> dict[str, Any]:
+    partial = dest / ".download.partial"
+    try:
+        _, plain = download(entry, partial)
+        _check_size(plain.size, state, checks)
+        sha256 = plain.hexdigest("sha256")
+        release = inspect(partial, sha256, checks.min_coverage)
+        if state.get("sha256") == sha256:  # the same bytes under new index fields
+            status, target = "unchanged", dest / state["file"]
+        else:
+            status, target = "updated", install(dest, partial, sha256, now.date().isoformat())
+    finally:
+        partial.unlink(missing_ok=True)
+        partial.with_name(partial.name + ".download").unlink(missing_ok=True)
+    stamp = now.isoformat()
+    new_state = release | {"file": target.name, "size": plain.size, "source": identity(entry)}
+    new_state |= {"updated_at": state.get("updated_at") if status == "unchanged" else stamp}
+    new_state["checked_at"] = stamp
+    write_json(dest / STATE, new_state)
+    return _health(status, new_state, prune(dest))
+
+
+def _check_size(size: int, state: dict[str, Any], checks: Checks) -> None:
+    if size < checks.min_bytes:
+        raise UpdateError(f"verify: {size} bytes, under the {checks.min_bytes} minimum")
+    if state and size < state["size"] * checks.shrink_limit:
+        raise UpdateError(f"verify: {size} bytes, under half the installed release")
+
+
+def record(database_file: str | Path, release: dict[str, Any]) -> None:
+    """Insert the release into dbip_releases (once; enrichment imports insert the same row)."""
+    from psycopg.types.json import Jsonb
+
+    from ..storage import connect
+
+    try:
+        with connect(database_file) as conn:
+            conn.execute(
+                "INSERT INTO dbip_releases(sha256,metadata) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                (release["sha256"], Jsonb(release)),
+            )
+    except Exception as exc:  # noqa: BLE001 - connection errors may carry the DSN
+        raise UpdateError(f"record: {type(exc).__name__}") from None
+
+
+def register(commands) -> None:
+    parser = commands.add_parser("dbip", help="Keep the local DB-IP MMDB current (operator)")
+    actions = parser.add_subparsers(dest="dbip_action", required=True)
+    run = actions.add_parser(
+        "update", help="Download, verify and install the account's current MMDB when it changed"
+    )
+    run.add_argument("--dest", type=Path, required=True, help="Directory of releases + current")
+    run.add_argument(
+        "--url-file",
+        help=f"Owner-only file holding the account URL (default ${URL_FILE_ENV}, else ${URL_ENV})",
+    )
+    run.add_argument(
+        "--database-file",
+        default=os.environ.get("PROXY_INDEX_DATABASE_FILE"),
+        help="Record the release in dbip_releases (default $PROXY_INDEX_DATABASE_FILE)",
+    )
+    run.add_argument("--min-bytes", type=int, default=DEFAULT_CHECKS.min_bytes)
+    run.add_argument("--min-coverage", type=float, default=DEFAULT_CHECKS.min_coverage)
+
+
+def dispatch(args) -> int:
+    checks = Checks(min_bytes=args.min_bytes, min_coverage=args.min_coverage)
+    try:
+        url = account_url(args.url_file)
+        result = update(
+            Path(args.dest).expanduser(), url, database_file=args.database_file, checks=checks
+        )
+    except UpdateError as exc:
+        print(json.dumps({"dbip": "failed", "error": str(exc)}))
+        return exc.code
+    except OSError as exc:
+        print(json.dumps({"dbip": "failed", "error": f"files: {type(exc).__name__}"}))
+        return 3
+    print(json.dumps(result))
+    return 3 if result.get("error") else 0

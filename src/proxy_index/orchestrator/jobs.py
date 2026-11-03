@@ -17,6 +17,9 @@ retention                 daily: test_events older than retention.events_days (w
                           estimated_hours older than retention.estimates_days
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
+dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
+                          installs the account's current DB-IP MMDB behind `dbip.dir`/current
+                          and records it; an unchanged release records 'skipped'
 
 Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
 and the index are written there (report_html.write, in a thread; install_reports).
@@ -205,6 +208,32 @@ async def live_reports(db: Database) -> dict[str, Any]:
     return {"dir": result["dir"], "running": len(result["batches"])}
 
 
+async def dbip_update(db: Database, credentials_file: str) -> dict[str, Any]:
+    """The daily DB-IP update; a failure (never carrying the account URL) fails the job."""
+    async with db.connection() as conn:
+        dest = await setting(conn, "dbip.dir")
+        url_file = await setting(conn, "dbip.account_url_file")
+    if not dest:
+        return {"skipped": "dbip.dir is not set"}
+    from .. import dbip
+
+    def work() -> dict[str, Any]:
+        url = dbip.account_url(url_file)
+        return dbip.update(
+            Path(dest), url, database_file=credentials_file, checks=dbip.DEFAULT_CHECKS
+        )
+
+    try:
+        result = await asyncio.to_thread(work)
+    except dbip.Busy:
+        return {"skipped": "another update is running"}
+    if result.get("error"):
+        raise dbip.UpdateError(result["error"])
+    if result["dbip"] == "unchanged":
+        return {"skipped": "release unchanged", "file": result["file"]}
+    return {k: result[k] for k in ("dbip", "file", "sha256", "removed")}
+
+
 def install_reports(db: Database) -> None:
     """Write reports whenever a committed transaction closes batches (Database.on_close)."""
 
@@ -252,6 +281,9 @@ def register_jobs(
     async def reports_job() -> dict[str, Any]:
         return await live_reports(db)
 
+    async def dbip_job() -> dict[str, Any]:
+        return await dbip_update(db, credentials_file)
+
     scheduler.add("census_plan", census_plan, every_s=60, aligned=True)
     scheduler.add("pulse_plan", pulse_plan, every_s=60, aligned=True)
     scheduler.add("pulse_evaluate", pulse_evaluate, every_s=60)
@@ -262,3 +294,4 @@ def register_jobs(
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
     scheduler.add("reports", reports_job, every_s=30)
+    scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
