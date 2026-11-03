@@ -19,7 +19,6 @@ from proxy_index import (
     run,
 )
 from proxy_index.cli import main
-from proxy_index.models import LabelError
 from proxy_index.providers import load_grammar
 from proxy_index.targets import EchoIpTarget, TargetRegistry
 from proxy_index.transport import HttpTransport
@@ -296,6 +295,8 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
     error = capsys.readouterr().err
     assert "--country 'US'" in error and "use --country us" in error
     assert "ValueError" not in error and "private-password" not in error
+    from proxy_index.models import LabelError  # here, so the base code fails the assertion above
+
     unset = str(LabelError("requested_country", "us", None))
     assert "--country 'us'" in unset and "sets no country parameter" in unset
 
