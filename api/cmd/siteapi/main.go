@@ -334,6 +334,10 @@ func dump(args []string) error {
 		return err
 	}
 	rendered, ok := v.Static[*endpoint]
+	if *endpoint == "/v1/dataset" {
+		// The dataset is served as a file (/v1/dataset redirects to it).
+		rendered, ok = v.Dataset, true
+	}
 	if !ok {
 		return fmt.Errorf("unknown endpoint %s", *endpoint)
 	}

@@ -2,7 +2,8 @@
 
 A Go service that returns every piece of data the website needs from the
 `proxy_reviews` Postgres database. The site reads nothing else: `src/lib/site-api.ts`
-fetches `/v1/dataset` once per static build (a dev server or the on-demand
+fetches the dataset once per static build (`/v1/dataset` redirects to the build's
+dataset file, a static file named by its hash; a dev server or the on-demand
 `/api/live` route revalidates it every few seconds with `If-None-Match`), and the
 browser reaches `/v1/version`, `/v1/events`, `/v1/snapshot`, `/v1/search-index` and the per-page answers (`/v1/rankings`, `/v1/networks…`, `/v1/countries…`)
 through the same-origin `/api/site/*` route. Open pages poll `/v1/version` to
@@ -64,13 +65,14 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 
 | Path | Body |
 |---|---|
-| `/v1/dataset` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"). |
+| `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
+| `/v1/files/dataset-<sha256>.json` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"): a static file rendered (and compressed) once per data update, named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current build's file and, until the next rebuild, the previous one are served as they are (a client may hold the old redirect for 5 s or race a rebuild); any older `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The site's `/api/site/*` passthrough, which this change leaves untouched (the site is being retired), does not forward the redirect. |
 | `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (`src/lib/measured-types.ts` `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like `CommandPalette.astro` (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex`: networks, guides, network reviews, pages, targets, actions, plus a new `Countries` group) and the palette's constants. |
 | `/v1/coverage` | The N/A report index: summary counts, dataset-level gaps, per-target/scope/profile gaps, record counts, a per-field index of which providers lack it, and one entry (`id`, `name`, `source`, `naCount`) per provider. |
 | `/v1/coverage/{slug}` | One provider's gaps grouped by section with a reason for each. |
-| `/v1/snapshot` | A summary of the published framework snapshot, never the payload itself (a daily build publishes one product group per network and requested country: 179 MB for 18 networks x 40 countries): `snapshotId`, `schemaVersion`, `implementationId`, `asOf`, `generatedAt`, `readiness`, `refreshSeconds`, `contentHash`, the `methodology` and `periods` as published, `productGroups`, and `scores` (every network's headline group scores per range and profile). Gives 404 `{"error":"no published snapshot","available":false}` when nothing is published. |
+| `/v1/snapshot` | A summary of the published framework snapshot, never the payload itself (a daily build publishes one product group per network and requested country: 179 MB for 18 networks x 40 countries): `snapshotId`, `schemaVersion`, `implementationId`, `asOf`, `generatedAt`, `readiness`, `refreshSeconds`, `contentHash`, the `methodology` as published, the build's window `periods` (start, end and hours of each range, read from the product groups' windows; `{}` with no group), `productGroups`, and `scores` (every network's headline group scores per range and profile). Gives 404 `{"error":"no published snapshot","available":false}` when nothing is published. |
 | `/v1/networks` | The overview: one row per network (`slug`, `name`, `kind`, `kinds`, `rank`, `score`, `uniqueIps` (the headline group's distinct IPs), `countries`, `latencyP50`, `successRate`), in rank order. |
 | `/v1/networks/{slug}?kind=` | One network and category (default its headline one), summed over all its product groups: `productGroups`, `requestedCountries`, `days` (the 30d window per UTC day: requests, successes, success rate, `ipsSum`, `uniqueIps`) and per range the totals (`requests`, `successes`, `successRate`, `ipsSum`, `uniqueIps`, `latencyP50/P90/P99`), the top 50 `countries` and the full length of each place list (`lists`). Distinct IPs and latency cannot be added up: they are the group's own when the network has one product group in that category, else null. It is also the network page's answer (it replaces `/v1/providers/{slug}`): `profile` (the provider's presentation, score and that category's measured blocks, without the geo and ASN lists, the place ranks, the histories and the raw snapshot product), `stats` (`windowStats` per range without its histories) and the network's newest published `reviews`, `communityRuns`, `changelog` and `tape` rows (at most 20 each, with their full counts in `records`). 404 for an unknown network or category. |
 | `/v1/networks/{slug}/chart?kind=&range=` | That category's histories for one range (default `30d`): `success`, `availability`, `latency` (p50/p90/p99), `pool` (distinct IPs) and outage `bands`, as `windowStats` draws them (5-minute points for 24h, days otherwise; `t` in minutes before the build). For `all`, the every-group fleet series (success, light-load latency, distinct IPs per bucket; no availability or bands, which are per product). |
@@ -80,14 +82,14 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/countries` | Every country any network was seen in (30d): networks and `ipsSum`. |
 | `/v1/countries/{cc}` | That country's row of every network and category per range, with `ipsSumRank` and `latencyRank` among the networks of the same category, and the city count per range. |
 | `/v1/countries/{cc}/cities?range=&q=&page=` | One page of that country's cities across networks (each row names its network and category). |
-| `/v1/version` | `{revision, builtAt}`: what open pages poll (through `/api/site/v1/version`) to learn that the data changed. `revision` is the hex SHA-256 of the `/v1/dataset` body, i.e. its ETag without quotes, so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
+| `/v1/version` | `{revision, builtAt}`: what open pages poll (through `/api/site/v1/version`) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5`; answer `If-None-Match` with `304`. |
 | `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders a QA-1-sized
 build (`internal/testscale`: 21 framework providers, 18 with 40 per-country product groups, the framework
-targets, 559 test events and the site's own content) and fails when any answer or page is larger. Until
-the rest of SNAP-SIZE-2 a temporary list in the test exempts `/v1/dataset` (the static build's input and
-what the download dialog fetches). `/v1/overview`, `/v1/providers` and `/v1/providers/{slug}` are gone:
+targets, 559 test events and the site's own content) and fails when any answer or page is larger. It has no
+exemptions: the dataset is not an answer but the file `/v1/dataset` redirects to (11.5 MB at the QA-1
+scale; the test logs its identity, gzip and brotli sizes). `/v1/overview`, `/v1/providers` and `/v1/providers/{slug}` are gone:
 `/v1/rankings`, `/v1/networks/{slug}` and `/v1/networks/{slug}/chart` answer what a page needs. A place row adds the requests of every product group that saw the place and keeps the latency
 p50 of the row with the most successes; `ipsSum` adds each group's distinct IPs, so an IP seen by two
 groups counts twice (an upper bound, not a distinct count). Capped lists are read whole from the build's
@@ -113,8 +115,10 @@ fixture-only targets, and `"catalog"` for editorial ones.
   weak comparison and matches any coding's tag (or `*`), returning `304` with no
   body. Every `/v1/*` response is
   `Cache-Control: public, max-age=60, stale-while-revalidate=600`. The exceptions
-  are `/v1/events`, which is `public, max-age=15, stale-while-revalidate=60`, and
-  `/v1/version`, which is `public, max-age=5`.
+  are `/v1/events`, which is `public, max-age=15, stale-while-revalidate=60`,
+  `/v1/version` and the `/v1/dataset` redirect, which are `public, max-age=5`, and
+  the dataset file, which is `public, max-age=31536000, immutable` (its name
+  changes with its bytes).
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
   - `current_calculation.build_id`
   - `max(test_events.event_id)`
@@ -145,7 +149,7 @@ fixture-only targets, and `"catalog"` for editorial ones.
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version.
-- **Measured (Apple Silicon, localhost).** Serving a cached `/v1/dataset` through the
+- **Measured (Apple Silicon, localhost).** Serving the cached dataset file through the
   handler takes about 1.8 µs (`BenchmarkCachedDataset`). Over loopback HTTP with
   keep-alive and brotli bodies, p50 is about 0.15-0.2 ms and p99 about 0.5-0.7 ms
   for the dataset, rankings, a network, search and events (`TestServeFromDatabase`

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -104,7 +105,19 @@ func newTestServer(t testing.TB, src Source) *Server {
 	return s
 }
 
+// get requests path and, like a browser or fetch, follows a redirect (the
+// dataset's) with the same headers.
 func get(h http.Handler, path string, headers ...string) *httptest.ResponseRecorder {
+	rec := getOnce(h, path, headers...)
+	if rec.Code == http.StatusFound {
+		base, _ := url.Parse(path)
+		next, _ := url.Parse(rec.Header().Get("Location"))
+		return getOnce(h, base.ResolveReference(next).String(), headers...)
+	}
+	return rec
+}
+
+func getOnce(h http.Handler, path string, headers ...string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	for i := 0; i+1 < len(headers); i += 2 {
 		req.Header.Set(headers[i], headers[i+1])
@@ -127,7 +140,7 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		t.Fatalf("dataset body: %v", err)
 	}
 	hdr := plain.Header()
-	if hdr.Get("Cache-Control") != "public, max-age=60, stale-while-revalidate=600" || hdr.Get("Vary") != "Accept-Encoding" ||
+	if hdr.Get("Cache-Control") != CacheFile || hdr.Get("Vary") != "Accept-Encoding" ||
 		hdr.Get("Content-Type") != "application/json; charset=utf-8" || hdr.Get("Content-Length") != fmt.Sprint(len(identity)) {
 		t.Fatalf("headers %v", hdr)
 	}
@@ -169,7 +182,7 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		t.Fatalf("stale etag: %d", r.Code)
 	}
 	head := httptest.NewRecorder()
-	h.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/v1/dataset", nil))
+	h.ServeHTTP(head, httptest.NewRequest(http.MethodHead, s.current.Load().DatasetPath, nil))
 	if head.Code != 200 || head.Body.Len() != 0 || head.Header().Get("Content-Length") != fmt.Sprint(len(identity)) {
 		t.Fatalf("HEAD: %d %d", head.Code, head.Body.Len())
 	}
@@ -405,7 +418,7 @@ func TestEventsEndpoint(t *testing.T) {
 func BenchmarkCachedDataset(b *testing.B) {
 	s := newTestServer(b, &fakeSource{rev: 1})
 	h := s.Handler()
-	req := httptest.NewRequest(http.MethodGet, "/v1/dataset", nil)
+	req := httptest.NewRequest(http.MethodGet, s.current.Load().DatasetPath, nil)
 	req.Header.Set("Accept-Encoding", "br")
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -511,5 +524,66 @@ func TestRankingsAnswerPerRangeInOrder(t *testing.T) {
 				t.Fatalf("%s row %d: %+v", path, i, n)
 			}
 		}
+	}
+}
+
+func TestTheDatasetIsAHashNamedFileBehindARedirect(t *testing.T) {
+	src := &fakeSource{rev: 1}
+	s := newTestServer(t, src)
+	h := s.Handler()
+	v := s.current.Load()
+	if _, ok := v.Static["/v1/dataset"]; ok || v.Dataset == nil || v.DatasetPath != "/v1/files/dataset-"+Revision(v)+".json" {
+		t.Fatalf("dataset file %q", v.DatasetPath)
+	}
+	redirect := getOnce(h, "/v1/dataset")
+	if redirect.Code != http.StatusFound || redirect.Header().Get("Location") != "files/dataset-"+Revision(v)+".json" ||
+		redirect.Header().Get("Cache-Control") != CacheVersion || redirect.Body.Len() > 0 {
+		t.Fatalf("redirect %d %v", redirect.Code, redirect.Header())
+	}
+	// Behind a prefix (the site's /api/site/v1/dataset) the relative Location still names the file.
+	if loc, _ := url.Parse("/api/site/v1/dataset"); loc.ResolveReference(&url.URL{Path: redirect.Header().Get("Location")}).Path !=
+		"/api/site"+v.DatasetPath {
+		t.Fatal("the Location does not resolve under a prefix")
+	}
+	file := getOnce(h, v.DatasetPath)
+	if file.Code != 200 || file.Header().Get("Cache-Control") != CacheFile || !bytes.Equal(file.Body.Bytes(), v.Dataset.Identity) {
+		t.Fatalf("file %d %v", file.Code, file.Header())
+	}
+	for _, path := range []string{"/v1/files/dataset-0000.json", "/v1/files/other.json"} {
+		if r := getOnce(h, path); r.Code != http.StatusNotFound {
+			t.Errorf("%s: %d", path, r.Code)
+		}
+	}
+	// A new build names a new file. The previous one is still served as it was
+	// until the next rebuild (a client may hold the old redirect for 5 s, or race
+	// the swap); after that an old name redirects, uncached, to the current file.
+	// Never a 404 for a dataset name.
+	rebuild := func(rev int64) *Version {
+		src.set(rev, nil)
+		if _, err := s.Refresh(context.Background(), false); err != nil {
+			t.Fatal(err)
+		}
+		return s.current.Load()
+	}
+	v2 := rebuild(2)
+	if old := getOnce(h, v.DatasetPath); old.Code != 200 || !bytes.Equal(old.Body.Bytes(), v.Dataset.Identity) ||
+		getOnce(h, v2.DatasetPath).Code != 200 || v2.DatasetPath == v.DatasetPath {
+		t.Fatalf("previous file after a rebuild: %d", old.Code)
+	}
+	v3 := rebuild(3)
+	moved := getOnce(h, v.DatasetPath)
+	if moved.Code != http.StatusFound || moved.Header().Get("Location") != strings.TrimPrefix(v3.DatasetPath, "/v1/files/") ||
+		moved.Header().Get("Cache-Control") != CacheNone {
+		t.Fatalf("an older file: %d %v", moved.Code, moved.Header())
+	}
+	if r := get(h, v.DatasetPath); r.Code != 200 || !bytes.Equal(r.Body.Bytes(), v3.Dataset.Identity) {
+		t.Fatalf("following an older file's redirect: %d", r.Code)
+	}
+	if r := getOnce(h, v2.DatasetPath); r.Code != 200 || !bytes.Equal(r.Body.Bytes(), v2.Dataset.Identity) {
+		t.Fatalf("the previous file after another rebuild: %d", r.Code)
+	}
+	cold := New(&fakeSource{rev: 1}, Options{}).Handler()
+	if getOnce(cold, "/v1/dataset").Code != http.StatusServiceUnavailable || getOnce(cold, v.DatasetPath).Code != http.StatusServiceUnavailable {
+		t.Fatal("before the first build")
 	}
 }

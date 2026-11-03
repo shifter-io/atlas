@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +38,16 @@ type Version struct {
 	search                             *LRU
 	events                             *LRU
 	pages                              *LRU
+	// Dataset is the /v1/dataset body, rendered once per build as a static
+	// file named by its hash, DatasetPath (/v1/files/dataset-<sha256>.json),
+	// cached for a year; /v1/dataset redirects to it.
+	Dataset     *Rendered
+	DatasetPath string
+	// previous is the build before's dataset file, still served under its
+	// own name until the next rebuild, so a client that got the old redirect
+	// (cached for up to 5 s, or racing the swap) still gets its file.
+	previous     *Rendered
+	previousPath string
 }
 
 // Source loads inputs; the database in production, fixtures in tests.
@@ -131,13 +142,16 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		return false, err
 	}
 	v.BuildTime = time.Since(start)
+	if cur != nil && cur.DatasetPath != v.DatasetPath {
+		v.previous, v.previousPath = cur.Dataset, cur.DatasetPath
+	}
 	s.current.Store(v)
 	s.state.Lock()
 	s.state.builds++
 	s.state.lastError = ""
 	s.state.Unlock()
 	s.log.Info("cache rebuilt", "version", v.ID, "build_ms", v.BuildTime.Milliseconds(), "load_ms", v.LoadTime.Milliseconds(),
-		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", len(v.Static["/v1/dataset"].Identity))
+		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", len(v.Dataset.Identity))
 	return true, nil
 }
 
@@ -180,7 +194,7 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 		cache string
 	}
 	jobs := []job{
-		{"/v1/dataset", res.Dataset, CacheStatic},
+		{datasetJob, res.Dataset, CacheFile},
 		{"/v1/search-index", res.Search, CacheStatic},
 		{"/v1/coverage", res.Coverage.Index(), CacheStatic},
 	}
@@ -212,6 +226,9 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	if err := <-errs; err != nil {
 		return nil, err
 	}
+	v.Dataset = v.Static[datasetJob]
+	delete(v.Static, datasetJob)
+	v.DatasetPath = "/v1/files/dataset-" + strings.Trim(v.Dataset.ETag, `"`) + ".json"
 	if res.Pages.Snapshot == nil {
 		r, err := Render(http.StatusNotFound, map[string]any{"error": "no published snapshot", "available": false}, CacheStatic, LevelFast)
 		if err != nil {
@@ -248,13 +265,12 @@ type VersionInfo struct {
 }
 
 // Revision identifies the published data of a Version: the hex SHA-256 of the
-// /v1/dataset body, which is also that body's ETag.
+// dataset file, which is also its ETag and part of its name.
 func Revision(v *Version) string {
-	d := v.Static["/v1/dataset"]
-	if d == nil {
+	if v.Dataset == nil {
 		return ""
 	}
-	return strings.Trim(d.ETag, `"`)
+	return strings.Trim(v.Dataset.ETag, `"`)
 }
 
 // Run polls for changes until the context ends.
@@ -279,7 +295,9 @@ func (s *Server) Handler() http.Handler {
 	static := func(path string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, path) }
 	}
-	for _, p := range []string{"/v1/dataset", "/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
+	mux.HandleFunc("GET /v1/dataset", s.serveDataset)
+	mux.HandleFunc("GET /v1/files/{name}", s.serveFile)
+	for _, p := range []string{"/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
 	mux.HandleFunc("GET /v1/coverage/{slug}", func(w http.ResponseWriter, r *http.Request) {
@@ -567,5 +585,56 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
 		w.Write(body) //nolint:errcheck
+	}
+}
+
+// datasetJob renders the dataset beside the answers; it is then moved out of
+// Static, which holds only the (capped) API answers.
+const datasetJob = "dataset file"
+
+// serveDataset redirects to the current dataset file. The Location is
+// relative (files/dataset-<sha>.json), so it resolves under any path prefix
+// a proxy adds (the site's /api/site/v1/dataset).
+func (s *Server) serveDataset(w http.ResponseWriter, r *http.Request) {
+	v := s.current.Load()
+	if v == nil {
+		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		return
+	}
+	h := w.Header()
+	h.Set("Location", strings.TrimPrefix(v.DatasetPath, "/v1/"))
+	h.Set("Cache-Control", CacheVersion)
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("X-Site-Version", strconv.FormatUint(v.ID, 10))
+	w.WriteHeader(http.StatusFound)
+}
+
+// datasetName is a dataset file's name: dataset-<hex sha256>.json.
+var datasetName = regexp.MustCompile(`^dataset-[0-9a-f]{64}\.json$`)
+
+// serveFile serves the current dataset file and, until the next rebuild, the
+// previous one. Any other dataset name (an older revision) is redirected,
+// uncached, to the current file, so a download or a build never gets a 404
+// because the data changed under it; other names are 404.
+func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
+	v := s.current.Load()
+	if v == nil {
+		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		return
+	}
+	name := r.PathValue("name")
+	switch path := "/v1/files/" + name; {
+	case path == v.DatasetPath:
+		s.write(w, r, v, v.Dataset)
+	case path == v.previousPath:
+		s.write(w, r, v, v.previous)
+	case datasetName.MatchString(name):
+		h := w.Header()
+		h.Set("Location", strings.TrimPrefix(v.DatasetPath, "/v1/files/"))
+		h.Set("Cache-Control", CacheNone)
+		h.Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusFound)
+	default:
+		writeError(w, http.StatusNotFound, "not found")
 	}
 }

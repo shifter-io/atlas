@@ -42,14 +42,9 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	return v, res, time.Since(t0)
 }
 
-// legacy is a TEMPORARY list of whole-fleet answers still above the cap.
-// TODO(SNAP-SIZE-2): serve /v1/dataset as a versioned static file (the
-// static build's input and what the download dialog fetches) and delete this
-// list. Every other answer must fit the cap.
-var legacy = map[string]bool{"/v1/dataset": true}
-
 // TestEveryAnswerFitsTheCap: every answer of a QA-1-sized build, and every
-// page of its long lists, is at most build.MaxAnswerBytes (legacy excepted).
+// page of its long lists, is at most build.MaxAnswerBytes. The dataset is not
+// an answer: it is the download file /v1/dataset redirects to.
 func TestEveryAnswerFitsTheCap(t *testing.T) {
 	v, res, took := scaleVersion(t)
 	// The scale build must reproduce the answer that once broke the cap: the
@@ -77,7 +72,7 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 			group = p[:i] + "/*"
 		}
 		largest[group] = max(largest[group], n)
-		if n > build.MaxAnswerBytes && !legacy[group] {
+		if n > build.MaxAnswerBytes {
 			t.Errorf("%s is %d bytes, above the %d-byte cap", p, n, build.MaxAnswerBytes)
 		}
 	}
@@ -100,7 +95,11 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 			t.Errorf("%s is %d bytes, above the cap", path, rec.Body.Len())
 		}
 	}
-	report := []string{fmt.Sprintf("build+render %v, %d answers, whole coverage %d", took.Round(time.Millisecond), len(paths), len(whole))}
+	if r := getOnce(h, "/v1/dataset"); r.Code != http.StatusFound || r.Body.Len() > 0 {
+		t.Errorf("/v1/dataset: %d, %d bytes", r.Code, r.Body.Len())
+	}
+	report := []string{fmt.Sprintf("build+render %v, %d answers, whole coverage %d, dataset file %d (gzip %d, br %d)", took.Round(time.Millisecond),
+		len(paths), len(whole), len(v.Dataset.Identity), len(v.Dataset.Gzip), len(v.Dataset.Brotli))}
 	for g, n := range largest {
 		report = append(report, fmt.Sprintf("%-48s %9d", g, n))
 	}

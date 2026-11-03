@@ -53,7 +53,7 @@ func TestServeFromDatabase(t *testing.T) {
 	}
 	cur := s.Current()
 	t.Logf("build took %v (load %v, assemble %v, render %v); dataset %d bytes identity, %d gzip, %d br", cur.BuildTime, cur.LoadTime, cur.AssembleTime, cur.RenderTime,
-		len(cur.Static["/v1/dataset"].Identity), len(cur.Static["/v1/dataset"].Gzip), len(cur.Static["/v1/dataset"].Brotli))
+		len(cur.Dataset.Identity), len(cur.Dataset.Gzip), len(cur.Dataset.Brotli))
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4, DisableCompression: true}}
