@@ -130,8 +130,8 @@ class Spaces:
     def from_file(cls, path: str | Path) -> Spaces:
         try:
             return cls(read_credentials(path, "spaces"))
-        except (KeyError, ValueError) as exc:
-            raise ArchiveError(f"Spaces settings: {exc}") from None
+        except (KeyError, ValueError, OSError) as exc:
+            raise ArchiveError(f"Spaces settings: {type(exc).__name__}: {exc}") from None
 
     def _request(self, method, key="", query=None, headers=None, body=None, payload=EMPTY):
         path = f"/{self.bucket}/{key}" if key else f"/{self.bucket}"
@@ -154,27 +154,32 @@ class Spaces:
         try:
             connection.request(method, target, body=body, headers=headers)
             response = connection.getresponse()
-            return response.status, dict(response.getheaders()), response
+            return response.status, dict(response.getheaders()), response, connection
         except OSError as exc:
             connection.close()
             raise ArchiveError(f"Spaces {method} failed: {type(exc).__name__}") from None
 
-    def _call(self, method, key="", expect=(200,), **options) -> tuple[dict, bytes]:
-        status, headers, response = self._request(method, key, **options)
-        data = response.read()
+    def _call(self, method, key="", expect=(200,), **options) -> tuple[int, dict, bytes]:
+        status, headers, response, connection = self._request(method, key, **options)
+        try:
+            data = response.read()
+        finally:
+            connection.close()
         if status not in expect:
             code = re.search(rb"<Code>([A-Za-z]+)</Code>", data)
             what = code.group(1).decode() if code else status
             raise ArchiveError(f"Spaces {method} {key or self.bucket} answered {what}")
-        return {k.lower(): v for k, v in headers.items()}, data
+        return status, {k.lower(): v for k, v in headers.items()}, data
 
     def head(self, key: str) -> dict[str, Any] | None:
         """The object's size, MD5 ETag and metadata (sha256, ...), or None when it is absent."""
-        headers, _ = self._call("HEAD", key, expect=(200, 404))
-        if "content-length" not in headers or headers.get("etag") is None:
+        status, headers, _ = self._call("HEAD", key, expect=(200, 404))
+        if status == 404:
             return None
+        if "content-length" not in headers or headers.get("etag") is None:
+            raise ArchiveError(f"Spaces HEAD {key} answered without a size or ETag")
         meta = {k[11:]: v for k, v in headers.items() if k.startswith("x-amz-meta-")}
-        return {"bytes": int(headers["content-length"]), "md5": headers["etag"].strip('"')} | meta
+        return meta | {"bytes": int(headers["content-length"]), "md5": headers["etag"].strip('"')}
 
     def put_file(self, key: str, path: Path, digests: dict, meta: dict | None = None) -> None:
         """Upload a file private; digests are file_digests(path) (bytes, sha256, md5), meta
@@ -190,18 +195,20 @@ class Spaces:
             self._call("PUT", key, headers=headers, body=body, payload=digests["sha256"])
 
     def get_file(self, key: str, path: Path) -> None:
-        status, _, response = self._request("GET", key)
-        if status != 200:
-            response.read()
-            raise ArchiveError(f"Spaces GET {key} answered {status}")
-        partial = Path(path).with_name(Path(path).name + ".partial")
-        with partial.open("wb") as out:
-            while chunk := response.read(CHUNK):
-                out.write(chunk)
-        partial.replace(path)
+        status, _, response, connection = self._request("GET", key)
+        try:
+            if status != 200:
+                raise ArchiveError(f"Spaces GET {key} answered {status}")
+            partial = Path(path).with_name(Path(path).name + ".partial")
+            with partial.open("wb") as out:
+                while chunk := response.read(CHUNK):
+                    out.write(chunk)
+            partial.replace(path)
+        finally:
+            connection.close()
 
     def versioning(self) -> str | None:
-        _, data = self._call("GET", query={"versioning": ""})
+        _, _, data = self._call("GET", query={"versioning": ""})
         found = re.search(rb"<Status>(\w+)</Status>", data)
         return found.group(1).decode() if found else None
 
@@ -220,6 +227,6 @@ class Spaces:
 
     def public_grants(self) -> list[str]:
         """The bucket ACL's grants to everyone or to every authenticated user (want none)."""
-        _, data = self._call("GET", query={"acl": ""})
+        _, _, data = self._call("GET", query={"acl": ""})
         uris = re.findall(rb"<URI>([^<]+)</URI>", data)
         return [u.decode() for u in uris if u.decode().endswith(PUBLIC)]

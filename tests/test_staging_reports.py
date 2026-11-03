@@ -381,7 +381,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
             }
             targets = conn.execute(
                 "SELECT target_id,census,census_concurrency,pulse_interval_minutes,"
-                "pulse_requests FROM targets ORDER BY sort_order"
+                "pulse_requests FROM targets WHERE engine='http' ORDER BY sort_order"
             ).fetchall()
             assert targets == [
                 ("generic_http", True, 100, 2, 100),

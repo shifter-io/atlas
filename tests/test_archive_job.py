@@ -20,8 +20,8 @@ from proxy_index.archive.job import facts_digest, object_key, run_due, store
 from proxy_index.archive.purge import purge_day
 from proxy_index.archive.spaces import Spaces, manager_settings, sign
 from proxy_index.cli import main
-from proxy_index.orchestrator.db import Database
-from proxy_index.orchestrator.jobs import archive
+from proxy_index.orchestrator.db import Database, put_setting
+from proxy_index.orchestrator.jobs import archive, retention
 from proxy_index.partitions import children, partition
 from proxy_index.storage import connect
 
@@ -372,8 +372,11 @@ async def test_the_orchestrator_job_and_the_cli(database, tmp_path, capsys):
                         "INSERT INTO settings(key,value) VALUES (%s,%s::jsonb)",
                         (name, json.dumps(value)),
                     )
-            # The day before DAY is due now; DAY waits for its run, which ran today.
-            assert (await archive(db, database))["archived"] == ["2026-09-30"]
+            # The day before DAY is due now and is archived; DAY waits for its run, which ran
+            # today, so its rows are over RAW_DAYS + STALL_DAYS old and the job fails.
+            with pytest.raises(ArchiveError, match="archive stalled: 2026-10-01"):
+                await archive(db, database)
+            assert list(bucket.objects) == ["/raw/2026/2026-09-30.tar.gz"]
             check = ["archive", "bucket", "--spaces-file", str(settings)]
             assert main(check) == 2 and "not private and versioned" in capsys.readouterr().err
             assert main([*check, "--apply"]) == 0
@@ -386,7 +389,65 @@ async def test_the_orchestrator_job_and_the_cli(database, tmp_path, capsys):
                 "--spaces-file",
                 str(settings),
             ]
-            assert main([*run, "--work-dir", str(tmp_path / "work")]) == 0
-            assert json.loads(capsys.readouterr().out)["archived"] == []
+            assert main([*run, "--work-dir", str(tmp_path / "work")]) == 2
+            assert "archive stalled" in capsys.readouterr().err
     finally:
         await db.close()
+
+
+async def test_a_stalled_archive_fails_and_retention_keeps_unarchived_estimates(database, tmp_path):
+    await census_day(database, tmp_path)
+    with connect(database) as conn:
+        conn.execute("UPDATE batch_runs SET status='running'")  # DAY can never be due
+    stalled = LATER + timedelta(days=10)
+    with fake_bucket(tmp_path) as (bucket, settings):
+        with pytest.raises(ArchiveError, match="archive stalled: 2026-10-01.*still open"):
+            run_due(database, Spaces.from_file(settings), tmp_path / "work", stalled)
+        assert list(bucket.objects) == ["/raw/2026/2026-09-30.tar.gz"]  # the due day went
+    db = Database(database)
+    try:
+        async with db.transaction() as conn:
+            await put_setting(conn, "archive.enabled", True)
+        # Long past retention.estimates_days: with the archive on, the estimates stay.
+        assert (await retention(db, stalled + timedelta(days=30)))["estimated_hours_deleted"] == 0
+        with connect(database) as conn:
+            assert conn.execute("SELECT count(*) FROM estimated_hours").fetchone()[0] == 1
+        async with db.transaction() as conn:
+            await put_setting(conn, "archive.enabled", False)
+        assert (await retention(db, stalled + timedelta(days=30)))["estimated_hours_deleted"] == 1
+    finally:
+        await db.close()
+
+
+async def test_a_failed_upload_or_verification_leaves_every_row(database, tmp_path, monkeypatch):
+    await census_day(database, tmp_path)
+
+    def counts():
+        with connect(database) as conn:
+            return [
+                conn.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+                for t in ("test_batches", "test_runs", "run_buckets", "estimated_hours")
+            ]
+
+    before = counts()
+    with fake_bucket(tmp_path) as (bucket, settings):
+        spaces = Spaces.from_file(settings)
+
+        def bad_digest(*args, **kwargs):
+            raise ArchiveError("Spaces PUT answered BadDigest")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Spaces, "put_file", bad_digest)
+            with pytest.raises(ArchiveError, match="BadDigest"):
+                run_due(database, spaces, tmp_path / "work", LATER)
+        assert counts() == before and bucket.objects == {}
+        real_head = Spaces.head
+
+        def no_sha(self, key):  # the object is there, but without its stored sha256
+            found = real_head(self, key)
+            return found and {k: v for k, v in found.items() if k != "sha256"}
+
+        monkeypatch.setattr(Spaces, "head", no_sha)
+        with pytest.raises(ArchiveError, match="archive_changed: raw/2026/2026-09-30"):
+            run_due(database, spaces, tmp_path / "work", LATER)
+        assert counts() == before

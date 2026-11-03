@@ -14,13 +14,17 @@ detect                    every minute: proxy_index.detect.detect(conn, now) wri
                           incident events from finished pulse batches (optional module)
 retention                 daily: test_events older than retention.events_days (whole monthly
                           partitions are dropped), job_runs older than retention.job_runs_days,
-                          estimated_hours older than retention.estimates_days
+                          estimated_hours older than retention.estimates_days (not while
+                          archive.enabled: the archive deletes them with their run)
 archive                   daily at 00:40 UTC, when `archive.enabled`: proxy_index.archive.job
                           archives the due days to Spaces and deletes their raw rows
 raw_upload                every 5 minutes, when `archive.enabled` and `raw.spool_dir`: each
                           ended hour's raw files to Spaces, hours older than 30 days removed
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
+dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
+                          renames the newest dated DB-IP MMDB from `dbip.base_url` over
+                          `dbip.dir`/dbip-full.mmdb and records it; unchanged is 'skipped'
 
 Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
 and the index are written there (report_html.write, in a thread; install_reports).
@@ -156,12 +160,16 @@ async def retention(db: Database, now: datetime | None = None) -> dict[str, Any]
             )
         ).rowcount
         estimates_days = int(await setting(conn, "retention.estimates_days"))
-        estimates = (
-            await conn.execute(
-                "DELETE FROM estimated_hours WHERE day<%s",
-                ((now - timedelta(days=estimates_days)).date(),),
-            )
-        ).rowcount
+        estimates = 0
+        # With the raw archive on, estimated hours go only with their run, after its day file
+        # is verified in the bucket (ARCHIVE-1); this fallback would delete them unarchived.
+        if not await setting(conn, "archive.enabled"):
+            estimates = (
+                await conn.execute(
+                    "DELETE FROM estimated_hours WHERE day<%s",
+                    ((now - timedelta(days=estimates_days)).date(),),
+                )
+            ).rowcount
     return {
         "dropped_partitions": dropped,
         "events_deleted": events,
@@ -235,6 +243,32 @@ async def live_reports(db: Database) -> dict[str, Any]:
     return {"dir": result["dir"], "running": len(result["batches"])}
 
 
+async def dbip_update(db: Database, credentials_file: str) -> dict[str, Any]:
+    """The daily DB-IP update; a failure fails the job (and alerts)."""
+    async with db.connection() as conn:
+        dest = await setting(conn, "dbip.dir")
+        configured = await setting(conn, "dbip.base_url")
+    if not dest:
+        return {"skipped": "dbip.dir is not set"}
+    from .. import dbip
+
+    def work() -> dict[str, Any]:
+        base = dbip.base_url(configured)
+        return dbip.update(
+            Path(dest), base, database_file=credentials_file, checks=dbip.DEFAULT_CHECKS
+        )
+
+    try:
+        result = await asyncio.to_thread(work)
+    except dbip.Busy:
+        return {"skipped": "another update is running"}
+    if result.get("error"):
+        raise dbip.UpdateError(result["error"])
+    if result["dbip"] == "unchanged":
+        return {"skipped": "release unchanged", "release": result["source"]["name"]}
+    return {"dbip": result["dbip"], "release": result["source"]["name"], "sha256": result["sha256"]}
+
+
 def install_reports(db: Database) -> None:
     """Write reports whenever a committed transaction closes batches (Database.on_close)."""
 
@@ -288,6 +322,9 @@ def register_jobs(
     async def reports_job() -> dict[str, Any]:
         return await live_reports(db)
 
+    async def dbip_job() -> dict[str, Any]:
+        return await dbip_update(db, credentials_file)
+
     scheduler.add("census_plan", census_plan, every_s=60, aligned=True)
     scheduler.add("pulse_plan", pulse_plan, every_s=60, aligned=True)
     scheduler.add("pulse_evaluate", pulse_evaluate, every_s=60)
@@ -300,3 +337,4 @@ def register_jobs(
     scheduler.add("archive", archive_job, at_utc_minute=40)
     scheduler.add("raw_upload", raw_upload_job, every_s=300)
     scheduler.add("reports", reports_job, every_s=30)
+    scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
