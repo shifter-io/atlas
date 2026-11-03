@@ -32,6 +32,7 @@ type Pages struct {
 	Country   map[string]*CountryAnswer  // by upper-case country code
 	Snapshot  *SnapshotSummary           // nil while nothing is published
 	Rankings  map[string]*RankingsAnswer // by range
+	Charts    map[string]*ChartAnswer    // by slug + "/" + kind + "/" + range
 	lists     map[listKey][]PlaceRow
 }
 
@@ -130,6 +131,17 @@ type NetworkAnswer struct {
 	Days               []DayRow                `json:"days"`
 	Ranges             map[string]*RangeTotals `json:"ranges"`
 	Networks           int                     `json:"networks,omitempty"` // all-networks answer only: networks covered
+	// The network page's profile (null for the all-networks answer), the
+	// category's window statistics per range without histories, and the
+	// network's newest published reviews, community runs, changelog and tape
+	// rows (at most RecordCap each).
+	Profile       *NetworkProfile        `json:"profile"`
+	Stats         map[string]*RangeStats `json:"stats"`
+	Reviews       []model.UserReview     `json:"reviews"`
+	CommunityRuns []model.CommunityRun   `json:"communityRuns"`
+	Changelog     []model.ChangeEvent    `json:"changelog"`
+	Tape          []model.TapeEvent      `json:"tape"`
+	Records       RecordCounts           `json:"records"` // full lengths of the four lists, each capped at RecordCap
 }
 
 // CountryIndexRow is one country of /v1/countries (30-day window); IpsSum
@@ -187,9 +199,10 @@ type PeerScores struct {
 }
 
 // buildPages computes every per-page answer of a build.
-func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, s *snap.Snapshot, row *store.SnapshotRow) *Pages {
+func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
+	s *snap.Snapshot, row *store.SnapshotRow) *Pages {
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
-		lists: map[listKey][]PlaceRow{}}
+		Charts: map[string]*ChartAnswer{}, lists: map[listKey][]PlaceRow{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
 	groups := groupsByProvider(s)
 	byCountry := map[string]map[string][]PlaceRow{} // cc -> range -> one row per network and kind
@@ -221,7 +234,9 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 		for key, rows := range places {
 			pg.lists[listKey{scope: AllNetworks + "/" + AllNetworks, rangeID: key.rangeID, dimension: key.dimension}] = rows
 		}
+		pg.allCharts(generatedAt, s)
 	}
+	pg.addDetails(generatedAt, details)
 	if s != nil {
 		pg.Snapshot = snapshotSummary(s, row, entries)
 	}

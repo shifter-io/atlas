@@ -26,11 +26,14 @@ type Result struct {
 	Fingerprint store.Fingerprint
 	BuiltAt     time.Time
 	Dataset     *model.Dataset
-	Overview    *Overview
-	Providers   []ProviderSummary
-	Details     map[string]*ProviderDetail
-	Search      *SearchIndex
-	Coverage    *Coverage
+	// Overview and Details are no longer served (/v1/overview and
+	// /v1/providers are gone). Details feed the network answers and charts;
+	// Overview stays the Go port of overview.ts that the TypeScript parity
+	// test checks (rankings and the measured market reuse its functions).
+	Overview *Overview
+	Details  map[string]*ProviderDetail
+	Search   *SearchIndex
+	Coverage *Coverage
 	// Pages is the small per-page answers (pages.go); it replaces serving the
 	// published snapshot payload whole.
 	Pages  *Pages
@@ -644,8 +647,6 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		ov.Leaderboard = append(ov.Leaderboard, sum)
 	}
 	res.Overview = ov
-	res.Providers = ov.Leaderboard
-	res.Pages = buildPages(ds.GeneratedAt, entries, stats, s, in.Snapshot)
 
 	for _, e := range entries {
 		p := e.P
@@ -680,6 +681,7 @@ func Build(in *store.Inputs, opts Options) (*Result, error) {
 		}
 		res.Details[p.Slug] = d
 	}
+	res.Pages = buildPages(ds.GeneratedAt, entries, stats, res.Details, s, in.Snapshot)
 	res.Search = buildSearchIndex(leader, ds.Targets, opts.Content, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, records)
 	return res, nil

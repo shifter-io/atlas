@@ -142,7 +142,7 @@ rows.
 | `pool.countries`, `regions`, `cities`, `asns` | `w.pool.*` | data | |
 | `pool.requestsPerIp` | none | always | ✱ |
 | `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, stays in `measurement`) | data | ✱ |
-| `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/providers/{slug}` `windows[].successDeltaPts`) | always | ✱ |
+| `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`, null without a load test; older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
@@ -271,8 +271,8 @@ is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 
 ### Window statistics of a measured provider
 
-`windowStats` (`/v1/overview` leaderboard `windows`, `/v1/providers/{slug}`
-`windows`) reads the snapshot window: `successRate = metrics.success_rate`,
+`windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
+`/chart` answers) reads the snapshot window: `successRate = metrics.success_rate`,
 `latencyP50/P90/P99` the `generic_http` target's headline latency (under load
 in every-request snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` its
 light-load `latency_ms` in every-request snapshots (null otherwise, and always
@@ -439,4 +439,55 @@ can repeat and percentiles do not add up.
   "countries":[{"key":"US","countryCode":"US","country":"United States","ipsSum":5100,"requests":900,"successes":880,
    "successRate":0.978,"latencyP50":980}],
   "lists":{"country":240,"region":1800,"city":9000,"asn":2500}},"7d":{"...":null},"30d":{"...":null}}}
+```
+
+### `/v1/networks/{slug}?kind=` (the network page)
+
+Besides the summed totals and places above, a network's answer carries what
+`/v1/providers/{slug}` used to, without its long lists:
+
+- `profile`: the Provider's presentation (`source`, `slug`, `name`, `tagline`,
+  `kinds`, `primaryKind`, `hq`, `founded`, `claim`, `verdict`, `strengths`,
+  `weaknesses`, `bestFor`, `website`, `products`, `measuredProduct`, `score`,
+  `reviews`, `framework`, `na`) and the category's measured blocks as in
+  `productMeasurements.<kind>` (`pool`, `performance`, `pricing`, `trust`,
+  `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`.
+  Left out: `geo` and `asns` (paged by `/places`), `series` (the chart
+  answers), `placeRanks` and `countryLatencyRanks` (the place rows carry their
+  ranks) and the raw `measurement`. The whole provider stays in `/v1/dataset`.
+- `stats`: `windowStats` of that category per range (see "Window statistics of
+  a measured provider") without `success`, `availability`, `latency`, `pool`
+  and `bands`.
+- the network's newest `reviews` (published), `communityRuns`, `changelog`
+  and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
+  first), and `records`, the full length of each list. The whole history
+  stays in `/v1/dataset`.
+
+The all-networks answer has `profile: null`, empty `stats` and empty records.
+
+```json
+{"generatedAt":"2026-11-03T09:00:00.000Z","kind":"residential","productGroups":40,"network":{"slug":"net00","...":null},
+ "days":[],"ranges":{"24h":{"...":null}},
+ "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null},
+  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},"pricing":{"...":null},
+  "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},
+ "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null}},
+ "reviews":[],"communityRuns":[],"changelog":[],"tape":[],"records":{"reviews":0,"communityRuns":0,"changelog":0,"tape":0}}
+```
+
+### `/v1/networks/{slug}/chart?kind=&range=`
+
+The histories `windowStats` draws for that category and range: `success`
+(`{t, v}` success rate), `availability` (`{t, v}`), `latency`
+(`{t, p50, p90, p99}`), `pool` (`{t, v}` distinct IPs) and `bands` (outages).
+`t` is minutes before the build's as-of time; points are five minutes apart
+for 24h and a day apart otherwise. For `all` the series is the every-group
+fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
+`unique_ips` per bucket, buckets without requests left out); `availability`
+and `bands` stay empty there, since uptime is a per-product fact.
+
+```json
+{"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
+ "success":[{"t":1435,"v":0.98}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
+ "pool":[{"t":1435,"v":212}],"bands":[]}
 ```

@@ -80,7 +80,11 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 	if tape := tapeIDs(t, s, "/v1/dataset"); !tape["event-1"] || !tape["event-2"] || len(tape) < build.MeasuredTapeRows {
 		t.Fatalf("tape lost the incidents: %d rows", len(tape))
 	}
-	if head := tapeIDs(t, s, "/v1/overview"); !head["event-1"] || !head["event-2"] || len(head) != 60 {
+	head := map[string]bool{}
+	for _, r := range s.current.Load().Result.Overview.Tape {
+		head[r.ID] = true
+	}
+	if !head["event-1"] || !head["event-2"] || len(head) != 60 {
 		t.Fatalf("overview tape lost the incidents: %d rows", len(head))
 	}
 

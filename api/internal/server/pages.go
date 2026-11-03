@@ -36,6 +36,9 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	for r, ans := range pg.Rankings {
 		out["/v1/rankings/"+r] = ans
 	}
+	for key, ans := range pg.Charts {
+		out["/v1/charts/"+key] = ans
+	}
 	if pg.Snapshot != nil {
 		out["/v1/snapshot"] = pg.Snapshot
 	}
@@ -70,6 +73,7 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /v1/networks/{slug}", s.serveNetwork)
 	mux.HandleFunc("GET /v1/networks/{slug}/places", s.serveNetworkPlaces)
+	mux.HandleFunc("GET /v1/networks/{slug}/chart", s.serveNetworkChart)
 	mux.HandleFunc("GET /v1/countries/{cc}", func(w http.ResponseWriter, r *http.Request) {
 		cc := r.PathValue("cc")
 		if !countryPattern.MatchString(cc) {
@@ -119,6 +123,33 @@ func (s *Server) serveNetwork(w http.ResponseWriter, r *http.Request) {
 		kind = v.Result.Pages.Primary[slug]
 	}
 	s.serveStatic(w, r, "/v1/networks/"+slug+"/"+kind)
+}
+
+// serveNetworkChart serves a network's histories for one category (default
+// its headline one) and range (default 30d).
+func (s *Server) serveNetworkChart(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if !onlyParams(w, q, "kind", "range") {
+		return
+	}
+	slug, rangeID := r.PathValue("slug"), q.Get("range")
+	if rangeID == "" {
+		rangeID = "30d"
+	}
+	if !slugPattern.MatchString(slug) || !rangeIDs[rangeID] {
+		writeError(w, http.StatusBadRequest, "invalid network or range (24h, 7d or 30d)")
+		return
+	}
+	v := s.current.Load()
+	if v == nil {
+		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		return
+	}
+	kind := q.Get("kind")
+	if kind == "" {
+		kind = v.Result.Pages.Primary[slug]
+	}
+	s.serveStatic(w, r, "/v1/charts/"+slug+"/"+kind+"/"+rangeID)
 }
 
 // listParams reads range, q and page.

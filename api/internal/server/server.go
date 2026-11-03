@@ -181,13 +181,8 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	}
 	jobs := []job{
 		{"/v1/dataset", res.Dataset, CacheStatic},
-		{"/v1/overview", res.Overview, CacheStatic},
-		{"/v1/providers", map[string]any{"generatedAt": res.Dataset.GeneratedAt, "providers": res.Providers}, CacheStatic},
 		{"/v1/search-index", res.Search, CacheStatic},
 		{"/v1/coverage", res.Coverage.Index(), CacheStatic},
-	}
-	for slug, d := range res.Details {
-		jobs = append(jobs, job{"/v1/providers/" + slug, d, CacheStatic})
 	}
 	for _, p := range res.Coverage.Providers {
 		jobs = append(jobs, job{"/v1/coverage/" + p.ID, p, CacheStatic})
@@ -284,14 +279,11 @@ func (s *Server) Handler() http.Handler {
 	static := func(path string) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) { s.serveStatic(w, r, path) }
 	}
-	for _, p := range []string{"/v1/dataset", "/v1/overview", "/v1/providers", "/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
+	for _, p := range []string{"/v1/dataset", "/v1/search-index", "/v1/coverage", "/v1/snapshot", "/v1/version"} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
 	mux.HandleFunc("GET /v1/coverage/{slug}", func(w http.ResponseWriter, r *http.Request) {
 		s.serveStatic(w, r, "/v1/coverage/"+r.PathValue("slug"))
-	})
-	mux.HandleFunc("GET /v1/providers/{slug}", func(w http.ResponseWriter, r *http.Request) {
-		s.serveStatic(w, r, "/v1/providers/"+r.PathValue("slug"))
 	})
 	mux.HandleFunc("GET /v1/search", s.serveSearch)
 	s.pageRoutes(mux)

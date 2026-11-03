@@ -68,8 +68,8 @@ func TestServeFromDatabase(t *testing.T) {
 		resp.Body.Close()
 		return resp, body
 	}
-	for _, p := range []string{"/v1/dataset", "/v1/overview", "/v1/providers", "/v1/providers/nimbus-residential", "/v1/providers/shifter",
-		"/v1/search-index", "/v1/search?q=nimbus", "/v1/coverage", "/v1/snapshot", "/v1/events", "/healthz"} {
+	for _, p := range []string{"/v1/dataset", "/v1/rankings", "/v1/networks", "/v1/networks/nimbus-residential", "/v1/networks/shifter",
+		"/v1/networks/shifter/chart?range=24h", "/v1/networks/all", "/v1/search-index", "/v1/search?q=nimbus", "/v1/coverage", "/v1/snapshot", "/v1/events", "/healthz"} {
 		resp, body := fetch(p)
 		if resp.StatusCode != 200 {
 			t.Errorf("%s: %d %s", p, resp.StatusCode, body)
@@ -95,7 +95,7 @@ func TestServeFromDatabase(t *testing.T) {
 	if testing.Short() || raceEnabled {
 		return
 	}
-	for _, p := range []string{"/v1/dataset", "/v1/overview", "/v1/providers/nimbus-residential", "/v1/search?q=nimbus", "/v1/events"} {
+	for _, p := range []string{"/v1/dataset", "/v1/rankings", "/v1/networks/nimbus-residential", "/v1/search?q=nimbus", "/v1/events"} {
 		for i := 0; i < 50; i++ {
 			fetch(p)
 		}

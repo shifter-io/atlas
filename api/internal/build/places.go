@@ -21,7 +21,8 @@ type placeList struct{ rangeID, dimension string }
 // into the answer, every list into the pages).
 func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*snap.Product, row *store.SnapshotRow) (*NetworkAnswer, map[placeList][]PlaceRow) {
 	ans := &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: len(groups),
-		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}}
+		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
+		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []model.ChangeEvent{}, Tape: []model.TapeEvent{}}
 	lists := map[placeList][]PlaceRow{}
 	for _, r := range Ranges {
 		t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,

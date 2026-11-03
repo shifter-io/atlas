@@ -185,8 +185,9 @@ type Overview struct {
 	NA          []string               `json:"na"`
 }
 
-// ProviderDetail is /v1/providers/{slug}: the Provider plus everything a
-// network page lists about it.
+// ProviderDetail is a Provider plus everything its network page lists about
+// it: the source of /v1/networks/{slug} (profile, stats, records) and of its
+// chart answers.
 type ProviderDetail struct {
 	Provider      *model.Provider                    `json:"provider"`
 	Windows       map[string]map[string]*WindowStats `json:"windows"`

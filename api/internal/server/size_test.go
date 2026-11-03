@@ -43,15 +43,10 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 }
 
 // legacy is a TEMPORARY list of whole-fleet answers still above the cap.
-// TODO(SNAP-SIZE-2): move the site's static build and its download dialog onto
-// the per-page answers, retire these and delete this list.
-//   - /v1/dataset: the static build's input, and what the download dialog
-//     (DownloadDialog.astro, on every page) fetches when a visitor downloads.
-//   - /v1/overview, /v1/providers, /v1/providers/{slug}: API views of the
-//     dataset that no page fetches.
-//
-// Every other answer must fit the cap.
-var legacy = map[string]bool{"/v1/dataset": true, "/v1/overview": true, "/v1/providers": true, "/v1/providers/*": true}
+// TODO(SNAP-SIZE-2): serve /v1/dataset as a versioned static file (the
+// static build's input and what the download dialog fetches) and delete this
+// list. Every other answer must fit the cap.
+var legacy = map[string]bool{"/v1/dataset": true}
 
 // TestEveryAnswerFitsTheCap: every answer of a QA-1-sized build, and every
 // page of its long lists, is at most build.MaxAnswerBytes (legacy excepted).

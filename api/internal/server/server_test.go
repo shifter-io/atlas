@@ -173,7 +173,10 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 	if head.Code != 200 || head.Body.Len() != 0 || head.Header().Get("Content-Length") != fmt.Sprint(len(identity)) {
 		t.Fatalf("HEAD: %d %d", head.Code, head.Body.Len())
 	}
-	for path, code := range map[string]int{"/v1/overview": 200, "/v1/providers": 200, "/v1/providers/alpha-net": 200, "/v1/providers/nope": 404,
+	for path, code := range map[string]int{"/v1/overview": 404, "/v1/providers": 404, "/v1/providers/alpha-net": 404, "/v1/providers/nope": 404,
+		"/v1/networks/alpha-net/chart": 200, "/v1/networks/alpha-net/chart?range=24h": 200, "/v1/networks/alpha-net/chart?range=1y": 400,
+		"/v1/networks/alpha-net/chart?kind=mobile": 404, "/v1/networks/alpha-net/chart?x=1": 400, "/v1/networks/nope/chart": 404,
+		"/v1/networks/all/chart?range=7d": 200, "/v1/charts/all/all/7d": 404,
 		"/v1/coverage": 200, "/v1/search-index": 200, "/v1/snapshot": 404, "/v1/nothing": 404, "/healthz": 200,
 		"/v1/coverage/alpha-net": 200, "/v1/coverage/nope": 404, "/v1/networks": 200, "/v1/networks/alpha-net": 200, "/v1/networks/alpha-net?kind=mobile": 404, "/v1/networks/nope": 404,
 		"/v1/networks/Bad_Slug": 400, "/v1/networks?x=1": 400, "/v1/networks/alpha-net/places": 200,

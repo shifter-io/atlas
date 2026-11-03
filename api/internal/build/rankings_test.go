@@ -167,7 +167,7 @@ func TestANetworkNamedAllHidesTheAggregate(t *testing.T) {
 	for _, r := range Ranges {
 		stats[r.ID] = &WindowStats{}
 	}
-	pg = buildPages("", []*entry{e}, map[string]map[string]*WindowStats{AllNetworks: stats}, nil, nil)
+	pg = buildPages("", []*entry{e}, map[string]map[string]*WindowStats{AllNetworks: stats}, nil, nil, nil)
 	if pg.Network["all/all"] != nil || pg.Network["all/residential"] == nil {
 		t.Fatalf("networks %v", pg.Network)
 	}
