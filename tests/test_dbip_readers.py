@@ -4,12 +4,12 @@ node's reopen between runs and the orchestrator's daily `dbip_update` job."""
 from __future__ import annotations
 
 import logging
-import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import maxminddb
 import pytest
-from dbip_fakes import DE, KEY, US, FakeAccount, tiny_mmdb, url_file
+from dbip_fakes import DE, US, FakeCdn, tiny_mmdb
 
 from proxy_index import dbip
 from proxy_index.enrichment import LocalEnricher, find_database, find_source
@@ -113,43 +113,46 @@ async def test_the_daily_job_updates_records_and_skips(tmp_path, database, db, m
     assert scheduler.tasks["dbip_update"].at_utc_minute == 5 * 60 + 23
     assert await dbip_update(db, str(database)) == {"skipped": "dbip.dir is not set"}
 
-    account = FakeAccount()
+    cdn = FakeCdn()
     try:
-        account.publish(tiny_mmdb(), "2026-11")
+        today = datetime.now(UTC).date()
+        cdn.files[f"dbip-full-{today - timedelta(days=3)}.mmdb"] = tiny_mmdb()
         async with db.connection() as conn:
             await put_setting(conn, "dbip.dir", str(tmp_path / "db-ip"))
-            await put_setting(conn, "dbip.account_url_file", str(url_file(tmp_path, account.url)))
+            await put_setting(conn, "dbip.base_url", cdn.url)
         done = await scheduler.run_now("dbip_update")
         assert done["dbip"] == "updated" and done["removed"] == []
-        assert os.path.exists(tmp_path / "db-ip" / done["file"])
+        assert (tmp_path / "db-ip" / "current").resolve().name == done["file"]
         again = await dbip_update(db, str(database))
         assert again == {"skipped": "release unchanged", "file": done["file"]}
-        account.routes[account.index_path] = (503, b"")
+        cdn.status[f"dbip-full-{today}.mmdb"] = 503
         assert await scheduler.run_now("dbip_update") is None  # failed, recorded and alerted
         async with db.connection() as conn:
             rows = await (
                 await conn.execute("SELECT status,error FROM job_runs WHERE job='dbip_update'")
             ).fetchall()
-            alerts = await (await conn.execute("SELECT data FROM alerts")).fetchall()
-            recorded = await (await conn.execute("SELECT count(*) AS n FROM dbip_releases")).fetchone()
+            alerts = await (await conn.execute("SELECT kind FROM alerts")).fetchall()
+            recorded = await (
+                await conn.execute("SELECT count(*) AS n FROM dbip_releases")
+            ).fetchone()
         assert [r["status"] for r in rows] == ["ok", "failed"]
-        assert rows[1]["error"] == "UpdateError: index: HTTP 503"
-        assert recorded["n"] == 1 and all(KEY not in str(a) for a in alerts)
+        assert rows[1]["error"] == f"UpdateError: probe dbip-full-{today}.mmdb: HTTP 503"
+        assert recorded["n"] == 1 and [a["kind"] for a in alerts] == ["job_failed"]
     finally:
-        account.close()
+        cdn.close()
 
 
 async def test_the_job_reports_a_busy_directory_and_a_recording_failure(
     tmp_path, database, db, monkeypatch
 ):
-    def busy(dest, url, **options):
+    def busy(dest, base, **options):
         raise dbip.Busy("another update is running in this directory")
 
     async with db.connection() as conn:
         await put_setting(conn, "dbip.dir", str(tmp_path / "db-ip"))
-    monkeypatch.setenv("DBIP_ACCOUNT_URL", "https://dbip.invalid/account")
+    monkeypatch.setenv("DBIP_BASE_URL", "https://cdn.invalid/dbip")
     monkeypatch.setattr(dbip, "update", busy)
     assert await dbip_update(db, str(database)) == {"skipped": "another update is running"}
-    monkeypatch.setattr(dbip, "update", lambda dest, url, **o: {"dbip": "updated", "error": "x"})
+    monkeypatch.setattr(dbip, "update", lambda dest, base, **o: {"dbip": "updated", "error": "x"})
     with pytest.raises(dbip.UpdateError, match="x"):
         await dbip_update(db, str(database))

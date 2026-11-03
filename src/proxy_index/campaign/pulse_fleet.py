@@ -6,10 +6,14 @@ wanted node `pi-pulse-<region>-<network>` that the pulse tag does not list is cr
 `scope.assign_and_verify_project` and armed. Arming issues the node's token (rotated), pushes
 the wheel, the network's provider config, its credentials and the token on stdin, and installs
 the `pi-pulse-node` service, which runs `proxy-index node` registered for that network and
-region; the orchestrator hands it one country at a time. Reconcile only creates: a droplet it
-did not record, or one no longer wanted, is reported as `unknown` and never touched, and it
-never deletes anything (a node whose assignment was not confirmed ends `destroy_refused`, for
-the owner). `retire --name N` removes one recorded node, only through
+region; the orchestrator hands it one country at a time. The node reads the image's DB-IP MMDB
+through the `db-ip/current` link; with `dbip_base_url`, arming also installs the
+`pi-dbip-update` timer, which runs `proxy-index dbip update` daily against that CDN directory,
+and the node reopens the database when the link moves (DBIP-DAILY-1).
+
+Reconcile only creates: a droplet it did not record, or one no longer wanted, is reported as
+`unknown` and never touched, and it never deletes anything (a node whose assignment was not
+confirmed ends `destroy_refused`, for the owner). `retire --name N` removes one recorded node, only through
 `scope.retire_pulse_node`, and checks it gone; a later reconcile creates it again unless
 `fleet.json` no longer lists it. Exit codes: reconcile 1 when a node failed or waits for the
 owner (`destroy_refused`), retire 1 when the node was not verified gone; otherwise 0.
@@ -19,7 +23,8 @@ are 0600 under `UMask=0077`, and a dedicated user is a follow-up once the smoke 
 checked its file permissions on a real node.
 
 `fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region,
-ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, and
+ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, optional
+dbip_base_url (https), and
 networks: {name: {product, provider_config, credentials, provider (default the name)}}.
 Paths are relative to the root. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
@@ -65,6 +70,7 @@ ARMABLE = ("assigned", "booting", "starting", "boot_failed", "start_failed")
 REGION_RE = r"^[a-z0-9]+$"
 WORD_RE = r"^[A-Za-z0-9_.-]+$"  # provider and product: safe in a systemd ExecStart line
 URL_RE = r"^https?://[A-Za-z0-9.:/_-]+$"
+DBIP_URL_RE = r"^https://[A-Za-z0-9.:/_-]+$"  # also safe in a systemd ExecStart line
 
 # Runs with the node's system Python: argv = root, secrets dir. Writes the secrets owner-only,
 # installs the wheel and (re)starts the always-on node service.
@@ -85,9 +91,13 @@ wheel = next(root / m.name for m in members if m.name.endswith(".whl"))
 """
     + INSTALL_WHEEL
     + r"""node = json.loads((root / "pulse" / "node.json").read_text())
-databases = sorted((root / "db-ip").glob("*.mmdb"))
-country_check = ["--mmdb", str(databases[0])] if len(databases) == 1 else []
-command = [str(root / "venv" / "bin" / "proxy-index"), "node",
+db, cli = root / "db-ip", str(root / "venv" / "bin" / "proxy-index")
+databases = sorted(db.glob("*.mmdb"))
+if not (db / "current").exists() and len(databases) == 1:  # the image's release, until updated
+    (db / "current").unlink(missing_ok=True)
+    (db / "current").symlink_to(databases[0].name)
+country_check = ["--mmdb", str(db / "current")] if (db / "current").exists() else []
+command = [cli, "node",
            "--orchestrator", node["orchestrator"], "--token-file", str(secrets / "node-token"),
            "--provider", node["provider"], "--product", node["product"],
            "--region", node["region"], "--provider-config", str(root / "pulse" / "provider.toml"),
@@ -97,8 +107,21 @@ unit = ["[Unit]", "Description=proxy-index pulse node", "After=network-online.ta
         "Wants=network-online.target", "", "[Service]", f"WorkingDirectory={root}",
         "ExecStart=" + " ".join(command), "Restart=always", "RestartSec=10", "UMask=0077",
         "LimitNOFILE=65536", "", "[Install]", "WantedBy=multi-user.target", ""]
-pathlib.Path("/etc/systemd/system/pi-pulse-node.service").write_text("\n".join(unit))
-for step in (["daemon-reload"], ["enable", "pi-pulse-node"], ["restart", "pi-pulse-node"]):
+units = {"pi-pulse-node.service": unit}
+steps = [["daemon-reload"], ["enable", "pi-pulse-node"], ["restart", "pi-pulse-node"]]
+if node.get("dbip_base_url"):
+    update = [cli, "dbip", "update", "--dest", str(db), "--base-url", node["dbip_base_url"]]
+    units["pi-dbip-update.service"] = ["[Unit]", "Description=proxy-index DB-IP update",
+        "After=network-online.target", "Wants=network-online.target", "", "[Service]",
+        "Type=oneshot", "ExecStart=" + " ".join(update), "Nice=10", ""]
+    units["pi-dbip-update.timer"] = ["[Unit]", "Description=Daily DB-IP update", "",
+        "[Timer]", "OnActiveSec=5min", "OnCalendar=*-*-* 05:41:00 UTC",
+        "RandomizedDelaySec=1800", "Persistent=true", "", "[Install]",
+        "WantedBy=timers.target", ""]
+    steps.append(["enable", "--now", "pi-dbip-update.timer"])
+for name, lines in units.items():
+    pathlib.Path("/etc/systemd/system/" + name).write_text("\n".join(lines))
+for step in steps:
     subprocess.run(["systemctl", *step], check=True)
 """
 )
@@ -134,6 +157,7 @@ class FleetConfig:
     database_file: Path
     networks: dict[str, Network]
     size: str = DEFAULT_SIZE
+    dbip_base_url: str | None = None
 
     def wanted(self) -> dict[str, tuple[str, str]]:
         """Every node the fleet should have: name -> (network, region)."""
@@ -168,6 +192,7 @@ def load_config(root: Path) -> FleetConfig:
         database_file=root / raw["database_file"],
         networks=networks,
         size=raw.get("size", DEFAULT_SIZE),
+        dbip_base_url=raw.get("dbip_base_url"),
     )
     _need(config.account not in ACCOUNTS, "account")
     _need(config.size not in SIZES, "size")
@@ -175,6 +200,10 @@ def load_config(root: Path) -> FleetConfig:
     _need(any(not re.fullmatch(REGION_RE, r) for r in regions), "region")
     _need(any(r not in config.image_by_region for r in regions), "image_by_region")
     _need(not re.fullmatch(URL_RE, config.orchestrator_url), "orchestrator_url")
+    _need(
+        config.dbip_base_url is not None and not re.fullmatch(DBIP_URL_RE, config.dbip_base_url),
+        "dbip_base_url",
+    )
     _need(config.wheel.suffix != ".whl", "wheel")
     return config
 
@@ -362,6 +391,8 @@ class Fleet:
             "product": network.product,
             "region": record.region,
         }
+        if self.config.dbip_base_url:
+            node["dbip_base_url"] = self.config.dbip_base_url
         files = [
             ("pulse/node.json", json.dumps(node).encode()),
             ("pulse/provider.toml", network.provider_config.read_bytes()),

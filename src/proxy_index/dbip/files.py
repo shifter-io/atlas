@@ -14,9 +14,8 @@ from typing import Any
 import maxminddb
 
 from ..enrichment import CURRENT, release_record
-from .source import Busy, UpdateError, private_file
+from .source import PREFIX, Busy, UpdateError, private_file
 
-PREFIX = "dbip-full-"
 STATE = "release.json"
 LOCK = ".update.lock"
 KEEP = 3  # the current release and the previous two
@@ -79,11 +78,12 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     partial.replace(path)
 
 
-def install(dest: Path, partial: Path, sha256: str, day: str) -> Path:
-    """Rename the verified MMDB into place and swing `current` to it, both atomically."""
-    target = dest / f"{PREFIX}{day}.mmdb"
+def install(dest: Path, partial: Path, sha256: str, name: str) -> Path:
+    """Rename the verified MMDB into place as `name` (another file of that name with other
+    bytes is kept: the new one gets its SHA-256 prefix) and swing `current` to it, atomically."""
+    target = dest / name
     if target.exists() and _sha256(target) != sha256:
-        target = dest / f"{PREFIX}{day}-{sha256[:8]}.mmdb"
+        target = target.with_name(f"{target.stem}-{sha256[:8]}.mmdb")
     os.chmod(partial, 0o644)  # licensed data, not a secret: every local service reads it
     partial.replace(target)
     link = dest / f".{CURRENT}.partial"

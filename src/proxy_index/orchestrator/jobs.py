@@ -18,8 +18,8 @@ retention                 daily: test_events older than retention.events_days (w
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
-                          installs the account's current DB-IP MMDB behind `dbip.dir`/current
-                          and records it; an unchanged release records 'skipped'
+                          installs the newest dated DB-IP MMDB from `dbip.base_url` behind
+                          `dbip.dir`/current and records it; an unchanged release is 'skipped'
 
 Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
 and the index are written there (report_html.write, in a thread; install_reports).
@@ -209,18 +209,18 @@ async def live_reports(db: Database) -> dict[str, Any]:
 
 
 async def dbip_update(db: Database, credentials_file: str) -> dict[str, Any]:
-    """The daily DB-IP update; a failure (never carrying the account URL) fails the job."""
+    """The daily DB-IP update; a failure fails the job (and alerts)."""
     async with db.connection() as conn:
         dest = await setting(conn, "dbip.dir")
-        url_file = await setting(conn, "dbip.account_url_file")
+        configured = await setting(conn, "dbip.base_url")
     if not dest:
         return {"skipped": "dbip.dir is not set"}
     from .. import dbip
 
     def work() -> dict[str, Any]:
-        url = dbip.account_url(url_file)
+        base = dbip.base_url(configured)
         return dbip.update(
-            Path(dest), url, database_file=credentials_file, checks=dbip.DEFAULT_CHECKS
+            Path(dest), base, database_file=credentials_file, checks=dbip.DEFAULT_CHECKS
         )
 
     try:

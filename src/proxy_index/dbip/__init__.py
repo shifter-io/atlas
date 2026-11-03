@@ -1,20 +1,20 @@
 """`proxy-index dbip update`: keep the local DB-IP MMDB current (DBIP-DAILY-1).
 
-The owner's DB-IP account URL answers JSON describing the current downloadable database
-({"mmdb": {"url", "name", "date", "version", "size", "md5sum", "sha1sum"}, ...}, possibly one
-level deeper per product). `update` fetches it, downloads the MMDB only when the release differs
-from the installed one, verifies it (size, any checksum given, the MaxMind reader and a spread of
-test lookups), installs it atomically as `dbip-full-YYYY-MM-DD.mmdb` behind the `current` link,
-keeps the previous two releases, deletes older ones and records the release in `dbip_releases`.
-A second run on the same release downloads and changes nothing.
+DB-IP releases are dated files on a CDN (`<base URL>/dbip-full-YYYY-MM-DD.mmdb`, source.py).
+`update` finds the newest one (tomorrow back to the installed release, or `lookback_days` when
+none is installed), downloads it only when it differs from the installed release, verifies it
+(the announced size, at least `min_bytes` and half the installed release, the MaxMind reader
+and a spread of test lookups), installs it atomically behind the `current` link (files.py),
+keeps the previous two releases, deletes older ones and records it in `dbip_releases`. A
+second run on the same release downloads and changes nothing.
 
-The account URL carries the account key, a secret: it comes from an owner-only file
-(`--url-file` or $DBIP_ACCOUNT_URL_FILE) or $DBIP_ACCOUNT_URL, never from argv, and it is never
-printed, logged or stored (source.py). The orchestrator runs `update` once a day (jobs.py,
-`dbip_update`); readers follow the `current` link (enrichment.LocalEnricher.reload).
+The orchestrator runs it once a day on its server (jobs.py, `dbip_update`) and each pulse node
+runs it from a daily timer (campaign/pulse_fleet.py); readers follow `current`
+(enrichment.LocalEnricher.reload).
 
-Exit codes: 0 updated or unchanged, 2 configuration, 3 fetch, verification or recording failed,
-4 another update holds the directory's lock. Every run prints one JSON health line.
+Exit codes: 0 updated or unchanged, 2 configuration, 3 probe, download, verification or
+recording failed, 4 another update holds the directory's lock. Every run prints one JSON
+health line.
 """
 
 from __future__ import annotations
@@ -22,21 +22,21 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .files import STATE, directory_lock, inspect, install, prune, read_state, write_json
 from .source import (
-    URL_ENV,
-    URL_FILE_ENV,
+    BASE_URL_ENV,
+    PREFIX,
     Busy,
     ConfigError,
+    Release,
     UpdateError,
-    account_url,
+    base_url,
     download,
-    fetch_index,
-    identity,
+    newest,
 )
 
 __all__ = [
@@ -45,7 +45,7 @@ __all__ = [
     "Checks",
     "ConfigError",
     "UpdateError",
-    "account_url",
+    "base_url",
     "update",
 ]
 
@@ -55,30 +55,45 @@ class Checks:
     min_bytes: int = 100 << 20  # a full DB-IP MMDB is over a gigabyte
     min_coverage: float = 0.9  # share of the test lookups that must find a country
     shrink_limit: float = 0.5  # a release under half the installed one's size is refused
+    lookback_days: int = 62  # how far back to look for a release when none is installed
 
 
 DEFAULT_CHECKS = Checks()
+_RELEASE = ("file", "sha256", "database_type", "build_epoch", "built_at")
 
 
 def update(
-    dest: Path, url: str, *, database_file: str | Path | None = None, checks: Checks = DEFAULT_CHECKS
+    dest: Path,
+    base: str,
+    *,
+    database_file: str | Path | None = None,
+    checks: Checks = DEFAULT_CHECKS,
+    today: date | None = None,
 ) -> dict[str, Any]:
-    """Bring `dest` to the account's current release; the health record (public fields).
+    """Bring `dest` to the newest release under `base`; the health record (public fields).
 
     Raises UpdateError before anything is installed; a failure to record an installed release
     is returned as `error` (the next run records it)."""
     dest.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC).replace(microsecond=0)
+    today = today or now.date()
     with directory_lock(dest):
         state = read_state(dest)
-        entry = fetch_index(url)
-        source = identity(entry)
-        if state and source and state.get("source") == source:
+        oldest = today - timedelta(days=checks.lookback_days)
+        if state:
+            oldest = max(oldest, date.fromisoformat(state["source"]["date"]))
+        # From tomorrow: a release dated in a time zone ahead of UTC is found the same day.
+        release = newest(base, today + timedelta(days=1), oldest)
+        if release is None and not state:
+            raise UpdateError(
+                f"probe: no {PREFIX}YYYY-MM-DD.mmdb in the last {checks.lookback_days} days"
+            )
+        if release is None or release.identity() == state.get("source"):
             state["checked_at"] = now.isoformat()
             write_json(dest / STATE, state)
             result = _health("unchanged", state, [])
         else:
-            result = _replace(dest, entry, state, checks, now)
+            result = _replace(dest, release, state, checks, now)
     if database_file:
         try:
             record(database_file, {k: result[k] for k in _RELEASE})
@@ -88,32 +103,27 @@ def update(
     return result
 
 
-_RELEASE = ("file", "sha256", "database_type", "build_epoch", "built_at")
-
-
 def _health(status: str, state: dict[str, Any], removed: list[str]) -> dict[str, Any]:
     return {"dbip": status, **{k: state[k] for k in (*_RELEASE, "source")}, "removed": removed}
 
 
 def _replace(
-    dest: Path, entry: dict[str, Any], state: dict[str, Any], checks: Checks, now: datetime
+    dest: Path, release: Release, state: dict[str, Any], checks: Checks, now: datetime
 ) -> dict[str, Any]:
     partial = dest / ".download.partial"
     try:
-        _, plain = download(entry, partial)
-        _check_size(plain.size, state, checks)
-        sha256 = plain.hexdigest("sha256")
-        release = inspect(partial, sha256, checks.min_coverage)
-        if state.get("sha256") == sha256:  # the same bytes under new index fields
+        size, sha256 = download(release, partial)
+        _check_size(size, state, checks)
+        record_ = inspect(partial, sha256, checks.min_coverage)
+        if state.get("sha256") == sha256:  # the same bytes, new headers
             status, target = "unchanged", dest / state["file"]
         else:
-            status, target = "updated", install(dest, partial, sha256, now.date().isoformat())
+            status, target = "updated", install(dest, partial, sha256, release.name)
     finally:
         partial.unlink(missing_ok=True)
-        partial.with_name(partial.name + ".download").unlink(missing_ok=True)
     stamp = now.isoformat()
-    new_state = release | {"file": target.name, "size": plain.size, "source": identity(entry)}
-    new_state |= {"updated_at": state.get("updated_at") if status == "unchanged" else stamp}
+    new_state = record_ | {"file": target.name, "size": size, "source": release.identity()}
+    new_state["updated_at"] = state.get("updated_at") if status == "unchanged" else stamp
     new_state["checked_at"] = stamp
     write_json(dest / STATE, new_state)
     return _health(status, new_state, prune(dest))
@@ -146,12 +156,11 @@ def register(commands) -> None:
     parser = commands.add_parser("dbip", help="Keep the local DB-IP MMDB current (operator)")
     actions = parser.add_subparsers(dest="dbip_action", required=True)
     run = actions.add_parser(
-        "update", help="Download, verify and install the account's current MMDB when it changed"
+        "update", help="Download, verify and install the newest dated MMDB when it changed"
     )
     run.add_argument("--dest", type=Path, required=True, help="Directory of releases + current")
     run.add_argument(
-        "--url-file",
-        help=f"Owner-only file holding the account URL (default ${URL_FILE_ENV}, else ${URL_ENV})",
+        "--base-url", help=f"CDN directory of dbip-full-YYYY-MM-DD.mmdb (default ${BASE_URL_ENV})"
     )
     run.add_argument(
         "--database-file",
@@ -160,14 +169,15 @@ def register(commands) -> None:
     )
     run.add_argument("--min-bytes", type=int, default=DEFAULT_CHECKS.min_bytes)
     run.add_argument("--min-coverage", type=float, default=DEFAULT_CHECKS.min_coverage)
+    run.add_argument("--lookback-days", type=int, default=DEFAULT_CHECKS.lookback_days)
 
 
 def dispatch(args) -> int:
-    checks = Checks(min_bytes=args.min_bytes, min_coverage=args.min_coverage)
+    checks = Checks(args.min_bytes, args.min_coverage, lookback_days=args.lookback_days)
     try:
-        url = account_url(args.url_file)
+        base = base_url(args.base_url)
         result = update(
-            Path(args.dest).expanduser(), url, database_file=args.database_file, checks=checks
+            Path(args.dest).expanduser(), base, database_file=args.database_file, checks=checks
         )
     except UpdateError as exc:
         print(json.dumps({"dbip": "failed", "error": str(exc)}))

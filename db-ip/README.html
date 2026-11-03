@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Local DB-IP database</title>
 <style>body{max-width:760px;margin:60px auto;padding:0 24px;font:16px/1.7 system-ui;color:#192b34}code{font-size:.9em;overflow-wrap:anywhere}a{color:#086e62}</style>
 <h1>Local DB-IP database</h1><p>Place a DB-IP Location + ISP MMDB file in this directory. The supplied local copy is <code>dbip-full-2026-09-14.mmdb</code>. Database files are excluded from Git, wheels and source distributions.</p>
-<p>Run <code>proxy-index db-info</code> to inspect the selected release. If several files exist, set <code>DBIP_MMDB</code> or pass <code>--mmdb</code> explicitly. Enrichment is offline and records the release checksum.</p>
+<p>Run <code>proxy-index db-info</code> to inspect the selected release. <code>proxy-index dbip update --dest db-ip --base-url URL</code> keeps the newest verified release behind the <code>current</code> link, which discovery prefers. Otherwise, if several files exist, set <code>DBIP_MMDB</code> or pass <code>--mmdb</code> explicitly. Enrichment is offline and records the release checksum.</p>
 <p><a href="../docs/index.html#dbip">Open the full usage guide</a>.</p></html>
 

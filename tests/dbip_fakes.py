@@ -1,29 +1,27 @@
-"""Test doubles for the DB-IP update: a tiny real MMDB and a loopback DB-IP account.
+"""Test doubles for the DB-IP update: a tiny real MMDB and a loopback CDN.
 
 `tiny_mmdb` writes a valid MaxMind DB (IPv4, one search-tree node): addresses below 128.0.0.0
-resolve to `low`, the rest to `high`. `FakeAccount` serves the account index JSON and the
-download on 127.0.0.1; its URLs carry KEY, which no output of the update may contain.
+resolve to `low`, the rest to `high`. `FakeCdn` serves dated files over HEAD and GET on
+127.0.0.1 and counts the requests.
 """
 
 from __future__ import annotations
 
-import gzip
-import hashlib
-import json
 import threading
+import zlib
 from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
-KEY = "acct-key-0b5e55ed"
 US = {"country": {"iso_code": "US", "names": {"en": "United States"}}}
 DE = {"country": {"iso_code": "DE", "names": {"en": "Germany"}}}
 NO_COUNTRY = {"traits": {"isp": "Example"}}
 
 
 def _control(kind: int, size: int) -> bytes:
-    assert size < 29
-    return bytes([kind << 5 | size]) if kind <= 7 else bytes([size, kind - 7])
+    """The control byte, the extended type byte and the size bytes (sizes under 285)."""
+    low, extra = (size, b"") if size < 29 else (29, bytes([size - 29]))
+    head = bytes([kind << 5 | low]) if kind <= 7 else bytes([low, kind - 7])
+    return head + extra
 
 
 def _uint(kind: int, value: int) -> bytes:
@@ -67,68 +65,46 @@ def tiny_mmdb(
     return tree + bytes(16) + first + second + b"\xab\xcd\xefMaxMind.com" + encode(metadata)
 
 
-class FakeAccount:
-    """A loopback DB-IP account: `publish` sets what the index offers; `hits` counts GETs."""
+class FakeCdn:
+    """A loopback CDN directory: `files` maps a name to its bytes, `status` forces an answer
+    for a name, `hits` counts (method, name)."""
 
     def __init__(self) -> None:
-        self.routes: dict[str, tuple[int, bytes]] = {}
-        self.hits: Counter[str] = Counter()
-        account = self
+        self.files: dict[str, bytes] = {}
+        self.status: dict[str, int] = {}
+        self.cut: dict[str, int] = {}  # serve only this many bytes of a file
+        self.hits: Counter[tuple[str, str]] = Counter()
+        cdn = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802 - the http.server name
-                account.hits[self.path] += 1
-                status, body = account.routes.get(self.path, (404, b"missing"))
+            def _answer(self, body: bool) -> None:
+                name = self.path.removeprefix("/dbip/")
+                cdn.hits[self.command, name] += 1
+                status = cdn.status.get(name, 200 if name in cdn.files else 404)
+                data = cdn.files.get(name, b"") if status == 200 else b""
                 self.send_response(status)
-                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("ETag", f'"{zlib.crc32(data):08x}"')
                 self.end_headers()
-                self.wfile.write(body)
+                if body:
+                    self.wfile.write(data[: cdn.cut.get(name, len(data))])
+
+            def do_HEAD(self) -> None:  # noqa: N802 - the http.server name
+                self._answer(False)
+
+            def do_GET(self) -> None:  # noqa: N802
+                self._answer(True)
 
             def log_message(self, *args) -> None:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/dbip/"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
-    @property
-    def index_path(self) -> str:
-        return f"/account/{KEY}/db/ip-to-location-isp/"
-
-    @property
-    def url(self) -> str:
-        return self.base + self.index_path
-
-    def download_path(self, version: str) -> str:
-        return f"/download/{KEY}/{version}.mmdb.gz"
-
-    def publish(self, data: bytes, version: str, *, packed=True, nest=False, **fields) -> dict:
-        """Offer `data` as the account's MMDB; `fields` override the index entry's fields."""
-        body = gzip.compress(data) if packed else data
-        path = self.download_path(version)
-        entry = {
-            "url": self.base + path,
-            "name": f"dbip-full-{version}.mmdb" + (".gz" if packed else ""),
-            "date": version,
-            "version": version,
-            "size": len(body),
-            "md5sum": hashlib.md5(body).hexdigest(),
-            "sha1sum": hashlib.sha1(body).hexdigest(),
-        } | fields
-        entry = {key: value for key, value in entry.items() if value is not None}
-        index = {"ip-to-location-isp": {"mmdb": entry}} if nest else {"csv": {}, "mmdb": entry}
-        self.routes[self.index_path] = (200, json.dumps(index).encode())
-        self.routes[path] = (200, body)
-        return entry
+    def downloads(self, name: str) -> int:
+        return self.hits["GET", name]
 
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
-
-
-def url_file(tmp_path: Path, url: str, mode: int = 0o600) -> Path:
-    path = tmp_path / "dbip-account-url"
-    path.write_text(url + "\n")
-    path.chmod(mode)
-    return path

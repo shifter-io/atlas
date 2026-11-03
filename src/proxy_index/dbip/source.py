@@ -1,17 +1,20 @@
-"""Where a DB-IP release comes from: the account URL, its JSON index and the download.
+"""Where a DB-IP release comes from: dated files under one CDN base URL.
 
-The account URL and the index's download URLs carry the account key, a secret: they are never
-printed, logged, stored or passed in argv, and every error here names the step and the error
-type or HTTP status only.
+The CDN serves each release as `<base URL>/dbip-full-YYYY-MM-DD.mmdb` (the release date). The
+newest one is found by probing (HEAD) from today backwards: the first name that exists wins,
+404 means "no release that day", any other answer stops the update. The base URL is
+configuration (`--base-url`, $DBIP_BASE_URL, the orchestrator's `dbip.base_url` setting),
+never hard-coded; errors name the file and the HTTP status or error type, never the URL.
 """
 
 from __future__ import annotations
 
-import gzip
 import hashlib
-import json
 import os
 from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import date, timedelta
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -20,15 +23,11 @@ from urllib.request import Request, urlopen
 
 from .. import __version__
 
-URL_FILE_ENV = "DBIP_ACCOUNT_URL_FILE"
-URL_ENV = "DBIP_ACCOUNT_URL"
-MAX_INDEX_BYTES = 1 << 20
+BASE_URL_ENV = "DBIP_BASE_URL"
+PREFIX = "dbip-full-"
 MAX_DOWNLOAD_BYTES = 16 << 30
 TIMEOUT_S = 60
 CHUNK = 1 << 20
-SUMS = {"md5sum": "md5", "sha1sum": "sha1", "sha256sum": "sha256", "sha256": "sha256"}
-# The index fields kept as a release identity (never its URL).
-PUBLIC = ("name", "version", "date", "size", *SUMS)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
 
@@ -46,119 +45,72 @@ class Busy(UpdateError):
     code = 4
 
 
-def account_url(url_file: str | Path | None = None) -> str:
-    """The account URL from the owner-only file, else $DBIP_ACCOUNT_URL."""
-    from ..node import read_token  # the same owner-only, no-link, one-token file check
+class Missing(UpdateError):
+    """HTTP 404: no such file on the CDN."""
 
-    path = url_file or os.environ.get(URL_FILE_ENV)
-    if path:
-        try:
-            url = read_token(path)
-        except (OSError, ValueError) as exc:
-            raise ConfigError(
-                f"account URL file: needs one URL, owner-only, mode 600 ({type(exc).__name__})"
-            ) from None
-    else:
-        url = os.environ.get(URL_ENV, "").strip()
+
+def release_name(day: date) -> str:
+    return f"{PREFIX}{day.isoformat()}.mmdb"
+
+
+def base_url(value: str | None = None) -> str:
+    """The CDN base URL (argument, else $DBIP_BASE_URL), with one trailing slash."""
+    url = (value or os.environ.get(BASE_URL_ENV) or "").strip()
     if not url:
-        raise ConfigError(f"no DB-IP account URL: set --url-file, ${URL_FILE_ENV} or ${URL_ENV}")
-    _check_url(url, "account URL", ConfigError)
-    return url
-
-
-def _check_url(url: str, what: str, error: type[UpdateError]) -> None:
+        raise ConfigError(f"no DB-IP base URL: set --base-url or ${BASE_URL_ENV}")
     parts = urlsplit(url)
-    if parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK):
-        return
-    raise error(f"{what} must be https")
+    secure = parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK)
+    if not secure or parts.query or parts.fragment:
+        raise ConfigError("the DB-IP base URL must be https, without a query")
+    return url.rstrip("/") + "/"
 
 
-def _open(url: str, step: str):
+@dataclass(frozen=True, slots=True)
+class Release:
+    """One dated file on the CDN, as its HEAD answered."""
+
+    name: str
+    day: date
+    url: str
+    size: int | None
+    etag: str | None
+    last_modified: str | None
+
+    def identity(self) -> dict[str, Any]:
+        """What tells a release apart (the installed one is compared with it): never the URL."""
+        found = {"size": self.size, "etag": self.etag, "last_modified": self.last_modified}
+        known = {key: value for key, value in found.items() if value is not None}
+        return {"name": self.name, "date": self.day.isoformat()} | known
+
+
+def _open(url: str, step: str, method: str = "GET"):
+    request = Request(url, method=method, headers={"User-Agent": f"proxy-index/{__version__}"})
     try:
-        request = Request(url, headers={"User-Agent": f"proxy-index/{__version__}"})
-        return urlopen(request, timeout=TIMEOUT_S)  # noqa: S310 - https only (_check_url)
+        return urlopen(request, timeout=TIMEOUT_S)  # noqa: S310 - https only (base_url)
     except HTTPError as exc:
-        raise UpdateError(f"{step}: HTTP {exc.code}") from None
-    except (URLError, OSError, ValueError) as exc:
+        exc.close()
+        raise (Missing if exc.code == 404 else UpdateError)(f"{step}: HTTP {exc.code}") from None
+    except (URLError, OSError, ValueError, HTTPException) as exc:
         raise UpdateError(f"{step}: {type(exc).__name__}") from None
 
 
-def fetch_index(url: str) -> dict[str, Any]:
-    """The MMDB entry of the account index."""
-    with _open(url, "index") as response:
-        body = response.read(MAX_INDEX_BYTES + 1)
-    if len(body) > MAX_INDEX_BYTES:
-        raise UpdateError("index: larger than expected")
-    try:
-        index = json.loads(body)
-    except ValueError:
-        raise UpdateError("index: not JSON") from None
-    levels = [index, *index.values()] if isinstance(index, dict) else []
-    entries = [
-        level["mmdb"]
-        for level in levels
-        if isinstance(level, dict)
-        and isinstance(level.get("mmdb"), dict)
-        and isinstance(level["mmdb"].get("url"), str)
-    ]
-    if len(entries) != 1:
-        raise UpdateError(f"index: {len(entries)} MMDB downloads instead of one")
-    _check_url(entries[0]["url"], "index: the download URL", UpdateError)
-    return entries[0]
-
-
-def identity(entry: dict[str, Any]) -> dict[str, Any]:
-    """The public fields that identify a release."""
-    return {key: entry[key] for key in PUBLIC if entry.get(key) is not None}
-
-
-class _Hashes:
-    def __init__(self) -> None:
-        self.size = 0
-        self.digests = {name: hashlib.new(name) for name in set(SUMS.values())}
-
-    def update(self, chunk: bytes) -> None:
-        self.size += len(chunk)
-        for digest in self.digests.values():
-            digest.update(chunk)
-
-    def hexdigest(self, name: str) -> str:
-        return self.digests[name].hexdigest()
-
-
-def _copy(source, target, hashes: _Hashes, limit: int) -> None:
-    while chunk := source.read(CHUNK):
-        hashes.update(chunk)
-        if hashes.size > limit:
-            raise UpdateError("download: larger than expected")
-        target.write(chunk)
-
-
-def download(entry: dict[str, Any], partial: Path) -> tuple[_Hashes, _Hashes]:
-    """The MMDB in `partial` (decompressed when gzip); hashes of the bytes served and of the
-    MMDB. The index's size and checksums must match the served bytes or the MMDB."""
-    raw = partial.with_name(partial.name + ".download")
-    served = _Hashes()
-    with _open(entry["url"], "download") as response, private_file(raw) as out:
+def newest(base: str, today: date, oldest: date) -> Release | None:
+    """The newest dated release from `today` back to `oldest` (both included), or None."""
+    day = today
+    while day >= oldest:
+        name = release_name(day)
         try:
-            _copy(response, out, served, MAX_DOWNLOAD_BYTES)
-        except OSError as exc:
-            raise UpdateError(f"download: {type(exc).__name__}") from None
-    with raw.open("rb") as stream:
-        packed = stream.read(2) == b"\x1f\x8b"
-    plain = served
-    if packed:
-        plain = _Hashes()
-        try:
-            with gzip.open(raw, "rb") as source, private_file(partial) as out:
-                _copy(source, out, plain, MAX_DOWNLOAD_BYTES)
-        except (OSError, EOFError) as exc:
-            raise UpdateError(f"download: not a valid gzip file ({type(exc).__name__})") from None
-        raw.unlink()
-    else:
-        raw.replace(partial)
-    _check_served(entry, served, plain)
-    return served, plain
+            with _open(base + name, f"probe {name}", "HEAD") as response:
+                headers = response.headers
+        except Missing:
+            day -= timedelta(days=1)
+            continue
+        length = headers.get("Content-Length")
+        size = int(length) if length and length.isdigit() else None
+        return Release(
+            name, day, base + name, size, headers.get("ETag"), headers.get("Last-Modified")
+        )
+    return None
 
 
 @contextmanager
@@ -170,13 +122,23 @@ def private_file(path: Path):
         os.fsync(stream.fileno())
 
 
-def _check_served(entry: dict[str, Any], served: _Hashes, plain: _Hashes) -> None:
-    size = entry.get("size")
-    if size is not None and str(size).isdigit() and int(size) not in (served.size, plain.size):
-        raise UpdateError("verify: size differs from the index")
-    for key, name in SUMS.items():
-        expected = str(entry.get(key) or "").strip().lower()
-        if expected and expected not in (served.hexdigest(name), plain.hexdigest(name)):
-            raise UpdateError(f"verify: {key} differs from the index")
-
-
+def download(release: Release, partial: Path) -> tuple[int, str]:
+    """Stream the release into `partial`; its size and SHA-256. The size must be the one the
+    HEAD and the GET announced (a cut-short download fails here)."""
+    digest, size = hashlib.sha256(), 0
+    step = f"download {release.name}"
+    with _open(release.url, step) as response, private_file(partial) as out:
+        announced = response.headers.get("Content-Length")
+        try:
+            while chunk := response.read(CHUNK):
+                size += len(chunk)
+                if size > MAX_DOWNLOAD_BYTES:
+                    raise UpdateError(f"{step}: larger than expected")
+                digest.update(chunk)
+                out.write(chunk)
+        except (OSError, HTTPException) as exc:
+            raise UpdateError(f"{step}: {type(exc).__name__}") from None
+    expected = {int(n) for n in (announced, release.size) if n is not None and str(n).isdigit()}
+    if expected - {size}:
+        raise UpdateError(f"{step}: {size} bytes, not the {max(expected)} announced")
+    return size, digest.hexdigest()

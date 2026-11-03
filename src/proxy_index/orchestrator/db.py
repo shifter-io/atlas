@@ -112,10 +112,9 @@ DEFAULTS: dict[str, Any] = {
     # Directory for the HTML batch reports written when a batch closes; None writes none.
     "reports.dir": None,
     # The daily DB-IP update (jobs.dbip_update): the release directory (None runs no update) and
-    # the owner-only file holding the account URL (None: $DBIP_ACCOUNT_URL_FILE). A path only:
-    # the URL itself is a secret and never goes into the database.
+    # the CDN directory holding dbip-full-YYYY-MM-DD.mmdb (None: $DBIP_BASE_URL).
     "dbip.dir": None,
-    "dbip.account_url_file": None,
+    "dbip.base_url": None,
 }
 
 
