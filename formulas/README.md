@@ -86,7 +86,7 @@ compared with the median request rows of the country's covered hours:
 A `network_missing` or `network_low_sample` hour did not measure the pool, so its factor comes from
 the network curve, scaled to the country's level: the network's unique IPs that hour, times the
 country's unique IPs over the network's in the country's other covered hours, divided by the
-country's peak-hour IPs. Such an hour is never the country's peak or low hour, and its own counts
+country's peak-hour IPs, and at most 1.0 so that the measured peak stays the largest factor. Such an hour is never the country's peak or low hour, and its own counts
 stay in `unique_ips` and `requests`. A `country_low_sample` hour keeps its own factor. The estimate
 of a fallback hour scales the measured requests by the hour factor, not by the country's request
 curve. A country on the network curve has `hour_basis` `network` in every covered hour; an hour

@@ -18,8 +18,9 @@ fewer request rows than min_sample_share x the median of its covered hours (`net
 where a covered hour is one in which the network itself reported IPs. Such an hour is not a
 measurement of the pool, so it is neither peak nor low and its factor comes from the network
 curve, scaled to the country's level: network IPs that hour x (the country's IPs / the network's
-IPs over its measured hours) / the country's peak IPs. An hour under low_sample_share x the median
-keeps its own count but is flagged `country_low_sample`. `hour_basis` records this per hour.
+IPs over its measured hours) / the country's peak IPs, at most 1.0. An hour under
+low_sample_share x the median keeps its own count but is flagged `country_low_sample`.
+`hour_basis` records this per hour.
 """
 
 from __future__ import annotations
@@ -90,33 +91,32 @@ def _fallback_reason(own: dict, peak_ips: int, min_peak_ips: int, min_hours: int
     return None
 
 
+def _sample_basis(rows: int, median: float, shares: tuple[float, float]) -> str:
+    if not rows:
+        return "network_missing"
+    if rows < shares[0] * median:
+        return "network_low_sample"
+    return "country_low_sample" if rows < shares[1] * median else "country"
+
+
 def hour_basis(requests: list[int], status: list[str], shares: tuple[float, float]) -> list:
     """Per hour, what a country's own-curve factor rests on; None where the network has no IP."""
-    min_share, low_share = shares
     covered = [requests[hour] for hour, value in enumerate(status) if value == "present"]
     median = statistics.median(covered) if covered else 0
-    basis = []
-    for hour, value in enumerate(status):
-        if value != "present":
-            basis.append(None)
-        elif not requests[hour]:
-            basis.append("network_missing")
-        elif requests[hour] < min_share * median:
-            basis.append("network_low_sample")
-        elif requests[hour] < low_share * median:
-            basis.append("country_low_sample")
-        else:
-            basis.append("country")
-    return basis
+    return [
+        _sample_basis(requests[hour], median, shares) if value == "present" else None
+        for hour, value in enumerate(status)
+    ]
 
 
 def _fill_from_network(factors: list, basis: list, own: list[int], network: list[int]) -> list:
-    """Replace the fallback hours' factors by the network curve at the country's level."""
+    """Replace the fallback hours' factors by the network curve at the country's level, at most
+    1.0 so that the measured peak stays the largest factor."""
     kept = [hour for hour, value in enumerate(basis) if value and value not in FALLBACK_HOURS]
     level = sum(own[hour] for hour in kept) / sum(network[hour] for hour in kept)
     peak = max(own[hour] for hour in kept)
     return [
-        network[hour] * level / peak if value in FALLBACK_HOURS else factor
+        min(network[hour] * level / peak, 1.0) if value in FALLBACK_HOURS else factor
         for hour, (factor, value) in enumerate(zip(factors, basis, strict=True))
     ]
 

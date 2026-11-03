@@ -338,6 +338,7 @@ def test_no_published_factor_is_zero_for_a_covered_hour(path):
     for code, entry in document["countries"].items():
         for hour, factor in enumerate(entry["hour_factors"]):
             assert not covered[hour] or (factor or 0) > 0, (code, hour, factor)
+            assert factor is None or factor <= 1.0, (code, hour, factor)
         peak = entry["unique_ips"][entry["peak_hour"]]
         for hour, basis in enumerate(entry["hour_basis"]):
             if basis in ("country", "country_low_sample"):
