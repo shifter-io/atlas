@@ -7,7 +7,7 @@ is a contract change. No I/O. Errors name the field, never the value (it can be 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -211,6 +211,8 @@ def object_key(prefix: str, network: str, target: str, country: str | None, slot
 # K-BP4 records.
 TIMINGS = ("queue", "context", "navigate", "settle", "total")
 TOKEN = r"[a-z0-9_]{1,64}"
+# The settings' table inputs (K-BP3): instagram_web and cloudflare_challenge.
+INPUT_TABLES = (("site", "handle"), ("url", "expect"))
 TRY_FIELDS = tuple(
     "i input source verdict error"
     " status final_url timings_ms bytes_down_est reason screenshot".split()
@@ -227,12 +229,21 @@ def page_url(url: str) -> str:
     return f"{parts.scheme}://{host}{f':{port}' if port else ''}{parts.path or '/'}"
 
 
+def _input(value: Any) -> str | dict[str, str]:
+    """A try's input as the settings give it: a string, or one of the INPUT_TABLES tables."""
+    if not isinstance(value, Mapping):
+        return check_string(value, "input", size=2048)
+    names = next((n for n in INPUT_TABLES if set(value) == set(n)), INPUT_TABLES[0])
+    table = check_fields(dict(value), names, "input")
+    return {name: check_string(text, f"input.{name}", size=2048) for name, text in table.items()}
+
+
 def try_record(**fields: Any) -> dict[str, Any]:
     """One validated tries.jsonl line (K-BP4); every field is required, absent values None. The
     verdict is the one its error code implies (ok: no error); a screenshot is the try's own."""
     record = check_fields(fields, TRY_FIELDS, "try")
     check_int(record["i"], "i", 0, MAX_TRIES - 1)
-    check_string(record["input"], "input")
+    record["input"] = _input(record["input"])
     optional(check_string, record["source"], "source", TOKEN)
     optional(check_string, record["error"], "error", TOKEN)
     if record["verdict"] != (CODE_VERDICTS.get(record["error"]) if record["error"] else "ok"):

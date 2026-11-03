@@ -1,6 +1,7 @@
 """Browser pulse contracts: names, outcomes, records, the ingest rule and the target protocol."""
 
 import asyncio
+import json
 import typing
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from proxy_index.browser import contracts as c
+from proxy_index.browser.settings import load_settings
 from proxy_index.models import ErrorCode, RequestContext
 from proxy_index.orchestrator import batches
 from proxy_index.orchestrator.db import Database
@@ -187,6 +189,34 @@ def test_try_record():
     )
     assert c.try_record(**failed)["screenshot"] == "browser/screenshots/0003.jpg"
     assert c.try_record(**try_fields(verdict="proxy_error", error="dns"))["error"] == "dns"
+
+
+def test_try_record_takes_every_run_target_input_from_the_settings():
+    """One try per run target, with each input exactly as the example settings give it."""
+    settings = load_settings(
+        Path(__file__).resolve().parents[1] / "configs/browser-pulse.example.toml"
+    )
+    assert {target.id for target in settings.targets} == set(c.RUN_TARGETS)
+    for target in settings.targets:
+        for value in target.inputs:
+            record = c.try_record(**try_fields(input=value, source=target.id))
+            # A table input is recorded as a plain object, so the line is JSON.
+            assert json.loads(json.dumps(record))["input"] == (
+                value if isinstance(value, str) else dict(value)
+            )
+    long_url = {"url": "https://example.invalid/" + "a" * 2000, "expect": "Example"}
+    assert c.try_record(**try_fields(input=long_url))["input"] == long_url
+    for value, message in [
+        ({"site": "x"}, r"input: missing fields \['handle'\]"),
+        ({"site": "x", "handle": "a", "extra": "b"}, "input: unknown fields"),
+        ({"url": "https://example.invalid/", "expect": 1}, "input.expect"),
+        ({"site": "x", "handle": "a" * 2049}, "input.handle"),
+        ({"cookies": "x"}, "must never hold"),
+        (["0306406152"], "input: must be"),
+        ("a" * 2049, "input: must be"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            c.try_record(**try_fields(input=value))
 
 
 @pytest.mark.parametrize("field", sorted(c.FORBIDDEN_FIELDS))
