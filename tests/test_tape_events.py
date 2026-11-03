@@ -72,7 +72,11 @@ async def emit_all(conn, product_id, region_id, at=AT):
         conn,
         at,
         events.HourEstimate(
-            product_id=product_id, day=date(2026, 11, 2), hour=13, formula_version="f1"
+            product_id=product_id,
+            day=date(2026, 11, 2),
+            hour=13,
+            formula_version="f1",
+            countries=40,
         ),
     )
     await events.emit_pulse_down(conn, at, window(product_id), outage_ids=(11, 12))
@@ -138,7 +142,7 @@ async def test_helpers_write_the_payload_contract():
     assert (estimate["region_id"], estimate["signal"], estimate["data"]) == (
         None,
         0,
-        {"day": "2026-11-02", "hour": 13, "formula_version": "f1"},
+        {"day": "2026-11-02", "hour": 13, "formula_version": "f1", "countries": 40},
     )
     assert (down["signal"], down["severity"], down["region_id"], down["data"]) == (
         -1,
@@ -202,6 +206,7 @@ BROKEN = {
     "boolean hour": lambda: hour(hour=True),
     "no formula": lambda: hour(formula_version=""),
     "negative estimate": lambda: hour(unique_ips=-5),
+    "negative country count": lambda: hour(countries=-1),
     "threshold above 1": lambda: window(threshold=1.5),
     "negative errors": lambda: window(errors=-3),
     "more errors than requests": lambda: window(errors=801),

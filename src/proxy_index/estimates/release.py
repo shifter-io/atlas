@@ -1,5 +1,8 @@
 """Hourly release of the estimated hours, with one estimate_hour_released event per network hour.
 
+The event stands for all of the hour's countries (their count is in its payload), so a full hour
+of 18 networks x 40 countries writes 18 tape events, not 720.
+
 An estimated hour is released once its UTC clock hour has ended: from then on the calculator
 windows include it. Every due hour is released in (day, hour) order in one transaction with its
 events, so an hour is never released without its event, nor announced twice. After a gap (the
@@ -19,7 +22,7 @@ RELEASE = """WITH due AS (
   AND (day + make_interval(hours => hour + 1)) AT TIME ZONE 'UTC' <= %(now)s
  RETURNING product_id,day,hour,formula_version,unique_ips)
 SELECT product_id,day,hour,max(formula_version) AS formula_version,
- round(sum(unique_ips))::bigint AS unique_ips
+ round(sum(unique_ips))::bigint AS unique_ips, count(*)::int AS countries
 FROM due GROUP BY product_id,day,hour ORDER BY day,hour,product_id"""
 
 
@@ -36,6 +39,7 @@ async def release_due(db: Database, now: datetime | None = None) -> list[events.
                 hour=row["hour"],
                 formula_version=str(row["formula_version"]),
                 unique_ips=row["unique_ips"],
+                countries=row["countries"],
             )
             for row in rows
         ]

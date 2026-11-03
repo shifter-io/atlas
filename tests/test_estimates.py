@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from psycopg.rows import dict_row
+from test_census_pulse import product
 from test_daily import daily_root
 from test_onboarding import START
 from test_storage import measurement
@@ -21,7 +22,9 @@ from test_storage import measurement
 from proxy_index.calculated import store
 from proxy_index.calculated.calculator import calculate as calculate_snapshot
 from proxy_index.daily import ingest as daily_ingest
+from proxy_index.detect import list_events
 from proxy_index.estimates import compute, release, window
+from proxy_index.orchestrator import events as tape_events
 from proxy_index.orchestrator.db import DEFAULTS, Database, put_setting
 from proxy_index.orchestrator.jobs import (
     _batch_skip,
@@ -245,6 +248,52 @@ async def test_stored_hours_are_released_in_order_and_never_rewritten(tmp_path, 
     assert {r["formula_version"] for r in stored(database) if r["hour"] == 20} == {2}
     with pytest.raises(ValueError, match="not imported"):
         compute.estimate_run(database, str(uuid.uuid4()), "DE", formula(DE={}))
+
+
+COUNTRIES = [a + b for a in "ABCDEFGH" for b in "VWXYZ"]  # 40 codes
+
+
+async def test_a_full_hour_writes_one_release_event_per_network_not_per_country(
+    tmp_path, database, db
+):
+    """TAPE-2: 18 networks x 40 countries released for one hour are 18 tape events, each with
+    its country count, and a pulse_down written beside them stays on the first page."""
+    seed(database)
+    run_key_sql = "SELECT run_key FROM test_runs WHERE run_id=%s"
+    with connect(database) as conn:
+        run_key = conn.execute(run_key_sql, (await imported(tmp_path, database, T1),)).fetchone()[0]
+        networks = [product(conn, f"net{n:02d}") for n in range(18)]
+        conn.cursor().executemany(
+            "INSERT INTO estimated_hours(product_id,country_code,day,hour,run_key,measured_at,"
+            "measured_ips,measured_requests,hour_factor,unique_ips,requests,day_unique_ips,curve,"
+            "formula_version) VALUES (%s,%s,%s,15,%s,%s,1,1,1,2.5,1,1,'country',1)",
+            [(p, c, T1.date(), run_key, T1) for p in networks for c in COUNTRIES],
+        )
+    due = await release.release_due(db, T1.replace(hour=16, minute=0))
+    assert len(due) == 18 and {(e.countries, e.unique_ips, e.hour) for e in due} == {(40, 100, 15)}
+    async with db.transaction() as conn:
+        await tape_events.emit_pulse_down(
+            conn, T1.replace(hour=16, minute=1), pulse_window(networks[0])
+        )
+    with connect(database) as conn:
+        listed = list_events(conn)
+    assert [e["kind"] for e in listed].count("estimate_hour_released") == 18
+    assert listed[0]["kind"] == "pulse_down" and len(listed) == 19
+    release_data = {(e["product"], json.dumps(e["data"], sort_keys=True)) for e in listed[1:]}
+    assert len(release_data) == 18
+    assert all('"countries": 40' in data for _, data in release_data)
+
+
+def pulse_window(product_id):
+    return tape_events.PulseWindow(
+        product_id=product_id,
+        window_start=T1.replace(hour=15, minute=55),
+        window_minutes=5,
+        errors=640,
+        requests=800,
+        regions=8,
+        threshold=0.5,
+    )
 
 
 async def test_week_unique_ips_are_distinct_measured_ips_not_a_sum_of_days(tmp_path, database, db):
