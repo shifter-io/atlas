@@ -9,6 +9,8 @@ import math
 import tomllib
 from pathlib import Path
 
+from ..browser.contracts import BROWSER_TARGETS
+
 KEYS = (
     "reliability",
     "speed",
@@ -140,6 +142,7 @@ def validate(config):
         "hosting_usage_types",
         "latency_target",
         "payload",
+        "target_groups",
     }
     if set(config) - known:
         raise ValueError("Unknown methodology setting")
@@ -181,6 +184,7 @@ def validate(config):
     _counts(config.get("slots", {}), SLOTS, 1, "slot")
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
+    _groups(config)
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
     return config
@@ -192,6 +196,24 @@ def latency_target(config):
     if not isinstance(target, str) or not target:
         raise ValueError("Invalid latency target")
     return target
+
+
+def _groups(config):
+    """[target_groups]: each group target names its distinct sources; a target is a source of
+    one group at most, and a group is nobody's source (calculated/browser.py). No browser, group
+    or source target is a required target: those are per-target figures only."""
+    groups = config.get("target_groups", {})
+    if not isinstance(groups, dict) or not all(isinstance(v, list) and v for v in groups.values()):
+        raise ValueError("Invalid target groups")
+    sources = [s for v in groups.values() for s in v]
+    if (
+        not all(isinstance(s, str) and s for s in sources)
+        or len(set(sources)) != len(sources)
+        or set(sources) & set(groups)
+    ):
+        raise ValueError("Invalid target groups")
+    if set(config["required_targets"]) & {*BROWSER_TARGETS, *groups, *sources}:
+        raise ValueError("A browser or group target cannot be a required target")
 
 
 def _usage_types(value):

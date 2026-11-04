@@ -1,11 +1,13 @@
-"""Wire traffic of the census, pulse and load tests (proxy-index report traffic,
-GET /v1/traffic).
+"""Wire traffic of the census, pulse and load tests, and of browser runs (proxy-index report
+traffic, GET /v1/traffic).
 
 Each provider's run in a batch counts once. A run whose artifact was ingested uses its stored
 run_buckets (requests = completed, exact wire bytes) when every bucket carries the v6 outcome
 counters; any other run uses the batch_runs counters (final, or the latest progress of a run
 that is still going or never uploaded). Time filters select batches by their scheduled slot.
-GB are decimal: 10^9 bytes.
+GB are decimal: 10^9 bytes. A browser run's bytes are the browser's estimates (K-BP4
+bytes_down_est), so by_test has a browser entry, with bytes_exact false, only when there are
+browser runs.
 """
 
 from __future__ import annotations
@@ -16,6 +18,9 @@ from psycopg.rows import dict_row
 
 GB = 10**9
 TESTS = ("census", "pulse", "load")
+BROWSER = "browser"
+# The by_test keys the calculated snapshot keeps (traffic.by_test).
+SNAPSHOT = ("runs", "requests", "bytes_up", "bytes_down", "bytes_exact")
 TERMINAL = ("done", "failed", "skipped", "killed")
 
 
@@ -63,8 +68,8 @@ def summary(
     """
     clauses, params = ["br.status<>'queued'"], []
     if test:
-        if test not in TESTS:
-            raise ValueError("test must be census, pulse or load")
+        if test not in (*TESTS, BROWSER):
+            raise ValueError("test must be census, pulse, load or browser")
         clauses.append("b.kind=%s")
         params.append(test)
     if provider:
@@ -110,6 +115,9 @@ def summary(
     )
     detail = [r | totals([r]) for r in rows]
     providers = sorted({r["provider"] for r in rows})
+    by_test = {kind: totals([r for r in rows if r["test"] == kind]) for kind in TESTS}
+    if browser := [r for r in rows if r["test"] == BROWSER]:
+        by_test[BROWSER] = totals(browser) | {"bytes_exact": False}
     return {
         "unit": "GB = 10^9 bytes",
         "period": {"from": start, "to": end},
@@ -119,9 +127,15 @@ def summary(
             {"provider": name} | totals([r for r in rows if r["provider"] == name])
             for name in providers
         ],
-        "by_test": {kind: totals([r for r in rows if r["test"] == kind]) for kind in TESTS},
+        "by_test": by_test,
         "total": totals(rows),
     }
+
+
+def snapshot(by_test):
+    """by_test as the calculated snapshot keeps it: per test its runs, requests and bytes (and
+    the browser entry's bytes_exact)."""
+    return {test: {k: t[k] for k in SNAPSHOT if k in t} for test, t in by_test.items()}
 
 
 def table(report):
