@@ -577,17 +577,17 @@ def write(conn, build_id, payload, config, persist):
 
     Each product group is made JSON-ready, validated, persisted (persist(conn, payload) writes
     its typed rows) and slimmed (slim.py) on its own, and so is each part of the runs, so the
-    whole payload is never copied or serialized at once; payload["products"] is replaced in
-    place by the slimmed groups. Returns the slimmed payload as read() assembles it.
+    whole payload is never copied or serialized at once. payload is not changed. Returns the
+    slimmed payload as read() assembles it.
     """
     head = jsonable({k: v for k, v in payload.items() if k not in parts.KINDS})
     validate_payload(head, ())
-    groups, rows = payload["products"], []
-    for position, group in enumerate(groups):
+    groups, rows = [], []
+    for position, group in enumerate(payload["products"]):
         group = jsonable(group)
         validate_payload(head, [group])
         persist(conn, head | {"products": [group], "overlap": []})
-        groups[position] = group = slim({"products": [group]}, config)["products"][0]
+        groups.append(group := slim({"products": [group]}, config)["products"][0])
         rows.append(("product", position, group["id"], group["product_id"], group["cohort"], group))
     persist(conn, head | {"products": []})
     runs = [jsonable(chunk) for chunk in parts.chunks(payload["runs"])]
