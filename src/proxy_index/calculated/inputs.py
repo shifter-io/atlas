@@ -16,6 +16,17 @@ def group_by_product(rows, drop_id=False):
     return groups
 
 
+def light_load(run, flagged_runs, timed_target):
+    """Whether a run's histograms count for the breakdowns' latency: light load of the latency
+    target (pulses and runs outside a batch), never a census or load run nor a pulse that ran
+    during a census (flagged_runs). build() and the list signature (lists.py) use it."""
+    return (
+        run.get("test") in (None, "pulse")
+        and not flagged_runs.get(run["run_key"])
+        and run["scope"]["target"]["id"] == timed_target
+    )
+
+
 def tested_by_product(tested):
     """Per product: the latest test time per country, and the tested rows with trimmed countries."""
     tested_groups, monitored_groups = defaultdict(dict), defaultdict(list)

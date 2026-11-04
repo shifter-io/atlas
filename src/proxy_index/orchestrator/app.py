@@ -3,12 +3,14 @@
 The admin routes (admin/routes.py, /admin/api) bring their own Basic-auth middleware for their
 path prefix, as node_auth only guards /v1/. ADMIN_USER / ADMIN_PASSWORD come from the
 environment; without a password the admin answers only over loopback in --dev, and `serve`
-refuses to start outside --dev.
+refuses to start outside --dev. With a certificate and key, `serve` answers HTTPS only (the
+manager's one node API port, MANAGER-ORCH-1).
 """
 
 from __future__ import annotations
 
 import logging
+import ssl
 from pathlib import Path
 
 from aiohttp import web
@@ -73,6 +75,18 @@ def build_app(
     return app
 
 
+def server_tls(cert: str | None, key: str | None) -> ssl.SSLContext | None:
+    """The HTTPS context for a certificate and its key (TLS 1.2 or later); None for neither."""
+    if not cert and not key:
+        return None
+    if not (cert and key):
+        raise ValueError("--tls-cert and --tls-key go together")
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(cert, key)
+    return context
+
+
 def serve(
     credentials_file: str,
     *,
@@ -80,8 +94,11 @@ def serve(
     port: int = 8080,
     dev: bool = False,
     methodology: str | Path | None = None,
+    tls: tuple[str | None, str | None] = (None, None),
 ) -> None:
-    """Run until interrupted. --dev logs verbosely and refuses to bind beyond loopback."""
+    """Run until interrupted. --dev logs verbosely and refuses to bind beyond loopback; `tls`
+    (certificate, key) serves HTTPS."""
+    context = server_tls(*tls)
     if dev and host not in LOOPBACK:
         raise ValueError(f"--dev refuses to bind {host}")
     if not dev and admin.credentials_from_env() is None:
@@ -99,5 +116,6 @@ def serve(
         build_app(credentials_file, dev=dev, methodology=methodology),
         host=host,
         port=port,
+        ssl_context=context,
         print=None,
     )

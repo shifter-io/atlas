@@ -308,7 +308,8 @@ class FakeDigitalOcean:
 
     async def _firewall(self, request):
         body = await self._body(request)
-        if set(body.get("tags") or []) - self.tags:  # DigitalOcean: "tag ... does not exist"
+        sources = {t for r in body.get("inbound_rules") or [] for t in r["sources"].get("tags", [])}
+        if (set(body.get("tags") or []) | sources) - self.tags:  # "tag ... does not exist"
             return web.json_response({"id": "unprocessable_entity"}, status=422)
         firewall_id = request.match_info.get("id") or (
             f"33333333-3333-4333-8333-{next(self._ids):012d}"

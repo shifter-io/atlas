@@ -20,6 +20,8 @@ def register(commands) -> None:
         help="Private PostgreSQL config (default $PROXY_INDEX_DATABASE_FILE)",
     )
     serve.add_argument("--methodology", help="Scoring methodology for the calculate job")
+    serve.add_argument("--tls-cert", help="PEM certificate: answer HTTPS only (with --tls-key)")
+    serve.add_argument("--tls-key", help="Owner-only PEM private key of --tls-cert")
 
     node = commands.add_parser("node", help="Run a node agent for one provider product")
     node.add_argument("--orchestrator", required=True, help="Orchestrator base URL")
@@ -87,6 +89,7 @@ def dispatch(args) -> int:
             port=args.port,
             dev=args.dev,
             methodology=args.methodology,
+            tls=(args.tls_cert, args.tls_key),
         )
         return 0
     if args.command == "scheduler":

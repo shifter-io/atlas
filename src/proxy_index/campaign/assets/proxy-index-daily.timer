@@ -1,0 +1,10 @@
+# MANAGER-ORCH-1: the hourly daily test, at HH:56 for the next hour. Installed OFF (owner rule
+# 2026-11-04): this file has no [Install] section, so neither `systemctl enable`, a preset nor a
+# reboot can start it. Only `campaign manager hourly-enable --apply` (the owner's go) adds it to
+# timers.target; `hourly-disable --apply` and `orchestrator-disable --apply` remove it again.
+[Unit]
+Description=Proxy Index daily test: each hour at HH:56 for the next hour (off until hourly-enable)
+
+[Timer]
+OnCalendar=*-*-* *:56:00 UTC
+AccuracySec=1s

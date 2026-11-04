@@ -133,6 +133,9 @@ DEFAULTS: dict[str, Any] = {
     "browser.ingest_concurrency": 4,
     "browser.archive_prefix": "browser-files",
     "browser.archive_dir": None,
+    # The calculate job's subprocess is killed after this long (MANAGER-ORCH-1): before the next
+    # hourly slot, so two calculations never overlap.
+    "calculate.timeout_seconds": 3000,
 }
 
 
