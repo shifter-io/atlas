@@ -121,8 +121,9 @@ def load_network(state: Path, name: str, settings: BrowserSettings) -> Network:
             raise UserError(f"{name}: {file} {reason}") from None
     untargeted = settings.is_untargeted(name)
     files = (directory / "provider.toml", directory / "credentials.toml")
-    factory = untargeted_factory(*files) if untargeted else provider_factory(*files)
     try:
+        # Making the factory reads provider.toml (node.rotating_loader): inside the try too.
+        factory = untargeted_factory(*files) if untargeted else provider_factory(*files)
         token = read_token(directory / "node.token")
         factory(settings.schedule.countries[0])  # a broken provider fails before registering
     except (OSError, ValueError) as exc:

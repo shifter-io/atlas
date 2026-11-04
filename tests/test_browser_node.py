@@ -370,6 +370,9 @@ def replace_with_directory(path: Path) -> None:
         (lambda d: (d / "credentials.toml").chmod(0o640), "credentials.toml must be owned"),
         (lambda d: private(d / "node.token", "two words"), "unusable network files"),
         (lambda d: private(d / "provider.toml", "schema_version = 9"), "unusable network"),
+        # BP-HOST-FIXES-1 review M1: read when the factory is made, not only when it builds.
+        (lambda d: private(d / "provider.toml", "provider = ["), r"\(TOMLDecodeError\)"),
+        (lambda d: private(d / "provider.toml", 'provider = "nope"'), r"\(ValueError\)"),
         (lambda d: replace_with_directory(d / "provider.toml"), "must be a regular file"),
     ],
 )
