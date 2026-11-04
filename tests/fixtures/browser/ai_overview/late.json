@@ -25,7 +25,7 @@
     "error": null,
     "reason": null,
     "answer_chars": 146,
-    "answer_ms": 0,
+    "answer_ms": 3000,
     "asked": false
   }
 }

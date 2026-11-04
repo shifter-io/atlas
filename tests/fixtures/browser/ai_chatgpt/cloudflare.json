@@ -13,7 +13,7 @@
   "expect": {
     "verdict": "challenge",
     "error": "challenge",
-    "reason": "challenge_marker",
+    "reason": "challenge_page",
     "asked": false
   }
 }

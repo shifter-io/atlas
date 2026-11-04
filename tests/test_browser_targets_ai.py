@@ -155,7 +155,7 @@ def test_every_source_has_its_cases():
         c.AI_CHATGPT: {
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
             *("cloudflare", "too_many_requests", "status_429", "no_reply", "one_sentence"),
-            "no_prompt",
+            *("no_prompt", "challenge_after_submit"),
         },
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),
@@ -222,9 +222,13 @@ def test_the_wait_ends_at_the_page_timeout_and_answer_wait():
     overview = run(FIXTURES / c.AI_OVERVIEW / "absent.json", answer_wait_s=2)
     assert overview[3].calls == [("wait_for", ", ".join(AiOverview.ANSWER), 2000)]
     assert outcome(overview[2]) == ("error", "no_answer", "no_overview")
-    # An overview that appears late keeps growing within what is left of the budget.
+    # An overview that appears late keeps growing within what is left of the budget, and
+    # its answer_ms counts from the start of the wait, the appearing time included.
     late = run(FIXTURES / c.AI_OVERVIEW / "late.json", answer_wait_s=4)
-    assert late[4]() == 4 and late[5]["answer_chars"] > 0
+    assert late[4]() == 4 and late[5]["answer_chars"] > 0 and late[5]["answer_ms"] == 3000
+    # A setting left unset keeps the default wait.
+    assert run(path, answer_wait_s=None, page_timeout_s=None)[4]() == 30
+    assert run(path, answer_wait_s=None, page_timeout_s=12)[4]() == 12
 
 
 def test_a_growing_answer_waits_until_it_is_stable():
@@ -241,6 +245,8 @@ def test_sentence_count():
     assert sentence_count("Pi is 3.14 exactly. Really!") == 2
     assert sentence_count("One. Two? Three! four") == 4
     assert sentence_count("空は青い。 光が散乱する。") == 2
+    assert sentence_count("空は青い。光が散乱する。") == 2
+    assert sentence_count("Done! 次。") == 2
 
 
 def test_chat_sources_ask_the_one_fixed_question(tmp_path):
@@ -282,6 +288,14 @@ def test_overview_rotates_its_questions():
     settings = load_settings(EXAMPLE)
     overview = next(t for t in settings.targets if t.id == c.AI_OVERVIEW)
     assert overview.answer_wait_s == 30
+
+
+def test_the_overview_shares_google_search_selectors_marks_and_url():
+    overview, search = registry.get(c.AI_OVERVIEW), registry.get(c.GOOGLE_SEARCH)
+    for name in ("RESULTS", "CAPTCHA_FORM", "CONSENT_FORM", "MARKS"):
+        assert getattr(overview, name) is getattr(search, name)
+    for query in ("why is the sky blue", "a & b"):
+        assert overview.address(query) == search.address(query)
 
 
 def test_registered_sources_match_the_targets_file():

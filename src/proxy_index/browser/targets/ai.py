@@ -16,7 +16,6 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
-from urllib.parse import urlencode
 
 from ...models import RequestContext
 from ...targets import PageDriver, PageSpec, PageView
@@ -33,20 +32,23 @@ from ..judge import (
     text_selector,
 )
 from . import PageTarget, choose
+from .pages import GoogleSearch
 
 # The numbers interact() returns; the judge reads them from PageView.found.
 ANSWER_CHARS = "answer_chars"
 ANSWER_SENTENCES = "answer_sentences"
 ANSWER_MS = "answer_ms"
 MIN_CHARS = 80
+ANSWER_WAIT_S = 30
 # An answer is complete once its length stays the same for STABLE_S, read every POLL_S.
 STABLE_S = 2.0
 POLL_S = 0.5
-_SENTENCE_BREAK = re.compile(r"(?<=[.!?。！？])\s+")
+# Latin marks need whitespace after them (3.14 is one number); CJK marks never do.
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+|(?<=[。！？])\s*")
 
 
 def sentence_count(text: str) -> int:
-    """Parts of the text split after a sentence-ending mark and whitespace, that hold a word."""
+    """Parts of the text split after a sentence-ending mark, that hold a word."""
     return sum(1 for part in _SENTENCE_BREAK.split(text.strip()) if re.search(r"\w", part))
 
 
@@ -64,7 +66,7 @@ class AiSource(PageTarget):
     `page_timeout_s` (the try's page timeout) from the settings with dataclasses.replace; the
     wait ends at the smaller one. `clock` and `sleep` are replaced only by tests."""
 
-    answer_wait_s: int = 30
+    answer_wait_s: int | None = ANSWER_WAIT_S
     page_timeout_s: int | None = None
     clock: Callable[[], float] = field(default=time.monotonic, repr=False, compare=False)
     sleep: Callable[[float], Awaitable[Any]] = field(
@@ -81,8 +83,9 @@ class AiSource(PageTarget):
         return {"input": choose(context, inputs), "source": self.id}
 
     def budget_s(self) -> float:
-        limits = (self.answer_wait_s, self.page_timeout_s)
-        return float(min(limit for limit in limits if limit is not None))
+        """The wait: answer_wait_s (ANSWER_WAIT_S when unset), cut to page_timeout_s if set."""
+        wait = ANSWER_WAIT_S if self.answer_wait_s is None else self.answer_wait_s
+        return float(wait if self.page_timeout_s is None else min(wait, self.page_timeout_s))
 
     async def dismiss(self, driver: PageDriver) -> None:
         """Close one consent or cookie dialog, if one is shown: one click, nothing else."""
@@ -102,10 +105,13 @@ class AiSource(PageTarget):
                 return len(text), sentence_count(text)
         return 0, 0
 
-    async def read_answer(self, driver: PageDriver, budget_s: float) -> dict[str, int]:
+    async def read_answer(
+        self, driver: PageDriver, budget_s: float, start: float | None = None
+    ) -> dict[str, int]:
         """Poll the answer until its length is unchanged for STABLE_S, a stop sign shows or
-        budget_s passes. answer_ms is the time from the start to its last growth."""
-        start = self.clock()
+        budget_s passes since `start` (default now). answer_ms runs from `start` to the
+        answer's last growth."""
+        start = self.clock() if start is None else start
         size, sentences, grown = 0, 0, start
         while True:
             now = self.clock()
@@ -135,29 +141,30 @@ class AiOverview(AiSource):
     url: str = "https://www.google.com/search"
 
     ANSWER = ('div[aria-label="AI Overview"]', 'div[data-attrid="AI Overview"]')
-    RESULTS = "#search a h3"
-    CAPTCHA_FORM = "form#captcha-form"
-    CONSENT_FORM = 'form[action*="consent.google"]'
+    # The results page is google_search's: its selectors, marks and URL have one owner.
+    RESULTS = GoogleSearch.RESULTS
+    CAPTCHA_FORM = GoogleSearch.CAPTCHA_FORM
+    CONSENT_FORM = GoogleSearch.CONSENT_FORM
+    MARKS = GoogleSearch.MARKS
     # The overview loads after the results: wait this long for it to start.
     APPEAR_S = 5
-    MARKS = (Mark("challenge", "sorry_page", paths=("/sorry/",), found=(CAPTCHA_FORM,)),)
 
     def address(self, value: Any) -> str:
-        return f"{self.url}?{urlencode({'q': value, 'hl': 'en', 'gl': 'us'})}"
+        return GoogleSearch.address(self, value)
 
     def wanted(self, value: Any) -> tuple[str, ...]:
         return (*self.ANSWER, self.RESULTS, self.CAPTCHA_FORM, self.CONSENT_FORM)
 
     async def interact(self, driver: PageDriver, spec: PageSpec) -> dict[str, int] | None:
         """With results shown, wait up to APPEAR_S for an overview, then for it to stop
-        growing; the whole wait is bounded by budget_s()."""
+        growing. The whole wait, and answer_ms, run from the start of interact()."""
         start, budget, overview = self.clock(), self.budget_s(), selector_list(*self.ANSWER)
         if not await driver.count(overview):
             if not await driver.count(self.RESULTS):
                 return None
             if not await driver.wait_for(overview, round(min(self.APPEAR_S, budget) * 1000)):
                 return {ANSWER_CHARS: 0, ANSWER_SENTENCES: 0}
-        return await self.read_answer(driver, max(0.0, budget - (self.clock() - start)))
+        return await self.read_answer(driver, budget, start)
 
     def rules(self, view: PageView) -> PageAssessment:
         if host_of(view).startswith("consent."):
@@ -249,7 +256,10 @@ class ChatGpt(ChatSource):
     STOPS = (text_selector("Too many requests"), "#challenge-form")
     DISMISS = ('button:has-text("Reject non-essential")', 'button:has-text("Accept all")')
     MIN_SENTENCES = 2
-    MARKS = (Mark("blocked", "too_many_requests", text=(TOO_MANY,)),)
+    MARKS = (
+        Mark("challenge", "challenge_page", found=("#challenge-form",)),
+        Mark("blocked", "too_many_requests", text=(TOO_MANY,)),
+    )
 
 
 @dataclass(frozen=True, slots=True)
