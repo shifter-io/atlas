@@ -299,9 +299,11 @@ async def test_a_build_writes_one_list_per_network_window_and_changes_nothing_el
     lists = network_lists(database, new["snapshot_id"])
     # The incremental build's network lists equal the full build's (CALC-INC-1a rule).
     assert lists == network_lists(database, full["snapshot_id"])
-    # alpha (US, DE and census-pulse groups), beta and gamma: one list per network window.
+    # alpha (US, DE and census-pulse groups), beta, gamma (empty windows) and delta (daily and
+    # census-pulse groups): one list per network window.
     networks = {(p["provider"], p["kind"]) for p in new["products"]}
-    assert len(networks) == 3 and len(lists) == len(networks) * len(WINDOWS)
+    assert {provider for provider, _ in networks} == {"alpha", "beta", "gamma", "delta"}
+    assert len(networks) == 4 and len(lists) == len(networks) * len(WINDOWS)
     with connect(database) as conn:
         members = defaultdict(list)
         for product_id, hours, list_id in conn.execute(
