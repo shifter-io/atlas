@@ -329,7 +329,7 @@ async def test_window_inputs_match_a_whole_calculation(scenario, database, monke
     monkeypatch.setattr(calculator, "build", build)
     # The synthetic observations have no request counters, so the payload check, which
     # compares observations with successful requests, does not apply to this fixture.
-    monkeypatch.setattr(calculator, "validate_payload", lambda payload: None)
+    monkeypatch.setattr(store, "validate_payload", lambda payload, products=None: None)
     as_of = scenario["as_of"]
     calculator.calculate(database, POLICY, as_of=as_of)
     groups = {}
