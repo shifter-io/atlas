@@ -36,7 +36,14 @@ from typing import Any
 
 from ..errors import UserError
 from ..models import ProxySource, RunConfig
-from ..node import NodeAgent, ProxyFactory, provider_factory, read_token, resident_mb
+from ..node import (
+    NodeAgent,
+    ProxyFactory,
+    provider_factory,
+    read_token,
+    resident_mb,
+    rotating_policy,
+)
 from ..sinks import JsonSink
 from ..targets import Target, TargetRegistry, registry
 from . import rawfiles, release
@@ -93,14 +100,14 @@ def _check_private(path: Path) -> None:
 
 
 def untargeted_factory(provider_config: Path, credentials_file: Path) -> ProxyFactory:
-    """Proxies with no country parameter and rotating sessions, whatever the batch country."""
+    """Proxies with no country parameter, a new exit per request, whatever the batch country."""
     from ..providers import load_provider
 
     def build(country_code: str) -> ProxySource:
         return load_provider(
             provider_config,
             parameters={},
-            session_policy="rotate",
+            session_policy=rotating_policy(provider_config),
             credentials_file=credentials_file,
         )
 

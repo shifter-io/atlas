@@ -210,6 +210,7 @@ PARSERS.append(_scheduler_parsers)
 
 def _plan_parsers(actions) -> None:
     """CAMP-1g: the campaign plan and the manager's deploy, enable, allow-me and teardown."""
+    from . import manager_orch
     from .contracts import ACCOUNTS
 
     plan = actions.add_parser("plan", help="Validate inputs; write the manifests and the spec")
@@ -285,6 +286,7 @@ def _plan_parsers(actions) -> None:
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
     for step in (deploy, upload, enable, stop, allow, teardown):
         step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
+    manager_orch.add_parsers(steps)  # MANAGER-ORCH-1
 
 
 def _plan(args) -> int:
@@ -324,8 +326,10 @@ def _plan(args) -> int:
 
 
 async def _manager_step(args) -> dict:
-    from . import deploy
+    from . import deploy, manager_orch
 
+    if args.manager_action in manager_orch.ACTIONS:  # MANAGER-ORCH-1
+        return await manager_orch.run(args, _cloud)
     if args.manager_action == "upload-spec":
         return await deploy.upload_spec(args.inventory, args.root)
     if args.manager_action == "enable":
