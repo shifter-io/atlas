@@ -6,6 +6,7 @@ import json
 import tarfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 
 import pytest
 from psycopg import sql
@@ -312,14 +313,15 @@ def test_raw_tables_get_daily_partitions_unless_the_month_has_one(database):
         assert [name for name, _, _ in children(conn, "test_events")] == ["test_events_2026_12"]
 
 
-async def at_once(database, table, creators):
-    """Run the creators while a transaction holds the parent table, so each queues for its lock
-    (after any name check it makes); release them together once all of them wait."""
+async def at_once(database, table, starters):
+    """Start the creators (each starter returns an awaitable) while a transaction holds the
+    parent table, so each queues for its lock after any name check it makes; release them
+    together once all of them wait."""
     with connect(database) as holder:
         holder.execute(
             sql.SQL("LOCK TABLE ONLY {} IN ACCESS SHARE MODE").format(sql.Identifier(table))
         )
-        tasks = [asyncio.ensure_future(creator) for creator in creators]
+        tasks = [asyncio.ensure_future(start()) for start in starters]
         for _ in range(500):
             with connect(database) as conn:
                 (waiting,) = conn.execute(
@@ -341,8 +343,8 @@ async def test_processes_creating_one_missing_month_at_once_all_succeed(database
     pools = [Database(database) for _ in range(6)]
     moment = datetime(2026, 12, 9, tzinfo=UTC)
     try:
-        creators = [pool.ensure_partition("test_events", moment) for pool in pools]
-        await at_once(database, "test_events", creators)
+        starters = [partial(pool.ensure_partition, "test_events", moment) for pool in pools]
+        await at_once(database, "test_events", starters)
     finally:
         for pool in pools:
             await pool.close()
@@ -359,8 +361,7 @@ async def test_transactions_creating_one_missing_day_at_once_all_succeed(databas
 
     loop = asyncio.get_running_loop()
     with ThreadPoolExecutor(max_workers=6) as pool:  # all six at once, on any CPU count
-        creators = [loop.run_in_executor(pool, create) for _ in range(6)]
-        await at_once(database, "run_buckets", creators)
+        await at_once(database, "run_buckets", [partial(loop.run_in_executor, pool, create)] * 6)
     with connect(database) as conn:
         assert children(conn, "run_buckets") == [
             ("run_buckets_2026_12_03", date(2026, 12, 3), date(2026, 12, 4))
