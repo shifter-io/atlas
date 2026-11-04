@@ -19,7 +19,7 @@ from test_migration import catalog
 from test_retention import clone
 
 from proxy_index import detect, traffic
-from proxy_index.calculated import browser, calculator, incremental, lists, store
+from proxy_index.calculated import browser, calculator, incremental, lists, netlists, store
 from proxy_index.calculated.aggregate import BREAKDOWNS
 from proxy_index.calculated.calculator import calculate
 from proxy_index.dbserver import Roles
@@ -30,10 +30,18 @@ from proxy_index.storage import connect, initialize, migrate
 pytest_plugins = ["test_storage"]
 
 CALCULATED_V8 = Path(__file__).parent / "fixtures/calculated_v8.sql"
+# Lists retention keeps no longer: group lists no window references, network lists (K10) whose
+# build has no window left.
+KEPT = "w.list_id=l.list_id OR l.cohort='network' AND w.build_id=l.created_build"
 ORPHANS = (
     "SELECT (SELECT count(*) FROM calculated_lists l WHERE NOT EXISTS (SELECT FROM "
-    "calculated_windows w WHERE w.list_id=l.list_id)),(SELECT count(*) FROM calculated_list_rows "
-    "r WHERE NOT EXISTS (SELECT FROM calculated_windows w WHERE w.list_id=r.list_id))"
+    f"calculated_windows w WHERE {KEPT})),(SELECT count(*) FROM calculated_list_rows r JOIN "
+    f"calculated_lists l USING(list_id) WHERE NOT EXISTS (SELECT FROM calculated_windows w WHERE "
+    f"{KEPT}))"
+)
+GROUP_ROWS = (
+    "SELECT count(*) FROM calculated_list_rows JOIN calculated_lists USING(list_id) "
+    "WHERE cohort<>'network'"
 )
 VIEWS = ("calculated_list_details", "calculated_breakdown_details", "current_breakdowns")
 
@@ -60,9 +68,13 @@ async def test_each_target_free_window_writes_one_list_by_copy(database, tmp_pat
     monkeypatch.undo()
     build = int(first["snapshot_id"])
     windows = [(p, w) for p in first["products"] for w in p["windows"].values()]
-    # One INSERT per list, and the rows go by COPY: never an INSERT per row.
-    assert sum("INSERT INTO calculated_lists" in s for s in statements) == len(windows)
-    assert not any("INSERT INTO calculated_list_rows" in s for s in statements)
+    # One INSERT per group list, and the rows go by COPY: never an INSERT per row. Each network
+    # window's list and rows come from one INSERT … SELECT (netlists.py).
+    networks = {(p["provider"], p["kind"]) for p in first["products"]}
+    assert statements.count(netlists.MERGE) == len(networks) * len(first["periods"])
+    groups = [s for s in statements if s != netlists.MERGE]
+    assert sum("INSERT INTO calculated_lists" in s for s in groups) == len(windows)
+    assert not any("INSERT INTO calculated_list_rows" in s for s in groups)
     assert payload_mismatches(database, build) == []
     with connect(database) as conn:
         assert conn.execute(
@@ -75,7 +87,7 @@ async def test_each_target_free_window_writes_one_list_by_copy(database, tmp_pat
             for r in conn.execute(
                 "SELECT l.product_id,l.cohort,l.window_hours,l.signature,l.created_build,"
                 "l.entries,l.figures,l.content_hash,(SELECT count(*) FROM calculated_list_rows r "
-                "WHERE r.list_id=l.list_id) FROM calculated_lists l"
+                "WHERE r.list_id=l.list_id) FROM calculated_lists l WHERE l.cohort<>'network'"
             )
         }
         assert conn.execute(ORPHANS).fetchone() == (0, 0)
@@ -221,7 +233,7 @@ async def test_discard_and_expire_delete_only_lists_no_window_references(databas
     base = int(first["snapshot_id"])
     at = datetime.fromisoformat(first["as_of"])
     with connect(database) as conn:
-        written = conn.execute("SELECT count(*) FROM calculated_list_rows").fetchone()[0]
+        written = conn.execute(GROUP_ROWS).fetchone()[0]
         daily = clone(conn, base, at - timedelta(days=1))  # a kept daily build, sharing lists
         older = clone(conn, base, at - timedelta(days=40))  # expires, sharing lists
         own = clone(conn, base, at - timedelta(days=41))  # expires, with lists of its own
@@ -234,9 +246,7 @@ async def test_discard_and_expire_delete_only_lists_no_window_references(databas
         conn.execute("UPDATE current_calculation SET build_id=%s", (daily,))
         # The discarded build wrote the lists, but another build's windows still use them.
         store.discard(conn, base)
-        assert conn.execute("SELECT count(*) FROM calculated_list_rows").fetchone()[0] == (
-            written + mine[1]
-        )
+        assert conn.execute(GROUP_ROWS).fetchone()[0] == written + mine[1]
     estimate = store.retention(database, dry_run=True)
     assert (estimate["kept_builds"], estimate["expired_builds"]) == ([daily], [older, own])
     assert (estimate["rows"]["calculated_lists"], estimate["rows"]["calculated_list_rows"]) == mine
@@ -246,7 +256,7 @@ async def test_discard_and_expire_delete_only_lists_no_window_references(databas
         assert conn.execute(
             "SELECT count(*),bool_and(created_build=%s) FROM calculated_lists", (base,)
         ).fetchone() == (mine[0], True)
-        assert conn.execute("SELECT count(*) FROM calculated_list_rows").fetchone()[0] == written
+        assert conn.execute(GROUP_ROWS).fetchone()[0] == written
         assert store.collect(conn) == 0
         # The kept build reads every row it had.
         assert conn.execute(

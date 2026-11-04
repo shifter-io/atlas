@@ -102,7 +102,8 @@ def assert_equal(database, policy, as_of):
 
 def lists_count(database):
     with connect(database) as conn:
-        return conn.execute("SELECT count(*) FROM calculated_lists").fetchone()[0]
+        query = "SELECT count(*) FROM calculated_lists WHERE cohort<>'network'"  # group lists
+        return conn.execute(query).fetchone()[0]
 
 
 @pytest.mark.asyncio
