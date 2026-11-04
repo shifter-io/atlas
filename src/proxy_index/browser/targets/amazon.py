@@ -41,7 +41,7 @@ class AmazonPdp(PageTarget):
                 "enter the characters you see",
                 # The robot check's own wording, also when its form is not counted.
                 "we just need to make sure you",
-                "api-services-support@amazon.com",
+                "to discuss automated access to amazon data",
             ),
             paths=("/errors/validatecaptcha",),
             found=(CAPTCHA_FORM,),

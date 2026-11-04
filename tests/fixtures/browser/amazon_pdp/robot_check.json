@@ -3,7 +3,7 @@
     "final_url": "https://www.amazon.com/dp/0000000000",
     "status": 200,
     "title": "Robot Check",
-    "text_head": "Sorry, we just need to make sure you're not a robot. For best results, please make sure your browser is accepting cookies. To discuss automated access to Amazon data please contact api-services-support@amazon.com.",
+    "text_head": "Sorry, we just need to make sure you're not a robot. For best results, please make sure your browser is accepting cookies. To discuss automated access to Amazon data please contact Amazon.",
     "found": {
       "#productTitle": 0,
       "#corePrice_feature_div .a-price": 0,
