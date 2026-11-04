@@ -1,0 +1,22 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/ap/signin?openid.mode=checkid_setup",
+    "status": 200,
+    "title": "Amazon Sign-In",
+    "text_head": "Sign in or create account. Enter mobile number or email. Continue.",
+    "found": {
+      "#productTitle": 0,
+      "#corePrice_feature_div .a-price": 0,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 0,
+      "a[href*=\"/dogsofamazon\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_redirect"
+  }
+}
