@@ -25,21 +25,21 @@ from .partitions import partition
 from .providers.credentials import read_credentials
 from .stats import Histogram
 
-SCHEMA_VERSION = 11
-# Only an unmodified v4 to v10 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 12
+# Only an unmodified v4 to v11 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
 V7_CHECKSUM = "75eb7782f9700e6b57b42d59ef8ffd1f46976d9178432689131c0add5ae5f0a5"
 V8_CHECKSUM = "5986ee1ea743a34bf42cb49d3a7d5ded4d0b884bb653cb090e3d4b7f679a4552"
-# The same v8 schema before the framework rename (one comment differs); databases created then
-# record it.
+# The same v8 schema before the framework rename (one comment differs), as databases of then have.
 V8_PRE_RENAME_CHECKSUM = "315af82775eb32324307b33c7f88b18a7fd1a9b443ee1b8cb15d42fa7b1945ca"
 V9_CHECKSUM = "bf4c540376649ecf841e5207e2581cda29cba76473761b7e5c27e72cee98b0ee"
 V10_CHECKSUM = "9e993488d6062b3a9082bdab5da44d5f1cf20ed849be641a6c6fd41a9ce9b9f9"
+V11_CHECKSUM = "e35fda97a06d674a160f277f0807408cbd7435f4eca571ab70773dd20715452c"
 MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
-MIGRATABLE |= {(10, V10_CHECKSUM): 10}
+MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Run-length settings stay out of the scope (and pool) definition; they are kept per run in
 # config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
@@ -949,11 +949,11 @@ V6_CHECKS = {
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v10 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v11 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v10_v11.sql in
-    turn; v5 to v10 start at the step for their version (v7 and v9 only add a table, v8 moves
-    names into the shared lists, v10 adds the batch kind browser). A
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v11_v12.sql in
+    turn; v5 to v11 start at the step for their version (v7 and v9 only add a table, v8 moves
+    names into the shared lists, v10 adds the batch kind browser, v11 swaps an index). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build) and
     v6 → v7 (breakdown names in the shared lists); each step's rows are verified right after it.
@@ -986,8 +986,8 @@ def migrate(credentials_file):
         else:
             start = MIGRATABLE.get(versions[0] if len(versions) == 1 else None)
             if start is None:
-                raise ValueError("Only an unmodified v4 to v10 schema can be migrated in place")
-        # A v6 to v10 database may already carry the current calculated layer, and a v6 or
+                raise ValueError("Only an unmodified v4 to v11 schema can be migrated in place")
+        # A v6 to v11 database may already carry the current calculated layer, and a v6 or
         # later one a calculated v3 to v6 layer (later is its version, else None).
         upgraded = layered and start >= 6 and layers == current_layer
         known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in (3, 4, 5, 6)}
@@ -1016,7 +1016,7 @@ def migrate(credentials_file):
         if start == 6:
             checks |= V6_CHECKS
             conn.execute(V6_SNAPSHOT)
-        for step in range(max(start, 5), SCHEMA_VERSION):  # migrate_v5_v6.sql .. v10_v11.sql
+        for step in range(max(start, 5), SCHEMA_VERSION):  # migrate_v5_v6.sql .. v11_v12.sql
             conn.execute((root / f"migrate_v{step}_v{step + 1}.sql").read_text())
         if start < 9:
             checks |= names.V8_CHECKS
@@ -1047,8 +1047,8 @@ def migrate(credentials_file):
             )
     # Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
     # columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
-    # v5 → v6, v6 → v7, v7 → v8, v9 → v10, v10 → v11 and calculated v2 → v3 only add tables and
-    # nullable or constant-default columns (and swap a check constraint): no rewrite.
+    # v5 → v6 to v11 → v12 (but v8 → v9) and calculated v2 → v3 only add tables, nullable or
+    # constant-default columns and an index (and swap a check constraint or index): no rewrite.
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:
         tables += ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
