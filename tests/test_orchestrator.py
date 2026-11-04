@@ -705,6 +705,43 @@ async def test_results_upload_ingests_and_links_the_run(database, db, client, tm
     assert (await retry.json())["run_key"] == body["run_key"]
 
 
+async def test_an_ingested_upload_is_spooled_by_its_import_hour(database, db, client, tmp_path):
+    spool = tmp_path / "spool"
+    async with db.transaction() as conn:
+        await put_setting(conn, "raw.spool_dir", str(spool))
+    batch_id, headers = await planned_run(database, db, client)
+    directory = await measurement(tmp_path, requests=3)
+    upload = pack(directory, tmp_path / "run.tar.gz").read_bytes()
+    reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
+    assert reply.status == 200, await reply.text()
+    run_id = json.loads((directory / "summary.json").read_text())["run_id"]
+    (spooled,) = spool.glob("*/*/*/*/*.tar.gz")
+    assert spooled.name == f"census-b{batch_id}-{run_id}.tar.gz"
+    assert spooled.read_bytes() == upload and spooled.stat().st_mode & 0o777 == 0o600
+
+
+async def test_a_spool_failure_after_the_ingest_still_finishes_the_run(
+    database, db, client, tmp_path
+):
+    blocked = tmp_path / "blocked-spool"
+    blocked.write_text("not a directory")  # the spool cannot create its hour folder
+    async with db.transaction() as conn:
+        await put_setting(conn, "raw.spool_dir", str(blocked))
+    batch_id, headers = await planned_run(database, db, client)
+    directory = await measurement(tmp_path, requests=3)
+    upload = pack(directory, tmp_path / "run.tar.gz").read_bytes()
+    reply = await client.post(f"/v1/results?batch_id={batch_id}", data=upload, headers=headers)
+    assert reply.status == 200, await reply.text()
+    body = await reply.json()
+    assert body["ingested"] and body["status"] == "done"
+    assert query(database, "SELECT status,run_key FROM batch_runs") == [("done", body["run_key"])]
+    ((severity, data),) = query(
+        database, "SELECT severity,data FROM alerts WHERE kind='raw_spool_failed'"
+    )
+    assert severity == "major" and data["batch_id"] == batch_id
+    assert data["error"] in {"NotADirectoryError", "FileExistsError"}
+
+
 @pytest.mark.parametrize(
     "member",
     [

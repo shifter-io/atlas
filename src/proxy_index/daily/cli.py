@@ -39,6 +39,9 @@ def register(commands) -> None:
     ingest.add_argument(
         "--formulas", type=Path, help="formulas/*.json: also store and release the estimated hours"
     )
+    ingest.add_argument(
+        "--spool", type=Path, help="keep each imported run's raw files there (raw.spool_dir)"
+    )
 
 
 def _plan(args) -> int:
@@ -81,7 +84,9 @@ def _ingest(args) -> int:
         print("Not ingested: the download did not verify", file=sys.stderr)
         return 3
     report = asyncio.run(
-        ingest_campaign(dest, args.database_file, args.mmdb, formulas=args.formulas)
+        ingest_campaign(
+            dest, args.database_file, args.mmdb, formulas=args.formulas, spool=args.spool
+        )
     )
     print(json.dumps({k: report[k] for k in ("campaign_id", "complete")}, indent=2))
     return 0 if report["complete"] else 3

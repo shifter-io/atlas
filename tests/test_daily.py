@@ -569,8 +569,12 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
     # fra1 comes first, before shifter's product exists: its events wait for the rerun.
     assert fra1["events"] is False and report["complete"] is False
     assert kinds(database) == ["daily_test_finished", "daily_test_started"]
-    again = await daily_ingest.ingest_campaign(root, database, mmdb)
+    spool = tmp_path / "spool"
+    again = await daily_ingest.ingest_campaign(root, database, mmdb, spool=spool)
     assert again["cells"]["shifter/tor1"]["ingested"] == ["CA", "PM"]
+    # The rerun's update used both runs: each is spooled once, as a .tar.gz of its directory.
+    spooled = sorted(p.name for p in spool.glob("*/*/*/*/daily-*.tar.gz"))
+    assert spooled == sorted(f"daily-{d.name}.tar.gz" for d in (root / "runs").iterdir())
     assert again["cells"]["shifter/fra1"]["events"] is True and again["complete"] is False
     assert kinds(database) == ["daily_test_finished"] * 2 + ["daily_test_started"] * 2
     assert len(list((root / "runs").iterdir())) == 2
@@ -583,6 +587,17 @@ async def test_a_collected_test_is_imported_and_its_events_emitted_once(
         with gzip.open(ips, "rt") as stream:
             seen |= {json.loads(line)["ip"] for line in stream}
     assert seen and not any(ip in text for ip in seen) and str(tmp_path) not in text
+    # A spool that cannot be written (a file where its folder should be) only raises an alert:
+    # the imports already committed, so the countries stay ingested and the cell done.
+    blocked = tmp_path / "blocked-spool"
+    blocked.write_text("not a directory")
+    third = await daily_ingest.ingest_campaign(root, database, mmdb, spool=blocked)
+    tor1 = third["cells"]["shifter/tor1"]
+    assert (tor1["status"], tor1["ingested"], tor1["issues"]) == ("done", ["CA", "PM"], [])
+    assert [issue.split(":")[0] for issue in tor1["spool_issues"]] == ["CA", "PM"]
+    with connect(database) as conn:
+        alerts = "SELECT severity,data->>'cell' FROM alerts WHERE kind='raw_spool_failed'"
+        assert conn.execute(alerts).fetchall() == [("major", "shifter/tor1")]
 
 
 def kinds(database):
@@ -628,7 +643,7 @@ def test_ingest_cli_downloads_once_then_imports(tmp_path, monkeypatch, capsys):
         downloads.append(campaign_id)
         (dest / collect.REPORT).write_text(json.dumps({"clean": True}))
 
-    async def fake_ingest(root, credentials, mmdb, *, formulas=None):
+    async def fake_ingest(root, credentials, mmdb, *, formulas=None, spool=None):
         return {"campaign_id": CID, "complete": len(downloads) == 1}
 
     monkeypatch.setattr(collect, "collect", fake_collect)

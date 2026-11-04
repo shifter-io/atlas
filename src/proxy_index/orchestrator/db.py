@@ -117,6 +117,8 @@ DEFAULTS: dict[str, Any] = {
     "archive.enabled": False,
     "archive.spaces_file": ".secrets/spaces.toml",
     "archive.work_dir": ".state/archive",
+    # The raw files of each update, kept 30 days and uploaded hourly (None keeps none).
+    "raw.spool_dir": None,
     # The daily DB-IP update (jobs.dbip_update): the release directory (None runs no update) and
     # the CDN directory holding dbip-full-YYYY-MM-DD.mmdb (None: $DBIP_BASE_URL).
     "dbip.dir": None,

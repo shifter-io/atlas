@@ -228,6 +228,7 @@ async def results(request: web.Request) -> web.Response:
     async with db.connection() as conn:
         upload_limit = int(await setting(conn, "results.max_upload_bytes"))
         extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
+        spool_dir = await setting(conn, "raw.spool_dir")
     with tempfile.TemporaryDirectory(prefix="proxy-index-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         await _receive(request, archive, upload_limit)
@@ -263,6 +264,8 @@ async def results(request: web.Request) -> web.Response:
             log.warning("ingest of batch %s rejected: %s", batch_id, exc)
             await _reject(request, batch_id, f"ingest: {exc}"[:500], "ingest_failed")
             raise _error(web.HTTPUnprocessableEntity, f"ingest rejected: {exc}"[:300]) from None
+        if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
+            await _spool(db, spool_dir, run["kind"], batch_id, summary, archive)
     status = await batches.finish_run(db, node, batch_id, summary, imported["run_key"])
     return web.json_response(
         {
@@ -273,6 +276,28 @@ async def results(request: web.Request) -> web.Response:
             "imported": imported["imported"],
         }
     )
+
+
+async def _spool(db: Database, root: str, kind: str, batch_id: int, summary: dict, archive):
+    """Keep the upload's raw file. The import has committed, so a failure only raises an alert:
+    the run is still finished and linked."""
+    from datetime import UTC, datetime
+
+    from ..archive.rawfiles import try_spool
+
+    name = f"{kind}-b{batch_id}-{summary.get('run_id')}.tar.gz"
+    issue = await asyncio.to_thread(try_spool, root, datetime.now(UTC), name, archive, move=True)
+    if issue:
+        log.warning("raw file of batch %s not spooled: %s", batch_id, issue)
+        async with db.transaction() as conn:
+            await raise_alert(
+                conn,
+                "raw_spool_failed",
+                f"the raw file of batch {batch_id} was not kept ({issue})",
+                severity="major",
+                dedupe_key="raw_spool_failed:results",
+                data={"batch_id": batch_id, "error": issue},
+            )
 
 
 def add_routes(app: web.Application) -> None:
