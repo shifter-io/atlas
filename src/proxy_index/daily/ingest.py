@@ -99,16 +99,18 @@ def convert_country(folder: Path, runs: Path) -> Path:
     return directory
 
 
-def _import(directory: Path, credentials: Path, mmdb: Path | None, spool: Path | None) -> None:
+def _import(directory: Path, credentials: Path, mmdb, spool: Path | None) -> str | None:
+    """Enrich and import a run; then keep its raw files when `spool` is set. The import has
+    committed by then, so a spool failure is returned (its exception type), never raised."""
     try:
         enrich_run(directory, mmdb)
     except FileExistsError:
         pass  # enriched by an earlier attempt
     storage.ingest(directory, credentials)
-    if spool:  # the raw files this update used (ARCHIVE-1: 30 days here, then Spaces)
-        rawfiles.spool(
-            spool, datetime.now(UTC), f"daily-{directory.name}.tar.gz", directory, move=False
-        )
+    if not spool:  # the raw files this update used (ARCHIVE-1: 30 days here, then Spaces)
+        return None
+    name = f"daily-{directory.name}.tar.gz"
+    return rawfiles.try_spool(spool, datetime.now(UTC), name, directory, move=False)
 
 
 def _times(jobs: list[dict]) -> tuple[str | None, str | None]:
@@ -140,7 +142,7 @@ def ingest_cell(
     countries = region_countries(load(manifest_path), region)
     cell = {"region": region, "countries": countries, "status": "failed", "ingested": []}
     cell |= {"requests": 0, "unique_ips": 0, "started_at": None, "finished_at": None}
-    cell |= {"estimated": [], "estimate_issues": []}
+    cell |= {"estimated": [], "estimate_issues": [], "spool_issues": []}
     try:
         verified = verify_round(manifest_path, region, ROUND)
         jobs = read_json(round_directory(manifest_path, region, ROUND) / "round.json")["jobs"]
@@ -156,10 +158,12 @@ def ingest_cell(
             continue
         try:
             directory = convert_country(job_directory(folder, job), runs)
-            _import(directory, credentials, mmdb, spool)
+            spool_issue = _import(directory, credentials, mmdb, spool)
         except (OSError, ValueError, KeyError, psycopg.Error) as exc:
             issues.append(f"{job['country']}: not imported ({type(exc).__name__})")
             continue
+        if spool_issue:
+            cell["spool_issues"].append(f"{job['country']}: raw files not kept ({spool_issue})")
         cell["ingested"].append(job["country"])
         _estimate(cell, formula, directory.name, job["country"], credentials)
         cell["unique_ips"] += entry.get("unique_ips") or 0
@@ -167,6 +171,18 @@ def ingest_cell(
     cell["status"] = "done" if verified["complete"] and not issues else "failed"
     cell["issues"] = issues
     return cell
+
+
+async def _spool_alert(db: Database, cell: str, issues: list[str]) -> None:
+    async with db.transaction() as conn:
+        await events.raise_alert(
+            conn,
+            "raw_spool_failed",
+            f"daily test {cell}: the raw files of {len(issues)} imported runs were not kept",
+            severity="major",
+            dedupe_key="raw_spool_failed:daily",
+            data={"cell": cell, "issues": issues[:20]},
+        )
 
 
 async def _product_id(db: Database, manifest: dict) -> int | None:
@@ -270,6 +286,8 @@ async def ingest_campaign(
                 spool=spool,
             )
             cell["estimate_issues"] += missing if cell["ingested"] else []
+            if cell["spool_issues"]:
+                await _spool_alert(db, key, cell["spool_issues"])
             cell["events"] = previous["cells"].get(key, {}).get("events", False)
             if not cell["events"]:
                 cell["events"] = await _emit_once(db, cell, manifest, fallback)

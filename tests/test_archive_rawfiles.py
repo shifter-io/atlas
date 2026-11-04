@@ -41,6 +41,7 @@ def test_ended_hours_are_uploaded_once_and_removed_after_30_days(tmp_path):
     assert first.parent == root / "2026/10/01/10" and first.stat().st_mode & 0o777 == 0o600
     assert spool(root, HOUR, first.name, raw(tmp_path, b"replay"), move=False) == first
     assert first.read_bytes() == b"run bytes"
+    assert spool(tmp_path / "other", HOUR, name("browser"), raw(tmp_path), move=False).exists()
     with pytest.raises(ArchiveError, match="not a raw file name"):
         spool(root, HOUR, "../evil.tar.gz", raw(tmp_path), move=False)
     with fake_bucket(tmp_path) as (bucket, settings):

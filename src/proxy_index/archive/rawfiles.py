@@ -34,7 +34,7 @@ from . import ArchiveError
 from .export import file_digests
 from .spaces import Spaces
 
-FILE = re.compile(r"(?P<kind>census|pulse|load|daily)(?:-b(?P<batch>\d+))?-[0-9a-f-]{36}\.tar\.gz")
+FILE = re.compile(r"(?P<kind>census|pulse|load|browser|daily)(?:-b(?P<batch>\d+))?-[0-9a-f-]{36}\.tar\.gz")
 UPLOADED = "uploaded.json"
 SETTLE = timedelta(minutes=5)  # an hour is packed this long after it ended
 KEEP_DAYS = 30
@@ -65,6 +65,16 @@ def spool(root: str | Path, moment: datetime, name: str, source: Path, *, move: 
     partial.chmod(0o600)
     partial.replace(target)
     return target
+
+
+def try_spool(root, moment: datetime, name: str, source: Path, *, move: bool) -> str | None:
+    """spool, for callers whose import has already committed: a failure must not change the
+    import's outcome, so it is returned (the exception type) for an alert instead of raised."""
+    try:
+        spool(root, moment, name, source, move=move)
+    except (OSError, ArchiveError) as exc:
+        return type(exc).__name__
+    return None
 
 
 def _hours(root: Path) -> list[tuple[datetime, Path]]:
