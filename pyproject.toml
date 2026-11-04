@@ -17,11 +17,21 @@ dependencies = [
   "pyyaml>=6.0.2,<7",
 ]
 
+[project.optional-dependencies]
+# Browser pulse hosts only: `uv sync --locked --extra browser`. The browser itself is
+# fetched by `proxy-index browser fetch` (src/proxy_index/browser/release.py).
+browser = ["camoufox==0.5.9", "playwright==1.62.0"]
+
 [project.scripts]
 proxy-index = "proxy_index.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "pytest-timeout>=2.4", "ruff>=0.12", "trustme>=1.2"]
+
+[tool.uv]
+# fpgen (camoufox) needs indexed-zstd: 1.7.x has no macOS x86_64 wheel; 1.6.1 has
+# self-contained wheels for every browser platform, so the Intel minis need no compiler.
+constraint-dependencies = ["indexed-zstd==1.6.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/proxy_index"]
