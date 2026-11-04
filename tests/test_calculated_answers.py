@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -10,6 +11,7 @@ WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
 # A QA-1-sized daily build per network: one product group per requested country, each window
 # with the capped lists a published snapshot keeps (country up to 1000, 25 of the others).
 NETWORKS, COUNTRIES, EXITS = 18, 8, 240
+END = datetime(2026, 11, 3, 4, 10, tzinfo=UTC)
 
 
 def place_rows(n, **label):
@@ -23,13 +25,18 @@ def place_rows(n, **label):
 def window(hours):
     lists = {"country": EXITS, "region": 25, "city": 25, "asn": 25, "country_asn": 25}
     points = 288 if hours == 24 else hours // 24
+    start = END - timedelta(hours=hours)
+    step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
     return {
-        "period": {"hours": hours},
+        "period": {"start": start.isoformat(), "end": END.isoformat(), "hours": hours},
         "readiness": "ready",
         "metrics": {"completed": 1000, "successes": 900},
         "scores": {"default": {"score": 71.5, "rank": 3, "components": {"speed": {"value": 0.9}}}},
         "targets": {"generic_http": {"metrics": {"completed": 1000}}},
-        "series": [{"at": f"t{i}", "completed": 3, "successes": 2} for i in range(points)],
+        "series": [
+            {"at": (start + i * step).isoformat(), "completed": 3, "successes": 2}
+            for i in range(points)
+        ],
         "breakdowns": {name: place_rows(n) for name, n in lists.items()},
         "breakdown_entries": {name: n * 10 for name, n in lists.items()},
         "pool": {
@@ -122,26 +129,51 @@ def test_bounds_keep_whole_rows_and_give_a_large_row_its_own_page():
 
 
 async def test_requests_do_no_database_work_once_cached(monkeypatch, payload):
-    calls = {"head": 0, "read": 0}
+    calls = {"head": 0, "read": 0, "parts": 0}
     now = [0.0]
 
     def head(database, snapshot):
         calls["head"] += 1
         return (7, "hash")
 
-    def read(database, snapshot):
+    def read_head(database, snapshot):
         calls["read"] += 1
-        return payload
+        return {k: v for k, v in payload.items() if k not in ("products", "runs")}
+
+    def read_parts(database, snapshot, kind, *, product, cohort, keys):
+        calls["parts"] += 1
+        assert (snapshot, kind, product, cohort, keys) == ("7", "products", None, None, None)
+        return payload[kind]
 
     monkeypatch.setattr(api.store, "head", head)
-    monkeypatch.setattr(api.store, "read", read)
+    monkeypatch.setattr(api.store, "read_head", read_head)
+    monkeypatch.setattr(api.store, "read_parts", read_parts)
     cache = Cache(clock=lambda: now[0])
     for _ in range(3):
         token = await cache.head(None, "current")
         body = await cache.answer(None, token[0], "scores", {"window": "7d"})
-    assert calls == {"head": 1, "read": 1} and len(body) <= MAX_ANSWER_BYTES
+    assert calls == {"head": 1, "read": 1, "parts": 1} and len(body) <= MAX_ANSWER_BYTES
     await cache.answer(None, 7, "scores", {"window": "24h"})
-    assert calls["read"] == 1
+    assert calls["read"] == calls["parts"] == 1
+    # The fleet answer needs the head alone.
+    await cache.answer(None, 7, "fleet", {"window": "24h"})
+    assert calls["parts"] == 1
     now[0] += api.HEAD_SECONDS + 1
     await cache.head(None, "current")
     assert calls["head"] == 2
+
+
+async def test_a_build_without_a_snapshot_is_unavailable_and_nothing_is_cached(
+    monkeypatch, payload
+):
+    head = {k: v for k, v in payload.items() if k not in ("products", "runs")}
+    monkeypatch.setattr(api.store, "read_head", lambda database, snapshot: head)
+    monkeypatch.setattr(api.store, "read_parts", lambda database, snapshot, kind, **kw: None)
+    cache = Cache()
+    with pytest.raises(api.Unavailable):
+        await cache.answer(None, 7, "scores", {"window": "7d"})
+    assert not cache.parts and not cache.answers and list(cache.payloads) == [7]
+    monkeypatch.setattr(api.store, "read_head", lambda database, snapshot: None)
+    with pytest.raises(api.Unavailable):
+        await cache.answer(None, 8, "fleet", {"window": "7d"})
+    assert list(cache.payloads) == [7] and not cache.answers

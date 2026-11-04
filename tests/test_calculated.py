@@ -761,15 +761,17 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     assert store.read(database)["snapshot_id"] == first["snapshot_id"]
     with connect(database) as conn:
         assert conn.execute("SELECT count(*) FROM calculation_builds").fetchone()[0] == 1
-    # Serve with a role that can SELECT only the two prepared publication tables.
+    # Serve with a role that can SELECT only the prepared publication tables (snapshot heads and
+    # parts, read through their partitioned table, and the current pointer).
     role = "snapshot_reader_" + uuid.uuid4().hex
     with connect(database) as conn:
         conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
         conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
         conn.execute(
-            sql.SQL("GRANT SELECT ON calculated_snapshots,current_calculation TO {}").format(
-                sql.Identifier(role)
-            )
+            sql.SQL(
+                "GRANT SELECT ON calculated_snapshots,calculated_snapshot_parts,"
+                "current_calculation TO {}"
+            ).format(sql.Identifier(role))
         )
 
     def reader(db):

@@ -49,6 +49,9 @@ from .aggregate import (
 from .aggregate import LATENCY as PERCENTILES
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, previous_products, tested_by_product
+from .parts import previous as previous_payload
+from .parts import read as stored_payload
+from .parts import sparse
 from .policy import (
     digest,
     effective,
@@ -59,8 +62,7 @@ from .policy import (
     uptime_settings,
 )
 from .releases import enriched_observations
-from .slim import slim
-from .store import discard, expire, jsonable, partition, prune, validate_payload
+from .store import discard, expire, jsonable, partition, prune, write
 
 SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
@@ -179,10 +181,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
             "SELECT * FROM metric_evidence ORDER BY evidence_id"
         ).fetchall()
         scheduled = scheduled_inputs(conn, as_of, latency_target(config))
-        previous_row = conn.execute(
-            "SELECT payload FROM calculated_snapshots JOIN current_calculation USING(build_id)"
-        ).fetchone()
-        previous = previous_row["payload"] if previous_row else None
+        previous = previous_payload(conn)  # only the groups' ids and scores
         # Hash relevant inputs, including role corrections, enrichment and late evidence.
         fingerprint = digest(
             jsonable(
@@ -208,11 +207,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         ).fetchone()
         payload = None
         if existing:
-            row = conn.execute(
-                "SELECT payload FROM calculated_snapshots WHERE build_id=%s",
-                (existing["build_id"],),
-            ).fetchone()
-            payload = row and row["payload"]
+            payload = stored_payload(conn, existing["build_id"])
             if payload is None:
                 # A pruned draft is recalculated as a new, and therefore newest, build.
                 discard(conn, existing["build_id"])
@@ -235,12 +230,8 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 previous,
                 **scheduled,
             )
-            payload = jsonable(estimates.window.attach(payload, runs, conn, as_of, config))
-            validate_payload(payload)
-            persist(conn, payload)
-            payload = slim(payload, config)
-            insert = "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)"
-            conn.execute(insert, (build_id, digest(payload), Jsonb(payload)))
+            payload = estimates.window.attach(payload, runs, conn, as_of, config)
+            payload = write(conn, build_id, payload, config, persist)  # head and parts
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -764,44 +755,27 @@ def build(
                     for e in ev + price_rows
                 ],
                 "unavailable": {k: v for k, v in UNAVAILABLE.items() if k not in values},
-                "series": series(
-                    rows,
-                    seen,
-                    since,
-                    as_of,
-                    hours,
-                    outages=down,
-                    tested=monitored_groups[p["product_id"]] if scheduled else (),
-                    latency_target=timed_target,
-                    minimum=minimum,
-                    factors=factors,
-                    excluded=excluded,
+                "series": sparse(
+                    series(
+                        rows,
+                        seen,
+                        since,
+                        as_of,
+                        hours,
+                        outages=down,
+                        tested=monitored_groups[p["product_id"]] if scheduled else (),
+                        latency_target=timed_target,
+                        minimum=minimum,
+                        factors=factors,
+                        excluded=excluded,
+                    ),
+                    every=scheduled or hours != 24,  # only daily groups' 24h series are sparse
                 ),
                 "previous_period": prev_m,
                 "success_delta": m["success_rate"] - prev_m["success_rate"]
                 if m["success_rate"] is not None and prev_m["success_rate"] is not None
                 else None,
                 "overlap": {"exclusive_share": None, "shared_share": None, "compared_products": 0},
-                "ip_samples": [
-                    {
-                        k: e["row"].get(k)
-                        for k in (
-                            "ip",
-                            "country_code",
-                            "country",
-                            "region",
-                            "city",
-                            "isp",
-                            "organization",
-                            "asn",
-                            "asn_organization",
-                            "connection_type",
-                            "usage_type",
-                        )
-                    }
-                    | {"observations": e["count"], "first_seen": e["first"], "last_seen": e["last"]}
-                    for _, e in sorted(ips.items())[: cfg["sample_limit"]]
-                ],
                 "roles": {
                     role: metrics([r for r in rows if r["role"] == role], hours)["completed"]
                     for role in ("exploratory", "pool_sampling", "benchmark", "monitor")

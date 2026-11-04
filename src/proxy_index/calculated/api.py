@@ -3,7 +3,9 @@
 Answers are small and cached (answers.py): the bare snapshot is its summary with a page of its
 product groups, and every list resource is paged so no answer passes answers.MAX_ANSWER_BYTES.
 A request does no database work: the current build id is looked up at most every HEAD_SECONDS,
-a build's payload is read once, and each rendered answer is kept for its build.
+a build's head is read once, each answer reads only the parts it needs (parts.py: the groups of
+its product or cohort, the group index, the runs) and each rendered answer is kept for its build.
+A 24-hour series stored sparse is served with every bucket (parts.dense()), as before.
 """
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ from aiohttp import web
 from .. import detect, traffic
 from . import store
 from .aggregate import iso
-from .answers import paged, summary
+from .answers import INDEX, paged, summary
+from .parts import dense
 
 RESOURCES = {
     "products",
@@ -32,6 +35,7 @@ RESOURCES = {
     "fleet",
     "runs",
 }
+GROUPS = {"products", "scores", "series", "targets", "breakdowns"}
 DATABASE = web.AppKey("database", object)
 CACHE = web.AppKey("cache", object)
 HEAD_SECONDS = 10
@@ -51,6 +55,28 @@ def page_number(query):
     return int(page)
 
 
+def needs(resource, query):
+    """What an answer reads beyond its build's head: read_parts() arguments, or None."""
+    if resource is None:
+        return ("products", None, None, INDEX)
+    if resource in GROUPS:
+        return ("products", query.get("product") or None, query.get("cohort") or None, None)
+    return ("runs", None, None, None) if resource == "runs" else None
+
+
+class Unavailable(LookupError):
+    """The build has no snapshot any more (pruned or expired since its id was looked up)."""
+
+
+def needed(database, snapshot, kind, product, cohort, keys):
+    """The parts an answer needs (store.read_parts()), each group's series with every bucket;
+    None when the build has no snapshot."""
+    rows = store.read_parts(database, snapshot, kind, product=product, cohort=cohort, keys=keys)
+    if rows is None or kind == "runs" or keys:
+        return rows
+    return [p | {"windows": {k: dense(w) for k, w in p["windows"].items()}} for p in rows]
+
+
 def project(payload, resource, query):
     """One answer: the snapshot summary (no resource) or a page of a resource."""
     page = page_number(query)
@@ -64,9 +90,10 @@ def project(payload, resource, query):
     unknown = set(query) - {"window", "product", "cohort", "page"}
     if unknown:
         raise ValueError("Unknown query parameter")
+    # Only the group answers read groups (needs()); the others get the head alone.
     products = [
         p
-        for p in payload["products"]
+        for p in payload.get("products", ())
         if (not query.get("product") or str(p["product_id"]) == query["product"])
         and (not query.get("cohort") or p["cohort"] == query["cohort"])
     ]
@@ -117,13 +144,15 @@ def project(payload, resource, query):
 
 
 class Cache:
-    """What the API keeps between requests: build ids (for HEAD_SECONDS), the newest PAYLOADS
-    payloads and the newest ANSWERS rendered answers, each keyed by its immutable build."""
+    """What the API keeps between requests: build ids (for HEAD_SECONDS), the heads of the newest
+    PAYLOADS builds, the newest PAYLOADS sets of parts read and the newest ANSWERS rendered
+    answers, each keyed by its immutable build."""
 
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.heads = {}
         self.payloads = OrderedDict()
+        self.parts = OrderedDict()
         self.answers = OrderedDict()
 
     async def head(self, database, snapshot):
@@ -142,19 +171,33 @@ class Cache:
         if key in self.answers:
             self.answers.move_to_end(key)
             return self.answers[key]
-        payload = self.payloads.get(build_id)
-        if payload is None:
-            payload = await asyncio.to_thread(store.read, database, str(build_id))
-            self.payloads[build_id] = payload
-            while len(self.payloads) > PAYLOADS:
-                self.payloads.popitem(last=False)
-        self.payloads.move_to_end(build_id)
+        payload = await self.load(self.payloads, build_id, store.read_head, database, build_id)
+        need = needs(resource, query)
+        if need:
+            rows = await self.load(self.parts, (build_id, need), needed, database, build_id, *need)
+            payload = payload | {need[0]: rows}
         result = project(payload, resource, query)
         body = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
         self.answers[key] = body
         while len(self.answers) > ANSWERS:
             self.answers.popitem(last=False)
         return body
+
+    async def load(self, cache, key, read, database, build_id, *args):
+        """cache[key], read into it (read(database, str(build_id), *args)) unless present.
+
+        A read that finds no snapshot (None) raises Unavailable and caches nothing, so a build
+        expired after its head was cached never answers with no groups.
+        """
+        if key not in cache:
+            found = await asyncio.to_thread(read, database, str(build_id), *args)
+            if found is None:
+                raise Unavailable(build_id)
+            cache[key] = found
+            while len(cache) > PAYLOADS:
+                cache.popitem(last=False)
+        cache.move_to_end(key)
+        return cache[key]
 
 
 async def handle(request):
@@ -188,6 +231,8 @@ async def handle(request):
     # Pin the body to the token's immutable version if publication moves between reads.
     try:
         body = await cache.answer(request.app[DATABASE], token[0], resource, request.query)
+    except Unavailable as exc:
+        raise web.HTTPNotFound(text="Snapshot unavailable") from exc
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
     return web.Response(body=body, content_type="application/json", headers=headers)

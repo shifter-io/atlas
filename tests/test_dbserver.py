@@ -89,7 +89,8 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     assert report["pg_stat_statements_preloaded"] is False
     assert {r["name"] for r in report["roles"]} >= set(roles)
     owners = {t["name"]: t["owner"] for t in report["partitioned"]}
-    assert owners == {f"public.{name}": roles.admin for name in PARENTS | {"calculated_breakdowns"}}
+    calculated = {"calculated_breakdowns", "calculated_snapshot_parts"}
+    assert owners == {f"public.{name}": roles.admin for name in PARENTS | calculated}
     kinds = [g["kind"] for g in report["gaps"]]
     assert kinds == [
         "admin_createdb",
@@ -127,7 +128,8 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
         conn.execute("DROP TABLE run_buckets_2026_01_15")  # the archive drops old days
     after = analyze(files[roles.runtime])
     assert after["db_server_analyze"] == "ok", after
-    assert after["tables"]["calculated_snapshot_parts"] == {"status": "absent"}
+    # Calculated v8 creates the snapshot parts, so the optional parent is analyzed too.
+    assert after["tables"]["calculated_snapshot_parts"]["status"] == "ok"
     with dbserver.connect(files[roles.admin], autocommit=True) as conn:
         conn.execute("ALTER TABLE run_buckets ADD COLUMN dbcheck_probe integer")
         conn.execute("CREATE TABLE dbcheck_new (x integer)")

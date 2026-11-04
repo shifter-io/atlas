@@ -87,7 +87,12 @@ def rows_by_build(conn):
             "GROUP BY 1"
         ).format(sql.Identifier(table))
         counts |= {(table, b): n for b, n in conn.execute(query)}
-    for table in ("calculated_windows", "calculated_overlaps", "calculated_snapshots"):
+    for table in (
+        "calculated_windows",
+        "calculated_overlaps",
+        "calculated_snapshots",
+        "calculated_snapshot_parts",
+    ):
         query = sql.SQL("SELECT build_id,count(*) FROM {} GROUP BY 1").format(sql.Identifier(table))
         counts |= {(table, b): n for b, n in conn.execute(query)}
     return counts
@@ -129,6 +134,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
             "calculated_windows",
             "calculated_overlaps",
             "calculated_snapshots",
+            "calculated_snapshot_parts",
         }
         times = {
             "current": day + timedelta(hours=18),
@@ -168,7 +174,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
     argv = ["calculate-expire", "--database-file", str(database)]
     estimate = output(capsys, [*argv, "--dry-run"])
     assert (estimate["schema"], estimate["kept_builds"], estimate["expired_builds"]) == (
-        "v7",
+        "v8",
         kept,
         expired,
     )
@@ -180,7 +186,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
     with connect(database) as conn:
         assert rows_by_build(conn) == before  # the dry run changed nothing
     assert output(capsys, argv) == {
-        "schema": "v7",
+        "schema": "v8",
         "kept_builds": kept,
         "expired_builds": expired,
     }
@@ -191,11 +197,19 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
             r[0] for r in conn.execute("SELECT build_id FROM calculation_builds ORDER BY 1")
         ] == kept
         assert partitions(conn) == {f"calculated_breakdowns_b{k}" for k in kept}
+        # Expired builds' snapshot parts go with their partitions too.
+        assert {
+            r[0]
+            for r in conn.execute(
+                "SELECT inhrelid::regclass::text FROM pg_inherits "
+                "WHERE inhparent='calculated_snapshot_parts'::regclass"
+            )
+        } <= {f"calculated_snapshot_parts_b{k}" for k in kept}
         assert conn.execute(
             "SELECT partdefid FROM pg_partitioned_table "
             "WHERE partrelid='calculated_breakdowns'::regclass"
         ).fetchone() == (0,)
-    assert output(capsys, argv) == {"schema": "v7", "kept_builds": kept, "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v8", "kept_builds": kept, "expired_builds": []}
     with pytest.raises(psycopg.errors.CheckViolation), connect(database) as conn:
         # No default partition: a breakdown of a build without a partition is rejected.
         conn.execute(
@@ -242,7 +256,7 @@ def test_retention_without_current_build_or_known_schema(database, capsys):
         )
     argv = ["calculate-expire", "--database-file", str(database)]
     # Nothing is current, so nothing can be dated: nothing expires.
-    assert output(capsys, argv) == {"schema": "v7", "kept_builds": [], "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v8", "kept_builds": [], "expired_builds": []}
     with connect(database) as conn:
         conn.execute("UPDATE calculation_schema SET checksum='edited'")
     # The dry run checks the layer exactly like the real run: unknown fails both.

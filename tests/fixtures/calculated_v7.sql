@@ -1,0 +1,203 @@
+CREATE TABLE IF NOT EXISTS calculation_schema (version integer PRIMARY KEY, checksum text NOT NULL);
+CREATE TABLE IF NOT EXISTS methodologies (
+ methodology_id text PRIMARY KEY, definition jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS calculation_roles (
+ run_key bigint PRIMARY KEY REFERENCES test_runs(run_key),
+ role text NOT NULL CHECK(role IN ('exploratory','pool_sampling','benchmark','monitor'))
+);
+-- Evidence may arrive before any calculation of its cohort, so cohort is not a foreign key.
+CREATE TABLE IF NOT EXISTS metric_evidence (
+ evidence_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ product_id integer NOT NULL REFERENCES products(product_id), cohort text NOT NULL,
+ metric text NOT NULL, value double precision NOT NULL,
+ period_start timestamptz NOT NULL, period_end timestamptz NOT NULL,
+ valid_until timestamptz NOT NULL, source text NOT NULL, content_hash text NOT NULL UNIQUE,
+ CHECK(period_end>period_start AND valid_until>=period_end)
+);
+CREATE INDEX IF NOT EXISTS metric_evidence_lookup ON metric_evidence(product_id,cohort,metric,period_end);
+-- Comparable test conditions keyed by the 20-character criteria digest. Unknown or
+-- non-conforming criteria stay verbatim in extra; cohort_criteria rebuilds the hashed object.
+CREATE TABLE IF NOT EXISTS cohorts (
+ cohort text PRIMARY KEY, kind text, country text, runner_location text, concurrency integer,
+ timeout_seconds numeric, rate numeric, proxy_protocol text, session_policy text,
+ ttl_seconds integer, parameters jsonb, flags jsonb, target_variant jsonb, extra jsonb
+);
+-- Payloads of unpublished builds are pruned (store.prune). After each publication store.expire
+-- deletes every build except the current one, the newest published build per UTC day of the last
+-- 30 days and the drafts whose payload prune kept.
+CREATE TABLE IF NOT EXISTS calculation_builds (
+ build_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ methodology_id text NOT NULL REFERENCES methodologies(methodology_id),
+ as_of timestamptz NOT NULL, input_hash text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(), published boolean NOT NULL DEFAULT false,
+ UNIQUE(methodology_id,as_of,input_hash)
+);
+CREATE TABLE IF NOT EXISTS calculated_windows (
+ result_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ build_id bigint NOT NULL REFERENCES calculation_builds(build_id),
+ product_id integer NOT NULL REFERENCES products(product_id),
+ cohort text NOT NULL REFERENCES cohorts(cohort), target text NOT NULL, window_hours integer NOT NULL,
+ completed bigint NOT NULL, successes bigint NOT NULL, errors bigint NOT NULL,
+ body_bytes bigint NOT NULL, success_rate double precision, timeout_rate double precision,
+ p50 integer, p90 integer, p95 integer, p99 integer,
+ unique_ips bigint, new_ips bigint, recurring_share double precision,
+ countries integer, regions integer, cities integer, asns integer,
+ coverage double precision NOT NULL, last_observed timestamptz,
+ readiness text NOT NULL CHECK(readiness IN ('ready','partial','unavailable')),
+ challenge_rate double precision, block_rate double precision, uptime double precision,
+ bytes_up bigint, bytes_down bigint,
+ UNIQUE(build_id,product_id,cohort,target,window_hours),
+ -- Lets breakdown rows carry their build (the partition key) consistently.
+ UNIQUE(result_id,build_id)
+);
+-- Coordinate-free breakdown labels, shared by every build: places are the main schema's
+-- place_names (shared with enrichment locations), and an ASN label is an asn_names entry with a
+-- usage type.
+CREATE TABLE IF NOT EXISTS asn_labels (
+ asn_label_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ asn_name_id integer NOT NULL REFERENCES asn_names(asn_name_id), usage_type text,
+ UNIQUE NULLS NOT DISTINCT(asn_name_id,usage_type)
+);
+-- dimension: g city (geography), r state/region and c country reference place_names; a asn
+-- references asn_labels; x country x ASN and y city x ASN reference both. position is the payload
+-- order within the dimension. Request counters and percentiles come from run_geo_buckets; they
+-- are NULL on rows calculated before v3, which held IP counts only.
+-- One LIST partition per build (calculated_breakdowns_b<build_id>, created by
+-- calculator.persist); store.discard drops a build's partition instead of deleting its rows.
+-- There is no default partition: a row for a build without a partition is rejected.
+CREATE TABLE IF NOT EXISTS calculated_breakdowns (
+ build_id bigint NOT NULL, result_id bigint NOT NULL,
+ ips bigint NOT NULL, observations bigint NOT NULL,
+ place_id integer REFERENCES place_names(place_id),
+ asn_label_id integer REFERENCES asn_labels(asn_label_id),
+ position integer NOT NULL, dimension "char" NOT NULL CHECK(dimension IN ('g','c','a','r','x','y')),
+ completed bigint, successes bigint, challenges bigint, blocks bigint,
+ p50 integer, p90 integer, p99 integer,
+ CHECK((place_id IS NULL) = (dimension = 'a')
+  AND (asn_label_id IS NULL) = (dimension IN ('g','c','r'))),
+ PRIMARY KEY(result_id,dimension,position,build_id),
+ FOREIGN KEY(result_id,build_id) REFERENCES calculated_windows(result_id,build_id)
+) PARTITION BY LIST(build_id);
+CREATE TABLE IF NOT EXISTS calculated_series (
+ result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
+ bucket_start timestamptz NOT NULL,
+ completed bigint NOT NULL, successes bigint NOT NULL,
+ p50 integer, p90 integer, p99 integer, unique_ips bigint,
+ uptime double precision CHECK(uptime >= 0 AND uptime <= 1),
+ PRIMARY KEY(result_id,bucket_start)
+);
+CREATE TABLE IF NOT EXISTS calculated_scores (
+ result_id bigint NOT NULL REFERENCES calculated_windows(result_id), profile text NOT NULL,
+ score double precision, grade text, rank integer, previous_rank integer,
+ state text NOT NULL, scored_at timestamptz, valid_until timestamptz,
+ PRIMARY KEY(result_id,profile)
+);
+CREATE TABLE IF NOT EXISTS score_reasons (
+ reason_id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, reason text NOT NULL UNIQUE
+);
+-- numeric keeps the JSON form of values and weights (100 versus 100.0) exact. weight is NULL
+-- only for scores calculated before payloads recorded weights.
+CREATE TABLE IF NOT EXISTS calculated_score_components (
+ result_id bigint NOT NULL, profile text NOT NULL, component text NOT NULL,
+ position smallint NOT NULL, state text NOT NULL CHECK(state IN ('ready','incomplete','unavailable')),
+ weight numeric, value numeric, inputs jsonb,
+ reason_id integer REFERENCES score_reasons(reason_id),
+ PRIMARY KEY(result_id,profile,component),
+ FOREIGN KEY(result_id,profile) REFERENCES calculated_scores(result_id,profile)
+);
+-- Reasons that components cannot derive. A product score lists, at position 0, every weighted
+-- component that is not ready; negative positions precede that block, positive ones follow it.
+CREATE TABLE IF NOT EXISTS calculated_score_reasons (
+ result_id bigint NOT NULL, profile text NOT NULL, position smallint NOT NULL,
+ reason_id integer NOT NULL REFERENCES score_reasons(reason_id),
+ PRIMARY KEY(result_id,profile,position),
+ FOREIGN KEY(result_id,profile) REFERENCES calculated_scores(result_id,profile)
+);
+CREATE TABLE IF NOT EXISTS calculated_overlaps (
+ build_id bigint REFERENCES calculation_builds(build_id), cohort text NOT NULL REFERENCES cohorts(cohort),
+ window_hours integer NOT NULL, product_a integer REFERENCES products(product_id),
+ product_b integer REFERENCES products(product_id), shared_ips bigint NOT NULL,
+ ips_a bigint NOT NULL, ips_b bigint NOT NULL,
+ PRIMARY KEY(build_id,cohort,window_hours,product_a,product_b), CHECK(product_a<product_b)
+);
+CREATE TABLE IF NOT EXISTS calculated_snapshots (
+ build_id bigint PRIMARY KEY REFERENCES calculation_builds(build_id),
+ content_hash text NOT NULL, payload jsonb NOT NULL
+);
+CREATE TABLE IF NOT EXISTS current_calculation (
+ singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+ build_id bigint NOT NULL REFERENCES calculated_snapshots(build_id)
+);
+-- Readable reconstructions of the payload fragments the typed rows replace.
+CREATE OR REPLACE VIEW cohort_criteria AS
+SELECT cohort,jsonb_build_object('kind',kind,'country',country,'runner_location',runner_location,
+ 'concurrency',concurrency,'timeout_seconds',timeout_seconds,'rate',rate,
+ 'proxy_protocol',proxy_protocol,'session_policy',session_policy,'parameters',parameters,
+ 'flags',flags,'ttl_seconds',ttl_seconds,'target_variant',target_variant)
+ || coalesce(extra,'{}') AS criteria
+FROM cohorts;
+-- ASN labels with their names, as asn_labels held them up to calculated v6.
+CREATE OR REPLACE VIEW asn_label_names AS
+SELECT l.asn_label_id,n.asn,n.name,l.usage_type FROM asn_labels l
+JOIN asn_names n USING(asn_name_id);
+CREATE OR REPLACE VIEW calculated_breakdown_details AS
+SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country'
+ WHEN 'r' THEN 'region' WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END
+ AS dimension,b.position,b.ips,b.observations,CASE b.dimension
+ WHEN 'g' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
+  'region',p.region,'region_code',p.region_code,'city',p.city)
+ WHEN 'c' THEN jsonb_build_object('country_code',p.country_code,'country',p.country)
+ WHEN 'r' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
+  'region',p.region,'region_code',p.region_code)
+ WHEN 'x' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
+  'asn',a.asn,'name',a.name,'usage_type',a.usage_type)
+ WHEN 'y' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
+  'region',p.region,'region_code',p.region_code,'city',p.city,
+  'asn',a.asn,'name',a.name,'usage_type',a.usage_type)
+ ELSE jsonb_build_object('asn',a.asn,'name',a.name,'usage_type',a.usage_type) END AS label,
+ b.completed,b.successes,b.successes::double precision/nullif(b.completed,0) AS success_rate,
+ b.challenges,b.blocks,b.p50,b.p90,b.p99
+FROM calculated_breakdowns b LEFT JOIN place_names p USING(place_id)
+LEFT JOIN asn_label_names a USING(asn_label_id);
+CREATE OR REPLACE VIEW calculated_score_details AS
+SELECT s.*,
+ (SELECT jsonb_object_agg(c.component,jsonb_build_object('state',c.state,'value',c.value,
+   'inputs',c.inputs,'reason',r.reason)) FROM calculated_score_components c
+  LEFT JOIN score_reasons r USING(reason_id) WHERE (c.result_id,c.profile)=(s.result_id,s.profile))
+ AS components,
+ (SELECT CASE WHEN bool_and(c.weight IS NOT NULL) THEN jsonb_object_agg(c.component,c.weight) END
+  FROM calculated_score_components c WHERE (c.result_id,c.profile)=(s.result_id,s.profile))
+ AS weights,
+ (SELECT coalesce(jsonb_agg(u.reason ORDER BY u.position,u.component_position),'[]') FROM (
+   SELECT x.position,0 AS component_position,r.reason FROM calculated_score_reasons x
+   JOIN score_reasons r USING(reason_id) WHERE (x.result_id,x.profile)=(s.result_id,s.profile)
+   UNION ALL
+   SELECT 0,c.position,coalesce(r.reason,c.component || ' not ready')
+   FROM calculated_score_components c JOIN calculated_windows w USING(result_id)
+   LEFT JOIN score_reasons r USING(reason_id) WHERE (c.result_id,c.profile)=(s.result_id,s.profile)
+   AND w.target='' AND c.weight>0 AND c.state<>'ready') u) AS reasons
+FROM calculated_scores s;
+-- Light browse views: none of them reads a payload (payload_bytes is its stored, compressed size,
+-- read from the TOAST pointer without fetching the value).
+CREATE OR REPLACE VIEW calculated_snapshots_list AS
+SELECT b.build_id,b.as_of,b.created_at,b.methodology_id,b.published,
+ b.build_id IN (SELECT build_id FROM current_calculation) AS is_current,
+ s.content_hash,pg_column_size(s.payload) AS payload_bytes
+FROM calculation_builds b LEFT JOIN calculated_snapshots s USING(build_id);
+CREATE OR REPLACE VIEW current_windows AS
+SELECT p.provider,p.name AS product,w.*
+FROM calculated_windows w JOIN products p USING(product_id)
+WHERE w.build_id=(SELECT build_id FROM current_calculation);
+CREATE OR REPLACE VIEW current_breakdowns AS
+SELECT b.build_id,b.result_id,pr.provider,pr.name AS product,w.cohort,w.window_hours,
+ CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country' WHEN 'r' THEN 'region'
+ WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END AS dimension,b.position,
+ p.country_code,p.country,p.region_code,p.region,p.city,a.asn,a.name AS asn_name,a.usage_type,
+ b.ips,b.observations,b.completed,b.successes,
+ b.successes::double precision/nullif(b.completed,0) AS success_rate,
+ b.challenges,b.blocks,b.p50,b.p90,b.p99
+FROM calculated_breakdowns b JOIN calculated_windows w USING(result_id,build_id)
+JOIN products pr USING(product_id)
+LEFT JOIN place_names p USING(place_id) LEFT JOIN asn_label_names a USING(asn_label_id)
+WHERE b.build_id=(SELECT build_id FROM current_calculation);

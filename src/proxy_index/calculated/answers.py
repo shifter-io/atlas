@@ -1,11 +1,12 @@
 """Small answers from a published snapshot: the API never sends a whole payload.
 
 A daily build publishes one product group per network and requested country, so its payload
-runs to hundreds of MB (179 MB for 18 networks x 40 countries). Every answer of the API is at
-most MAX_ANSWER_BYTES of JSON: the bare snapshot is its summary (ids, times, readiness,
-methodology, periods) with one page of the product-group index, and every list resource is cut
-into pages that each fit the cap. A page holds whole rows; a single row larger than the cap
-(a product group window with a very long breakdown) is a page of its own.
+runs to hundreds of MB (179 MB for 18 networks x 40 countries) and is stored in parts
+(parts.py). Every answer of the API is at most MAX_ANSWER_BYTES of JSON: the bare snapshot is
+its summary (ids, times, readiness, methodology, periods) with one page of the product-group
+index, and every list resource is cut into pages that each fit the cap. A page holds whole
+rows; a single row larger than the cap (a product group window with a very long breakdown) is a
+page of its own.
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ SUMMARY = (
     "periods",
     "dbip_release",
 )
+# The keys of a product group that its entry in the summary's index is made of.
+INDEX = ("id", "product_id", "provider", "name", "kind", "cohort", "criteria")
 
 
 def size(value) -> int:
@@ -35,17 +38,10 @@ def size(value) -> int:
 
 
 def summary(payload: dict, page: int) -> dict:
-    """The bare snapshot answer: its summary and one page of its product groups."""
+    """The bare snapshot answer: its summary and one page of its product groups (of which it
+    reads only the INDEX keys)."""
     index = [
-        {
-            "id": p["id"],
-            "product_id": p["product_id"],
-            "provider": p["provider"],
-            "name": p["name"],
-            "kind": p["kind"],
-            "cohort": p["cohort"],
-            "country": (p.get("criteria") or {}).get("country"),
-        }
+        {k: p[k] for k in INDEX[:-1]} | {"country": (p.get("criteria") or {}).get("country")}
         for p in payload["products"]
     ]
     head = {k: payload[k] for k in SUMMARY if k in payload} | {"products": len(index)}
