@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 403,
+    "title": "Example Domain",
+    "text_head": "Example Domain\nThis domain is for use in documentation examples without needing permission.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 1,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}

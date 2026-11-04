@@ -8,6 +8,7 @@
       "body:has-text(\"Example Domain\")": 1,
       "#challenge-form": 0,
       "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
       "#cf-error-details": 0
     }
   },

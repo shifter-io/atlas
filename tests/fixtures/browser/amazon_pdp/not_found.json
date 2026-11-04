@@ -1,0 +1,22 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/dp/0000000000",
+    "status": 404,
+    "title": "Page Not Found",
+    "text_head": "Sorry! We couldn't find that page. Try searching or go to Amazon's home page.",
+    "found": {
+      "#productTitle": 0,
+      "#corePrice_feature_div .a-price": 0,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 0,
+      "a[href*=\"/dogsofamazon\"]": 1
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "not_found"
+  }
+}
