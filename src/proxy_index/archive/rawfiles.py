@@ -122,12 +122,7 @@ def _upload_part(spaces: Spaces, hour: datetime, folder: Path, files: list[Path]
     with tempfile.TemporaryDirectory(prefix="proxy-index-raw-") as temporary:
         path = _pack(hour, files, Path(temporary, "hour.tar"))
         digests = file_digests(path)
-        found = spaces.head(key)
-        if found is None:
-            spaces.put_file(key, path, digests)
-            found = spaces.head(key)
-    if found is None or any(found.get(k) != digests[k] for k in ("bytes", "md5", "sha256")):
-        raise ArchiveError(f"archive_changed: {key} in the bucket differs from the hour's files")
+        spaces.put_verified(key, path, digests, what="the hour's files")
     return {"key": key, "sha256": digests["sha256"], "files": [p.name for p in files]}
 
 

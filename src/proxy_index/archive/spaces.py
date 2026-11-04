@@ -110,6 +110,10 @@ async def push_settings(inventory: Path, data: bytes, shell=None) -> None:
     await remote.put_secret("spaces.toml", data)
 
 
+class ArchiveChanged(ArchiveError):
+    """The object at a key holds other bytes than the file meant for it; nothing was written."""
+
+
 class Spaces:
     """One bucket. Raises ArchiveError on any answer other than the expected one."""
 
@@ -193,6 +197,34 @@ class Spaces:
         }
         with Path(path).open("rb") as body:
             self._call("PUT", key, headers=headers, body=body, payload=digests["sha256"])
+
+    def put_verified(
+        self,
+        key: str,
+        path: Path,
+        digests: dict,
+        meta: dict | None = None,
+        *,
+        existing: tuple[str, ...] | None = None,
+        what: str = "the local file",
+    ) -> dict[str, Any]:
+        """Store a file at key once, verified: HEAD; PUT when absent; HEAD again.
+
+        A new object must answer with the file's bytes, MD5 and sha256 and the meta given; an
+        object already there only with the fields named in `existing` (default: all of them).
+        Raises ArchiveChanged (`archive_changed: <key> ... differs from <what>`) otherwise and
+        never overwrites. Returns the object's HEAD with its key.
+        """
+        expected = {k: digests[k] for k in ("bytes", "md5", "sha256")} | (meta or {})
+        found = self.head(key)
+        if found is None:
+            self.put_file(key, path, digests, meta)
+            found = self.head(key)
+        elif existing is not None:
+            expected = {k: expected[k] for k in existing}
+        if found is None or any(found.get(k) != v for k, v in expected.items()):
+            raise ArchiveChanged(f"archive_changed: {key} in the bucket differs from {what}")
+        return {"key": key, **found}
 
     def get_file(self, key: str, path: Path) -> None:
         status, _, response, connection = self._request("GET", key)
