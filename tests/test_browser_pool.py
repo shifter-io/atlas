@@ -164,3 +164,68 @@ def test_resident_bytes_is_none_without_ps(monkeypatch):
 
     monkeypatch.setattr(pool_module.subprocess, "run", fail)
     assert resident_bytes() is None
+
+
+async def test_a_slot_recycled_by_its_last_lease_is_not_relaunched():
+    pool, launch = make(size=1, recycle_after=2)
+    for _ in range(4):
+        async with pool.browser():
+            pass
+    await pool.close()
+    stats = pool.stats()
+    assert (stats["launches"], stats["recycles"], stats["closes"]) == (2, 2, 0)
+    assert stats["launches"] == stats["recycles"] + stats["crashes"] + stats["closes"]
+    assert all(b.closed for b in launch.browsers)
+
+
+class SlowClose(FakeBrowser):
+    async def close(self) -> None:
+        for _ in range(3):
+            await asyncio.sleep(0)
+        self.closed = True
+
+
+async def test_close_survives_a_lease_ending_while_it_closes_idle_browsers():
+    launch = Launcher()
+
+    async def slow_launch():
+        browser = SlowClose(len(launch.browsers))
+        launch.browsers.append(browser)
+        return browser
+
+    pool = BrowserPool(3, slow_launch, recycle_after=100, memory=lambda: None)
+    leases = [pool.browser() for _ in range(3)]
+    for lease in leases:
+        await lease.__aenter__()
+    for lease in leases[:2]:
+        await lease.__aexit__(None, None, None)
+    closing = asyncio.create_task(pool.close())
+    await asyncio.sleep(0)
+    await leases[2].__aexit__(None, None, None)
+    await closing
+    assert all(b.closed for b in launch.browsers) and len(pool._idle) == 3
+    stats = pool.stats()
+    assert stats["closes"] == 3 == stats["launches"]
+
+
+async def test_a_waiter_granted_before_close_launches_nothing_after_it():
+    pool, launch = make(size=1)
+    lease = pool.browser()
+    await lease.__aenter__()
+    waiter = asyncio.create_task(pool.browser().__aenter__())
+    await asyncio.sleep(0)
+    await lease.__aexit__(None, None, None)
+    await pool.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        await waiter
+    assert len(launch.browsers) == 1 and launch.browsers[0].closed
+
+
+async def test_a_browser_that_died_while_idle_is_replaced_before_the_try():
+    pool, launch = make()
+    async with pool.browser() as browser:
+        pass
+    browser.connected = False
+    async with pool.browser() as browser:
+        assert browser.number == 1
+    assert pool.stats()["crashes"] == 1 and launch.browsers[0].closed

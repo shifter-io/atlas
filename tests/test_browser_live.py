@@ -104,7 +104,7 @@ async def test_each_outcome_page_gives_its_verdict(executable):
     assert ok["bytes_down_est"] > 0
 
 
-async def test_images_load_when_not_blocked_and_bad_credentials_are_proxy_auth(executable):
+async def test_images_load_when_not_blocked_and_refused_credentials_are_proxy_errors(executable):
     async with site_and_proxy() as (site, proxy, _, port), make_pool(executable, 1) as pool:
         outcomes, _ = await tries(pool, port, ["ok"], block=())
         assert outcomes[0].verdict == "ok" and site.images == 1
@@ -138,17 +138,16 @@ async def test_a_pool_of_three_runs_thirty_tries_and_leaks_no_process(executable
                 targets=registry,
                 transport_factory=factory,
             )
-            stats = pool.stats()
+        stats = pool.stats()
     print(f"30 tries: {summary.successes} ok, latency {summary.latency_ms}, pool {stats}")
     for record in records.tries:
         if record["error"]:
             print(f"try {record['i']}: {record['error']} {record['reason']} {record['timings_ms']}")
     assert summary.completed == 30 and summary.successes == 30
-    # Leases spread unevenly over the slots, so the recycle count varies (30 tries on 3 slots
-    # reach 10 on one at least). Every launch past the first three replaces a recycled browser;
-    # a browser recycled by the last lease of its slot is never replaced.
+    # Whatever the lease spread, every launch ends in exactly one close once the pool closed
+    # (30 tries on 3 slots reach recycle_after=10 on one slot at least).
     assert stats["leases"] == 30 and stats["crashes"] == 0 and stats["recycles"] >= 1
-    assert 3 <= stats["launches"] <= 3 + stats["recycles"]
+    assert stats["launches"] == stats["recycles"] + stats["crashes"] + stats["closes"]
     for _ in range(50):
         if not leftover(executable):
             break

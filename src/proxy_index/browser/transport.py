@@ -39,8 +39,6 @@ TEXT_HEAD = 4096
 # Google's consent interstitial and its accept control; accepted once per try's context.
 CONSENT_HOST = re.compile(r"consent\.google\.[a-z.]+")
 CONSENT_ACCEPT = 'button#L2AGLb, form[action*="consent.google"] button'
-# Networks already logged as refused for SOCKS5 with credentials (once per host process).
-_SOCKS_LOGGED: set[tuple[str | None, str | None]] = set()
 
 
 class Recorder(Protocol):
@@ -60,6 +58,12 @@ def _ms(since: float) -> int:
     return round((time.perf_counter() - since) * 1000)
 
 
+def _exception_reason(exc: BaseException) -> str:
+    """A browser_error try's reason: the exception's class name, lower-cased."""
+    name = type(exc).__name__.lower()
+    return name if re.fullmatch(TOKEN, name) else "exception"
+
+
 def _reason(name: str | None) -> str:
     lowered = (name or "").lower()
     return lowered if re.fullmatch(TOKEN, lowered) else "navigation_error"
@@ -75,7 +79,8 @@ async def _accept_consent(page: Page, target: Any) -> None:
     the results is left alone, as GoogleSearch judges it)."""
     host = urlsplit(await page.url()).hostname or ""
     hidden = await page.count(target.CONSENT_FORM) and not await page.count(target.RESULTS)
-    if CONSENT_HOST.fullmatch(host) or hidden:
+    # Without the accept control there is nothing to click: the judge reads the consent page.
+    if (CONSENT_HOST.fullmatch(host) or hidden) and await page.count(CONSENT_ACCEPT):
         await page.click(CONSENT_ACCEPT)
 
 
@@ -116,7 +121,9 @@ class BrowserTransport:
         return None
 
     def _budget(self) -> asyncio.Timeout:
-        """Cancels an in-flight try at the run's deadline plus one page timeout."""
+        """Cancels an in-flight try at the deadline plus one page timeout. Under runner.run
+        the runner cancels its tries at the deadline itself; this is the backstop for any
+        other caller, and for a transport given a deadline its runner does not have."""
         if self.deadline is None:
             return asyncio.timeout(None)
         remaining = self.deadline + self.timeout_s - time.time()
@@ -145,7 +152,7 @@ class BrowserTransport:
             else:
                 # A crash or unexpected exception; the pool replaces a disconnected browser.
                 log.warning("Browser try failed (%s)", type(exc).__name__)
-                assessment = failed("browser_error", "exception")
+                assessment = failed("browser_error", _exception_reason(exc))
         timings["total"] = _ms(began)
         outcome = Outcome(
             latency_ms=float((timings["navigate"] or 0) + (timings["settle"] or 0)),
@@ -164,8 +171,8 @@ class BrowserTransport:
         proxy = self.config.proxy.resolve(context)
         if proxy.scheme == "socks5" and proxy.username is not None:
             network = (self.config.provider, self.config.product)
-            if network not in _SOCKS_LOGGED:
-                _SOCKS_LOGGED.add(network)
+            if network not in self.pool.refused_networks:
+                self.pool.refused_networks.add(network)
                 log.warning("Browser tries refuse SOCKS5 with credentials (%s/%s)", *network)
             return failed("proxy_connect", "socks5_auth_unsupported")
         spec = target.page(context, self.inputs)
@@ -173,7 +180,7 @@ class BrowserTransport:
         async with self.pool.browser() as browser:
             timings["queue"] = _ms(mark)
             mark = time.perf_counter()
-            async with browser.context(proxy, self.block) as page:
+            async with browser.context(proxy, self.block, self.timeout_s * 1000) as page:
                 timings["context"] = _ms(mark)
                 return await self._on_page(page, target, spec, state)
 

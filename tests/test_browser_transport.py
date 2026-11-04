@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 from browser_site import SiteTarget
 
-from proxy_index.browser import transport as transport_module
 from proxy_index.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMINGS
 from proxy_index.browser.driver import NavigationError, UserAgentRefused
 from proxy_index.browser.pool import BrowserPool
@@ -94,6 +93,7 @@ class FakeBrowser:
         self.closed = False
         self.gotos: list[tuple[str, int]] = []
         self.clicks: list[str] = []
+        self.timeouts: list[int] = []
         self.contexts: list[tuple[Any, tuple[str, ...]]] = []
         self.open_contexts = 0
 
@@ -101,8 +101,9 @@ class FakeBrowser:
         return self.connected
 
     @contextlib.asynccontextmanager
-    async def context(self, proxy, block=()):
+    async def context(self, proxy, block=(), timeout_ms=30_000):
         self.contexts.append((proxy, tuple(block)))
+        self.timeouts.append(timeout_ms)
         self.open_contexts += 1
         try:
             yield FakePage(self, self.script)
@@ -169,6 +170,7 @@ async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():
     browser = harness.browsers[0]
     assert browser.contexts == [(HTTP_PROXY, ("image", "media"))]
     assert browser.gotos == [("http://site.invalid/ok", 20_000)] and browser.open_contexts == 0
+    assert browser.timeouts == [20_000]
 
 
 NAMES = [*FIREFOX_ERRORS, *(prefix + "X" for prefix, _ in FIREFOX_ERROR_PREFIXES), "OTHER", None]
@@ -234,7 +236,6 @@ async def test_queue_wait_is_in_timings_not_in_latency():
 
 async def test_socks5_with_credentials_is_refused_before_any_traffic(caplog):
     socks = ProxyConfig("socks5", "192.0.2.10", 1080, "user", "pass")
-    transport_module._SOCKS_LOGGED.clear()
     harness = Harness(proxy=socks)
     with caplog.at_level(logging.WARNING):
         for index in range(2):
@@ -267,7 +268,7 @@ async def test_a_crash_is_browser_error_and_the_pool_relaunches():
     harness = Harness(Script(error=RuntimeError("Target closed"), crash=True))
     outcome = await harness.execute()
     assert (outcome.verdict, outcome.error) == ("error", "browser_error")
-    assert harness.recorder.tries[0][0]["reason"] == "exception"
+    assert harness.recorder.tries[0][0]["reason"] == "runtimeerror"
     harness.script.crash, harness.script.error = False, None
     assert (await harness.execute(index=1)).verdict == "ok"
     assert len(harness.browsers) == 2 and harness.browsers[0].closed
@@ -283,6 +284,7 @@ async def test_the_context_is_closed_when_the_target_raises():
     harness = Harness()
     outcome = await harness.execute(Raising())
     assert outcome.error == "browser_error"
+    assert harness.recorder.tries[0][0]["reason"] == "timeouterror"
     assert harness.browsers[0].open_contexts == 0 and harness.browsers[0].alive()
 
 
@@ -301,7 +303,8 @@ GOOGLE = replace(SETTINGS, id="google_search", inputs=("pizza",))
 
 
 async def test_a_google_consent_wall_is_accepted_once():
-    script = Script(url="https://consent.google.com/ml", found={GoogleSearch.RESULTS: 3})
+    found = {GoogleSearch.RESULTS: 3, CONSENT_ACCEPT: 1}
+    script = Script(url="https://consent.google.com/ml", found=found)
     harness = Harness(script, settings=GOOGLE)
     outcome = await harness.execute(GoogleSearch())
     assert outcome.verdict == "ok" and harness.browsers[0].clicks == [CONSENT_ACCEPT]
@@ -310,7 +313,7 @@ async def test_a_google_consent_wall_is_accepted_once():
 
 @pytest.mark.parametrize(("results", "clicks"), [(3, 0), (0, 1)])
 async def test_a_consent_form_is_accepted_only_when_it_hides_the_results(results, clicks):
-    found = {GoogleSearch.RESULTS: results, GoogleSearch.CONSENT_FORM: 1}
+    found = {GoogleSearch.RESULTS: results, GoogleSearch.CONSENT_FORM: 1, CONSENT_ACCEPT: 1}
     harness = Harness(Script(url="https://www.google.com/search", found=found), settings=GOOGLE)
     await harness.execute(GoogleSearch())
     assert len(harness.browsers[0].clicks) == clicks
@@ -321,7 +324,25 @@ async def test_target_overrides_win_over_browser_defaults():
     harness = Harness(settings=settings)
     await harness.execute()
     assert harness.browsers[0].contexts == [(HTTP_PROXY, ())]
-    assert harness.browsers[0].gotos[0][1] == 3000
+    assert harness.browsers[0].gotos[0][1] == 3000 and harness.browsers[0].timeouts == [3000]
+
+
+async def test_a_consent_page_without_its_accept_control_is_judged_not_clicked():
+    harness = Harness(Script(url="https://consent.google.com/ml", found={}), settings=GOOGLE)
+    outcome = await harness.execute(GoogleSearch())
+    assert (outcome.verdict, outcome.error) == ("error", "no_content")
+    assert harness.recorder.tries[0][0]["reason"] == "consent_page"
+    assert harness.browsers[0].clicks == []
+
+
+async def test_refused_networks_are_logged_once_per_pool(caplog):
+    socks = ProxyConfig("socks5", "192.0.2.10", 1080, "user", "pass")
+    harness = Harness(proxy=socks)
+    other = BrowserTransport(harness.config, pool=harness.pool, browser=OPTIONS, settings=SETTINGS)
+    with caplog.at_level(logging.WARNING):
+        await harness.execute()
+        await other.execute(SiteTarget(), context=RequestContext("r", 0, 0))
+    assert len([r for r in caplog.records if "SOCKS5" in r.getMessage()]) == 1
 
 
 async def test_runs_through_the_runner_like_an_http_run(tmp_path):

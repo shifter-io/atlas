@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import types
 
@@ -42,6 +43,8 @@ class Request:
     async def sizes(self):
         if isinstance(self.size, Exception):
             raise self.size
+        if self.size is None:
+            await asyncio.Event().wait()  # never answers
         return {"responseBodySize": self.size}
 
 
@@ -103,6 +106,9 @@ class PWContext:
 
     def on(self, event, handler):
         self.handlers[event] = handler
+
+    def set_default_timeout(self, timeout):
+        self.timeout = timeout
 
     async def route(self, pattern, handler):
         self.routes.append((pattern, handler))
@@ -212,11 +218,14 @@ async def test_context_options_blocking_and_close_on_every_path():
     browser = Browser(PWDriver(), pw)
     proxy = ProxyConfig("http", "192.0.2.1", 8080, "u", "p")
     with pytest.raises(ValueError):
-        async with browser.context(proxy, ("image",)) as page:
+        async with browser.context(proxy, ("image",), 5000) as page:
             assert isinstance(page, Page)
+            pw.contexts[0].handlers["requestfinished"](Request(size=None))
+            pending = page._sizes[0]
             raise ValueError("try failed")
+    assert pending.cancelled()
     context = pw.contexts[0]
-    assert context.options == {"proxy": driver.proxy_option(proxy)}
+    assert context.options == {"proxy": driver.proxy_option(proxy)} and context.timeout == 5000
     [(pattern, handler)] = context.routes
     routes = [Route("image"), Route("document")]
     for route in routes:

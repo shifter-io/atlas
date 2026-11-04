@@ -74,6 +74,12 @@ class Page:
         sizes = await asyncio.gather(*self._sizes, return_exceptions=True)
         return sum(max(s.get("responseBodySize", 0), 0) for s in sizes if isinstance(s, dict))
 
+    async def _drop_sizes(self) -> None:
+        """Before the context closes: no size lookup outlives it or goes unretrieved."""
+        for future in self._sizes:
+            future.cancel()
+        await asyncio.gather(*self._sizes, return_exceptions=True)
+
     async def goto(self, url: str, timeout_ms: int) -> int | None:
         try:
             response = await self._page.goto(url, timeout=timeout_ms)
@@ -133,19 +139,24 @@ class Browser:
 
     @contextlib.asynccontextmanager
     async def context(
-        self, proxy: ProxyConfig | None, block: Collection[str] = ()
+        self, proxy: ProxyConfig | None, block: Collection[str] = (), timeout_ms: int = 30_000
     ) -> AsyncIterator[Page]:
-        """A fresh context through `proxy` that aborts requests of the `block` resource types;
-        it is closed however the try ends."""
+        """A fresh context through `proxy` that aborts requests of the `block` resource types,
+        with `timeout_ms` as every action's default timeout; closed however the try ends."""
         options: dict[str, Any] = {"proxy": proxy_option(proxy)} if proxy else {}
         if self._user_agent is not None:
             options["user_agent"] = self._user_agent
         context = await self._browser.new_context(**options)
+        page = None
         try:
+            context.set_default_timeout(timeout_ms)
             if block:
                 await context.route("**/*", _blocker(frozenset(block)))
-            yield Page(context, await context.new_page())
+            page = Page(context, await context.new_page())
+            yield page
         finally:
+            if page is not None:
+                await page._drop_sizes()
             await context.close()
 
     async def _user_agent_seen(self) -> str:

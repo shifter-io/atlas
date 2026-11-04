@@ -2,7 +2,9 @@
 
 Every run on a host shares one BrowserPool. Leases are granted first in, first out, so runs
 waiting together interleave. A process is launched on first use, replaced after
-`recycle_after` tries, and replaced as soon as a lease ends with it disconnected (a crash).
+`recycle_after` tries, and replaced as soon as a lease ends with it disconnected (a crash) or
+a lease is granted with it disconnected. Every launch is matched by exactly one close: a
+recycle, a crash or the pool's close (`launches == recycles + crashes + closes` once closed).
 """
 
 from __future__ import annotations
@@ -75,8 +77,11 @@ class BrowserPool:
         self._launch, self._memory = launch, memory
         self._idle: deque[_Slot] = deque(_Slot() for _ in range(size))
         self._waiters: deque[asyncio.Future[_Slot]] = deque()
-        self._counts = dict.fromkeys(("leases", "waits", "launches", "recycles", "crashes"), 0)
+        names = ("leases", "waits", "launches", "recycles", "crashes", "closes")
+        self._counts = dict.fromkeys(names, 0)
         self._closed = False
+        # Networks a transport already logged as refused: logged once per host (one pool).
+        self.refused_networks: set[tuple[str | None, str | None]] = set()
 
     async def __aenter__(self) -> BrowserPool:
         return self
@@ -93,13 +98,19 @@ class BrowserPool:
         waiter = asyncio.get_running_loop().create_future()
         self._waiters.append(waiter)
         try:
-            return await waiter
+            slot = await waiter
         except asyncio.CancelledError:
             if waiter.done() and not waiter.cancelled():
                 self._release(waiter.result())
             else:
                 self._waiters.remove(waiter)
             raise
+        if self._closed:
+            # Granted before close() and resumed after it: nothing launches on a closed pool.
+            await self._retire(slot)
+            self._idle.append(slot)
+            raise RuntimeError("the browser pool is closed")
+        return slot
 
     def _release(self, slot: _Slot) -> None:
         while self._waiters:
@@ -117,7 +128,9 @@ class BrowserPool:
             self._counts["crashes"] += 1
         elif slot.tries >= self.recycle_after:
             self._counts["recycles"] += 1
-        elif not self._closed:
+        elif self._closed:
+            self._counts["closes"] += 1
+        else:
             return
         browser, slot.browser, slot.tries = slot.browser, None, 0
         with contextlib.suppress(Exception):
@@ -128,6 +141,8 @@ class BrowserPool:
         """Wait for a free process (first in, first out) and hold it for one try."""
         slot = await self._acquire()
         try:
+            if slot.browser is not None and not slot.browser.alive():
+                await self._retire(slot)  # died while idle: replace it before the try
             if slot.browser is None:
                 slot.browser = await self._launch()
                 self._counts["launches"] += 1
@@ -142,7 +157,7 @@ class BrowserPool:
                 self._release(slot)
 
     def stats(self) -> dict[str, int | None]:
-        """Leases, waits, launches, recycles and crashes so far, and resident memory."""
+        """Leases, waits, launches, recycles, crashes and closes so far, and resident memory."""
         return {"size": self.size, **self._counts, "resident_bytes": self._memory()}
 
     async def close(self) -> None:
@@ -152,5 +167,10 @@ class BrowserPool:
             waiter = self._waiters.popleft()
             if not waiter.done():
                 waiter.set_exception(RuntimeError("the browser pool is closed"))
-        for slot in self._idle:
+        # A lease ending meanwhile appends its slot to _idle: never iterate it across an await.
+        done: list[_Slot] = []
+        while self._idle:
+            slot = self._idle.popleft()
             await self._retire(slot)
+            done.append(slot)
+        self._idle.extend(done)
