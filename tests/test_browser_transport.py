@@ -174,6 +174,15 @@ async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():
     assert browser.timeouts == [20_000]
 
 
+async def test_a_status_999_try_is_recorded_not_raised():
+    """LinkedIn answers its block with 999: the try keeps its record and the run goes on."""
+    harness = Harness(Script(status=999))
+    outcome = await harness.execute()
+    assert outcome.status == 999
+    [(record, _)] = harness.recorder.tries
+    assert record["status"] == 999 and record["verdict"] == outcome.verdict
+
+
 NAMES = [*FIREFOX_ERRORS, *(prefix + "X" for prefix, _ in FIREFOX_ERROR_PREFIXES), "OTHER", None]
 
 
