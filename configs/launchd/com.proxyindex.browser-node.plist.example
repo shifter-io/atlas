@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The browser host process as a launchd agent (docs/browser.html, Host). Copy it to
+  ~/Library/LaunchAgents/com.proxyindex.browser-node.plist, replace every __PLACEHOLDER__ and
+  load it with `launchctl bootstrap gui/$(id -u) <plist>`. Placeholders only: no user, host or
+  path belongs in the repository.
+    __CHECKOUT__      the repository checkout (synced with `uv sync --locked --no-dev --extra browser`)
+    __STATE__         the host state directory (settings.toml, networks/, camoufox/, runs/, logs/)
+    __HOST__          the logical host name, browser-<n>
+    __ORCHESTRATOR__  the orchestrator base URL
+  launchd sends SIGTERM on unload: new tries stop, running runs end and every browser closes.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.proxyindex.browser-node</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__CHECKOUT__/.venv/bin/proxy-index</string>
+    <string>browser-node</string>
+    <string>--settings</string>
+    <string>__STATE__/settings.toml</string>
+    <string>--state</string>
+    <string>__STATE__</string>
+    <string>--host</string>
+    <string>__HOST__</string>
+    <string>--orchestrator</string>
+    <string>__ORCHESTRATOR__</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__CHECKOUT__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ExitTimeOut</key>
+  <integer>120</integer>
+  <key>ProcessType</key>
+  <string>Standard</string>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>StandardOutPath</key>
+  <string>__STATE__/logs/browser-node.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__STATE__/logs/browser-node.err.log</string>
+</dict>
+</plist>

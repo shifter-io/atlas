@@ -202,6 +202,9 @@ def main(argv: list[str] | None = None) -> int:
     from .browser import release as browser_release
 
     browser_release.register(commands)
+    from .browser import node as browser_node
+
+    browser_node.register(commands)
     private = _operator_groups(commands)
     args = parser.parse_args(argv)
     try:
@@ -211,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
             return fleet.dispatch(args)
         if args.command == "browser":
             return browser_release.dispatch(args)
+        if args.command == "browser-node":
+            return browser_node.dispatch(args)
         if args.command in {
             "calculate-init",
             "calculate",

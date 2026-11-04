@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -129,7 +129,13 @@ class NodeAgent:
         progress_interval: float = 30.0,
         transport_factory: Callable[[RunConfig], Any] = HttpTransport,
         upload_backoff: float = 2.0,
+        registry: TargetRegistry = registry,
+        config_options: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        run_options: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
+        """`registry` defaults to the code one; `config_options(assignment)` returns RunConfig
+        fields replacing the assignment's (raising refuses the run) and `run_options(assignment)`
+        extra keyword arguments for runner.run, such as `deadline`."""
         if not region and not host:
             raise ValueError("A node needs --region or --host-name")
         self.base = orchestrator.rstrip("/")
@@ -144,6 +150,8 @@ class NodeAgent:
         self.progress_interval = progress_interval
         self.transport_factory = transport_factory
         self.upload_backoff = upload_backoff
+        self.registry = registry
+        self.config_options, self.run_options = config_options, run_options
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None
@@ -273,8 +281,8 @@ class NodeAgent:
         built-in echo target of the same scheme (generic_http / generic_https)."""
         target_id = assignment["target_id"]
         try:
-            registry.get(target_id)
-            return registry
+            self.registry.get(target_id)
+            return self.registry
         except ValueError:
             url = assignment.get("target_url")
             scheme = urlsplit(url).scheme if isinstance(url, str) else None
@@ -288,6 +296,7 @@ class NodeAgent:
             return adhoc
 
     def config(self, assignment: dict[str, Any]) -> RunConfig:
+        overrides = self.config_options(assignment) if self.config_options else {}
         proxy = self.proxy_factory(assignment["country_code"])
         target = self.targets(assignment).get(assignment["target_id"])
         url = assignment.get("target_url")
@@ -300,7 +309,7 @@ class NodeAgent:
         for name in ("min_sample", "stall_seconds"):
             if assignment.get(name):
                 options[name] = assignment[name]
-        return RunConfig(
+        config = RunConfig(
             target=assignment["target_id"],
             proxy=proxy,
             requests=assignment.get("requests"),
@@ -314,6 +323,7 @@ class NodeAgent:
             stop_rule=assignment["stop_rule"],
             **options,
         )
+        return replace(config, **overrides) if overrides else config
 
     async def _wait_until(self, moment: datetime, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -353,6 +363,7 @@ class NodeAgent:
                 # after a restart, so a deploy just before a census slot loses nothing.
                 return
             config = self.config(assignment)
+            extra = self.run_options(assignment) if self.run_options else {}
             active.concurrency = config.concurrency
             log.info(
                 "batch %s: %s %s %s from %s",
@@ -373,8 +384,8 @@ class NodeAgent:
                     progress=lambda counters: self._progress(active, counters),
                     progress_interval=self.progress_interval,
                     enricher=self.enricher,
-                    transport_factory=self.transport_factory,
                     targets=self.targets(assignment),
+                    **{"transport_factory": self.transport_factory} | extra,
                 )
             finally:
                 directory = sink.directory
