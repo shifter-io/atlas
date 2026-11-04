@@ -2,7 +2,9 @@
 
 configs/regions.yaml maps a hostname pattern (a regular expression matched against the whole,
 lower-cased host or region name) to the ISO 3166-1 alpha-2 codes that region tests. Every known
-country belongs to exactly one region and every pattern names exactly one region.
+country belongs to exactly one region and every pattern names exactly one region. The browser
+region (browser.contracts, K-BP5) is not in that file: it tests no country of its own, and a
+name no cloud pattern matches but the browser pattern does resolves to it.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .browser.contracts import BROWSER_REGION, BROWSER_REGION_ID, BROWSER_REGION_PATTERN
 
 # A source checkout keeps them in framework/configs; a wheel ships copies inside the package.
 _PACKAGED = Path(__file__).resolve().parent / "configs"
@@ -157,8 +161,19 @@ def _cached(path: str) -> RegionMap:
 
 
 def resolve_region(name_or_host: str, path: str | Path | None = None) -> str:
-    """Region slug for a host such as ``prod-fra1-shifter`` or a bare slug such as ``fra1``."""
-    return _cached(str(Path(path or REGIONS_FILE).resolve())).resolve(name_or_host)
+    """Region slug for a host such as ``prod-fra1-shifter`` or a bare slug such as ``fra1``;
+    ``browser`` for ``browser`` or ``browser-1`` when no cloud region's pattern matches it."""
+    regions = _cached(str(Path(path or REGIONS_FILE).resolve()))
+    value = name_or_host.strip().lower()
+    cloud = any(re.fullmatch(region.pattern, value) for region in regions.regions)
+    if not cloud and re.fullmatch(BROWSER_REGION_PATTERN, value):
+        return BROWSER_REGION
+    return regions.resolve(name_or_host)
+
+
+def region_id(slug: str) -> int:
+    """The runner_regions id of a region slug: a cloud region's (REGION_IDS) or the browser's."""
+    return BROWSER_REGION_ID if slug == BROWSER_REGION else REGION_IDS[slug]
 
 
 TARGET_DEFAULTS: dict[str, Any] = {

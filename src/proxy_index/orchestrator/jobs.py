@@ -20,6 +20,9 @@ reports                   every 30 s, when the `reports.dir` setting is set: ind
 dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
                           renames the newest dated DB-IP MMDB from `dbip.base_url` over
                           `dbip.dir`/dbip-full.mmdb and records it; unchanged is 'skipped'
+browser_plan              every minute, on the minute, while `browser.enabled` and the settings
+                          file at `browser.settings_file` say so: open each browser target's
+                          slot in the browser region (browser.py)
 
 Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
 and the index are written there (report_html.write, in a thread; install_reports).
@@ -40,6 +43,7 @@ from psycopg import sql
 from .. import storage
 from ..regions import CONFIGS
 from . import batches, pulse
+from .browser import browser_plan
 from .db import Database, setting
 from .scheduler import Scheduler
 
@@ -295,3 +299,8 @@ def register_jobs(
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
     scheduler.add("reports", reports_job, every_s=30)
     scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
+
+    async def browser_plan_job() -> dict[str, Any]:
+        return await browser_plan(db)
+
+    scheduler.add("browser_plan", browser_plan_job, every_s=60, aligned=True)
