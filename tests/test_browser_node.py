@@ -239,7 +239,10 @@ def log_lines(state: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-async def test_two_networks_share_one_pool_with_per_target_settings(tmp_path):
+async def test_two_networks_share_one_pool_with_per_target_settings(tmp_path, monkeypatch):
+    # The deadline 10 minutes after the slot end, so that a run started now always has time,
+    # even in a slot's last 2 minutes (the real margin: test_deadline_is_the_slot_end...).
+    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
     state = make_state(tmp_path)
     past = datetime.now(UTC) - timedelta(hours=2)
     google = browser_work(2, "google_search")

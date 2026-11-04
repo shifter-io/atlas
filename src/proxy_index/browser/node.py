@@ -219,6 +219,32 @@ class JsonLog:
         self.handler.close()
 
 
+class BrowserAgent(NodeAgent):
+    """One network's node agent on a browser host: its targets, run options and transport
+    come from the host (NodeAgent's registry, config_options and run_options hooks)."""
+
+    def __init__(self, host: BrowserHost, network: Network, orchestrator: str, **options):
+        super().__init__(
+            orchestrator,
+            network.token,
+            provider=network.provider,
+            product=network.product,
+            proxy_factory=network.proxy_factory,
+            work_dir=host.state / "runs" / network.directory.name,
+            region=BROWSER_REGION,
+            host=host.name,
+            **options,
+        )
+        self.browser_host, self.network = host, network
+        self.registry = host.registry
+
+    def config_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        return self.browser_host.config_options(self.network, assignment)
+
+    def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        return self.browser_host.run_options(self.network, assignment)
+
+
 class BrowserHost:
     """Every network of one host (`settings` is its BrowserSettings.host view) on one pool."""
 
@@ -230,7 +256,6 @@ class BrowserHost:
         *,
         launch: Callable[[], Awaitable[Pooled]],
         recorder: RecorderFactory | None = None,
-        hour_interval: float = HOUR_S,
         **agent_options: Any,
     ) -> None:
         self.settings, self.state = settings, Path(state)
@@ -242,27 +267,11 @@ class BrowserHost:
             options.browsers_per_host, launch, recycle_after=options.recycle_after
         )
         self.recorder = recorder or (lambda network, assignment: NullRecorder())
-        self.hour_interval = hour_interval
+        self.hour_interval = HOUR_S
         self.busy_ms = 0
         self.networks = load_networks(self.state, settings)
         self.log = JsonLog(self.state / "logs" / LOG_NAME)
-        self.agents = [self._agent(n, orchestrator, agent_options) for n in self.networks]
-
-    def _agent(self, network: Network, orchestrator: str, options: dict[str, Any]) -> NodeAgent:
-        return NodeAgent(
-            orchestrator,
-            network.token,
-            provider=network.provider,
-            product=network.product,
-            proxy_factory=network.proxy_factory,
-            work_dir=self.state / "runs" / network.directory.name,
-            region=BROWSER_REGION,
-            host=self.name,
-            registry=self.registry,
-            config_options=partial(self.config_options, network),
-            run_options=partial(self.run_options, network),
-            **options,
-        )
+        self.agents = [BrowserAgent(self, n, orchestrator, **agent_options) for n in self.networks]
 
     def config_options(self, network: Network, assignment: dict[str, Any]) -> dict[str, Any]:
         """The RunConfig fields from the settings; refuses other kinds and unlisted targets."""

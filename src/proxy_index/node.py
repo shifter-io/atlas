@@ -111,6 +111,9 @@ class Active:
 
 
 class NodeAgent:
+    # The targets a node runs; a subclass (the browser host, browser/node.py) replaces them.
+    registry: TargetRegistry = registry
+
     def __init__(
         self,
         orchestrator: str,
@@ -129,13 +132,7 @@ class NodeAgent:
         progress_interval: float = 30.0,
         transport_factory: Callable[[RunConfig], Any] = HttpTransport,
         upload_backoff: float = 2.0,
-        registry: TargetRegistry = registry,
-        config_options: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-        run_options: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
-        """`registry` defaults to the code one; `config_options(assignment)` returns RunConfig
-        fields replacing the assignment's (raising refuses the run) and `run_options(assignment)`
-        extra keyword arguments for runner.run, such as `deadline`."""
         if not region and not host:
             raise ValueError("A node needs --region or --host-name")
         self.base = orchestrator.rstrip("/")
@@ -150,8 +147,6 @@ class NodeAgent:
         self.progress_interval = progress_interval
         self.transport_factory = transport_factory
         self.upload_backoff = upload_backoff
-        self.registry = registry
-        self.config_options, self.run_options = config_options, run_options
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None
@@ -295,8 +290,16 @@ class NodeAgent:
             )
             return adhoc
 
+    def config_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        """RunConfig fields replacing the assignment's (a subclass hook); raising refuses."""
+        return {}
+
+    def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        """Extra keyword arguments for runner.run, such as `deadline` (a subclass hook)."""
+        return {}
+
     def config(self, assignment: dict[str, Any]) -> RunConfig:
-        overrides = self.config_options(assignment) if self.config_options else {}
+        overrides = self.config_options(assignment)
         proxy = self.proxy_factory(assignment["country_code"])
         target = self.targets(assignment).get(assignment["target_id"])
         url = assignment.get("target_url")
@@ -363,7 +366,7 @@ class NodeAgent:
                 # after a restart, so a deploy just before a census slot loses nothing.
                 return
             config = self.config(assignment)
-            extra = self.run_options(assignment) if self.run_options else {}
+            extra = self.run_options(assignment)
             active.concurrency = config.concurrency
             log.info(
                 "batch %s: %s %s %s from %s",
