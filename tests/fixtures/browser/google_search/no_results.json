@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.google.com/search",
+    "status": 200,
+    "title": "example - Google Search",
+    "text_head": "Your search - example - did not match any documents. Suggestions: Make sure that all words are spelled correctly. Try different keywords. Try more general keywords.",
+    "found": {
+      "#search a h3": 0,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_results"
+  }
+}
