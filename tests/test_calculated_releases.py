@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timedelta
 
 import dbip_fakes
+from test_archive_job import shift
 from test_calculated import POLICY, OtherIP
 from test_storage import enrichment, measurement
 
@@ -95,6 +96,18 @@ async def test_the_snapshot_lists_every_release_its_runs_used(database, tmp_path
     # A run without enrichment (a pulse) keeps its IP, unlabelled, and names no release.
     pulse = await measurement(tmp_path, requests=2, provider="third")
     ingest(pulse, database)
+
+    # Only the build's runs count: an hour earlier, the older run alone is in the window.
+    hour = timedelta(hours=1)
+    run_id = json.loads((older / "summary.json").read_text())["run_id"]
+    with connect(database) as conn:
+        run_key = conn.execute("SELECT run_key FROM test_runs WHERE run_id=%s", (run_id,))
+        run_key = run_key.fetchone()[0]
+        started = conn.execute("SELECT started_at FROM test_runs WHERE run_key=%s", (run_key,))
+        shift(conn, run_key, started.fetchone()[0] - hour)
+    earlier = calculate(database, POLICY, as_of=end_of(older) - hour)
+    assert earlier["dbip_releases"] == release_ids(database, "a" * 64)
+    assert countries(earlier)["fixture"] == ["US"]
 
     snapshot = calculate(database, POLICY, as_of=end_of(older, newer, pulse))
     assert snapshot["dbip_releases"] == release_ids(database, "a" * 64, "b" * 64)
