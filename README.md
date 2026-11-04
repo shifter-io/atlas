@@ -409,6 +409,9 @@ release it used, and the calculation reads each run's observations with that run
 (its newest one, if it was enriched again). A new release therefore changes only the runs
 enriched with it, never older ones. The snapshot's `dbip_release` names the newest release that
 some run uses; a release recorded by the update before any run used it changes nothing.
+`dbip_releases` lists the ids of every release the snapshot's observations were labelled with.
+A release is its file's sha256, not its name, so the replaced `dbip-full.mmdb` is a new release.
+An IP seen by runs with different releases takes the labels of its lowest `run_key` in the window.
 
 **On the manager** (where the orchestrator runs), the orchestrator's `dbip_update` job runs the
 update daily at 05:23 UTC once the `dbip.dir` setting names the directory. A failure fails the
