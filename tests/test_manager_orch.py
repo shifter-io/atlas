@@ -74,6 +74,18 @@ def installable(unit):
     return any(line == "[Install]" or line.startswith(keys) for line in directives(unit))
 
 
+def starts_hourly(script):
+    """Lines that could turn the hourly test on; reading its state (`is-active`) is not one."""
+    words = ("enable", "start", "restart", "add-wants", "link", "reenable", "preset")
+    return [
+        line
+        for line in script.splitlines()
+        if "proxy-index-daily" in line
+        and "is-active" not in line
+        and any(f"systemctl {word}" in line for word in words)
+    ]
+
+
 def staged(stdin):
     """{member name: bytes} of the enable script's stdin tar."""
     with tarfile.open(fileobj=io.BytesIO(stdin)) as archive:
@@ -227,7 +239,11 @@ def test_the_enable_script_reads_the_database_file_in_place():
     units = next(i for i, line in enumerate(lines) if "/etc/systemd/system/" in line)
     assert check < swap < units  # nothing is installed before the daily check passes
     assert f'--formulas "$stage/formulas" --template "{manager_daily.CAMPAIGNS}/{CID}"' in script
-    assert manager_daily.DAILY_TIMER not in script and "add-wants" not in script
+    assert starts_hourly(script) == [] and "add-wants" not in script
+    timer = manager_daily.DAILY_TIMER
+    assert starts_hourly(f"systemctl start {timer}\nsystemctl is-active {timer}") == [
+        f"systemctl start {timer}"
+    ]  # the check itself sees a start
 
 
 def test_the_hourly_timer_is_never_started_by_enable_or_deploy():
@@ -391,8 +407,8 @@ async def test_enable_and_deploy_leave_the_hourly_timer_inactive(job, tmp_path):
     deploy_shell = DeployShell()
     await run_deploy(fake, job, shell=deploy_shell)
     for script in shell.scripts() + deploy_shell.commands():
-        assert manager_daily.DAILY_TIMER not in script and "add-wants" not in script
-        assert "proxy-index-daily.service" not in script
+        assert starts_hourly(script) == [] and "add-wants" not in script
+    assert not any("proxy-index-daily" in script for script in deploy_shell.commands())
     for line in shell.scripts()[0].splitlines():
         if line.startswith("systemctl "):
             assert "daily" not in line
