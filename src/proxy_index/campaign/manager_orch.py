@@ -9,9 +9,11 @@ nightly `db-server analyze` timer, opens the node API port (NODE_API_PORT, HTTPS
 manager's cloud firewall to the pulse-node tag, and starts both units. The orchestrator reads the
 manager's database file in place (`/etc/proxy-index/database.toml`, never copied or printed).
 Its TLS key and admin password are made on the manager and never leave it; only the public
-certificate comes back, beside the inventory, with its SHA-256 recorded. Without `--apply`
-both commands print what they would do and change nothing; `--apply` of enable also needs the
-owner's recorded go (D13). `orchestrator-disable --apply` stops the units, then closes the port.
+certificate comes back, beside the inventory, with its SHA-256 recorded. It also installs the
+daily test's own inputs and its hourly timer, which stays OFF (`manager_daily`). Without
+`--apply` every command prints what it would do and changes nothing; `--apply` of enable also
+needs the owner's recorded go (D13). `orchestrator-disable --apply` stops the units and the
+hourly timer, then closes the port.
 """
 
 from __future__ import annotations
@@ -19,12 +21,13 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
-from . import deploy, ops_api
+from . import deploy, manager_daily, ops_api
 from .contracts import PULSE_TAG
 from .do_api import ApiError, DigitalOcean
 from .image import Shell, run_shell
@@ -33,15 +36,16 @@ NODE_API_PORT = 8443
 WANTED_SIZE = "s-8vcpu-16gb-amd"
 ORCHESTRATOR_UNIT = "proxy-index-orchestrator.service"
 ANALYZE_TIMER = "proxy-index-db-analyze.timer"
-UNIT_FILES = (ORCHESTRATOR_UNIT, "proxy-index-db-analyze.service", ANALYZE_TIMER)
-STARTED = (ORCHESTRATOR_UNIT, ANALYZE_TIMER)
+DAILY = (manager_daily.DAILY_SERVICE, manager_daily.DAILY_TIMER)
+UNIT_FILES = (ORCHESTRATOR_UNIT, "proxy-index-db-analyze.service", ANALYZE_TIMER, *DAILY)
+STARTED = (ORCHESTRATOR_UNIT, ANALYZE_TIMER)  # never the hourly timer (owner rule)
 DATABASE_FILE = "/etc/proxy-index/database.toml"
 TLS_DIR = "/opt/proxy-index-campaign/.secrets/tls"
 CERT, KEY = f"{TLS_DIR}/orchestrator.crt", f"{TLS_DIR}/orchestrator.key"
 ENV_FILE = "/opt/proxy-index-campaign/.secrets/orchestrator.env"
 DBIP_DIR = "/opt/proxy-index-campaign/db-ip"
 HEALTH_TRIES = 30  # two seconds apart
-ACTIONS = ("resize", "orchestrator-enable", "orchestrator-disable")
+ACTIONS = ("resize", "orchestrator-enable", "orchestrator-disable", *manager_daily.ACTIONS)
 PEM_RE = re.compile(r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n")
 
 
@@ -103,10 +107,11 @@ def go_record(owner_go: Path | None, now: datetime) -> dict[str, str]:
     return {"owner_go": str(owner_go.resolve()), "owner_go_sha256": digest, "at": now.isoformat()}
 
 
-def enable_script(host: str, port: int = NODE_API_PORT) -> str:
-    """Root shell run on the manager after the unit files are unpacked from stdin: the TLS key
-    and certificate (for the manager's address) and the admin password, each made once and
-    root-only; start the units; wait for /health over HTTPS; print the certificate."""
+def enable_script(host: str, cid: str, port: int = NODE_API_PORT) -> str:
+    """Root shell run on the manager with a tar on stdin (units/, formulas/): check and install
+    the daily inputs, then the units; make the TLS key and certificate (for the manager's
+    address) and the admin password once, root-only; start the orchestrator and the analyze
+    timer (never the hourly one); wait for /health over HTTPS; print the certificate."""
     address = str(ipaddress.IPv4Address(host))
     url = f"https://{address}:{port}/health"
     curl = f"curl -fsS --max-time 5 --cacert {CERT} --connect-to ::127.0.0.1: {url}"
@@ -115,8 +120,13 @@ def enable_script(host: str, port: int = NODE_API_PORT) -> str:
             "set -eu",
             f"test -s {DATABASE_FILE}",
             f'test "$(stat -c %a {DATABASE_FILE})" = 600',
+            "umask 077",
+            "stage=$(mktemp -d /root/pi-orch-XXXXXX)",
+            "trap 'rm -rf \"$stage\"' EXIT",
+            'tar -x --no-same-owner -C "$stage"',
+            *manager_daily.install_lines(cid),
             "umask 022",
-            "tar -x --no-same-owner -C /etc/systemd/system",
+            'install -m 644 "$stage"/units/* /etc/systemd/system/',
             f"install -d -m 755 {DBIP_DIR}",
             "umask 077",
             f"install -d -m 700 {TLS_DIR}",
@@ -138,6 +148,14 @@ def enable_script(host: str, port: int = NODE_API_PORT) -> str:
             f"cat {CERT}",
             "echo healthy",
         ]
+    )
+
+
+def payload(formulas: dict[str, bytes]) -> bytes:
+    """The enable script's stdin: units/<unit> and formulas/<network>.json."""
+    return deploy._tar(
+        [(f"units/{name}", data, mode) for name, data, mode in units()]
+        + [(f"formulas/{name}", data, 0o600) for name, data in formulas.items()]
     )
 
 
@@ -164,36 +182,53 @@ async def _firewall(cloud: DigitalOcean, inventory: dict[str, Any], rules: dict)
         raise
 
 
+@dataclass(frozen=True)
+class EnableInputs:
+    """`orchestrator-enable` inputs: the owner's go (for --apply), the repository's formulas
+    and the daily template campaign (needed once, then the inventory's)."""
+
+    owner_go: Path | None = None
+    formulas: Path = Path("formulas")
+    daily_template: str | None = None
+
+
 async def enable(
     cloud: DigitalOcean,
     inventory_path: Path,
+    inputs: EnableInputs | None = None,
     *,
     apply: bool = False,
-    owner_go: Path | None = None,
     shell: Shell = run_shell,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Install and start the orchestrator on the manager; the dry run changes nothing."""
-    inventory = _recorded(inventory_path)
+    """Install and start the orchestrator on the manager, and install (never start) the hourly
+    daily test with its checked inputs; the dry run changes nothing."""
+    inputs, inventory = inputs or EnableInputs(), _recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     if inventory.get("manager_size") != WANTED_SIZE:
         raise deploy.DeployError(f"record the manager's size first ({WANTED_SIZE}): resize")
-    planned = inventory | {"node_api_port": NODE_API_PORT}
-    rules = manager_rules(planned, inventory["mac_ipv4"])
+    cid = manager_daily.template_id(inventory, inputs.daily_template)
+    formulas = manager_daily.formula_files(inputs.formulas)
+    sent = manager_daily.digests(formulas)
+    rules = manager_rules(inventory | {"node_api_port": NODE_API_PORT}, inventory["mac_ipv4"])
     result = {
         "applied": apply,
         "units": {name: hashlib.sha256(data).hexdigest() for name, data, _ in units()},
         "started": list(STARTED),
+        "hourly_timer": "installed off: hourly-enable after the owner's go",
+        "daily": {"template": cid, "formulas": len(formulas)},
         "node_api_port": NODE_API_PORT,
         "firewall_inbound": rules["inbound_rules"],
     }
     if not apply:
         return result
-    go = go_record(owner_go, now or datetime.now(UTC))
+    go = go_record(inputs.owner_go, now or datetime.now(UTC))
     await _firewall(cloud, inventory, rules)
     deploy.save(inventory_path, inventory, node_api_port=NODE_API_PORT)
-    remote, tar = deploy.Manager(inventory, inventory_path, shell), deploy._tar(units())
-    out = await remote.run(enable_script(inventory["host"]), "orchestrator-enable", tar)
+    remote = deploy.Manager(inventory, inventory_path, shell)
+    script = remote.argv(enable_script(inventory["host"], cid))
+    code, out = await remote.shell(script, payload(formulas))
+    check = manager_daily.verify(out, code, sent, "orchestrator-enable")
     pem = _certificate(out)
     cert_path = inventory_path.with_name(f"{inventory_path.stem}.orchestrator.crt")
     cert_path.write_text(pem)
@@ -201,8 +236,10 @@ async def enable(
         "cert": cert_path.name,
         "cert_sha256": hashlib.sha256(pem.encode()).hexdigest(),
         "orchestrator_url": f"https://{inventory['host']}:{NODE_API_PORT}",
+        "formulas_sha256": sent,
+        "droplets_by_hour": check["droplets_by_hour"],
     }
-    deploy.save(inventory_path, inventory, orchestrator=record)
+    deploy.save(inventory_path, inventory, orchestrator=record, daily_template=cid)
     return result | {"cert": cert_path.name, "cert_sha256": record["cert_sha256"]}
 
 
@@ -214,20 +251,21 @@ async def disable(
     shell: Shell = run_shell,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Stop the orchestrator and the analyze timer, then close the node API port."""
+    """Stop the orchestrator, the analyze timer and the hourly timer, then close the port."""
     inventory = _recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     closed = {key: value for key, value in inventory.items() if key != "node_api_port"}
     rules = manager_rules(closed, inventory["mac_ipv4"])
     result = {
         "applied": apply,
-        "stopped": list(STARTED),
+        "stopped": [*STARTED, manager_daily.DAILY_TIMER],
         "firewall_inbound": rules["inbound_rules"],
     }
     if not apply:
         return result
+    script = [f"systemctl disable --now {' '.join(STARTED)}", *manager_daily.off_lines()]
     await deploy.Manager(inventory, inventory_path, shell).run(
-        f"systemctl disable --now {' '.join(STARTED)}", "orchestrator-disable"
+        "set -eu\n" + "\n".join(script), "orchestrator-disable"
     )
     await _firewall(cloud, inventory, rules)
     inventory.pop("node_api_port", None)
@@ -237,20 +275,31 @@ async def disable(
 
 
 def add_parsers(steps, inventory: Path) -> None:
-    """`campaign manager resize|orchestrator-enable|orchestrator-disable` (all dry runs unless
-    --apply)."""
+    """`campaign manager resize|orchestrator-enable|orchestrator-disable|hourly-enable|
+    hourly-disable` (all dry runs unless --apply)."""
     found = steps.add_parser("resize", help="Check and record the manager's size (dry run)")
     found.add_argument("--size", default=WANTED_SIZE)
     on = steps.add_parser("orchestrator-enable", help="Run the orchestrator here (dry run)")
-    on.add_argument("--owner-go", type=Path, help="the owner's recorded go (needed by --apply)")
+    on.add_argument("--formulas", type=Path, default=Path("formulas"), help="formulas/*.json")
+    on.add_argument("--daily-template", help="the daily template's campaign id (once)")
     off = steps.add_parser("orchestrator-disable", help="Stop it and close its port (dry run)")
-    for step in (found, on, off):
+    hourly = steps.add_parser("hourly-enable", help="Start the hourly daily test (owner's go)")
+    quiet = steps.add_parser("hourly-disable", help="Stop the hourly daily test (dry run)")
+    for step in (on, hourly):
+        step.add_argument("--owner-go", type=Path, help="the owner's recorded go (for --apply)")
+    for step in (found, on, off, hourly, quiet):
         step.add_argument("--apply", action="store_true", help="act; without it, only print")
         step.add_argument("--inventory", type=Path, default=inventory)
 
 
 async def run(args, cloud_for) -> dict[str, Any]:
     """One of ACTIONS, on the account the inventory records (as allow-me and teardown)."""
+    if args.manager_action == "hourly-enable":
+        return await manager_daily.hourly_enable(
+            args.inventory, apply=args.apply, owner_go=args.owner_go
+        )
+    if args.manager_action == "hourly-disable":
+        return await manager_daily.hourly_disable(args.inventory, apply=args.apply)
     account = deploy.load_inventory(args.inventory).get("account")
     if account is None:
         raise deploy.DeployError("no manager is recorded")
@@ -258,5 +307,6 @@ async def run(args, cloud_for) -> dict[str, Any]:
         if args.manager_action == "resize":
             return await resize(cloud, args.inventory, args.size, apply=args.apply)
         if args.manager_action == "orchestrator-enable":
-            return await enable(cloud, args.inventory, apply=args.apply, owner_go=args.owner_go)
+            inputs = EnableInputs(args.owner_go, args.formulas, args.daily_template)
+            return await enable(cloud, args.inventory, inputs, apply=args.apply)
         return await disable(cloud, args.inventory, apply=args.apply)

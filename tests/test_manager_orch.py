@@ -4,6 +4,7 @@ only, no live calls), HTTPS serving and the calculation as a subprocess."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -11,14 +12,17 @@ import ssl
 import sys
 import tarfile
 import time
+from pathlib import Path
 
 import aiohttp
 import pytest
 import trustme
 from aiohttp import web
 from campaign_deploy_fakes import (
+    CID,
     MANAGER_IP,
     OTHER_IP,
+    ROOT,
     Fake,
     fast_assign,
     inventory,
@@ -27,10 +31,11 @@ from campaign_deploy_fakes import (
     run_deploy,
     writes,
 )
+from campaign_deploy_fakes import Shell as DeployShell
 from campaign_fakes import running
 
 from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, manager_orch, ops_api
+from proxy_index.campaign import deploy, manager_daily, manager_orch, ops_api
 from proxy_index.campaign.contracts import PULSE_TAG
 from proxy_index.orchestrator import app as orchestrator_app
 from proxy_index.orchestrator import cli as orchestrator_cli
@@ -54,17 +59,61 @@ def job(tmp_path):
     return make_job(tmp_path)
 
 
-class Shell:
-    """Fake SSH: records argv and stdin; the enable script prints the certificate and `healthy`."""
+CHECK_OK = {"ok": True, "issues": [], "networks": ["shifter"], "droplets_by_hour": {"5": 1}}
 
-    def __init__(self, healthy=True):
-        self.calls, self.healthy = [], healthy
+
+def staged(stdin):
+    """{member name: bytes} of the enable script's stdin tar."""
+    with tarfile.open(fileobj=io.BytesIO(stdin)) as archive:
+        return {m.name: archive.extractfile(m).read() for m in archive}
+
+
+class Shell:
+    """Fake SSH: records argv and stdin; answers the enable script like the manager (the check
+    line, each received formula's SHA-256, the certificate, `healthy`) and the hourly ones."""
+
+    def __init__(self, healthy=True, check=CHECK_OK, tamper=False, timer="active"):
+        self.calls, self.healthy, self.check = [], healthy, check
+        self.tamper, self.timer = tamper, timer
 
     async def __call__(self, argv, stdin):
         self.calls.append((argv, stdin))
-        if "systemctl enable" in argv[-1]:
-            return 0, "Created symlink\n" + CERT_PEM + ("healthy\n" if self.healthy else "")
+        command, check = argv[-1], f"daily-check {json.dumps(self.check, separators=(',', ':'))}"
+        if "systemctl restart" in command:
+            if not self.check["ok"]:
+                return 4, check + "\n"
+            sums = [
+                f"formula {hashlib.sha256(data + (b'x' if self.tamper else b'')).hexdigest()} "
+                + name.removeprefix("formulas/")
+                for name, data in staged(stdin).items()
+                if name.startswith("formulas/")
+            ]
+            tail = "healthy\n" if self.healthy else ""
+            return 0, "\n".join([check, *sums, "Created symlink", CERT_PEM]) + tail
+        if "add-wants" in command:
+            return 0, f"{check}\n{self.timer}\n"
+        if "is-active" in command:
+            return 0, "inactive\n"
         return 0, ""
+
+    def scripts(self):
+        return [argv[-1] for argv, _ in self.calls]
+
+
+def formula_dir(tmp_path):
+    folder = tmp_path / "formulas"
+    folder.mkdir(exist_ok=True)
+    for network, schedule in {"shifter": {"GB": 5}, "geonode": {"DE": 6}}.items():
+        (folder / f"{network}.json").write_text(
+            json.dumps({"network": network, "schedule": schedule})
+        )
+    return folder
+
+
+def go_inputs(tmp_path, **changes):
+    """Inputs for an applied enable: the owner's go, the formulas and the template."""
+    values = {"owner_go": owner_go(tmp_path), "formulas": formula_dir(tmp_path)}
+    return manager_orch.EnableInputs(**(values | {"daily_template": CID} | changes))
 
 
 async def deployed(job, size=WANTED, pulse_tag=True):
@@ -72,6 +121,7 @@ async def deployed(job, size=WANTED, pulse_tag=True):
     fake = Fake()
     fake.sizes.append({"slug": WANTED, "available": True, "regions": ["lon1"]})
     await run_deploy(fake, job)
+    deploy.save(job.inventory, inventory(job), campaigns=[CID])  # the daily template, uploaded
     fake.droplets[str(inventory(job)["manager_id"])]["size_slug"] = size
     if pulse_tag:
         fake.tags.add(PULSE_TAG)
@@ -115,6 +165,17 @@ def test_the_units_are_rendered_from_the_assets():
         "--tls-key",
         manager_orch.KEY,
     ]
+    hourly = found[manager_daily.DAILY_TIMER]
+    assert "OnCalendar=*-*-* *:56:00 UTC" in hourly
+    assert "[Install]" not in hourly and "WantedBy" not in hourly  # nothing can enable it
+    daily = found[manager_daily.DAILY_SERVICE]
+    assert "[Install]" not in daily and "Type=oneshot" in daily
+    assert '--unit=proxy-index-daily-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in daily
+    assert (
+        f"daily hour --formulas {manager_daily.FORMULAS} --template {manager_daily.TEMPLATE} "
+        f"--database-file {manager_orch.DATABASE_FILE} --mmdb {manager_orch.DBIP_DIR}/"
+        "dbip-full.mmdb --start next-hour'"
+    ) in daily
     analyze = found["proxy-index-db-analyze.service"]
     assert "Type=oneshot" in analyze
     assert f"db-server analyze --database-file {manager_orch.DATABASE_FILE}" in analyze
@@ -136,14 +197,26 @@ def test_the_firewall_keeps_its_rules_and_adds_the_node_api_rule():
 
 
 def test_the_enable_script_reads_the_database_file_in_place():
-    script = manager_orch.enable_script(MANAGER_IP)
+    script = manager_orch.enable_script(MANAGER_IP, CID)
     assert f"subjectAltName=IP:{MANAGER_IP}" in script
     assert f"https://{MANAGER_IP}:8443/health" in script and "--connect-to ::127.0.0.1:" in script
     assert script.splitlines()[-2:] == [f"cat {manager_orch.CERT}", "echo healthy"]
     uses = [line for line in script.splitlines() if manager_orch.DATABASE_FILE in line]
     assert all(line.startswith("test ") for line in uses) and len(uses) == 2  # never read
     with pytest.raises(ValueError):
-        manager_orch.enable_script("203.0.113.10; rm -rf /")
+        manager_orch.enable_script("203.0.113.10; rm -rf /", CID)
+    lines = script.splitlines()
+    check = next(i for i, line in enumerate(lines) if "daily check" in line)
+    swap = next(i for i, line in enumerate(lines) if "mv -Tf" in line)
+    units = next(i for i, line in enumerate(lines) if "/etc/systemd/system/" in line)
+    assert check < swap < units  # nothing is installed before the daily check passes
+    assert f'--formulas "$stage/formulas" --template "{manager_daily.CAMPAIGNS}/{CID}"' in script
+    assert manager_daily.DAILY_TIMER not in script and "add-wants" not in script
+
+
+def test_the_hourly_timer_is_never_started_by_enable_or_deploy():
+    assert manager_daily.DAILY_TIMER not in manager_orch.STARTED
+    assert not any("daily" in name for name in deploy.UNIT_FILES)  # deploy installs no daily unit
 
 
 # --- resize -------------------------------------------------------------------------------------
@@ -206,60 +279,84 @@ async def recorded_size(fake, job):
         await manager_orch.resize(cloud, job.inventory, apply=True)
 
 
-async def test_enable_dry_run_changes_nothing(job):
+async def test_enable_dry_run_changes_nothing(job, tmp_path):
     fake = await deployed(job)
     await recorded_size(fake, job)
     before, writes_before, shell = inventory(job), writes(fake), Shell()
+    inputs = manager_orch.EnableInputs(formulas=formula_dir(tmp_path), daily_template=CID)
     async with running(fake) as cloud:
-        result = await manager_orch.enable(cloud, job.inventory, shell=shell)
+        result = await manager_orch.enable(cloud, job.inventory, inputs, shell=shell)
     assert result["applied"] is False and result["node_api_port"] == 8443
     assert result["firewall_inbound"][-1]["sources"] == {"tags": [PULSE_TAG]}
     assert sorted(result["units"]) == sorted(manager_orch.UNIT_FILES)
+    assert result["daily"] == {"template": CID, "formulas": 2}
+    assert result["started"] == list(manager_orch.STARTED)
     assert inventory(job) == before and writes(fake) == writes_before and shell.calls == []
 
 
-async def test_enable_needs_the_recorded_size_and_the_owner_go(job, tmp_path):
+async def test_enable_needs_the_size_the_owner_go_and_its_daily_inputs(job, tmp_path):
     fake = await deployed(job)
     async with running(fake) as cloud:
         with pytest.raises(deploy.DeployError, match="record the manager's size first"):
-            await manager_orch.enable(cloud, job.inventory, apply=True, shell=Shell())
+            await manager_orch.enable(cloud, job.inventory, go_inputs(tmp_path), apply=True)
     await recorded_size(fake, job)
     empty = tmp_path / "empty.md"
     empty.write_text("\n")
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "x.json").write_text('{"network": "x", "schedule": {"GB": 25}}')
+    refusals = [
+        ({"owner_go": None}, "--owner-go"),
+        ({"owner_go": empty}, "--owner-go"),
+        ({"owner_go": tmp_path / "missing.md"}, "--owner-go"),
+        ({"daily_template": None}, "name the daily template once"),
+        ({"daily_template": "not-an-id"}, "must be a campaign id"),
+        ({"daily_template": "20270101t230000z-ffffffffffff"}, "never uploaded"),
+        ({"formulas": bad}, "needs a test hour"),
+        ({"formulas": tmp_path / "none"}, "no formula"),
+    ]
     before, writes_before = inventory(job), writes(fake)
     async with running(fake) as cloud:
-        for go in (None, empty, tmp_path / "missing.md"):
-            with pytest.raises(deploy.DeployError, match="--owner-go"):
-                await manager_orch.enable(cloud, job.inventory, apply=True, owner_go=go)
+        for changes, message in refusals:
+            with pytest.raises(deploy.DeployError, match=message):
+                await manager_orch.enable(
+                    cloud, job.inventory, go_inputs(tmp_path, **changes), apply=True
+                )
     assert inventory(job) == before and writes(fake) == writes_before
 
 
 async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path):
     fake = await deployed(job)
     await recorded_size(fake, job)
-    shell = Shell()
+    shell, inputs = Shell(), go_inputs(tmp_path)
     async with running(fake) as cloud:
-        result = await manager_orch.enable(
-            cloud, job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=shell
-        )
+        result = await manager_orch.enable(cloud, job.inventory, inputs, apply=True, shell=shell)
     rules = manager_firewall(fake, job)
     assert rules["inbound_rules"][-1] == manager_orch.node_api_rule()
     assert rules["droplet_ids"] == [int(inventory(job)["manager_id"])]
     ((argv, stdin),) = shell.calls
-    assert argv[-1] == manager_orch.enable_script(MANAGER_IP)
-    with tarfile.open(fileobj=io.BytesIO(stdin)) as archive:
-        installed = {m.name: (archive.extractfile(m).read(), m.mode) for m in archive}
-    assert installed == {name: (data, mode) for name, data, mode in manager_orch.units()}
+    assert argv[-1] == manager_orch.enable_script(MANAGER_IP, CID)
+    sent = staged(stdin)
+    assert sent == {f"units/{name}": data for name, data, _ in manager_orch.units()} | {
+        f"formulas/{p.name}": p.read_bytes() for p in inputs.formulas.glob("*.json")
+    }
     saved = inventory(job)
     cert = job.inventory.with_name("campaign-manager.orchestrator.crt")
     assert cert.read_text() == CERT_PEM and result["cert"] == cert.name
-    assert saved["node_api_port"] == 8443
+    assert saved["node_api_port"] == 8443 and saved["daily_template"] == CID
     record = saved["orchestrator"]
     assert record["orchestrator_url"] == f"https://{MANAGER_IP}:8443"
     assert record["cert_sha256"] == result["cert_sha256"] and record["owner_go_sha256"]
+    assert record["formulas_sha256"] == manager_daily.digests(
+        manager_daily.formula_files(inputs.formulas)
+    )
+    assert record["droplets_by_hour"] == CHECK_OK["droplets_by_hour"]
+    assert "hourly" not in saved  # the hourly timer stays off
     assert MANAGER_IP not in json.dumps(result)  # the address stays in the inventory
-    # allow-me (a new Mac address) keeps the node API rule.
+    # A rerun (after a deploy) takes the recorded template; allow-me keeps the node API rule.
     async with running(fake) as cloud:
+        rerun = go_inputs(tmp_path, daily_template=None)
+        await manager_orch.enable(cloud, job.inventory, rerun, apply=True, shell=shell)
         await deploy.allow_me(cloud, job.inventory, OTHER_IP)
     assert manager_firewall(fake, job)["inbound_rules"] == [
         ops_api.ssh_from(OTHER_IP),
@@ -267,15 +364,46 @@ async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path
     ]
 
 
-async def test_enable_fails_when_the_health_check_does_not_pass(job, tmp_path):
+async def test_enable_and_deploy_leave_the_hourly_timer_inactive(job, tmp_path):
     fake = await deployed(job)
     await recorded_size(fake, job)
+    shell = Shell()
     async with running(fake) as cloud:
-        with pytest.raises(deploy.DeployError, match="did not answer /health"):
-            await manager_orch.enable(
-                cloud, job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=Shell(False)
-            )
-    assert "orchestrator" not in inventory(job)
+        await manager_orch.enable(
+            cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell
+        )
+    deploy_shell = DeployShell()
+    await run_deploy(fake, job, shell=deploy_shell)
+    for script in shell.scripts() + deploy_shell.commands():
+        assert manager_daily.DAILY_TIMER not in script and "add-wants" not in script
+        assert "proxy-index-daily.service" not in script
+    for line in shell.scripts()[0].splitlines():
+        if line.startswith("systemctl "):
+            assert "daily" not in line
+    timer = dict((name, data) for name, data, _ in manager_orch.units())[manager_daily.DAILY_TIMER]
+    assert b"[Install]" not in timer  # `systemctl enable`, a preset or a reboot cannot start it
+    (provision,) = [stdin for argv, stdin in deploy_shell.calls if "provision" in argv[-1]]
+    assert not [name for name in staged(provision) if "daily" in name]  # deploy ships none
+    assert "hourly" not in inventory(job)
+
+
+async def test_enable_stops_when_the_manager_disagrees(job, tmp_path):
+    fake = await deployed(job)
+    await recorded_size(fake, job)
+    failing = {"ok": False, "issues": ["hour 7: the template cannot test geonode"]}
+    cases = [
+        (Shell(healthy=False), "did not answer /health"),
+        (Shell(check=failing), "the daily check failed: hour 7: the template cannot test geonode"),
+        (Shell(tamper=True), "the formulas on the manager differ"),
+    ]
+    async with running(fake) as cloud:
+        for shell, message in cases:
+            with pytest.raises(deploy.DeployError, match=message):
+                await manager_orch.enable(
+                    cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell
+                )
+    saved = inventory(job)
+    assert "orchestrator" not in saved and "daily_template" not in saved
     assert not job.inventory.with_name("campaign-manager.orchestrator.crt").exists()
 
 
@@ -286,27 +414,32 @@ async def test_a_missing_pulse_tag_is_named_and_nothing_is_recorded(job, tmp_pat
     async with running(fake) as cloud:
         with pytest.raises(deploy.DeployError, match=f"does the tag {PULSE_TAG} exist"):
             await manager_orch.enable(
-                cloud, job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=shell
+                cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell
             )
     assert "node_api_port" not in inventory(job) and shell.calls == []
     assert len(manager_firewall(fake, job)["inbound_rules"]) == 1
 
 
-async def test_disable_stops_the_units_then_closes_the_port(job, tmp_path):
+async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port(job, tmp_path):
     fake = await deployed(job)
     await recorded_size(fake, job)
     async with running(fake) as cloud:
         await manager_orch.enable(
-            cloud, job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=Shell()
+            cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=Shell()
         )
         shell, before = Shell(), inventory(job)
         dry = await manager_orch.disable(cloud, job.inventory, shell=shell)
         assert dry["firewall_inbound"] == [ops_api.ssh_from(before["mac_ipv4"])]
+        assert dry["stopped"][-1] == manager_daily.DAILY_TIMER
         assert inventory(job) == before and shell.calls == []
         await manager_orch.disable(cloud, job.inventory, apply=True, shell=shell)
-    assert shell.calls[0][0][-1] == (
-        "systemctl disable --now proxy-index-orchestrator.service proxy-index-db-analyze.timer"
-    )
+    assert shell.scripts()[0].splitlines() == [
+        "set -eu",
+        "systemctl disable --now proxy-index-orchestrator.service proxy-index-db-analyze.timer",
+        f"systemctl stop {manager_daily.DAILY_TIMER} || true",
+        f"rm -f {manager_daily.WANTS}",
+        "systemctl daemon-reload",
+    ]
     assert manager_firewall(fake, job)["inbound_rules"] == [ops_api.ssh_from(before["mac_ipv4"])]
     saved = inventory(job)
     assert "node_api_port" not in saved and saved["orchestrator_disabled_at"]
@@ -319,6 +452,89 @@ async def test_deploy_keeps_the_node_api_rule(job):
     assert manager_firewall(fake, job)["inbound_rules"][-1] == manager_orch.node_api_rule()
 
 
+# --- the hourly timer (owner rule: on only with the owner's go) --------------------------------
+
+
+async def enabled(job, tmp_path, fake=None):
+    fake = fake or await deployed(job)
+    await recorded_size(fake, job)
+    async with running(fake) as cloud:
+        await manager_orch.enable(
+            cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=Shell()
+        )
+
+
+async def test_hourly_enable_needs_the_orchestrator_and_the_owner_go(job, tmp_path):
+    fake = await deployed(job)
+    with pytest.raises(deploy.DeployError, match="run orchestrator-enable --apply first"):
+        await manager_daily.hourly_enable(job.inventory, apply=True, owner_go=owner_go(tmp_path))
+    await enabled(job, tmp_path, fake)
+    shell, before = Shell(), inventory(job)
+    dry = await manager_daily.hourly_enable(job.inventory, shell=shell)
+    assert dry == {"applied": False, "timer": manager_daily.DAILY_TIMER, "template": CID}
+    with pytest.raises(deploy.DeployError, match="--owner-go"):
+        await manager_daily.hourly_enable(job.inventory, apply=True, shell=shell)
+    assert shell.calls == [] and inventory(job) == before
+
+
+async def test_hourly_enable_checks_then_adds_the_timer_to_timers_target(job, tmp_path):
+    await enabled(job, tmp_path)
+    shell = Shell()
+    result = await manager_daily.hourly_enable(
+        job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=shell
+    )
+    script = shell.scripts()[0].splitlines()
+    timer = manager_daily.DAILY_TIMER
+    assert script[-3:] == [
+        f"systemctl add-wants timers.target {timer}",
+        f"systemctl start {timer}",
+        f"systemctl is-active {timer}",
+    ]
+    check = next(i for i, line in enumerate(script) if "daily check" in line)
+    assert check < script.index(f"systemctl add-wants timers.target {timer}")
+    assert result["droplets_by_hour"] == CHECK_OK["droplets_by_hour"]
+    hourly = inventory(job)["hourly"]
+    assert hourly["on"] is True and hourly["owner_go_sha256"]
+
+
+async def test_hourly_enable_refuses_a_failed_check_or_an_inactive_timer(job, tmp_path):
+    await enabled(job, tmp_path)
+    failing = {"ok": False, "issues": ["no formula"]}
+    for shell, message in (
+        (Shell(check=failing), "the daily check failed: no formula"),
+        (Shell(timer="failed"), "the hourly timer is not active"),
+    ):
+        with pytest.raises(deploy.DeployError, match=message):
+            await manager_daily.hourly_enable(
+                job.inventory, apply=True, owner_go=owner_go(tmp_path), shell=shell
+            )
+    assert "hourly" not in inventory(job)
+
+
+async def test_hourly_disable_takes_the_timer_out_and_it_stays_off(job, tmp_path):
+    await enabled(job, tmp_path)
+    shell = Shell()
+    assert (await manager_daily.hourly_disable(job.inventory, shell=shell))["applied"] is False
+    assert shell.calls == []
+    await manager_daily.hourly_disable(job.inventory, apply=True, shell=shell)
+    script = shell.scripts()[0]
+    assert f"rm -f {manager_daily.WANTS}" in script and "systemctl daemon-reload" in script
+    assert inventory(job)["hourly"]["on"] is False
+
+    async def still_active(argv, stdin):
+        return 0, "active\n"
+
+    with pytest.raises(deploy.DeployError, match="did not stop"):
+        await manager_daily.hourly_disable(job.inventory, apply=True, shell=still_active)
+    with pytest.raises(deploy.DeployError, match="no manager is recorded"):
+        await manager_daily.hourly_disable(tmp_path / "none.json", apply=True)
+
+
+def test_the_repository_formulas_install(tmp_path):
+    found = manager_daily.formula_files(ROOT / "formulas")
+    assert len(found) >= 18 and all(name.endswith(".json") for name in found)
+
+
 # --- CLI ----------------------------------------------------------------------------------------
 
 
@@ -326,13 +542,21 @@ def test_the_cli_parses_the_new_manager_steps(tmp_path):
     args = parse(["campaign", "manager", "resize"])
     assert (args.manager_action, args.size, args.apply) == ("resize", WANTED, False)
     go = tmp_path / "go.md"
-    args = parse(["campaign", "manager", "orchestrator-enable", "--owner-go", str(go), "--apply"])
-    assert (args.owner_go, args.apply) == (go, True)
+    args = parse(
+        ["campaign", "manager", "orchestrator-enable", "--owner-go", str(go), "--apply"]
+        + ["--daily-template", CID]
+    )
+    assert (args.owner_go, args.apply, args.daily_template) == (go, True, CID)
+    assert args.formulas == Path("formulas")
     args = parse(["campaign", "manager", "orchestrator-disable", "--inventory", str(go)])
     assert (args.manager_action, args.inventory, args.apply) == ("orchestrator-disable", go, False)
+    args = parse(["campaign", "manager", "hourly-enable", "--owner-go", str(go)])
+    assert (args.manager_action, args.owner_go, args.apply) == ("hourly-enable", go, False)
+    args = parse(["campaign", "manager", "hourly-disable", "--apply"])
+    assert (args.manager_action, args.apply) == ("hourly-disable", True)
 
 
-async def test_the_cli_runs_each_step_on_the_recorded_account(job, monkeypatch):
+async def test_the_cli_runs_each_step_on_the_recorded_account(job, tmp_path, monkeypatch):
     fake = await deployed(job)
     accounts = []
 
@@ -341,12 +565,19 @@ async def test_the_cli_runs_each_step_on_the_recorded_account(job, monkeypatch):
         return running(fake)
 
     monkeypatch.setattr(campaign_cli, "_cloud", cloud_for)
+    folder = formula_dir(tmp_path)
     for argv in (
         ["resize", "--apply"],
-        ["orchestrator-enable"],
+        ["orchestrator-enable", "--formulas", str(folder), "--daily-template", CID],
         ["orchestrator-disable"],
+        ["hourly-enable"],
+        ["hourly-disable"],
     ):
         args = parse(["campaign", "manager", *argv, "--inventory", str(job.inventory)])
+        if argv[0] == "hourly-enable":
+            with pytest.raises(deploy.DeployError, match="orchestrator-enable --apply first"):
+                await campaign_cli._manager_step(args)
+            continue
         result = await campaign_cli._manager_step(args)
         assert result["applied"] is ("--apply" in argv)
     assert accounts == ["leftclick"] * 3
