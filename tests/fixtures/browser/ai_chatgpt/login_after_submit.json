@@ -1,0 +1,27 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 1.0,
+      "after_submit": true,
+      "counts": {
+        "div[role=\"dialog\"]:has([data-testid=\"login-button\"])": 1
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_dialog",
+    "asked": true
+  }
+}

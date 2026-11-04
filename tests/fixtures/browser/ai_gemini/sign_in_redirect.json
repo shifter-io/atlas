@@ -1,0 +1,17 @@
+{
+  "page": {
+    "url": "https://accounts.google.com/v3/signin/identifier",
+    "status": 200,
+    "title": "Sign in - Google Accounts",
+    "text_head": "",
+    "counts": {},
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_redirect",
+    "asked": false
+  }
+}

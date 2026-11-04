@@ -1,0 +1,31 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER The sky looks blue because the air scatters short blue light more than red light"
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "short_answer",
+    "answer_chars": 102,
+    "asked": true
+  }
+}

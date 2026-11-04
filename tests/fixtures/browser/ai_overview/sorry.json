@@ -1,0 +1,19 @@
+{
+  "page": {
+    "url": "https://www.google.com/sorry/index",
+    "status": 200,
+    "title": "https://www.google.com/sorry/index",
+    "text_head": "Our systems have detected unusual traffic from your computer network.",
+    "counts": {
+      "form#captcha-form": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "sorry_page",
+    "asked": false
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 429,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {},
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "block_status",
+    "asked": false
+  }
+}

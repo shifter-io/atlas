@@ -1,0 +1,52 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Gemini",
+    "text_head": "",
+    "counts": {
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER The sky "
+      },
+      "counts": {
+        "model-response message-content": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.0,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER The sky looks blue because air scatters short blue light far more th"
+      },
+      "counts": {
+        "model-response message-content": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.5,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER The sky looks blue because air scatters short blue light far more than red light. This effect is called Rayleigh scattering."
+      },
+      "counts": {
+        "model-response message-content": 1
+      },
+      "after_submit": true
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 146,
+    "answer_ms": 1500,
+    "asked": true
+  }
+}

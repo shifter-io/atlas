@@ -1,0 +1,17 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "Something went wrong",
+    "counts": {},
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_prompt",
+    "asked": false
+  }
+}

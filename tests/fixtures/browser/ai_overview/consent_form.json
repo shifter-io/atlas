@@ -1,0 +1,19 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "Google Search",
+    "text_head": "Before you continue to Google",
+    "counts": {
+      "form[action*=\"consent.google\"]": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "consent_page",
+    "asked": false
+  }
+}
