@@ -125,6 +125,18 @@ CREATE TABLE IF NOT EXISTS calculated_snapshots (
  build_id bigint PRIMARY KEY REFERENCES calculation_builds(build_id),
  content_hash text NOT NULL, payload jsonb NOT NULL
 );
+-- Contract K1 (calculated v8, parts.py): payload holds the head of a build stored since v8 and
+-- the whole payload of an older one; the head's product groups and runs are these rows, one
+-- group per 'product' row, at most parts.RUNS_PER_PART runs per 'runs' row, in payload order.
+-- One LIST partition per build (calculated_snapshot_parts_b<build_id>, created by
+-- store.partition()), dropped with its snapshot by store.prune() and store.discard().
+CREATE TABLE IF NOT EXISTS calculated_snapshot_parts (
+ build_id bigint NOT NULL REFERENCES calculated_snapshots(build_id) DEFERRABLE INITIALLY DEFERRED,
+ kind text NOT NULL CHECK(kind IN ('product','runs')), position integer NOT NULL CHECK(position>=0),
+ part_id text NOT NULL, product_id integer, cohort text, content_hash text NOT NULL,
+ part jsonb NOT NULL, CHECK((kind='product')=(product_id IS NOT NULL AND cohort IS NOT NULL)),
+ PRIMARY KEY(build_id,kind,position)
+) PARTITION BY LIST(build_id);
 CREATE TABLE IF NOT EXISTS current_calculation (
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  build_id bigint NOT NULL REFERENCES calculated_snapshots(build_id)
@@ -179,11 +191,12 @@ SELECT s.*,
    AND w.target='' AND c.weight>0 AND c.state<>'ready') u) AS reasons
 FROM calculated_scores s;
 -- Light browse views: none of them reads a payload (payload_bytes is its stored, compressed size,
--- read from the TOAST pointer without fetching the value).
+-- head and parts, read from the TOAST pointers without fetching the values).
 CREATE OR REPLACE VIEW calculated_snapshots_list AS
 SELECT b.build_id,b.as_of,b.created_at,b.methodology_id,b.published,
  b.build_id IN (SELECT build_id FROM current_calculation) AS is_current,
- s.content_hash,pg_column_size(s.payload) AS payload_bytes
+ s.content_hash,pg_column_size(s.payload)+coalesce((SELECT sum(pg_column_size(p.part))
+  FROM calculated_snapshot_parts p WHERE p.build_id=b.build_id),0) AS payload_bytes
 FROM calculation_builds b LEFT JOIN calculated_snapshots s USING(build_id);
 CREATE OR REPLACE VIEW current_windows AS
 SELECT p.provider,p.name AS product,w.*

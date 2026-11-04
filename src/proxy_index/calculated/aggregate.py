@@ -944,12 +944,13 @@ def series(
     minimum=1,
     factors=None,
     excluded=None,
+    sparse=False,
 ):
     """Request history plus outage-time availability at the same bucket resolution.
 
-    A country contributes only in buckets intersecting a started census/pulse run
-    or a recorded outage. Missing monitoring evidence is null, never assumed healthy.
-    Outage intervals are unioned per country and clipped to each half-open bucket.
+    A country counts only in buckets intersecting a started census/pulse run or a recorded outage.
+    Missing evidence is null, never assumed healthy; outages are unioned per country and clipped
+    to each half-open bucket. sparse leaves out points with no stored bucket and no availability.
     """
     step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
     buckets = defaultdict(list)
@@ -962,8 +963,7 @@ def series(
         buckets[slot(r["bucket_start"])].append(r)
     for o in observations:
         seen[slot(o["bucket_start"])].add(o["ip_id"])
-    out = []
-    t = start
+    out, t = [], start
     while t < end:
         m = metrics(buckets[t], step.total_seconds() / 3600)
         latency_rows = [r for r in buckets[t] if r["target"] == latency_target]
@@ -994,7 +994,7 @@ def series(
             }
         )
         t += step
-    return out
+    return [p for p in out if not sparse or p["unique_ips"] is not None or p["uptime"] is not None]
 
 
 def component(value, state="ready", reason=None, inputs=None):

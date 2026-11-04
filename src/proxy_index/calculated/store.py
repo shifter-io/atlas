@@ -13,10 +13,12 @@ from psycopg.rows import tuple_row
 
 from ..storage import connect
 from ..storage import initialize as initialize_history
+from . import parts
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
+from .slim import slim
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -24,20 +26,22 @@ V3_CHECKSUM = "5f24879fc7f37486903881c91f5334f85cfa83dcffd90fc00a972508424b394d"
 V4_CHECKSUM = "83d3794413bb56b371ff04ac7f9978652310b20013077c0400d1477d7fb24938"
 V5_CHECKSUM = "ccb566016dba5d6d18b09da7cb88ced16758f0fbf446fcac88495d67d94b8782"
 V6_CHECKSUM = "140ad11f64d300f4e8104da53421bcf00816464fa052d854082831775286dd26"
+V7_CHECKSUM = "66c66164b5915e2015382de9f640d997d1cece6df88f2ab3436f265a597a661a"
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.
 KEEP_DRAFTS = 2
 # After each publication expire() keeps the current build, the newest RETAIN_PER_DAY published
 # builds of each of the last RETAIN_DAYS UTC days and the drafts whose payload prune() kept.
 RETAIN_DAYS = 30
 RETAIN_PER_DAY = 1
-# Rows of a build in the tables keyed by its windows' result_id; breakdowns live in the build's
-# partition (calculated_breakdowns_b<build_id>).
+# Rows of a build in the tables keyed by its windows' result_id; breakdowns and snapshot parts
+# live in the build's partitions (calculated_breakdowns_b<build_id>, ..._snapshot_parts_b<id>).
 DERIVED_TABLES = (
     "calculated_score_reasons",
     "calculated_score_components",
     "calculated_scores",
     "calculated_series",
 )
+PARTITIONED = ("calculated_breakdowns", "calculated_snapshot_parts")
 # Test kinds of the snapshot's traffic.by_test (load since the latency-under-load test).
 TESTS = {"census", "pulse", "load"}
 MIGRATION_CHECKS = {
@@ -136,6 +140,17 @@ V6_CHECKS = {
     + V6_LABELS
     + " n USING(asn_label_id) WHERE to_jsonb(o)::text IS DISTINCT FROM to_jsonb(n)::text",
 }
+# A v7 layer's builds keep their single payload row: each must read back unchanged, with no parts.
+V7_SNAPSHOT = (
+    "CREATE TEMP TABLE v7_before_snapshots ON COMMIT DROP AS SELECT build_id,content_hash,"
+    "sha256(convert_to(payload::text,'UTF8')) AS payload FROM calculated_snapshots"
+)
+V7_CHECKS = {
+    "unsplit snapshots": "SELECT count(*) FROM v7_before_snapshots o FULL JOIN "
+    "calculated_snapshots n USING(build_id) WHERE (o.content_hash,o.payload) IS DISTINCT FROM "
+    "(n.content_hash,sha256(convert_to(n.payload::text,'UTF8'))) OR n.payload ? 'parts' "
+    "OR EXISTS (SELECT FROM calculated_snapshot_parts p WHERE p.build_id=o.build_id)",
+}
 
 
 def jsonable(value):
@@ -168,29 +183,40 @@ def initialize(database):
 
 
 def prune(conn):
-    """Drop payloads of unpublished, non-current builds beyond the newest KEEP_DRAFTS."""
-    return conn.execute(
-        "DELETE FROM calculated_snapshots WHERE build_id IN (SELECT s.build_id FROM "
-        "calculated_snapshots s JOIN calculation_builds b USING(build_id) WHERE NOT b.published "
-        "AND s.build_id NOT IN (SELECT build_id FROM current_calculation) "
-        "ORDER BY s.build_id DESC OFFSET %s)",
+    """Drop payloads (head and parts) of unpublished, non-current builds beyond the newest
+    KEEP_DRAFTS."""
+    builds = conn.cursor(row_factory=tuple_row).execute(
+        "SELECT s.build_id FROM calculated_snapshots s JOIN calculation_builds b USING(build_id) "
+        "WHERE NOT b.published AND s.build_id NOT IN (SELECT build_id FROM current_calculation) "
+        "ORDER BY s.build_id DESC OFFSET %s",
         (KEEP_DRAFTS,),
-    ).rowcount
+    )
+    builds = [row[0] for row in builds]
+    for build_id in builds:
+        drop(conn, build_id, "calculated_snapshot_parts")
+    query = "DELETE FROM calculated_snapshots WHERE build_id=ANY(%s)"
+    return conn.execute(query, (builds,)).rowcount
 
 
-def partition(conn, build_id):
-    """Create the build's breakdown partition (calculated_breakdowns_b<build_id>)."""
+def partition(conn, build_id, table="calculated_breakdowns"):
+    """Create the build's partition of table (<table>_b<build_id>), one of PARTITIONED."""
     conn.execute(
-        sql.SQL(
-            "CREATE TABLE IF NOT EXISTS {} PARTITION OF calculated_breakdowns FOR VALUES IN ({})"
-        ).format(
-            sql.Identifier(f"calculated_breakdowns_b{int(build_id)}"), sql.Literal(int(build_id))
+        sql.SQL("CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES IN ({})").format(
+            sql.Identifier(f"{table}_b{int(build_id)}"),
+            sql.Identifier(table),
+            sql.Literal(int(build_id)),
         )
     )
 
 
+def drop(conn, build_id, table):
+    """Drop the build's partition of table, if it has one."""
+    name = sql.Identifier(f"{table}_b{int(build_id)}")
+    conn.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(name))
+
+
 def discard(conn, build_id):
-    """Delete one build and all of its rows; its breakdowns go with their partition.
+    """Delete one build and all of its rows; its breakdowns and parts go with their partitions.
 
     The current build cannot be discarded: current_calculation references its snapshot. On a
     calculated v5 database (no partitions yet) the breakdowns are deleted through their windows.
@@ -200,11 +226,8 @@ def discard(conn, build_id):
         .execute("SELECT relkind='p' FROM pg_class WHERE oid='calculated_breakdowns'::regclass")
         .fetchone()[0]
     )
-    conn.execute(
-        sql.SQL("DROP TABLE IF EXISTS {}").format(
-            sql.Identifier(f"calculated_breakdowns_b{int(build_id)}")
-        )
-    )
+    for table in PARTITIONED:
+        drop(conn, build_id, table)
     # On v6 the dropped partition held every breakdown of the build.
     for table in (*(() if partitioned else ("calculated_breakdowns",)), *DERIVED_TABLES):
         conn.execute(
@@ -264,7 +287,7 @@ def estimate(conn, expired):
 
     Breakdowns are counted through their windows, so this also works on a calculated v5
     database before its migration. Bytes are each table's size (with its partitions, indexes
-    and TOAST) in proportion to the rows removed; payloads use their stored size.
+    and TOAST) in proportion to the rows removed; payloads and their parts use their stored size.
     """
     windows = "result_id IN (SELECT result_id FROM calculated_windows WHERE build_id=ANY(%s))"
     keys = {table: windows for table in (*DERIVED_TABLES, "calculated_breakdowns")} | {
@@ -288,11 +311,17 @@ def estimate(conn, expired):
         "WHERE build_id=ANY(%s)",
         (expired,),
     ).fetchone()[0]
+    if conn.execute("SELECT to_regclass('calculated_snapshot_parts')").fetchone()[0]:
+        rows["calculated_snapshot_parts"], size["calculated_snapshot_parts"] = conn.execute(
+            "SELECT count(*),coalesce(sum(pg_column_size(part)),0) FROM calculated_snapshot_parts "
+            "WHERE build_id=ANY(%s)",
+            (expired,),
+        ).fetchone()
     return {"rows": rows, "bytes": size, "total_bytes": sum(size.values())}
 
 
 def layer(conn):
-    """Name the calculated layer that retention accepts ("v7" or an unmodified "v5"), or raise.
+    """Name the calculated layer that retention accepts ("v8" or an unmodified "v5"), or raise.
 
     A v5 database can expire before db-migrate, so that the migration moves only kept rows.
     """
@@ -404,6 +433,16 @@ def _evidence(conn, record):
     return {"content_hash": digest(record)}
 
 
+def _build(conn, snapshot):
+    """The build id of snapshot ("current" or a build id), or None."""
+    if snapshot != "current":
+        return int(snapshot)
+    row = conn.cursor(row_factory=tuple_row).execute(
+        "SELECT build_id FROM current_calculation WHERE singleton"
+    )
+    return (row.fetchone() or (None,))[0]
+
+
 def head(database, snapshot="current"):
     with connect(database) as conn:
         conn.execute("SET TRANSACTION READ ONLY")
@@ -419,26 +458,49 @@ def head(database, snapshot="current"):
     return row
 
 
-def read(database, snapshot="current"):
-    # Exactly one prepared row, even for API projections. Never join raw-history tables here.
+def read(database, snapshot="current", *, assemble=True):
+    """The snapshot's payload, assembled from its head and parts (parts.py); with assemble
+    False its stored head. Never join raw-history tables here."""
     with connect(database) as conn:
         conn.execute("SET TRANSACTION READ ONLY")
-        query = (
-            "SELECT payload FROM calculated_snapshots WHERE build_id="
-            "(SELECT build_id FROM current_calculation WHERE singleton)"
-            if snapshot == "current"
-            else "SELECT payload FROM calculated_snapshots WHERE build_id=%s"
-        )
-        row = conn.execute(query, () if snapshot == "current" else (int(snapshot),)).fetchone()
+        build_id = _build(conn, snapshot)
+        if build_id is None:
+            return None
+        return parts.read(conn, build_id) if assemble else parts.head(conn, build_id)
+
+
+def read_head(database, snapshot="current"):
+    """The snapshot's payload without products and runs, or None (a few MB at most)."""
+    with connect(database) as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        build_id = _build(conn, snapshot)
+        row = conn.execute(
+            "SELECT payload - 'products' - 'runs' FROM calculated_snapshots WHERE build_id=%s",
+            (build_id,),
+        ).fetchone()
     return row[0] if row else None
+
+
+def read_parts(database, snapshot, kind="products", *, product=None, cohort=None, keys=None):
+    """The snapshot's product groups ("products") or runs ("runs"), in order; see parts.rows()."""
+    with connect(database) as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        build_id = _build(conn, snapshot)
+        if build_id is None:
+            return []
+        return parts.rows(conn, build_id, kind, product, cohort, keys)
 
 
 def _fraction(value):
     return value is None or (type(value) in (int, float) and 0 <= value <= 1)
 
 
-def validate_payload(payload):
-    """Check the reconciling invariants of a v1 or v2 snapshot before it is stored or published."""
+def validate_payload(payload, products=None):
+    """Check the reconciling invariants of a v1 or v2 snapshot before it is stored or published.
+
+    products, an iterable of product groups, replaces payload["products"]: a stored head and its
+    groups are checked one group at a time (already JSON-ready: json.dumps is not repeated).
+    """
     version = payload["schema_version"]
     if version not in (1, 2) or not payload["methodology"]["id"]:
         raise ValueError("Invalid snapshot contract")
@@ -447,7 +509,7 @@ def validate_payload(payload):
         or not {"census", "pulse"} <= set(payload["traffic"]["by_test"]) <= TESTS
     ):
         raise ValueError("Invalid snapshot contract")
-    for product in payload["products"]:
+    for product in payload["products"] if products is None else products:
         if version == 2 and not isinstance(product["census"], list):
             raise ValueError("Invalid snapshot contract")
         for window in product["windows"].values():
@@ -478,7 +540,8 @@ def validate_payload(payload):
             for score in window["scores"].values():
                 if score["state"] == "ready" and score["score"] is None:
                     raise ValueError("Ready score is missing")
-    json.dumps(payload, allow_nan=False)
+    if products is None:
+        json.dumps(payload, allow_nan=False)
 
 
 def publish(database, snapshot):
@@ -489,7 +552,8 @@ def publish(database, snapshot):
         ).fetchone()
         if not row:
             raise ValueError("Unknown snapshot")
-        validate_payload(row[0])
+        split = "parts" in row[0]
+        validate_payload(row[0], parts.stream(conn, snapshot, "products") if split else None)
         current = conn.execute(
             "SELECT b.as_of FROM current_calculation c JOIN calculation_builds b USING(build_id)"
         ).fetchone()
@@ -508,13 +572,53 @@ def publish(database, snapshot):
     return {"published_snapshot": str(snapshot), "expired_builds": expired}
 
 
+def write(conn, build_id, payload, config, persist):
+    """Store a built payload as its head and parts (parts.py), one part at a time.
+
+    Each product group is made JSON-ready, validated, persisted (persist(conn, payload) writes
+    its typed rows) and slimmed (slim.py) on its own, and so is each part of the runs, so the
+    whole payload is never copied or serialized at once; payload["products"] is replaced in
+    place by the slimmed groups. Returns the slimmed payload as read() assembles it.
+    """
+    head = jsonable({k: v for k, v in payload.items() if k not in parts.KINDS})
+    validate_payload(head, ())
+    groups, rows = payload["products"], []
+    for position, group in enumerate(groups):
+        group = jsonable(group)
+        validate_payload(head, [group])
+        persist(conn, head | {"products": [group], "overlap": []})
+        groups[position] = group = slim({"products": [group]}, config)["products"][0]
+        rows.append(("product", position, group["id"], group["product_id"], group["cohort"], group))
+    persist(conn, head | {"products": []})
+    runs = [jsonable(chunk) for chunk in parts.chunks(payload["runs"])]
+    rows += [("runs", n, f"runs:{n}", None, None, chunk) for n, chunk in enumerate(runs)]
+    head["parts"] = {"products": len(groups), "runs": len(runs)}
+    text, hashes = parts.head_text(head), [digest(head)]
+    partition(conn, build_id, "calculated_snapshot_parts")
+    columns = "build_id,kind,position,part_id,product_id,cohort,content_hash,part"
+    with conn.cursor().copy(f"COPY calculated_snapshot_parts({columns}) FROM STDIN") as copy:
+        for *row, part in rows:
+            hashes.append(digest(part))
+            copy.write_row((build_id, *row, hashes[-1], json.dumps(part, allow_nan=False)))
+    conn.execute(
+        "INSERT INTO calculated_snapshots VALUES (%s,%s,%s::jsonb)",
+        (build_id, parts.content_hash(hashes), text),
+    )
+    return parts.assemble(head, groups, [run for chunk in runs for run in chunk])
+
+
 def export(database, path, snapshot="current"):
-    payload = read(database, snapshot)
-    if payload is None:
-        raise ValueError("No published snapshot")
+    """Write the snapshot's payload as indented JSON, reading its parts a few at a time."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n")
+    with connect(database) as conn:
+        conn.execute("SET TRANSACTION READ ONLY")
+        build_id = _build(conn, snapshot)
+        query = "SELECT FROM calculated_snapshots WHERE build_id=%s"
+        if build_id is None or not conn.execute(query, (build_id,)).fetchone():
+            raise ValueError("No published snapshot")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        with temporary.open("w") as out:
+            snapshot_id = parts.export(conn, build_id, out)
     temporary.replace(path)
-    return {"snapshot_id": payload["snapshot_id"], "path": str(path)}
+    return {"snapshot_id": snapshot_id, "path": str(path)}

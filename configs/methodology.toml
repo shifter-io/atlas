@@ -17,6 +17,8 @@ score_valid_hours = 24
 # operator-skipped or killed batches are never slots and never count against the provider. A slot
 # is filled by a run with at least one request, also when every request failed: a provider that is
 # down is data (filled and down: it lowers success and uptime), not a gap.
+# sample_limit is unused: windows no longer carry ip_samples. It stays so that the methodology id
+# (a digest of these settings) does not change.
 sample_limit = 50
 # The one target every latency figure is measured on: light-load and under-load latency, the speed
 # score, breakdown latency and the load factor. Other targets count for success, blocks,

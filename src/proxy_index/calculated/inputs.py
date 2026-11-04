@@ -27,6 +27,7 @@ def tested_by_product(tested):
 def previous_products(previous, as_of):
     """The previous snapshot's products by id (none if it is newer than as_of).
 
+    previous is parts.previous(): as_of, the methodology id and each group's id and scores only.
     Their scores are stamped with the previous methodology id where they lack one.
     """
     if not previous or datetime.fromisoformat(previous["as_of"]) > as_of:

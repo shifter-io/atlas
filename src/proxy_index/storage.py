@@ -955,8 +955,8 @@ def migrate(credentials_file):
     turn; v5 to v10 start at the step for their version (v7 and v9 only add a table, v8 moves
     names into the shared lists, v10 adds the batch kind browser). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
-    (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build) and
-    v6 → v7 (breakdown names in the shared lists); each step's rows are verified right after it.
+    (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
+    v6 → v7 (shared breakdown names), v7 → v8 (snapshot parts); each step is verified after it.
     A v6 or later database with an older calculated layer starts at its step. Every rebuilt pool,
     scope, bucket and run summary, every test batch, location, network and per-IP enrichment, and
     every calculated window, breakdown and score, must equal its original.
@@ -990,7 +990,7 @@ def migrate(credentials_file):
         # A v6 to v10 database may already carry the current calculated layer, and a v6 or
         # later one a calculated v3 to v6 layer (later is its version, else None).
         upgraded = layered and start >= 6 and layers == current_layer
-        known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in (3, 4, 5, 6)}
+        known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in range(3, store.SCHEMA_VERSION)}
         later = known.get(layers[0]) if layered and start >= 6 and len(layers) == 1 else None
         expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
         if layered and not upgraded and not later and layers != expected:
@@ -998,7 +998,7 @@ def migrate(credentials_file):
                 "Only an unmodified calculated v1 schema can be migrated in place"
                 if start == 4
                 else "The calculated schema differs from this release; only an unmodified "
-                "calculated v2, v3, v4, v5 or v6 schema can be migrated in place"
+                "calculated v2 to v7 schema can be migrated in place"
             )
         checks = {}
         if start == 4:
@@ -1023,7 +1023,7 @@ def migrate(credentials_file):
         if layered and not upgraded and not later:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
         steps = []
-        for n in (3, 4, 5, 6):  # calculated v3 → v4 up to v6 → v7, from the layer's step
+        for n in range(3, store.SCHEMA_VERSION):  # calculated v3 → v4 up to v7 → v8, from its step
             if layered and not upgraded and (later or n) <= n:
                 conn.execute(getattr(store, f"V{n}_SNAPSHOT"))
                 conn.execute((root / f"calculated/migrate_v{n}_v{n + 1}.sql").read_text())
