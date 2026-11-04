@@ -462,7 +462,7 @@ def test_recovery_seals_rebuilds_and_cleans_but_never_deletes_unconfirmed(tmp_pa
     def seal_run(run_dir, batch, summary, sha):
         return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=outbox)
 
-    assert recover(runs, outbox, seal_run) == (1, 0)
+    assert recover(runs, outbox, seal_run) == (1, 0, 0)
     assert not finished.exists() and not half.exists() and not sealed.exists()
     assert not killed.exists() and not bc.outbox_paths(outbox, ids[3])[0].exists()
     assert not confirmed.exists() and not (outbox / f"{ids[0]}.json.partial").exists()
@@ -480,7 +480,7 @@ def test_recovery_keeps_a_run_it_cannot_seal(tmp_path, caplog):
     def seal_run(run_dir, batch, summary, sha):
         return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=tmp_path / "outbox")
 
-    assert recover(tmp_path / "runs", tmp_path / "outbox", seal_run) == (0, 1)
+    assert recover(tmp_path / "runs", tmp_path / "outbox", seal_run) == (0, 1, 0)
     assert run_dir.exists() and "kept unsealed (JSONDecodeError)" in caplog.text
 
 
@@ -501,7 +501,7 @@ def test_an_unreadable_sidecar_beside_a_run_never_stops_recovery(tmp_path, caplo
     def seal_run(run_dir, batch, summary, sha):
         return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=outbox)
 
-    assert recover(tmp_path / "runs", outbox, seal_run) == (0, 1)
+    assert recover(tmp_path / "runs", outbox, seal_run) == (0, 1, 0)
     assert stuck.exists() and archive.exists() and side.read_text() == sidecar
     assert not other.exists() and [b.run_id for b in Outbox(outbox).pending()] == [ids[1]]
     assert f"run {ids[0]} kept unsealed (" in caplog.text  # its error type only
@@ -521,7 +521,7 @@ def test_a_sidecar_that_cannot_be_removed_never_stops_recovery(tmp_path, monkeyp
 
     monkeypatch.setattr(Path, "unlink", refuse)
     caplog.set_level(logging.WARNING)
-    assert recover(tmp_path / "runs", outbox, lambda *a: None) == (0, 0)
+    assert recover(tmp_path / "runs", outbox, lambda *a: None) == (0, 0, 0)
     assert orphan.exists() and "kept (PermissionError)" in caplog.text
 
 
@@ -536,7 +536,7 @@ def test_a_sidecar_whose_tar_gz_differs_is_rebuilt_from_its_run(tmp_path):
     def seal_run(run_dir, batch, summary, sha):
         return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=outbox)
 
-    assert recover(tmp_path / "runs", outbox, seal_run) == (0, 0)
+    assert recover(tmp_path / "runs", outbox, seal_run) == (0, 0, 0)
     [rebuilt] = Outbox(outbox).pending()
     assert not run_dir.exists() and rebuilt.sha256 == bundle.sha256
     assert hashlib.sha256(rebuilt.archive.read_bytes()).hexdigest() == bundle.sha256
@@ -572,7 +572,7 @@ def test_a_half_run_is_deleted_at_start_and_nothing_finished_or_unconfirmed(tmp_
         sealed.append(run_dir.name)
         raise AssertionError("no run here is sealed")
 
-    assert recover(runs, outbox, seal_run) == (2, 2)
+    assert recover(runs, outbox, seal_run) == (2, 2, 0)
     assert not half.exists() and not bare.exists() and sealed == []
     assert linked.exists() and (factless / "summary.json").exists()
     assert f"run {factless.name} kept unsealed (no {rawfiles.BATCH_FILE})" in caplog.text
@@ -583,3 +583,27 @@ def test_a_half_run_is_deleted_at_start_and_nothing_finished_or_unconfirmed(tmp_
         assert caplog.text.count(f"browser_run_discarded: run {run_id} ") == 1
     guard.every = 0
     assert not guard.full()
+
+
+def test_a_half_run_that_cannot_be_deleted_counts_discard_failed(tmp_path, monkeypatch, caplog):
+    """BP-HOST-FIXES-1 (BP-DATA-HALF-1 review N1): a half run whose delete fails is counted
+    `discard_failed`, not `unsealed`, and the next start deletes it."""
+    runs, outbox = tmp_path / "runs", tmp_path / "outbox"
+    half = make_run(tmp_path, RUN_ID)
+    (half / "summary.json").unlink()
+
+    def refuse(path, *args, **kwargs):
+        raise PermissionError("read-only")
+
+    def seal_run(*args):
+        raise AssertionError("a half run is never sealed")
+
+    caplog.set_level(logging.INFO)
+    with monkeypatch.context() as patched:
+        patched.setattr(rawfiles.shutil, "rmtree", refuse)
+        assert recover(runs, outbox, seal_run) == (0, 0, 1)
+    assert half.exists() and f"browser_run_discard_failed: run {RUN_ID} (PermissionError)" in (
+        caplog.text
+    )
+    assert "browser_recover: sealed=0 discarded=0 kept=0 discard_failed=1" in caplog.text
+    assert recover(runs, outbox, seal_run) == (1, 0, 0) and not half.exists()
