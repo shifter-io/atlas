@@ -21,7 +21,13 @@ CASES = cases(c.LINKEDIN_PUBLIC)
 
 
 def test_linkedin_public_has_its_cases():
-    assert {path.stem for path in CASES} == {"ok", "ok_login_like_slug", "authwall", "status_999", "no_name"}
+    assert {path.stem for path in CASES} == {
+        "ok",
+        "ok_login_like_slug",
+        "authwall",
+        "status_999",
+        "no_name",
+    }
 
 
 @pytest.mark.parametrize("path", CASES, ids=case_id)
