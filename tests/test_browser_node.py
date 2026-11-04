@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import shutil
+import ssl
 import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from helpers import self_signed
 from test_browser_driver import UA, PWBrowser, fake_modules
 from test_browser_transport import FakeBrowser, Script
 
@@ -560,12 +562,32 @@ def test_serving_disabled_settings_runs_nothing(tmp_path, monkeypatch):
         served.append(host)
 
     monkeypatch.setattr(host_module, "serve", fake_serve)
-    assert run_cli(state, "--orchestrator", "http://orchestrator.invalid") == 0
+    assert run_cli(state, "--orchestrator", "https://orchestrator.invalid") == 0
     assert served == [None]
     private(state / "settings.toml", SETTINGS)
-    assert run_cli(state, "--orchestrator", "http://orchestrator.invalid") == 0
+    assert run_cli(state, "--orchestrator", "https://orchestrator.invalid") == 0
     assert isinstance(served[1], BrowserHost) and served[1].name == "browser-1"
     served[1].log.close()
+
+
+def test_the_host_pins_the_managers_certificate_and_refuses_plain_http(
+    tmp_path, monkeypatch, capsys
+):
+    state = make_state(tmp_path)
+    install_fake_release(state)
+    served = []
+
+    async def fake_serve(host):
+        served.append(host)
+
+    monkeypatch.setattr(host_module, "serve", fake_serve)
+    assert run_cli(state, "--orchestrator", "http://203.0.113.9:8080") == 2
+    assert "plain http:// is refused" in capsys.readouterr().err and served == []
+    cert, _ = self_signed(tmp_path, "manager")
+    assert run_cli(state, "--orchestrator", "https://203.0.113.9:8443", "--ca-file", str(cert)) == 0
+    (host,) = served
+    assert all(isinstance(agent.tls, ssl.SSLContext) for agent in host.agents) and host.agents
+    host.log.close()
 
 
 async def test_serve_stops_on_sigterm(tmp_path):

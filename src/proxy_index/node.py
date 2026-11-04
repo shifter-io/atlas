@@ -9,6 +9,8 @@ uploads it as tar.gz to /v1/results with retries, and deletes it once accepted. 
 out every ten seconds.
 
 Credentials never leave the node and are never logged: errors are reported by type only.
+Every request verifies the orchestrator's TLS as `tls` says (node_tls.client_tls: the pinned
+manager certificate, or the public CAs).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import logging
 import os
 import random
 import shutil
+import ssl
 import stat
 import sys
 import tempfile
@@ -131,6 +134,9 @@ class Active:
 class NodeAgent:
     # The targets a node runs; a subclass (the browser host, browser/node.py) replaces them.
     registry: TargetRegistry = registry
+    # The session's TLS check (node_tls.client_tls): True for the public CAs, or the context
+    # pinning the manager's certificate; set before run().
+    tls: ssl.SSLContext | bool = True
 
     def __init__(
         self,
@@ -204,7 +210,8 @@ class NodeAgent:
         self.work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         # Results are ingested before the reply, which can take minutes for a large census.
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=1800)
-        async with aiohttp.ClientSession(timeout=timeout) as self.session:
+        connector = aiohttp.TCPConnector(ssl=self.tls)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as self.session:
             while not stop.is_set():
                 try:
                     await self.register()
@@ -212,7 +219,11 @@ class NodeAgent:
                 except Rejected:
                     raise
                 except (aiohttp.ClientError, OSError, TimeoutError) as exc:
-                    log.warning("register failed (%s); retrying", type(exc).__name__)
+                    if isinstance(exc, aiohttp.ClientConnectorCertificateError):
+                        log.error("register refused: the orchestrator's TLS certificate is not "
+                                  "the trusted one (--ca-file); retrying")  # fmt: skip
+                    else:
+                        log.warning("register failed (%s); retrying", type(exc).__name__)
                     with contextlib.suppress(TimeoutError):
                         await asyncio.wait_for(stop.wait(), self.poll_interval)
             beat = asyncio.create_task(self._heartbeats(stop))

@@ -44,6 +44,7 @@ from ..node import (
     resident_mb,
     rotating_policy,
 )
+from ..node_tls import client_tls
 from ..sinks import JsonSink
 from ..targets import Target, TargetRegistry, registry
 from . import rawfiles, release
@@ -597,6 +598,9 @@ def register(commands) -> None:
     parser.add_argument("--host", required=True, help="Logical host name (browser-<n>)")
     parser.add_argument("--orchestrator", help="Orchestrator base URL (not needed with --check)")
     parser.add_argument(
+        "--ca-file", help="PEM certificate to trust alone for an https orchestrator (the manager's)"
+    )
+    parser.add_argument(
         "--check", action="store_true", help="Check settings, state and browsers, then exit"
     )
     parser.add_argument("--browsers", type=int, default=1, help="Browsers --check opens")
@@ -621,6 +625,7 @@ def dispatch(args) -> int:
         return 0
     if not args.orchestrator:
         raise UserError("--orchestrator is required unless --check")
+    tls = client_tls(args.orchestrator, args.ca_file)  # refuses a URL the host must not use
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -631,5 +636,8 @@ def dispatch(args) -> int:
         log.warning("the browser settings say enabled = false: this host runs nothing")
         asyncio.run(serve(None))
         return 0
-    asyncio.run(serve(BrowserHost(settings, state, args.orchestrator, launch=launch)))
+    host = BrowserHost(settings, state, args.orchestrator, launch=launch)
+    for agent in host.agents:
+        agent.tls = tls
+    asyncio.run(serve(host))
     return 0
