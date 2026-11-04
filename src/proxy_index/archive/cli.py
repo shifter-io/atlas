@@ -4,7 +4,8 @@
 loads a day file (`--file`, or `--date` from the bucket) into a database with the same storage
 schema. `run` archives the due days now (what the orchestrator's daily `archive` job does).
 `bucket` checks that the bucket is private and versioned (`--apply` enables versioning).
-`rebuild` imports the spooled raw files of some days into a database (rawfiles.rebuild).
+`rebuild` imports the spooled raw files of some days into a database (rawfiles.rebuild) and,
+with `--spaces-file`, the browser bundles archived in Spaces for those days.
 Refusals exit 2 and change nothing.
 """
 
@@ -38,7 +39,9 @@ def register(commands) -> None:
     run.add_argument("--work-dir", type=Path, required=True)
     run.add_argument("--max-days", type=int, default=3)
     rebuild = actions.add_parser("rebuild", help="Import the spooled raw files of some days")
-    rebuild.add_argument("--spool", type=Path, required=True, help="raw.spool_dir")
+    rebuild.add_argument("--spool", type=Path, help="raw.spool_dir")
+    rebuild.add_argument("--spaces-file", type=Path, help="Also the browser bundles in Spaces")
+    rebuild.add_argument("--browser-prefix", default="browser-files", help="browser.archive_prefix")
     rebuild.add_argument("--from", dest="first", type=date.fromisoformat, required=True)
     rebuild.add_argument("--to", dest="last", type=date.fromisoformat, required=True)
     rebuild.add_argument("--database-file", type=Path, required=True)
@@ -94,9 +97,18 @@ def _bucket(args) -> dict:
 
 
 def _rebuild(args) -> dict:
-    from .rawfiles import rebuild
+    from .rawfiles import rebuild, rebuild_browser
+    from .spaces import Spaces
 
-    return rebuild(args.spool, args.database_file, args.first, args.last)
+    if not args.spool and not args.spaces_file:
+        raise ArchiveError("rebuild needs --spool, --spaces-file or both")
+    report = rebuild(args.spool, args.database_file, args.first, args.last) if args.spool else {}
+    if args.spaces_file:
+        spaces = Spaces.from_file(args.spaces_file)
+        report["browser"] = rebuild_browser(
+            spaces, args.database_file, args.browser_prefix, args.first, args.last
+        )
+    return report
 
 
 HANDLERS = {"restore": _restore, "run": _run, "bucket": _bucket, "rebuild": _rebuild}
