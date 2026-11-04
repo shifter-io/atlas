@@ -1,0 +1,20 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "Log in or sign up",
+    "counts": {
+      "#prompt-textarea": 1,
+      "div[role=\"dialog\"]:has-text(\"Log in or sign up\")": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_dialog",
+    "asked": false
+  }
+}

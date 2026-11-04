@@ -1,0 +1,19 @@
+{
+  "page": {
+    "url": "https://consent.google.com/ml",
+    "status": 200,
+    "title": "Before you continue to Google Search",
+    "text_head": "Before you continue to Google. We use cookies and data to deliver and maintain services.",
+    "counts": {
+      "form[action*=\"consent.google\"]": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "consent_page",
+    "asked": false
+  }
+}

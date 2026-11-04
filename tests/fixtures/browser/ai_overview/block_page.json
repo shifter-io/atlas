@@ -1,0 +1,17 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 403,
+    "title": "Error 403 (Forbidden)!!1",
+    "text_head": "403. That's an error. Your client does not have permission.",
+    "counts": {},
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "block_marker",
+    "asked": false
+  }
+}
