@@ -106,7 +106,8 @@ func mergeWindow(merged map[string]map[string]*PlaceRow, row *store.SnapshotRow,
 	typed := capturedPlaceRows(row, p, w)
 	for _, d := range placeDimensions {
 		if rows, ok := typed[d]; ok {
-			for _, r := range rows {
+			for i := range rows {
+				r := rows[i].PlaceRow(d)
 				mergePlace(merged[d], d, PlaceRow{CountryCode: r.CountryCode, Country: r.Country, RegionCode: r.RegionCode,
 					Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: Num(r.Ips), Requests: Num(r.Completed),
 					Successes: Num(r.Successes), LatencyP50: Num(r.P50)}, Num(r.Asn))

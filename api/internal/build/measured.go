@@ -57,12 +57,7 @@ func productCensus(p *snap.Product) *censusTotals {
 }
 
 // proxyKind maps a snapshot product kind to the site's category.
-func proxyKind(kind string) string {
-	if model.IsProxyKind(kind) {
-		return kind
-	}
-	return "residential"
-}
+func proxyKind(kind string) string { return snap.ProxyKind(kind) }
 
 // minutesAgo is the age of a stamp in minutes before the reference time.
 // presentation.ts divides milliseconds by 60 here, which is not minutes; the

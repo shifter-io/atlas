@@ -23,7 +23,6 @@ import (
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Version is one immutable generation of responses.
@@ -62,23 +61,6 @@ type Source interface {
 	// LoadEvents reads only the events and the newest event id (store.LoadEvents).
 	LoadEvents(ctx context.Context) (*store.Inputs, error)
 	Events(ctx context.Context, f store.EventFilter) ([]store.Event, error)
-}
-
-// DBSource reads through a read-only pool.
-type DBSource struct{ Pool *pgxpool.Pool }
-
-func (d DBSource) Fingerprint(ctx context.Context) (store.Fingerprint, error) {
-	return store.ReadFingerprint(ctx, d.Pool)
-}
-
-func (d DBSource) Load(ctx context.Context) (*store.Inputs, error) { return store.Load(ctx, d.Pool) }
-
-func (d DBSource) LoadEvents(ctx context.Context) (*store.Inputs, error) {
-	return store.LoadEvents(ctx, d.Pool)
-}
-
-func (d DBSource) Events(ctx context.Context, f store.EventFilter) ([]store.Event, error) {
-	return store.QueryEvents(ctx, d.Pool, f)
 }
 
 // Options configure a Server.

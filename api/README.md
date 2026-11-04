@@ -120,6 +120,23 @@ is byte for byte what it was. A build whose stored product rows differ from the 
 count, or whose stored point is off its window's 5-minute grid, fails the rebuild (the
 old answers stay served). The `runs` rows are not read: no answer uses them.
 
+The long lists are read from the typed rows (`internal/store/lists.go`): before
+calculated schema v9, a build's `calculated_breakdowns` partition (by `result_id`);
+from v9 (contract K2), the shared `calculated_list_rows` (by `list_id`, named by
+`calculated_windows.list_id` or by a payload v3 window's `lists.id`). One query per
+set of ids filters `list_id = ANY($1) AND dimension = ANY($2)` on the stored
+dimension code, by the primary key, and the rows' JSON is written in Go. `serve`
+keeps the rows of every list a current window references between rebuilds
+(`store.Lists`) and reads only the ids it does not hold; a list no window
+references any more is dropped. Country, region, city, ASN and country x ASN rows
+are held whole for every list; city x ASN rows only for each provider's product
+group per proxy kind (the group whose raw result `measurement` serves). Payload v3
+windows get their arrays back from these rows, so they read as their v2 form (see
+`FIELDS.md`, "Typed lists"). Before v9 the read locks the `calculated_breakdowns`
+parent (`ACCESS SHARE`, before its snapshot), so a publication that drops the old
+build's partition waits for the read instead of leaving it without rows; v9 deletes
+lists instead, which the read's snapshot keeps seeing.
+
 `source` is `"measured"` on providers, tape rows, changelog, reviews and community
 runs. On targets it is `"measured"` for framework targets and `"catalog"` for
 editorial ones.

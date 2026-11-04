@@ -219,10 +219,10 @@ type SnapshotRow struct {
 	// before calculated v8 reads (parts.go), without runs for a build stored
 	// in parts.
 	Payload []byte
-	full    []byte // Payload with its capped long lists restored (longtail.go)
-	// Places is every place list of a capped snapshot, read whole from the
-	// build's typed rows (placerows.go); nil when nothing was capped.
-	Places map[PlaceWindow][]PlaceRow
+	full    []byte // Payload with its lists put back (longtail.go)
+	// Places is each target-free window's typed list (lists.go) of a slimmed
+	// snapshot; nil when nothing was slimmed.
+	Places map[PlaceWindow]*List
 }
 
 // Event is one public.test_events row in the framework's /v1/events shape.
@@ -412,15 +412,43 @@ func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	return in, nil
 }
 
-// Load reads every input in one consistent read-only snapshot. Only the
+// Load reads every input in one consistent read-only snapshot, every list
+// afresh (LoadLists).
+func Load(ctx context.Context, db TxBeginner) (*Inputs, error) { return LoadLists(ctx, db, nil) }
+
+// afterSnapshot, when set, runs once the current snapshot row is read, and
+// lockBreakdowns off skips the lock below: tests of the concurrent reads.
+var (
+	afterSnapshot  func()
+	lockBreakdowns = true
+)
+
+// LoadLists reads every input in one consistent read-only snapshot, holding
+// the typed lists in lists between calls (nil: none held). Only the
 // framework schema is required; site tables that are missing read as empty
 // (Inputs.SiteGaps names them).
-func Load(ctx context.Context, db TxBeginner) (*Inputs, error) {
+//
+// Before K2 a build's typed rows are a calculated_breakdowns partition, which
+// a publication can drop: the snapshot would still see the build as current
+// and find no rows. The read therefore locks the calculated_breakdowns parent
+// (ACCESS SHARE, ONLY: no partition rights needed) before its snapshot is
+// taken; dropping a partition locks its parent exclusively, so it waits. K2 deletes
+// lists instead, and the snapshot keeps seeing them.
+func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error) {
+	partitioned, err := hasBreakdowns(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	if partitioned && lockBreakdowns {
+		if _, err := tx.Exec(ctx, `LOCK TABLE ONLY public.calculated_breakdowns IN ACCESS SHARE MODE`); err != nil {
+			return nil, fmt.Errorf("lock calculated_breakdowns: %w", err)
+		}
+	}
 	in := &Inputs{}
 	l, err := ReadSiteLayout(ctx, tx)
 	if err != nil {
@@ -543,10 +571,10 @@ func Load(ctx context.Context, db TxBeginner) (*Inputs, error) {
 				}
 			}
 			in.Snapshot = &s
-			if err := s.readLongTail(ctx, tx); err != nil {
-				return err
+			if afterSnapshot != nil {
+				afterSnapshot()
 			}
-			return s.readPlaceRows(ctx, tx)
+			return s.readLists(ctx, tx, lists)
 		},
 		func() error { return in.loadEvents(ctx, tx) },
 	}
@@ -556,4 +584,18 @@ func Load(ctx context.Context, db TxBeginner) (*Inputs, error) {
 		}
 	}
 	return in, nil
+}
+
+// hasBreakdowns reports whether the database keeps typed rows in
+// calculated_breakdowns (before K2), in a transaction of its own: LoadLists
+// must lock the table before its snapshot.
+func hasBreakdowns(ctx context.Context, db TxBeginner) (bool, error) {
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	var ok bool
+	err = tx.QueryRow(ctx, `SELECT to_regclass('public.calculated_breakdowns') IS NOT NULL`).Scan(&ok)
+	return ok, err
 }

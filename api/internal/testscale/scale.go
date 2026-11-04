@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
@@ -73,7 +74,7 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 	}
 	template := doc["products"].([]any)[0].(map[string]any)
 	products := []any{}
-	places := map[store.PlaceWindow][]store.PlaceRow{}
+	places := map[store.PlaceWindow]*store.List{}
 	for n := range shape.Networks {
 		for c := range shape.Countries {
 			id := n*1000 + c + 1
@@ -254,24 +255,32 @@ func fill(w map[string]any, shape Shape, n, c int) {
 	pool["list_entries"] = map[string]any{"geo": shape.Tail, "countries_breakdown": shape.Exits, "asns_breakdown": shape.Tail}
 }
 
-// tails is the typed region, city and ASN rows of one window.
-func tails(shape Shape, n int) []store.PlaceRow {
-	out := []store.PlaceRow{}
+// tails is the typed region, city and ASN rows of a network's windows, one
+// list each network shares (built once).
+func tails(shape Shape, n int) *store.List {
+	key := [2]int{shape.Tail, n}
+	if l, ok := tailLists.Load(key); ok {
+		return l.(*store.List)
+	}
+	rows := map[string][]store.ListRow{}
 	for i := range shape.Tail {
 		p := place(i + n)
 		cc, country, rc, region, city := p["country_code"].(string), p["country"].(string), p["region_code"].(string), p["region"].(string), p["city"].(string)
 		nw := network(i + n)
-		name := nw["name"].(string)
-		ips, completed, successes := float64(1000-i), float64(3*(1000-i)), float64(2*(1000-i))
-		out = append(out,
-			store.PlaceRow{Dimension: "region", CountryCode: &cc, Country: &country, RegionCode: &rc, Region: &region, Asn: nan(), Ips: ips, Completed: completed, Successes: successes, P50: float64(400 + i)},
-			store.PlaceRow{Dimension: "city", CountryCode: &cc, Country: &country, RegionCode: &rc, Region: &region, City: &city, Asn: nan(), Ips: ips, Completed: completed, Successes: successes, P50: float64(400 + i)},
-			store.PlaceRow{Dimension: "asn", Asn: float64(64512 + i + n), Name: &name, Ips: ips, Completed: completed, Successes: successes, P50: float64(400 + i)})
+		name, asn := nw["name"].(string), int64(64512+i+n)
+		ips := int64(1000 - i)
+		counters := store.ListRow{Ips: ips, Observations: 2 * ips, Completed: 3 * ips, Successes: 2 * ips, P50: int32(400 + i), P90: -1, P99: -1}
+		r, g, a := counters, counters, counters
+		r.Place = &store.Place{CountryCode: &cc, Country: &country, RegionCode: &rc, Region: &region}
+		g.Place = &store.Place{CountryCode: &cc, Country: &country, RegionCode: &rc, Region: &region, City: &city}
+		a.Network = &store.Network{Asn: &asn, Name: &name}
+		rows["region"], rows["city"], rows["asn"] = append(rows["region"], r), append(rows["city"], g), append(rows["asn"], a)
 	}
-	return out
+	l, _ := tailLists.LoadOrStore(key, store.NewList(rows))
+	return l.(*store.List)
 }
 
-func nan() float64 { var z float64; return z / z }
+var tailLists sync.Map
 
 // fixture is the every-request fixture's payload.
 func fixture() ([]byte, error) {

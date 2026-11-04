@@ -197,7 +197,8 @@ func placeValues(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[place
 	typed := capturedPlaceRows(s, p, w)
 	for _, dimension := range placeDimensions {
 		if rows, ok := typed[dimension]; ok {
-			for _, r := range rows {
+			for i := range rows {
+				r := rows[i].PlaceRow(dimension)
 				add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, Num(r.Asn), Num(r.Ips), Num(r.Successes), Num(r.P50))
 			}
 			continue
@@ -212,17 +213,14 @@ func placeValues(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[place
 // capturedPlaceRows is, per place list the snapshot capped, the build's typed
 // rows of that list when their count is the list's recorded full count (as
 // store/longtail.go restores lists). Other lists are used as published.
-func capturedPlaceRows(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[string][]store.PlaceRow {
+func capturedPlaceRows(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[string][]store.ListRow {
 	if s == nil || !p.ProductID.OK() || !w.Period.Hours.OK() {
 		return nil
 	}
-	rows := s.Places[store.PlaceWindow{Product: int64(p.ProductID), Cohort: p.Cohort, Hours: int64(w.Period.Hours)}]
-	byDimension := map[string][]store.PlaceRow{}
-	for _, r := range rows {
-		byDimension[r.Dimension] = append(byDimension[r.Dimension], r)
-	}
-	out := map[string][]store.PlaceRow{}
-	for dimension, list := range byDimension {
+	l := s.Places[store.PlaceWindow{Product: int64(p.ProductID), Cohort: p.Cohort, Hours: int64(w.Period.Hours)}]
+	out := map[string][]store.ListRow{}
+	for _, dimension := range placeDimensions {
+		list := l.Rows(dimension)
 		n, recorded := w.BreakdownEntries[dimension]
 		if recorded && len(w.Breakdowns[dimension]) < n && len(list) == n {
 			out[dimension] = list

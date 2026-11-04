@@ -3,7 +3,6 @@ package build
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/rand"
 	"sort"
 	"strconv"
@@ -247,17 +246,16 @@ func TestPlaceRanksMergeKeysAndPreferWholeTypedLists(t *testing.T) {
 	})
 	cappedProduct := capped.Snap["residential"]
 	cappedProduct.ProductID = 8
-	missing := math.NaN()
-	typed := &store.SnapshotRow{Places: map[store.PlaceWindow][]store.PlaceRow{
-		{Product: 8, Cohort: "pool", Hours: 24}: {
-			{Dimension: "city", CountryCode: rankStr("RO"), RegionCode: rankStr("B"), Region: rankStr("Bucharest"),
-				City: rankStr("Bucharest"), Ips: 20, Successes: 7, P50: 150, Asn: missing},
-			{Dimension: "city", CountryCode: rankStr("RO"), RegionCode: rankStr("B"), Region: rankStr("Bucharest"),
-				City: rankStr("Cluj"), Ips: 3, Successes: missing, P50: missing, Asn: missing},
+	bucharest := &store.Place{CountryCode: rankStr("RO"), RegionCode: rankStr("B"), Region: rankStr("Bucharest"), City: rankStr("Bucharest")}
+	cluj := &store.Place{CountryCode: rankStr("RO"), RegionCode: rankStr("B"), Region: rankStr("Bucharest"), City: rankStr("Cluj")}
+	asn := func(n int64) *store.Network { return &store.Network{Asn: &n} }
+	typed := &store.SnapshotRow{Places: map[store.PlaceWindow]*store.List{
+		{Product: 8, Cohort: "pool", Hours: 24}: store.NewList(map[string][]store.ListRow{
+			"city": {{Place: bucharest, Ips: 20, Completed: 9, Successes: 7, P50: 150},
+				{Place: cluj, Ips: 3, Completed: -1, Successes: -1, P50: -1}},
 			// Two ASN rows where three are recorded: the published list stays.
-			{Dimension: "asn", Asn: 8708, Ips: 50, Successes: missing, P50: missing},
-			{Dimension: "asn", Asn: 9050, Ips: 50, Successes: missing, P50: missing},
-		}}}
+			"asn": {{Network: asn(8708), Ips: 50, Successes: -1, P50: -1}, {Network: asn(9050), Ips: 50, Successes: -1, P50: -1}},
+		})}}
 	addRanks([]*entry{merged, capped, plain}, typed)
 	key := "RO|B|Bucharest|Bucharest"
 	for _, c := range []struct {

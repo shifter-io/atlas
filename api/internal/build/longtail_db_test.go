@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
 )
 
@@ -125,9 +126,19 @@ func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[s
 func TestCappedSnapshotServesTheSameProviderAsTheWholeOne(t *testing.T) {
 	whole, capped, products := snapshotVariants(t)
 	expected := measuredOnly(t, whole)
-	db := testdb.New(t)
-	storeTypedRows(t, db, db.Publish(t, capped), products)
-	res := buildFrom(t, db)
+	for _, k2 := range []bool{false, true} {
+		t.Run(map[bool]string{false: "calculated_breakdowns", true: "lists"}[k2], func(t *testing.T) {
+			db := testdb.New(t)
+			storeTypedRows(t, db, db.Publish(t, capped), products)
+			if k2 {
+				db.MoveToLists(t)
+			}
+			sameAsWhole(t, expected, buildFrom(t, db))
+		})
+	}
+}
+
+func sameAsWhole(t *testing.T, expected, res *build.Result) {
 	want, got := generic(t, expected.Details["shifter"]), generic(t, res.Details["shifter"])
 	if !reflect.DeepEqual(want, got) {
 		var diffs []string

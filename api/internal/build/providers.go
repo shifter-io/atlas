@@ -201,18 +201,7 @@ func realProviders(in *store.Inputs, s *snap.Snapshot, c *catalog, targets []mod
 func realProvider(id string, row *store.ProviderRow, slug, name string, products []*snap.Product, frameworkProducts []string,
 	s *snap.Snapshot, c *catalog, targets []model.TargetMeta, slugOfProduct map[int]string, nameOf map[string]string) (*entry, error) {
 	// One snapshot product per category: the one with the most 30d requests.
-	byKind := map[string]*snap.Product{}
-	kinds := []string{}
-	for _, p := range products {
-		k := proxyKind(p.Kind)
-		cur, ok := byKind[k]
-		if !ok {
-			kinds = append(kinds, k)
-		}
-		if !ok || p.Window("30d").Metrics.Completed > cur.Window("30d").Metrics.Completed {
-			byKind[k] = p
-		}
-	}
+	byKind, kinds := snap.ByKind(products)
 	primary := ""
 	if row != nil && row.PrimaryKind != nil && byKind[*row.PrimaryKind] != nil {
 		primary = *row.PrimaryKind

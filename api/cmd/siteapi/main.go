@@ -121,7 +121,7 @@ func serve(args []string) error {
 	defer pool.Close()
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
-	srv := server.New(server.DBSource{Pool: pool}, server.Options{Interval: *interval, DataPeriod: *dataPeriod, CacheFloor: *cacheFloor})
+	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: *interval, DataPeriod: *dataPeriod, CacheFloor: *cacheFloor})
 	if _, err := srv.Refresh(ctx, true); err != nil {
 		return fmt.Errorf("initial build: %w", err)
 	}

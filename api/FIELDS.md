@@ -524,3 +524,31 @@ and `bands` stay empty there, since uptime is a per-product fact.
  "success":[{"t":1435,"v":0.98}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
  "pool":[{"t":1435,"v":212}],"bands":[]}
 ```
+
+## Typed lists (API-LISTS-1)
+
+From proxy-index calculated v9 (contract K2) the whole lists are the rows of
+`public.calculated_list_rows`, keyed by `list_id`, which builds share; before it
+they are the build's `public.calculated_breakdowns` rows. *Capped snapshots* above
+still describes what is read whole; the API now reads those rows directly
+(`store/lists.go`), not through `calculated_breakdown_details`, and only for list
+ids it does not hold already. City x ASN rows are read only for each provider's
+product group per proxy kind (the most 30-day requests, `snap.ByKind`), the group
+`measurement` comes from.
+
+Payload v3 (proxy-index SNAP-LISTREF-1), as the API reads it:
+
+- A window carries `"lists": {"id": <list_id>, "entries": {<name>: <rows>}}`
+  instead of its `breakdowns` arrays and of the pool's `geo`,
+  `countries_breakdown` and `asns_breakdown` arrays. `<name>` is each list the v2
+  window carries (the six breakdowns `country`, `region`, `city`, `asn`,
+  `country_asn`, `city_asn`, and the three pool lists) and `<rows>` the number of
+  rows the v2 window kept (`slim.py`'s first N).
+- `breakdown_entries` and `pool.list_entries` (each list's full row count) stay.
+- A breakdown is the first `<rows>` rows of its dimension by position. A pool list
+  is picked from its dimension's rows as `aggregate.pool_lists()` picks it (rows
+  with IPs, most IPs first, then Python's `str()` of the row), first `<rows>` kept.
+- `schema_version` is 3. A v3 window reads exactly as its v2 form (the rows are
+  written as jsonb writes the payload), except that a group the API does not read
+  city x ASN rows for has no `city_asn` list.
+

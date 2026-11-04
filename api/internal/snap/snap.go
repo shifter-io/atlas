@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
 )
 
 type Num = jsnum.Num
@@ -428,6 +429,34 @@ func (v *Product) UnmarshalJSON(d []byte) error {
 // country of a daily test's cohort (nil for census/pulse cohorts).
 type Criteria struct {
 	Country *string `json:"country"`
+}
+
+// ProxyKind is a product's proxy category: its kind, residential when the
+// kind is not a proxy category.
+func ProxyKind(kind string) string {
+	if model.IsProxyKind(kind) {
+		return kind
+	}
+	return "residential"
+}
+
+// ByKind is, per proxy category, the product with the most 30-day completed
+// requests (the first on a tie), with the categories in first-seen order: the
+// group a provider serves for each kind.
+func ByKind(products []*Product) (map[string]*Product, []string) {
+	byKind := map[string]*Product{}
+	kinds := []string{}
+	for _, p := range products {
+		k := ProxyKind(p.Kind)
+		cur, ok := byKind[k]
+		if !ok {
+			kinds = append(kinds, k)
+		}
+		if !ok || p.Window("30d").Metrics.Completed > cur.Window("30d").Metrics.Completed {
+			byKind[k] = p
+		}
+	}
+	return byKind, kinds
 }
 
 // Window returns a window or an empty one.
