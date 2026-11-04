@@ -112,7 +112,8 @@ def test_enrichment_places_ips_in_their_country_and_leaves_a_few_unmatched():
 
 
 def test_a_pulse_has_47_to_92_distinct_rows_that_add_up_to_100_requests():
-    m = model()
+    m = model()  # scale 0.004: every country's tests are tiny, its lists at their floor
+    assert all(p.cities >= 31 and p.asns >= 5 for p in m.places)
     for lane in m.lanes:
         for hour in range(24):
             errors, rows = m.pulse(lane, 1, hour)
@@ -120,9 +121,7 @@ def test_a_pulse_has_47_to_92_distinct_rows_that_add_up_to_100_requests():
             assert sum(row[2] for row in rows) == synthetic.PULSE_REQUESTS
             assert sum(row[3] for row in rows) == synthetic.PULSE_REQUESTS - errors
             assert len({row[:2] for row in rows}) == len(rows)
-            places = m.places[lane.country]
-            assert len(rows) <= synthetic.GEO_ROWS[1]
-            assert len(rows) >= min(synthetic.GEO_ROWS[0], places.cities * places.asns)
+            assert synthetic.GEO_ROWS[0] <= len(rows) <= synthetic.GEO_ROWS[1]
     assert m.latency(0) == model().latency(0) and m.latency(0) != model(seed=8).latency(0)
 
 
