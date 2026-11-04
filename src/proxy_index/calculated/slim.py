@@ -4,7 +4,8 @@ calculate() persists the full payload into the typed tables (calculated_breakdow
 breakdown row) and stores and serves this capped copy. Every total stays exact: pool counts
 (unique_ips, countries, regions, cities, asns), shares and window metrics are computed from the
 full data before capping and are not touched here, and each capped list records how many rows it
-had, so a reader can say "showing 50 of 61,497".
+had, so a reader can say "showing 50 of 61,497". Window targets are kept whole, including each
+browser target's browser object (calculated/browser.py).
 """
 
 from __future__ import annotations

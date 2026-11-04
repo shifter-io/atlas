@@ -181,6 +181,14 @@ dcAsns = 6
 authenticity = 6
 value = 12
 
+# Group targets (browser pulse): a group target is measured over the union of its sources'
+# requests and is never scheduled itself. Each source keeps its own entry, with the group named.
+# Browser targets are per-target only: their runs never enter a network's window metrics, census
+# overlap, series, uptime, coverage, scores, fleet totals or breakdowns (calculated/browser.py),
+# so no browser target is a required target.
+[target_groups]
+ai_answers = ["ai_overview", "ai_chatgpt", "ai_gemini"]
+
 # Optional overrides: [products."provider/product"] and [targets.target_id].
 # Override weights, target_weights, peer, required_targets or eligibility settings.
 # Product settings are applied first; target settings take precedence for target scores.

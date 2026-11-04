@@ -42,8 +42,9 @@ DERIVED_TABLES = (
     "calculated_series",
 )
 PARTITIONED = ("calculated_breakdowns", "calculated_snapshot_parts")
-# Test kinds of the snapshot's traffic.by_test (load since the latency-under-load test).
-TESTS = {"census", "pulse", "load"}
+# Test kinds of the snapshot's traffic.by_test (load since the latency-under-load test; browser,
+# with estimated bytes, only when there were browser runs).
+TESTS = {"census", "pulse", "load", "browser"}
 MIGRATION_CHECKS = {
     "cohorts and readiness": "SELECT count(*) FROM v1_windows o JOIN calculated_windows w "
     "USING(result_id) LEFT JOIN cohort_criteria c ON c.cohort=w.cohort WHERE "

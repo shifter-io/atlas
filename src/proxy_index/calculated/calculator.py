@@ -17,6 +17,7 @@ from .. import detect, estimates, traffic
 from ..names import labels as shared_labels
 from ..storage import RAW_DAYS, column, connect
 from ..targets import registry
+from . import browser
 from .aggregate import (
     BREAKDOWNS,
     NETWORK,
@@ -70,7 +71,7 @@ IMPLEMENTATION_ID = hashlib.sha256(
         Path(__file__).with_name(name).read_bytes()
         for name in ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py")
     )
-    + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic))
+    + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
 ).hexdigest()
 # Census and pulse runs (linked to a test batch) of a product share one cohort, whatever the
 # country, target, node or concurrency: every provider runs them at the same moment, so they are
@@ -78,7 +79,7 @@ IMPLEMENTATION_ID = hashlib.sha256(
 SCHEDULED = "census_pulse"
 # A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
 # are display labels: every request counts for every metric whatever its role.
-BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"}
+BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
 EVENTS_IN_SNAPSHOT = 200
 # The resolution of stored buckets: a time slot is a whole number of them (and of the pulse
 # interval), so no stored request is ever placed in the wrong slot.
@@ -286,7 +287,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
         "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
         "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
     )
-    window = "WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s "
+    window = f"WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s AND {browser.NOT_BROWSER}"
     # Census runs of every product (a census still running at the cutoff ends there), and the
     # pulse and load runs they may overlap; a day of margin covers runs that began earlier.
     times = (
@@ -419,8 +420,9 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
         "SELECT br.product_id,b.country_code AS country,"
         "br.started_at,least(coalesce(br.finished_at,%(end)s),%(end)s) AS last "
         "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "WHERE b.kind<>'load' AND br.started_at IS NOT NULL AND br.started_at<%(end)s "
-        "AND coalesce(br.finished_at,%(end)s)>=%(start)s ORDER BY 1,2,br.started_at",
+        "WHERE b.kind NOT IN ('load','browser') AND br.started_at IS NOT NULL "
+        "AND br.started_at<%(end)s AND coalesce(br.finished_at,%(end)s)>=%(start)s "
+        "ORDER BY 1,2,br.started_at",
         {"start": start, "end": as_of},
     ).fetchall()
     pulse_minutes = conn.execute(
@@ -451,10 +453,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
         "events": detect.list_events(conn, before=as_of, limit=EVENTS_IN_SNAPSHOT),
         "traffic": {
             "period": {"start": start, "end": as_of},
-            "by_test": {
-                test: {k: t[k] for k in ("runs", "requests", "bytes_up", "bytes_down")}
-                for test, t in report["by_test"].items()
-            },
+            "by_test": traffic.snapshot(report["by_test"]),
         },
     }
 
@@ -588,7 +587,7 @@ def build(
     fleet_groups = defaultdict(list)
     for key, p in groups.items():
         cfg = effective(config, p["provider"], p["product"])
-        raw = bucket_groups[key]
+        raw, browser_raw = browser.split(bucket_groups[key])  # browser rows: per target only
         obs = obs_groups[key]
         p["census"] = sorted(census_groups[p["product_id"]], key=lambda c: c["country"])
         # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
@@ -664,9 +663,7 @@ def build(
                 "old": old,
                 "evidence": ev + price_rows,
             }
-            ids = set(cfg["required_targets"]) | {r["target"] for r in rows}
-            for target in sorted(ids):
-                own = [r for r in rows if r["target"] == target]
+            for target, own, extra in browser.targets(cfg, rows, browser_raw, since, as_of):
                 tm = timed(
                     own,
                     hours,
@@ -686,7 +683,7 @@ def build(
                     [b for b in batches if b["target_id"] == target], since, as_of, threshold
                 )["value"]
                 tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
-                if scheduled:
+                if scheduled and not extra:  # a browser target's coverage stays its buckets'
                     slot_coverage(
                         tm, [b for b in batches if b["target_id"] == target], since, as_of
                     )
@@ -702,6 +699,7 @@ def build(
                     "benchmark": tm,
                     "score": None,
                     "readiness": "measured" if tm["completed"] else "unavailable",
+                    **extra,  # browser targets: K-BP6 outcomes, page loads, group and sources
                 }
             member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], up, values)
             member["observed"] = m["last_observed"]
