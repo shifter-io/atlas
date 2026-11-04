@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -111,6 +111,9 @@ class Active:
 
 
 class NodeAgent:
+    # The targets a node runs; a subclass (the browser host, browser/node.py) replaces them.
+    registry: TargetRegistry = registry
+
     def __init__(
         self,
         orchestrator: str,
@@ -273,8 +276,8 @@ class NodeAgent:
         built-in echo target of the same scheme (generic_http / generic_https)."""
         target_id = assignment["target_id"]
         try:
-            registry.get(target_id)
-            return registry
+            self.registry.get(target_id)
+            return self.registry
         except ValueError:
             url = assignment.get("target_url")
             scheme = urlsplit(url).scheme if isinstance(url, str) else None
@@ -287,7 +290,20 @@ class NodeAgent:
             )
             return adhoc
 
+    def config_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        """RunConfig fields replacing the assignment's (a subclass hook); raising refuses."""
+        return {}
+
+    def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
+        """Extra keyword arguments for runner.run, such as `deadline` (a subclass hook)."""
+        return {}
+
+    def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
+        """The run's sink, whose directory upload() sends (a subclass hook)."""
+        return JsonSink(self.work_dir)
+
     def config(self, assignment: dict[str, Any]) -> RunConfig:
+        overrides = self.config_options(assignment)
         proxy = self.proxy_factory(assignment["country_code"])
         target = self.targets(assignment).get(assignment["target_id"])
         url = assignment.get("target_url")
@@ -300,7 +316,7 @@ class NodeAgent:
         for name in ("min_sample", "stall_seconds"):
             if assignment.get(name):
                 options[name] = assignment[name]
-        return RunConfig(
+        config = RunConfig(
             target=assignment["target_id"],
             proxy=proxy,
             requests=assignment.get("requests"),
@@ -314,6 +330,7 @@ class NodeAgent:
             stop_rule=assignment["stop_rule"],
             **options,
         )
+        return replace(config, **overrides) if overrides else config
 
     async def _wait_until(self, moment: datetime, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -353,6 +370,7 @@ class NodeAgent:
                 # after a restart, so a deploy just before a census slot loses nothing.
                 return
             config = self.config(assignment)
+            extra = self.run_options(assignment)
             active.concurrency = config.concurrency
             log.info(
                 "batch %s: %s %s %s from %s",
@@ -364,7 +382,7 @@ class NodeAgent:
             )
             # The first progress post marks the run (and the batch) started.
             await self._progress(active, {"requests": 0})
-            sink = JsonSink(self.work_dir)
+            sink = self.result_sink(assignment)
             try:
                 summary = await run(
                     config,
@@ -373,8 +391,8 @@ class NodeAgent:
                     progress=lambda counters: self._progress(active, counters),
                     progress_interval=self.progress_interval,
                     enricher=self.enricher,
-                    transport_factory=self.transport_factory,
                     targets=self.targets(assignment),
+                    **{"transport_factory": self.transport_factory} | extra,
                 )
             finally:
                 directory = sink.directory

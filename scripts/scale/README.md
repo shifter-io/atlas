@@ -98,7 +98,7 @@ got at least 31 cities and 5 ASNs, which adds pulse geo rows (about 10% more
 Census and load runs (off in production), `test_events`, outages, nodes, `load_references`,
 `provider_overlap` (no IP is shared between networks) and per-scope lifetime `metrics` (left
 `{}`). `cycle.py` (below) drives the hourly cycle on top of this data through the real ingest,
-release, calculate and API paths.
+node API, release, calculate and API paths.
 
 ## Tests
 
@@ -127,28 +127,43 @@ uv run python scripts/scale/cycle.py --database proxy_scale.toml --hours 24 --ou
    written as the run directory `daily ingest` imports (`summary.json`, `ips.jsonl.gz` and the
    synthetic DB-IP enrichment of the day), imported with `storage.ingest`, and its estimated hours
    are stored with `estimates.compute.estimate_run`.
-2. **release**: `estimates.release.release_due` at the hour's end (`estimates release`).
-3. **calculate**: `proxy-index calculate --as-of <hour end> --publish` in a child process.
-4. **siteapi**: with `--siteapi`, the driver polls its `/healthz` until the fingerprint names the
+2. **pulses**: `orchestrator.batches.pulse_plan` opens the hour's slot; each node (one token per
+   network and region) asks `GET /v1/work` and uploads each run as a node does,
+   `POST /v1/results` with the run directory as tar.gz (no IP rows, the geo rows of the pulse), to
+   the node API: an orchestrator app served on loopback by the driver, or `--node-api URL`.
+   That orchestrator must run without its scheduler, as the in-process app does
+   (`build_app(..., with_scheduler=False)`): a simulated hour is always in the past, so a running
+   scheduler's reaper would fail its runs as not started (`batch.start_grace_seconds`) and its
+   `pulse_plan` would open real-time slots in the scratch database.
+   Uploads go at `--pulse-rate` a second: by default the scheduled rate, one pulse per lane an
+   hour (1.25 a second at full size, so a full-size hour of pulses takes about an hour and runs
+   as several parts); `0` uploads as fast as `--pulse-concurrency` (32) allows.
+3. **release**: `estimates.release.release_due` at the hour's end (`estimates release`).
+4. **calculate**: `proxy-index calculate --as-of <hour end> --publish` in a child process.
+5. **siteapi**: with `--siteapi`, the driver polls its `/healthz` until the fingerprint names the
    new build (the API's own poll, `--interval`, is part of the wait), up to `--siteapi-timeout`
    (600 s).
 
-The daily tests carry the same IPs, places, counters and scopes the generator would have written
-for that hour; their runs carry the summary key `scale_cycle`, so `generate.py` refuses the database
+The first run sets the scratch database to the generator's pulse schedule: `generic_http` every
+60 minutes in the data set's countries, `generic_https` and the load wave off. The daily tests
+and pulses carry the same IPs, places, counters and scopes the generator would have written for
+that hour; their runs carry the summary key `scale_cycle`, so `generate.py` refuses the database
 afterwards.
 
 | Option | Default | Meaning |
 |---|---|---|
 | `--hours` | (required) | hours the cycle runs in all, over every run of the command |
 | `--first-hour` | 0 | UTC hour of the first cycle day it starts at (recorded by the first run) |
-| `--max-minutes` | 25 | a run stops at the next step boundary after this, or inside the ingest step |
+| `--max-minutes` | 25 | a run stops at the next step boundary after this, or inside the ingest and pulse steps |
 | `--out` | `scale-report` | directory of `scale-report.json` and `scale-report.md` |
+| `--pulse-rate`, `--pulse-concurrency` | scheduled rate, 32 | upload pacing |
+| `--node-api` | in-process | base URL of the node API of an orchestrator on this database that runs **without its scheduler** (see below) |
 | `--siteapi`, `--siteapi-pid`, `--siteapi-timeout` | off | the API to wait for, its pid for peak RSS |
 | `--methodology` | `configs/methodology.toml` | passed to `calculate` |
 
 Progress (finished hours with their measurements, the current hour's finished steps and parts) is
 kept in the settings row `scale.cycle`. An interrupted step is continued by the next run: ingest
-skips the tests it imported, release and calculate run again.
+skips the tests it imported, pulses upload the runs still open, release and calculate run again.
 A failed calculation stops the run with exit code 1 and is run again by the next one.
 
 ## Measurements
@@ -156,22 +171,28 @@ A failed calculation stops the run with exit code 1 and is run again by the next
 - **Statement timings.** When the database has `pg_stat_statements` installed and loaded
   (DB-CHECK-1 reports it), the change of its counters over each step: every statement of the
   database in that time, including the calculation child's and siteapi's. Otherwise the driver
-  times every psycopg `execute` and `executemany` of its own process (ingest, release) and runs
-  the calculation under `measure.py trace` to time the child's; COPY is not traced (the step's
-  time includes it) and siteapi's statements are not seen. The 20 slowest
+  times every psycopg `execute` and `executemany` of its own process (ingest, the node API,
+  release) and runs the calculation under `measure.py trace` to time the child's; COPY is not
+  traced (the step's time includes it) and siteapi's statements are not seen. The 20 slowest
   statements of each step are kept.
 - **Sizes.** After each hour: the database size and `pg_total_relation_size` of every table, its
   partitions and indexes included.
 - **Peak RSS.** Of the calculation: the largest `VmHWM` of `/proc/<pid>/status` sampled every half
   second, and the child's own maximum resident size (wait4). Of siteapi: its `VmHWM` after the
   refresh (`--siteapi-pid`), which is its peak since it started. Linux only.
-- **Times.** Each step's wall time, and per daily test (p50, p95, maximum).
+- **Times.** Each step's wall time; per daily test; per pulse upload, the seconds until the node
+  API answered (p50, p95, maximum), and the uploads per second.
+- **Pulse outcomes.** `planned` is the slot's batch runs and `uploads` the successful uploads.
+  `failed` and `failures` count failed upload *attempts* (a rejected answer, a client error or
+  timeout, a reply that is not JSON), not runs: a run whose upload failed and succeeded in a later
+  part counts in both `failed` and `uploads`. `statuses` gives every run's final state on the
+  server after the hour (for example `done`, or `failed` for an ingest the node API rejected).
 
 `scale-report.json` holds every finished hour (`hours`: steps, statements, sizes) and the hour in
 progress; `scale-report.md` has one row per hour, then the last hour's slowest statements per step
 and its largest tables.
 
 `tests/test_scale_cycle.py` drives two hours of the miniature with a stand-in `/healthz` and
-checks that the daily rows, enrichment and estimated hours equal those `generate.py` writes for
-the same hours, that no new pool, scope, location or network row appears, that
+checks that the daily rows, enrichment, estimated hours and pulse geo rows equal those
+`generate.py` writes for the same hours, that no new pool, scope, location or network row appears, that
 an interrupted hour continues where it stopped, and that the guards refuse.
