@@ -46,8 +46,8 @@ from .aggregate import (
     with_under_load,
 )
 from .fleet import fleet_entry, fleet_totals
-from .inputs import cutoff, group_by_product, previous_products, tested_by_product
-from .lists import CRITERIA, persist
+from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
+from .lists import CRITERIA, reusing
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .parts import sparse
@@ -237,7 +237,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 **scheduled,
             )
             payload = estimates.window.attach(payload, runs, conn, as_of, config)
-            payload = write(conn, build_id, payload, config, persist)  # head and parts
+            payload = write(conn, build_id, payload, config, reusing(conn, payload, runs, buckets))
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -506,7 +506,7 @@ def build(
         linked = r.get("batch_id") is not None
         cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
-        r["group"] = key
+        r["group"], r["light"] = key, light_load(r, flagged_runs, timed_target)
         run_map[r["run_key"]] = r
         if linked:
             scheduled_groups[r["product_id"]] = key
@@ -560,9 +560,7 @@ def build(
                 "test": test,
                 "during_census": bool(overlapped),
                 "census_batches": overlapped,
-                "light": test in (None, "pulse")
-                and not overlapped
-                and r["scope"]["target"]["id"] == timed_target,
+                "light": r["light"],
                 "slot": floor_time(at or b["bucket_start"], slot_seconds),
                 "country": country.strip().upper() if country else None,
                 "region": r.get("batch_region"),
