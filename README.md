@@ -175,6 +175,14 @@ build keeps serving. Census-pulse lists keep signature NULL. After
 `calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
 and keep their columns. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
+Calculated schema v10 (`calculated/migrate_v9_v10.sql`, contract K6) adds the incremental
+calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `proxy-index
+calculate` is incremental (`calculated/incremental.py`): it reads run metadata, buckets and list
+signatures first, reuses a stored list (and reads no observation) for every window whose signature
+matches, and reads observations only for the other windows; the values that move with the cutoff
+are counted in the database (`calculated/hourly.py`, `fleetsql.py`, `rollups.py`). `calculate
+--full` (the Python `calculate()`'s default) reads and aggregates every observation as before; it
+is the oracle the incremental tests compare with, byte for byte.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and

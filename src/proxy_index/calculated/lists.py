@@ -178,7 +178,6 @@ def signatures(conn, payload, runs, buckets):
     cur = conn.cursor(row_factory=tuple_row)
     countries = digest(sorted(cur.execute("SELECT country_code,name FROM countries").fetchall()))
     daily = {r["run_key"]: r for r in runs if r.get("batch_id") is None}
-    enriched = {k: (rel, sha) for k, rel, sha in cur.execute(ENRICHMENTS, (sorted(daily),))}
     periods = [(p["start"], p["end"], p["hours"]) for p in payload["periods"].values()]
     spans = defaultdict(dict)  # (group, hours) -> run_key -> [first, last] bucket in the window
     for b in buckets:  # ordered by bucket_start
@@ -188,6 +187,8 @@ def signatures(conn, payload, runs, buckets):
         for start, end, hours in periods:
             if start <= at < end:
                 spans[r["group"], hours].setdefault(r["run_key"], [at, at])[1] = at
+    signed_runs = sorted({k for runs_of in spans.values() for k in runs_of})  # only these
+    enriched = {k: (rel, sha) for k, rel, sha in cur.execute(ENRICHMENTS, (signed_runs,))}
     head = {"v": SIGNATURE_VERSION, "impl": payload["implementation_id"], "countries": countries}
     head["method"] = payload["methodology"]["id"]
     signed = {}
@@ -218,7 +219,11 @@ def persist(conn, payload, signed=None):
     for p in payload["products"]:
         for label, w in p["windows"].items():
             signature = (signed or {}).get((p["product_id"], p["cohort"], w["period"]["hours"]))
-            list_id = lists[p["id"], label] = write_list(conn, build_id, p, w, rows, signature)
+            list_id = lists[p["id"], label] = (
+                w["lists"]["id"]  # a stored list the incremental calculation reused
+                if "lists" in w
+                else write_list(conn, build_id, p, w, rows, signature)
+            )
             for target, m, scores in [
                 ("", w["metrics"], w["scores"]),
                 *[(t, v["metrics"], {"balanced": v["score"]}) for t, v in w["targets"].items()],

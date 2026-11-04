@@ -22,6 +22,11 @@ def register(commands):
             p.add_argument("--methodology", default="configs/methodology.toml")
             p.add_argument("--as-of")
             p.add_argument("--publish", action="store_true")
+            p.add_argument(
+                "--full",
+                action="store_true",
+                help="Read every observation of the window (the oracle), not only changed windows",
+            )
         elif name == "snapshot-publish":
             p.add_argument("snapshot")
         elif name == "snapshot-export":
@@ -101,7 +106,8 @@ def dispatch(args):
     elif args.command == "calculate":
         from .calculator import calculate
 
-        payload = calculate(db, args.methodology, as_of=args.as_of, publish=args.publish)
+        mode = "full" if args.full else "incremental"
+        payload = calculate(db, args.methodology, as_of=args.as_of, publish=args.publish, mode=mode)
         result = {k: payload[k] for k in ("snapshot_id", "as_of", "readiness")}
     elif args.command == "snapshot-publish":
         result = store.publish(db, args.snapshot)

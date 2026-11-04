@@ -428,8 +428,11 @@ async def test_calculated_v7_builds_migrate_unchanged_and_still_serve(databases,
     builds = v7_layer(database, payloads)
     before = snapshots(database)
     result = migrate(database)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (7, 9)
-    assert result["verified"] == [*store.V7_CHECKS, *store.V8_CHECKS]
+    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
+        7,
+        10,
+    )
+    assert result["verified"] == [*store.V7_CHECKS, *store.V8_CHECKS, *store.V9_CHECKS]
     assert snapshots(database) == before
     for build_id, payload in zip(builds, payloads, strict=True):
         assert store.read(database, str(build_id)) == payload | {"snapshot_id": str(build_id)}

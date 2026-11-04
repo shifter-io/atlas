@@ -13,21 +13,19 @@ from pathlib import Path
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .. import detect, estimates, traffic
-from ..storage import RAW_DAYS, connect
+from .. import detect, traffic
+from ..storage import connect
 from ..targets import registry
-from . import browser
+from . import browser, incremental
 from .aggregate import LATENCY as PERCENTILES
 from .aggregate import (
     NOT_LATENCY_TARGET,
     PLACE,
     PRICES,
     UNAVAILABLE,
-    breakdowns,
     census_overlaps,
     census_split,
     daily_average,
-    daily_pools,
     floor_time,
     latency_detail,
     load_factors,
@@ -35,8 +33,6 @@ from .aggregate import (
     outage_list,
     outage_uptime,
     peer_scores,
-    pool,
-    pool_lists,
     product_inputs,
     series,
     slot_coverage,
@@ -47,7 +43,7 @@ from .aggregate import (
 )
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
-from .lists import CRITERIA, reusing
+from .lists import CRITERIA
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .parts import sparse
@@ -60,22 +56,16 @@ from .policy import (
     slot_settings,
     uptime_settings,
 )
-from .releases import enriched_observations, snapshot_fields
-from .store import discard, expire, jsonable, prune, write
+from .releases import snapshot_fields
+from .store import discard, expire, prune
 
 SCHEMA_VERSION = 3
+# The calculation's modules (and detect, traffic, browser): a change to any changes the id, so the
+# build fingerprint and every list signature.
+SOURCES = "calculator aggregate policy slim inputs lists incremental hourly fleetsql rollups "
+SOURCES += "sqlwindow poolfig"
 IMPLEMENTATION_ID = hashlib.sha256(
-    b"".join(
-        Path(__file__).with_name(name).read_bytes()
-        for name in (
-            "calculator.py",
-            "aggregate.py",
-            "policy.py",
-            "slim.py",
-            "inputs.py",
-            "lists.py",
-        )
-    )
+    b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
 ).hexdigest()
 # Census and pulse runs (linked to a test batch) of a product share one cohort, whatever the
@@ -150,7 +140,9 @@ def retain(score, previous, as_of, valid_hours, observed, method_id=None):
     return score
 
 
-def calculate(database, methodology, *, as_of=None, publish=False):
+def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
+    """Calculate (and publish) a build. mode "full" reads every observation of the window, the
+    oracle; "incremental" (the CLI's default) reads only the missed windows' (incremental.py)."""
     config, method_id = load(methodology)
     as_of, latest = as_of or datetime.now(UTC), as_of is None
     if isinstance(as_of, str):
@@ -162,46 +154,9 @@ def calculate(database, methodology, *, as_of=None, publish=False):
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         conn.execute("SELECT pg_advisory_xact_lock(817452902)")
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
-        start = as_of - timedelta(days=RAW_DAYS)  # older raw rows are archived
-        runs = conn.execute(
-            "SELECT r.run_key,r.run_id::text,r.summary_sha256,r.summary,r.started_at,"
-            "r.finished_at,s.scope,s.scope_id,p.product_id,p.provider,p.name,r.batch_id,"
-            "b.kind AS test,b.scheduled_for AS slot_at,trim(b.country_code) AS batch_country,"
-            "rr.slug AS batch_region,"
-            "coalesce(cr.role,CASE b.kind "
-            + " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in BATCH_ROLES.items())
-            + " END,'exploratory') AS role FROM test_runs r "
-            "JOIN scope_details s USING(scope_id) JOIN products p ON p.product_id=s.product_id "
-            "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
-            "LEFT JOIN runner_regions rr ON rr.region_id=b.region_id "
-            "LEFT JOIN calculation_roles cr USING(run_key) ORDER BY r.run_key"
-        ).fetchall()
-        buckets = conn.execute(
-            "SELECT bucket_start,run_key,run_bucket_counters(b) AS counters,"
-            "outcome_counters AS outcome FROM run_buckets b "
-            "WHERE bucket_start>=%s AND bucket_start<%s ORDER BY bucket_start,run_key",
-            (start, as_of),
-        ).fetchall()
-        release, observations = enriched_observations(conn, start, as_of)
-        evidence_rows = conn.execute(
-            "SELECT * FROM metric_evidence ORDER BY evidence_id"
-        ).fetchall()
-        scheduled = scheduled_inputs(conn, as_of, latency_target(config))
+        inputs = incremental.read(conn, config, method_id, as_of, mode)
         previous = previous_payload(conn)  # only the groups' ids and scores
-        # Hash relevant inputs, including role corrections, enrichment and late evidence.
-        fingerprint = digest(
-            jsonable(
-                {
-                    "runs": runs,
-                    "release": release,
-                    "evidence": evidence_rows,
-                    "buckets": buckets,
-                    "observations": observations,
-                    "scheduled": scheduled,
-                    "implementation_id": IMPLEMENTATION_ID,
-                }
-            )
-        )
+        fingerprint = inputs.fingerprint
         conn.execute(
             "INSERT INTO methodologies VALUES (%s,%s,now()) ON CONFLICT DO NOTHING",
             (method_id, Jsonb(config)),
@@ -224,20 +179,19 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 (method_id, as_of, fingerprint),
             ).fetchone()["build_id"]
             payload = build(
-                runs,
-                buckets,
-                observations,
-                evidence_rows,
+                inputs.runs,
+                inputs.buckets,
+                inputs.source,
+                inputs.evidence,
                 config,
                 method_id,
                 as_of,
                 build_id,
-                release,
+                inputs.release,
                 previous,
-                **scheduled,
+                **inputs.scheduled,
             )
-            payload = estimates.window.attach(payload, runs, conn, as_of, config)
-            payload = write(conn, build_id, payload, config, reusing(conn, payload, runs, buckets))
+            payload = inputs.store(conn, build_id, payload, config)
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -497,7 +451,6 @@ def build(
     groups = {}
     run_map = {}
     bucket_groups = defaultdict(list)
-    obs_groups = defaultdict(list)
     geo_groups = defaultdict(list)
     scheduled_groups = {}
     scope_groups = {}
@@ -568,11 +521,12 @@ def build(
                 "last_observed": min(r["finished_at"], b["bucket_start"] + timedelta(minutes=5)),
             }
         )
-    for o in observations:
-        r = run_map[o["run_key"]]
-        obs_groups[r["group"]].append(
-            o | {"requested_country": r["scope"]["config"].get("requested_country")}
-        )
+    # What build() derives from IPs comes from its source (incremental.py): the observations, all
+    # aggregated here (the full calculation), or the incremental calculation's.
+    source = observations
+    if not isinstance(source, incremental.Full):
+        source = incremental.Full(observations)
+    source.group(run_map)
     for g in geo:
         key = (
             scheduled_groups.get(g["product_id"])
@@ -591,7 +545,6 @@ def build(
     for key, p in groups.items():
         cfg = effective(config, p["provider"], p["product"])
         raw, browser_raw = browser.split(bucket_groups[key])  # browser rows: per target only
-        obs = obs_groups[key]
         p["census"] = sorted(census_groups[p["product_id"]], key=lambda c: c["country"])
         # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
         scheduled = scheduled_groups.get(p["product_id"]) == key
@@ -619,19 +572,21 @@ def build(
         )
         p["outages"] = outage_list(down, as_of - timedelta(hours=720), as_of)
         # Daily pools of the last 30 days; every window averages its own days of them.
-        days = daily_pools(obs, as_of, max(config["windows"]) // 24)
+        days = source.days(key, as_of, max(config["windows"]) // 24)
         for hours in config["windows"]:
             label = {24: "24h", 168: "7d", 720: "30d"}[hours]
             since = as_of - timedelta(hours=hours)
             rows = [r for r in raw if since <= r["bucket_start"] < as_of]
-            seen = [o for o in obs if since <= o["bucket_start"] < as_of]
+            seen = source.seen(key, since, as_of)
             slots_now = [d for d in slot_runs if since <= d["scheduled_for"] < as_of]
             # Every request counts (census, pulse and load alike); success is time-weighted.
             m = timed(rows, hours, minimum, slots_now, slot_minutes)
             timed_rows = [r for r in rows if r["target"] == timed_target]
             factors, reference, excluded = load_factors(timed_rows, minimum)
             with_under_load(m, rows, factors, minimum, excluded)
-            ps, ips = pool(seen, since, hours, hosting_usage_types(cfg))
+            located = [g for g in geo_groups[key] if g["hours"] <= hours]
+            hosting = hosting_usage_types(cfg)
+            ps, ips, lists, kept = source.window(key, seen, since, hours, hosting, located)
             ps["daily"] = daily_average(days, hours)
             # Pulse-slot counts stay for reference; the published value is outage time.
             up = uptime(batches, since, as_of, threshold)
@@ -643,8 +598,7 @@ def build(
                 # Census/pulse cohorts: coverage is the share of pulse slots filled, not of
                 # 5-minute buckets (pulses run every 30 minutes, all countries at one tick).
                 slot_coverage(m, batches, since, as_of)
-            dimensions = breakdowns(ips, [g for g in geo_groups[key] if g["hours"] <= hours])
-            ps |= pool_lists(dimensions)
+            ps |= lists
             old = prev_products.get(p["id"], {}).get("windows", {}).get(label, {})
             ev = [
                 e
@@ -744,7 +698,7 @@ def build(
                 ),
                 "pool": ps,
                 "uptime": up,
-                "breakdowns": dimensions,
+                **kept,  # "breakdowns", or a reused list (incremental.py)
                 "targets": targets,
                 "scores": {},
                 "evidence": values,
@@ -791,6 +745,7 @@ def build(
                     for name in ("census", "pulse", "load", "unscheduled")
                 },
             }
+            w["series"] = source.ips(key, hours, w["series"])  # incremental: counted IPs
             p["windows"][label] = w
             sets[(key, label)] = set(ips)
             fleet_groups[(p["cohort"], label)].append((p, rows, seen, member))
@@ -845,6 +800,8 @@ def build(
                 ]
             )
     fleets += fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target)
+    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
+    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
     return {
         "schema_version": SCHEMA_VERSION,
         "implementation_id": IMPLEMENTATION_ID,
