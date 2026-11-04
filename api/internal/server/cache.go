@@ -15,9 +15,10 @@ import (
 // never outlives it, and a browser's copy may outlive it by at most max-age
 // unless the CDN sends Age. Most of their content changes only with a new
 // snapshot, but some of it is built from test events and the site catalog,
-// which change at any time and trigger a rebuild of their own: the dataset's
-// tape and every network answer's tape and changelog. Those parts lag up to the
-// next update. /v1/version and the /v1/dataset redirect stay short
+// which change at any time: the dataset's tape and every network answer's tape
+// and changelog. A catalog edit triggers a rebuild of its own; a new test event
+// refreshes only /v1/events (reuse.go), so the tapes keep the events of the
+// last build. Those parts lag up to the next update. /v1/version and the /v1/dataset redirect stay short
 // (CacheVersion), so open pages still notice every change within seconds.
 const (
 	// DefaultDataPeriod is the data update schedule: a new snapshot is

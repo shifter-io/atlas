@@ -68,6 +68,16 @@ func (f *fakeSource) Load(context.Context) (*store.Inputs, error) {
 	return in, nil
 }
 
+// LoadEvents is the events part of Load (store.LoadEvents), without counting a load.
+func (f *fakeSource) LoadEvents(context.Context) (*store.Inputs, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	return &store.Inputs{Events: f.events, EventsComplete: f.complete, Notable: f.notable, NotableComplete: !f.notableCut}, nil
+}
+
 func (f *fakeSource) Events(_ context.Context, filter store.EventFilter) ([]store.Event, error) {
 	f.dbQueries.Add(1)
 	return store.Pick(append(append([]store.Event{}, f.events...), f.notable...), filter), nil

@@ -137,11 +137,13 @@ editorial ones.
   late in that copy's life can keep it up to N more unless the CDN sends `Age`.
   Not everything in a data answer comes from the snapshot: the network answers' tape
   and changelog are built from test events and site rows, and catalog edits change
-  names and texts. Those change at any time (each change rebuilds the cache at once),
-  but cached copies of the data answers show them only after they expire, at most at
-  the next update. `/v1/version` and the `/v1/dataset` redirect stay
-  `public, max-age=5, s-maxage=5`, so open pages notice every change, a new event
-  included, within seconds and always get the current dataset file.
+  names and texts. A catalog edit rebuilds the cache at once, but cached copies of the
+  data answers show it only after they expire, at most at the next update. A new test
+  event refreshes only `/v1/events` (see Change detection): the dataset's and the
+  network answers' tapes keep the events of the last full build until the next one.
+  `/v1/version` and the `/v1/dataset` redirect stay `public, max-age=5, s-maxage=5`, so
+  open pages notice every data change within seconds and always get the current
+  dataset file; the live tape follows events through `/v1/events`.
   `/v1/events` (the live tape) is `public, max-age=15, s-maxage=15`; the dataset file
   is `public, max-age=31536000, immutable` (its name changes with its bytes);
   `/healthz` and errors are `no-store`.
@@ -155,10 +157,19 @@ editorial ones.
   - the framework product count
   - a digest of `public.targets`
 
-  A rebuild only happens when the fingerprint changed. It is single-flight: one build
-  at a time, and waiters re-check rather than rebuild. The previous version keeps
-  serving during a rebuild. A failed rebuild keeps it serving, is logged, and shows
-  in `/healthz` (`status: degraded`, `lastError`).
+  A full rebuild only happens when the fingerprint's data part (everything but
+  `max(test_events.event_id)`) changed. When only the newest event id changed, the
+  events alone are read (one read-only transaction, the same 2,000 + 500 rows as a
+  full read) and a new version is swapped in that shares every other rendered answer
+  with the serving one: the dataset file, the network and page answers, search and
+  coverage are not read, built, rendered or compressed again, and `/v1/events` (its
+  default query pre-rendered) answers from the new events. A full rebuild re-renders
+  every answer but keeps the serving version's precompressed body wherever the new
+  bytes are identical (same SHA-256 and bytes, same `Cache-Control` and status), so
+  only changed bodies are compressed again. Refreshes are single-flight: one at a
+  time, and waiters re-check rather than rebuild. The previous version keeps serving
+  during a refresh. A failed one keeps it serving, is logged, and shows in `/healthz`
+  (`status: degraded`, `lastError`).
 - **Search.** `/v1/search` normalises the query (lowercase, collapsed whitespace),
   scores it against the in-memory index, and keeps the rendered response in a
   bounded LRU of 1,024 entries. The LRU is per version, so a rebuild cannot serve
@@ -174,7 +185,7 @@ editorial ones.
     non-routine matches were found (or all of them are held).
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
-  in a 256-entry LRU for that version.
+  in a 256-entry LRU for that version (a new event starts a new one).
 - **Measured (Apple Silicon, localhost).** Serving the cached dataset file through the
   handler takes about 1.8 µs (`BenchmarkCachedDataset`). Over loopback HTTP with
   keep-alive and brotli bodies, p50 is about 0.15-0.2 ms and p99 about 0.5-0.7 ms

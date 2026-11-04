@@ -32,6 +32,18 @@ func newEventWindow(in *store.Inputs) EventWindow {
 		Notable: in.Notable, NotableJSON: render(in.Notable), NotableComplete: in.NotableComplete}
 }
 
+// WithEvents is res with the events of in (store.LoadEvents: Events,
+// Notable, their completeness and Fingerprint.MaxEventID) in place of its own,
+// for an events-only change. It is a shallow copy that shares every other
+// answer: the dataset's tape and the network answers' tapes were built from
+// res's events and keep them until the next full build.
+func WithEvents(res *Result, in *store.Inputs) *Result {
+	out := *res
+	out.Events = newEventWindow(in)
+	out.Fingerprint.MaxEventID = in.Fingerprint.MaxEventID
+	return &out
+}
+
 // held is the number of rows in memory; row(i) is the window's rows, then the
 // notable rows past them, newest first.
 func (w *EventWindow) held() int { return len(w.Raw) + len(w.Notable) }

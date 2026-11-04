@@ -59,6 +59,10 @@ func (f *freshSource) Load(context.Context) (*store.Inputs, error) {
 	return in, nil
 }
 
+func (f *freshSource) LoadEvents(context.Context) (*store.Inputs, error) {
+	return &store.Inputs{EventsComplete: true, NotableComplete: true}, nil
+}
+
 func (f *freshSource) Events(context.Context, store.EventFilter) ([]store.Event, error) {
 	return nil, nil
 }

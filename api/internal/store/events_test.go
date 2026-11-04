@@ -179,3 +179,58 @@ func TestMergeNewest(t *testing.T) {
 		t.Fatalf("merged %v", ids)
 	}
 }
+
+// LoadEvents (an events-only refresh) reads the events exactly as Load does,
+// and the newest event id the fingerprint has: none on an empty table, then a
+// cut window with notable rows past it.
+func TestLoadEventsReadsTheEventsLoadReads(t *testing.T) {
+	db := testdb.New(t)
+	ctx := context.Background()
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	same := func(stage string) {
+		t.Helper()
+		in, err := store.Load(ctx, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev, err := store.LoadEvents(ctx, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp, err := store.ReadFingerprint(ctx, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ev.Fingerprint.EventsKey() != in.Fingerprint.EventsKey() || ev.Fingerprint.EventsKey() != fp.EventsKey() ||
+			in.Fingerprint.DataKey() != fp.DataKey() {
+			t.Fatalf("%s: events key %q, load %q, fingerprint %q", stage, ev.Fingerprint.EventsKey(), in.Fingerprint.EventsKey(), fp.EventsKey())
+		}
+		if !slices.EqualFunc(ev.Events, in.Events, sameEvent) || !slices.EqualFunc(ev.Notable, in.Notable, sameEvent) ||
+			ev.EventsComplete != in.EventsComplete || ev.NotableComplete != in.NotableComplete || ev.Snapshot != nil || len(ev.FrameworkProducts) != 0 {
+			t.Fatalf("%s: LoadEvents read %d+%d rows (%v %v), Load %d+%d (%v %v)", stage, len(ev.Events), len(ev.Notable),
+				ev.EventsComplete, ev.NotableComplete, len(in.Events), len(in.Notable), in.EventsComplete, in.NotableComplete)
+		}
+	}
+	same("empty")
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T15:00:00Z','pulse_down',-1,'major'),"+
+		"('2026-11-02T14:00:00Z','latency_rise',-1,'minor')")
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) SELECT '2026-11-02T16:00:30Z','estimate_hour_released',0,'info'"+
+		" FROM generate_series(1,$1::int)", store.EventWindow+1)
+	same("window cut")
+	if ev, err := store.LoadEvents(ctx, pool); err != nil || ev.EventsComplete || len(ev.Notable) != 2 || ev.Fingerprint.EventsKey() == "" {
+		t.Fatalf("cut window %v %d notable %q", err, len(ev.Notable), ev.Fingerprint.EventsKey())
+	}
+	done, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := store.LoadEvents(done, pool); err == nil {
+		t.Fatal("LoadEvents read with a cancelled context")
+	}
+}
+
+func sameEvent(a, b store.Event) bool {
+	return a.ID == b.ID && a.At.Equal(b.At) && a.Kind == b.Kind && string(a.Data) == string(b.Data)
+}

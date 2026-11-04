@@ -21,8 +21,9 @@ const (
 	// The value itself is the floor, used only if that is skipped.
 	CacheData = "public, max-age=30, s-maxage=30"
 	// CacheVersion is short: /v1/version is how open pages notice that the
-	// data changed (a new snapshot, but also a new test event or a catalog
-	// edit), and /v1/dataset redirects to the current dataset file.
+	// data changed (a new snapshot, but also a catalog edit), and /v1/dataset
+	// redirects to the current dataset file. A new test event alone changes
+	// neither: it refreshes only /v1/events (reuse.go).
 	CacheVersion = "public, max-age=5, s-maxage=5"
 	// CacheEvents is the live tape: test events arrive at any time.
 	CacheEvents = "public, max-age=15, s-maxage=15"

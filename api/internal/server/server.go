@@ -59,6 +59,8 @@ type Version struct {
 type Source interface {
 	Fingerprint(ctx context.Context) (store.Fingerprint, error)
 	Load(ctx context.Context) (*store.Inputs, error)
+	// LoadEvents reads only the events and the newest event id (store.LoadEvents).
+	LoadEvents(ctx context.Context) (*store.Inputs, error)
 	Events(ctx context.Context, f store.EventFilter) ([]store.Event, error)
 }
 
@@ -70,6 +72,10 @@ func (d DBSource) Fingerprint(ctx context.Context) (store.Fingerprint, error) {
 }
 
 func (d DBSource) Load(ctx context.Context) (*store.Inputs, error) { return store.Load(ctx, d.Pool) }
+
+func (d DBSource) LoadEvents(ctx context.Context) (*store.Inputs, error) {
+	return store.LoadEvents(ctx, d.Pool)
+}
 
 func (d DBSource) Events(ctx context.Context, f store.EventFilter) ([]store.Event, error) {
 	return store.QueryEvents(ctx, d.Pool, f)
@@ -142,9 +148,11 @@ func New(src Source, opts Options) *Server {
 // Current returns the serving Version (nil before the first build).
 func (s *Server) Current() *Version { return s.current.Load() }
 
-// Refresh rebuilds when the fingerprint changed (or force). Concurrent calls
-// are single-flight: one build at a time, and a caller that waited re-checks
-// the fingerprint instead of building the same thing twice.
+// Refresh rebuilds when the fingerprint's data part changed (or force), and
+// only refreshes the events answers when nothing but the newest event id did
+// (refreshEvents). Concurrent calls are single-flight: one build at a time,
+// and a caller that waited re-checks the fingerprint instead of building the
+// same thing twice.
 func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
@@ -157,11 +165,14 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		return false, err
 	}
 	cur := s.current.Load()
-	if !force && cur != nil && cur.Fingerprint == fp.Key() {
+	switch change(cur, fp, force) {
+	case changeNone:
 		return false, nil
+	case changeEvents:
+		return s.refreshEvents(ctx, cur)
 	}
 	start := time.Now()
-	v, err := s.build(ctx)
+	v, err := s.build(ctx, cur)
 	if err != nil {
 		s.fail(err)
 		return false, err
@@ -199,7 +210,9 @@ func (s *Server) fail(err error) {
 	s.log.Error("cache refresh failed; serving the previous version", "error", err)
 }
 
-func (s *Server) build(ctx context.Context) (*Version, error) {
+// build reads and renders a new Version, reusing prev's bodies whose bytes
+// did not change (reuse.go).
+func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	t0 := time.Now()
 	in, err := s.src.Load(ctx)
 	if err != nil {
@@ -211,7 +224,7 @@ func (s *Server) build(ctx context.Context) (*Version, error) {
 		return nil, fmt.Errorf("build: %w", err)
 	}
 	t2 := time.Now()
-	v, err := RenderVersion(s.nextID.Add(1), res, s.opts)
+	v, err := renderVersion(s.nextID.Add(1), res, s.opts, prev)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +234,10 @@ func (s *Server) build(ctx context.Context) (*Version, error) {
 
 // RenderVersion pre-renders every static response of a build.
 func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error) {
+	return renderVersion(id, res, opts, nil)
+}
+
+func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*Version, error) {
 	v := &Version{ID: id, Fingerprint: res.Fingerprint.Key(), BuiltAt: res.BuiltAt, Result: res, Static: map[string]*Rendered{},
 		search: NewLRU(max(opts.SearchLRU, 1)), events: NewLRU(max(opts.EventsLRU, 1)), pages: NewLRU(PagesLRU),
 		NextData: nextData(res.Dataset.Snapshot.AsOf, opts.DataPeriod)}
@@ -240,6 +257,7 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	for path, value := range pageAnswers(res.Pages) {
 		jobs = append(jobs, job{path, value, CacheData})
 	}
+	reused := reusable(prev)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	errs := make(chan error, len(jobs)+2)
@@ -247,7 +265,7 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 		wg.Add(1)
 		go func(j job) {
 			defer wg.Done()
-			r, err := Render(http.StatusOK, j.value, j.cache, LevelBest)
+			r, err := reused.render(http.StatusOK, j.value, j.cache)
 			if err != nil {
 				errs <- fmt.Errorf("render %s: %w", j.path, err)
 				return
@@ -274,15 +292,9 @@ func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error)
 	if err != nil {
 		return nil, err
 	}
-	v.Static["/v1/version"] = ver
-	// The default events query (what the live tape polls first) is rendered up front.
-	// (When the in-memory window cannot prove the answer, the first request asks the database.)
-	if def, err := eventsBody(res, store.EventFilter{Limit: 100}); err == nil {
-		r, err := Render(http.StatusOK, def, CacheEvents, LevelBest)
-		if err != nil {
-			return nil, err
-		}
-		v.events.Add(eventsKey(store.EventFilter{Limit: 100}), r)
+	v.Static[versionPath] = ver
+	if err := addDefaultEvents(v); err != nil {
+		return nil, err
 	}
 	return v, nil
 }
@@ -326,7 +338,7 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.HandleFunc("GET /v1/dataset", s.serveDataset)
 	mux.HandleFunc("GET /v1/files/{name}", s.serveFile)
-	for _, p := range []string{"/v1/search-index", "/v1/coverage", "/v1/version"} {
+	for _, p := range []string{"/v1/search-index", "/v1/coverage", versionPath} {
 		mux.HandleFunc("GET "+p, static(p))
 	}
 	mux.HandleFunc("GET /v1/coverage/{slug}", func(w http.ResponseWriter, r *http.Request) {

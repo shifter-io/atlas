@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,23 @@ type Fingerprint struct {
 func (f Fingerprint) Key() string {
 	b, _ := json.Marshal(f)
 	return string(b)
+}
+
+// DataKey is Key without the newest event id: everything a full build reads
+// except the events. When it changes, the cache is rebuilt.
+func (f Fingerprint) DataKey() string {
+	f.MaxEventID = nil
+	return f.Key()
+}
+
+// EventsKey is the fingerprint's events part, the newest event id ("" while
+// test_events is empty). When only it changes, only the events answers are
+// refreshed (LoadEvents).
+func (f Fingerprint) EventsKey() string {
+	if f.MaxEventID == nil {
+		return ""
+	}
+	return strconv.FormatInt(*f.MaxEventID, 10)
 }
 
 const fingerprintSQL = `SELECT
@@ -361,12 +379,37 @@ func readSite[T any](ctx context.Context, tx pgx.Tx, l SiteLayout, r siteRead, s
 	return out, nil
 }
 
+// TxBeginner starts the read-only transactions of Load and LoadEvents (a
+// pgxpool.Pool or a pgx.Conn).
+type TxBeginner interface {
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
+}
+
+// LoadEvents reads only what an events-only change refreshes, in one
+// REPEATABLE READ read-only transaction: the newest event id
+// (Fingerprint.MaxEventID, the fingerprint's events part) and the events
+// exactly as Load reads them (Events, Notable and their completeness). Every
+// other field is empty.
+func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	in := &Inputs{}
+	if err := tx.QueryRow(ctx, `SELECT max(event_id) FROM public.test_events`).Scan(&in.Fingerprint.MaxEventID); err != nil {
+		return nil, fmt.Errorf("newest event: %w", err)
+	}
+	if err := in.loadEvents(ctx, tx); err != nil {
+		return nil, fmt.Errorf("events: %w", err)
+	}
+	return in, nil
+}
+
 // Load reads every input in one consistent read-only snapshot. Only the
 // framework schema is required; site tables that are missing read as empty
 // (Inputs.SiteGaps names them).
-func Load(ctx context.Context, db interface {
-	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
-}) (*Inputs, error) {
+func Load(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
