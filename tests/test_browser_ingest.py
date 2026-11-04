@@ -130,12 +130,18 @@ async def set_settings(db, values):
 
 
 def browser_run(database, provider, *, target="amazon_pdp", slot=SLOT, status="running"):
-    """A browser batch in DE with the provider's node running it; returns the batch id."""
+    """The provider's run in the browser batch of (target, slot) in DE, created when missing (a
+    batch has one run per network); returns the batch id."""
     with connect(database) as conn:
-        (batch_id,) = conn.execute(
+        conn.execute(
             "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-            "start_at,status) VALUES ('browser','DE',%s,%s,%s,%s,'running') RETURNING batch_id",
+            "start_at,status) VALUES ('browser','DE',%s,%s,%s,%s,'running') ON CONFLICT DO NOTHING",
             (bc.BROWSER_REGION_ID, target, slot, slot),
+        )
+        (batch_id,) = conn.execute(
+            "SELECT batch_id FROM test_batches WHERE kind='browser' AND target_id=%s "
+            "AND scheduled_for=%s",
+            (target, slot),
         ).fetchone()
         conn.execute(
             "INSERT INTO batch_runs(batch_id,product_id,node_id,status,started_at) "
@@ -206,6 +212,7 @@ async def make_bundle(tmp_path, batch_id, provider="alpha", **options):
         files=[{"name": MEMBERS.tries, "bytes": len(tries), "sha256": sha256(tries)}],
     ) | options.get("manifest", {})
     members = [(MEMBERS.tries, tries), (MEMBERS.manifest, json.dumps(manifest).encode())]
+    members = members[: 1 if options.get("no_manifest") else 2]
     return tar_bytes(directory, members + list(options.get("extra", ()))), summary["run_id"]
 
 
@@ -569,6 +576,8 @@ async def test_a_replay_checks_the_archived_object(database, client, world, scra
         ({"manifest": {"target": "google_search"}}, "another target"),
         ({"manifest": {"requested_country": None, "geo_targeting": False}}, "geo targeting"),
         ({"manifest": {"format": "other"}}, "manifest"),
+        ({"manifest": {"network": {"provider": "beta", "product": "res"}}}, "another provider"),
+        ({"no_manifest": True}, "no browser/manifest.json"),
         ({"extra": [("browser/screenshots/0000.jpg", b"jpeg")]}, "files differ"),
     ],
 )
@@ -623,3 +632,24 @@ async def test_a_browser_node_must_register_before_it_uploads(database, client, 
     data, run_id = await make_bundle(world["tmp"], batch_id, "delta", host="browser-4")
     status, body, _ = await upload(client, node["token"], batch_id, data, run_id)
     assert status == 403 and "register" in body["error"]
+
+
+async def test_a_bad_prefix_or_an_unreachable_database_answers_503(
+    database, db, client, world, scratch, monkeypatch
+):
+    import psycopg
+
+    batch_id = browser_run(database, "alpha")
+    args = (world["tokens"]["alpha"], batch_id, *await make_bundle(world["tmp"], batch_id))
+    await set_settings(db, {"browser.archive_prefix": "raw"})  # ARCHIVE-1's top level
+    status, body, _ = await upload(client, *args)
+    assert status == 503 and body["error"].startswith("archive_not_configured: prefix")
+    await set_settings(db, {"browser.archive_prefix": "browser-files"})
+
+    async def unreachable(*a, **k):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(browser_ingest, "_settings", unreachable)
+    assert (await upload(client, *args))[:2] == (503, {"error": "database unavailable; retry"})
+    assert world["bucket"].objects == {}
+    assert_nothing_kept(world, scratch)
