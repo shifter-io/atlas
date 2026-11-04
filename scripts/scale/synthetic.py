@@ -40,6 +40,9 @@ ERROR_SHARE = 50  # one timeout per this many successes in a daily test
 LATENCY = (0.6, 0.8, 0.9, 1.0, 1.15, 1.4, 1.9, 3.2)
 WEIGHTS = (6, 14, 18, 22, 16, 12, 8, 4)
 HOSTING_EVERY = 33  # every 33rd synthetic ASN of a country is a hosting network
+# Every country gets at least 31 cities and 5 ASNs (155 pairs), more than a pulse's 92 rows,
+# however small its tests: DB-IP's lists do not shrink with a provider's pool in the country.
+MIN_CITIES, MIN_ASNS = 31, 5
 
 
 def mix(value: int) -> int:
@@ -242,8 +245,8 @@ class Model:
         count = len(self.settings.countries)
         for c in range(count):
             largest = max(self.lanes[n * count + c].ips for n in range(len(self.formulas)))
-            cities = min(5000, max(5, round(largest / 12)))
-            asns = min(900, max(3, cities // 6))
+            cities = min(5000, max(MIN_CITIES, round(largest / 12)))
+            asns = min(900, max(MIN_ASNS, cities // 6))
             places.append(Places(cities, min(60, max(1, cities // 40)), asns, location, network))
             location, network = location + cities, network + asns
         return places
@@ -323,7 +326,7 @@ class Model:
         seed = key(self.settings.seed, "pulse", lane.position, day, hour)
         places = self.places[lane.country]
         errors, wanted = seed % 4, GEO_ROWS[0] + (seed >> 8) % (GEO_ROWS[1] - GEO_ROWS[0] + 1)
-        known = min(wanted - (errors > 0), places.cities * places.asns)
+        known = wanted - (errors > 0)  # places hold at least MIN_CITIES x MIN_ASNS pairs
         pairs, value = [], seed
         taken = set()
         while len(pairs) < known:
