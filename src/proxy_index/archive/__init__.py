@@ -4,8 +4,9 @@ Raw measurement rows stay `partitions.RAW_DAYS` (30) days in the database. Once 
 tied to a day is older than that, the day is exported (export.py) into `YYYY-MM-DD.tar.gz`:
 a `manifest.json` and one COPY-format CSV per table (tables.py lists them, their roles and
 which rows belong to the day); restore.py loads a file back into a database with the same
-storage schema. Deleting an archived day's rows, only once its file is stored and verified,
-is the archive job's step (not in this module yet).
+storage schema. job.py (the orchestrator's daily `archive` job) uploads each due day's file to
+Spaces (spaces.py), verifies it, and only then purge.py deletes the day's rows, dropping its
+daily partitions.
 """
 
 FORMAT = "proxy-index-raw-day"

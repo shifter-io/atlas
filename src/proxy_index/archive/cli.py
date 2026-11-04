@@ -1,15 +1,18 @@
-"""`proxy-index archive export|restore` (operator).
+"""`proxy-index archive export|restore|run|bucket` (operator).
 
 `export` writes one day's file (`<out>/YYYY-MM-DD.tar.gz`) and deletes nothing. `restore`
-loads a day file into a database with the same storage schema; it exits 2 when the file or
-the database does not fit (nothing is changed then).
+loads a day file (`--file`, or `--date` from the bucket) into a database with the same storage
+schema. `run` archives the due days now (what the orchestrator's daily `archive` job does).
+`bucket` checks that the bucket is private and versioned (`--apply` enables versioning).
+Refusals exit 2 and change nothing.
 """
 
 from __future__ import annotations
 
 import json
 import sys
-from datetime import date
+import tempfile
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from . import ArchiveError
@@ -23,8 +26,19 @@ def register(commands) -> None:
     export.add_argument("--database-file", type=Path, required=True)
     export.add_argument("--out", type=Path, required=True, help="Directory for the file")
     restore = actions.add_parser("restore", help="Load a day's archive file into a database")
-    restore.add_argument("--file", type=Path, required=True, help="A YYYY-MM-DD.tar.gz file")
+    source = restore.add_mutually_exclusive_group(required=True)
+    source.add_argument("--file", type=Path, help="A YYYY-MM-DD.tar.gz file")
+    source.add_argument("--date", type=date.fromisoformat, help="The day's file in the bucket")
     restore.add_argument("--database-file", type=Path, required=True)
+    restore.add_argument("--spaces-file", type=Path, help="[spaces] settings (with --date)")
+    run = actions.add_parser("run", help="Archive and delete the due days now")
+    run.add_argument("--database-file", type=Path, required=True)
+    run.add_argument("--spaces-file", type=Path, required=True)
+    run.add_argument("--work-dir", type=Path, required=True)
+    run.add_argument("--max-days", type=int, default=3)
+    bucket = actions.add_parser("bucket", help="Check the bucket is private and versioned")
+    bucket.add_argument("--spaces-file", type=Path, required=True)
+    bucket.add_argument("--apply", action="store_true", help="Enable versioning")
 
 
 def _export(args) -> int:
@@ -36,20 +50,53 @@ def _export(args) -> int:
     return 0
 
 
-def _restore(args) -> int:
+def _restore(args) -> dict:
+    from .job import object_key
     from .restore import restore_file
+    from .spaces import Spaces
 
-    try:
-        report = restore_file(args.file, args.database_file)
-    except ArchiveError as exc:
-        print(f"Restore refused: {exc}", file=sys.stderr)
-        return 2
-    print(json.dumps(report, indent=2))
-    return 0
+    if args.file:
+        return restore_file(args.file, args.database_file)
+    if not args.spaces_file:
+        raise ArchiveError("--date needs --spaces-file")
+    with tempfile.TemporaryDirectory(prefix="proxy-index-restore-") as temporary:
+        path = Path(temporary, f"{args.date.isoformat()}.tar.gz")
+        Spaces.from_file(args.spaces_file).get_file(object_key(args.date), path)
+        return restore_file(path, args.database_file)
 
 
-HANDLERS = {"export": _export, "restore": _restore}
+def _run(args) -> dict:
+    from .job import run_due
+    from .spaces import Spaces
+
+    spaces = Spaces.from_file(args.spaces_file)
+    now = datetime.now(UTC)
+    return run_due(args.database_file, spaces, args.work_dir, now, max_days=args.max_days)
+
+
+def _bucket(args) -> dict:
+    from .spaces import Spaces
+
+    spaces = Spaces.from_file(args.spaces_file)
+    if args.apply and spaces.versioning() != "Enabled":
+        spaces.enable_versioning()
+    report = {"bucket": spaces.bucket, "versioning": spaces.versioning()}
+    report["public_grants"] = spaces.public_grants()
+    if report["public_grants"] or report["versioning"] != "Enabled":
+        raise ArchiveError(f"the bucket is not private and versioned: {report}")
+    return report
+
+
+HANDLERS = {"restore": _restore, "run": _run, "bucket": _bucket}
 
 
 def dispatch(args) -> int:
-    return HANDLERS[args.archive_action](args)
+    if args.archive_action == "export":
+        return _export(args)
+    try:
+        report = HANDLERS[args.archive_action](args)
+    except ArchiveError as exc:
+        print(f"Archive {args.archive_action} refused: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2))
+    return 0
