@@ -409,7 +409,7 @@ async def test_snapshot_v2_breakdowns_uptime_census_and_traffic(database, tmp_pa
     policy = lenient_policy(tmp_path)
     policy.write_text(policy.read_text().replace("min_batches = 10", "min_batches = 1"))
     payload = calculate(database, policy, as_of=as_of, publish=True)
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload_mismatches(database, int(payload["snapshot_id"])) == []
     entries = [p for p in payload["products"] if p["provider"] == "alpha"]
     # One scheduled cohort for census and pulse across targets, plus the ad-hoc run's cohort.

@@ -15,6 +15,7 @@ The test prints the stored sizes (run pytest with -s).
 import json
 import os
 import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -93,7 +94,11 @@ async def test_a_full_size_build_is_stored(database, tmp_path):
                 (build_id, digest(big), Jsonb(big)),
             )
         else:
-            write(conn, build_id, big, load(POLICY)[0], lambda conn, payload: None)
+            # No typed rows: every window names list 0 (payload v3, SNAP-LISTREF-1).
+            unlisted = lambda conn, payload: {  # noqa: E731
+                (p["id"], label): 0 for p in payload["products"] for label in p["windows"]
+            }
+            write(conn, build_id, big, load(POLICY)[0], unlisted)
     with connect(database) as conn:
         sizes = conn.execute(
             "SELECT octet_length(payload::text),pg_column_size(payload) FROM calculated_snapshots "
@@ -107,7 +112,8 @@ async def test_a_full_size_build_is_stored(database, tmp_path):
         ).fetchall()
         groups = 0
         for position, part in enumerate(store.parts.stream(conn, build_id, "products")):
-            assert part == big["products"][position]
+            group = big["products"][position]
+            assert part == getattr(store, "refer", lambda g, _: g)(group, defaultdict(int))
             groups += 1
     print(json.dumps({"head_bytes": sizes, "parts": rows, "group_json_bytes": total}))
     assert groups == NETWORKS * COUNTRIES
