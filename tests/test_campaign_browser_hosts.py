@@ -23,35 +23,15 @@ from proxy_index.campaign import browser_hosts, deploy, manager_rules, ops_api
 from proxy_index.campaign import cli as campaign_cli
 from proxy_index.campaign.contracts import PULSE_TAG
 
-# Test data holds no real address (the privacy check), and the real check refuses the
-# documentation blocks, so documentation addresses stand in for the hosts' public IPv4s through
-# the `stand_ins` fixture; the refusal tests use the real check (`real_check`).
-HOSTS = ["198.51.100.20", "203.0.113.30"]
-OTHER_HOSTS = ["192.0.2.40"]
+# Well-known public resolver addresses: global, and nobody's host.
+HOSTS = ["8.8.8.8", "1.1.1.1"]
+OTHER_HOSTS = ["9.9.9.9"]
 PORT = manager_rules.NODE_API_PORT
-REAL_REFUSAL = browser_hosts._refusal
 
 
 @pytest.fixture(autouse=True)
 def quick_assign(monkeypatch):
     fast_assign(monkeypatch)
-
-
-@pytest.fixture(autouse=True)
-def stand_ins(monkeypatch):
-    """Documentation addresses count as public; every other refusal stays the real one."""
-
-    def refusal(address):
-        if any(address in block for block in browser_hosts.DOCUMENTATION):
-            return None
-        return REAL_REFUSAL(address)
-
-    monkeypatch.setattr(browser_hosts, "_refusal", refusal)
-
-
-@pytest.fixture
-def real_check(monkeypatch):
-    monkeypatch.setattr(browser_hosts, "_refusal", REAL_REFUSAL)
 
 
 @pytest.fixture
@@ -163,45 +143,39 @@ async def test_clear_removes_the_browser_sources(job):
 @pytest.mark.parametrize(
     ("values", "reason"),
     [
+        (["10.1.2.3"], "private"),
+        (["172.16.0.9"], "private"),
+        (["192.168.1.20"], "private"),
+        (["169.254.10.10"], "private"),
         (["127.0.0.1"], "loopback"),
         (["192.0.2.1"], "documentation"),
         (["198.51.100.7"], "documentation"),
         (["203.0.113.10"], "documentation"),
+        (["100.64.0.1"], "private or reserved"),
+        (["224.0.0.5"], "private or reserved"),
         (["0.0.0.0"], "private or reserved"),
-        (["192.0.2.0/24"], "not an IPv4"),
-        (["2001:db8::1"], "not an IPv4"),
+        (["8.8.8.8", " 8.8.8.8"], "twice"),
+        (["8.8.8.8/32"], "not an IPv4"),
+        (["2001:4860:4860::8888"], "not an IPv4"),
         (["host.example"], "not an IPv4"),
+        ([f"8.8.8.{n}" for n in range(1, 10)], "at most 8"),
     ],
 )
-def test_the_real_check_refuses_non_public_addresses(real_check, values, reason):
+def test_only_distinct_public_ipv4s_are_accepted(values, reason):
     with pytest.raises(deploy.DeployError, match=reason):
         browser_hosts.checked(values)
 
 
-@pytest.mark.parametrize(
-    ("values", "reason"),
-    [
-        (["198.51.100.20", " 198.51.100.20"], "twice"),
-        (["198.51.100.20/32"], "not an IPv4"),
-        ([f"198.51.100.{n}" for n in range(1, 10)], "at most 8"),
-        (["198.51.100.20", "127.0.0.1"], "loopback"),
-    ],
-)
-def test_only_distinct_addresses_at_most_eight(values, reason):
-    with pytest.raises(deploy.DeployError, match=reason):
-        browser_hosts.checked(values)
-
-
-def test_eight_addresses_are_accepted():
-    values = [f"198.51.100.{n}" for n in range(1, 9)]
+def test_eight_public_addresses_are_accepted():
+    values = [f"8.8.8.{n}" for n in range(1, 9)]
     assert browser_hosts.checked([f" {v}" for v in values]) == values
 
 
 async def test_a_refused_address_changes_nothing(job):
     fake = await opened(job)
     before, sent = inventory(job), list(fake.requests)
-    with pytest.raises(deploy.DeployError, match="loopback"):
-        await set_hosts(fake, job, [HOSTS[0], "127.0.0.1"])
+    with pytest.raises(deploy.DeployError, match="private"):
+        await set_hosts(fake, job, ["8.8.8.8", "10.0.0.1"])
     assert inventory(job) == before and fake.requests == sent  # refused before any call
 
 
@@ -243,10 +217,10 @@ async def test_a_missing_firewall_is_refused(job):
     "drift",
     [
         {"tags": [PULSE_TAG]},  # the addresses were dropped
-        {"tags": [PULSE_TAG], "addresses": ["198.51.100.20/32"]},  # one is missing
-        {"tags": [PULSE_TAG], "addresses": ["198.51.100.0/24", "203.0.113.30/32"]},  # wider
-        {"addresses": ["198.51.100.20/32", "203.0.113.30/32"]},  # the pulse-node tag was dropped
-        {"tags": [PULSE_TAG], "addresses": [*HOSTS, HOSTS[1]]},  # a duplicate
+        {"tags": [PULSE_TAG], "addresses": ["8.8.8.8/32"]},  # one is missing
+        {"tags": [PULSE_TAG], "addresses": ["10.0.0.0/8", "1.1.1.1/32"]},  # a wider source
+        {"addresses": ["8.8.8.8/32", "1.1.1.1/32"]},  # the pulse-node tag was dropped
+        {"tags": [PULSE_TAG], "addresses": ["8.8.8.8", "1.1.1.1", "1.1.1.1"]},  # a duplicate
         {"tags": [PULSE_TAG], "addresses": ["not-an-address"]},
     ],
 )
@@ -261,7 +235,7 @@ async def test_a_firewall_that_reads_back_differently_fails_and_saves_nothing(jo
 
 async def test_a_read_back_without_the_prefix_is_the_same_source(job):
     fake = await opened(job, Drifting())
-    fake.drift = {"tags": [PULSE_TAG], "addresses": ["203.0.113.30", "198.51.100.20/32"]}
+    fake.drift = {"tags": [PULSE_TAG], "addresses": ["1.1.1.1", "8.8.8.8/32"]}
     await set_hosts(fake, job, HOSTS)
     assert inventory(job)["browser_host_ipv4s"] == HOSTS
 
@@ -313,8 +287,8 @@ class Cloud:
 @pytest.mark.parametrize(
     ("argv", "hosts", "apply"),
     [
-        (["--ip", ",".join(HOSTS), "--ip", OTHER_HOSTS[0]], [*HOSTS, *OTHER_HOSTS], False),
-        (["--ip", HOSTS[0], "--apply"], [HOSTS[0]], True),
+        (["--ip", "8.8.8.8,1.1.1.1", "--ip", "9.9.9.9"], [*HOSTS, *OTHER_HOSTS], False),
+        (["--ip", "8.8.8.8", "--apply"], ["8.8.8.8"], True),
         (["--clear", "--apply"], [], True),
     ],
 )
@@ -341,14 +315,14 @@ def test_the_cli_refuses_a_bad_address_before_any_client(monkeypatch, capsys, tm
     monkeypatch.setattr(campaign_cli, "_cloud", Cloud)
     Cloud.accounts = []
     args = parse(
-        ["campaign", "manager", "browser-hosts", "--ip", "127.0.0.1", "--inventory", str(recorded)]
+        ["campaign", "manager", "browser-hosts", "--ip", "10.0.0.1", "--inventory", str(recorded)]
     )
     assert campaign_cli.dispatch(args) == 3
-    assert Cloud.accounts == [] and "loopback" in capsys.readouterr().err
+    assert Cloud.accounts == [] and "private" in capsys.readouterr().err
 
 
 def test_the_cli_needs_ip_or_clear(tmp_path):
-    for argv in ([], ["--ip", HOSTS[0], "--clear"]):
+    for argv in ([], ["--ip", "8.8.8.8", "--clear"]):
         with pytest.raises(SystemExit):
             parse(["campaign", "manager", "browser-hosts", *argv, "--inventory", "x.json"])
 
