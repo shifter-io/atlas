@@ -189,6 +189,9 @@ def test_try_record():
     )
     assert c.try_record(**failed)["screenshot"] == "browser/screenshots/0003.jpg"
     assert c.try_record(**try_fields(verdict="proxy_error", error="dns"))["error"] == "dns"
+    # LinkedIn's block answers 999 (K-BP2: block): its record is kept, so the run is not lost.
+    blocked = try_fields(verdict="block", error="blocked", status=999, reason="block_status")
+    assert c.try_record(**blocked)["status"] == 999
 
 
 def test_try_record_takes_every_run_target_input_from_the_settings():
@@ -238,6 +241,7 @@ def test_try_record_refusals():
         (try_fields(screenshot="browser/screenshots/0004.jpg"), "screenshot"),
         (try_fields(i=10_000), "i:"),
         (try_fields(status=99), "status"),
+        (try_fields(status=1000), "status"),
         (try_fields(final_url="ftp://example.com/"), "final_url"),
         (try_fields(timings_ms={"total": 1}), "timings_ms"),
         (try_fields(timings_ms=try_fields()["timings_ms"] | {"total": -1}), "timings_ms.total"),

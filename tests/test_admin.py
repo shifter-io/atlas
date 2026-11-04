@@ -78,6 +78,23 @@ async def census(database, db, *countries, providers=("alpha", "beta")):
     return batch_id, tokens
 
 
+async def plan_pulses(db, monkeypatch=None):
+    """Plan the current pulse slot from its start and return the wall-clock instant used.
+
+    A slot opened more than pulse.GRACE late spreads over its rest only, and a target whose
+    start no longer fits waits for the next slot: planned in a slot's last 30 seconds, the
+    second target got no batch. Planning from the slot start opens both at any time of day.
+    With monkeypatch, the admin readers' clock is frozen at the returned instant, so the
+    planned slot is their current one even if a slot boundary passes during the test.
+    """
+    now = datetime.now(UTC)
+    step = 30 * 60  # the targets' default pulse_interval_minutes
+    await batches.pulse_plan(db, datetime.fromtimestamp(now.timestamp() // step * step, UTC))
+    if monkeypatch is not None:
+        monkeypatch.setattr(views, "_now", lambda value=None: (value or now).astimezone(UTC))
+    return now
+
+
 # --- auth -----------------------------------------------------------------------------------
 
 
@@ -158,10 +175,9 @@ async def test_actions_require_json(admin):
 # --- readers --------------------------------------------------------------------------------
 
 
-async def test_dashboard_shape(database, db, admin):
+async def test_dashboard_shape(database, db, admin, monkeypatch):
     batch_id, _ = await census(database, db)
-    now = datetime.now(UTC)
-    await batches.pulse_plan(db, now)
+    await plan_pulses(db, monkeypatch)
     with connect(database) as conn:
         conn.execute(
             "UPDATE batch_runs br SET status='done',requests=100,successes=90 FROM test_batches b "
@@ -214,7 +230,7 @@ async def test_dashboard_shape(database, db, admin):
 
 async def test_batches_list_filters_and_detail(database, db, admin):
     batch_id, _ = await census(database, db)
-    await batches.pulse_plan(db, datetime.now(UTC))
+    await plan_pulses(db)
     body = await get(admin, "/batches")
     assert body["filters"] == {"kind": None, "status": None, "country": None, "limit": 100}
     # The census, two pulses and the load wave in fra1's reference country (DE).
@@ -359,7 +375,7 @@ async def test_nodes_grid_includes_missing_cells(database, admin):
 
 async def test_traffic_sums_and_filters(database, db, admin):
     batch_id, _ = await census(database, db)
-    await batches.pulse_plan(db, datetime.now(UTC))
+    now = await plan_pulses(db)
     with connect(database) as conn:
         conn.execute(
             "UPDATE batch_runs br SET status='done',requests=100,bytes_up=500,bytes_down=1500 "
@@ -392,7 +408,7 @@ async def test_traffic_sums_and_filters(database, db, admin):
     assert keys(await get(admin, "/traffic", provider="beta")) == [("pulse", "beta/res")]
     assert keys(await get(admin, "/traffic", provider="beta/other")) == []
     assert (await get(admin, "/traffic", region="lon1"))["rows"] == []
-    future = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+    future = (now + timedelta(days=1)).date().isoformat()
     assert (await get(admin, "/traffic", **{"from": future}))["rows"] == []
     windowed = await get(admin, "/traffic", **{"from": "2020-01-01", "to": future})
     assert windowed["filters"]["from"] == "2020-01-01T00:00:00+00:00"
@@ -521,7 +537,7 @@ async def test_skip_census_writes_census_skipped(database, db, admin):
 async def test_kill_pulse_writes_pulse_finished(database, db, admin):
     prepare(database)
     issue_token(database, provider="alpha", product="res", region="fra1")
-    await batches.pulse_plan(db, datetime.now(UTC))
+    await plan_pulses(db)
     batch_id = query(database, "SELECT min(batch_id) FROM test_batches")[0][0]
     assert (await post(admin, f"/batches/{batch_id}/kill"))["runs_killed"] == 1
     (event,) = query(

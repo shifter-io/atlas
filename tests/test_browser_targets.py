@@ -3,7 +3,7 @@ target's own fixtures, URLs and rules are tested in its test_browser_target_<tar
 
 import asyncio
 import tomllib
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import pytest
 from browser_targets_cases import (
@@ -181,3 +181,46 @@ def test_page_target_base_needs_its_parts():
             call()
     with pytest.raises(NotImplementedError):
         base.page(context(0), ("a",))
+
+
+@dataclass(frozen=True, slots=True)
+class Shown(PageTarget):
+    """A page target whose page shows its content when `#content` is found."""
+
+    MARKS = (j.Mark("challenge", "site_check", text=("site check",), paths=("/check/",)),)
+
+    def shown(self, view):
+        return bool(j.count(view, "#content"))
+
+    def rules(self, view):
+        return j.OK if view.title or view.text_head else j.failed("no_content", "blank")
+
+
+@dataclass(frozen=True, slots=True)
+class TitleRead(Shown):
+    SHOWN_UNREAD = ("text_head",)
+
+
+@dataclass(frozen=True, slots=True)
+class ShownOk(Shown):
+    SHOWN_OK = True
+
+
+def test_a_shown_page_is_not_read_for_markers():
+    target = Shown("x", "https://www.example.com/")
+    page = PageView("https://www.example.com/", 200, "captcha", "site check", {"#content": 1})
+    assert PageTarget("x", "u").shown(page) is False
+    assert target.judge(replace(page, found={})).reason == "site_check"
+    # Shown: the marks, the shared markers and the rules see a blank title and text...
+    assert outcome(target.judge(page)) == ("error", "no_content", "blank")
+    # ...only the SHOWN_UNREAD fields: here the title is still read.
+    assert TitleRead("x", "u").judge(page).reason == "challenge_marker"
+    # Statuses and marks by path or selector still count.
+    assert target.judge(replace(page, status=403)).reason == "block_status"
+    assert target.judge(replace(page, final_url="https://www.example.com/check/1")).reason == (
+        "site_check"
+    )
+    # With SHOWN_OK the page is ok right after the 407 step.
+    assert ShownOk("x", "u").judge(replace(page, status=403)) is j.OK
+    assert ShownOk("x", "u").judge(replace(page, status=407)).reason == "proxy_auth_status"
+    assert ShownOk("x", "u").judge(replace(page, found={})).reason == "site_check"
