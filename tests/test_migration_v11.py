@@ -52,7 +52,7 @@ def test_v10_database_adds_the_browser_batch_kind(databases):
     before = stored_rows(database)
     assert before[0] and before[1]
     result = migrate(database)
-    assert (result["from_schema_version"], result["schema_version"]) == (10, 11)
+    assert (result["from_schema_version"], result["schema_version"]) == (10, SCHEMA_VERSION)
     assert result["verified"] == [] and migrate(database)["migrated"] is False
     initialize(database)
     store.initialize(database)

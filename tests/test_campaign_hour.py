@@ -887,6 +887,16 @@ async def test_run_process_streams_caps_and_times_out():
     assert await fanout.run_process(gone, b"x" * 5_000_000, 30, io.BytesIO(), 10) == 0
 
 
+async def test_run_process_ends_when_killed_with_unread_output():
+    """A child killed with more unread stdout than the reader buffers (which pauses the pipe)
+    is still reaped: wait() returns only once stdout reaches EOF. The child writes before it
+    reads, so the stdin write never drains, stdout fills and the timeout always fires."""
+    flood_first = "import sys; sys.stdout.write('x' * 1_000_000); sys.stdin.read()"
+    stuck = [sys.executable, "-c", flood_first]
+    run = fanout.run_process(stuck, b"y" * 1_000_000, 0.5, io.BytesIO(), 10)
+    assert await asyncio.wait_for(run, 10) == 255
+
+
 async def test_oversized_worker_output_is_refused(tmp_path):
     runner = FakeRunner((0, b"x" * (fanout.OUTPUT_BYTES + 1)))
     remote = fanout.OpenSSHRemote(tmp_path, tmp_path / "rt", 0, runner=runner)
