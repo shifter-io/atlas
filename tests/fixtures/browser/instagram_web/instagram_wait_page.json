@@ -1,0 +1,19 @@
+{
+  "view": {
+    "final_url": "https://www.instagram.com/example_person/",
+    "status": 200,
+    "title": "Instagram",
+    "text_head": "Please wait a few minutes before you try again.",
+    "found": {
+      "header h2": 0,
+      "main a[href*=\"/p/\"]": 0,
+      "main a[href*=\"/reel/\"]": 0,
+      "div[role=\"dialog\"] input[name=\"username\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "wait_page"
+  }
+}
