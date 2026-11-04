@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from helpers import FakeTransport
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches
+from proxy_index.orchestrator import batches, jobs
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
 from proxy_index.orchestrator.db import Database, put_setting
@@ -992,17 +992,12 @@ async def test_scheduler_loop_fires_due_jobs(db):
 async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monkeypatch):
     calls = []
 
-    def fake(database_file, methodology, *, publish):
-        calls.append(publish)
+    async def fake(argv, limit_s):
+        calls.append(argv[-1])
         return {"snapshot_id": "s1", "as_of": "now"}
 
-    import sys
-    import types
-
-    # A stand-in module: the job imports the calculator lazily, at run time.
-    module = types.ModuleType("proxy_index.calculated.calculator")
-    module.calculate = fake
-    monkeypatch.setitem(sys.modules, "proxy_index.calculated.calculator", module)
+    # A stand-in for the subprocess (test_manager_orch runs the real one).
+    monkeypatch.setattr(jobs, "run_calculation", fake)
     await set_setting(db, "calculate.trigger", "batch")  # the old schedule; hourly is the default
     assert (await calculate(db, database, "m.toml"))["skipped"].startswith("no batch")
     prepare(database, ("DE",), DE=time(12))
@@ -1015,7 +1010,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
         conn.execute("INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',now())")
         conn.execute("UPDATE test_batches SET finished_at=now()+interval '1 second'")
     assert (await calculate(db, database, "m.toml")) == {"skipped": "debounced"}
-    assert calls == [True]
+    assert calls == ["--publish"]
 
 
 async def test_detect_job_is_optional(database, monkeypatch):

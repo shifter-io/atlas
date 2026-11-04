@@ -1,4 +1,4 @@
-"""`proxy-index daily plan|run|ingest` (operator).
+"""`proxy-index daily plan|run|ingest|hour|check` (operator; `hour` and `check` on the manager).
 
 `plan` prints the hour's droplet plan and writes nothing (a dry run). `run` runs the hour's test
 on the manager and exits 3 when a worker is not verified gone or the hour did not finish.
@@ -42,6 +42,14 @@ def register(commands) -> None:
     ingest.add_argument(
         "--spool", type=Path, help="keep each imported run's raw files there (raw.spool_dir)"
     )
+    hour = actions.add_parser("hour", help="Manager: run the next hour's test, then ingest it")
+    check = actions.add_parser("check", help="Check formulas and template for all 24 hours")
+    for action in (hour, check):
+        action.add_argument("--formulas", type=Path, required=True, help="formulas/*.json")
+        action.add_argument("--template", type=Path, required=True, help="A planned campaign root")
+    hour.add_argument("--database-file", type=Path, required=True)
+    hour.add_argument("--mmdb", type=Path)
+    hour.add_argument("--start", default="next-hour", help="next-hour, now-hour or an ISO hour")
 
 
 def _plan(args) -> int:
@@ -92,7 +100,34 @@ def _ingest(args) -> int:
     return 0 if report["complete"] else 3
 
 
-HANDLERS = {"plan": _plan, "run": _run, "ingest": _ingest}
+def _hour(args) -> int:
+    """The hourly timer's job: exit 3 unless the hour ran clean and its import is complete."""
+    from ..campaign.cli import cancel_on_signals
+    from .hourly import run_and_ingest
+
+    async def run() -> dict:
+        cancel_on_signals()
+        return await run_and_ingest(
+            args.formulas, args.template.resolve(), args.database_file, args.mmdb, args.start
+        )
+
+    outcome = asyncio.run(run())
+    print(json.dumps(outcome, indent=2))
+    if outcome["state"] == "nothing_due":
+        return 0
+    clean = outcome["state"] == "done" and not outcome["leftover"]
+    return 0 if clean and outcome["ingest"]["complete"] else 3
+
+
+def _check(args) -> int:
+    """One JSON line; exit 0 whether or not it found issues (`ok`)."""
+    from .hourly import check
+
+    print(json.dumps(check(args.formulas, args.template), separators=(",", ":")))
+    return 0
+
+
+HANDLERS = {"plan": _plan, "run": _run, "ingest": _ingest, "hour": _hour, "check": _check}
 
 
 def dispatch(args) -> int:
