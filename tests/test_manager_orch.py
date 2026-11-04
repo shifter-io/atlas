@@ -35,7 +35,7 @@ from campaign_deploy_fakes import Shell as DeployShell
 from campaign_fakes import running
 
 from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, manager_daily, manager_orch, ops_api
+from proxy_index.campaign import deploy, manager_daily, manager_orch, manager_rules, ops_api
 from proxy_index.campaign.contracts import PULSE_TAG
 from proxy_index.orchestrator import app as orchestrator_app
 from proxy_index.orchestrator import cli as orchestrator_cli
@@ -56,7 +56,7 @@ def quick_assign(monkeypatch):
 
 @pytest.fixture
 def job(tmp_path):
-    return make_job(tmp_path)
+    return make_job(tmp_path, account="proxy-index")
 
 
 CHECK_OK = {"ok": True, "issues": [], "networks": ["shifter"], "droplets_by_hour": {"5": 1}}
@@ -332,7 +332,7 @@ async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path
     async with running(fake) as cloud:
         result = await manager_orch.enable(cloud, job.inventory, inputs, apply=True, shell=shell)
     rules = manager_firewall(fake, job)
-    assert rules["inbound_rules"][-1] == manager_orch.node_api_rule()
+    assert rules["inbound_rules"][-1] == manager_rules.node_api_rule()
     assert rules["droplet_ids"] == [int(inventory(job)["manager_id"])]
     ((argv, stdin),) = shell.calls
     assert argv[-1] == manager_orch.enable_script(MANAGER_IP, CID)
@@ -360,7 +360,7 @@ async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path
         await deploy.allow_me(cloud, job.inventory, OTHER_IP)
     assert manager_firewall(fake, job)["inbound_rules"] == [
         ops_api.ssh_from(OTHER_IP),
-        manager_orch.node_api_rule(),
+        manager_rules.node_api_rule(),
     ]
 
 
@@ -449,7 +449,7 @@ async def test_deploy_keeps_the_node_api_rule(job):
     fake = await deployed(job)
     deploy.save(job.inventory, inventory(job), node_api_port=8443)
     await run_deploy(fake, job)
-    assert manager_firewall(fake, job)["inbound_rules"][-1] == manager_orch.node_api_rule()
+    assert manager_firewall(fake, job)["inbound_rules"][-1] == manager_rules.node_api_rule()
 
 
 # --- the hourly timer (owner rule: on only with the owner's go) --------------------------------
@@ -535,24 +535,57 @@ def test_the_repository_formulas_install(tmp_path):
     assert len(found) >= 18 and all(name.endswith(".json") for name in found)
 
 
+async def test_an_inventory_of_another_account_is_refused_before_any_call(tmp_path, monkeypatch):
+    other = make_job(tmp_path, account="leftclick")
+    fake = await deployed(other)
+    deploy.save(other.inventory, inventory(other), manager_size=WANTED, orchestrator={"x": 1})
+    before, requests, shell = inventory(other), len(fake.requests), Shell()
+    steps = [
+        lambda cloud: manager_orch.resize(cloud, other.inventory, apply=True),
+        lambda cloud: manager_orch.enable(cloud, other.inventory, go_inputs(tmp_path), apply=True),
+        lambda cloud: manager_orch.disable(cloud, other.inventory, apply=True, shell=shell),
+        lambda cloud: manager_daily.hourly_enable(
+            other.inventory, apply=True, owner_go=owner_go(tmp_path), shell=shell
+        ),
+        lambda cloud: manager_daily.hourly_disable(other.inventory, apply=True, shell=shell),
+    ]
+    async with running(fake) as cloud:
+        for step in steps:
+            with pytest.raises(deploy.DeployError, match="only on the proxy-index account"):
+                await step(cloud)
+    clouds = []
+    monkeypatch.setattr(campaign_cli, "_cloud", lambda account: clouds.append(account))
+    for action in ("resize", "orchestrator-disable"):
+        args = parse(
+            ["campaign", "manager", action, "--apply", "--inventory", str(other.inventory)]
+        )
+        with pytest.raises(deploy.DeployError, match="only on the proxy-index account"):
+            await campaign_cli._manager_step(args)
+    assert len(fake.requests) == requests and shell.calls == [] and clouds == []
+    assert inventory(other) == before
+
+
 # --- CLI ----------------------------------------------------------------------------------------
 
 
 def test_the_cli_parses_the_new_manager_steps(tmp_path):
-    args = parse(["campaign", "manager", "resize"])
+    with pytest.raises(SystemExit):  # the inventory is always named
+        parse(["campaign", "manager", "resize"])
+    inv = ["--inventory", str(tmp_path / "pi.json")]
+    args = parse(["campaign", "manager", "resize", *inv])
     assert (args.manager_action, args.size, args.apply) == ("resize", WANTED, False)
     go = tmp_path / "go.md"
     args = parse(
         ["campaign", "manager", "orchestrator-enable", "--owner-go", str(go), "--apply"]
-        + ["--daily-template", CID]
+        + ["--daily-template", CID, *inv]
     )
     assert (args.owner_go, args.apply, args.daily_template) == (go, True, CID)
     assert args.formulas == Path("formulas")
     args = parse(["campaign", "manager", "orchestrator-disable", "--inventory", str(go)])
     assert (args.manager_action, args.inventory, args.apply) == ("orchestrator-disable", go, False)
-    args = parse(["campaign", "manager", "hourly-enable", "--owner-go", str(go)])
+    args = parse(["campaign", "manager", "hourly-enable", "--owner-go", str(go), *inv])
     assert (args.manager_action, args.owner_go, args.apply) == ("hourly-enable", go, False)
-    args = parse(["campaign", "manager", "hourly-disable", "--apply"])
+    args = parse(["campaign", "manager", "hourly-disable", "--apply", *inv])
     assert (args.manager_action, args.apply) == ("hourly-disable", True)
 
 
@@ -580,7 +613,7 @@ async def test_the_cli_runs_each_step_on_the_recorded_account(job, tmp_path, mon
             continue
         result = await campaign_cli._manager_step(args)
         assert result["applied"] is ("--apply" in argv)
-    assert accounts == ["leftclick"] * 3
+    assert accounts == ["proxy-index"] * 3
     assert inventory(job)["manager_size"] == WANTED
     with pytest.raises(deploy.DeployError, match="no manager is recorded"):
         await manager_orch.run(
@@ -654,8 +687,16 @@ def test_the_calculation_command():
     tail = ["calculate", "--database-file", "db.toml", "--methodology", "m.toml", "--publish"]
     assert plain[-6:] == tail
     scoped = jobs.calculation_argv("db.toml", "m.toml", "8G")
-    assert scoped[:6] == ["systemd-run", "--scope", "--quiet", "-p", "MemoryMax=8G", "--"]
-    assert scoped[6:] == plain
+    assert scoped[:7] == [
+        "systemd-run",
+        "--scope",
+        "--quiet",
+        "--unit=proxy-index-calculate",
+        "-p",
+        "MemoryMax=8G",
+        "--",
+    ]
+    assert scoped[7:] == plain
     for bad in ("8 G", "0", "8G; reboot", "-1G"):
         with pytest.raises(ValueError, match="PROXY_INDEX_CALCULATE_MEMORY_MAX"):
             jobs.calculation_argv("db.toml", "m.toml", bad)
@@ -693,6 +734,30 @@ async def test_a_calculation_past_its_timeout_is_killed_with_its_children(tmp_pa
     with pytest.raises(jobs.CalculationFailed, match="timed out after 1 s"):
         await jobs.run_calculation(python(code), 1)
     assert time.monotonic() - began < 10
+    for pid in map(int, pids.read_text().split()):
+        for _ in range(50):
+            if not _alive(pid):
+                break
+            await asyncio.sleep(0.1)
+        assert not _alive(pid)
+
+
+async def test_a_cancelled_calculation_is_killed_and_the_cancel_propagates(tmp_path):
+    pids = tmp_path / "pids"
+    code = (
+        "import os, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"open({str(pids)!r}, 'w').write(f'{{os.getpid()}} {{child.pid}}')\n"
+        "time.sleep(60)\n"
+    )
+    task = asyncio.ensure_future(jobs.run_calculation(python(code), 60))
+    for _ in range(100):
+        if pids.exists() and len(pids.read_text().split()) == 2:
+            break
+        await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
     for pid in map(int, pids.read_text().split()):
         for _ in range(50):
             if not _alive(pid):

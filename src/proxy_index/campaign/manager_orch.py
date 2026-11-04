@@ -31,8 +31,8 @@ from . import deploy, manager_daily, ops_api
 from .contracts import PULSE_TAG
 from .do_api import ApiError, DigitalOcean
 from .image import Shell, run_shell
+from .manager_rules import NODE_API_PORT, manager_rules
 
-NODE_API_PORT = 8443
 WANTED_SIZE = "s-8vcpu-16gb-amd"
 ORCHESTRATOR_UNIT = "proxy-index-orchestrator.service"
 ANALYZE_TIMER = "proxy-index-db-analyze.timer"
@@ -49,38 +49,17 @@ ACTIONS = ("resize", "orchestrator-enable", "orchestrator-disable", *manager_dai
 PEM_RE = re.compile(r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n")
 
 
-def node_api_rule(port: int = NODE_API_PORT) -> dict[str, Any]:
-    """The node API port, open to the pulse-node tag (BP-FIREWALL adds the minis' addresses)."""
-    return {"protocol": "tcp", "ports": str(port), "sources": {"tags": [PULSE_TAG]}}
-
-
-def manager_rules(inventory: dict[str, Any], mac_ipv4: str) -> dict[str, Any]:
-    """The manager firewall: SSH from the Mac, all outbound, and the node API rule while the
-    inventory records the orchestrator's port (deploy and allow-me keep it)."""
-    rules = ops_api.manager_firewall(mac_ipv4, str(inventory["manager_id"]))
-    if inventory.get("node_api_port"):
-        rules["inbound_rules"].append(node_api_rule(int(inventory["node_api_port"])))
-    return rules
-
-
 def units() -> list[tuple[str, bytes, int]]:
     """The unit files installed under /etc/systemd/system (from the wheel's assets)."""
     assets = files("proxy_index.campaign").joinpath("assets")
     return [(name, assets.joinpath(name).read_bytes(), 0o644) for name in UNIT_FILES]
 
 
-def _recorded(inventory_path: Path) -> dict[str, Any]:
-    inventory = deploy.load_inventory(inventory_path)
-    if not inventory.get("manager_id") or not inventory.get("host"):
-        raise deploy.DeployError("no manager is recorded")
-    return inventory
-
-
 async def resize(
     cloud: DigitalOcean, inventory_path: Path, size: str = WANTED_SIZE, *, apply: bool = False
 ) -> dict[str, Any]:
     """Check the manager's live size against `size` and, with `apply`, record it."""
-    inventory = _recorded(inventory_path)
+    inventory = manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     if deploy.MANAGER_REGION not in (await cloud.sizes()).get(size, []):
         raise deploy.DeployError(f"size {size} is not offered in {deploy.MANAGER_REGION}")
@@ -97,14 +76,6 @@ async def resize(
     if apply and recorded != size:
         deploy.save(inventory_path, inventory, manager_size=size)
     return result | {"action": "none" if recorded == size else "record"}
-
-
-def go_record(owner_go: Path | None, now: datetime) -> dict[str, str]:
-    """The owner's go for the switch (D13): the answer file's path, SHA-256 and the time."""
-    if owner_go is None or not owner_go.is_file() or not owner_go.read_text().strip():
-        raise deploy.DeployError("--apply needs --owner-go with the owner's recorded answer")
-    digest = hashlib.sha256(owner_go.read_bytes()).hexdigest()
-    return {"owner_go": str(owner_go.resolve()), "owner_go_sha256": digest, "at": now.isoformat()}
 
 
 def enable_script(host: str, cid: str, port: int = NODE_API_PORT) -> str:
@@ -203,7 +174,7 @@ async def enable(
 ) -> dict[str, Any]:
     """Install and start the orchestrator on the manager, and install (never start) the hourly
     daily test with its checked inputs; the dry run changes nothing."""
-    inputs, inventory = inputs or EnableInputs(), _recorded(inventory_path)
+    inputs, inventory = inputs or EnableInputs(), manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     if inventory.get("manager_size") != WANTED_SIZE:
         raise deploy.DeployError(f"record the manager's size first ({WANTED_SIZE}): resize")
@@ -222,7 +193,7 @@ async def enable(
     }
     if not apply:
         return result
-    go = go_record(inputs.owner_go, now or datetime.now(UTC))
+    go = manager_daily.go_record(inputs.owner_go, now or datetime.now(UTC))
     await _firewall(cloud, inventory, rules)
     deploy.save(inventory_path, inventory, node_api_port=NODE_API_PORT)
     remote = deploy.Manager(inventory, inventory_path, shell)
@@ -252,7 +223,7 @@ async def disable(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Stop the orchestrator, the analyze timer and the hourly timer, then close the port."""
-    inventory = _recorded(inventory_path)
+    inventory = manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     closed = {key: value for key, value in inventory.items() if key != "node_api_port"}
     rules = manager_rules(closed, inventory["mac_ipv4"])
@@ -274,7 +245,7 @@ async def disable(
     return result
 
 
-def add_parsers(steps, inventory: Path) -> None:
+def add_parsers(steps) -> None:
     """`campaign manager resize|orchestrator-enable|orchestrator-disable|hourly-enable|
     hourly-disable` (all dry runs unless --apply)."""
     found = steps.add_parser("resize", help="Check and record the manager's size (dry run)")
@@ -289,7 +260,9 @@ def add_parsers(steps, inventory: Path) -> None:
         step.add_argument("--owner-go", type=Path, help="the owner's recorded go (for --apply)")
     for step in (found, on, off, hourly, quiet):
         step.add_argument("--apply", action="store_true", help="act; without it, only print")
-        step.add_argument("--inventory", type=Path, default=inventory)
+        step.add_argument(
+            "--inventory", type=Path, required=True, help="the proxy-index account's inventory"
+        )
 
 
 async def run(args, cloud_for) -> dict[str, Any]:
@@ -300,10 +273,8 @@ async def run(args, cloud_for) -> dict[str, Any]:
         )
     if args.manager_action == "hourly-disable":
         return await manager_daily.hourly_disable(args.inventory, apply=args.apply)
-    account = deploy.load_inventory(args.inventory).get("account")
-    if account is None:
-        raise deploy.DeployError("no manager is recorded")
-    async with cloud_for(account) as cloud:
+    manager_daily.recorded(args.inventory)  # the proxy-index manager, before any call
+    async with cloud_for(manager_daily.ACCOUNT) as cloud:
         if args.manager_action == "resize":
             return await resize(cloud, args.inventory, args.size, apply=args.apply)
         if args.manager_action == "orchestrator-enable":

@@ -9,8 +9,8 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           debounced to calculate.min_interval_seconds and only after a batch
                           finished; runs `proxy-index calculate --publish` as a subprocess,
                           killed after calculate.timeout_seconds, under
-                          `systemd-run --scope -p MemoryMax=…` when
-                          $PROXY_INDEX_CALCULATE_MEMORY_MAX is set (the manager's unit)
+                          `systemd-run --scope --unit=proxy-index-calculate -p MemoryMax=…`
+                          when $PROXY_INDEX_CALCULATE_MEMORY_MAX is set (the manager's unit)
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
                           hours that ended, with their estimate_hour_released events
 detect                    every minute: proxy_index.detect.detect(conn, now) writes the
@@ -72,6 +72,10 @@ MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
 # The calculation's memory cap (a systemd size such as 8G), set by the manager's unit.
 MEMORY_ENV = "PROXY_INDEX_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
+# The capped calculation's scope. One fixed name: while a calculation left by a crashed or killed
+# orchestrator still runs (its scope is outside the service), systemd refuses a second one, and
+# the job fails with that exit instead of running two at once.
+SCOPE_UNIT = "proxy-index-calculate"
 
 
 class CalculationFailed(RuntimeError):
@@ -135,8 +139,8 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
 def calculation_argv(
     credentials_file: str, methodology: Path | str, memory_max: str | None = None
 ) -> list[str]:
-    """`proxy-index calculate --publish` of this installation, under a systemd scope capped at
-    `memory_max` when given (the database file is passed by path, never read here)."""
+    """`proxy-index calculate --publish` of this installation, under the systemd scope SCOPE_UNIT
+    capped at `memory_max` when given (the database file is passed by path, never read here)."""
     script = Path(sys.executable).with_name("proxy-index")
     command = (
         [str(script)]
@@ -153,7 +157,8 @@ def calculation_argv(
         return command
     if not MEMORY_RE.fullmatch(memory_max):
         raise ValueError(f"{MEMORY_ENV} must be a size such as 8G")
-    return ["systemd-run", "--scope", "--quiet", "-p", f"MemoryMax={memory_max}", "--", *command]
+    scope = ["systemd-run", "--scope", "--quiet", f"--unit={SCOPE_UNIT}"]
+    return [*scope, "-p", f"MemoryMax={memory_max}", "--", *command]
 
 
 async def run_calculation(argv: list[str], limit_s: float) -> dict[str, Any]:

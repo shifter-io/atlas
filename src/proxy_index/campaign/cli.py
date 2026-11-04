@@ -286,7 +286,7 @@ def _plan_parsers(actions) -> None:
         step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
     for step in (deploy, upload, enable, stop, allow, teardown):
         step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
-    manager_orch.add_parsers(steps, SECRETS / "campaign-manager.json")  # MANAGER-ORCH-1
+    manager_orch.add_parsers(steps)  # MANAGER-ORCH-1
 
 
 def _plan(args) -> int:

@@ -32,6 +32,28 @@ CAMPAIGNS = "/opt/proxy-index-campaign/campaigns"
 PROXY_INDEX = "/opt/proxy-index-campaign/venv/bin/proxy-index"
 WANTS = f"/etc/systemd/system/timers.target.wants/{DAILY_TIMER}"
 ACTIONS = ("hourly-enable", "hourly-disable")
+ACCOUNT = "proxy-index"  # the brief: the "Proxy Index" team account, never leftclick
+
+
+def recorded(inventory_path: Path) -> dict[str, Any]:
+    """The recorded manager, refused unless it is the proxy-index account's (before any call)."""
+    inventory = deploy.load_inventory(inventory_path)
+    if not inventory.get("manager_id") or not inventory.get("host"):
+        raise deploy.DeployError("no manager is recorded")
+    if inventory.get("account") != ACCOUNT:
+        raise deploy.DeployError(
+            f"this inventory's manager is on account {inventory.get('account')}; these steps act "
+            f"only on the {ACCOUNT} account's manager: pass its inventory with --inventory"
+        )
+    return inventory
+
+
+def go_record(owner_go: Path | None, now: datetime) -> dict[str, str]:
+    """The owner's go for a step (D13, hourly tests): the answer file's path, SHA-256 and time."""
+    if owner_go is None or not owner_go.is_file() or not owner_go.read_text().strip():
+        raise deploy.DeployError("--apply needs --owner-go with the owner's recorded answer")
+    digest = hashlib.sha256(owner_go.read_bytes()).hexdigest()
+    return {"owner_go": str(owner_go.resolve()), "owner_go_sha256": digest, "at": now.isoformat()}
 
 
 def formula_files(directory: Path) -> dict[str, bytes]:
@@ -129,9 +151,7 @@ async def hourly_enable(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Turn the hourly daily test on, only with the owner's recorded go (owner rule)."""
-    from .manager_orch import go_record
-
-    inventory = deploy.load_inventory(inventory_path)
+    inventory = recorded(inventory_path)
     if not inventory.get("orchestrator") or not inventory.get("daily_template"):
         raise deploy.DeployError("run orchestrator-enable --apply first")
     result = {"applied": apply, "timer": DAILY_TIMER, "template": inventory["daily_template"]}
@@ -159,9 +179,7 @@ async def hourly_disable(
     inventory_path: Path, *, apply: bool = False, shell: Shell = run_shell, now=None
 ) -> dict[str, Any]:
     """Turn the hourly daily test off (it stays off after a reboot)."""
-    inventory = deploy.load_inventory(inventory_path)
-    if not inventory.get("host"):
-        raise deploy.DeployError("no manager is recorded")
+    inventory = recorded(inventory_path)
     result = {"applied": apply, "timer": DAILY_TIMER}
     if not apply:
         return result
