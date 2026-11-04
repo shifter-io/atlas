@@ -10,7 +10,8 @@
       "#corePriceDisplay_desktop_feature_div .a-price": 0,
       "#price_inside_buybox": 0,
       "#price": 0,
-      "form[action*=\"validateCaptcha\"]": 0
+      "form[action*=\"validateCaptcha\"]": 0,
+      "a[href*=\"/dogsofamazon\"]": 0
     }
   },
   "expect": {
