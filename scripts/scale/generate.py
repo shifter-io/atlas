@@ -14,9 +14,9 @@ day's shared rows (partitions, DB-IP release, pulse batches) commit first, then 
 rows in its own transaction, --jobs networks at a time in worker processes; the settings row
 records each finished network, so an interrupted step is resumed by running it again.
 
-Guards: the database must be named proxy_scale, its storage schema must be this framework's, and
-it must not hold any test_runs row this generator did not write (each of its runs carries the
-summary key scale_generator).
+Guards: the database must be named proxy_scale, or the session's only schema must be proxy_scale
+(target.py); its storage schema must be this framework's, and it must not hold any test_runs row
+this generator did not write (each of its runs carries the summary key scale_generator).
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from psycopg.types.json import Jsonb
+import target
 from synthetic import Model, Settings
 from writer import MARKER, Writer
 
@@ -52,11 +53,11 @@ class Refused(Exception):
 
 
 def guard(conn, expected: str = DATABASE) -> None:
-    """Refuse any database but the scratch one, and one holding runs written by anything else."""
-    name = conn.execute("SELECT current_database()").fetchone()[0]
-    if name != expected:
-        raise Refused(f"the database is {name!r}; this generator writes only to {expected!r}")
-    if conn.execute("SELECT to_regclass('public.test_runs')").fetchone()[0] is None:
+    """Refuse any target but the scratch one (target.py), and one holding others' runs."""
+    found = target.refusal(conn, expected)
+    if found:
+        raise Refused(f"{found}; this generator writes only to {expected!r} {target.ALLOWED}")
+    if conn.execute("SELECT to_regclass('test_runs')").fetchone()[0] is None:
         return
     foreign = conn.execute(
         f"SELECT count(*) FROM test_runs WHERE NOT (summary ? '{MARKER}')"
@@ -67,7 +68,7 @@ def guard(conn, expected: str = DATABASE) -> None:
 
 def stored(conn) -> tuple[Settings, dict] | None:
     """The recorded settings and progress (days_done, prepared day, its finished networks)."""
-    if conn.execute("SELECT to_regclass('public.settings')").fetchone()[0] is None:
+    if conn.execute("SELECT to_regclass('settings')").fetchone()[0] is None:
         return None
     row = conn.execute("SELECT value FROM settings WHERE key=%s", (SETTING,)).fetchone()
     return (Settings.from_json(row[0]), row[0]) if row else None

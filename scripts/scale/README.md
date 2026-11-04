@@ -46,7 +46,8 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
 
 ## Guards
 
-- It writes only to a database named `proxy_scale`.
+- It writes only to a database named `proxy_scale`, or to the schema `proxy_scale` of another
+  database with `search_path` exactly `proxy_scale` ("A scratch schema", below; `target.py`).
 - It refuses a database holding any `test_runs` row it did not write (its runs carry the summary
   key `scale_generator`), and a storage schema other than this framework's.
 - A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
@@ -170,13 +171,15 @@ A failed calculation stops the run with exit code 1 and is run again by the next
 
 - **Statement timings.** When the database has `pg_stat_statements` installed and loaded
   (DB-CHECK-1 reports it), the change of its counters over each step: every statement of the
-  database in that time, including the calculation child's and siteapi's. Otherwise the driver
+  database in that time, including the calculation child's and siteapi's; not in a scratch schema,
+  whose search path does not reach it and whose database also runs production. Otherwise the driver
   times every psycopg `execute` and `executemany` of its own process (ingest, the node API,
   release) and runs the calculation under `measure.py trace` to time the child's; COPY is not
   traced (the step's time includes it) and siteapi's statements are not seen. The 20 slowest
   statements of each step are kept.
-- **Sizes.** After each hour: the database size and `pg_total_relation_size` of every table, its
-  partitions and indexes included.
+- **Sizes.** After each hour: the database size and `pg_total_relation_size` of every table of
+  the session's schema, its partitions and indexes included, and their sum (`tables_bytes`, the
+  report's "Tables GB"). In a scratch schema the database size includes production's data.
 - **Peak RSS.** Of the calculation: the largest `VmHWM` of `/proc/<pid>/status` sampled every half
   second, and the child's own maximum resident size (wait4). Of siteapi: its `VmHWM` after the
   refresh (`--siteapi-pid`), which is its peak since it started. Linux only.
@@ -196,3 +199,57 @@ and its largest tables.
 checks that the daily rows, enrichment, estimated hours and pulse geo rows equal those
 `generate.py` writes for the same hours, that no new pool, scope, location or network row appears, that
 an interrupted hour continues where it stopped, and that the guards refuse.
+
+# A scratch schema in production's database (SCALE-SCHEMA-1)
+
+Where no separate database may be created (no `CREATEDB`, no new server), the scripts run in a
+temporary schema `proxy_scale` inside production's database `proxy_reviews`. libpq's
+`PGOPTIONS='-c search_path=proxy_scale'` makes every connection of the run read and write only
+that schema: the three scripts, every `proxy-index` command (`db-init`, `calculate`,
+`snapshot-export`, ...) and the child processes they start. Nothing changes a production role or
+setting (`ALTER ROLE ... SET search_path` would change a shared role and is not used).
+
+```sh
+uv run python scripts/scale/target.py sql   # the SQL below, for the admin role
+# As proxy_admin in proxy_reviews:  CREATE SCHEMA proxy_scale AUTHORIZATION proxy_admin;
+export PGOPTIONS='-c search_path=proxy_scale'   # in the shell of every later command
+uv run python scripts/scale/target.py check --database proxy_reviews.toml   # must print "allowed"
+uv run python scripts/scale/generate.py --database proxy_reviews.toml --days 1 --scale 0.1
+# ... proxy-index db-init, generate.py, cycle.py, as above, all with PGOPTIONS set
+# Afterwards, as proxy_admin:  DROP SCHEMA proxy_scale CASCADE;
+# Read-only check that it is gone (0):  SELECT count(*) FROM pg_namespace WHERE nspname='proxy_scale';
+```
+
+**Guard** (`target.py`, used by `generate.py` and `cycle.py`): a script writes only when the
+database is named `proxy_scale` (the separate database above), or when the session's current
+schema is `proxy_scale` and `search_path` is exactly `proxy_scale`, with no `public` and no
+`"$user"`, so a name the scratch schema lacks can never reach a production table. Otherwise it
+refuses before writing anything (exit code 2), as it refuses runs it did not write. The scripts
+never create or drop a schema. `storage.initialize` and `storage.migrate` look for
+`schema_versions` in the session's schema, so the scratch schema gets its own.
+
+**What the schema shares with production.** Same server, same database:
+
+- *Advisory locks are per database.* The cycle's ingest takes the ingest lock (`storage.ingest`),
+  its `calculate` holds the calculation lock for its whole calculation, and its pulse planning the
+  orchestrator's planning lock: production's ingest, hourly calculation and scheduler wait for
+  them while they run, and the reverse.
+- *CPU, disk, WAL and backups.* Every generated row is written to the shared WAL and grows the
+  database's backups until the schema is dropped.
+- `pg_stat_statements` counts the whole database, so the driver times its own statements
+  instead (see "Measurements"); the report's "Database GB" includes production.
+
+**Keep load modest** (owner): production shares the server. Use the size knobs that exist
+(`--scale`, `--networks`, `--countries`, `--total-days`, and `--jobs`, `--pulse-rate` for pace)
+for a reduced run rather than full size, and drop the schema as soon as the run is done.
+
+**The Go API.** The siteapi's pinned pgx (v5.11.0) reads `PGOPTIONS` into the `options` startup
+parameter, and its connection string sets no `options`, so a siteapi started with `PGOPTIONS`
+exported serves the scratch schema. This was found by reading the pgx source, not by running it.
+
+`tests/test_scale_schema.py` builds a production stand-in in `public` (the miniature with one run
+the generator did not write, the calculated layer and a table of its own), runs `generate.py`, one
+`cycle.py` hour and `measure.py` in `proxy_scale`, and checks that every `public` row is
+unchanged, that `measure.py`'s tables are the scratch schema's, and that a database not named
+`proxy_scale` without `PGOPTIONS`, a `search_path` with `public` or `"$user"`, and a missing schema
+are refused with nothing written.

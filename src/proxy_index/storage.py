@@ -134,7 +134,7 @@ def initialize(credentials_file):
     schema, checksum = _schema()
     with connect(credentials_file) as conn:
         conn.execute("SELECT pg_advisory_xact_lock(817452901)")
-        if conn.execute("SELECT to_regclass('public.schema_versions')").fetchone()[0]:
+        if conn.execute("SELECT to_regclass(current_schema||'.schema_versions')").fetchone()[0]:
             versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
             if versions != [(SCHEMA_VERSION, checksum)]:
                 raise ValueError(
@@ -969,7 +969,7 @@ def migrate(credentials_file):
     with connect(credentials_file) as conn:
         conn.execute("SELECT pg_advisory_xact_lock(817452901)")
         conn.execute("SELECT pg_advisory_xact_lock(817452902)")
-        if not conn.execute("SELECT to_regclass('public.schema_versions')").fetchone()[0]:
+        if not conn.execute("SELECT to_regclass(current_schema||'.schema_versions')").fetchone()[0]:
             raise ValueError("No schema to migrate; use db-init")
         versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
         layered = conn.execute("SELECT to_regclass('calculation_schema')").fetchone()[0]

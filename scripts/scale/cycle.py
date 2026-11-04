@@ -15,8 +15,9 @@ steps, the measurements (measure.py) and the report. Progress is kept in the set
 scale.cycle: past --max-minutes a run stops between steps (or inside the ingest and pulse steps),
 and the same command continues it until N hours are done.
 
-Guards: the database must be named proxy_scale, hold a whole-day generator data set, and no
-test_runs row written by anything but the generator and this driver (summary key scale_cycle).
+Guards: the database must be named proxy_scale, or the session's only schema must be proxy_scale
+(target.py); it must hold a whole-day generator data set, and no test_runs row written by anything
+but the generator and this driver (summary key scale_cycle).
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ import aiohttp
 import generate
 import measure
 import synthetic
+import target
 import writer
 from aiohttp import web
 from psycopg.rows import dict_row
@@ -104,9 +106,9 @@ class Failed(Exception):
 
 def guard(conn, expected: str = DATABASE):
     """The generator's settings and progress; refuse another database or foreign runs."""
-    name = conn.execute("SELECT current_database()").fetchone()[0]
-    if name != expected:
-        raise Refused(f"the database is {name!r}; this driver uses only {expected!r}")
+    found = target.refusal(conn, expected)
+    if found:
+        raise Refused(f"{found}; this driver uses only {expected!r} {target.ALLOWED}")
     found = generate.stored(conn)
     if found is None:
         raise Refused("the database holds no synthetic data set; run generate.py first")
@@ -544,7 +546,7 @@ class Cycle:
         if current:
             done = [name for name, step in current["steps"].items() if step["done"]]
             current = {"index": current["index"], "steps_done": done}
-        found = {"database": self.conn.execute("SELECT current_database()").fetchone()[0]}
+        found = dict(zip(("database", "schema"), self.conn.execute(target.STATE).fetchone()))
         found |= {"settings": self.model.settings.to_json(), "current": current}
         found |= {key: state[key] for key in ("first_day", "first_hour", "hours")}
         found["statements_from"] = "pg_stat_statements" if self.pg_stat else "the driver"

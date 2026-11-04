@@ -24,8 +24,11 @@ import psycopg
 
 TOP = 20  # statements kept per step
 TEXT = 300  # characters kept of a statement
+# Only when its view is on the search path: in a scratch schema of production's database
+# (target.py) it is not, and its counters would mix in production's statements.
 EXTENSION = (
     "SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements' "
+    "AND to_regclass('pg_stat_statements') IS NOT NULL "
     "AND current_setting('shared_preload_libraries') LIKE '%pg_stat_statements%'"
 )
 STATEMENTS = (
@@ -35,7 +38,7 @@ STATEMENTS = (
 SIZES = (
     "SELECT c.relname,sum(pg_total_relation_size(t.relid))::bigint FROM pg_class c "
     "JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL pg_partition_tree(c.oid) t "
-    "WHERE n.nspname='public' AND c.relkind IN ('r','p') AND NOT c.relispartition "
+    "WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND NOT c.relispartition "
     "GROUP BY 1 ORDER BY 2 DESC,1"
 )
 
@@ -141,9 +144,11 @@ class Tracer:
 
 
 def sizes(conn) -> dict:
-    """The database's size and each table's (with its partitions and indexes), in bytes."""
+    """The database's size, and each table of the session's schema (with its partitions and
+    indexes) and their sum, in bytes; in a scratch schema the database also holds production."""
     total = conn.execute("SELECT pg_database_size(current_database())").fetchone()[0]
-    return {"database_bytes": total, "tables": dict(conn.execute(SIZES).fetchall())}
+    tables = dict(conn.execute(SIZES).fetchall())
+    return {"database_bytes": total, "tables_bytes": sum(tables.values()), "tables": tables}
 
 
 def vm_hwm(pid: int) -> int | None:
@@ -203,6 +208,7 @@ COLUMNS = (  # the report's hour table: (header, cell of (record, steps))
     ("siteapi s", lambda r, s: "" if "skipped" in s["siteapi"] else s["siteapi"]["seconds"]),
     ("siteapi RSS MB", lambda r, s: _mb(s["siteapi"].get("peak_rss_kb"))),
     ("Database GB", lambda r, s: f"{r['sizes']['database_bytes'] / 2**30:.1f}"),
+    ("Tables GB", lambda r, s: f"{r['sizes'].get('tables_bytes', 0) / 2**30:.1f}"),
 )
 
 
@@ -215,8 +221,8 @@ def markdown(report: dict) -> str:
     """One row per hour, then the last hour's slowest statements per step and largest tables."""
     lines = ["# Scale cycle report (SCALE-GEN-1b)", ""]
     lines.append(
-        f"Database `{report['database']}`, statement timings from {report['statements_from']}, "
-        f"pulse rate {report['pulse_rate']} runs/s, written {report['written_at']}."
+        f"Database `{report['database']}`, schema `{report.get('schema')}`, statement timings "
+        f"from {report['statements_from']}, pulse rate {report['pulse_rate']} runs/s, written {report['written_at']}."
     )
     rows = [[cell(r, r["steps"]) for _, cell in COLUMNS] for r in report["hours"]]
     lines += ["", *table([name for name, _ in COLUMNS], rows)]
