@@ -150,16 +150,16 @@ def test_every_source_has_its_cases():
     assert names == {
         c.AI_OVERVIEW: {
             *("ok", "late", "absent", "short", "sorry", "recaptcha", "block_page", "no_results"),
-            *("consent", "consent_form"),
+            *("consent", "consent_form", "answer_names_markers"),
         },
         c.AI_CHATGPT: {
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
             *("cloudflare", "too_many_requests", "status_429", "no_reply", "one_sentence"),
-            *("no_prompt", "challenge_after_submit"),
+            *("no_prompt", "challenge_after_submit", "answer_names_markers", "challenge_cleared"),
         },
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),
-            *("unusual_traffic", "no_reply"),
+            *("unusual_traffic", "no_reply", "answer_names_markers"),
         },
     }
 
@@ -239,6 +239,19 @@ def test_a_growing_answer_waits_until_it_is_stable():
     assert outcome(result) == ("ok", None, None)
 
 
+def test_a_read_answer_is_ok_whatever_the_page_says_but_a_407_comes_first():
+    """The answer is in the text the markers read, and the status is the first navigation's:
+    neither undoes it (the answer_names_markers and challenge_cleared fixtures). A 407 is
+    still the proxy's refusal, answer or not."""
+    answer = {"answer_chars": 200, "answer_sentences": 3}
+    for target_id in c.AI_SOURCES:
+        target = registry.get(target_id)
+        page = PageView(target.url, 403, "Just a moment...", "captcha rate limit", answer)
+        assert outcome(target.judge(page)) == ("ok", None, None)
+        refused = PageView(target.url, 407, "", "", answer)
+        assert outcome(target.judge(refused)) == ("proxy_error", "proxy_auth", "proxy_auth_status")
+
+
 def test_sentence_count():
     assert sentence_count("") == sentence_count("  ...  ") == 0
     assert sentence_count("No end mark") == 1
@@ -305,7 +318,7 @@ def test_registered_sources_match_the_targets_file():
     for target_id in c.AI_SOURCES:
         target = registry.get(target_id)
         assert (target.id, target.engine, target.pool_eligible) == (target_id, "browser", False)
-        assert target.version == "1" and isinstance(target, PageTarget)
+        assert target.version == "2" and isinstance(target, PageTarget)
         assert target.build_request().url == urls[target_id]
         assert target.answer_wait_s == 30 and target.page_timeout_s is None
     assert {t.id for t in registry.all() if t.engine == c.BROWSER_ENGINE} == set(c.RUN_TARGETS)

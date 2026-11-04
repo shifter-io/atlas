@@ -1,0 +1,42 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER Sunlight hits air "
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.0,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER Sunlight hits air molecules that scatter blue light far more than red. It is no captcha and no answer to too many requests: it is Rayleigh scattering."
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 172,
+    "answer_ms": 1000,
+    "asked": true
+  }
+}

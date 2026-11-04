@@ -1,0 +1,40 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "why is the sky blue - Google Search",
+    "text_head": "AI Overview",
+    "counts": {
+      "#search a h3": 8
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "texts": {
+        "div[aria-label=\"AI Overview\"]": "PRIVATE-ANSWER-MARKER The sky is blue be"
+      },
+      "counts": {
+        "div[aria-label=\"AI Overview\"]": 1
+      }
+    },
+    {
+      "t": 1.0,
+      "texts": {
+        "div[aria-label=\"AI Overview\"]": "PRIVATE-ANSWER-MARKER The sky is blue because air scatters short blue wavelengths more than red. No rate limit applies: sunlight is scattered the same way all day."
+      },
+      "counts": {
+        "div[aria-label=\"AI Overview\"]": 1
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 163,
+    "answer_ms": 1000,
+    "asked": false
+  }
+}

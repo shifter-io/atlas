@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from ...models import RequestContext
 from ...targets import PageDriver, PageSpec, PageView
-from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW
+from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW, PROXY_AUTH_STATUS
 from ..judge import (
     OK,
     Mark,
@@ -66,6 +66,8 @@ class AiSource(PageTarget):
     `page_timeout_s` (the try's page timeout) from the settings with dataclasses.replace; the
     wait ends at the smaller one. `clock` and `sleep` are replaced only by tests."""
 
+    # 2: a complete answer is ok before the page's words and status are read (judge()).
+    version: str = "2"
     answer_wait_s: int | None = ANSWER_WAIT_S
     page_timeout_s: int | None = None
     clock: Callable[[], float] = field(default=time.monotonic, repr=False, compare=False)
@@ -131,6 +133,15 @@ class AiSource(PageTarget):
         chars, sentences = found.get(ANSWER_CHARS, 0), found.get(ANSWER_SENTENCES, 0)
         return chars >= MIN_CHARS and sentences >= self.MIN_SENTENCES
 
+    def judge(self, view: PageView) -> PageAssessment:
+        """A complete answer is ok, then the shared steps (PageTarget.judge). The visible text
+        the markers read holds the answer itself, and the status is the first navigation's
+        (a challenge that cleared by itself was a 403): neither undoes an answer that was
+        read. A 407 still comes first."""
+        if view.status != PROXY_AUTH_STATUS and self.answered(view):
+            return OK
+        return PageTarget.judge(self, view)
+
 
 @dataclass(frozen=True, slots=True)
 class AiOverview(AiSource):
@@ -169,8 +180,6 @@ class AiOverview(AiSource):
     def rules(self, view: PageView) -> PageAssessment:
         if host_of(view).startswith("consent."):
             return failed("no_content", "consent_page")
-        if self.answered(view):
-            return OK
         if count(view, *self.ANSWER) or view.found.get(ANSWER_CHARS):
             return failed("no_answer", "short_overview")
         if count(view, self.RESULTS):
@@ -221,8 +230,6 @@ class ChatSource(AiSource):
         return await self.read_answer(driver, self.budget_s())
 
     def rules(self, view: PageView) -> PageAssessment:
-        if self.answered(view):
-            return OK
         if self.login_redirect(view):
             return failed("login_wall", "login_redirect")
         if count(view, *self.LOGIN_DIALOGS):
