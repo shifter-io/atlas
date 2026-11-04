@@ -1,15 +1,16 @@
 """What a calculation reads before build(), in its two modes (contract K6).
 
-"full" (`calculate --full`; calculator.calculate()'s default) reads every run and every IP
+"full" (`calculate`'s and calculator.calculate()'s default) reads every run and every IP
 observation of the 30-day window and aggregates them in Python (Full): the oracle
 every test compares the incremental calculation with.
 
-"incremental" (the `calculate` command's default) reads metadata first: the runs (every run
+"incremental" (`calculate --incremental`) reads metadata first: the runs (every run
 outside a batch, whose payload rows list them; batch runs started since a day before the window,
 with a slot or a bucket in it, and each product's first, so every group exists in payload order;
 census and pulse summaries are not read), the window's buckets and each daily window's list
 signature. A window whose signature names a stored list (a hit) takes its list id, entry counts
-and figures from calculated_lists and reads no observation; the other windows (misses, and every
+and figures from calculated_lists and returns no observation row to Python; the other windows
+(misses, and every
 census-pulse window until CALC-PULSE-1) read their runs' observations, aggregated in Python as
 full mode does (CALC-INC-1b counts them in SQL). What moves with the cutoff comes from the frozen
 extension modules (hourly.py, fleetsql.py, rollups.py), whose bodies count in the database. The
@@ -244,15 +245,15 @@ class Incremental(Full):
 
     def _count(self, groups, windows, days):
         """Count in the database the daily pools and series IPs of every group window, and the
-        first-seen IPs of every hit window (slice_figures(), bucket_ips())."""
+        first-seen IPs of the widest hit window of each group (slice_figures(), bucket_ips())."""
         products = {g: (product, self.runs[g]) for g, product in groups.items() if self.runs[g]}
         day, slices, self.ranges = timedelta(hours=24), {}, {}
         for g in products:
             slices[g] = [(self.as_of - (d + 1) * day, self.as_of - d * day) for d in range(days)]
-            for h in windows:
-                if (g, h) in self.hits:  # its range: the hit window's first-seen IPs
-                    self.ranges[g, h] = len(slices[g])
-                    slices[g].append((self.as_of - timedelta(hours=h), self.as_of))
+            widest = max((h for h in windows if (g, h) in self.hits), default=None)
+            if widest:  # new IPs of every hit window of the group (hourly.new_ips())
+                self.ranges[g] = len(slices[g])
+                slices[g].append((self.as_of - timedelta(hours=widest), self.as_of, "first_seen"))
         self.figures = hourly.slice_figures(self.conn, products, slices)
         buckets = {}
         for g in products:
@@ -274,7 +275,7 @@ class Incremental(Full):
             return super().window(
                 key, super().seen(key, since, self.as_of), since, hours, hosting, geo
             )
-        figures, n = hit["figures"], self.ranges.get((key, hours))
+        figures, n = hit["figures"], self.ranges.get(key)
         found = None if n is None else self.figures[key][n]  # None: no run in the window
         new, size = hourly.new_ips(found, since), figures["unique_ips"]
         ps = {"unique_ips": size, "new_ips": new, "churn_rate": new / size if size else None}

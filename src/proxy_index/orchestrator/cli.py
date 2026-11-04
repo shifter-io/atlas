@@ -26,6 +26,9 @@ def register(commands) -> None:
     node = commands.add_parser("node", help="Run a node agent for one provider product")
     node.add_argument("--orchestrator", required=True, help="Orchestrator base URL")
     node.add_argument("--token-file", required=True, help="Owner-only file holding the token")
+    node.add_argument(
+        "--ca-file", help="PEM certificate to trust alone for an https orchestrator (the manager's)"
+    )
     node.add_argument("--provider", required=True)
     node.add_argument("--product", required=True)
     where = node.add_mutually_exclusive_group(required=True)
@@ -126,6 +129,9 @@ def dispatch(args) -> int:
 
     from ..enrichment import LocalEnricher
     from ..node import NodeAgent, provider_factory, read_token, serve
+    from ..node_tls import client_tls
+
+    tls = client_tls(args.orchestrator, args.ca_file)  # refuses a URL the node must not use
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -149,5 +155,6 @@ def dispatch(args) -> int:
             # The configured path as given: a link is followed again for every run.
             mmdb=enricher.source,
         )
+        agent.tls = tls
         asyncio.run(serve(agent))
     return 0

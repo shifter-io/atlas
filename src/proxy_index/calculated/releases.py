@@ -37,8 +37,11 @@ OBSERVATIONS = (
 )
 
 
-# The observations of some runs (the first parameter) only.
-RUN_OBSERVATIONS = OBSERVATIONS.replace("WHERE ", "WHERE o.run_key=ANY(%s) AND ", 1)
+# The observations of some runs (the first parameter) only: the outer query's filter, which no
+# other part of OBSERVATIONS contains (tests check it).
+RUN_OBSERVATIONS = OBSERVATIONS.replace(
+    "WHERE o.bucket_start>=", "WHERE o.run_key=ANY(%s) AND o.bucket_start>="
+)
 
 
 def enriched_observations(conn, start, as_of) -> tuple[dict[str, Any], list]:

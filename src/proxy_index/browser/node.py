@@ -35,15 +35,16 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import UserError
-from ..models import ProxySource, RunConfig
+from ..models import RunConfig
 from ..node import (
     NodeAgent,
     ProxyFactory,
     provider_factory,
     read_token,
     resident_mb,
-    rotating_policy,
+    rotating_loader,
 )
+from ..node_tls import client_tls
 from ..sinks import JsonSink
 from ..targets import Target, TargetRegistry, registry
 from . import rawfiles, release
@@ -100,18 +101,10 @@ def _check_private(path: Path) -> None:
 
 
 def untargeted_factory(provider_config: Path, credentials_file: Path) -> ProxyFactory:
-    """Proxies with no country parameter, a new exit per request, whatever the batch country."""
-    from ..providers import load_provider
-
-    def build(country_code: str) -> ProxySource:
-        return load_provider(
-            provider_config,
-            parameters={},
-            session_policy=rotating_policy(provider_config),
-            credentials_file=credentials_file,
-        )
-
-    return build
+    """Proxies with no country parameter, a new exit per request, whatever the batch country
+    (node.rotating_loader: Geonode on its rotating port)."""
+    load = rotating_loader(provider_config, credentials_file)
+    return lambda country_code: load({})
 
 
 def load_network(state: Path, name: str, settings: BrowserSettings) -> Network:
@@ -128,8 +121,9 @@ def load_network(state: Path, name: str, settings: BrowserSettings) -> Network:
             raise UserError(f"{name}: {file} {reason}") from None
     untargeted = settings.is_untargeted(name)
     files = (directory / "provider.toml", directory / "credentials.toml")
-    factory = untargeted_factory(*files) if untargeted else provider_factory(*files)
     try:
+        # Making the factory reads provider.toml (node.rotating_loader): inside the try too.
+        factory = untargeted_factory(*files) if untargeted else provider_factory(*files)
         token = read_token(directory / "node.token")
         factory(settings.schedule.countries[0])  # a broken provider fails before registering
     except (OSError, ValueError) as exc:
@@ -345,9 +339,9 @@ class BrowserHost:
         self.guard = rawfiles.DiskGuard(
             (self.runs, self.outbox_dir), settings.outbox.max_pending_gb, notify=self._full_line
         )
-        # Half runs recover() deleted at this start; finished run directories kept unsealed
-        # (by recover() at start, and seals that failed since).
-        self.discarded = self.unsealed = 0
+        # Half runs recover() deleted at this start (and those it could not delete); finished
+        # run directories kept unsealed (by recover() at start, and seals that failed since).
+        self.discarded = self.unsealed = self.discard_failed = 0
         # Run ids being sealed now: a pass must not send a bundle before its seal has ended.
         self.sealing: set[str] = set()
         self._wake: asyncio.Event | None = None
@@ -501,7 +495,8 @@ class BrowserHost:
         line |= {"browser_seconds": seconds, "pool": stats, "rss_mb": resident_mb()}
         line["utilization"] = round(seconds / (self.pool.size * self.hour_interval), 4)
         line |= self.outbox.hour_stats()
-        line |= {"discarded": self.discarded, "unsealed": self.unsealed}
+        line |= {"discarded": self.discarded, "discard_failed": self.discard_failed}
+        line["unsealed"] = self.unsealed
         self.log.write(line)
         return line
 
@@ -514,11 +509,18 @@ class BrowserHost:
 
     async def run(self, stop: asyncio.Event) -> None:
         """Serve every network until `stop`; then their runs end as NodeAgent ends them and
-        the pool closes every browser. A network that cannot serve stops the host."""
+        the pool closes every browser. A network that cannot serve stops the host. The state
+        directory's lock (rawfiles.host_lock) is held throughout, so a second process on it
+        fails before its recover() could delete this one's runs."""
+        with rawfiles.host_lock(self.state):
+            await self._serve(stop)
+
+    async def _serve(self, stop: asyncio.Event) -> None:
         self._wake = asyncio.Event()
-        self.discarded, self.unsealed = await asyncio.to_thread(
+        recovered = await asyncio.to_thread(
             rawfiles.recover, self.runs, self.outbox_dir, self.seal_run
         )
+        self.discarded, self.unsealed, self.discard_failed = recovered
         tasks = [asyncio.create_task(agent.run(stop)) for agent in self.agents]
         helpers = [asyncio.create_task(loop(stop)) for loop in (self._hourly, self._outbox_loop)]
         try:
@@ -537,6 +539,19 @@ class BrowserHost:
 
 
 async def check(
+    settings: BrowserSettings,
+    state: str | Path,
+    launch: Callable[[], Awaitable[Any]],
+    browsers: int = 1,
+    memory: Callable[[], int | None] | None = None,
+) -> dict[str, Any]:
+    """--check (_check below), holding the host's lock (rawfiles.host_lock): it never runs
+    beside a live host on the same state."""
+    with rawfiles.host_lock(Path(state)):
+        return await _check(settings, state, launch, browsers, memory)
+
+
+async def _check(
     settings: BrowserSettings,
     state: str | Path,
     launch: Callable[[], Awaitable[Any]],
@@ -597,6 +612,9 @@ def register(commands) -> None:
     parser.add_argument("--host", required=True, help="Logical host name (browser-<n>)")
     parser.add_argument("--orchestrator", help="Orchestrator base URL (not needed with --check)")
     parser.add_argument(
+        "--ca-file", help="PEM certificate to trust alone for an https orchestrator (the manager's)"
+    )
+    parser.add_argument(
         "--check", action="store_true", help="Check settings, state and browsers, then exit"
     )
     parser.add_argument("--browsers", type=int, default=1, help="Browsers --check opens")
@@ -621,6 +639,7 @@ def dispatch(args) -> int:
         return 0
     if not args.orchestrator:
         raise UserError("--orchestrator is required unless --check")
+    tls = client_tls(args.orchestrator, args.ca_file)  # refuses a URL the host must not use
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -631,5 +650,8 @@ def dispatch(args) -> int:
         log.warning("the browser settings say enabled = false: this host runs nothing")
         asyncio.run(serve(None))
         return 0
-    asyncio.run(serve(BrowserHost(settings, state, args.orchestrator, launch=launch)))
+    host = BrowserHost(settings, state, args.orchestrator, launch=launch)
+    for agent in host.agents:
+        agent.tls = tls
+    asyncio.run(serve(host))
     return 0

@@ -5,7 +5,8 @@ History places measured runs back in time in the database, each with seeded rand
 of documentation IPs labelled in two DB-IP releases (test_sqlwindow's labels: unenriched IPs, IPs
 in two countries of one network, empty and NULL labels) and released estimated hours. The
 regression: the `calculate` command (the hourly job) read every observation row of the 30-day
-window every hour; with no new test it now reads none, and `calculate --full` reads them all.
+window every hour, as it still does by default (full); `calculate --incremental` reads none when no
+test changed.
 """
 
 import random
@@ -203,8 +204,8 @@ async def daily_history(database, tmp_path, end):
 async def test_an_hour_without_new_tests_reads_no_observation_row(
     database, tmp_path, monkeypatch, capsys
 ):
-    """The regression: the hourly `calculate` command read every observation row of the window
-    each hour; it now reads none when no test changed. --full still reads them all."""
+    """The regression: `calculate` reads every observation row of the window each hour (on main
+    too); `calculate --incremental` reads none when no test changed."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await daily_history(database, tmp_path, end)
     policy = str(lenient_policy(tmp_path))
@@ -214,11 +215,11 @@ async def test_an_hour_without_new_tests_reads_no_observation_row(
             (end - 30 * DAY, end),
         ).fetchone()[0]
     args = ["calculate", "--database-file", str(database), "--methodology", policy, "--as-of"]
-    assert main([*args, (end - HOUR).isoformat()]) == 0
+    assert main([*args, (end - HOUR).isoformat()]) == 0  # its lists, with their signatures
     log = statements(monkeypatch)
     assert main([*args, end.isoformat()]) == 0
-    assert stored > 0 and observation_rows(log) == 0, f"read {observation_rows(log)} of {stored}"
+    assert stored > 0 and observation_rows(log) == stored  # the full calculation: every row
     log.clear()
-    assert main([*args, end.isoformat(), "--full"]) == 0
-    assert observation_rows(log) == stored
+    assert main([*args, end.isoformat(), "--incremental"]) == 0
+    assert observation_rows(log) == 0, f"read {observation_rows(log)} of {stored}"
     capsys.readouterr()

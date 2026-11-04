@@ -97,7 +97,9 @@ async def _accept_consent(page: Page, target: Any) -> None:
 
 class BrowserTransport:
     """A run's browser tries on the host's shared pool. `settings` is the target's [[target]]:
-    its inputs, and its timeout_s and block_resources overriding the [browser] defaults."""
+    its inputs, and its timeout_s and block_resources overriding the [browser] defaults.
+    `view_sink`, if given, receives (request index, the PageView judge() got) after the try is
+    recorded, once per try that reached a view; only scripts/browser_capture.py passes one."""
 
     def __init__(
         self,
@@ -108,8 +110,10 @@ class BrowserTransport:
         settings: TargetSettings,
         recorder: Recorder | None = None,
         deadline: float | None = None,
+        view_sink: Callable[[int, PageView], None] | None = None,
     ) -> None:
         self.config, self.pool, self.deadline = config, pool, deadline
+        self.view_sink = view_sink
         self.recorder = recorder if recorder is not None else NullRecorder()
         self.inputs = settings.inputs
         self.timeout_s = settings.timeout_s or browser.page_timeout_s
@@ -150,7 +154,7 @@ class BrowserTransport:
         timings: dict[str, int | None] = dict.fromkeys(TIMINGS)
         # The try's facts as its steps learn them (timings_ms, main status, URL, bytes, shot).
         state: dict[str, Any] = {"timings": timings, "status": None, "final_url": None}
-        state |= {"bytes": None, "shot": None, "found": {}}
+        state |= {"bytes": None, "shot": None, "found": {}, "view": None}
         budget = self._budget()
         try:
             async with budget:
@@ -175,6 +179,9 @@ class BrowserTransport:
             completed_at=time.perf_counter(),
         )
         self._record(target, context, outcome, getattr(assessment, "reason", None), state)
+        # After the record, so a sink changes neither the try's timings nor its record.
+        if self.view_sink is not None and state["view"] is not None:
+            self.view_sink(context.request_index, state["view"])
         return outcome
 
     async def _attempt(self, target: BrowserTarget, context: RequestContext, state: dict) -> Any:
@@ -238,6 +245,7 @@ class BrowserTransport:
             found=found,
             timings_ms=dict(timings),
         )
+        state["view"] = view
         return target.judge(view)
 
     def _record(

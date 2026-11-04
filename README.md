@@ -177,12 +177,18 @@ and keep their columns. Snapshot payloads are kept for the current build, publis
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
 Calculated schema v10 (`calculated/migrate_v9_v10.sql`, contract K6) adds the incremental
 calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `proxy-index
-calculate` is incremental (`calculated/incremental.py`): it reads run metadata, buckets and list
-signatures first, reuses a stored list (and reads no observation) for every window whose signature
-matches, and reads observations only for the other windows; the values that move with the cutoff
-are counted in the database (`calculated/hourly.py`, `fleetsql.py`, `rollups.py`). `calculate
---full` (the Python `calculate()`'s default) reads and aggregates every observation as before; it
-is the oracle the incremental tests compare with, byte for byte.
+calculate --incremental` (`calculated/incremental.py`) reads run metadata, buckets and list
+signatures first, reuses a stored list for every window whose signature matches (no observation
+row comes back to Python for it), and reads observations only for the other windows; the values
+that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
+`rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
+CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the
+Python `calculate()`'s default) stays the full calculation, which reads and aggregates every
+observation as before and is the oracle the incremental tests compare with, byte for byte; the
+incremental one is `calculate --incremental`. Measured on scale-generator data (6 networks × 60
+countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
+database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
+took 362 s and 3.7 GB.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
@@ -392,6 +398,35 @@ index and a live page for every running batch every 30 s, from the counters node
 `proxy-index report html --database-file F --out DIR [--batch ID]`. They are single
 self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
 challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.
+
+## Nodes and the manager's certificate
+
+On the campaign manager the orchestrator answers HTTPS only, with a self-signed certificate it
+made for its own IP address (`campaign manager orchestrator-enable`, docs/campaign.html). The
+nodes trust exactly that certificate, never a public CA in its place:
+
+1. `orchestrator-enable --apply` copies the public certificate beside the inventory
+   (`campaign-manager.orchestrator.crt`) and records its SHA-256 in the inventory's
+   `orchestrator.cert_sha256` and the URL in `orchestrator.orchestrator_url`
+   (`https://<manager>:8443`). Check the copy you hand on: `shasum -a 256 <file>` must print
+   that SHA-256. The key never leaves the manager; the certificate is public.
+2. Pulse nodes: put the file in the fleet root and set `fleet.json` `"ca_file":
+   "campaign-manager.orchestrator.crt"` with `orchestrator_url` set to the recorded URL, then
+   reconcile. Arming copies it to the node as `pulse/orchestrator-ca.crt` and starts
+   `proxy-index node ... --ca-file` on it.
+3. Browser hosts (the minis): copy the file into the host's state directory and add
+   `--ca-file STATE/campaign-manager.orchestrator.crt` to `proxy-index browser-node`.
+4. Any other node: `proxy-index node --orchestrator https://<manager>:8443 --ca-file <file> ...`.
+
+With `--ca-file` the node checks the server's certificate against that file alone, and the
+URL's address against the address in the certificate; any other certificate, or the right one
+at another address, is refused before a request is sent (the node logs `register refused: the
+orchestrator's TLS certificate is not the trusted one (--ca-file)` and keeps retrying). The file
+must hold exactly one PEM certificate. Without `--ca-file` an https URL is checked against the
+system's public CAs. Plain `http://` is accepted only to this machine (a local staging
+orchestrator): to another host it is refused at start, with or without `--ca-file`, because the
+node's token would cross the network in clear text. A new certificate on the manager (after
+825 days, or a new manager) means copying the new file to every node again.
 
 ## Daily DB-IP update
 

@@ -1,5 +1,5 @@
 """CALC-INC-1a: the incremental calculation (calculated/incremental.py) equals the full one, and a
-window whose runs did not change reads no observation.
+window whose runs did not change returns no observation row to Python.
 
 The 3-day fixture holds measured runs moved back in time in the database, each with seeded random
 observations of documentation IPs labelled in two DB-IP releases (test_sqlwindow's labels:
@@ -30,7 +30,7 @@ from test_calculated_hourly_reads import (
 )
 from test_calculated_lists import owned  # noqa: F401 (fixture)
 
-from proxy_index.calculated import incremental, store
+from proxy_index.calculated import incremental, releases, store
 from proxy_index.calculated.calculator import calculate
 from proxy_index.storage import connect, migrate
 
@@ -61,6 +61,11 @@ async def history(database, tmp_path, end):
     await h.scheduled("census", "alpha", 30 * HOUR)
     await h.scheduled("pulse", "alpha", 5 * HOUR)
     await h.browser("alpha", 2)
+    # delta's census and pulse runs are all older than the window and its margin, so only its
+    # first batch run gives its census-pulse group (in payload order); it also tests daily.
+    await h.scheduled("pulse", "delta", 40 * DAY)
+    await h.scheduled("census", "delta", 35 * DAY)
+    await h.daily("delta", "us", 10 * HOUR)
     return h
 
 
@@ -127,16 +132,18 @@ async def test_incremental_equals_full_at_every_hourly_cutoff(day, database, tmp
                 seen.add(("estimated", "estimated" in w))
                 seen.add(("overlap", w["overlap"]["compared_products"]))
         seen |= {("scheduled", p["criteria"].get("schedule")) for p in payload["products"]}
+        seen |= {(p["provider"], p["criteria"].get("schedule")) for p in payload["products"]}
     # Every case is exercised: empty and measured windows, estimates, peers, census-pulse
     # groups, and windows the incremental builds reused and ones they counted.
     assert {("data", True), ("estimated", True), ("overlap", 1)} <= seen
     assert ("data", False) in seen  # gamma's windows
     assert ("scheduled", "census_pulse") in seen and ("scheduled", None) in seen
+    assert ("delta", "census_pulse") in seen
     assert counted["hit"] > counted["miss"] > 0, counted
 
 
 @pytest.mark.asyncio
-async def test_a_hit_window_reads_no_observation(database, tmp_path, monkeypatch):
+async def test_a_hit_window_returns_no_observation_row(database, tmp_path, monkeypatch):
     end = floor_hour(datetime.now(UTC)) + HOUR
     await daily_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
@@ -156,8 +163,15 @@ async def test_a_hit_window_reads_no_observation(database, tmp_path, monkeypatch
     assert json.dumps(a) == json.dumps(b), first_difference(a, b)
 
 
+def test_the_run_filter_is_the_outer_querys():
+    """releases.RUN_OBSERVATIONS filters the observations themselves, not the release CTE."""
+    query = releases.RUN_OBSERVATIONS
+    assert releases.OBSERVATIONS.count("WHERE o.bucket_start>=") == 1
+    assert query.count("o.run_key=ANY(%s)") == 1
+    assert query.index("o.run_key=ANY(%s)") > query.index("FROM ip_observations o")
+
+
 def test_unknown_mode_is_refused(database):
-    store.initialize(database)
     with pytest.raises(ValueError, match="calculation mode"):
         calculate(database, "configs/methodology.toml", mode="partial")
 

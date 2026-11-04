@@ -6,7 +6,9 @@ import asyncio
 import contextlib
 import io
 import json
+import logging
 import shutil
+import ssl
 import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,10 +16,11 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from helpers import self_signed
 from test_browser_driver import UA, PWBrowser, fake_modules
 from test_browser_transport import FakeBrowser, Script
 
-from proxy_index import cli
+from proxy_index import RequestContext, cli
 from proxy_index.browser import node as host_module
 from proxy_index.browser import release
 from proxy_index.browser.node import (
@@ -367,6 +370,9 @@ def replace_with_directory(path: Path) -> None:
         (lambda d: (d / "credentials.toml").chmod(0o640), "credentials.toml must be owned"),
         (lambda d: private(d / "node.token", "two words"), "unusable network files"),
         (lambda d: private(d / "provider.toml", "schema_version = 9"), "unusable network"),
+        # BP-HOST-FIXES-1 review M1: read when the factory is made, not only when it builds.
+        (lambda d: private(d / "provider.toml", "provider = ["), r"\(TOMLDecodeError\)"),
+        (lambda d: private(d / "provider.toml", 'provider = "nope"'), r"\(ValueError\)"),
         (lambda d: replace_with_directory(d / "provider.toml"), "must be a regular file"),
     ],
 )
@@ -408,6 +414,30 @@ def test_networks_get_a_new_exit_per_request_in_their_grammars_policy(
     assert proxies.session_policy == policy
 
 
+@pytest.mark.parametrize("factory", [provider_factory, untargeted_factory])
+def test_geonode_from_mains_file_gets_a_new_exit_per_request_on_port_9000(
+    tmp_path, factory, caplog
+):
+    """BP-HOST-FIXES-1: main's configs/geonode.toml names the sticky port 10000, where the
+    grammar refuses "rotate"; both factories use the rotating port 9000 instead (logged once)
+    and leave the file as it is."""
+    config = (CONFIGS / "geonode.toml").read_text()
+    assert "port = 10000" in config
+    private(tmp_path / "provider.toml", config)
+    private(tmp_path / "credentials.toml", '[geonode]\naccount = "acct"\npassword = "pw"\n')
+    caplog.set_level(logging.INFO)
+    build = factory(tmp_path / "provider.toml", tmp_path / "credentials.toml")
+    proxies, again = build("US"), build("GB")
+    assert (proxies.host, proxies.port) == ("proxy.geonode.io", 9000)
+    assert proxies.session_policy == "rotate"
+    assert again.port == 9000 and again.session_policy == "rotate"
+    users = {proxies.resolve(RequestContext("run", 0, n)).username for n in range(3)}
+    assert len(users) == 1 and "session" not in users.pop()  # the gateway picks each exit
+    assert ("country" in proxies.parameters) is (factory is provider_factory)
+    assert caplog.text.count("geonode: a new exit per request uses rotating gateway port") == 1
+    assert (tmp_path / "provider.toml").read_text() == config
+
+
 def test_run_timing_counts_tries_latency_queue_and_browser_time():
     class Inner:
         seen = 0
@@ -445,7 +475,7 @@ async def test_the_hourly_line_reports_utilization_pool_and_memory(tmp_path):
         "outbox_pending": 0, "outbox_bytes": 0, "rejected": 0, "conflicts": 0
     }  # fmt: skip
     assert line["confirmed_last_hour"] == 0 and "incomplete" not in line
-    assert line["discarded"] == 0 and line["unsealed"] == 0
+    assert line["discarded"] == 0 and line["unsealed"] == 0 and line["discard_failed"] == 0
     host.log.close()
     [written] = log_lines(state)
     assert written == json.loads(json.dumps(line))
@@ -560,12 +590,32 @@ def test_serving_disabled_settings_runs_nothing(tmp_path, monkeypatch):
         served.append(host)
 
     monkeypatch.setattr(host_module, "serve", fake_serve)
-    assert run_cli(state, "--orchestrator", "http://orchestrator.invalid") == 0
+    assert run_cli(state, "--orchestrator", "https://orchestrator.invalid") == 0
     assert served == [None]
     private(state / "settings.toml", SETTINGS)
-    assert run_cli(state, "--orchestrator", "http://orchestrator.invalid") == 0
+    assert run_cli(state, "--orchestrator", "https://orchestrator.invalid") == 0
     assert isinstance(served[1], BrowserHost) and served[1].name == "browser-1"
     served[1].log.close()
+
+
+def test_the_host_pins_the_managers_certificate_and_refuses_plain_http(
+    tmp_path, monkeypatch, capsys
+):
+    state = make_state(tmp_path)
+    install_fake_release(state)
+    served = []
+
+    async def fake_serve(host):
+        served.append(host)
+
+    monkeypatch.setattr(host_module, "serve", fake_serve)
+    assert run_cli(state, "--orchestrator", "http://203.0.113.9:8080") == 2
+    assert "plain http:// is refused" in capsys.readouterr().err and served == []
+    cert, _ = self_signed(tmp_path, "manager")
+    assert run_cli(state, "--orchestrator", "https://203.0.113.9:8443", "--ca-file", str(cert)) == 0
+    (host,) = served
+    assert all(isinstance(agent.tls, ssl.SSLContext) for agent in host.agents) and host.agents
+    host.log.close()
 
 
 async def test_serve_stops_on_sigterm(tmp_path):

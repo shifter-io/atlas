@@ -9,6 +9,8 @@ uploads it as tar.gz to /v1/results with retries, and deletes it once accepted. 
 out every ten seconds.
 
 Credentials never leave the node and are never logged: errors are reported by type only.
+Every request verifies the orchestrator's TLS as `tls` says (node_tls.client_tls: the pinned
+manager certificate, or the public CAs).
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import logging
 import os
 import random
 import shutil
+import ssl
 import stat
 import sys
 import tempfile
@@ -69,17 +72,46 @@ def provider_factory(
     provider_config: str | Path, credentials_file: str | Path | None = None
 ) -> ProxyFactory:
     """Proxies from the node's provider TOML, targeted at one country, a new exit per request."""
+    load = rotating_loader(provider_config, credentials_file)
+    return lambda country_code: load({"country": country_code.lower()})
+
+
+def rotating_loader(
+    provider_config: str | Path, credentials_file: str | Path | None = None
+) -> Callable[[dict[str, Any]], ProxySource]:
+    """Load the provider TOML with the given parameters and a new exit per request.
+
+    The policy is rotating_policy's. A grammar that rotates only on rotating gateway ports
+    (Geonode) refuses "rotate" on the file's sticky port: the proxy then goes to the scheme's
+    first rotating port (Geonode HTTP: 9000), logged once here. The file is not changed; its
+    sticky port stays for the runs that ask for sessions (census, campaigns).
+    """
     from .providers import load_provider
 
-    def build(country_code: str) -> ProxySource:
-        return load_provider(
+    provider, settings = _provider_file(provider_config)
+    policy = rotating_policy(provider_config)
+    port = _rotating_port(provider, settings) if policy == "rotate" else None
+    if port is not None:
+        log.info("%s: a new exit per request uses rotating gateway port %d", provider, port)
+
+    def load(parameters: dict[str, Any]) -> ProxySource:
+        if port is None:
+            return load_provider(
+                provider_config,
+                parameters=parameters,
+                session_policy=policy,
+                credentials_file=credentials_file,
+            )
+        # Checked as the file says first ("gateway": no session, on its own port), then moved.
+        sticky = load_provider(
             provider_config,
-            parameters={"country": country_code.lower()},
-            session_policy=rotating_policy(provider_config),
+            parameters=parameters,
+            session_policy="gateway",
             credentials_file=credentials_file,
         )
+        return replace(sticky, port=port, session_policy=policy)
 
-    return build
+    return load
 
 
 def rotating_policy(provider_config: str | Path) -> str | None:
@@ -87,16 +119,40 @@ def rotating_policy(provider_config: str | Path) -> str | None:
 
     A grammar whose default is not "rotate" and that has no rotating ports sets rotation
     itself and refuses "rotate" (Proxy-Seller: the next port per request). Geonode, default
-    "gateway" with rotating ports, keeps "rotate".
+    "gateway" with rotating ports, keeps "rotate" (on a rotating port, rotating_loader).
     """
     from .providers.grammar import load_grammar
 
-    with Path(provider_config).open("rb") as stream:
-        provider = tomllib.load(stream).get("provider")
+    provider, _ = _provider_file(provider_config)
     if not isinstance(provider, str):
         return "rotate"  # load_provider refuses the file with its own error
     grammar = load_grammar(provider)
     return "rotate" if grammar.no_session_policy == "rotate" or grammar.rotating_ports else None
+
+
+def _provider_file(provider_config: str | Path) -> tuple[Any, dict[str, Any]]:
+    """The provider TOML's `provider` value and its [settings] table ({} when not a table)."""
+    with Path(provider_config).open("rb") as stream:
+        data = tomllib.load(stream)
+    settings = data.get("settings")
+    return data.get("provider"), settings if isinstance(settings, dict) else {}
+
+
+def _rotating_port(provider: Any, settings: dict[str, Any]) -> int | None:
+    """The scheme's first rotating gateway port when the grammar has rotating ports for the
+    file's scheme and the file's port (or the grammar's default) is not one of them; else None.
+    Malformed values give None: load_provider refuses them with its own error."""
+    from .providers.grammar import load_grammar
+
+    scheme = settings.get("scheme", "http")
+    if not isinstance(provider, str) or not isinstance(scheme, str):
+        return None
+    grammar = load_grammar(provider)
+    rotating = grammar.rotating_ports.get(scheme)
+    port = settings.get("port", grammar.ports.get(scheme))
+    if rotating is None or type(port) is not int or rotating[0] <= port <= rotating[1]:
+        return None
+    return rotating[0]
 
 
 def resident_mb() -> int | None:
@@ -131,6 +187,9 @@ class Active:
 class NodeAgent:
     # The targets a node runs; a subclass (the browser host, browser/node.py) replaces them.
     registry: TargetRegistry = registry
+    # The session's TLS check (node_tls.client_tls): True for the public CAs, or the context
+    # pinning the manager's certificate; set before run().
+    tls: ssl.SSLContext | bool = True
 
     def __init__(
         self,
@@ -204,7 +263,8 @@ class NodeAgent:
         self.work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         # Results are ingested before the reply, which can take minutes for a large census.
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=10, sock_read=1800)
-        async with aiohttp.ClientSession(timeout=timeout) as self.session:
+        connector = aiohttp.TCPConnector(ssl=self.tls)
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector) as self.session:
             while not stop.is_set():
                 try:
                     await self.register()
@@ -212,7 +272,11 @@ class NodeAgent:
                 except Rejected:
                     raise
                 except (aiohttp.ClientError, OSError, TimeoutError) as exc:
-                    log.warning("register failed (%s); retrying", type(exc).__name__)
+                    if isinstance(exc, aiohttp.ClientConnectorCertificateError):
+                        log.error("register refused: the orchestrator's TLS certificate is not "
+                                  "the trusted one (--ca-file); retrying")  # fmt: skip
+                    else:
+                        log.warning("register failed (%s); retrying", type(exc).__name__)
                     with contextlib.suppress(TimeoutError):
                         await asyncio.wait_for(stop.wait(), self.poll_interval)
             beat = asyncio.create_task(self._heartbeats(stop))
