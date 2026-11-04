@@ -55,7 +55,7 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"
-markers = ["scale: simulated high-volume benchmark"]
+markers = ["scale: simulated high-volume benchmark", "browser_live: the real pinned Camoufox (scripts/ci/browser_live.sh)"]
 # A hung test fails on its own instead of stalling the whole run.
 timeout = 300
 
