@@ -11,9 +11,11 @@ import json
 import logging
 import re
 import shutil
+import stat
 import tarfile
 from datetime import timedelta
 
+import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from test_browser_node import (
@@ -33,6 +35,7 @@ from proxy_index.browser import contracts as bc
 from proxy_index.browser import node as host_module
 from proxy_index.browser import rawfiles
 from proxy_index.browser.node import BrowserHost
+from proxy_index.errors import UserError
 
 
 class Kbp7(Orchestrator):
@@ -285,3 +288,35 @@ async def test_a_launched_browser_identity_goes_into_the_manifest(tmp_path):
     await host._launch_one()
     assert host.identity == CAMOUFOX
     host.log.close()
+
+
+async def test_a_second_host_on_a_live_hosts_state_exits_and_deletes_nothing(tmp_path):
+    """BP-HOST-FIXES-1 (BP-DATA-HALF-1 review N2): a second process on the same state would
+    delete the first one's runs in progress at its start (recover()); it fails on the state's
+    lock instead, and so does --check. The lock ends with the first host."""
+    state = make_state(tmp_path)
+    fake = Kbp7({})
+    first, server = await host_with(state, fake)
+    second = BrowserHost(host_view(state), state, str(server.make_url("")), launch=Fleet().launch)
+    stop = asyncio.Event()
+    task = asyncio.create_task(first.run(stop))
+    try:
+        await until(lambda: len(fake.registered) == 2)  # recover() is done: both registered
+        running = make_run(state, RUN_ID)
+        (running / "summary.json").unlink()  # a run in progress: no summary.json yet
+        locked = r"another browser-node holds .*host\.lock: one process per state directory"
+        async with asyncio.timeout(5):
+            with pytest.raises(UserError, match=locked):
+                await second.run(asyncio.Event())
+            with pytest.raises(UserError, match=locked):
+                await host_module.check(host_view(state), state, Fleet().launch)
+        assert running.is_dir() and (running / rawfiles.BATCH_FILE).is_file()
+        assert len(fake.registered) == 2  # the second host registered nothing
+    finally:
+        stop.set()
+        await task
+        await server.close()
+        second.log.close()
+    assert stat.S_IMODE((state / rawfiles.LOCK_NAME).stat().st_mode) == 0o600
+    with rawfiles.host_lock(state):  # released when the first host ended
+        pass

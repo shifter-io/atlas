@@ -9,7 +9,8 @@ manager's confirmation (contracts.confirmed) and on nothing else: 429, 503, othe
 network errors keep it for a later pass with backoff, a 409 marks it `.conflict` and another
 4xx `.rejected`. Nothing unconfirmed is ever deleted. Above `max_pending_gb` of runs and
 outbox, no screenshot is written; the tries are still recorded. At host start, recover() seals
-what a killed process left finished and deletes its half runs (no summary.json).
+what a killed process left finished and deletes its half runs (no summary.json), under
+host_lock(): one process per state directory.
 
 Logs carry ids, statuses and error names, never a token, credential or proxy value.
 """
@@ -18,13 +19,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import json
 import logging
 import os
 import re
 import shutil
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +35,7 @@ from typing import Any, NamedTuple
 import aiohttp
 
 from ..archive.export import file_digests
+from ..errors import UserError
 from ..models import VERDICTS
 from ..orchestrator.archive import pack
 from . import contracts as bc
@@ -48,6 +51,7 @@ INGEST_PARALLEL = 2
 BACKOFF_S, BACKOFF_MAX_S = 30.0, 300.0
 GUARD_EVERY_S, FULL_LOG_EVERY_S = 60.0, 3600.0
 GB = 1 << 30
+LOCK_NAME = "host.lock"
 
 
 def _write(path: Path, data: bytes, mode: str = "wb", sync: bool = True) -> None:
@@ -403,11 +407,38 @@ SealRun = Callable[[Path, Batch, dict, str], Bundle]
 
 
 class Recovered(NamedTuple):
-    """What recover() did not send on: run directories deleted as half runs, and finished
-    ones kept unsealed."""
+    """What recover() did not send on: run directories deleted as half runs, finished ones
+    kept unsealed, and half runs it could not delete (retried at the next start)."""
 
     discarded: int
     unsealed: int
+    discard_failed: int
+
+
+@contextlib.contextmanager
+def host_lock(state: Path) -> Iterator[None]:
+    """Hold <state>/host.lock (created 0600) with an exclusive flock while the block runs.
+
+    A second browser-node on the same state directory would delete the first one's runs in
+    progress at its start (recover()): it fails at once with a UserError instead, deleting
+    nothing. The descriptor is not inherited by child processes, so the lock ends with this
+    process.
+    """
+    path = Path(state) / LOCK_NAME
+    try:
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    except OSError as exc:
+        raise UserError(f"cannot open the host lock {path} ({type(exc).__name__})") from None
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise UserError(
+                f"another browser-node holds {path}: one process per state directory"
+            ) from None
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
@@ -415,8 +446,9 @@ def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
     without its sidecar is rebuilt), drop a run directory whose bundle is already sealed and
     verified, and drop half-written sidecars and those of bundles already confirmed. A run
     directory without summary.json (killed during its run) is a half run: it is deleted, never
-    sealed or uploaded, and logged once. A finished run it cannot read or seal is kept as it is,
-    with its sidecar. One bad file never stops the start."""
+    sealed or uploaded, and logged once; one it cannot delete is counted `discard_failed` and
+    tried again at the next start. A finished run it cannot read or seal is kept as it is, with
+    its sidecar. One bad file never stops the start. Logs one line with the counts."""
     if outbox.is_dir():
         for sidecar in [*outbox.glob("*.json.partial"), *outbox.glob("*.json")]:
             try:
@@ -424,7 +456,7 @@ def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
                     sidecar.unlink()
             except OSError as exc:
                 log.warning("sidecar %s kept (%s)", sidecar.name, type(exc).__name__)
-    found = {"sealed": 0, "discarded": 0, "kept": 0}
+    found = {"sealed": 0, "discarded": 0, "kept": 0, "discard_failed": 0}
     for run_dir in sorted(p for p in runs.glob("*/*") if p.is_dir() and not p.is_symlink()):
         if not re.fullmatch(bc.RUN_ID, run_dir.name):
             continue
@@ -434,12 +466,14 @@ def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
             log.warning("run %s kept unsealed (%s)", run_dir.name, type(exc).__name__)
             outcome = "kept"
         found[outcome] += 1
-    return Recovered(found["discarded"], found["kept"])
+    log.info("browser_recover: %s", " ".join(f"{key}={value}" for key, value in found.items()))
+    return Recovered(found["discarded"], found["kept"], found["discard_failed"])
 
 
 def _recover_run(run_dir: Path, outbox: Path, seal_run: SealRun) -> str:
     """`sealed` when the run is in the outbox now (sealed before, its directory goes, or
-    here), `discarded` when it was a half run, now deleted, `kept` otherwise."""
+    here), `discarded` when it was a half run, now deleted, `discard_failed` when that delete
+    failed, `kept` otherwise."""
     archive, sidecar = bc.outbox_paths(outbox, run_dir.name)
     if sidecar.exists() and archive.exists():
         if file_digests(archive)["sha256"] == read_bundle(sidecar).sha256:
@@ -447,7 +481,11 @@ def _recover_run(run_dir: Path, outbox: Path, seal_run: SealRun) -> str:
             return "sealed"
         sidecar.unlink()
     if not os.path.lexists(run_dir / "summary.json"):
-        shutil.rmtree(run_dir)
+        try:
+            shutil.rmtree(run_dir)
+        except OSError as exc:
+            log.warning("browser_run_discard_failed: run %s (%s)", run_dir.name, type(exc).__name__)
+            return "discard_failed"
         log.warning("browser_run_discarded: run %s killed during its run, deleted", run_dir.name)
         return "discarded"
     if not (run_dir / BATCH_FILE).is_file():
