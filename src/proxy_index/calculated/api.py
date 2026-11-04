@@ -85,9 +85,10 @@ def project(payload, resource, query):
     unknown = set(query) - {"window", "product", "cohort", "page"}
     if unknown:
         raise ValueError("Unknown query parameter")
+    # Only the group answers read groups (needs()); the others get the head alone.
     products = [
         p
-        for p in payload["products"]
+        for p in payload.get("products", ())
         if (not query.get("product") or str(p["product_id"]) == query["product"])
         and (not query.get("cohort") or p["cohort"] == query["cohort"])
     ]

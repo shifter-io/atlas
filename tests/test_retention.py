@@ -134,6 +134,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
             "calculated_windows",
             "calculated_overlaps",
             "calculated_snapshots",
+            "calculated_snapshot_parts",
         }
         times = {
             "current": day + timedelta(hours=18),

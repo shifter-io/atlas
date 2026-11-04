@@ -27,7 +27,8 @@ RUNS_PER_PART = 2000
 HEAD_BYTES = 64 * 1024 * 1024
 # A build's product groups (one per row) or runs (a list of up to RUNS_PER_PART per row) in
 # payload order: PARTS reads its parts in their primary-key order, LEGACY the single payload of a
-# build stored before calculated v8. product and cohort keep one product id's or cohort's groups.
+# build stored before calculated v8 (it has no parts partition, nor a database before v8 a parts
+# table). product and cohort keep one product id's or cohort's groups.
 FILTER = (
     "(%(product)s::text IS NULL OR {}=%(product)s) AND (%(cohort)s::text IS NULL OR {}=%(cohort)s)"
 )
@@ -40,7 +41,7 @@ PARTS = (
 LEGACY = (
     "SELECT {value} FROM (SELECT e.value,e.n FROM calculated_snapshots s CROSS JOIN LATERAL "
     "jsonb_array_elements(s.payload->%(key)s) WITH ORDINALITY e(value,n) "
-    "WHERE s.build_id=%(build)s AND NOT s.payload ? 'parts' AND "
+    "WHERE s.build_id=%(build)s AND "
     + FILTER.format("e.value->>'product_id'", "e.value->>'cohort'")
     + ") r ORDER BY r.n"
 )
@@ -96,13 +97,16 @@ def _rows(conn, build_id, kind, value="r.value", named=False, **filters):
     params |= {"product": None, "cohort": None} | filters
     if params["keys"]:
         value, params["keys"] = KEYS, [*params["keys"]]
-    for query in (PARTS, LEGACY):
-        with conn.cursor(name=f"snapshot_{kind}" if named else "", row_factory=tuple_row) as cursor:
-            if named:
-                cursor.itersize = 8
-            cursor.execute(query.format(value=value), params)
-            for (found,) in cursor:
-                yield from found if kind == "runs" and query is PARTS else (found,)
+    split = conn.cursor(row_factory=tuple_row).execute(
+        "SELECT to_regclass(%s) IS NOT NULL", (f"calculated_snapshot_parts_b{int(build_id)}",)
+    )
+    query = PARTS if split.fetchone()[0] else LEGACY
+    with conn.cursor(name=f"snapshot_{kind}" if named else "", row_factory=tuple_row) as cursor:
+        if named:
+            cursor.itersize = 8
+        cursor.execute(query.format(value=value), params)
+        for (found,) in cursor:
+            yield from found if kind == "runs" and query is PARTS else (found,)
 
 
 def rows(conn, build_id, kind, product=None, cohort=None, keys=None):

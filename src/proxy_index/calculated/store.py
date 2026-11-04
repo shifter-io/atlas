@@ -613,7 +613,7 @@ def export(database, path, snapshot="current"):
     with connect(database) as conn:
         conn.execute("SET TRANSACTION READ ONLY")
         build_id = _build(conn, snapshot)
-        query = "SELECT FROM calculated_snapshots WHERE build_id=%s"
+        query = "SELECT 1 FROM calculated_snapshots WHERE build_id=%s"
         if build_id is None or not conn.execute(query, (build_id,)).fetchone():
             raise ValueError("No published snapshot")
         path.parent.mkdir(parents=True, exist_ok=True)

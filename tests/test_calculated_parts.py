@@ -148,7 +148,11 @@ def whole_payload_build(database, payload):
 
 
 @pytest.mark.asyncio
-async def test_a_build_stored_whole_before_v8_still_reads_publishes_and_serves(database, tmp_path):
+async def test_a_build_stored_whole_before_v8_still_reads_publishes_and_serves(
+    database, tmp_path, monkeypatch
+):
+    # Both builds stay after the second publication (retention has its own tests).
+    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     end = await two_providers(database, tmp_path)
     payload = calculate(database, POLICY, as_of=end, publish=True)
     with connect(database) as conn:
@@ -357,10 +361,11 @@ async def test_parts_are_written_and_read_through_the_parent_by_non_owner_roles(
             conn.execute(
                 "INSERT INTO calculated_snapshots VALUES (%s,%s,%s)", (legacy, "x", Jsonb(head))
             )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), connect(database) as conn:
+            conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(roles["reader"])))
+            conn.execute("SELECT count(*) FROM ip_observations")
         with connect(database) as conn:
             conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(roles["reader"])))
-            with pytest.raises(psycopg.errors.InsufficientPrivilege):
-                conn.execute("SELECT count(*) FROM ip_observations")
             found = parts.read(conn, legacy)
         assert found["products"] == [group] and found["runs"] == []
         assert found["snapshot_id"] == str(legacy) and "parts" not in found
