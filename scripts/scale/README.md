@@ -131,6 +131,10 @@ uv run python scripts/scale/cycle.py --database proxy_scale.toml --hours 24 --ou
    network and region) asks `GET /v1/work` and uploads each run as a node does,
    `POST /v1/results` with the run directory as tar.gz (no IP rows, the geo rows of the pulse), to
    the node API: an orchestrator app served on loopback by the driver, or `--node-api URL`.
+   That orchestrator must run without its scheduler, as the in-process app does
+   (`build_app(..., with_scheduler=False)`): a simulated hour is always in the past, so a running
+   scheduler's reaper would fail its runs as not started (`batch.start_grace_seconds`) and its
+   `pulse_plan` would open real-time slots in the scratch database.
    Uploads go at `--pulse-rate` a second: by default the scheduled rate, one pulse per lane an
    hour (1.25 a second at full size, so a full-size hour of pulses takes about an hour and runs
    as several parts); `0` uploads as fast as `--pulse-concurrency` (32) allows.
@@ -153,7 +157,7 @@ afterwards.
 | `--max-minutes` | 25 | a run stops at the next step boundary after this, or inside the ingest and pulse steps |
 | `--out` | `scale-report` | directory of `scale-report.json` and `scale-report.md` |
 | `--pulse-rate`, `--pulse-concurrency` | scheduled rate, 32 | upload pacing |
-| `--node-api` | in-process | base URL of a running orchestrator's node API on this database |
+| `--node-api` | in-process | base URL of the node API of an orchestrator on this database that runs **without its scheduler** (see below) |
 | `--siteapi`, `--siteapi-pid`, `--siteapi-timeout` | off | the API to wait for, its pid for peak RSS |
 | `--methodology` | `configs/methodology.toml` | passed to `calculate` |
 
@@ -178,6 +182,11 @@ A failed calculation stops the run with exit code 1 and is run again by the next
   refresh (`--siteapi-pid`), which is its peak since it started. Linux only.
 - **Times.** Each step's wall time; per daily test; per pulse upload, the seconds until the node
   API answered (p50, p95, maximum), and the uploads per second.
+- **Pulse outcomes.** `planned` is the slot's batch runs and `uploads` the successful uploads.
+  `failed` and `failures` count failed upload *attempts* (a rejected answer, a client error or
+  timeout, a reply that is not JSON), not runs: a run whose upload failed and succeeded in a later
+  part counts in both `failed` and `uploads`. `statuses` gives every run's final state on the
+  server after the hour (for example `done`, or `failed` for an ingest the node API rejected).
 
 `scale-report.json` holds every finished hour (`hours`: steps, statements, sizes) and the hour in
 progress; `scale-report.md` has one row per hour, then the last hour's slowest statements per step

@@ -147,6 +147,7 @@ def test_two_hours_go_through_the_real_paths_and_store_what_the_generator_does(d
     for steps in (one, two):
         assert steps["pulses"]["planned"] == steps["pulses"]["uploads"] == 6
         assert steps["pulses"]["failed"] == 0 and steps["pulses"]["latency"]["p95"] > 0
+        assert steps["pulses"]["statuses"] == {"done": 6}
         assert steps["calculate"]["exit"] == 0 and steps["calculate"]["peak_rss_kb"] > 0
         assert steps["calculate"]["statements"]  # traced in the child process
         assert steps["siteapi"]["reached"] and steps["siteapi"]["status"] == "ok"
@@ -196,18 +197,18 @@ def test_an_interrupted_hour_continues_where_it_stopped(databases, tmp_path, mon
     assert report["current"]["index"] == 0 and report["hours"] == []
     assert "Hour 0 is in progress." in (tmp_path / "report" / "scale-report.md").read_text()
 
-    lost = []
+    # Two uploads are lost: a rejected answer and a client timeout (a slow ingest at full size).
+    lost = [cycle.Failed("connection lost"), TimeoutError("upload timed out")]
 
-    async def lost_once(self, *args):
-        if not lost:
-            lost.append(1)
-            raise cycle.Failed("connection lost")
+    async def lost_twice(self, *args):
+        if lost:
+            raise lost.pop(0)
         return await real_upload(self, *args)
 
     monkeypatch.setattr(cycle.Cycle, "daily", real_daily)
-    monkeypatch.setattr(cycle.Cycle, "upload", lost_once)
+    monkeypatch.setattr(cycle.Cycle, "upload", lost_twice)
     stopped = drive(config, tmp_path, first_hour=first, pulse_rate=50.0)
-    assert not stopped["complete"]  # one pulse is left to upload
+    assert not stopped["complete"]  # two pulses are left to upload
     assert not drive(config, tmp_path, max_minutes=0)["complete"]  # no time: nothing runs
     with pytest.raises(cycle.Failed, match="calculate exited with 2"):
         drive(config, tmp_path, methodology=str(tmp_path / "missing.toml"))
@@ -217,10 +218,12 @@ def test_an_interrupted_hour_continues_where_it_stopped(databases, tmp_path, mon
     steps = record["steps"]
     tests = sum(lane.hour == first for lane in model(config).lanes)
     assert steps["ingest"]["parts"] == (2 if tests > 1 else 1) and steps["ingest"]["tests"] == tests
-    assert steps["pulses"]["parts"] == 2 and steps["pulses"]["failed"] == 1
+    assert steps["pulses"]["parts"] == 2 and steps["pulses"]["failed"] == 2  # attempts
     assert steps["pulses"]["uploads"] == steps["pulses"]["planned"] == 6
-    (failure,) = steps["pulses"]["failures"]
-    assert failure.startswith("batch ") and failure.endswith(": connection lost")
+    assert steps["pulses"]["statuses"] == {"done": 6}  # every run ended done on the server
+    first_failure, second_failure = steps["pulses"]["failures"]
+    assert first_failure.startswith("batch ") and first_failure.endswith(": connection lost")
+    assert second_failure.endswith(": upload timed out")
     assert steps["siteapi"]["skipped"] == "no --siteapi" and steps["calculate"]["parts"] == 1
     daily = rows(
         config,

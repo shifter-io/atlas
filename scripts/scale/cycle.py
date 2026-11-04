@@ -181,6 +181,7 @@ def reduce(name: str, parts: list[dict]) -> dict:
     if name == "pulses":
         latencies = [value for part in parts for value in part["latencies"]]
         result |= {"planned": parts[-1]["planned"], "uploads": len(latencies)}
+        result["statuses"] = parts[-1]["statuses"]
         result["failed"] = sum(part["failed"] for part in parts)
         result["failures"] = [text for part in parts for text in part["failures"]][:20]
         result["rate"] = round(len(latencies) / seconds, 3) if seconds else None
@@ -399,6 +400,7 @@ class Cycle:
         part = asyncio.run(self.upload_hour(day, start, tokens))
         runs = self.conn.cursor(row_factory=dict_row).execute(RUNS, (TARGET, start)).fetchall()
         part["planned"] = len(runs)
+        part["statuses"] = dict(Counter(run["status"] for run in runs))  # the runs' final states
         return part, not any(run["status"] in PENDING for run in runs)
 
     @contextlib.asynccontextmanager
@@ -440,7 +442,9 @@ class Cycle:
             async with gate:
                 try:
                     latencies.append(await self.upload(session, base, slot, run, tokens))
-                except (Failed, aiohttp.ClientError) as exc:
+                # A timeout (aiohttp's, or a slow ingest) or a 200 that is not JSON is a
+                # failed upload like a rejected one: recorded, and the run stays open.
+                except (Failed, aiohttp.ClientError, TimeoutError, ValueError) as exc:
                     failures.append(f"batch {run['batch_id']}: {exc}"[:300])
 
         for i, run in enumerate(runs):
@@ -572,7 +576,11 @@ def arguments(argv=None):
     parser.add_argument("--first-hour", type=int, default=0, help="UTC hour the cycle starts at")
     parser.add_argument("--pulse-rate", type=float, help="uploads a second (0: unpaced)")
     parser.add_argument("--pulse-concurrency", type=int, default=32)
-    parser.add_argument("--node-api", help="node API base URL (default: in-process, loopback)")
+    parser.add_argument(
+        "--node-api",
+        help="node API of an orchestrator on this database run WITHOUT its scheduler "
+        "(its reaper would fail the past hour's runs); default: in-process, loopback",
+    )
     parser.add_argument("--siteapi", help="base URL of a siteapi serving this database")
     parser.add_argument("--siteapi-pid", type=int, help="its process id, for its peak RSS")
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
