@@ -22,6 +22,16 @@ def register(commands):
             p.add_argument("--methodology", default="configs/methodology.toml")
             p.add_argument("--as-of")
             p.add_argument("--publish", action="store_true")
+            mode = p.add_mutually_exclusive_group()  # full until CALC-INC-2/CALC-FLEET-1
+            mode.add_argument("--full", dest="mode", action="store_const", const="full")
+            mode.add_argument(
+                "--incremental",
+                dest="mode",
+                action="store_const",
+                const="incremental",
+                help="Read observations only for windows whose runs changed",
+            )
+            p.set_defaults(mode="full")
         elif name == "snapshot-publish":
             p.add_argument("snapshot")
         elif name == "snapshot-export":
@@ -101,7 +111,8 @@ def dispatch(args):
     elif args.command == "calculate":
         from .calculator import calculate
 
-        payload = calculate(db, args.methodology, as_of=args.as_of, publish=args.publish)
+        options = {"as_of": args.as_of, "publish": args.publish, "mode": args.mode}
+        payload = calculate(db, args.methodology, **options)
         result = {k: payload[k] for k in ("snapshot_id", "as_of", "readiness")}
     elif args.command == "snapshot-publish":
         result = store.publish(db, args.snapshot)

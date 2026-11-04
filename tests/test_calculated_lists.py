@@ -19,7 +19,7 @@ from test_migration import catalog
 from test_retention import clone
 
 from proxy_index import detect, traffic
-from proxy_index.calculated import browser, calculator, lists, store
+from proxy_index.calculated import browser, calculator, incremental, lists, store
 from proxy_index.calculated.aggregate import BREAKDOWNS
 from proxy_index.calculated.calculator import calculate
 from proxy_index.dbserver import Roles
@@ -111,6 +111,10 @@ def downgrade_to_v8(database, empty):
         )
         conn.execute("ALTER TABLE calculated_windows DROP COLUMN list_id")
         conn.execute("DROP TABLE calculated_list_rows,calculated_lists")
+        conn.execute(  # the calculated v10 memo tables (CALC-INC-1a)
+            "DROP TABLE calculated_run_ranges,calculated_slot_figures,calculated_distinct,"
+            "calculated_bucket_ips,calculated_ip_last_seen"
+        )
         conn.execute(CALCULATED_V8.read_text())
         builds = conn.execute("SELECT DISTINCT build_id FROM v9_rows").fetchall()
         assert builds
@@ -153,8 +157,11 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
         ).fetchall()
     assert all(before.values())
     result = migrate(database)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (8, 9)
-    assert result["verified"] == [*store.V8_CHECKS]
+    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
+        8,
+        10,
+    )
+    assert result["verified"] == [*store.V8_CHECKS, *store.V9_CHECKS]
     with connect(database) as conn:
         assert views(conn) == before
         # One list per target-free window, numbered with its result_id; the rest have none.
@@ -287,7 +294,7 @@ def owned(databases, tmp_path):
 def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
     # The admin role migrates; the new tables and views get the default privileges only.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 9
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 10
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
     country = {"country_code": "XA", "country": "Example"} | counters
@@ -323,6 +330,9 @@ def test_implementation_id_hashes_the_list_writer():
     """persist and the list figures live in lists.py: a change there must change the build
     fingerprint (and the list signature's implementation id), as it did inside calculator.py."""
     hashed = ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py", "lists.py")
+    # The incremental calculation's modules (CALC-INC-1a) and the SQL counts they use.
+    hashed += ("incremental.py", "hourly.py", "fleetsql.py", "rollups.py", "sqlwindow.py")
+    hashed += ("poolfig.py",)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)
@@ -330,5 +340,5 @@ def test_implementation_id_hashes_the_list_writer():
     ).hexdigest()
     assert calculator.IMPLEMENTATION_ID == expected
     # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.
-    for writer in (calculator.reusing, lists.persist, lists.signatures):
+    for writer in (lists.reusing, lists.persist, lists.signatures, incremental.read):
         assert Path(sys.modules[writer.__module__].__file__).name in hashed

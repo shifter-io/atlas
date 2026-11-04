@@ -37,15 +37,26 @@ OBSERVATIONS = (
 )
 
 
+# The observations of some runs (the first parameter) only: the outer query's filter, which no
+# other part of OBSERVATIONS contains (tests check it).
+RUN_OBSERVATIONS = OBSERVATIONS.replace(
+    "WHERE o.bucket_start>=", "WHERE o.run_key=ANY(%s) AND o.bucket_start>="
+)
+
+
 def enriched_observations(conn, start, as_of) -> tuple[dict[str, Any], list]:
     """The snapshot's release fields (snapshot_fields()) and the window's observations, each
     with its run's release."""
     observations = conn.execute(OBSERVATIONS, (start, as_of)).fetchall()
+    return used_releases(conn, {o["run_key"] for o in observations}), observations
+
+
+def used_releases(conn, observed) -> dict[str, Any]:
+    """The release fields of a window whose observations came from the runs observed."""
     per_run = {r["run_key"]: r["release_id"] for r in conn.execute(RUN_RELEASES)}
-    observed = {o["run_key"] for o in observations}
     used = sorted({per_run[k] for k in observed if k in per_run})
     newest = conn.execute(RELEASE, (used[-1],)).fetchone() if used else None
-    return {"dbip_release": newest, "dbip_releases": used}, observations
+    return {"dbip_release": newest, "dbip_releases": used}
 
 
 def snapshot_fields(release: dict[str, Any] | None) -> dict[str, Any]:

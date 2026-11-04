@@ -175,6 +175,20 @@ build keeps serving. Census-pulse lists keep signature NULL. After
 `calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
 and keep their columns. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
+Calculated schema v10 (`calculated/migrate_v9_v10.sql`, contract K6) adds the incremental
+calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `proxy-index
+calculate --incremental` (`calculated/incremental.py`) reads run metadata, buckets and list
+signatures first, reuses a stored list for every window whose signature matches (no observation
+row comes back to Python for it), and reads observations only for the other windows; the values
+that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
+`rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
+CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the
+Python `calculate()`'s default) stays the full calculation, which reads and aggregates every
+observation as before and is the oracle the incremental tests compare with, byte for byte; the
+incremental one is `calculate --incremental`. Measured on scale-generator data (6 networks × 60
+countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
+database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
+took 362 s and 3.7 GB.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and

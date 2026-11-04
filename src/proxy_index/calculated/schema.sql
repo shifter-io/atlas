@@ -94,6 +94,31 @@ CREATE TABLE IF NOT EXISTS calculated_list_rows (
   AND (asn_label_id IS NULL) = (dimension IN ('g','c','r'))),
  PRIMARY KEY(list_id,dimension,position)
 ) WITH (autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_insert_scale_factor = 0.01);
+-- Memos of the incremental calculation (contract K6, incremental.py, hourly.py, fleetsql.py),
+-- calculated v10: a run's figures per range of its buckets (release_id 0: unenriched), figures
+-- of a set of runs in a time slot and its distinct IPs (keyed by the digest of their inputs),
+-- each 5-minute bucket's distinct IPs over every run, and each exit IP's newest sighting. None
+-- references a raw table, which ARCHIVE-1 empties; old entries are collected by age (created_at,
+-- last_used, last_seen). CALC-INC-2 and CALC-FLEET-1 fill them.
+CREATE TABLE IF NOT EXISTS calculated_run_ranges (
+ run_key bigint NOT NULL, release_id integer NOT NULL, first_bucket timestamptz NOT NULL,
+ last_bucket timestamptz NOT NULL, figures jsonb NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY(run_key,release_id,first_bucket,last_bucket)
+);
+CREATE TABLE IF NOT EXISTS calculated_slot_figures (
+ digest text PRIMARY KEY, figures jsonb NOT NULL, last_used timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS calculated_distinct (
+ digest text PRIMARY KEY, counts jsonb NOT NULL, last_used timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS calculated_bucket_ips (
+ bucket_start timestamptz PRIMARY KEY, runs_digest text NOT NULL, unique_ips bigint NOT NULL
+);
+CREATE TABLE IF NOT EXISTS calculated_ip_last_seen (
+ ip_id bigint PRIMARY KEY, last_seen timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS calculated_ip_last_seen_time ON calculated_ip_last_seen(last_seen);
 CREATE TABLE IF NOT EXISTS calculated_series (
  result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
  bucket_start timestamptz NOT NULL,

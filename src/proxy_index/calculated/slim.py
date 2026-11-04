@@ -38,6 +38,8 @@ def slim(payload, config):
 
 
 def _window(window, limits):
+    if "lists" in window:  # already a reference to a stored list (incremental.py)
+        return window
     breakdowns = window.get("breakdowns")
     if breakdowns is not None:
         window = window | {
@@ -62,6 +64,9 @@ def refer(product, lists):
     """
     windows = {}
     for label, window in product["windows"].items():
+        if "lists" in window:
+            windows[label] = window
+            continue
         kept = window["breakdowns"] | {
             k: window["pool"][k] for k in POOL_LISTS if k in window["pool"]
         }

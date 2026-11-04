@@ -18,7 +18,7 @@ from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 from .slim import refer, slim
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -28,6 +28,7 @@ V5_CHECKSUM = "ccb566016dba5d6d18b09da7cb88ced16758f0fbf446fcac88495d67d94b8782"
 V6_CHECKSUM = "140ad11f64d300f4e8104da53421bcf00816464fa052d854082831775286dd26"
 V7_CHECKSUM = "66c66164b5915e2015382de9f640d997d1cece6df88f2ab3436f265a597a661a"
 V8_CHECKSUM = "65f217a8497750078be93711d245f9de7c873c933a67146f38b6520bcb4de277"
+V9_CHECKSUM = "0efaf3f1c8b25cf7866263c851499edf73ee997dce8211c265c1707c1bd49a54"
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.
 KEEP_DRAFTS = 2
 # After each publication expire() keeps the current build, the newest RETAIN_PER_DAY published
@@ -167,6 +168,12 @@ V8_CHECKS = {
     "l USING(list_id) WHERE (w.target='') IS DISTINCT FROM (l.list_id IS NOT NULL) OR w.target='' "
     "AND (l.product_id,l.cohort,l.window_hours,l.created_build,l.signature) IS DISTINCT FROM "
     "(w.product_id,w.cohort,w.window_hours,w.build_id,NULL)",
+}
+# A v9 layer gains the empty memo tables of contract K6; its lists must stay as they were.
+V9_SNAPSHOT = "CREATE TEMP TABLE v9_before ON COMMIT DROP AS SELECT * FROM calculated_lists"
+V9_CHECKS = {
+    "lists kept": "SELECT count(*) FROM v9_before o FULL JOIN calculated_lists n USING(list_id) "
+    "WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
 }
 
 
