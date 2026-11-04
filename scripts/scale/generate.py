@@ -56,7 +56,7 @@ def guard(conn, expected: str = DATABASE) -> None:
     """Refuse any target but the scratch one (target.py), and one holding others' runs."""
     found = target.refusal(conn, expected)
     if found:
-        raise Refused(f"{found}; this generator writes only to {expected!r} {target.ALLOWED}")
+        raise Refused(f"{found}; this generator writes only to {expected!r} {target.SCHEMA_RULE}")
     if conn.execute("SELECT to_regclass('test_runs')").fetchone()[0] is None:
         return
     foreign = conn.execute(

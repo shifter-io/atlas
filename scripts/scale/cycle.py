@@ -108,7 +108,7 @@ def guard(conn, expected: str = DATABASE):
     """The generator's settings and progress; refuse another database or foreign runs."""
     found = target.refusal(conn, expected)
     if found:
-        raise Refused(f"{found}; this driver uses only {expected!r} {target.ALLOWED}")
+        raise Refused(f"{found}; this driver uses only {expected!r} {target.SCHEMA_RULE}")
     found = generate.stored(conn)
     if found is None:
         raise Refused("the database holds no synthetic data set; run generate.py first")

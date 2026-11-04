@@ -18,7 +18,7 @@ import argparse
 import sys
 
 SCRATCH = "proxy_scale"
-ALLOWED = f"(or its schema {SCRATCH!r} with search_path exactly {SCRATCH!r})"
+SCHEMA_RULE = f"(or its schema {SCRATCH!r} with search_path exactly {SCRATCH!r})"
 STATE = "SELECT current_database(),current_schema(),current_setting('search_path')"
 SQL = f"""\
 -- Before the run, as proxy_admin in proxy_reviews:
@@ -57,7 +57,7 @@ def main(argv=None) -> int:
         found = refusal(conn)
     print(f"database {database!r}, schema {schema!r}, search_path {path!r}")
     if found:
-        print(f"refused: {found}; the scale scripts write only to {SCRATCH!r} {ALLOWED}")
+        print(f"refused: {found}; the scale scripts write only to {SCRATCH!r} {SCHEMA_RULE}")
         return 2
     print("allowed")
     return 0
