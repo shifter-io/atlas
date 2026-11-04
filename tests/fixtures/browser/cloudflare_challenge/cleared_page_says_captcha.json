@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 200,
+    "title": "Example Domain | Captcha demo",
+    "text_head": "Example Domain\nA demo of a captcha widget on a normal page.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 1,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}
