@@ -13,11 +13,12 @@ counter is generated from a seed.
 ```sh
 # Once, as the admin role: an empty database for the test.
 createdb proxy_scale
-# Then in steps of one or a few days (a step can be rerun; it continues where it stopped).
-uv run python scripts/scale/generate.py --database proxy_scale.toml --days 1..4
-uv run python scripts/scale/generate.py --database proxy_scale.toml --days 5..8
+# Then one day per step (a full-size day takes about 20 minutes; see "Time and size").
+# A step can be rerun: it continues where it stopped.
+uv run python scripts/scale/generate.py --database proxy_scale.toml --days 1
+uv run python scripts/scale/generate.py --database proxy_scale.toml --days 2
 # ...
-uv run python scripts/scale/generate.py --database proxy_scale.toml --days 29..31
+uv run python scripts/scale/generate.py --database proxy_scale.toml --days 31
 # Afterwards, as the admin role:
 dropdb proxy_scale
 ```
@@ -74,18 +75,22 @@ Per network and country:
   them.
 - **DB-IP.** One synthetic release per day; every IP of the day is enriched with it (about 0.5%
   unmatched). Places and ASNs are synthetic lists sized like DB-IP: up to 5,000 cities, 60
-  regions and 900 ASNs in the largest countries; every 33rd ASN is a hosting network.
+  regions and 900 ASNs in the largest countries, and at least 31 cities and 5 ASNs in every
+  country, so each pulse's 47-92 rows fit; every 33rd ASN is a hosting network.
 
 At full size a day is about 23 M `ip_observations` rows, 15-17 M `ip_enrichment` rows, 107,568
-pulse runs with about 7.6 M `run_geo_buckets` rows and 4,482 daily tests, matching the DB-AUDIT-2
+pulse runs with about 7.5 M `run_geo_buckets` rows (69.5 a run on average) and 4,482 daily tests, matching the DB-AUDIT-2
 scale model.
 
 ## Time and size
 
 One full-size day (18 networks × 249 countries) took 20 min 40 s with `--jobs 4` on a 4-CPU
 disposable server that also ran PostgreSQL 17 (day 1, so every IP was new). Almost all of it is
-database work, mostly index and foreign-key upkeep. On one connection the same day took about 30
-minutes. A machine with more CPUs, or the database on its own server, can take a larger
+database work, mostly index and foreign-key upkeep. On one connection the same day did not
+finish within the 30-minute limit of that test run. The time was measured before every country
+got at least 31 cities and 5 ASNs, which adds pulse geo rows (about 10% more
+`run_geo_buckets`), and only for day 1: later days, with upserts into larger `product_ips` and
+`pool_ips`, were not measured. A machine with more CPUs, or the database on its own server, can take a larger
 `--jobs`; SCALE-RUN-1 records the time per step on the real servers.
 
 ## Not generated
