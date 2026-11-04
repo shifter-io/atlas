@@ -83,6 +83,16 @@ def release_ids(database, *sha256s) -> list[int]:
     return [r[0] for r in rows]
 
 
+def move(database, run, delta) -> None:
+    """Move a stored run and its rows by delta."""
+    run_id = json.loads((run / "summary.json").read_text())["run_id"]
+    with connect(database) as conn:
+        row = conn.execute(
+            "SELECT run_key,started_at FROM test_runs WHERE run_id=%s", (run_id,)
+        ).fetchone()
+        shift(conn, row[0], row[1] + delta)
+
+
 async def test_the_snapshot_lists_every_release_its_runs_used(database, tmp_path):
     store.initialize(database)
     with connect(database) as conn:  # recorded by the update before any run used it
@@ -97,16 +107,13 @@ async def test_the_snapshot_lists_every_release_its_runs_used(database, tmp_path
     pulse = await measurement(tmp_path, requests=2, provider="third")
     ingest(pulse, database)
 
-    # Only the build's runs count: an hour earlier, the older run alone is in the window.
+    # Only the build's runs count: an hour earlier, the older run alone is in the window, so
+    # the build names release a only, not the newer b of a run after its cutoff.
     hour = timedelta(hours=1)
-    run_id = json.loads((older / "summary.json").read_text())["run_id"]
-    with connect(database) as conn:
-        run_key = conn.execute("SELECT run_key FROM test_runs WHERE run_id=%s", (run_id,))
-        run_key = run_key.fetchone()[0]
-        started = conn.execute("SELECT started_at FROM test_runs WHERE run_key=%s", (run_key,))
-        shift(conn, run_key, started.fetchone()[0] - hour)
+    move(database, older, -hour)
     earlier = calculate(database, POLICY, as_of=end_of(older) - hour)
     assert earlier["dbip_releases"] == release_ids(database, "a" * 64)
+    assert earlier["dbip_release"]["sha256"] == "a" * 64
     assert countries(earlier)["fixture"] == ["US"]
 
     snapshot = calculate(database, POLICY, as_of=end_of(older, newer, pulse))
@@ -175,3 +182,19 @@ async def test_a_file_replaced_under_its_name_is_a_new_release(database, tmp_pat
     assert countries(snapshot) == {"fixture": ["US"], "second": ["DE"]}
     assert snapshot["dbip_releases"] == release_ids(database, *sha256s)
     assert snapshot["dbip_release"]["sha256"] == sha256s[1]
+
+
+async def test_a_build_without_enriched_observations_names_no_release(database, tmp_path):
+    """An enriched run after the cutoff is outside the build: with only a pulse run in its
+    window, the snapshot names no release."""
+    store.initialize(database)
+    enriched = await measurement(tmp_path, requests=2)
+    enrichment(enriched, attributes=US, release="a" * 64)
+    ingest(enriched, database)
+    pulse = await measurement(tmp_path, requests=2, provider="third")
+    ingest(pulse, database)
+    move(database, enriched, timedelta(hours=1))
+
+    snapshot = calculate(database, POLICY, as_of=end_of(pulse))
+    assert snapshot["dbip_release"] is None and snapshot["dbip_releases"] == []
+    assert countries(snapshot)["third"] == []

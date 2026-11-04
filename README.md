@@ -407,9 +407,10 @@ CDN ever needs a token, that has to change first.
 **Each test keeps the locations it was saved with.** Enrichment is stored per run with the
 release it used, and the calculation reads each run's observations with that run's own release
 (its newest one, if it was enriched again). A new release therefore changes only the runs
-enriched with it, never older ones. The snapshot's `dbip_release` names the newest release that
-some run uses; a release recorded by the update before any run used it changes nothing.
-`dbip_releases` lists the ids of every release the snapshot's observations were labelled with.
+enriched with it, never older ones. The snapshot's `dbip_releases` lists the ids of every
+release its observations were labelled with, and `dbip_release` names the newest of them (null
+when it used none); a release no observation in the window used, such as one the update
+recorded before any run used it, is in neither.
 A release is its file's sha256, not its name, so the replaced `dbip-full.mmdb` is a new release.
 An IP seen by runs with different releases takes the labels of its lowest `run_key` in the window.
 

@@ -10,19 +10,17 @@ unlabelled.
 An IP that runs with different releases returned takes the labels of its lowest run_key in the
 window: the rows come ordered by run_key and `aggregate.pool()` keeps an IP's first row.
 
-The snapshot names the newest release that some run uses (`dbip_release`; a release the update
-recorded before any run used it changes nothing) and every release its observations were
-labelled with (`dbip_releases`, ascending ids).
+The snapshot names every release its observations were labelled with (`dbip_releases`,
+ascending ids) and the newest of them (`dbip_release`, null when it used none). A release no
+observation of the window used (recorded by the update before any run used it, or used only by
+runs outside the window) is in neither, so a build at an older cutoff names what it used.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-RELEASE = (
-    "SELECT release_id,sha256,metadata FROM dbip_releases WHERE release_id IN "
-    "(SELECT release_id FROM run_enrichments) ORDER BY release_id DESC LIMIT 1"
-)
+RELEASE = "SELECT release_id,sha256,metadata FROM dbip_releases WHERE release_id=%s"
 RUN_RELEASES = "SELECT run_key,max(release_id) AS release_id FROM run_enrichments GROUP BY run_key"
 OBSERVATIONS = (
     f"WITH run_release AS ({RUN_RELEASES}) "
@@ -37,7 +35,6 @@ OBSERVATIONS = (
     "WHERE o.bucket_start>=%s AND o.bucket_start<%s "
     "ORDER BY o.run_key,o.bucket_start,o.ip_id"
 )
-NO_RELEASE = {"dbip_release": None, "dbip_releases": []}
 
 
 def enriched_observations(conn, start, as_of) -> tuple[dict[str, Any], list]:
@@ -47,10 +44,10 @@ def enriched_observations(conn, start, as_of) -> tuple[dict[str, Any], list]:
     per_run = {r["run_key"]: r["release_id"] for r in conn.execute(RUN_RELEASES)}
     observed = {o["run_key"] for o in observations}
     used = sorted({per_run[k] for k in observed if k in per_run})
-    newest = conn.execute(RELEASE).fetchone()
+    newest = conn.execute(RELEASE, (used[-1],)).fetchone() if used else None
     return {"dbip_release": newest, "dbip_releases": used}, observations
 
 
 def snapshot_fields(release: dict[str, Any] | None) -> dict[str, Any]:
     """The payload's `dbip_release` and `dbip_releases` (none for a build given no release)."""
-    return release or NO_RELEASE
+    return release or {"dbip_release": None, "dbip_releases": []}
