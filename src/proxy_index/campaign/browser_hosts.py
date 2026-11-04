@@ -30,10 +30,8 @@ def _refusal(address: ipaddress.IPv4Address) -> str | None:
         return "a loopback address"
     if any(address in block for block in DOCUMENTATION):
         return "a documentation address"
-    if address.is_private:
-        return "a private address"
-    if address.is_multicast or not address.is_global:
-        return "not a public address"
+    if address.is_private or address.is_multicast or not address.is_global:
+        return "a private or reserved address"
     return None
 
 
