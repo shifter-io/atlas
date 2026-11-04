@@ -293,7 +293,7 @@ class BrowserAgent(NodeAgent):
             bundle = await asyncio.to_thread(host.seal, directory)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             log.warning("batch %s: run not sealed (%s); kept", batch_id, type(exc).__name__)
-            host.incomplete += 1
+            host.unsealed += 1
             return {}
         finally:
             host.sealing.discard(directory.name)
@@ -338,8 +338,9 @@ class BrowserHost:
         self.guard = rawfiles.DiskGuard(
             (self.runs, self.outbox_dir), settings.outbox.max_pending_gb, notify=self._full_line
         )
-        # Run directories kept unsealed (recover() at start, and seals that failed since).
-        self.incomplete = 0
+        # Half runs recover() deleted at this start; finished run directories kept unsealed
+        # (by recover() at start, and seals that failed since).
+        self.discarded = self.unsealed = 0
         # Run ids being sealed now: a pass must not send a bundle before its seal has ended.
         self.sealing: set[str] = set()
         self._wake: asyncio.Event | None = None
@@ -493,7 +494,7 @@ class BrowserHost:
         line |= {"browser_seconds": seconds, "pool": stats, "rss_mb": resident_mb()}
         line["utilization"] = round(seconds / (self.pool.size * self.hour_interval), 4)
         line |= self.outbox.hour_stats()
-        line["incomplete"] = self.incomplete
+        line |= {"discarded": self.discarded, "unsealed": self.unsealed}
         self.log.write(line)
         return line
 
@@ -508,7 +509,7 @@ class BrowserHost:
         """Serve every network until `stop`; then their runs end as NodeAgent ends them and
         the pool closes every browser. A network that cannot serve stops the host."""
         self._wake = asyncio.Event()
-        self.incomplete = await asyncio.to_thread(
+        self.discarded, self.unsealed = await asyncio.to_thread(
             rawfiles.recover, self.runs, self.outbox_dir, self.seal_run
         )
         tasks = [asyncio.create_task(agent.run(stop)) for agent in self.agents]

@@ -421,7 +421,8 @@ async def test_the_hourly_line_reports_utilization_pool_and_memory(tmp_path):
     assert {k: line[k] for k in ("outbox_pending", "outbox_bytes", "rejected", "conflicts")} == {
         "outbox_pending": 0, "outbox_bytes": 0, "rejected": 0, "conflicts": 0
     }  # fmt: skip
-    assert line["confirmed_last_hour"] == 0 and line["incomplete"] == 0
+    assert line["confirmed_last_hour"] == 0 and "incomplete" not in line
+    assert line["discarded"] == 0 and line["unsealed"] == 0
     host.log.close()
     [written] = log_lines(state)
     assert written == json.loads(json.dumps(line))

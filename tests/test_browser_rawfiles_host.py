@@ -152,19 +152,24 @@ async def test_a_restart_sends_three_pending_bundles_oldest_first(tmp_path):
     assert {token for token, *_ in fake.posts} == {TOKENS[SHIFTER]} and fake.failed == {}
 
 
-async def test_a_host_start_seals_a_run_a_killed_process_left(tmp_path):
+async def test_a_host_start_seals_a_finished_run_and_deletes_a_half_run(tmp_path, caplog):
+    """BP-DATA-HALF-1: a run killed mid-run (no summary.json) is deleted at start and never
+    uploaded; a run killed after it finished is sealed and uploaded as before."""
     state = make_state(tmp_path)
     run_dir = make_run(state, RUN_ID)  # state/runs/shifter.residential/<run id>
     killed = make_run(state, "0b6a7e4c-1d2e-4f3a-9b8c-7d6e5f4a3b2d")
     (killed / "summary.json").unlink()
+    caplog.set_level(logging.WARNING)
     fake = Kbp7({})
     host, server = await host_with(state, fake)
     try:
         await serve_while(host, lambda: len(fake.posts) == 1)
     finally:
         await server.close()
-    assert not run_dir.exists() and killed.exists() and host.incomplete == 1
-    assert fake.posts[0][1] == RUN_ID
+    assert not run_dir.exists() and not killed.exists()
+    assert (host.discarded, host.unsealed) == (1, 0)
+    assert [bundle_id for _, bundle_id, _ in fake.posts] == [RUN_ID]
+    assert caplog.text.count(f"browser_run_discarded: run {killed.name} ") == 1
 
 
 async def test_a_run_that_cannot_be_sealed_is_kept_and_not_failed(tmp_path, monkeypatch, caplog):
@@ -188,7 +193,7 @@ async def test_a_run_that_cannot_be_sealed_is_kept_and_not_failed(tmp_path, monk
         await server.close()
     assert fake.failed == {} and fake.posts == []
     [run_dir] = (state / "runs" / "shifter.residential").iterdir()
-    assert (run_dir / "summary.json").exists() and host.incomplete == 1
+    assert (run_dir / "summary.json").exists() and host.unsealed == 1 and host.discarded == 0
     assert host.sealing == set()
 
 
@@ -207,7 +212,7 @@ async def test_a_host_with_an_unreadable_sidecar_still_starts(tmp_path):
         await serve_while(host, lambda: len(fake.posts) == 1)
     finally:
         await server.close()
-    assert stuck.exists() and not other.exists() and host.incomplete == 1
+    assert stuck.exists() and not other.exists() and host.unsealed == 1
     assert fake.posts[0][1] == other.name
 
 
