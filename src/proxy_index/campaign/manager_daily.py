@@ -33,6 +33,7 @@ PROXY_INDEX = "/opt/proxy-index-campaign/venv/bin/proxy-index"
 WANTS = f"/etc/systemd/system/timers.target.wants/{DAILY_TIMER}"
 ACTIONS = ("hourly-enable", "hourly-disable")
 ACCOUNT = "proxy-index"  # the brief: the "Proxy Index" team account, never leftclick
+BUSY = "the hourly daily test is on or an hour is running: hourly-disable --apply first"
 
 
 def recorded(inventory_path: Path) -> dict[str, Any]:
@@ -101,6 +102,11 @@ def install_lines(cid: str) -> list[str]:
     template = f"{CAMPAIGNS}/{cid}"
     return [
         f"test -f {template}/campaign-spec.json",
+        # Never swap the formulas under the hourly test (`hourly-disable --apply` first).
+        f'if systemctl is-active --quiet {DAILY_TIMER} || [ -n "$(systemctl list-units '
+        "'proxy-index-daily-*' --state=active --no-legend --plain)\" ]; then",
+        '  echo "daily-busy"; exit 5',
+        "fi",
         *check_lines("$stage/formulas", template),
         f"install -d -m 700 {DAILY_DIR}",
         f"rm -rf {FORMULAS}.new {FORMULAS}.old",
@@ -118,6 +124,8 @@ def verify(out: str, code: int, sent: dict[str, str], what: str) -> dict[str, An
     lines = out.strip().splitlines()
     found = [line.removeprefix("daily-check ") for line in lines if line.startswith("daily-check ")]
     check = json.loads(found[-1]) if found else None
+    if "daily-busy" in lines:
+        raise deploy.DeployError(BUSY)
     if check is not None and not check.get("ok"):
         raise deploy.DeployError(f"the daily check failed: {'; '.join(check['issues'][:5])}")
     if code != 0 or check is None:

@@ -74,7 +74,9 @@ MEMORY_ENV = "PROXY_INDEX_CALCULATE_MEMORY_MAX"
 MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
 # The capped calculation's scope. One fixed name: while a calculation left by a crashed or killed
 # orchestrator still runs (its scope is outside the service), systemd refuses a second one, and
-# the job fails with that exit instead of running two at once.
+# the job fails with that exit instead of running two at once. CollectMode unloads the scope as
+# soon as it ends, also after an out-of-memory kill (recorded as exit 137), so the name is free
+# for the next hour: a failed scope that stayed loaded would refuse every later calculation.
 SCOPE_UNIT = "proxy-index-calculate"
 
 
@@ -158,7 +160,8 @@ def calculation_argv(
     if not MEMORY_RE.fullmatch(memory_max):
         raise ValueError(f"{MEMORY_ENV} must be a size such as 8G")
     scope = ["systemd-run", "--scope", "--quiet", f"--unit={SCOPE_UNIT}"]
-    return [*scope, "-p", f"MemoryMax={memory_max}", "--", *command]
+    limits = ["-p", f"MemoryMax={memory_max}", "-p", "CollectMode=inactive-or-failed"]
+    return [*scope, *limits, "--", *command]
 
 
 async def run_calculation(argv: list[str], limit_s: float) -> dict[str, Any]:

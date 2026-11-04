@@ -84,14 +84,16 @@ class Shell:
     """Fake SSH: records argv and stdin; answers the enable script like the manager (the check
     line, each received formula's SHA-256, the certificate, `healthy`) and the hourly ones."""
 
-    def __init__(self, healthy=True, check=CHECK_OK, tamper=False, timer="active"):
+    def __init__(self, healthy=True, check=CHECK_OK, tamper=False, timer="active", busy=False):
         self.calls, self.healthy, self.check = [], healthy, check
-        self.tamper, self.timer = tamper, timer
+        self.tamper, self.timer, self.busy = tamper, timer, busy
 
     async def __call__(self, argv, stdin):
         self.calls.append((argv, stdin))
         command, check = argv[-1], f"daily-check {json.dumps(self.check, separators=(',', ':'))}"
         if "systemctl restart" in command:
+            if self.busy:  # the hourly timer is on, or an hour is running
+                return 5, "daily-busy\n"
             if not self.check["ok"]:
                 return 4, check + "\n"
             sums = [
@@ -182,6 +184,7 @@ def test_the_units_are_rendered_from_the_assets():
     assert not installable(hourly)  # nothing can enable it
     daily = found[manager_daily.DAILY_SERVICE]
     assert not installable(daily) and "Type=oneshot" in daily
+    assert "--property=CollectMode=inactive-or-failed" in daily  # failed hours do not pile up
     assert installable(service)  # the orchestrator itself is enabled by orchestrator-enable
     assert '--unit=proxy-index-daily-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in daily
     assert (
@@ -408,6 +411,7 @@ async def test_enable_stops_when_the_manager_disagrees(job, tmp_path):
         (Shell(healthy=False), "did not answer /health"),
         (Shell(check=failing), "the daily check failed: hour 7: the template cannot test geonode"),
         (Shell(tamper=True), "the formulas on the manager differ"),
+        (Shell(busy=True), "the hourly daily test is on or an hour is running"),
     ]
     async with running(fake) as cloud:
         for shell, message in cases:
@@ -418,6 +422,23 @@ async def test_enable_stops_when_the_manager_disagrees(job, tmp_path):
     saved = inventory(job)
     assert "orchestrator" not in saved and "daily_template" not in saved
     assert not job.inventory.with_name("campaign-manager.orchestrator.crt").exists()
+
+
+async def test_enable_never_swaps_the_formulas_under_the_hourly_test(job, tmp_path):
+    fake = await deployed(job)
+    await recorded_size(fake, job)
+    deploy.save(job.inventory, inventory(job), hourly={"on": True})
+    before, writes_before, shell = inventory(job), writes(fake), Shell()
+    async with running(fake) as cloud:
+        with pytest.raises(deploy.DeployError, match="hourly-disable --apply first"):
+            await manager_orch.enable(
+                cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell
+            )
+    assert inventory(job) == before and writes(fake) == writes_before and shell.calls == []
+    lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
+    guard = next(i for i, line in enumerate(lines) if "--state=active" in line)
+    assert manager_daily.DAILY_TIMER in lines[guard] and "'proxy-index-daily-*'" in lines[guard]
+    assert guard < next(i for i, line in enumerate(lines) if "mv -Tf" in line)
 
 
 async def test_a_missing_pulse_tag_is_named_and_nothing_is_recorded(job, tmp_path):
@@ -456,6 +477,7 @@ async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port
     assert manager_firewall(fake, job)["inbound_rules"] == [ops_api.ssh_from(before["mac_ipv4"])]
     saved = inventory(job)
     assert "node_api_port" not in saved and saved["orchestrator_disabled_at"]
+    assert saved["hourly"] == {"on": False, "at": saved["orchestrator_disabled_at"]}
 
 
 async def test_deploy_keeps_the_node_api_rule(job):
@@ -700,16 +722,18 @@ def test_the_calculation_command():
     tail = ["calculate", "--database-file", "db.toml", "--methodology", "m.toml", "--publish"]
     assert plain[-6:] == tail
     scoped = jobs.calculation_argv("db.toml", "m.toml", "8G")
-    assert scoped[:7] == [
+    assert scoped[:9] == [
         "systemd-run",
         "--scope",
         "--quiet",
         "--unit=proxy-index-calculate",
         "-p",
         "MemoryMax=8G",
+        "-p",
+        "CollectMode=inactive-or-failed",  # an OOM-killed scope never blocks the next hour
         "--",
     ]
-    assert scoped[7:] == plain
+    assert scoped[9:] == plain
     for bad in ("8 G", "0", "8G; reboot", "-1G"):
         with pytest.raises(ValueError, match="PROXY_INDEX_CALCULATE_MEMORY_MAX"):
             jobs.calculation_argv("db.toml", "m.toml", bad)

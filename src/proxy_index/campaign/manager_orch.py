@@ -178,6 +178,8 @@ async def enable(
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
     if inventory.get("manager_size") != WANTED_SIZE:
         raise deploy.DeployError(f"record the manager's size first ({WANTED_SIZE}): resize")
+    if inventory.get("hourly", {}).get("on"):  # the formulas are never swapped under it
+        raise deploy.DeployError(manager_daily.BUSY)
     cid = manager_daily.template_id(inventory, inputs.daily_template)
     formulas = manager_daily.formula_files(inputs.formulas)
     sent = manager_daily.digests(formulas)
@@ -241,7 +243,8 @@ async def disable(
     await _firewall(cloud, inventory, rules)
     inventory.pop("node_api_port", None)
     stamp = (now or datetime.now(UTC)).isoformat()
-    deploy.save(inventory_path, inventory, orchestrator_disabled_at=stamp)
+    hourly = {"on": False, "at": stamp}  # off_lines took the hourly timer out too
+    deploy.save(inventory_path, inventory, orchestrator_disabled_at=stamp, hourly=hourly)
     return result
 
 

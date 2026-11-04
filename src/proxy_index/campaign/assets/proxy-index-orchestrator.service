@@ -12,8 +12,9 @@ Type=simple
 # ADMIN_USER and ADMIN_PASSWORD, made on the manager by orchestrator-enable (root-only 0600).
 EnvironmentFile=/opt/proxy-index-campaign/.secrets/orchestrator.env
 # The calculation runs in its own scope, proxy-index-calculate.scope (MemoryMax=8G, outside this
-# unit's cgroup). A graceful stop kills it (jobs.run_calculation); after a crash or a kill the old
-# calculation keeps that scope, and the next one is refused until it ends.
+# unit's cgroup, unloaded when it ends: an out-of-memory kill fails that hour with exit 137 and
+# the next hour runs normally). A graceful stop kills it (jobs.run_calculation); after a crash or
+# a kill the old calculation keeps that scope, and the next one is refused until it ends.
 Environment=PROXY_INDEX_CALCULATE_MEMORY_MAX=8G
 # The one DB-IP file the dbip_update job replaces atomically (setting dbip.dir is its folder).
 Environment=DBIP_MMDB=/opt/proxy-index-campaign/db-ip/dbip-full.mmdb
