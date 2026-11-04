@@ -5,7 +5,9 @@ path: calculator.SCHEMA_VERSION 2 and parts holding the rows): read back, export
 the two are byte-identical after removing the build's ids, clock and implementation and the
 schema version. The fixtures are the seeded random observations of test_sqlwindow (three DB-IP
 releases, unenriched IPs, runs split by window edges, two runs in one slice, an IP in two
-countries, empty-string and NULL labels) and the census-pulse scenario (scheduled groups).
+countries, empty-string and NULL labels), the census-pulse scenario (scheduled groups), the
+browser scenario of test_calculated_browser (browser batches), and a late run with an empty
+window.
 """
 
 import copy
@@ -14,19 +16,21 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from test_calculated import POLICY, lenient_policy, payload_mismatches
+from test_calculated import POLICY, lenient_policy, payload_mismatches, spread
+from test_calculated_browser import add_browser_runs, ai_sources, generic  # noqa: F401 (fixture)
 from test_calculated_slim import TINY
 from test_census_pulse import outage
 from test_census_pulse import scenario as census_scenario
 from test_sqlwindow import scenario  # noqa: F401 (fixture)
 
+from proxy_index.browser import contracts
 from proxy_index.calculated import calculator, parts, store
 from proxy_index.calculated.aggregate import BREAKDOWNS
 from proxy_index.calculated.api import RESOURCES, app
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.policy import PAYLOAD
 from proxy_index.calculated.slim import POOL_LISTS, refer, slim
-from proxy_index.storage import connect
+from proxy_index.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 
@@ -93,8 +97,9 @@ def stored_parts(database, build):
     return groups, ids
 
 
-def assert_equal_builds(database, tmp_path, new, legacy):
-    """new (v3) reads, exports and serves as legacy (v2) does, byte for byte."""
+def assert_equal_builds(database, tmp_path, new, legacy, *, cut=True):
+    """new (v3) reads, exports and serves as legacy (v2) does, byte for byte. cut: some list is
+    longer than its cap, so the v3 parts are smaller (a fixture with one exit IP has none)."""
     a, b = store.read(database, new), store.read(database, legacy)
     assert json.dumps(without(a)) == json.dumps(without(b))
     assert exported(database, new, tmp_path / "v3.json") == exported(
@@ -119,9 +124,10 @@ def assert_equal_builds(database, tmp_path, new, legacy):
             assert w["breakdown_entries"] == full["breakdown_entries"]
             assert w["pool"]["list_entries"] == full["pool"]["list_entries"]
             truncated += any(kept[n] < full["breakdown_entries"][n] for n in BREAKDOWNS)
-    assert truncated
-    # The parts no longer copy the lists' rows.
-    assert sum(map(len, map(json.dumps, groups))) < sum(map(len, map(json.dumps, old)))
+    assert bool(truncated) == cut
+    # The parts no longer copy the lists' rows (with lists of one row or none, the reference is
+    # about as long as the rows it replaces).
+    assert not cut or sum(map(len, map(json.dumps, groups))) < sum(map(len, map(json.dumps, old)))
     return a
 
 
@@ -164,6 +170,49 @@ async def test_v3_with_its_lists_equals_v2_with_scheduled_groups(database, tmp_p
         current = await (await client.get("/v1/breakdowns?window=24h")).json()
         old = await (await client.get(f"/v1/snapshots/{legacy}/breakdowns?window=24h")).json()
     assert json.dumps(without(current)) == json.dumps(without(old)) and current["data"]
+
+
+@pytest.mark.asyncio
+async def test_v3_with_its_lists_equals_v2_with_browser_runs(
+    database,
+    tmp_path,
+    monkeypatch,
+    ai_sources,  # noqa: F811
+):
+    as_of = await generic(database, tmp_path)
+    await add_browser_runs(database, tmp_path)
+    new, legacy = both(database, capped(tmp_path, lenient_policy(tmp_path)), as_of, monkeypatch)
+    payload = assert_equal_builds(database, tmp_path, new, legacy)
+    # Every product's windows hold the browser targets (read back in jsonb key order).
+    for p in payload["products"]:
+        assert set(contracts.BROWSER_TARGETS) <= set(p["windows"]["24h"]["targets"])
+    v3, v2 = await served(database, (new, legacy))
+    assert v3 == v2
+
+
+@pytest.mark.asyncio
+async def test_v3_with_its_lists_equals_v2_with_a_late_run_and_an_empty_window(
+    database, tmp_path, monkeypatch
+):
+    """A run that ends after the cutoff (its buckets at +0, +5 and +10 minutes are in, +30 is
+    not) and a product whose 24h window has no row (its one run is three days old)."""
+    store.initialize(database)
+    w = datetime(2026, 10, 1, 12, tzinfo=UTC)
+    minute = timedelta(minutes=1)
+    late = await spread(tmp_path, monkeypatch, w + minute, [0, 300, 600, 1800])
+    old = await spread(tmp_path, monkeypatch, w - timedelta(days=3), [0], provider="second")
+    for directory in (late, old):
+        ingest(directory, database)
+    new, legacy = both(database, capped(tmp_path), w + 20 * minute, monkeypatch)
+    payload = assert_equal_builds(database, tmp_path, new, legacy, cut=False)
+    windows = {p["provider"]: p["windows"] for p in payload["products"]}
+    assert windows["fixture"]["24h"]["metrics"]["completed"] == 3
+    empty = windows["second"]["24h"]
+    assert empty["metrics"]["completed"] == 0 and empty["pool"]["unique_ips"] == 0
+    assert not any(empty["breakdowns"].values())
+    assert windows["second"]["7d"]["metrics"]["completed"] == 1
+    v3, v2 = await served(database, (new, legacy))
+    assert v3 == v2
 
 
 @pytest.mark.asyncio

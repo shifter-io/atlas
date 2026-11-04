@@ -166,7 +166,11 @@ implementation, methodology, window, country names and each run of the group in 
 its summary hash, enrichment release and artifact hash, clipped bucket span and light-load flag),
 and a build with a stored list's signature reuses it without writing rows. The list is still
 computed and its content hash compared; a mismatch fails the calculation ("list signature is
-incomplete") and the previous build keeps serving. Census-pulse lists keep signature NULL. After
+incomplete") and the previous build keeps serving. The mismatch is permanent for that signature:
+every later calculation with the same window inputs fails again until the runs leave the window
+(up to 30 days for 30d) or `IMPLEMENTATION_ID` changes. The remedy is a code fix of the signature
+(a release changes `IMPLEMENTATION_ID`); until then the calculation stays stopped and the current
+build keeps serving. Census-pulse lists keep signature NULL. After
 `discard` and `expire` the lists no window references are deleted (`store.collect`).
 `calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
 and keep their columns. Snapshot payloads are kept for the current build, published builds

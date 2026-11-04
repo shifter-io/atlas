@@ -20,6 +20,9 @@ from proxy_index.storage import connect, ingest
 pytest_plugins = ["test_storage"]
 
 POLICY = Path("configs/methodology.toml")
+# A 5-minute bucket edge for runs on fixed clocks (spread()).
+EDGE = datetime(2026, 10, 1, 12, 5, tzinfo=UTC)
+MINUTE = timedelta(minutes=1)
 LIVE = Path("results/live-shifter/ef3b5883-bf12-48dc-9759-43b79f937276")
 
 
@@ -110,7 +113,8 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     # These assertions read older published builds; retention has its own tests.
     monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
     store.initialize(database)
-    d = await measurement(tmp_path, requests=10)
+    # Fixed clocks: both providers' runs in the 12:00 bucket, whenever the test runs.
+    d = await spread(tmp_path, monkeypatch, EDGE - 4 * MINUTE, [0] * 10)
     ingest(d, database)
     raw = json.loads((d / "summary.json").read_text())
     end = datetime.fromisoformat(raw["finished_at"]) + timedelta(minutes=5)
@@ -125,7 +129,7 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     }
     assert calculate(database, POLICY, as_of=end)["snapshot_id"] == first["snapshot_id"]
     # A late imported second provider revises the same cutoff, including overlap.
-    second_dir = await measurement(tmp_path, requests=10, provider="second")
+    second_dir = await spread(tmp_path, monkeypatch, EDGE - 3 * MINUTE, [0] * 10, provider="second")
     ingest(second_dir, database)
     second = calculate(database, POLICY, as_of=end, publish=True)
     assert second["snapshot_id"] != first["snapshot_id"]
@@ -195,6 +199,32 @@ async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     assert before["products"][0]["windows"]["24h"]["metrics"]["completed"] == 0
     at_start = calculate(database, POLICY, as_of=bucket + timedelta(hours=24))
     assert at_start["products"][0]["windows"]["24h"]["metrics"]["completed"] == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("late", [15, 120], ids=["same-bucket", "cutoff-bucket"])
+async def test_a_late_provider_in_the_cutoff_bucket_is_in_the_revised_build(
+    database, tmp_path, monkeypatch, late
+):
+    """FLAKY-OVERLAP-1: the first run ends at 12:04:30, so a cutoff 5 minutes later lies in the
+    12:05 bucket and the first build stops at 12:05. A second provider imported late, whose run
+    ended `late` seconds after the first (12:04:45: the same bucket; 12:06:30: the cutoff's own
+    bucket, as when the test crossed a bucket edge on the real clock), is in the revised build
+    at the same cutoff and shares the first's exit IP: that bucket closes (its run had ended by
+    the cutoff), so the cutoff moves to its end."""
+    store.initialize(database)
+    start = EDGE - timedelta(seconds=30)
+    ingest(await spread(tmp_path, monkeypatch, start, [0] * 10), database)
+    end = start + 5 * MINUTE
+    assert calculate(database, POLICY, as_of=end, publish=True)["as_of"] == EDGE.isoformat()
+    second = start + timedelta(seconds=late)
+    ingest(await spread(tmp_path, monkeypatch, second, [0] * 10, provider="second"), database)
+    after = calculate(database, POLICY, as_of=end, publish=True)
+    shared = {o["window"]: o["shared_ips"] for o in after["overlap"]}
+    assert shared == {"24h": 1, "7d": 1, "30d": 1}
+    day = {p["provider"]: p["windows"]["24h"]["metrics"]["completed"] for p in after["products"]}
+    assert day == {"fixture": 10, "second": 10}
+    assert after["as_of"] == (EDGE + 5 * MINUTE * (late > 60)).isoformat()
 
 
 @pytest.mark.asyncio
@@ -935,6 +965,29 @@ def lenient_policy(tmp_path):
 class OtherIP(FakeTransport):
     async def execute(self, target, *, context=None):
         return Outcome(30.2, ip="9.9.9.9", status=200, response_body_bytes=8)
+
+
+async def spread(tmp_path, monkeypatch, start, offsets, **options):
+    """A run that starts at `start` and completes one request at each of `offsets` (seconds
+    after it) on the runner's own clocks, so it has observations in every 5-minute bucket the
+    offsets reach and finishes at the last one. Fixed clocks: the run's buckets never depend on
+    when the test runs."""
+    from proxy_index import runner
+
+    clock = [0.0]
+
+    class Stepping(FakeTransport):
+        async def execute(self, target, *, context=None):
+            clock[0] = offsets[self.count]
+            self.count += 1
+            return Outcome(10.1, ip="8.8.8.8", status=200, response_body_bytes=8)
+
+    with monkeypatch.context() as fixed:
+        fixed.setattr(runner.time, "time", lambda: start.timestamp())
+        fixed.setattr(runner.time, "perf_counter", lambda: clock[0])
+        return await measurement(
+            tmp_path, requests=len(offsets), concurrency=1, transport_factory=Stepping, **options
+        )
 
 
 async def benchmark_scenario(database, tmp_path):
