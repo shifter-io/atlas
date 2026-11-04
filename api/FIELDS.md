@@ -552,3 +552,43 @@ Payload v3 (proxy-index SNAP-LISTREF-1), as the API reads it:
   written as jsonb writes the payload), except that a group the API does not read
   city x ASN rows for has no `city_asn` list.
 
+
+## IP numbers from the hour formula (API-ESTIMATES-1)
+
+A daily test's product group whose windows (24h, 7d, 30d) hold released
+estimated hours carries the framework's `estimated` block beside its measured
+figures (proxy-index `estimates/window.py`). The API serves every IP count it
+derives from such a window as the hour formula's daily estimate, a plain whole
+number (rounded half up) in the same fields as before: no answer has an
+`estimated` key, flag or label, and the window's measured distinct IP count is
+not served for that window (contract K8, owner decision Q6).
+
+| API value | From the window's `estimated` block |
+|---|---|
+| A window's unique IPs: provider `pool.uniqueIps24h`/`uniqueIps30d`, window statistics `uniqueIps`, network totals `uniqueIps` and `ipsSum`, the unique-IP tile and its rank, the dataset totals built from them | `unique_ips.value` |
+| A place or breakdown row's IPs: `geo[].ips` (and its share), `asns[].ips` (and its share), network and country place rows `ipsSum` (country, region, city, ASN), their ranks, `/v1/countries` `ipsSum` | the measured row's IPs × `breakdown_scale` |
+| The 24h IP chart (`series.uniqueIps24h`, chart and window `pool`) | one point per released hour (`series[]`, `t` from the hour's start) |
+| A 7d/30d daily IP point (`series.uniqueIps30d`, chart and window `pool`, network `days[]`) | the measured day's IPs × `breakdown_scale`, like a place row (hourly figures are not added up: an IP seen in several hours would count once per hour) |
+
+A daily group's cohort is one requested country, so its per-country figure
+(`countries[]`) is its window figure. Requests, success, latency, uptime,
+outages and overlap stay measured. A window without the block (census-pulse
+groups, a window with no released hour) keeps its measured IPs, and so do a
+row or daily point when the block has no `breakdown_scale`, and the
+every-group fleet figures of `/v1/networks/all`.
+
+`measurement` (the headline group's raw result) follows the same mapping: a
+window with the block loses it, its `pool.unique_ips` and the `ips` of its
+`breakdowns`, `pool.geo`, `pool.countries_breakdown` and `pool.asns_breakdown`
+rows, its daily `series[].unique_ips` and its `pool.daily.unique_ips` (the
+average daily distinct IPs) are scaled by `breakdown_scale` as above, and its
+24h five-minute `series[].unique_ips` are null (the released hours are coarser
+than the buckets). The members of a rewritten object come out in key order.
+Other fields of the raw result (`pool.new_ips`, `tests`, `ip_samples`,
+`census_overlap`) are passed through as published.
+
+The tape keeps a row per released hour (event kind `estimate_hour_released`,
+an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update
+released" when the hour is missing) with that hour's IPs as its value: no
+answer text names the estimate (owner decision on the API-ESTIMATES-1 review).
+The `/v1/events` rows keep the framework's event kind name.

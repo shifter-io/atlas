@@ -99,7 +99,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	mv := measuredView{Kind: kind, Product: product}
 	var meas model.Measured
 	meas.Pool = model.PoolStats{
-		UniqueIps24h: day.Pool.UniqueIps, UniqueIps30d: w.Pool.UniqueIps, ClaimedPoolSize: nan,
+		UniqueIps24h: ipsOf(day), UniqueIps30d: ipsOf(w), ClaimedPoolSize: nan,
 		ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		RequestsPerIP: nan,
@@ -180,8 +180,8 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	meas.Series = model.ProviderSeries{
 		Success24h: successes(day), Success30d: successes(w), Latency24h: lat24,
 		Latency30d:    pointsV(w, func(r snap.SeriesRow) Num { return seriesLatency(w, r).P50 }),
-		UniqueIps24h:  pointsV(day, func(r snap.SeriesRow) Num { return r.UniqueIps }),
-		UniqueIps30d:  pointsV(w, func(r snap.SeriesRow) Num { return r.UniqueIps }),
+		UniqueIps24h:  ipPoints(day, "24h", points(day), func(at string) Num { return minutesAgo(ref, at) }),
+		UniqueIps30d:  ipPoints(w, "30d", points(w), func(at string) Num { return minutesAgo(ref, at) }),
 		PricePerGb90d: []model.SeriesPoint{},
 	}
 	byCountry := map[string]snap.BreakdownRow{}
@@ -192,7 +192,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	}
 	meas.Geo = []model.GeoBucket{}
 	for _, g := range w.Pool.CountriesBreakdown {
-		b := model.GeoBucket{CountryCode: g.CountryCode, Country: model.S(g.Country), Ips: g.Ips, Share: g.Ips / w.Pool.UniqueIps, LatencyP50: nan, SuccessRate: nan}
+		b := model.GeoBucket{CountryCode: g.CountryCode, Country: model.S(g.Country), Ips: scaledIps(w, g.Ips), Share: scaledShare(w, g.Ips), LatencyP50: nan, SuccessRate: nan}
 		if r, has := byCountry[g.CountryCode]; has {
 			b.LatencyP50, b.SuccessRate = r.P50, r.SuccessRate
 		}
@@ -209,7 +209,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		case "business":
 			k = "business"
 		}
-		meas.Asns = append(meas.Asns, model.AsnBucket{Asn: a.Asn, Name: model.S(a.Name), Kind: k, Ips: a.Ips, Share: a.Ips / w.Pool.UniqueIps})
+		meas.Asns = append(meas.Asns, model.AsnBucket{Asn: a.Asn, Name: model.S(a.Name), Kind: k, Ips: scaledIps(w, a.Ips), Share: scaledShare(w, a.Ips)})
 	}
 	// presentation.ts leaves the overlap block unavailable. The snapshot does publish the
 	// 30d exclusive/shared share and per-pair counts, so the API maps them when present.
@@ -256,7 +256,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		untestedText = strings.Join(untested[:len(untested)-1], ", ") + " and " + untested[len(untested)-1]
 	}
 	totals := fmt.Sprintf("%s completed requests, %s successes and %s unique IPs.",
-		jsnum.Locale(m.Completed.F()), jsnum.Locale(m.Successes.F()), jsnum.Locale(w.Pool.UniqueIps.F()))
+		jsnum.Locale(m.Completed.F()), jsnum.Locale(m.Successes.F()), jsnum.Locale(ipsOf(w).F()))
 	// The copy follows the data: the schedule the network is measured on, its
 	// score once there is one, and only what is really still missing.
 	scheduled := census != nil || pulses > 0
@@ -283,7 +283,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		success = " time-weighted success over every request"
 	}
 	mv.Strengths = []string{
-		jsnum.Locale(w.Pool.UniqueIps.F()) + " distinct exit IPs observed",
+		jsnum.Locale(ipsOf(w).F()) + ipsPhrase(w),
 		jsnum.Pct(m.SuccessRate.F(), 2) + success,
 	}
 	if census != nil {

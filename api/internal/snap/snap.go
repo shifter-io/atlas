@@ -335,6 +335,46 @@ type Window struct {
 	// BreakdownEntries is each capped list's full row count (absent when
 	// nothing was capped).
 	BreakdownEntries map[string]int `json:"breakdown_entries"`
+	// Estimated is the window's released hourly estimates (nil when it has
+	// none: census-pulse groups, or no hour released inside the window).
+	Estimated *Estimated `json:"estimated"`
+}
+
+// Estimated is a window's `estimated` block (proxy-index
+// estimates/window.py): the unique IPs the hour formula gives the window and
+// each released UTC hour, and BreakdownScale, the estimated over the measured
+// unique IPs (NaN when nothing was measured). Only the figures the API maps
+// are typed: a daily group's cohort is one requested country, so its
+// per-country figure (countries[]) is its window figure.
+type Estimated struct {
+	UniqueIps      EstimatedValue  `json:"unique_ips"`
+	Series         []EstimatedHour `json:"series"`
+	BreakdownScale Num             `json:"breakdown_scale"`
+}
+
+func (v *Estimated) UnmarshalJSON(d []byte) error {
+	type plain Estimated
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+type EstimatedValue struct {
+	Value Num `json:"value"`
+}
+
+func (v *EstimatedValue) UnmarshalJSON(d []byte) error {
+	type plain EstimatedValue
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// EstimatedHour is one released hour: Start is its UTC hour.
+type EstimatedHour struct {
+	Start     string `json:"start"`
+	UniqueIps Num    `json:"unique_ips"`
+}
+
+func (v *EstimatedHour) UnmarshalJSON(d []byte) error {
+	type plain EstimatedHour
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *Window) UnmarshalJSON(d []byte) error {

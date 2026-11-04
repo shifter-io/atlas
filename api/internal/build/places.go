@@ -34,7 +34,7 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 		for _, p := range groups {
 			w := p.Window(r.ID)
 			t.Requests, t.Successes = addNum(t.Requests, w.Metrics.Completed), addNum(t.Successes, w.Metrics.Successes)
-			t.IpsSum = addNum(t.IpsSum, w.Pool.UniqueIps)
+			t.IpsSum = addNum(t.IpsSum, ipsOf(w))
 			mergeWindow(merged, row, p, w)
 		}
 		if len(groups) == 0 {
@@ -44,7 +44,7 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 		if len(groups) == 1 {
 			// One group: its own distinct IPs and latency are the network's.
 			w := groups[0].Window(r.ID)
-			t.UniqueIps, t.LatencyP50, t.LatencyP90, t.LatencyP99 = w.Pool.UniqueIps, w.Metrics.LatencyMs.P50, w.Metrics.LatencyMs.P90, w.Metrics.LatencyMs.P99
+			t.UniqueIps, t.LatencyP50, t.LatencyP90, t.LatencyP99 = ipsOf(w), w.Metrics.LatencyMs.P50, w.Metrics.LatencyMs.P90, w.Metrics.LatencyMs.P99
 		}
 		for _, d := range placeDimensions {
 			rows := sortedRows(merged[d])
@@ -78,16 +78,17 @@ func requestedCountries(groups []*snap.Product) []string {
 func days(groups []*snap.Product) []DayRow {
 	byDay := map[string]*DayRow{}
 	for _, p := range groups {
-		for _, s := range p.Window("30d").Series {
+		w := p.Window("30d")
+		for _, s := range w.Series {
 			day := dayOf(s.At)
 			d := byDay[day]
 			if d == nil {
 				d = &DayRow{Day: day, Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan}
 				byDay[day] = d
 			}
-			d.Requests, d.Successes, d.IpsSum = addNum(d.Requests, s.Completed), addNum(d.Successes, s.Successes), addNum(d.IpsSum, s.UniqueIps)
+			d.Requests, d.Successes, d.IpsSum = addNum(d.Requests, s.Completed), addNum(d.Successes, s.Successes), addNum(d.IpsSum, dayIps(w, s))
 			if len(groups) == 1 {
-				d.UniqueIps = s.UniqueIps
+				d.UniqueIps = dayIps(w, s)
 			}
 		}
 	}
@@ -109,14 +110,14 @@ func mergeWindow(merged map[string]map[string]*PlaceRow, row *store.SnapshotRow,
 			for i := range rows {
 				r := rows[i].PlaceRow(d)
 				mergePlace(merged[d], d, PlaceRow{CountryCode: r.CountryCode, Country: r.Country, RegionCode: r.RegionCode,
-					Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: Num(r.Ips), Requests: Num(r.Completed),
+					Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: scaledIps(w, Num(r.Ips)), Requests: Num(r.Completed),
 					Successes: Num(r.Successes), LatencyP50: Num(r.P50)}, Num(r.Asn))
 			}
 			continue
 		}
 		for _, r := range w.Breakdowns[d] {
 			mergePlace(merged[d], d, PlaceRow{CountryCode: r.CountryCode, Country: r.Country, RegionCode: r.RegionCode,
-				Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: r.Ips, Requests: r.Completed, Successes: r.Successes,
+				Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: scaledIps(w, r.Ips), Requests: r.Completed, Successes: r.Successes,
 				LatencyP50: r.P50}, r.Asn)
 		}
 	}

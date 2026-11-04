@@ -271,7 +271,11 @@ func realProvider(id string, row *store.ProviderRow, slug, name string, products
 		p.Score = head.Score
 		p.Tagline, p.Verdict = model.S(head.Tagline), model.S(head.Verdict)
 		p.Strengths, p.Weaknesses = head.Strengths, head.Weaknesses
-		p.Measurement = json.RawMessage(byKind[primary].Raw)
+		raw, err := measurementOf(byKind[primary])
+		if err != nil {
+			return nil, fmt.Errorf("measurement of %s: %w", slug, err)
+		}
+		p.Measurement = raw
 	} else {
 		p.Measured = model.EmptyMeasured()
 		mergeCatalog(slug, primary, &p.Measured, c, nil)

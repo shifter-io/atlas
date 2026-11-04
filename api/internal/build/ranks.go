@@ -123,7 +123,7 @@ func tileValues(w snap.Window) [tileCount]Num {
 	if !latency.OK() || latency < 0 {
 		latency = nan
 	}
-	return [tileCount]Num{positive(w.Pool.UniqueIps), positive(w.Pool.Countries), positive(w.Pool.Regions),
+	return [tileCount]Num{positive(ipsOf(w)), positive(w.Pool.Countries), positive(w.Pool.Regions),
 		positive(w.Pool.Cities), positive(w.Pool.Asns), latency}
 }
 
@@ -199,12 +199,12 @@ func placeValues(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[place
 		if rows, ok := typed[dimension]; ok {
 			for i := range rows {
 				r := rows[i].PlaceRow(dimension)
-				add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, Num(r.Asn), Num(r.Ips), Num(r.Successes), Num(r.P50))
+				add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, Num(r.Asn), scaledIps(w, Num(r.Ips)), Num(r.Successes), Num(r.P50))
 			}
 			continue
 		}
 		for _, r := range w.Breakdowns[dimension] {
-			add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, r.Asn, r.Ips, r.Successes, r.P50)
+			add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, r.Asn, scaledIps(w, r.Ips), r.Successes, r.P50)
 		}
 	}
 	return out

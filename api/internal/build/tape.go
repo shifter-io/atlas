@@ -64,7 +64,9 @@ func joinParts(parts ...string) string {
 	return strings.Join(out, " · ")
 }
 
-// describeDaily is tape.ts describeDaily: the daily test and hourly estimate rows.
+// describeDaily is tape.ts describeDaily: the daily test and hourly update
+// rows. An hour's release reads as an hourly update: no tape text names the
+// estimate (owner decision, API-ESTIMATES-1).
 func describeDaily(e *store.EventJSON, d map[string]any, inWhere string) (tapeText, bool) {
 	countries := ""
 	if list, ok := d["countries"].([]any); ok {
@@ -91,9 +93,9 @@ func describeDaily(e *store.EventJSON, d map[string]any, inWhere string) (tapeTe
 		}
 		return tapeText{"Daily test done" + inWhere, detail, ipsText}, true
 	case "estimate_hour_released":
-		title := "Hourly estimate released"
+		title := "Hourly update released"
 		if h, ok := numOf(d["hour"]); ok && h == math.Trunc(h) && h >= 0 && h <= 23 {
-			title = fmt.Sprintf("Estimate for %02d:00 UTC released", int(h))
+			title = fmt.Sprintf("Hourly update for %02d:00 UTC", int(h))
 		}
 		day, _ := strOf(d["day"])
 		return tapeText{title, day, ipsText}, true
