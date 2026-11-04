@@ -32,7 +32,7 @@ V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
 V7_CHECKSUM = "75eb7782f9700e6b57b42d59ef8ffd1f46976d9178432689131c0add5ae5f0a5"
 V8_CHECKSUM = "5986ee1ea743a34bf42cb49d3a7d5ded4d0b884bb653cb090e3d4b7f679a4552"
-# The same v8 schema before the framework rename (one comment differs), as databases of then have.
+# The v8 schema before the framework rename (one comment differs); databases made then have it.
 V8_PRE_RENAME_CHECKSUM = "315af82775eb32324307b33c7f88b18a7fd1a9b443ee1b8cb15d42fa7b1945ca"
 V9_CHECKSUM = "bf4c540376649ecf841e5207e2581cda29cba76473761b7e5c27e72cee98b0ee"
 V10_CHECKSUM = "9e993488d6062b3a9082bdab5da44d5f1cf20ed849be641a6c6fd41a9ce9b9f9"
@@ -665,7 +665,7 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
             )
             _membership(conn, provider, product_id)
             # Avoid another persisted membership set per performance configuration.
-            # The history indexes determine first presence within this exact scope.
+            # First presence within this exact scope: the anti-join reads via test_runs_scope.
             new_ips = conn.execute(
                 "SELECT count(*) FROM (SELECT DISTINCT a.ip_id FROM incoming_ips i "
                 "JOIN ip_addresses a USING(ip)) n WHERE NOT EXISTS (SELECT 1 FROM "

@@ -105,11 +105,11 @@ old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged); 
 (`migrate_v9_v10.sql`) adds `estimated_hours`; schema v11 (`migrate_v10_v11.sql`) adds the batch
 kind `browser` (the browser pulse) and changes no row; schema v12 (`migrate_v11_v12.sql`) replaces
 the `ip_observations` index `(ip_id, bucket_start)`, which no query used, with
-`(bucket_start, ip_id)` for distinct-IP counts per time slice, and changes no row (building it
-blocks writes to `ip_observations` until the migration commits). `db-init` verifies v12 and refuses
-other schemas. `proxy-index db-migrate --database-file .secrets/database.toml` upgrades an
-unmodified v5 to v11 database, or an unmodified v4 database (and calculated v1 layer) through v5 to
-v12, in
+`(bucket_start, ip_id)` for distinct-IP counts per time slice, and changes no row (building the
+index blocks writes to `ip_observations`; dropping the old one then blocks reads and writes until
+the migration commits, which follows at once). `db-init` verifies v12 and refuses other schemas.
+`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v11
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v12, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every
