@@ -94,6 +94,8 @@ async def set_browser_hosts(
     wanted = checked(addresses)
     inventory = manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
+    if not inventory.get("manager_firewall_id") or not inventory.get("mac_ipv4"):
+        raise deploy.DeployError("the manager has no recorded firewall: deploy first")
     port = inventory.get("node_api_port")
     if wanted and not port:
         raise deploy.DeployError("the node API port is closed: orchestrator-enable first")
@@ -138,8 +140,12 @@ def add_parser(steps) -> None:
 
 
 def addresses(args) -> list[str]:
-    """The --ip values split on commas ([] for --clear)."""
-    return [a for value in args.ip or [] for a in value.split(",") if a.strip()]
+    """The --ip values split on commas ([] for --clear). An empty entry is refused, so a failed
+    `--ip "$(...)"` never clears the hosts: only --clear does."""
+    found = [a.strip() for value in args.ip or [] for a in value.split(",")]
+    if "" in found:
+        raise deploy.DeployError("--ip has an empty address; use --clear to remove the hosts")
+    return found
 
 
 async def run(args, cloud_for) -> dict[str, Any]:

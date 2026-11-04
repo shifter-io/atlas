@@ -325,3 +325,24 @@ def test_the_cli_needs_ip_or_clear(tmp_path):
     for argv in ([], ["--ip", "8.8.8.8", "--clear"]):
         with pytest.raises(SystemExit):
             parse(["campaign", "manager", "browser-hosts", *argv, "--inventory", "x.json"])
+
+
+@pytest.mark.parametrize("value", ["", " ", ",", "192.0.2.1,", ",192.0.2.1", "192.0.2.1,,"])
+def test_an_empty_ip_entry_is_refused_and_never_clears(monkeypatch, capsys, tmp_path, value):
+    """A failed `--ip "$(...)"` must not clear the hosts: only --clear does (review B2)."""
+    recorded = tmp_path / "campaign-manager.json"
+    recorded.write_text(json.dumps({"account": "proxy-index", "manager_id": 1, "host": "h"}))
+    monkeypatch.setattr(campaign_cli, "_cloud", Cloud)
+    Cloud.accounts = []
+    argv = ["--ip", value, "--apply", "--inventory", str(recorded)]
+    args = parse(["campaign", "manager", "browser-hosts", *argv])
+    assert campaign_cli.dispatch(args) == 3
+    assert Cloud.accounts == [] and "--clear" in capsys.readouterr().err
+
+
+async def test_an_inventory_without_a_firewall_is_refused(job):
+    fake = Fake()
+    await run_deploy(fake, job)
+    deploy.save(job.inventory, inventory(job) | {"manager_firewall_id": None})
+    with pytest.raises(deploy.DeployError, match="deploy first"):
+        await set_hosts(fake, job, [], apply=False)

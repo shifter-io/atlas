@@ -186,7 +186,7 @@ td:first-child{width:auto}</style>
 <li><strong>Remove</strong> every browser host: <code>--clear --apply</code>.</li>
 </ol>
 <p>Only distinct public IPv4 addresses are accepted, at most 8: a private, loopback, link-local, shared (CGNAT), multicast or documentation address, an IPv6 address, a network such as <code>/24</code> or a repeated address is refused before anything is sent.</p>
-<p>When the home connection's address changes, the hosts' connections to the manager fail and their bundles stay in the outbox (a network error keeps a bundle; nothing unconfirmed is deleted). Read the new address on a mini as in step 1 and run the command again with it and <code>--apply</code>; the old address is removed in the same change. The outbox sends the waiting bundles again with its backoff, at most 5 minutes later.</p>
+<p>When the home connection's address changes, the hosts' connections to the manager fail and their bundles stay in the outbox (a network error keeps a bundle; nothing unconfirmed is deleted). Read the new address on a mini as in step 1 and run the command again with it and <code>--apply</code>; the old address is removed in the same change. The outbox sends the waiting bundles again within about 10 minutes (its backoff is at most 5 minutes and it runs every 5 minutes).</p>
 <p>The reported user agent is the standard Firefox one for the engine (<code>user_agent(engine_version, os)</code>): its Firefox version always equals the engine's major version, and a host refuses to start otherwise.</p>
 </section>
 <section id="install"><h2>7. Install (D7)</h2>
