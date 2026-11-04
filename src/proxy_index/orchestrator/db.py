@@ -16,7 +16,7 @@ import contextlib
 import logging
 import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -24,7 +24,7 @@ from psycopg import pq
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .. import storage
+from .. import partitions
 from ..providers.credentials import read_credentials
 
 log = logging.getLogger(__name__)
@@ -227,22 +227,19 @@ class Database:
             await conn.close()
 
     async def ensure_partition(self, table: str, moment: datetime) -> None:
-        """storage.partition on its own autocommit connection (same names and bounds), so a
-        transaction that rolls back cannot leave the cache claiming a partition exists."""
-        captured: list[Any] = []
-
-        class Capture:
-            def execute(self, query: Any) -> None:
-                captured.append(query)
-
-        storage.partition(Capture(), table, moment)
-        key = f"{table}:{moment.astimezone(UTC):%Y-%m}"
-        if key in self._partitions:
+        """partitions.partition for a monthly table (test_events) on a connection of its own, in
+        a transaction of its own (a caller's that rolls back cannot leave the cache claiming the
+        partition exists); asked once per month and process."""
+        name, start, end = partitions.monthly(table, moment)
+        if name in self._partitions:
             return
         async with self.connection() as conn:
-            for query in captured:
-                await conn.execute(query)
-        self._partitions.add(key)
+            found = await conn.execute("SELECT to_regclass(%s) AS found", (name,))
+            if (await found.fetchone())["found"] is None:
+                async with conn.transaction():
+                    for query in partitions.creation(table, name, start, end):
+                        await conn.execute(query)
+        self._partitions.add(name)
 
 
 async def setting(conn: psycopg.AsyncConnection, key: str) -> Any:
