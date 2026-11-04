@@ -7,6 +7,7 @@ byte for byte once the browser-only entries are removed.
 """
 
 import copy
+import hashlib
 import json
 from collections import Counter, defaultdict
 from datetime import UTC, datetime, timedelta
@@ -111,7 +112,14 @@ def test_outcome_rates_sum_to_one_and_match_the_counters():
             t,
             20,
             8,
-            errors={"challenge": 2, "blocked": 1, "login_wall": 3, "timeout": 1, "dns": 1, "tls": 4},
+            errors={
+                "challenge": 2,
+                "blocked": 1,
+                "login_wall": 3,
+                "timeout": 1,
+                "dns": 1,
+                "tls": 4,
+            },
             challenges=2,
             blocks=1,
             timeouts=1,
@@ -399,7 +407,9 @@ async def test_browser_runs_leave_every_network_figure_byte_identical(
     after = calculate(database, policy, as_of=as_of)
     assert after["snapshot_id"] != before["snapshot_id"]
     a, b = network_only(before), network_only(after)
-    assert json.dumps(a) == json.dumps(b)
+    # Byte-identical serializations (hashes keep a failure's report small: the first difference).
+    digest = [hashlib.sha256(json.dumps(x).encode()).hexdigest() for x in (a, b)]
+    assert digest[0] == digest[1], first_difference(a, b)
     # The comparison is not empty: three products with scores, uptime and breakdowns.
     assert [p["provider"] for p in a["products"]] == list(PROVIDERS)
     day = a["products"][0]["windows"]["24h"]
@@ -417,6 +427,21 @@ async def test_browser_runs_leave_every_network_figure_byte_identical(
             check_browser_target(found[target], target)
         minutes = p["scoring"]["slots"]["minutes"]
         check_group(found, union_rate(summaries, p["provider"], minutes))
+
+
+def first_difference(a, b, path="$"):
+    """The path of the first difference of two JSON values, with both sides (shortened)."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        if list(a) != list(b):
+            return f"{path}: keys {list(a)} != {list(b)}"
+        pairs = [(f"{path}.{k}", a[k], b[k]) for k in a]
+    elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        pairs = [(f"{path}[{i}]", x, y) for i, (x, y) in enumerate(zip(a, b, strict=True))]
+    elif a == b and type(a) is type(b):
+        return None
+    else:
+        return f"{path}: {json.dumps(a)[:300]} != {json.dumps(b)[:300]}"
+    return next((d for at, x, y in pairs if (d := first_difference(x, y, at))), None)
 
 
 def check_browser_target(entry, target):
