@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 from ..models import Outcome, RequestContext, RunConfig
 from ..targets import BrowserTarget, PageSpec, PageView
 from .contracts import (
+    AI_SOURCES,
     GOOGLE_SEARCH,
     TIMINGS,
     TOKEN,
@@ -32,6 +33,7 @@ from .driver import NavigationError, Page, UserAgentRefused
 from .judge import PageAssessment, failed, selectors
 from .pool import BrowserPool
 from .settings import BrowserOptions, TargetSettings
+from .targets.ai import ANSWER_CHARS
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +69,15 @@ def _exception_reason(exc: BaseException) -> str:
 def _reason(name: str | None) -> str:
     lowered = (name or "").lower()
     return lowered if re.fullmatch(TOKEN, lowered) else "navigation_error"
+
+
+def _numbers(extra: Any, found: dict[str, int]) -> dict[str, int]:
+    """interact()'s named numbers, added to PageView.found after the selector counts; a name
+    that is also a selector, or a value that is not an int, is refused (browser_error)."""
+    numbers = dict(extra or {})
+    if set(numbers) & set(found) or any(type(value) is not int for value in numbers.values()):
+        raise ValueError("interact() returned a selector's name or a value that is not an int")
+    return numbers
 
 
 def _page_url(url: str) -> str | None:
@@ -139,7 +150,7 @@ class BrowserTransport:
         timings: dict[str, int | None] = dict.fromkeys(TIMINGS)
         # The try's facts as its steps learn them (timings_ms, main status, URL, bytes, shot).
         state: dict[str, Any] = {"timings": timings, "status": None, "final_url": None}
-        state |= {"bytes": None, "shot": None}
+        state |= {"bytes": None, "shot": None, "found": {}}
         budget = self._budget()
         try:
             async with budget:
@@ -193,7 +204,10 @@ class BrowserTransport:
         state["final_url"] = _page_url(await page.url())
         state["bytes"] = await page.bytes_down_est()
         failure = assessment.error is not None
-        if self.screenshots == "all" or (failure and self.screenshots == "failures"):
+        # Privacy: a screenshot of an AI source that showed answer text would hold the answer.
+        answered = target.id in AI_SOURCES and state["found"].get(ANSWER_CHARS, 0) > 0
+        policy = self.screenshots == "all" or (failure and self.screenshots == "failures")
+        if policy and not answered:
             with contextlib.suppress(Exception):
                 state["shot"] = await page.screenshot()
         return assessment
@@ -211,9 +225,11 @@ class BrowserTransport:
         if spec.wait_for:
             await page.wait_for(spec.wait_for, timeout_ms)
         await asyncio.sleep(spec.settle_ms / 1000)
-        await target.interact(page, spec)
+        extra = await target.interact(page, spec)
         timings["settle"] = _ms(mark)
         found = {selector: await page.count(selector) for selector in selectors(spec.wait_for)}
+        found |= _numbers(extra, found)
+        state["found"] = found
         view = PageView(
             final_url=await page.url(),
             status=state["status"],

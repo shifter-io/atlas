@@ -155,9 +155,11 @@ class Browser:
             page = Page(context, await context.new_page())
             yield page
         finally:
-            if page is not None:
-                await page._drop_sizes()
-            await context.close()
+            try:
+                if page is not None:
+                    await page._drop_sizes()
+            finally:
+                await context.close()
 
     async def _user_agent_seen(self) -> str:
         async with self.context(None) as page:

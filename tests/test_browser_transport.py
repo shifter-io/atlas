@@ -14,6 +14,7 @@ from browser_site import SiteTarget
 
 from proxy_index.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMINGS
 from proxy_index.browser.driver import NavigationError, UserAgentRefused
+from proxy_index.browser.judge import OK, failed
 from proxy_index.browser.pool import BrowserPool
 from proxy_index.browser.settings import BrowserOptions, TargetSettings
 from proxy_index.browser.targets.pages import GoogleSearch
@@ -366,3 +367,57 @@ async def test_without_a_context_the_transport_numbers_its_tries():
             await transport.execute(SiteTarget())
     assert [t[0]["i"] for t in harness.recorder.tries] == [0, 1]
     NullRecorder().try_done({}, None)
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerTarget(SiteTarget):
+    """An AI-source-like target: interact() returns numbers that its rules read."""
+
+    id: str = "ai_overview"
+    numbers: Any = None
+
+    async def interact(self, driver, spec):
+        return self.numbers
+
+    def rules(self, view):
+        if view.found.get("answer_chars", 0) >= 80:
+            return OK
+        return failed("no_answer", "short_answer")
+
+
+async def test_interact_numbers_reach_the_judge():
+    harness = Harness()
+    outcome = await harness.execute(AnswerTarget(numbers={"answer_chars": 120, "answer_ms": 5}))
+    assert outcome.verdict == "ok"
+
+
+@pytest.mark.parametrize("policy", ["failures", "all"])
+async def test_no_screenshot_of_an_ai_try_that_showed_answer_text(policy):
+    harness = Harness(options=replace(OPTIONS, screenshots=policy))
+    outcome = await harness.execute(AnswerTarget(numbers={"answer_chars": 10}))
+    assert outcome.error == "no_answer"
+    [(record, shot)] = harness.recorder.tries
+    assert shot is None and record["screenshot"] is None and record["reason"] == "short_answer"
+
+
+async def test_an_ai_try_without_answer_text_keeps_its_failure_screenshot():
+    harness = Harness()
+    await harness.execute(AnswerTarget(numbers={"answer_chars": 0}))
+    assert harness.recorder.tries[0][1] == b"jpeg"
+
+
+async def test_answer_text_only_hides_screenshots_of_ai_sources():
+    harness = Harness()
+    await harness.execute(AnswerTarget(id="browser_site", numbers={"answer_chars": 10}))
+    assert harness.recorder.tries[0][1] == b"jpeg"
+
+
+BAD_NUMBERS = [{"#content": 1}, {"answer_chars": 1.5}, {"answer_chars": True}]
+
+
+@pytest.mark.parametrize("numbers", BAD_NUMBERS)
+async def test_interact_numbers_must_be_ints_not_named_like_a_selector(numbers):
+    harness = Harness()
+    outcome = await harness.execute(AnswerTarget(numbers=numbers))
+    reason = harness.recorder.tries[0][0]["reason"]
+    assert (outcome.error, reason) == ("browser_error", "valueerror")
