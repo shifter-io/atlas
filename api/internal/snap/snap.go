@@ -5,6 +5,11 @@
 // and nulls as NaN, which is what the TypeScript port relies on
 // (`number(undefined)` is NaN there). Each product keeps its raw JSON so the
 // API can pass the ProductResult through unchanged as Provider.measurement.
+//
+// A build stored since calculated v8 is a head and its parts (proxy-index
+// calculated/parts.py, contract K1), with its daily groups' 24-hour series
+// sparse; store reads it back as the single payload of an older build,
+// every bucket included, so it decodes here the same way.
 package snap
 
 import (

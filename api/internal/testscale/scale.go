@@ -12,9 +12,13 @@
 // field is N/A), their products, the framework targets and the test events
 // (556 hour releases and three pulse events). Its site.* catalog tables were
 // empty, so Inputs has no catalog or demo rows either.
+//
+// Current and Parts give a payload as the framework stores it since
+// calculated v8: in parts, the daily groups' 24-hour series sparse.
 package testscale
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,8 +60,7 @@ var capped = map[string]int{"region": 25, "city": 25, "asn": 25, "country_asn": 
 
 // Inputs is a store.Inputs holding only a published snapshot of the shape.
 func Inputs(shape Shape) (*store.Inputs, error) {
-	_, file, _, _ := runtime.Caller(0)
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "fixtures", "measured", "snapshot-every-request.json"))
+	raw, err := fixture()
 	if err != nil {
 		return nil, err
 	}
@@ -260,3 +263,171 @@ func tails(shape Shape, n int) []store.PlaceRow {
 }
 
 func nan() float64 { var z float64; return z / z }
+
+// fixture is the every-request fixture's payload.
+func fixture() ([]byte, error) {
+	_, file, _, _ := runtime.Caller(0)
+	return os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "fixtures", "measured", "snapshot-every-request.json"))
+}
+
+// EveryRequest is the every-request fixture's payload as Current writes it,
+// with a second group: a daily copy of its census/pulse group (cohort
+// "daily-us", no schedule), as a build has both.
+func EveryRequest() ([]byte, error) {
+	raw, err := fixture()
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	products := doc["products"].([]any)
+	daily, err := clone(products[0].(map[string]any))
+	if err != nil {
+		return nil, err
+	}
+	criteria := daily["criteria"].(map[string]any)
+	delete(criteria, "schedule")
+	daily["cohort"], daily["id"] = "daily-us", fmt.Sprintf("%v:daily-us", daily["product_id"])
+	doc["products"] = append(products, daily)
+	payload, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	return Current(payload)
+}
+
+// Current gives every empty point of the payload's 24-hour series
+// (completed 0, unique_ips null) the keys proxy-index aggregate.series()
+// writes now and the every-request fixture predates: uptime, and
+// latency_under_load_ms when the window has a latency target.
+func Current(payload []byte) ([]byte, error) {
+	doc, groups, err := eachGroup(payload, current)
+	if err != nil {
+		return nil, err
+	}
+	doc["products"] = append(append([]byte("["), bytes.Join(groups, []byte(","))...), ']')
+	return json.Marshal(doc)
+}
+
+// current is Current for one group.
+func current(group map[string]any) {
+	for _, w := range dayWindows(group) {
+		latency, _ := w["latency"].(map[string]any)
+		timed, _ := latency["target"].(string)
+		series, _ := w["series"].([]any)
+		for _, point := range series {
+			pt := point.(map[string]any)
+			if pt["completed"] != 0.0 || pt["unique_ips"] != nil {
+				continue
+			}
+			pt["uptime"] = nil
+			if timed != "" {
+				pt["latency_under_load_ms"] = map[string]any{"p50": nil, "p90": nil, "p95": nil, "p99": nil}
+			}
+		}
+	}
+}
+
+// RunsPerPart is the most runs one 'runs' part holds (proxy-index
+// calculated/parts.py RUNS_PER_PART).
+const RunsPerPart = 2000
+
+// Parts is the payload as calculated v8 stores it (contract K1): its head
+// (every top-level key except products and runs, plus "parts") and its
+// product and runs parts. With sparse, each daily group's 24-hour series is
+// as proxy-index calculated/parts.py sparse() leaves it (a point with
+// neither unique_ips nor uptime is left out; census/pulse groups, whose
+// criteria name a schedule, keep every point).
+func Parts(payload []byte, sparse bool) (head []byte, products, runs [][]byte, err error) {
+	edit := func(map[string]any) {}
+	if sparse {
+		edit = sparseSeries
+	}
+	doc, products, err := eachGroup(payload, edit)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var all []json.RawMessage
+	if doc["runs"] != nil {
+		if err := json.Unmarshal(doc["runs"], &all); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	for i := 0; i < len(all); i += RunsPerPart {
+		b, err := json.Marshal(all[i:min(i+RunsPerPart, len(all))])
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		runs = append(runs, b)
+	}
+	delete(doc, "products")
+	delete(doc, "runs")
+	if doc["parts"], err = json.Marshal(map[string]int{"products": len(products), "runs": len(runs)}); err != nil {
+		return nil, nil, nil, err
+	}
+	head, err = json.Marshal(doc)
+	return head, products, runs, err
+}
+
+// eachGroup decodes the payload's top level and each product group in turn
+// (never the whole payload at once), applies edit to the group and returns
+// the top level and the groups re-encoded.
+func eachGroup(payload []byte, edit func(map[string]any)) (map[string]json.RawMessage, [][]byte, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return nil, nil, err
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(doc["products"], &raw); err != nil {
+		return nil, nil, err
+	}
+	groups := make([][]byte, len(raw))
+	for i, r := range raw {
+		var g map[string]any
+		if err := json.Unmarshal(r, &g); err != nil {
+			return nil, nil, err
+		}
+		edit(g)
+		b, err := json.Marshal(g)
+		if err != nil {
+			return nil, nil, err
+		}
+		groups[i], raw[i] = b, nil
+	}
+	return doc, groups, nil
+}
+
+// dayWindows is the group's 24-hour windows.
+func dayWindows(group map[string]any) []map[string]any {
+	out := []map[string]any{}
+	windows, _ := group["windows"].(map[string]any)
+	for _, entry := range windows {
+		w, _ := entry.(map[string]any)
+		if period, _ := w["period"].(map[string]any); period["hours"] == 24.0 {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// sparseSeries leaves a daily group's empty 24-hour points out.
+func sparseSeries(group map[string]any) {
+	if criteria, _ := group["criteria"].(map[string]any); criteria["schedule"] != nil {
+		return
+	}
+	for _, w := range dayWindows(group) {
+		series, ok := w["series"].([]any)
+		if !ok {
+			continue
+		}
+		kept := []any{}
+		for _, point := range series {
+			if pt := point.(map[string]any); pt["unique_ips"] != nil || pt["uptime"] != nil {
+				kept = append(kept, pt)
+			}
+		}
+		w["series"] = kept
+	}
+}

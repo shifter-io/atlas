@@ -212,8 +212,11 @@ type FrameworkProduct struct {
 type SnapshotRow struct {
 	BuildID     int64
 	ContentHash string
-	Payload     []byte
-	full        []byte // Payload with its capped long lists restored (longtail.go)
+	// Payload is the published payload as the single payload of a build
+	// before calculated v8 reads (parts.go), without runs for a build stored
+	// in parts.
+	Payload []byte
+	full    []byte // Payload with its capped long lists restored (longtail.go)
 	// Places is every place list of a capped snapshot, read whole from the
 	// build's typed rows (placerows.go); nil when nothing was capped.
 	Places map[PlaceWindow][]PlaceRow
@@ -523,13 +526,18 @@ func Load(ctx context.Context, db TxBeginner) (*Inputs, error) {
 		},
 		func() error {
 			var s SnapshotRow
-			err := tx.QueryRow(ctx, `SELECT s.build_id, s.content_hash, s.payload::text FROM public.calculated_snapshots s
- JOIN public.current_calculation c ON c.build_id = s.build_id WHERE c.singleton`).Scan(&s.BuildID, &s.ContentHash, &s.Payload)
+			var parts *int
+			err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &parts)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
 			if err != nil {
 				return err
+			}
+			if parts != nil {
+				if err := s.readParts(ctx, tx, *parts); err != nil {
+					return err
+				}
 			}
 			in.Snapshot = &s
 			if err := s.readLongTail(ctx, tx); err != nil {

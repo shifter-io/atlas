@@ -106,6 +106,20 @@ groups counts twice (an upper bound, not a distinct count). Capped lists are rea
 typed rows. Network, country and coverage answers are computed and compressed once per build;
 a long-list page is cut from a precomputed list on first request and kept in a 1,024-entry LRU per version.
 
+The published snapshot is read in either of the framework's two stored forms
+(`internal/store/parts.go`). A build stored before calculated schema v8 is one
+`calculated_snapshots.payload` row. A build stored since (proxy-index
+`calculated/parts.py`, contract K1) keeps a head there (every top-level key except
+`products` and `runs`, plus `"parts": {"products": n, "runs": m}`) and its product
+groups in `calculated_snapshot_parts`, one group per `product` row; its daily groups'
+24-hour series hold only the 5-minute buckets with requests or availability. The API
+reads the head, then the `product` rows in order, one at a time: each 24-hour series
+gets its empty buckets back exactly as the framework writes them, and the groups go
+where the single row has them, so the payload decodes as the same text and every answer
+is byte for byte what it was. A build whose stored product rows differ from the head's
+count, or whose stored point is off its window's 5-minute grid, fails the rebuild (the
+old answers stay served). The `runs` rows are not read: no answer uses them.
+
 `source` is `"measured"` on providers, tape rows, changelog, reviews and community
 runs. On targets it is `"measured"` for framework targets and `"catalog"` for
 editorial ones.
@@ -271,6 +285,9 @@ touched. The suite covers:
 
 - `store`:
   - migrations are idempotent and checksummed
+  - a build stored in parts (head, product rows, sparse daily 24-hour series)
+    reads as the same payload text stored whole, without its runs; a head whose
+    part count does not match, or a point off the 5-minute grid, fails the read
   - triggers bump the revision on insert and delete
   - a database without the site schema loads with every site table empty and one
     gap; `migrate` changes the fingerprint
@@ -296,6 +313,10 @@ touched. The suite covers:
     also compared the Go port with the site's TypeScript; that parity test went
     with it.
 - `server`:
+  - every answer is byte for byte the same from a build stored whole and from the
+    same build stored in parts with sparse daily 24-hour series: the every-request
+    fixture (a census/pulse group and a daily copy) and the QA-1 scale (18 x 40;
+    more than one jsonb row holds, so its whole form is the parts with every point)
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
   - rebuild only on change

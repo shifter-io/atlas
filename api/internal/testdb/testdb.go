@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -146,24 +147,111 @@ func (d *DB) Exec(t testing.TB, sql string, args ...any) {
 // registering its products in the framework's providers/products tables.
 func (d *DB) Publish(t testing.TB, payload []byte) int64 {
 	t.Helper()
+	ctx := context.Background()
+	c := d.Conn(t)
+	defer c.Close(ctx)
+	var s struct {
+		Products []json.RawMessage `json:"products"`
+	}
+	if err := json.Unmarshal(payload, &s); err != nil {
+		t.Fatal(err)
+	}
+	id := d.register(t, c, payload, s.Products)
+	if _, err := c.Exec(ctx, "INSERT INTO calculated_snapshots VALUES ($1,$2,$3)", id, "test-"+hex.EncodeToString(randomBytes()), payload); err != nil {
+		t.Fatal(err)
+	}
+	current(t, c, id)
+	return id
+}
+
+// partsTable is calculated_snapshot_parts as proxy-index calculated/schema.sql
+// creates it from calculated v8 (contract K1), for a framework schema older
+// than that.
+const partsTable = `CREATE TABLE IF NOT EXISTS calculated_snapshot_parts (
+ build_id bigint NOT NULL REFERENCES calculated_snapshots(build_id) DEFERRABLE INITIALLY DEFERRED,
+ kind text NOT NULL CHECK(kind IN ('product','runs')), position integer NOT NULL CHECK(position>=0),
+ part_id text NOT NULL, product_id integer, cohort text, content_hash text NOT NULL,
+ part jsonb NOT NULL, CHECK((kind='product')=(product_id IS NOT NULL AND cohort IS NOT NULL)),
+ PRIMARY KEY(build_id,kind,position)
+) PARTITION BY LIST(build_id)`
+
+// PublishParts stores a snapshot as calculated v8 does (contract K1): head in
+// calculated_snapshots and the product groups and runs parts in the build's
+// partition of calculated_snapshot_parts, as the current published
+// calculation, registering its products like Publish.
+func (d *DB) PublishParts(t testing.TB, head []byte, products, runs [][]byte) int64 {
+	t.Helper()
+	ctx := context.Background()
+	c := d.Conn(t)
+	defer c.Close(ctx)
+	groups := make([]json.RawMessage, len(products))
+	for i, p := range products {
+		groups[i] = p
+	}
+	id := d.register(t, c, head, groups)
+	tx, err := c.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	partition := pgx.Identifier{fmt.Sprintf("calculated_snapshot_parts_b%d", id)}.Sanitize()
+	for _, sql := range []string{partsTable, fmt.Sprintf("CREATE TABLE %s PARTITION OF calculated_snapshot_parts FOR VALUES IN (%d)", partition, id)} {
+		if _, err := tx.Exec(ctx, sql); err != nil {
+			t.Fatalf("%v\n%s", err, sql)
+		}
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO calculated_snapshots VALUES ($1,$2,$3)", id, "test-"+hex.EncodeToString(randomBytes()), head); err != nil {
+		t.Fatal(err)
+	}
+	insert := "INSERT INTO calculated_snapshot_parts VALUES ($1,$2,$3,$4,$5,$6,'test',$7)"
+	for i, p := range products {
+		var g struct {
+			ID        string `json:"id"`
+			ProductID int64  `json:"product_id"`
+			Cohort    string `json:"cohort"`
+		}
+		if err := json.Unmarshal(p, &g); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, insert, id, "product", i, g.ID, g.ProductID, g.Cohort, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, r := range runs {
+		if _, err := tx.Exec(ctx, insert, id, "runs", i, fmt.Sprintf("runs:%d", i), nil, nil, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current(t, c, id)
+	return id
+}
+
+// register records the snapshot's methodology, providers and products and a
+// published build for it; returns the build id.
+func (d *DB) register(t testing.TB, c *pgx.Conn, head []byte, products []json.RawMessage) int64 {
+	t.Helper()
 	var s struct {
 		AsOf        string `json:"as_of"`
 		Methodology struct {
 			ID       string          `json:"id"`
 			Settings json.RawMessage `json:"settings"`
 		} `json:"methodology"`
-		Products []struct {
-			Provider string `json:"provider"`
-			Product  string `json:"product"`
-		} `json:"products"`
 	}
-	if err := json.Unmarshal(payload, &s); err != nil {
+	if err := json.Unmarshal(head, &s); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	c := d.Conn(t)
-	defer c.Close(ctx)
-	for _, p := range s.Products {
+	for _, raw := range products {
+		var p struct {
+			Provider string `json:"provider"`
+			Product  string `json:"product"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := c.Exec(ctx, "INSERT INTO providers VALUES ($1) ON CONFLICT DO NOTHING", p.Provider); err != nil {
 			t.Fatal(err)
 		}
@@ -179,17 +267,23 @@ func (d *DB) Publish(t testing.TB, payload []byte) int64 {
 		t.Fatal(err)
 	}
 	var id int64
-	buf := make([]byte, 8)
-	rand.Read(buf) //nolint:errcheck
 	if err := c.QueryRow(ctx, "INSERT INTO calculation_builds(methodology_id,as_of,input_hash,published) VALUES ($1,$2,$3,true) RETURNING build_id",
-		s.Methodology.ID, s.AsOf, hex.EncodeToString(buf)).Scan(&id); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.Exec(ctx, "INSERT INTO calculated_snapshots VALUES ($1,$2,$3)", id, "test-"+hex.EncodeToString(buf), payload); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.Exec(ctx, "INSERT INTO current_calculation VALUES (true,$1) ON CONFLICT (singleton) DO UPDATE SET build_id=excluded.build_id", id); err != nil {
+		s.Methodology.ID, s.AsOf, hex.EncodeToString(randomBytes())).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// current makes build the current calculation.
+func current(t testing.TB, c *pgx.Conn, build int64) {
+	t.Helper()
+	if _, err := c.Exec(context.Background(), "INSERT INTO current_calculation VALUES (true,$1) ON CONFLICT (singleton) DO UPDATE SET build_id=excluded.build_id", build); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func randomBytes() []byte {
+	buf := make([]byte, 8)
+	rand.Read(buf) //nolint:errcheck
+	return buf
 }
