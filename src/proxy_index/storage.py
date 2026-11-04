@@ -998,7 +998,7 @@ def migrate(credentials_file):
                 "Only an unmodified calculated v1 schema can be migrated in place"
                 if start == 4
                 else "The calculated schema differs from this release; only an unmodified "
-                "calculated v2 to v7 schema can be migrated in place"
+                "calculated v2 to v8 schema can be migrated in place"
             )
         checks = {}
         if start == 4:
@@ -1023,7 +1023,7 @@ def migrate(credentials_file):
         if layered and not upgraded and not later:
             conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
         steps = []
-        for n in range(3, store.SCHEMA_VERSION):  # calculated v3 → v4 up to v7 → v8, from its step
+        for n in range(3, store.SCHEMA_VERSION):  # calculated v3 → v4 up to v8 → v9, from its step
             if layered and not upgraded and (later or n) <= n:
                 conn.execute(getattr(store, f"V{n}_SNAPSHOT"))
                 conn.execute((root / f"calculated/migrate_v{n}_v{n + 1}.sql").read_text())

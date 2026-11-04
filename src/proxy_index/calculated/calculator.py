@@ -67,7 +67,14 @@ SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()
-        for name in ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py")
+        for name in (
+            "calculator.py",
+            "aggregate.py",
+            "policy.py",
+            "slim.py",
+            "inputs.py",
+            "lists.py",
+        )
     )
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
 ).hexdigest()
