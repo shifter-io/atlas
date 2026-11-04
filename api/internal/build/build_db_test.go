@@ -254,7 +254,7 @@ INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_
 	nulls := map[string]bool{}
 	collectNulls(g, "", nulls)
 	for x := range nulls {
-		if x == "measurement" || x == "framework" || strings.HasPrefix(x, "measurement.") {
+		if x == "framework" || strings.HasPrefix(x, "coverageEvidence.") {
 			continue
 		}
 		if !na[x] {
@@ -273,8 +273,8 @@ INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_
 	if prov.Series.Success24h[0].T.F() != 60 {
 		t.Errorf("series ages are minutes: got %v", prov.Series.Success24h[0].T)
 	}
-	if prov.Measurement == nil {
-		t.Error("raw snapshot product not attached")
+	if prov.CoverageEvidence[prov.PrimaryKind] == nil {
+		t.Error("coverage evidence not attached")
 	}
 	// Coverage lists the provider with sectioned N/A fields.
 	var cov *build.CoverageEntity
@@ -496,13 +496,11 @@ func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T
 	}
 	res := measuredOnly(t, changed)
 	provider := res.Details["shifter"].Provider
-	measured := generic(t, provider.Measurement).(map[string]any)
-	expected, _ := json.Marshal(rows)
-	for rangeID, entry := range measured["windows"].(map[string]any) {
-		window := entry.(map[string]any)
-		received, _ := json.Marshal(window["breakdowns"].(map[string]any)["city_asn"])
-		if !bytes.Equal(expected, received) {
-			t.Errorf("%s lost coverage network evidence: %s", rangeID, received)
+	expected := `[["DE","Germany","Berlin","Berlin",3320,"Deutsche Telekom","residential",12,50]]`
+	for _, r := range build.Ranges {
+		received, _ := json.Marshal(provider.CoverageEvidence[provider.PrimaryKind][r.ID])
+		if string(received) != expected {
+			t.Errorf("%s lost coverage network evidence: %s", r.ID, received)
 		}
 	}
 }

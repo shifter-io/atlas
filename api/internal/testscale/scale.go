@@ -45,6 +45,11 @@ type Shape struct {
 	NoFleetAll bool
 	// Browser adds the nine browser pulse targets to every window (AddBrowser).
 	Browser bool
+	// CityAsn gives each network's headline group (its first requested
+	// country) its lists as store.SnapshotRow.Full puts them back from the
+	// typed rows: a whole city x ASN list of this many rows and a whole pool
+	// ASN list (Tail rows) in every window. Zero leaves them capped.
+	CityAsn int
 }
 
 // FleetUniqueIps is the distinct IPs of every every-group fleet entry, and
@@ -56,8 +61,10 @@ const (
 )
 
 // QA1 is the QA-1 build: 18 networks x 40 requested countries, about 240
-// exit countries per window.
-var QA1 = Shape{Networks: 18, Countries: 40, Exits: 240, Tail: 200, Unmeasured: 3, Events: 559, Browser: true}
+// exit countries per window, and each network's headline group with a whole
+// city x ASN list of 1,000 rows per window (real builds have tens of
+// thousands; the dataset file carries them whole).
+var QA1 = Shape{Networks: 18, Countries: 40, Exits: 240, Tail: 200, Unmeasured: 3, Events: 559, Browser: true, CityAsn: 1000}
 
 // capped is how many rows the framework's [payload] settings keep.
 var capped = map[string]int{"region": 25, "city": 25, "asn": 25, "country_asn": 25, "city_asn": 25}
@@ -212,10 +219,15 @@ func network(i int) map[string]any {
 func fill(w map[string]any, shape Shape, n, c int) {
 	lists := map[string][]any{}
 	entries := map[string]any{}
+	whole := shape.CityAsn > 0 && c == 0
+	cityAsn := shape.Tail
+	if whole {
+		cityAsn = shape.CityAsn
+	}
 	for name, keep := range map[string]int{"country": shape.Exits, "region": shape.Tail, "city": shape.Tail, "asn": shape.Tail,
-		"country_asn": shape.Tail, "city_asn": shape.Tail} {
+		"country_asn": shape.Tail, "city_asn": cityAsn} {
 		rows, n := []any{}, keep
-		if limit, ok := capped[name]; ok && limit < n {
+		if limit, ok := capped[name]; ok && limit < n && !(whole && name == "city_asn") {
 			n = limit
 		}
 		for i := range n {
@@ -237,7 +249,7 @@ func fill(w map[string]any, shape Shape, n, c int) {
 					label[k] = v
 				}
 			}
-			rows = append(rows, row(i, 1000-i, label))
+			rows = append(rows, row(i, max(1000-i, 1), label))
 		}
 		lists[name], entries[name] = rows, keep
 	}
@@ -246,7 +258,13 @@ func fill(w map[string]any, shape Shape, n, c int) {
 	geo, countries, asns := []any{}, []any{}, []any{}
 	for i := range 50 {
 		geo = append(geo, map[string]any{"country_code": countryCode(i), "country": "Country", "region": "Region", "region_code": "R", "city": fmt.Sprintf("City %d", i), "ips": 50 - i, "observations": 50})
-		asns = append(asns, map[string]any{"asn": 64512 + i, "name": "Example", "usage_type": "isp", "ips": 50 - i, "observations": 50})
+	}
+	asnRows := 50
+	if whole {
+		asnRows = shape.Tail
+	}
+	for i := range asnRows {
+		asns = append(asns, map[string]any{"asn": 64512 + i, "name": "Example", "usage_type": "isp", "ips": asnRows - i, "observations": 50})
 	}
 	for i := range shape.Exits {
 		countries = append(countries, map[string]any{"country_code": countryCode(i), "country": "Country", "ips": shape.Exits - i, "observations": 9})

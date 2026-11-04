@@ -18,7 +18,7 @@ source. The columns are:
   (the site's internal unavailable sentinel). In JSON those values are `null`, as
   `JSON.stringify(NaN)` is. The site's loader (`src/lib/site-api.ts`) turns a `null`
   in a numeric field back into `NaN`, except the `number | null` fields listed under
-  "Null by contract" (and `claimedPoolSize`), and leaves `measurement`, `framework`
+  "Null by contract" (and `claimedPoolSize`), and leaves `framework`
   and `snapshot` as published. Every formatter in `src/lib/format.ts` shows both
   `null` and `NaN` as `N/A`.
 
@@ -65,6 +65,7 @@ General rules:
 | `changelog[]` | `site.changelog` | never |
 | `reviews[]` | `site.reviews` | never |
 | `communityRuns[]` | `site.community_runs` | never |
+| `pages` *(added)* | every page answer the site draws, by the request that serves it (see "Page answers in the dataset file") | never |
 | `snapshot` *(added)* | `{available, snapshotId, schemaVersion, asOf, generatedAt, refreshSeconds, methodologyId, readiness, contentHash}` of the published calculation | all null while nothing is published |
 | `na` *(added)* | dataset-level N/A paths (meta, weights, totals, snapshot) | |
 
@@ -117,10 +118,10 @@ With no providers, everything except the record counts is null (`na`).
 | `productMeasurements.<category>` | one per measured snapshot category (the product with the most 30d requests when a provider has several cohorts) | as below | |
 | `score.composite` / `rank` / `previousRank` | `w.scores.balanced.score` / `rank` / `previous_rank` | data (until a ready score) | ✱ |
 | `score.grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
-| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target), reachable through `measurement` | data | ✱ |
+| `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target) | data | ✱ |
 | `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement | as below | |
 | `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in this repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
-| `measurement` *(TS optional; always present)* | the raw snapshot `ProductResult` of the headline product, unchanged | | |
+| `coverageEvidence` *(added)* | the coverage evidence table's rows, see "Every-request snapshots" | a row's own fields are null when unknown, not listed in `na` | |
 | `framework` *(added)* | `{provider: public.providers.id, products: [public.products.name]}` | | |
 | `na` *(added)* | | | |
 
@@ -137,7 +138,7 @@ not read).
 | `pool.churnRate`, `recurringShare` | `w.pool.churn_rate`, `recurring_share` | data | ✱ |
 | `pool.countries`, `regions`, `cities`, `asns` | `w.pool.*` | data | |
 | `pool.requestsPerIp` | none | always | ✱ |
-| `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, stays in `measurement`) | data | ✱ |
+| `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, is not served) | data | ✱ |
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`, null without a load test; older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
@@ -176,12 +177,18 @@ not read).
 
 ### Every-request snapshots
 
-The shared review Coverage evidence table reads `measurement.windows[range].breakdowns.city_asn`.
-Each row is one observed location/network intersection: `name`/`asn` fill ASN / ISP,
-`usage_type` supplies the observed network type, and `p50` is light-load median latency.
-Distinct IPs are that intersection's `ips`, not the city total repeated for every ASN.
-The snapshot field passes through the site API whole (see *Capped snapshots*). Older snapshots keep their
-location counts and matching `breakdowns.city` latency, with unknown ASN/type rendered N/A.
+The network page's Coverage evidence table reads `coverageEvidence[kind][range]`: every
+row of the headline group's `windows[range].breakdowns.city_asn` (whole, see *Capped
+snapshots*), in the published order, written as the compact array
+`[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50]`.
+Each row is one observed location/network intersection: `asn`/`asnName` (the row's
+`name`) fill ASN / ISP, `usageType` (`usage_type`) the observed network type, and
+`latencyP50` (`p50`) is the light-load median latency. Distinct IPs are that
+intersection's `ips` (mapped like any breakdown row, see "IP numbers from the hour
+formula"), not the city total repeated for every ASN. A field the row does not have
+is null; those nulls are the row's own and are not listed in `na`. A range whose
+window has no City × ASN list has no rows; a provider without a measured group has
+no `coverageEvidence`.
 
 ### Capped snapshots
 
@@ -209,9 +216,8 @@ percentile. Missing values are null and listed in `na`. Coverage evidence shows
 this country rank beneath each available local latency; its tooltip gives the
 country p50 and peer count. City/ASN percentiles are never averaged for ranking.
 
-`tileRanks[kind][range]` and `placeRanks[kind][range]` are calculated once per build
-(`build/ranks.go`); pages and `/api/geo` serve the cached values and do no database
-work. Peers are the measured products of the same category, cohort and reporting
+`tileRanks[kind][range]` is calculated once per build (`build/ranks.go`); pages serve
+the cached values and do no database work. Peers are the measured products of the same category, cohort and reporting
 period. A rank is `{rank, peers}`: `rank` is 1 plus the
 number of peers strictly better (ties share a rank, SQL `RANK()`), `peers` counts the
 valid values including self, and a missing value has `rank` null.
@@ -219,16 +225,6 @@ valid values including self, and a missing value has `rank` null.
   and `asns` (higher is better, counted when above zero) and the headline latency p50
   (lower is better, counted when not negative) as `uniqueIps`, `countries`, `regions`,
   `cities`, `asns` and `latency`.
-- `placeRanks` has `countries`, `regions`, `cities` and `asns` maps from the
-  `breakdowns.country`, `region`, `city` and `asn` rows, keyed by the upper-case
-  country code, `CC|region_code|region`, `CC|region_code|region|city` and the decimal
-  ASN. Each value is the compact array `[ipsRank, ipsPeers, latencyRank,
-  latencyPeers]`: IPs higher is better (counted when above zero), p50 lower is better
-  (counted when not negative and the row has successes). Rows sharing a key add their
-  IPs and keep the p50 of the row with most successes. A list the snapshot capped is
-  ranked whole from the build's typed rows (`store/placerows.go`, read in the same
-  transaction) when their count matches `breakdown_entries`; otherwise as published.
-  `/api/geo` rows carry their place's ranks as `placeRanks`.
 
 The framework's every-request scoring (proxy-index branch `score-from-all-requests`) keeps
 `schema_version` 2 and adds fields; the API reads both shapes. A window's
@@ -240,8 +236,8 @@ shares (`geo_accuracy`, `datacenter_asn_share`); products carry `pricing`
 (`lowest_per_gb`, `entry_per_gb`, `effective_from`, `valid_until`, `sources`).
 The window `latency` block (load reference, factors, per-country light and
 under-load latency), `tests` (requests per test kind), `time_slots`,
-`coverage_slots.down` and the light-load breakdown percentiles are passed
-through unchanged in `measurement` for the network page. `latency.countries[]`
+`coverage_slots.down` and the light-load breakdown percentiles are read for
+the window statistics and are not served raw. `latency.countries[]`
 has one entry per requested country and target (`target`); the page shows the
 `generic_http` ones. Time slots are lcm(pulse interval, 5 min): 30 minutes in
 production, 10 in staging. The slow-down factor's references are read by
@@ -286,7 +282,7 @@ For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
 empty.
 
 `availability` is the per-bucket fractional availability history, mapped from
-`measurement.windows.<range>.series[].uptime` without interpolation. Buckets
+the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
 are five minutes for 24h and one day for 7d/30d. The calculator unions and clips
 recorded outages per country, using countries with a started census/pulse run
 or an active outage in that bucket. Buckets without monitoring evidence, and
@@ -402,6 +398,22 @@ These small answers (each at most 200 KB, `build.MaxAnswerBytes`) are computed
 once per build from the published snapshot and the dataset's providers. Numbers
 the API does not have are `null`, as everywhere else.
 
+### Page answers in the dataset file
+
+The dataset file holds every answer below that a page of the site draws, so a
+download alone regenerates them (owner decision on DATASET-SIZE-1: the dataset
+carries what the pages use). `pages` maps each request to its body, byte for byte
+what the server serves for it: `/v1/networks`, `/v1/rankings?range=<r>` for 24h, 7d
+and 30d, `/v1/networks/<slug>?kind=<kind>` for every network and category (the
+all-networks answer is `/v1/networks/all?kind=all`) and
+`/v1/networks/<slug>/chart?kind=<kind>&range=<r>`. The request without `kind`
+serves the network's `primaryKind`. Not in it: the country answers
+(`/v1/countries...`), the paged place lists (`.../places`, `.../cities`), search
+and the N/A manifest, which no page of the site's design draws
+(API-DATA-DESIGN-1). `TestTheDatasetFileRegeneratesEveryPageAnswer` checks the
+file against the answers. A rebuild that keeps the file (see "The dataset file"
+in `README.md`) keeps its pages too: they are the build's that wrote it.
+
 ### `/v1/rankings?range=24h|7d|30d`
 
 The overview list in its final order, so a page renders it at once. One row
@@ -486,8 +498,8 @@ Besides the summed totals and places above, a network's answer carries what
   `productMeasurements.<kind>` (`pool`, `performance`, `pricing`, `trust`,
   `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`.
   Left out: `geo` and `asns` (paged by `/places`), `series` (the chart
-  answers), `placeRanks` and `countryLatencyRanks` (the place rows carry their
-  ranks) and the raw `measurement`. The whole provider stays in `/v1/dataset`.
+  answers) and `countryLatencyRanks` (the place rows carry their ranks). The whole
+  provider stays in `/v1/dataset`.
 - `stats`: `windowStats` of that category per range (see "Window statistics of
   a measured provider") without `success`, `availability`, `latency`, `pool`
   and `bands`.
@@ -534,7 +546,7 @@ still describes what is read whole; the API now reads those rows directly
 (`store/lists.go`), not through `calculated_breakdown_details`, and only for list
 ids it does not hold already. City x ASN rows are read only for each provider's
 product group per proxy kind (the most 30-day requests, `snap.ByKind`), the group
-`measurement` comes from.
+`coverageEvidence` comes from.
 
 Payload v3 (proxy-index SNAP-LISTREF-1), as the API reads it:
 
@@ -577,15 +589,8 @@ groups, a window with no released hour) keeps its measured IPs, and so do a
 row or daily point when the block has no `breakdown_scale`, and the
 every-group fleet figures of `/v1/networks/all`.
 
-`measurement` (the headline group's raw result) follows the same mapping: a
-window with the block loses it, its `pool.unique_ips` and the `ips` of its
-`breakdowns`, `pool.geo`, `pool.countries_breakdown` and `pool.asns_breakdown`
-rows, its daily `series[].unique_ips` and its `pool.daily.unique_ips` (the
-average daily distinct IPs) are scaled by `breakdown_scale` as above, and its
-24h five-minute `series[].unique_ips` are null (the released hours are coarser
-than the buckets). The members of a rewritten object come out in key order.
-Other fields of the raw result (`pool.new_ips`, `tests`, `ip_samples`,
-`census_overlap`) are passed through as published.
+`coverageEvidence` rows follow the same mapping as any breakdown row: their `ips` are
+the measured row's IPs × `breakdown_scale`.
 
 The tape keeps a row per released hour (event kind `estimate_hour_released`,
 an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update

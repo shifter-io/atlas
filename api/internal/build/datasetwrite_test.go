@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math"
 	"strings"
 	"testing"
 
@@ -41,7 +40,8 @@ func TestWriteDatasetReportsErrors(t *testing.T) {
 	if err := build.WriteDataset(failWriter{}, &model.Dataset{}); err == nil || err.Error() != "disk full" {
 		t.Fatalf("write error: %v", err)
 	}
-	bad := &model.Dataset{Providers: []*model.Provider{{Slug: "a"}, {Slug: "b", Measurement: math.Inf(1)}}}
+	broken := model.Measured{Pricing: model.Pricing{Plans: []model.PricingPlan{{Catalog: json.RawMessage("{")}}}}
+	bad := &model.Dataset{Providers: []*model.Provider{{Slug: "a"}, {Slug: "b", Measured: broken}}}
 	if _, err := json.Marshal(bad); err == nil {
 		t.Fatal("Marshal accepts the value: pick another one")
 	}

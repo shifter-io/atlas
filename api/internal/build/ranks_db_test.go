@@ -178,28 +178,6 @@ func storeRankRows(t *testing.T, db *testdb.DB, build int64, cohort string, whol
 	}
 }
 
-// directPlaceRanksSQL ranks every place row across networks with RANK(): IPs
-// when above zero, p50 when not negative with successes; rows without a value
-// get no rank and are not peers.
-const directPlaceRanksSQL = `WITH v AS (
- SELECT pr.provider, w.window_hours AS hours,
-  CASE d.dimension WHEN 'geography' THEN 'city' ELSE d.dimension END AS dim,
-  CASE d.dimension WHEN 'asn' THEN d.label->>'asn' WHEN 'country' THEN upper(d.label->>'country_code')
-   WHEN 'region' THEN upper(d.label->>'country_code') || '|' || coalesce(d.label->>'region_code', '') || '|' || coalesce(d.label->>'region', '')
-   ELSE upper(d.label->>'country_code') || '|' || coalesce(d.label->>'region_code', '') || '|' || coalesce(d.label->>'region', '')
-    || '|' || coalesce(d.label->>'city', '') END AS key,
-  CASE WHEN d.ips > 0 THEN d.ips END AS ips,
-  CASE WHEN d.p50 >= 0 AND d.successes > 0 THEN d.p50 END AS p50
- FROM calculated_windows w JOIN products pr USING (product_id)
- JOIN calculated_breakdown_details d USING (result_id)
- WHERE w.build_id = $1 AND w.target = '' AND d.dimension IN ('country', 'region', 'geography', 'asn'))
-SELECT provider, hours, dim, key,
- CASE WHEN ips IS NOT NULL THEN rank() OVER (PARTITION BY hours, dim, key ORDER BY ips DESC NULLS LAST) END,
- count(ips) OVER (PARTITION BY hours, dim, key),
- CASE WHEN p50 IS NOT NULL THEN rank() OVER (PARTITION BY hours, dim, key ORDER BY p50 NULLS LAST) END,
- count(p50) OVER (PARTITION BY hours, dim, key)
-FROM v`
-
 // directTileRanksSQL ranks every window's coverage counts above zero across
 // networks with RANK(), from the published payload.
 const directTileRanksSQL = `WITH v AS (
@@ -227,50 +205,8 @@ func TestRanksMatchADirectSQLRanking(t *testing.T) {
 	ctx := context.Background()
 	c := db.Conn(t)
 	defer c.Close(ctx)
-	rangeOf := map[int64]string{24: "24h", 168: "7d", 720: "30d"}
 
-	rows, err := c.Query(ctx, directPlaceRanksSQL, build)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checked := map[string]int{}
-	for rows.Next() {
-		var provider, dim, key string
-		var hours, ipsPeers, latPeers int64
-		var ipsRank, latRank *int64
-		if err := rows.Scan(&provider, &hours, &dim, &key, &ipsRank, &ipsPeers, &latRank, &latPeers); err != nil {
-			t.Fatal(err)
-		}
-		ranks := res.Details[provider].Provider.PlaceRanks["residential"][rangeOf[hours]]
-		got, ok := map[string]map[string]model.PlaceRank{"country": ranks.Countries, "region": ranks.Regions,
-			"city": ranks.Cities, "asn": ranks.Asns}[dim][key]
-		if !ok || !sameDBRank(got.Ips, ipsRank, ipsPeers) || !sameDBRank(got.Latency, latRank, latPeers) {
-			t.Errorf("%s %dh %s %q: built %+v, SQL ips %v/%d latency %v/%d", provider, hours, dim, key, got,
-				deref(ipsRank), ipsPeers, deref(latRank), latPeers)
-		}
-		checked[dim]++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	built := map[string]int{}
-	for _, d := range res.Details {
-		for _, byRange := range d.Provider.PlaceRanks {
-			for _, r := range byRange {
-				built["country"] += len(r.Countries)
-				built["region"] += len(r.Regions)
-				built["city"] += len(r.Cities)
-				built["asn"] += len(r.Asns)
-			}
-		}
-	}
-	for _, dim := range []string{"country", "region", "city", "asn"} {
-		if checked[dim] < 10 || built[dim] != checked[dim] {
-			t.Errorf("%s: %d built ranks, %d SQL rows", dim, built[dim], checked[dim])
-		}
-	}
-
-	rows, err = c.Query(ctx, directTileRanksSQL, build)
+	rows, err := c.Query(ctx, directTileRanksSQL, build)
 	if err != nil {
 		t.Fatal(err)
 	}

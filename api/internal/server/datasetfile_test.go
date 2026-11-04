@@ -408,9 +408,15 @@ func TestWritingTheDatasetFileHasBoundedMemory(t *testing.T) {
 	if err := build.WriteDataset(one, res.Dataset); err != nil {
 		t.Fatal(err)
 	}
+	// Only the providers are repeated, so their share of the file sets the
+	// count (the rest, pages and records, stays one copy).
 	full := *res.Dataset
 	full.Providers = nil
-	for range memoryDatasetBytes/one.n + 1 {
+	rest := &countWriter{w: io.Discard}
+	if err := build.WriteDataset(rest, &full); err != nil {
+		t.Fatal(err)
+	}
+	for range (memoryDatasetBytes-rest.n)/(one.n-rest.n) + 1 {
 		full.Providers = append(full.Providers, res.Dataset.Providers...)
 	}
 	sink := &countWriter{w: io.Discard}

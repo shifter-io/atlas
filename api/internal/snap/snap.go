@@ -295,6 +295,7 @@ type BreakdownRow struct {
 	City        *string `json:"city"`
 	Asn         Num     `json:"asn"`
 	Name        *string `json:"name"`
+	UsageType   *string `json:"usage_type"`
 	Ips         Num     `json:"ips"`
 	Completed   Num     `json:"completed"`
 	Successes   Num     `json:"successes"`

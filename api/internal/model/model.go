@@ -10,7 +10,6 @@ package model
 import (
 	"bytes"
 	"encoding/json"
-	"strconv"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
 )
@@ -541,36 +540,20 @@ type TileRanks struct {
 	Latency   Rank `json:"latency"`
 }
 
-// PlaceRank ranks one product in one country, region, city or ASN by IPs seen
-// there and by latency p50 there, among the same peers as TileRanks. It is
-// written as [ipsRank, ipsPeers, latencyRank, latencyPeers] to keep the long
-// lists small.
-type PlaceRank struct {
-	Ips, Latency Rank
+// CoverageRow is one observed city x ASN of a network's headline group in one
+// range (the network page's coverage evidence table): written as
+// [countryCode, country, region, city, asn, asnName, usageType, ips,
+// latencyP50] to keep the long lists small. Text is null when unknown, as are
+// the ASN and the numbers.
+type CoverageRow struct {
+	CountryCode, Country, Region, City Str
+	Asn                                Num
+	AsnName, UsageType                 Str
+	Ips, LatencyP50                    Num
 }
 
-func (r PlaceRank) MarshalJSON() ([]byte, error) {
-	b := []byte{'['}
-	for i, v := range [...]Rank{r.Ips, r.Latency} {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		rank, _ := v.Rank.MarshalJSON()
-		b = append(append(b, rank...), ',')
-		b = strconv.AppendInt(b, int64(v.Peers), 10)
-	}
-	return append(b, ']'), nil
-}
-
-// PlaceRanks holds a product window's PlaceRank per country ("US"), region
-// ("US|CA|California"), city ("US|CA|California|Los Angeles") and ASN
-// ("13335"); region and city keys use the row's region_code and region as
-// published, empty when null.
-type PlaceRanks struct {
-	Countries map[string]PlaceRank `json:"countries"`
-	Regions   map[string]PlaceRank `json:"regions"`
-	Cities    map[string]PlaceRank `json:"cities"`
-	Asns      map[string]PlaceRank `json:"asns"`
+func (r CoverageRow) MarshalJSON() ([]byte, error) {
+	return json.Marshal([...]any{r.CountryCode, r.Country, r.Region, r.City, r.Asn, r.AsnName, r.UsageType, r.Ips, r.LatencyP50})
 }
 
 type ReviewSummary struct {
@@ -601,14 +584,13 @@ type Provider struct {
 	ProductMeasurements *MeasurementMap   `json:"productMeasurements"`
 	Score               ScoreView         `json:"score"`
 	Measured
-	Reviews ReviewSummary `json:"reviews"`
-	// Measurement is the raw snapshot ProductResult of the headline product
-	// (null without a published snapshot product).
-	Measurement         any                                                 `json:"measurement"`
+	Reviews             ReviewSummary                                       `json:"reviews"`
 	CountryLatencyRanks map[string]map[string]map[string]CountryLatencyRank `json:"countryLatencyRanks,omitempty"`
 	// Precomputed measured ranks by proxy type and time range.
-	TileRanks  map[string]map[string]TileRanks  `json:"tileRanks,omitempty"`
-	PlaceRanks map[string]map[string]PlaceRanks `json:"placeRanks,omitempty"`
+	TileRanks map[string]map[string]TileRanks `json:"tileRanks,omitempty"`
+	// CoverageEvidence is, by proxy type and time range, every observed city x
+	// ASN row of the type's headline group, most IPs first.
+	CoverageEvidence map[string]map[string][]CoverageRow `json:"coverageEvidence,omitempty"`
 	// Framework identity, null for unlinked catalog rows.
 	Framework *FrameworkLink `json:"framework"`
 	NA        []string       `json:"na"`
@@ -760,8 +742,11 @@ type Dataset struct {
 	Changelog        []ChangeEvent    `json:"changelog"`
 	Reviews          []UserReview     `json:"reviews"`
 	CommunityRuns    []CommunityRun   `json:"communityRuns"`
-	Snapshot         SnapshotMeta     `json:"snapshot"`
-	NA               []string         `json:"na"`
+	// Pages is every page answer the site draws, by the path that serves it
+	// (build.DatasetPages), so the file alone regenerates each one.
+	Pages    any          `json:"pages"`
+	Snapshot SnapshotMeta `json:"snapshot"`
+	NA       []string     `json:"na"`
 }
 
 // MeasurementMap is productMeasurements with insertion-ordered keys.

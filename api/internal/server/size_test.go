@@ -43,9 +43,16 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	return v, res, time.Since(t0)
 }
 
+// The dataset file's bounds at the QA-1 scale (18 networks).
+const (
+	datasetMaxBytes = 12 << 20
+	datasetMaxGzip  = 2 << 20
+)
+
 // TestEveryAnswerFitsTheCap: every answer of a QA-1-sized build, and every
 // page of its long lists, is at most build.MaxAnswerBytes. The dataset is not
-// an answer: it is the download file /v1/dataset redirects to.
+// an answer: it is the download file /v1/dataset redirects to, bounded by
+// datasetMaxBytes and datasetMaxGzip.
 func TestEveryAnswerFitsTheCap(t *testing.T) {
 	v, res, took := scaleVersion(t)
 	// The scale build must reproduce the answer that once broke the cap: the
@@ -95,6 +102,10 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 		if rec.Body.Len() > build.MaxAnswerBytes {
 			t.Errorf("%s is %d bytes, above the cap", path, rec.Body.Len())
 		}
+	}
+	// The dataset file of 18 networks stays small (DATASET-SIZE-1).
+	if v.Dataset.Bytes > datasetMaxBytes || v.Dataset.Gzip > datasetMaxGzip {
+		t.Errorf("the dataset file is %d bytes (gzip %d), above %d (gzip %d)", v.Dataset.Bytes, v.Dataset.Gzip, datasetMaxBytes, datasetMaxGzip)
 	}
 	if r := getOnce(h, "/v1/dataset"); r.Code != http.StatusFound || r.Body.Len() > 0 {
 		t.Errorf("/v1/dataset: %d, %d bytes", r.Code, r.Body.Len())

@@ -2,10 +2,10 @@ package build
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
 )
 
@@ -85,72 +85,25 @@ func TestTheMappingTakesTheFormulasFigures(t *testing.T) {
 	}
 }
 
-func TestTheRawResultFollowsTheMapping(t *testing.T) {
-	p := decodeProduct(t, estimateProduct)
-	raw, err := measurementOf(p)
-	if err != nil {
-		t.Fatal(err)
+// The coverage evidence keeps every city x ASN row of the headline group per
+// range, unknown fields null, each row's IPs scaled half up like any
+// breakdown row's; a range without the list has no rows.
+func TestCoverageEvidenceFollowsTheMapping(t *testing.T) {
+	p := decodeProduct(t, `{"id":"1:x","kind":"residential","windows":{
+"24h":{"breakdowns":{"city_asn":[{"country_code":"US","country":"United States","region_code":"CA","region":"California",
+  "city":"Los Angeles","asn":7922,"name":"Comcast","usage_type":"isp","ips":3,"p50":420},{"ips":1}]},
+ "estimated":{"unique_ips":{"value":10},"breakdown_scale":2.5}},
+"7d":{"breakdowns":{"city_asn":[{"city":"Austin","ips":4,"p50":null}]}}}}`)
+	e := &entry{P: &model.Provider{}, Snap: map[string]*snap.Product{"residential": p}}
+	unmeasured := &entry{P: &model.Provider{}}
+	addCoverageEvidence([]*entry{e, unmeasured})
+	got, err := json.Marshal(e.P.CoverageEvidence)
+	want := `{"residential":{"24h":[["US","United States","California","Los Angeles",7922,"Comcast","isp",8,420],` +
+		`[null,null,null,null,null,null,null,3,null]],"30d":[],"7d":[[null,null,null,"Austin",null,null,null,4,null]]}}`
+	if err != nil || string(got) != want {
+		t.Errorf("coverage evidence %s %v", got, err)
 	}
-	if strings.Contains(string(raw), "estimat") {
-		t.Fatalf("raw result names the estimate: %s", raw)
-	}
-	var got struct {
-		Windows map[string]snap.Window `json:"windows"`
-	}
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatal(err)
-	}
-	day, month, week, fortnight := got.Windows["24h"], got.Windows["30d"], got.Windows["7d"], got.Windows["14d"]
-	if day.Pool.UniqueIps != 251 || day.Pool.CountriesBreakdown[0].Ips != 153 || day.Pool.AsnsBreakdown[0].Ips.OK() {
-		t.Errorf("24h pool %+v", day.Pool)
-	}
-	if day.Breakdowns["country"][0].Ips != 153 || day.Breakdowns["city"][0].Ips != 3 {
-		t.Errorf("24h breakdowns %+v", day.Breakdowns)
-	}
-	if day.Series[0].UniqueIps.OK() || day.Series[1].UniqueIps.OK() || day.Series[0].Completed != 5 {
-		t.Errorf("24h buckets keep a measured IP count: %+v", day.Series)
-	}
-	if month.Pool.UniqueIps != 251 || month.Series[0].UniqueIps != 40 || month.Series[1].UniqueIps != 50 || month.Series[2].UniqueIps != 9 {
-		t.Errorf("30d %+v %+v", month.Pool, month.Series)
-	}
-	if fortnight.Pool.UniqueIps != 200 || fortnight.Series[0].UniqueIps != 15 || fortnight.Series[1].UniqueIps.OK() {
-		t.Errorf("14d %+v %+v", fortnight.Pool, fortnight.Series)
-	}
-	if week.Pool.UniqueIps != 100 || week.Series[0].UniqueIps != 50 {
-		t.Errorf("7d changed: %+v", week)
-	}
-	var geo struct {
-		Windows map[string]struct {
-			Pool struct {
-				Geo []struct {
-					Ips float64 `json:"ips"`
-				} `json:"geo"`
-				Daily *struct {
-					UniqueIps float64 `json:"unique_ips"`
-					Days      float64 `json:"days"`
-				} `json:"daily"`
-			} `json:"pool"`
-		} `json:"windows"`
-	}
-	if err := json.Unmarshal(raw, &geo); err != nil || geo.Windows["24h"].Pool.Geo[0].Ips != 8 {
-		t.Errorf("24h geo %+v %v", geo.Windows["24h"].Pool.Geo, err)
-	}
-	if d := geo.Windows["24h"].Pool.Daily; d == nil || d.UniqueIps != 25 || d.Days != 1 || geo.Windows["14d"].Pool.Daily != nil {
-		t.Errorf("pool daily %+v / %+v", d, geo.Windows["14d"].Pool.Daily)
-	}
-	plain := decodeProduct(t, `{"id":"1:x","windows":{"24h":{"pool":{"unique_ips":1}}}}`)
-	if raw, err := measurementOf(plain); err != nil || string(raw) != string(plain.Raw) {
-		t.Errorf("a product without figures is not passed through: %s %v", raw, err)
-	}
-	for _, bad := range []string{`{"windows":{"24h":{"estimated":{}}}`, `{"windows":{"24h":{"estimated":{},"pool":[]}}}`,
-		`{"windows":{"24h":{"estimated":{},"pool":{"geo":{}}}}}`, `{"windows":{"24h":{"estimated":{},"pool":{"geo":[{"ips":"x"}]}}}}`,
-		`{"windows":{"24h":{"estimated":{},"breakdowns":[]}}}`, `{"windows":{"24h":{"estimated":{},"series":{}}}}`,
-		`{"windows":{"24h":{"estimated":{},"pool":{"daily":[]}}}}`, `{"windows":{"24h":{"estimated":{},"pool":{"daily":{"unique_ips":"x"}}}}}`,
-		`{"windows":{"30d":{"estimated":{},"series":[{"unique_ips":"x"}]}}}`} {
-		p := decodeProduct(t, `{"windows":{"24h":{"estimated":{}},"30d":{"estimated":{}}}}`)
-		p.Raw = []byte(bad)
-		if _, err := measurementOf(p); err == nil {
-			t.Errorf("%s: no error", bad)
-		}
+	if unmeasured.P.CoverageEvidence != nil {
+		t.Errorf("an unmeasured provider has coverage evidence: %v", unmeasured.P.CoverageEvidence)
 	}
 }

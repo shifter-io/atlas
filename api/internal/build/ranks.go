@@ -27,82 +27,54 @@ const (
 	tileCount
 )
 
+// placeDimensions are the place lists of a network's answers (places.go).
 var placeDimensions = [...]string{"country", "region", "city", "asn"}
-
-type placeKey struct{ dimension, key string }
-
-// placeValue is a product window's IPs and latency in one place; a missing
-// value is NaN.
-type placeValue struct{ ips, latency Num }
 
 // rankedWindow is one measured product window waiting for its ranks.
 type rankedWindow struct {
-	group  rankGroup
-	tiles  [tileCount]Num
-	places map[placeKey]placeValue
-	setT   func(model.TileRanks)
-	setP   func(model.PlaceRanks)
+	group rankGroup
+	tiles [tileCount]Num
+	setT  func(model.TileRanks)
 }
 
-// addRanks sets every measured provider's TileRanks and PlaceRanks once per
-// build. A place list the snapshot capped is read whole from the build's typed
-// rows (store.SnapshotRow.Places).
-func addRanks(entries []*entry, s *store.SnapshotRow) {
+// addRanks sets every measured provider's TileRanks once per build.
+func addRanks(entries []*entry) {
 	var windows []rankedWindow
 	tilePeers := map[rankGroup]*[tileCount][]Num{}
-	placePeers := map[rankGroup]map[placeKey]*[2][]Num{}
 	for _, e := range entries {
-		windows = append(windows, measuredWindows(e, s)...)
+		windows = append(windows, measuredWindows(e)...)
 	}
 	for _, w := range windows {
 		tiles := tilePeers[w.group]
 		if tiles == nil {
 			tiles = &[tileCount][]Num{}
 			tilePeers[w.group] = tiles
-			placePeers[w.group] = map[placeKey]*[2][]Num{}
 		}
 		for i, v := range w.tiles {
 			if v.OK() {
 				tiles[i] = append(tiles[i], v)
 			}
 		}
-		for k, v := range w.places {
-			peers := placePeers[w.group][k]
-			if peers == nil {
-				peers = &[2][]Num{}
-				placePeers[w.group][k] = peers
-			}
-			for i, x := range [2]Num{v.ips, v.latency} {
-				if x.OK() {
-					peers[i] = append(peers[i], x)
-				}
-			}
-		}
 	}
 	for _, w := range windows {
 		w.setT(tileRanks(w.tiles, tilePeers[w.group]))
-		w.setP(placeRanks(w.places, placePeers[w.group]))
 	}
 }
 
 // measuredWindows collects an entry's product windows and gives it empty
 // rank maps for them to fill.
-func measuredWindows(e *entry, s *store.SnapshotRow) []rankedWindow {
+func measuredWindows(e *entry) []rankedWindow {
 	var out []rankedWindow
 	e.P.TileRanks = map[string]map[string]model.TileRanks{}
-	e.P.PlaceRanks = map[string]map[string]model.PlaceRanks{}
 	for kind, p := range e.Snap {
 		tiles := map[string]model.TileRanks{}
-		places := map[string]model.PlaceRanks{}
-		e.P.TileRanks[kind], e.P.PlaceRanks[kind] = tiles, places
+		e.P.TileRanks[kind] = tiles
 		for _, r := range Ranges {
 			w := p.Window(r.ID)
 			out = append(out, rankedWindow{
-				group:  rankGroup{kind, p.Cohort, r.ID, w.Period.Start, w.Period.End},
-				tiles:  tileValues(w),
-				places: placeValues(s, p, w),
-				setT:   func(v model.TileRanks) { tiles[r.ID] = v },
-				setP:   func(v model.PlaceRanks) { places[r.ID] = v },
+				group: rankGroup{kind, p.Cohort, r.ID, w.Period.Start, w.Period.End},
+				tiles: tileValues(w),
+				setT:  func(v model.TileRanks) { tiles[r.ID] = v },
 			})
 		}
 	}
@@ -138,18 +110,6 @@ func tileRanks(v [tileCount]Num, peers *[tileCount][]Num) model.TileRanks {
 	}
 }
 
-func placeRanks(places map[placeKey]placeValue, peers map[placeKey]*[2][]Num) model.PlaceRanks {
-	out := model.PlaceRanks{Countries: map[string]model.PlaceRank{}, Regions: map[string]model.PlaceRank{},
-		Cities: map[string]model.PlaceRank{}, Asns: map[string]model.PlaceRank{}}
-	byDimension := map[string]map[string]model.PlaceRank{
-		"country": out.Countries, "region": out.Regions, "city": out.Cities, "asn": out.Asns}
-	for k, v := range places {
-		p := peers[k]
-		byDimension[k.dimension][k.key] = model.PlaceRank{Ips: rankOf(v.ips, p[0], true), Latency: rankOf(v.latency, p[1], false)}
-	}
-	return out
-}
-
 // rankOf is v's competition rank among peers (1 + peers strictly better);
 // NaN when v is missing.
 func rankOf(v Num, peers []Num, higherIsBetter bool) model.Rank {
@@ -164,50 +124,6 @@ func rankOf(v Num, peers []Num, higherIsBetter bool) model.Rank {
 		}
 	}
 	return r
-}
-
-// placeValues is a window's IPs (counted when above zero) and latency p50
-// (counted when not negative and with successes) per place, from every row of
-// each list. Rows sharing a key add their IPs and keep the p50 of the row with
-// most successes.
-func placeValues(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[placeKey]placeValue {
-	out := map[placeKey]placeValue{}
-	most := map[placeKey]Num{}
-	add := func(dimension string, cc, regionCode, region, city *string, asn, ips, successes, p50 Num) {
-		key, ok := placeKeyOf(dimension, cc, regionCode, region, city, asn)
-		if !ok {
-			return
-		}
-		k := placeKey{dimension, key}
-		v, seen := out[k]
-		if !seen {
-			v = placeValue{ips: nan, latency: nan}
-		}
-		if ips.OK() && ips > 0 {
-			if v.ips.OK() {
-				ips += v.ips
-			}
-			v.ips = ips
-		}
-		if p50.OK() && p50 >= 0 && successes.OK() && successes > most[k] {
-			v.latency, most[k] = p50, successes
-		}
-		out[k] = v
-	}
-	typed := capturedPlaceRows(s, p, w)
-	for _, dimension := range placeDimensions {
-		if rows, ok := typed[dimension]; ok {
-			for i := range rows {
-				r := rows[i].PlaceRow(dimension)
-				add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, Num(r.Asn), scaledIps(w, Num(r.Ips)), Num(r.Successes), Num(r.P50))
-			}
-			continue
-		}
-		for _, r := range w.Breakdowns[dimension] {
-			add(dimension, r.CountryCode, r.RegionCode, r.Region, r.City, r.Asn, scaledIps(w, r.Ips), r.Successes, r.P50)
-		}
-	}
-	return out
 }
 
 // capturedPlaceRows is, per place list the snapshot capped, the build's typed
@@ -229,8 +145,11 @@ func capturedPlaceRows(s *store.SnapshotRow, p *snap.Product, w snap.Window) map
 	return out
 }
 
-// placeKeyOf is the PlaceRanks key of a row (see model.PlaceRanks); false
-// for a row without a country (or, for an ASN row, without an ASN).
+// placeKeyOf is a row's key in a network's place lists: the country code
+// ("US"), region ("US|CA|California"), city ("US|CA|California|Los Angeles")
+// or ASN ("13335"), region and city keys using the row's region_code and
+// region as published, empty when null; false for a row without a country
+// (or, for an ASN row, without an ASN).
 func placeKeyOf(dimension string, cc, regionCode, region, city *string, asn Num) (string, bool) {
 	country := strings.ToUpper(strings.TrimSpace(model.SV(cc)))
 	switch dimension {

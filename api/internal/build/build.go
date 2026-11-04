@@ -335,7 +335,7 @@ func Build(in *store.Inputs) (*Result, error) {
 		return nil, err
 	}
 	addCountryLatencyRanks(entries)
-	addRanks(entries, in.Snapshot)
+	addRanks(entries)
 	names := map[string]string{}
 	slugOfFramework := map[string]string{}
 	for _, e := range entries {
@@ -461,12 +461,15 @@ func Build(in *store.Inputs) (*Result, error) {
 		for _, k := range e.P.ProductMeasurements.Keys {
 			declared = append(declared, "productMeasurements."+k+".overlap.likelyUpstream")
 		}
-		e.P.NA, err = naOf(e.P, declared, true, "measurement", "framework")
+		e.P.NA, err = naOf(e.P, declared, true, "framework")
 		if err != nil {
 			return nil, err
 		}
 		e.P.NA = withoutPublishedEmpties(e)
 	}
+	// After the N/A manifests: a coverage row's nulls are the row's own
+	// unknown fields, not gaps of the provider (FIELDS.md).
+	addCoverageEvidence(entries)
 	for i := range ds.Targets {
 		if ds.Targets[i].NA, err = naOf(ds.Targets[i], nil, false); err != nil {
 			return nil, err
@@ -589,6 +592,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	}
 	res.Pages = buildPages(ds.GeneratedAt, entries, stats, res.Details, s, in.Snapshot)
 	res.Pages.Published = publishedProducts(s, entries, in.Providers)
+	ds.Pages = datasetPages(res.Pages)
 	res.Search = buildSearchIndex(leader, ds.Targets, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, records)
 	return res, nil

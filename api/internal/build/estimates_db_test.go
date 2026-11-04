@@ -230,54 +230,6 @@ func scaledOrNull(ips Num) Num {
 
 func sameNum(a, b Num) bool { return a == b || (!a.OK() && !b.OK()) }
 
-// The provider's raw result loses its `estimated` block; a window without
-// one, like every window of a group without figures, passes through as is.
-func TestTheRawResultCarriesNoEstimate(t *testing.T) {
-	res := estimatedBuild(t)
-	var raw struct {
-		Windows map[string]map[string]json.RawMessage `json:"windows"`
-	}
-	m := res.Details["shifter"].Provider.Measurement.(json.RawMessage)
-	if err := json.Unmarshal(m, &raw); err != nil {
-		t.Fatal(err)
-	}
-	for label, w := range raw.Windows {
-		if _, ok := w["estimated"]; ok {
-			t.Errorf("%s keeps its estimated block", label)
-		}
-		var pool struct {
-			UniqueIps float64 `json:"unique_ips"`
-			Countries []struct {
-				Ips float64 `json:"ips"`
-			} `json:"countries_breakdown"`
-		}
-		if err := json.Unmarshal(w["pool"], &pool); err != nil {
-			t.Fatal(err)
-		}
-		if Num(pool.UniqueIps) != half(estimateValue) || pool.Countries[0].Ips != 12400 {
-			t.Errorf("%s raw pool %+v", label, pool)
-		}
-	}
-	snapshot := map[string]any{}
-	if err := json.Unmarshal(estimatedSnapshot(t), &snapshot); err != nil {
-		t.Fatal(err)
-	}
-	rival, _ := json.Marshal(snapshot["products"].([]any)[1])
-	if got := res.Details["rival"].Provider.Measurement.(json.RawMessage); !bytes.Equal(compact(t, got), compact(t, rival)) {
-		t.Error("a group without figures does not serve its raw result unchanged")
-	}
-}
-
-func compact(t *testing.T, b []byte) []byte {
-	t.Helper()
-	var v any
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatal(err)
-	}
-	out, _ := json.Marshal(v)
-	return out
-}
-
 // No answer body names the estimate: no `estimated` key or flag and no
 // "estimate" text, in every pre-rendered answer, the dataset and the pages.
 // The tape keeps an hour's release row, worded as an hourly update (owner
