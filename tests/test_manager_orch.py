@@ -62,6 +62,18 @@ def job(tmp_path):
 CHECK_OK = {"ok": True, "issues": [], "networks": ["shifter"], "droplets_by_hour": {"5": 1}}
 
 
+def directives(unit):
+    """A unit file's section and key lines, without its comments."""
+    text = unit.decode() if isinstance(unit, bytes) else unit
+    return [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
+
+
+def installable(unit):
+    """True when anything could enable the unit: an [Install] section or an install key."""
+    keys = ("WantedBy=", "RequiredBy=", "UpheldBy=", "Alias=", "Also=")
+    return any(line == "[Install]" or line.startswith(keys) for line in directives(unit))
+
+
 def staged(stdin):
     """{member name: bytes} of the enable script's stdin tar."""
     with tarfile.open(fileobj=io.BytesIO(stdin)) as archive:
@@ -167,9 +179,10 @@ def test_the_units_are_rendered_from_the_assets():
     ]
     hourly = found[manager_daily.DAILY_TIMER]
     assert "OnCalendar=*-*-* *:56:00 UTC" in hourly
-    assert "[Install]" not in hourly and "WantedBy" not in hourly  # nothing can enable it
+    assert not installable(hourly)  # nothing can enable it
     daily = found[manager_daily.DAILY_SERVICE]
-    assert "[Install]" not in daily and "Type=oneshot" in daily
+    assert not installable(daily) and "Type=oneshot" in daily
+    assert installable(service)  # the orchestrator itself is enabled by orchestrator-enable
     assert '--unit=proxy-index-daily-$$(date -u -d "+10 min" +%%Y%%m%%dT%%H)' in daily
     assert (
         f"daily hour --formulas {manager_daily.FORMULAS} --template {manager_daily.TEMPLATE} "
@@ -381,7 +394,7 @@ async def test_enable_and_deploy_leave_the_hourly_timer_inactive(job, tmp_path):
         if line.startswith("systemctl "):
             assert "daily" not in line
     timer = dict((name, data) for name, data, _ in manager_orch.units())[manager_daily.DAILY_TIMER]
-    assert b"[Install]" not in timer  # `systemctl enable`, a preset or a reboot cannot start it
+    assert not installable(timer)  # `systemctl enable`, a preset or a reboot cannot start it
     (provision,) = [stdin for argv, stdin in deploy_shell.calls if "provision" in argv[-1]]
     assert not [name for name in staged(provision) if "daily" in name]  # deploy ships none
     assert "hourly" not in inventory(job)
