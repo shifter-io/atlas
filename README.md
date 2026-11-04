@@ -48,6 +48,7 @@ for CPU monitoring and cancellation behavior. A local CPU-only check is availabl
 The locally supplied DB-IP MMDB belongs in `db-ip/` (or set `DBIP_MMDB`). It is
 excluded from version control and distributions. It is separate from PostgreSQL:
 MMDB provides optional offline enrichment; PostgreSQL persists history and cached lifetime metrics.
+`proxy-index dbip update` keeps it current from the DB-IP CDN (see "Daily DB-IP update").
 
 PostgreSQL: this project uses a dedicated local cluster on `127.0.0.1:55432`.
 Run `uv run --no-editable python scripts/postgres_local.py start` after reboot.
@@ -100,12 +101,18 @@ each runner region; schema v9 (`migrate_v8_v9.sql`) moves place and ASN names in
 lists `place_names` and `asn_names`: `enrichment_locations` keeps a place id and coordinates,
 `enrichment_networks` an ASN name id and the per-IP network attributes, every location and network
 id is kept, and the views `enrichment_location_fields` and `enrichment_network_fields` give their
-old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged). `db-init` verifies
-v9 and refuses other schemas. `proxy-index db-migrate --database-file .secrets/database.toml`
-upgrades an unmodified v8, v7, v6 or v5 database, or an unmodified v4 database (and calculated v1
-layer) through v5 to v8, in place, in one transaction that compares every rebuilt summary, scope,
-pool, bucket, location, network and per-IP enrichment (from v6 every test batch, and from v4
-every cohort, breakdown and score) with its original before committing. Run it on every
+old columns (`ip_enrichment_fields` and `ip_enrichment_details` are unchanged); schema v10
+(`migrate_v9_v10.sql`) adds `estimated_hours`; schema v11 (`migrate_v10_v11.sql`) adds the batch
+kind `browser` (the browser pulse) and changes no row; schema v12 (`migrate_v11_v12.sql`) replaces
+the `ip_observations` index `(ip_id, bucket_start)`, which no query used, with
+`(bucket_start, ip_id)` for distinct-IP counts per time slice, and changes no row (building the
+index blocks writes to `ip_observations`; dropping the old one then blocks reads and writes until
+the migration commits, which follows at once). `db-init` verifies v12 and refuses other schemas.
+`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v11
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v12, in
+place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
+network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
+score) with its original before committing. Run it on every
 database (production and staging) before starting the new orchestrator. Locally, run
 `PYTHONPATH=src .venv/bin/python scripts/migrate_database.py`, which takes a pg_dump first.
 The local `scripts/rebuild_database.py` backs up, stages, verifies and swaps a rebuild from
@@ -359,6 +366,80 @@ index and a live page for every running batch every 30 s, from the counters node
 `proxy-index report html --database-file F --out DIR [--batch ID]`. They are single
 self-contained HTML files: per product status, stop reason, success rate, unique and new IPs,
 challenges, blocks, timeouts, proxy errors, p50/p90/p99, MB, top cities and ASNs, and events.
+
+## Daily DB-IP update
+
+DB-IP releases are dated files in one CDN directory: `<base URL>/dbip-full-YYYY-MM-DD.mmdb`
+(the release date). `proxy-index dbip update --dest DIR --base-url URL` keeps
+`DIR/dbip-full.mmdb` at the newest one. The file always has that one name.
+
+- **Finding the release.** It probes (HEAD) from tomorrow (UTC) back to the installed release,
+  or back `--lookback-days` (default 62) when none is installed, and takes the newest file that
+  exists. A 404 means no release that day; any other answer fails the run.
+- **Downloading.** It downloads only when the release's name, size, ETag or Last-Modified
+  differs from the installed one. The download goes to a temporary file in `DIR`, never into
+  the file in use.
+- **Checking.** The size must match the announced length, be at least `--min-bytes` (default
+  100 MiB) and at least half the installed release. The file must open with the MaxMind reader
+  as a DB-IP database, and of one test address per public /8, at least `--min-coverage`
+  (default 90 %) must have a country.
+- **Installing.** It renames the checked file over `dbip-full.mmdb` in one step, so a reader sees
+  the old file or the new one and never a partial one. A reader that has the old file open keeps
+  it until it reopens. Earlier releases are not kept. The same bytes under new headers leave
+  the file untouched.
+- **Recording.** It records the release in `dbip_releases` (with `--database-file`, default
+  `$PROXY_INDEX_DATABASE_FILE`). `release.json` holds the installed release, so a run on an
+  unchanged release downloads nothing.
+
+Every run prints one JSON health line (`"dbip": "updated" | "unchanged" | "failed"`). Exit
+codes: 0 updated or unchanged, 2 configuration, 3 probe, download, check or recording failed (a
+release installed but not recorded is recorded by the next run), 4 another update of the
+directory is running.
+
+The base URL is configuration, never in this repository: `--base-url`, `$DBIP_BASE_URL`, the
+orchestrator's `dbip.base_url` setting or the pulse fleet's `dbip_base_url`. It must be https
+without a query, and a redirect is followed only to another https URL. Errors name the file and
+the HTTP status or error type, never the URL. The URL is not a secret today (a public dated CDN
+path), so it also appears in the pulse nodes' update unit
+(`/etc/systemd/system/pi-dbip-update.service`, mode 0644) and in its process arguments. If the
+CDN ever needs a token, that has to change first.
+
+**Each test keeps the locations it was saved with.** Enrichment is stored per run with the
+release it used, and the calculation reads each run's observations with that run's own release
+(its newest one, if it was enriched again). A new release therefore changes only the runs
+enriched with it, never older ones. The snapshot's `dbip_release` names the newest release that
+some run uses; a release recorded by the update before any run used it changes nothing.
+
+**On the manager** (where the orchestrator runs), the orchestrator's `dbip_update` job runs the
+update daily at 05:23 UTC once the `dbip.dir` setting names the directory. A failure fails the
+job and raises a `job_failed` alert; an unchanged release records the run as `skipped`. Run it
+now with `POST /admin/api/jobs/run {"job": "dbip_update"}`.
+
+```sql
+INSERT INTO settings(key,value) VALUES ('dbip.dir','"/opt/proxy-index/db-ip"'),
+  ('dbip.base_url','"https://<cdn host>/<directory>/"')
+  ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now();
+```
+
+Readers name the file: point `--mmdb` or `DBIP_MMDB` at `DIR/dbip-full.mmdb`. Without either,
+`db-ip/dbip-full.mmdb` wins over other `db-ip/*.mmdb` files. `daily ingest` and `enrich` open the
+database per run, so each run uses the release installed when it is enriched. A long-running
+`proxy-index node` reopens the replaced file between runs only (a run keeps one release), with no
+restart.
+
+**On the pulse droplets**, each node fetches the release itself from the CDN. Nothing is pushed
+from the manager: the arming tar is read into memory on a 1 GB node, and the MMDB is over 1 GB.
+- With `dbip_base_url` in `fleet.json`, arming installs `pi-dbip-update.timer`. It runs
+  `proxy-index dbip update --dest /opt/proxy-index-worker/db-ip` 5 minutes after arming, then
+  daily at 05:41 UTC plus up to 30 minutes of random delay, which spreads the downloads.
+- Arming renames the image's MMDB to `db-ip/dbip-full.mmdb` when that name does not exist yet,
+  and starts the node with `--mmdb .../db-ip/dbip-full.mmdb`. The node runs on the image's
+  release until the first update and reopens the file after each one.
+- A node holds one release (about 1.4 GB) plus one download in flight.
+- Without `dbip_base_url`, arming disables and removes a timer an earlier arming installed.
+  Nodes armed before `dbip_base_url` was set get the timer only when armed again (re-created).
+- Hourly campaign workers keep the release baked into their image (`campaign image build --mmdb
+  DIR/dbip-full.mmdb`); rebuilding the image refreshes them.
 
 ## Private network onboarding
 

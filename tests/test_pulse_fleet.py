@@ -9,6 +9,8 @@ import json
 import tarfile
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from campaign_fakes import PROD_PROJECT, FakeDigitalOcean, Fault, running
@@ -498,6 +500,8 @@ async def test_a_node_still_shown_after_its_delete_is_not_counted_gone(tmp_path)
         ({"orchestrator_url": "ftp://example"}, "orchestrator_url"),
         ({"orchestrator_url": "http://x/ y"}, "orchestrator_url"),
         ({"wheel": "proxy_index.tar.gz"}, "wheel"),
+        ({"dbip_base_url": "http://cdn.invalid/dbip/"}, "dbip_base_url"),
+        ({"dbip_base_url": "https://cdn.invalid/db ip/"}, "dbip_base_url"),
         ({"networks": {"Bad Name": {}}}, "network name"),
         (
             {
@@ -584,3 +588,68 @@ def test_cli_reconcile_and_retire(tmp_path, monkeypatch, capsys, action, report,
         else (root, NODE, True)
     )
     assert seen == ["proxy-index", called]
+
+
+async def test_with_a_dbip_base_url_the_node_is_told_where_releases_are(tmp_path):
+    root = make_root(tmp_path, dbip_base_url="https://cdn.invalid/dbip/")
+    remote = Remote()
+    await reconcile(world(), root, remote)
+    ((_, payload, _),) = remote.pushed
+    node = json.loads(bundle(payload)["pulse/node.json"][1])
+    assert node["dbip_base_url"] == "https://cdn.invalid/dbip/"
+
+
+def arm_script(tmp_path, node, databases=(), units=None):
+    """Runs NODE_SCRIPT after its wheel install on a fake worker root; returns the root, the
+    systemd units left in place and the systemctl calls. `units` are already installed."""
+    root = tmp_path / "worker"
+    (root / "pulse").mkdir(parents=True)
+    (root / "db-ip").mkdir()
+    for name in databases:
+        (root / "db-ip" / name).write_bytes(name.encode())
+    (root / "pulse" / "node.json").write_text(json.dumps(node))
+    systemd, steps = tmp_path / "systemd", []
+    systemd.mkdir()
+    for name in units or ():
+        (systemd / name).write_text("old")
+    shim = SimpleNamespace(
+        Path=lambda p: systemd / Path(p).name if p.startswith("/etc/systemd/") else Path(p)
+    )
+    run = SimpleNamespace(run=lambda command, check: steps.append((command[1:], check)))
+    tail = pulse_fleet.NODE_SCRIPT.split(pulse_fleet.INSTALL_WHEEL)[1]
+    exec(tail, {"json": json, "pathlib": shim, "subprocess": run, "root": root, "secrets": root})
+    return root, {p.name: p.read_text() for p in systemd.iterdir()}, steps
+
+
+NODE_JSON = {"orchestrator": "http://o", "provider": "p", "product": "q", "region": "lon1"}
+UPDATER = ("pi-dbip-update.service", "pi-dbip-update.timer")
+
+
+def test_arming_names_the_image_database_and_installs_the_daily_update(tmp_path):
+    base = "https://cdn.invalid/dbip/"
+    root, units, steps = arm_script(
+        tmp_path, NODE_JSON | {"dbip_base_url": base}, ["dbip-full-2026-11-02.mmdb"]
+    )
+    db = root / "db-ip"
+    assert sorted(p.name for p in db.iterdir()) == ["dbip-full.mmdb"]
+    assert (db / "dbip-full.mmdb").read_bytes() == b"dbip-full-2026-11-02.mmdb"  # renamed
+    assert f"--mmdb {db}/dbip-full.mmdb" in units["pi-pulse-node.service"]
+    update = f"bin/proxy-index dbip update --dest {db} --base-url {base}"
+    assert update in units["pi-dbip-update.service"]
+    assert "OnCalendar=*-*-* 05:41:00 UTC" in units["pi-dbip-update.timer"]
+    assert steps[-1] == (["enable", "--now", "pi-dbip-update.timer"], True)
+
+
+def test_arming_keeps_an_updated_database_and_removes_a_timer_no_longer_wanted(tmp_path):
+    names = ["dbip-full-2026-09-14.mmdb", "dbip-full.mmdb"]  # the update's file and an old one
+    root, units, steps = arm_script(tmp_path, NODE_JSON, names, units=UPDATER)
+    assert (root / "db-ip" / "dbip-full.mmdb").read_bytes() == b"dbip-full.mmdb"
+    assert set(units) == {"pi-pulse-node.service"}  # the earlier arming's timer is gone
+    assert steps[0] == (["disable", "--now", "pi-dbip-update.timer"], False)
+    assert [s for s, _ in steps[1:]] == [
+        ["daemon-reload"],
+        ["enable", "pi-pulse-node"],
+        ["restart", "pi-pulse-node"],
+    ]
+    _, units, _ = arm_script(tmp_path / "bare", NODE_JSON)
+    assert "--mmdb" not in units["pi-pulse-node.service"]

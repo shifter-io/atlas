@@ -100,8 +100,7 @@ async def measurement(
     return sink.directory
 
 
-def enrichment(directory, *, invalid_ip=False, attributes=None):
-    release = "a" * 64
+def enrichment(directory, *, invalid_ip=False, attributes=None, release="a" * 64):
     with gzip.open(directory / "ips.jsonl.gz", "rt") as stream:
         rows = [json.loads(line) for line in stream]
     output = directory / f"enriched-{release}.jsonl.gz"

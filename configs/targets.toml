@@ -35,3 +35,97 @@ pulse_interval_minutes = 30
 pulse_requests = 100
 pulse_concurrency = 25
 sort_order = 20
+
+# Browser targets (docs/browser.html, K-BP1). The browser pulse settings file schedules them, so
+# they never run in the HTTP pulse or the census: db-seed refuses pulse_enabled or census here.
+# Their pulse_* columns are unused. ai_answers is a group computed over its three sources.
+
+[[target]]
+id = "amazon_pdp"
+label = "Marketplace product page"
+url = "https://www.amazon.com/dp/"
+engine = "browser"
+pass_condition = "The product page loads with its title and price or buy box, not a captcha."
+census = false
+pulse_enabled = false
+sort_order = 30
+
+[[target]]
+id = "google_search"
+label = "Google Search SERP"
+url = "https://www.google.com/search"
+engine = "browser"
+pass_condition = "The results page shows organic results, not the /sorry captcha or a consent wall."
+census = false
+pulse_enabled = false
+sort_order = 40
+
+[[target]]
+id = "linkedin_public"
+label = "Public professional profile"
+url = "https://www.linkedin.com/in/"
+engine = "browser"
+pass_condition = "The public profile shows its name and headline, not the authwall or a 999 block."
+census = false
+pulse_enabled = false
+sort_order = 50
+
+[[target]]
+id = "instagram_web"
+label = "Social media web app"
+url = "https://www.instagram.com/"
+engine = "browser"
+pass_condition = "The Instagram or X profile shows its posts, not a login overlay or a block."
+census = false
+pulse_enabled = false
+sort_order = 60
+
+[[target]]
+id = "cloudflare_challenge"
+label = "Managed challenge page"
+url = "https://challenges.cloudflare.com/"
+engine = "browser"
+pass_condition = "The managed challenge clears and the protected page shows its expected text."
+census = false
+pulse_enabled = false
+sort_order = 70
+
+[[target]]
+id = "ai_answers"
+label = "AI answers"
+url = "https://www.google.com/search"
+engine = "browser"
+pass_condition = "Never run itself: computed over the tries of its three AI sources."
+census = false
+pulse_enabled = false
+sort_order = 80
+
+[[target]]
+id = "ai_overview"
+label = "AI answers: Google AI Overview"
+url = "https://www.google.com/search"
+engine = "browser"
+pass_condition = "The results page for the question shows an AI Overview with text."
+census = false
+pulse_enabled = false
+sort_order = 81
+
+[[target]]
+id = "ai_chatgpt"
+label = "AI answers: ChatGPT"
+url = "https://chatgpt.com/"
+engine = "browser"
+pass_condition = "ChatGPT answers the fixed question without asking to sign in."
+census = false
+pulse_enabled = false
+sort_order = 82
+
+[[target]]
+id = "ai_gemini"
+label = "AI answers: Gemini"
+url = "https://gemini.google.com/app"
+engine = "browser"
+pass_condition = "Gemini answers the fixed question without asking to sign in."
+census = false
+pulse_enabled = false
+sort_order = 83

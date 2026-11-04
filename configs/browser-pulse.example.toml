@@ -1,0 +1,103 @@
+# Browser pulse settings (schema 2), with every field. The real file is private: it names the
+# hosts' networks and real inputs. Copy this file, replace the placeholders and pass it by path
+# (proxy_index.browser.settings.load_settings). See docs/browser.html.
+schema = 2
+enabled = false                 # the planner and the hosts do nothing until true
+
+[schedule]                      # read by the orchestrator
+countries = ["US"]              # one batch per country and slot
+lead_seconds = 60               # a slot's first run starts this long after the batch opens
+
+[browser]                       # read by the hosts
+browsers_per_host = 10          # 1..16 browsers at once on one host
+recycle_after = 25              # tries per browser process before a fresh one
+page_timeout_s = 45             # navigation and wait budget per try, 5..600
+headless = true
+block_resources = ["image", "media", "font"]   # default; a target may override it
+screenshots = "failures"        # failures | all | none
+locale = "en-US"
+
+[outbox]
+dir = "outbox"                  # relative to the host state directory
+max_pending_gb = 20             # above this, the host stops taking screenshots
+
+# One [[target]] per run target, in start order within a slot. tries (1..10000, per network
+# per run) and every_minutes (5..1440, slots aligned to the epoch) are required per target;
+# there is no global budget. Optional per target: timeout_s, block_resources,
+# challenge_wait_s, answer_wait_s.
+
+[[target]]
+id = "amazon_pdp"
+tries = 100
+every_minutes = 60
+inputs = ["0306406152"]         # ASINs: 10 digits or capital letters
+
+[[target]]
+id = "google_search"
+tries = 100
+every_minutes = 60
+inputs = ["example query"]
+
+[[target]]
+id = "linkedin_public"
+tries = 100
+every_minutes = 60
+inputs = ["example"]            # public profile slugs
+
+[[target]]
+id = "instagram_web"
+tries = 100
+every_minutes = 60
+inputs = [
+  {site = "instagram", handle = "example"},
+  {site = "x", handle = "example"},
+]
+
+[[target]]
+id = "cloudflare_challenge"
+tries = 100
+every_minutes = 60
+challenge_wait_s = 20
+inputs = [{url = "https://example.com/protected", expect = "Example Domain"}]
+
+[[target]]
+id = "ai_overview"
+tries = 34
+every_minutes = 60
+answer_wait_s = 30
+inputs = ["example question"]
+
+[[target]]
+id = "ai_chatgpt"
+tries = 33
+every_minutes = 60
+answer_wait_s = 60
+block_resources = []
+inputs = ["example question"]   # exactly one fixed question
+
+[[target]]
+id = "ai_gemini"
+tries = 33
+every_minutes = 60
+timeout_s = 60
+answer_wait_s = 60
+inputs = ["example question"]   # exactly one fixed question
+
+# Logical host names (browser-<n>), never machine names. Networks are provider/product; each
+# network runs on one host only.
+[[host]]
+name = "browser-1"
+networks = ["example-a/residential", "example-b/residential"]
+
+[[host]]
+name = "browser-2"
+networks = ["example-c/residential", "example-d/residential"]
+
+[[host]]
+name = "browser-3"
+networks = ["example-e/residential", "example-untargeted/residential"]
+
+[networks]
+# Networks that cannot be targeted by country run with no country flag (D11): their runs record
+# requested_country = null and every report marks them untargeted.
+untargeted = ["example-untargeted/residential"]
