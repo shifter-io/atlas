@@ -156,10 +156,11 @@ def test_every_source_has_its_cases():
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
             *("cloudflare", "too_many_requests", "status_429", "no_reply", "one_sentence"),
             *("no_prompt", "challenge_after_submit", "answer_names_markers", "challenge_cleared"),
+            *("stream_names_limit", "login_after_answer"),
         },
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),
-            *("unusual_traffic", "no_reply", "answer_names_markers"),
+            *("unusual_traffic", "no_reply", "answer_names_markers", "stream_names_traffic"),
         },
     }
 

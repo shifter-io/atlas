@@ -66,7 +66,8 @@ class AiSource(PageTarget):
     `page_timeout_s` (the try's page timeout) from the settings with dataclasses.replace; the
     wait ends at the smaller one. `clock` and `sleep` are replaced only by tests."""
 
-    # 2: a complete answer is ok before the page's words and status are read (judge()).
+    # 2: a complete answer is ok before the page's words and status are read (judge()), and
+    # a stop sign ends only a wait with no answer yet (read_answer()).
     version: str = "2"
     answer_wait_s: int | None = ANSWER_WAIT_S
     page_timeout_s: int | None = None
@@ -110,9 +111,10 @@ class AiSource(PageTarget):
     async def read_answer(
         self, driver: PageDriver, budget_s: float, start: float | None = None
     ) -> dict[str, int]:
-        """Poll the answer until its length is unchanged for STABLE_S, a stop sign shows or
-        budget_s passes since `start` (default now). answer_ms runs from `start` to the
-        answer's last growth."""
+        """Poll the answer until its length is unchanged for STABLE_S, a stop sign shows while
+        no answer has appeared, or budget_s passes since `start` (default now). A stop sign
+        replaces an answer, never interrupts one: the text stops match the whole body, which
+        holds the answer's own words. answer_ms runs from `start` to the answer's last growth."""
         start = self.clock() if start is None else start
         size, sentences, grown = 0, 0, start
         while True:
@@ -122,7 +124,7 @@ class AiSource(PageTarget):
                 size, sentences, grown = chars, parts, now
             elif size and now - grown >= STABLE_S:
                 break
-            if now - start >= budget_s or await self.stopped(driver):
+            if now - start >= budget_s or (not size and await self.stopped(driver)):
                 break
             await self.sleep(POLL_S)
         found = {ANSWER_CHARS: size, ANSWER_SENTENCES: sentences}
