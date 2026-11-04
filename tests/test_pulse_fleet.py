@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 from campaign_fakes import PROD_PROJECT, FakeDigitalOcean, Fault, running
+from helpers import self_signed
 
 from proxy_index.campaign import pulse_fleet
 from proxy_index.campaign import scope as scope_module
@@ -499,6 +500,9 @@ async def test_a_node_still_shown_after_its_delete_is_not_counted_gone(tmp_path)
         ({"image_by_region": {}}, "image_by_region"),
         ({"orchestrator_url": "ftp://example"}, "orchestrator_url"),
         ({"orchestrator_url": "http://x/ y"}, "orchestrator_url"),
+        ({"orchestrator_url": "http://203.0.113.9:8080"}, "plain http:// is refused"),
+        ({"ca_file": "missing.crt"}, "needs an https://"),
+        ({"orchestrator_url": "https://203.0.113.9:8443", "ca_file": "x.crt"}, "cannot be read"),
         ({"wheel": "proxy_index.tar.gz"}, "wheel"),
         ({"dbip_base_url": "http://cdn.invalid/dbip/"}, "dbip_base_url"),
         ({"dbip_base_url": "https://cdn.invalid/db ip/"}, "dbip_base_url"),
@@ -619,6 +623,24 @@ def arm_script(tmp_path, node, databases=(), units=None):
     tail = pulse_fleet.NODE_SCRIPT.split(pulse_fleet.INSTALL_WHEEL)[1]
     exec(tail, {"json": json, "pathlib": shim, "subprocess": run, "root": root, "secrets": root})
     return root, {p.name: p.read_text() for p in systemd.iterdir()}, steps
+
+
+async def test_with_a_ca_file_the_node_gets_the_managers_certificate(tmp_path):
+    root = make_root(tmp_path, orchestrator_url="https://203.0.113.9:8443", ca_file="m.crt")
+    cert, _ = self_signed(root, "m", "203.0.113.9")
+    remote = Remote()
+    await reconcile(world(), root, remote)
+    ((_, payload, _),) = remote.pushed
+    files = bundle(payload)
+    assert files["pulse/orchestrator-ca.crt"] == (0o600, cert.read_bytes())
+    assert json.loads(files["pulse/node.json"][1])["ca_file"] is True
+
+
+def test_arming_points_the_node_at_its_ca_file(tmp_path):
+    root, units, _ = arm_script(tmp_path, NODE_JSON | {"ca_file": True})
+    assert f"--ca-file {root}/pulse/orchestrator-ca.crt" in units["pi-pulse-node.service"]
+    _, units, _ = arm_script(tmp_path / "plain", NODE_JSON)
+    assert "--ca-file" not in units["pi-pulse-node.service"]
 
 
 NODE_JSON = {"orchestrator": "http://o", "provider": "p", "product": "q", "region": "lon1"}

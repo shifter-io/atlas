@@ -8,6 +8,8 @@ import ssl
 import struct
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 
 @asynccontextmanager
@@ -206,3 +208,47 @@ class Network:
 
     def public(self):
         return {"proxy_protocol": self.scheme, "test_protocol": self.protocol}
+
+
+def self_signed(directory: Path, name: str, address: str = "127.0.0.1") -> tuple[Path, Path]:
+    """A self-signed EC P-256 certificate for the IP `address`, made as the manager makes its
+    own (`openssl req -x509`: CN proxy-index-orchestrator, CA:TRUE, subjectAltName IP), and
+    its owner-only key; returns their paths."""
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "proxy-index-orchestrator")])
+    own = x509.SubjectKeyIdentifier.from_public_key(key.public_key())
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=825))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(address))]), False
+        )
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .add_extension(own, False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(own), False)
+        .sign(key, hashes.SHA256())
+    )
+    cert, private = directory / f"{name}.crt", directory / f"{name}.key"
+    cert.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    private.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    private.chmod(0o600)
+    return cert, private

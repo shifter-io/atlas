@@ -26,7 +26,9 @@ checked its file permissions on a real node.
 
 `fleet.json` keys: account, size (only `s-1vcpu-1gb-amd`), regions, image_by_region,
 ssh_key_id, identity (the SSH key file), wheel, orchestrator_url, database_file, optional
-dbip_base_url (https), and
+dbip_base_url (https), optional ca_file (the manager's certificate, which arming copies to
+the node as `pulse/orchestrator-ca.crt`; the node then trusts only it; ca_file needs an https
+orchestrator_url, and a remote orchestrator_url must be https either way: node_tls), and
 networks: {name: {product, provider_config, credentials, provider (default the name)}}.
 Paths are relative to the root. The ledger
 `nodes.json` holds names, ids and states only; addresses stay in memory and tokens only in the
@@ -45,6 +47,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..errors import UserError
+from ..node_tls import client_tls
 from ..onboarding.files import atomic_json, lock
 from ..onboarding.scheduler import Clock
 from . import scope
@@ -73,6 +77,7 @@ REGION_RE = r"^[a-z0-9]+$"
 WORD_RE = r"^[A-Za-z0-9_.-]+$"  # provider and product: safe in a systemd ExecStart line
 URL_RE = r"^https?://[A-Za-z0-9.:/_-]+$"
 DBIP_URL_RE = r"^https://[A-Za-z0-9.:/_-]+$"  # also safe in a systemd ExecStart line
+CA_NAME = "orchestrator-ca.crt"  # under pulse/ on the node
 
 # Runs with the node's system Python: argv = root, secrets dir. Writes the secrets owner-only,
 # installs the wheel and (re)starts the always-on node service.
@@ -99,12 +104,14 @@ databases = sorted(db.glob("*.mmdb"))
 if not mmdb.exists() and len(databases) == 1:  # the image's release, until the first update
     databases[0].replace(mmdb)
 country_check = ["--mmdb", str(mmdb)] if mmdb.exists() else []
+ca = root / "pulse" / "orchestrator-ca.crt"  # CA_NAME
+pinned = ["--ca-file", str(ca)] if node.get("ca_file") else []
 command = [cli, "node",
            "--orchestrator", node["orchestrator"], "--token-file", str(secrets / "node-token"),
            "--provider", node["provider"], "--product", node["product"],
            "--region", node["region"], "--provider-config", str(root / "pulse" / "provider.toml"),
            "--credentials-file", str(secrets / "credentials.toml"),
-           "--work-dir", str(root / "pulse" / "runs"), *country_check]
+           "--work-dir", str(root / "pulse" / "runs"), *country_check, *pinned]
 unit = ["[Unit]", "Description=proxy-index pulse node", "After=network-online.target",
         "Wants=network-online.target", "", "[Service]", f"WorkingDirectory={root}",
         "ExecStart=" + " ".join(command), "Restart=always", "RestartSec=10", "UMask=0077",
@@ -165,6 +172,7 @@ class FleetConfig:
     networks: dict[str, Network]
     size: str = DEFAULT_SIZE
     dbip_base_url: str | None = None
+    ca_file: Path | None = None
 
     def wanted(self) -> dict[str, tuple[str, str]]:
         """Every node the fleet should have: name -> (network, region)."""
@@ -200,6 +208,7 @@ def load_config(root: Path) -> FleetConfig:
         networks=networks,
         size=raw.get("size", DEFAULT_SIZE),
         dbip_base_url=raw.get("dbip_base_url"),
+        ca_file=root / raw["ca_file"] if raw.get("ca_file") else None,
     )
     _need(config.account not in ACCOUNTS, "account")
     _need(config.size not in SIZES, "size")
@@ -212,6 +221,10 @@ def load_config(root: Path) -> FleetConfig:
         "dbip_base_url",
     )
     _need(config.wheel.suffix != ".whl", "wheel")
+    try:
+        client_tls(config.orchestrator_url, config.ca_file)
+    except UserError as error:
+        raise FleetError(f"fleet.json: invalid orchestrator_url or ca_file ({error})") from None
     return config
 
 
@@ -400,12 +413,17 @@ class Fleet:
         }
         if self.config.dbip_base_url:
             node["dbip_base_url"] = self.config.dbip_base_url
+        pinned = []
+        if self.config.ca_file:
+            node["ca_file"] = True
+            pinned = [(f"pulse/{CA_NAME}", self.config.ca_file.read_bytes())]
         files = [
             ("pulse/node.json", json.dumps(node).encode()),
             ("pulse/provider.toml", network.provider_config.read_bytes()),
             (f"wheel/{self.config.wheel.name}", self.config.wheel.read_bytes()),
             ("secrets/credentials.toml", network.credentials.read_bytes()),
             ("secrets/node-token", (issued["token"] + "\n").encode()),
+            *pinned,
         ]
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w") as archive:
