@@ -203,7 +203,7 @@ async def test_sparse_daily_series_serve_the_full_series_of_the_same_inputs(
     sparse = calculate(database, POLICY, as_of=as_of, publish=True)
     # The same inputs with the old full series (another implementation id, so another build).
     monkeypatch.setattr(calculator, "IMPLEMENTATION_ID", "full-series")
-    monkeypatch.setattr(calculator, "series", lambda *a, sparse=False, **k: series(*a, **k))
+    monkeypatch.setattr(calculator, "sparse", lambda points, every=False: points)
     full = calculate(database, POLICY, as_of=as_of)
     assert full["snapshot_id"] != sparse["snapshot_id"]
     sparse = store.read(database, sparse["snapshot_id"])
@@ -253,10 +253,13 @@ def test_sparse_keeps_buckets_with_requests_or_availability():
         "outages": [{"country": "DE", "started_at": m(5), "ended_at": m(10)}],
     }
     full = series([request], [], start, m(20), 24, **history)
-    points = series([request], [], start, m(20), 24, **history, sparse=True)
-    # Availability alone (0:00, 0:05) or requests alone (0:10) keep a bucket; 0:15 has neither.
+    points = parts.sparse(full)
+    # Availability alone (0:00, 0:05) or requests alone (0:10, no IP seen: unique_ips 0) keep a
+    # bucket; 0:15 has neither.
     assert [p["uptime"] for p in full] == [1, 0, None, None]
+    assert [p["unique_ips"] for p in full] == [None, None, 0, None]
     assert points == full[:3] and full[3]["completed"] == 0
+    assert parts.sparse(full, every=True) is full
 
 
 def test_dense_rebuilds_dropped_points_and_keeps_other_windows():
@@ -324,6 +327,7 @@ async def test_a_head_over_the_bound_is_refused_and_nothing_is_stored(
     monkeypatch.setattr(parts, "HEAD_BYTES", 1000)
     with pytest.raises(ValueError, match="Snapshot head is"):
         calculate(database, POLICY, as_of=end, publish=True)
+    assert store.read(database) is None
     with connect(database) as conn:
         assert conn.execute("SELECT count(*) FROM calculation_builds").fetchone() == (0,)
         assert conn.execute("SELECT count(*) FROM calculated_snapshot_parts").fetchone() == (0,)

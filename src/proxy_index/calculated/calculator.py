@@ -51,6 +51,7 @@ from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, previous_products, tested_by_product
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
+from .parts import sparse
 from .policy import (
     digest,
     effective,
@@ -754,19 +755,21 @@ def build(
                     for e in ev + price_rows
                 ],
                 "unavailable": {k: v for k, v in UNAVAILABLE.items() if k not in values},
-                "series": series(
-                    rows,
-                    seen,
-                    since,
-                    as_of,
-                    hours,
-                    outages=down,
-                    tested=monitored_groups[p["product_id"]] if scheduled else (),
-                    latency_target=timed_target,
-                    minimum=minimum,
-                    factors=factors,
-                    excluded=excluded,
-                    sparse=not scheduled and hours == 24,  # daily groups: buckets with data
+                "series": sparse(
+                    series(
+                        rows,
+                        seen,
+                        since,
+                        as_of,
+                        hours,
+                        outages=down,
+                        tested=monitored_groups[p["product_id"]] if scheduled else (),
+                        latency_target=timed_target,
+                        minimum=minimum,
+                        factors=factors,
+                        excluded=excluded,
+                    ),
+                    every=scheduled or hours != 24,  # only daily groups' 24h series are sparse
                 ),
                 "previous_period": prev_m,
                 "success_delta": m["success_rate"] - prev_m["success_rate"]

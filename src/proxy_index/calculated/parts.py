@@ -83,10 +83,7 @@ def head_text(head):
 
 
 def assemble(head, products, runs):
-    """The payload of a head and its parts, as one jsonb payload row reads back; a head without
-    "parts" (a build stored before calculated v8) is the whole payload already."""
-    if "parts" not in head:
-        return head
+    """The payload of a head (with "parts") and its parts, as one jsonb payload row reads back."""
     body = {k: v for k, v in head.items() if k != "parts"}
     return jsonb_order(body | {"products": products, "runs": runs})
 
@@ -175,9 +172,17 @@ def export(conn, build_id, out):
     return found["snapshot_id"]
 
 
+def sparse(points, every=False):
+    """A series without its empty points: buckets with no stored request and no availability
+    (completed 0, every other value null; dense() restores them), unless every is set."""
+    if every:
+        return points
+    return [p for p in points if p["unique_ips"] is not None or p["uptime"] is not None]
+
+
 def dense(window):
-    """window with every bucket of its series: a 24h series stored sparse (aggregate.series(
-    sparse=True)) gets back the empty points it left out, exactly as series() writes them."""
+    """window with every bucket of its series: a 24h series stored sparse (sparse()) gets back
+    the empty points it left out, exactly as aggregate.series() writes them."""
     if window["period"]["hours"] != 24:
         return window
     start, end = (datetime.fromisoformat(window["period"][k]) for k in ("start", "end"))
