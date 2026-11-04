@@ -443,8 +443,8 @@ def test_browser_target_protocol():
         base.page(RequestContext(RUN_ID, 0, 0), ("a",))
     with pytest.raises(NotImplementedError):
         base.judge(view)
-    # No browser target is registered yet: the registry still holds the two echo targets.
-    assert {t.id for t in registry.all()} == {"generic_http", "generic_https"}
+    # The HTTP targets are still the two echo targets; browser targets register beside them.
+    assert {t.id for t in registry.all() if t.engine == "http"} == {"generic_http", "generic_https"}
 
 
 def test_targets_file_has_the_browser_rows():

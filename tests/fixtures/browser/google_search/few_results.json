@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.google.com/search",
+    "status": 200,
+    "title": "example - Google Search",
+    "text_head": "Example result one. Example result two.",
+    "found": {
+      "#search a h3": 2,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "few_results"
+  }
+}
