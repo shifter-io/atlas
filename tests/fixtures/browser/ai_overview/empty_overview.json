@@ -1,0 +1,24 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "why is the sky blue - Google Search",
+    "text_head": "AI Overview",
+    "counts": {
+      "div[aria-label=\"AI Overview\"]": 1,
+      "#search a h3": 8
+    },
+    "texts": {
+      "div[aria-label=\"AI Overview\"]": ""
+    }
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "short_overview",
+    "answer_chars": 0,
+    "asked": false,
+    "waited_s": 30
+  }
+}

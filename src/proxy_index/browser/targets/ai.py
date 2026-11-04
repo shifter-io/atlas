@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from ...models import RequestContext
 from ...targets import PageDriver, PageSpec, PageView
-from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW
+from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW, PROXY_AUTH_STATUS
 from ..judge import (
     OK,
     Mark,
@@ -108,9 +108,10 @@ class AiSource(PageTarget):
     async def read_answer(
         self, driver: PageDriver, budget_s: float, start: float | None = None
     ) -> dict[str, int]:
-        """Poll the answer until its length is unchanged for STABLE_S, a stop sign shows or
-        budget_s passes since `start` (default now). answer_ms runs from `start` to the
-        answer's last growth."""
+        """Poll the answer until its length is unchanged for STABLE_S, a stop sign shows while
+        no answer has appeared, or budget_s passes since `start` (default now). A stop sign
+        replaces an answer, never interrupts one: the text stops match the whole body, which
+        holds the answer's own words. answer_ms runs from `start` to the answer's last growth."""
         start = self.clock() if start is None else start
         size, sentences, grown = 0, 0, start
         while True:
@@ -120,7 +121,7 @@ class AiSource(PageTarget):
                 size, sentences, grown = chars, parts, now
             elif size and now - grown >= STABLE_S:
                 break
-            if now - start >= budget_s or await self.stopped(driver):
+            if now - start >= budget_s or (not size and await self.stopped(driver)):
                 break
             await self.sleep(POLL_S)
         found = {ANSWER_CHARS: size, ANSWER_SENTENCES: sentences}
@@ -130,6 +131,15 @@ class AiSource(PageTarget):
         found = view.found
         chars, sentences = found.get(ANSWER_CHARS, 0), found.get(ANSWER_SENTENCES, 0)
         return chars >= MIN_CHARS and sentences >= self.MIN_SENTENCES
+
+    def judge(self, view: PageView) -> PageAssessment:
+        """A complete answer is ok, then the shared steps (PageTarget.judge). The visible text
+        the markers read holds the answer itself, and the status is the first navigation's
+        (a challenge that cleared by itself was a 403): neither undoes an answer that was
+        read. A 407 still comes first."""
+        if view.status != PROXY_AUTH_STATUS and self.answered(view):
+            return OK
+        return PageTarget.judge(self, view)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +179,6 @@ class AiOverview(AiSource):
     def rules(self, view: PageView) -> PageAssessment:
         if host_of(view).startswith("consent."):
             return failed("no_content", "consent_page")
-        if self.answered(view):
-            return OK
         if count(view, *self.ANSWER) or view.found.get(ANSWER_CHARS):
             return failed("no_answer", "short_overview")
         if count(view, self.RESULTS):
@@ -221,8 +229,6 @@ class ChatSource(AiSource):
         return await self.read_answer(driver, self.budget_s())
 
     def rules(self, view: PageView) -> PageAssessment:
-        if self.answered(view):
-            return OK
         if self.login_redirect(view):
             return failed("login_wall", "login_redirect")
         if count(view, *self.LOGIN_DIALOGS):

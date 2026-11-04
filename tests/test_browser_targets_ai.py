@@ -150,16 +150,17 @@ def test_every_source_has_its_cases():
     assert names == {
         c.AI_OVERVIEW: {
             *("ok", "late", "absent", "short", "sorry", "recaptcha", "block_page", "no_results"),
-            *("consent", "consent_form"),
+            *("consent", "consent_form", "answer_names_markers", "empty_overview"),
         },
         c.AI_CHATGPT: {
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
             *("cloudflare", "too_many_requests", "status_429", "no_reply", "one_sentence"),
-            *("no_prompt", "challenge_after_submit"),
+            *("no_prompt", "challenge_after_submit", "answer_names_markers", "challenge_cleared"),
+            *("stream_names_limit", "login_after_answer"),
         },
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),
-            *("unusual_traffic", "no_reply"),
+            *("unusual_traffic", "no_reply", "answer_names_markers", "stream_names_traffic"),
         },
     }
 
@@ -237,6 +238,19 @@ def test_a_growing_answer_waits_until_it_is_stable():
     assert numbers["answer_ms"] == 1500 and clock() == 1.5 + 2.0
     assert numbers["answer_sentences"] == 2 and POLL_S == 0.5
     assert outcome(result) == ("ok", None, None)
+
+
+def test_a_read_answer_is_ok_whatever_the_page_says_but_a_407_comes_first():
+    """The answer is in the text the markers read, and the status is the first navigation's:
+    neither undoes it (the answer_names_markers and challenge_cleared fixtures). A 407 is
+    still the proxy's refusal, answer or not."""
+    answer = {"answer_chars": 200, "answer_sentences": 3}
+    for target_id in c.AI_SOURCES:
+        target = registry.get(target_id)
+        page = PageView(target.url, 403, "Just a moment...", "captcha rate limit", answer)
+        assert outcome(target.judge(page)) == ("ok", None, None)
+        refused = PageView(target.url, 407, "", "", answer)
+        assert outcome(target.judge(refused)) == ("proxy_error", "proxy_auth", "proxy_auth_status")
 
 
 def test_sentence_count():
