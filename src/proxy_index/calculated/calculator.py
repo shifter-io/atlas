@@ -62,7 +62,7 @@ from .policy import (
     slot_settings,
     uptime_settings,
 )
-from .releases import enriched_observations
+from .releases import enriched_observations, snapshot_fields
 from .store import discard, expire, jsonable, partition, prune, write
 
 SCHEMA_VERSION = 2
@@ -865,7 +865,7 @@ def build(
         "products": list(groups.values()),
         "fleet": fleets,
         "overlap": overlaps,
-        "dbip_release": release,
+        **snapshot_fields(release),
         "targets": [
             {
                 "id": t.id,

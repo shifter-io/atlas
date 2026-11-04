@@ -8,7 +8,8 @@ directory. The Outbox sends a bundle through its network's node agent and delete
 manager's confirmation (contracts.confirmed) and on nothing else: 429, 503, other 5xx and
 network errors keep it for a later pass with backoff, a 409 marks it `.conflict` and another
 4xx `.rejected`. Nothing unconfirmed is ever deleted. Above `max_pending_gb` of runs and
-outbox, no screenshot is written; the tries are still recorded.
+outbox, no screenshot is written; the tries are still recorded. At host start, recover() seals
+what a killed process left finished and deletes its half runs (no summary.json).
 
 Logs carry ids, statuses and error names, never a token, credential or proxy value.
 """
@@ -27,7 +28,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import aiohttp
 
@@ -401,13 +402,21 @@ async def _post(bundle: Bundle, agent: Any, sha256: str) -> tuple[int, Any, floa
 SealRun = Callable[[Path, Batch, dict, str], Bundle]
 
 
-def recover(runs: Path, outbox: Path, seal_run: SealRun) -> int:
+class Recovered(NamedTuple):
+    """What recover() did not send on: run directories deleted as half runs, and finished
+    ones kept unsealed."""
+
+    discarded: int
+    unsealed: int
+
+
+def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
     """At host start: seal every finished run directory a killed process left (a tar.gz
     without its sidecar is rebuilt), drop a run directory whose bundle is already sealed and
     verified, and drop half-written sidecars and those of bundles already confirmed. A run
-    directory it does not seal (killed during its run, so no summary.json; or a file that cannot
-    be read or sealed) is kept as it is, with its sidecar, and counted: the return value. One
-    bad file never stops the start."""
+    directory without summary.json (killed during its run) is a half run: it is deleted, never
+    sealed or uploaded, and logged once. A finished run it cannot read or seal is kept as it is,
+    with its sidecar. One bad file never stops the start."""
     if outbox.is_dir():
         for sidecar in [*outbox.glob("*.json.partial"), *outbox.glob("*.json")]:
             try:
@@ -415,32 +424,36 @@ def recover(runs: Path, outbox: Path, seal_run: SealRun) -> int:
                     sidecar.unlink()
             except OSError as exc:
                 log.warning("sidecar %s kept (%s)", sidecar.name, type(exc).__name__)
-    kept = 0
+    found = {"sealed": 0, "discarded": 0, "kept": 0}
     for run_dir in sorted(p for p in runs.glob("*/*") if p.is_dir() and not p.is_symlink()):
         if not re.fullmatch(bc.RUN_ID, run_dir.name):
             continue
         try:
-            sealed = _recover_run(run_dir, outbox, seal_run)
+            outcome = _recover_run(run_dir, outbox, seal_run)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             log.warning("run %s kept unsealed (%s)", run_dir.name, type(exc).__name__)
-            sealed = False
-        kept += not sealed
-    if kept:
-        log.warning("browser_run_incomplete: %s run directories kept unsealed", kept)
-    return kept
+            outcome = "kept"
+        found[outcome] += 1
+    return Recovered(found["discarded"], found["kept"])
 
 
-def _recover_run(run_dir: Path, outbox: Path, seal_run: SealRun) -> bool:
-    """Whether the run is in the outbox now: sealed before (its directory goes) or here."""
+def _recover_run(run_dir: Path, outbox: Path, seal_run: SealRun) -> str:
+    """`sealed` when the run is in the outbox now (sealed before, its directory goes, or
+    here), `discarded` when it was a half run, now deleted, `kept` otherwise."""
     archive, sidecar = bc.outbox_paths(outbox, run_dir.name)
     if sidecar.exists() and archive.exists():
         if file_digests(archive)["sha256"] == read_bundle(sidecar).sha256:
             shutil.rmtree(run_dir)
-            return True
+            return "sealed"
         sidecar.unlink()
-    if not (run_dir / "summary.json").is_file() or not (run_dir / BATCH_FILE).is_file():
-        return False
+    if not os.path.lexists(run_dir / "summary.json"):
+        shutil.rmtree(run_dir)
+        log.warning("browser_run_discarded: run %s killed during its run, deleted", run_dir.name)
+        return "discarded"
+    if not (run_dir / BATCH_FILE).is_file():
+        log.warning("run %s kept unsealed (no %s)", run_dir.name, BATCH_FILE)
+        return "kept"
     summary = json.loads((run_dir / "summary.json").read_bytes())
     batch, settings_sha256 = run_facts(run_dir)
     seal_run(run_dir, batch, summary, settings_sha256)
-    return True
+    return "sealed"
