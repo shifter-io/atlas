@@ -1,9 +1,10 @@
 """A small DigitalOcean Spaces (S3) client on the standard library: AWS Signature V4.
 
-Only what the archive needs: HEAD, PUT and GET of one object, and the bucket's versioning and
-ACL. Objects are written private (`x-amz-acl: private`) with a signed payload sha256 and a
-Content-MD5, so the server rejects a body that changed on the way; the file's sha256 is also
-stored as `x-amz-meta-sha256`, which HEAD returns for the verification before any deletion.
+Only what the archive needs: HEAD, PUT and GET of one object, a prefix's keys, and the bucket's
+versioning and ACL. Objects are written private (`x-amz-acl: private`) with a signed payload
+sha256 and a Content-MD5, so the server rejects a body that changed on the way; the file's
+sha256 is also stored as `x-amz-meta-sha256`, which HEAD returns for the verification before any
+deletion.
 
 Settings: a `[spaces]` table (endpoint, bucket, access_key_id and optionally region and
 secret_access_key) in a 0600 file. Without secret_access_key the secret is read from the macOS
@@ -110,6 +111,10 @@ async def push_settings(inventory: Path, data: bytes, shell=None) -> None:
     await remote.put_secret("spaces.toml", data)
 
 
+class ArchiveChanged(ArchiveError):
+    """The object at a key holds other bytes than the file meant for it; nothing was written."""
+
+
 class Spaces:
     """One bucket. Raises ArchiveError on any answer other than the expected one."""
 
@@ -194,6 +199,34 @@ class Spaces:
         with Path(path).open("rb") as body:
             self._call("PUT", key, headers=headers, body=body, payload=digests["sha256"])
 
+    def put_verified(
+        self,
+        key: str,
+        path: Path,
+        digests: dict,
+        meta: dict | None = None,
+        *,
+        existing: tuple[str, ...] | None = None,
+        what: str = "the local file",
+    ) -> dict[str, Any]:
+        """Store a file at key once, verified: HEAD; PUT when absent; HEAD again.
+
+        A new object must answer with the file's bytes, MD5 and sha256 and the meta given; an
+        object already there only with the fields named in `existing` (default: all of them).
+        Raises ArchiveChanged (`archive_changed: <key> ... differs from <what>`) otherwise and
+        never overwrites. Returns the object's HEAD with its key.
+        """
+        expected = {k: digests[k] for k in ("bytes", "md5", "sha256")} | (meta or {})
+        found = self.head(key)
+        if found is None:
+            self.put_file(key, path, digests, meta)
+            found = self.head(key)
+        elif existing is not None:
+            expected = {k: expected[k] for k in existing}
+        if found is None or any(found.get(k) != v for k, v in expected.items()):
+            raise ArchiveChanged(f"archive_changed: {key} in the bucket differs from {what}")
+        return {"key": key, **found}
+
     def get_file(self, key: str, path: Path) -> None:
         status, _, response, connection = self._request("GET", key)
         try:
@@ -206,6 +239,20 @@ class Spaces:
             partial.replace(path)
         finally:
             connection.close()
+
+    def list_keys(self, prefix: str) -> list[str]:
+        """Every key starting with prefix, in key order (ListObjectsV2, paged by start-after:
+        callers' keys are plain path characters)."""
+        keys: list[str] = []
+        while True:
+            query = {"list-type": "2", "prefix": prefix} | (
+                {"start-after": keys[-1]} if keys else {}
+            )
+            _, _, data = self._call("GET", query=query)
+            page = [k.decode() for k in re.findall(rb"<Key>([^<]+)</Key>", data)]
+            keys += page
+            if not page or b"<IsTruncated>true</IsTruncated>" not in data:
+                return keys
 
     def versioning(self) -> str | None:
         _, _, data = self._call("GET", query={"versioning": ""})

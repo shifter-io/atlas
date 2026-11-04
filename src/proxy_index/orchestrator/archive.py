@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import tarfile
 import zlib
+from collections.abc import Callable
 from pathlib import Path
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -30,20 +31,37 @@ def pack(directory: str | Path, destination: str | Path) -> Path:
     return destination
 
 
-def unpack(source: str | Path, directory: str | Path, *, max_bytes: int) -> list[str]:
-    """Extract a run archive into an empty directory; returns the file names."""
+def unpack(
+    source: str | Path,
+    directory: str | Path,
+    *,
+    max_bytes: int,
+    nested: Callable[[str], bool] | None = None,
+    max_members: int = MAX_MEMBERS,
+) -> list[str]:
+    """Extract a run archive into an empty directory; returns the file names.
+
+    `nested` admits more names (exact relative paths, such as a browser bundle's
+    `browser/tries.jsonl`), extracted under their parent directories; directory entries it
+    admits are skipped. It must accept only safe, fixed path shapes.
+    """
     directory = Path(directory)
     names: list[str] = []
     total = 0
     try:
         with tarfile.open(source, "r:gz") as archive:
             for member in archive:
-                if len(names) >= MAX_MEMBERS:
+                if member.isdir() and nested is not None and nested(member.name):
+                    continue
+                if len(names) >= max_members:
                     raise ArchiveError("Too many files in the archive")
                 if not member.isreg():
                     raise ArchiveError("Archives may contain only regular files")
-                if not NAME.fullmatch(member.name) or member.name in names:
+                plain = NAME.fullmatch(member.name) is not None
+                if not (plain or (nested and nested(member.name))) or member.name in names:
                     raise ArchiveError("Archive member names must be plain, unique file names")
+                if not plain:
+                    (directory / member.name).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 total += member.size
                 if member.size < 0 or total > max_bytes:
                     raise ArchiveError("Archive is larger than the extraction limit")
