@@ -1,0 +1,14 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 200,
+    "title": "Just a moment...",
+    "text_head": "Checking your browser before accessing example.com.",
+    "found": {}
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "challenge_marker"
+  }
+}

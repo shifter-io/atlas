@@ -1,0 +1,19 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 403,
+    "title": "Just a moment...",
+    "text_head": "Verifying you are human. This may take a few seconds.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 1,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "challenge_page"
+  }
+}

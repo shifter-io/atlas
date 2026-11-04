@@ -6,10 +6,10 @@ participating product runs from its node in the country's region, starting at th
 test: every pulse slot of a census target also opens one per runner region, in the region's
 reference country of the day (`load_references`, see `load_references()`), where each product
 runs one wave of census_concurrency requests at census concurrency, load.delay_seconds after
-that country's pulse. A product participates when it has at
-least one registered node anywhere; a participating product without a node in the batch's
-region gets a 'failed' run with stop_reason/error 'no_node' (plus an alert, and a 'no_node'
-tape event when that alert opens).
+that country's pulse. A product participates when it has at least one registered node outside
+the browser region (whose 'browser' batches orchestrator/browser.py plans); a participating
+product without a node in the batch's region gets a 'failed' run with stop_reason/error
+'no_node' (plus an alert, and a 'no_node' tape event when that alert opens).
 
 Lock order, everywhere: test_batches row (FOR UPDATE) first, then its batch_runs rows. The
 barrier (`close_batch`) runs under the batch lock: a batch is 'done' once every run is terminal
@@ -35,6 +35,7 @@ from typing import Any
 
 import psycopg
 
+from ..browser.contracts import BROWSER_REGION_ID
 from ..calculated.aggregate import blend, census_overlaps
 from .db import Database, mark_closed, setting
 from .events import emit, raise_alert
@@ -67,6 +68,10 @@ LATE_START = timedelta(seconds=5)
 # Nodes are handed runs this far ahead of start_at so they can wait on the wall clock.
 ASSIGN_AHEAD = timedelta(minutes=5)
 PLAN_LOCK = 817452902
+TAKING = (
+    "SELECT DISTINCT p.product_id,p.provider,p.name FROM nodes n JOIN products p ON "
+    f"p.provider=n.provider AND p.name=n.product AND n.region_id<>{BROWSER_REGION_ID}"
+)
 # An upload is being received or ingested (a large census takes minutes): allow it longer.
 UPLOAD_STALE = 3
 
@@ -87,12 +92,8 @@ async def _row(conn: psycopg.AsyncConnection, query: str, params: Any = None) ->
 
 
 async def participants(conn: psycopg.AsyncConnection) -> list[dict]:
-    """Products with at least one registered node, in any region."""
-    return await _rows(
-        conn,
-        "SELECT DISTINCT p.product_id,p.provider,p.name FROM nodes n JOIN products p "
-        "ON p.provider=n.provider AND p.name=n.product ORDER BY p.product_id",
-    )
+    """Products with at least one registered node, in any region but the browser one."""
+    return await _rows(conn, TAKING + " ORDER BY p.product_id")
 
 
 async def _create_runs(
@@ -102,8 +103,7 @@ async def _create_runs(
     if not batch_ids:
         return []
     await conn.execute(
-        "WITH taking AS (SELECT DISTINCT p.product_id,p.provider,p.name FROM nodes n "
-        " JOIN products p ON p.provider=n.provider AND p.name=n.product) "
+        "WITH taking AS (" + TAKING + ") "
         "INSERT INTO batch_runs(batch_id,product_id,node_id,status,finished_at,stop_reason,error) "
         "SELECT b.batch_id,t.product_id,n.node_id,"
         " CASE WHEN n.node_id IS NULL THEN 'failed' ELSE 'queued' END,"

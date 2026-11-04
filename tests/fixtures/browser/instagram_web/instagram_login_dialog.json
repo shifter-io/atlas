@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.instagram.com/example_person/",
+    "status": 200,
+    "title": "Example Person (@example_person) - Instagram photos and videos",
+    "text_head": "example_person. Log in to see more. Phone number, username or email.",
+    "found": {
+      "header h2": 1,
+      "main a[href*=\"/p/\"]": 12,
+      "div[role=\"dialog\"] input[name=\"username\"]": 1
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_dialog"
+  }
+}

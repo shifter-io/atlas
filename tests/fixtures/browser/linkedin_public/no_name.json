@@ -1,0 +1,17 @@
+{
+  "view": {
+    "final_url": "https://www.linkedin.com/in/example-person/",
+    "status": 200,
+    "title": "LinkedIn",
+    "text_head": "Example page without a profile.",
+    "found": {
+      "h1.top-card-layout__title": 0,
+      ".top-card-layout__headline": 1
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_name"
+  }
+}
