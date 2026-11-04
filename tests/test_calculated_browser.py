@@ -15,16 +15,18 @@ from statistics import mean
 
 import pytest
 from helpers import FakeTransport
+from psycopg.rows import dict_row
 from test_calculated import lenient_policy
 from test_census_pulse import batch, batch_run, product
 from test_storage import ALL_ATTRIBUTES, enrichment, measurement
-from test_storage_v6 import census, load, write_geo
+from test_storage_v6 import census, load, save, write_geo
 
 from proxy_index import traffic
 from proxy_index.browser import contracts
 from proxy_index.calculated import browser, store
 from proxy_index.calculated.aggregate import timed
 from proxy_index.calculated.calculator import calculate
+from proxy_index.calculated.inputs import cutoff
 from proxy_index.calculated.policy import load as load_policy
 from proxy_index.calculated.policy import validate
 from proxy_index.models import Outcome
@@ -227,6 +229,13 @@ def test_methodology_target_groups():
     ):
         with pytest.raises(ValueError, match="Invalid target groups"):
             validate(copy.deepcopy(config) | {"target_groups": groups})
+    # Browser, group and source targets are per-target only: never required (D9 by construction).
+    for target in ("amazon_pdp", GROUP, "ai_chatgpt"):
+        required = copy.deepcopy(config)
+        required["required_targets"] = [*config["required_targets"], target]
+        required["benchmark_weights"] = config["benchmark_weights"] | {target: 1}
+        with pytest.raises(ValueError, match="cannot be a required target"):
+            validate(required)
     del config["target_groups"]
     assert validate(config)  # optional
 
@@ -507,3 +516,51 @@ def test_group_rate_is_timed_over_the_union():
     # Slot one: 10 of 40 succeeded; slot two: none of 10. Each slot weighs the same.
     assert m["success_rate"] == (10 / 40 + 0) / 2
     assert m["request_success_rate"] == 10 / 50
+
+
+@pytest.mark.asyncio
+async def test_a_browser_run_in_the_cutoff_bucket_never_moves_the_cutoff(
+    database, tmp_path, ai_sources
+):
+    """An off-grid cutoff whose bucket holds only a finished browser run stays at the bucket's
+    start, as without it (else every network window would shift by 5 minutes), for an explicit
+    cutoff and for a calculation of everything stored (latest)."""
+    grid = await generic(database, tmp_path)  # after every network run's buckets
+    requested = grid + timedelta(minutes=2, seconds=30)
+    policy = lenient_policy(tmp_path)
+    before = calculate(database, policy, as_of=requested)
+    selection = tries("amazon_pdp", 1)
+    directory = await measurement(
+        tmp_path,
+        requests=len(selection),
+        target="amazon_pdp",
+        provider=PROVIDERS[0],
+        concurrency=1,
+        requested_country="us",
+        transport_factory=browser_transport(selection),
+    )
+    summary = load(directory)
+    summary["started_at"] = (grid + timedelta(seconds=10)).isoformat(timespec="microseconds")
+    summary["finished_at"] = (grid + timedelta(seconds=60)).isoformat(timespec="microseconds")
+    assert len(summary["buckets"]) == 1
+    summary["buckets"][0]["bucket_start"] = grid.isoformat(timespec="microseconds")
+    save(directory, summary)
+    with connect(database) as conn:
+        batch_id = batch(conn, "browser", grid, country="US", target="amazon_pdp")
+    key = ingest(directory, database, batch_id=batch_id)["run_key"]
+    with connect(database) as conn:
+        batch_run(
+            conn,
+            batch_id,
+            product(conn, PROVIDERS[0]),
+            grid + timedelta(seconds=60),
+            run_key=key,
+            requests=summary["completed"],
+            successes=summary["successes"],
+            bytes_down=summary["bytes_down"],
+        )
+        conn.row_factory = dict_row
+        assert cutoff(conn, requested, True) == cutoff(conn, requested, False) == grid
+    after = calculate(database, policy, as_of=requested)
+    assert before["as_of"] == after["as_of"] == grid.isoformat()
+    assert first_difference(network_only(before), network_only(after)) is None

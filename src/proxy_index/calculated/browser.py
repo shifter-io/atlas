@@ -55,8 +55,8 @@ def engine(target):
 
 def split(rows):
     """(network rows, browser rows) of a group's bucket rows, each in its original order. A row
-    is a browser row when its run's batch kind (test) is browser, else when its target's engine
-    is."""
+    is a browser row when its run's batch kind (test) is browser or its target's engine is (a
+    pulse batch of a browser target is browser too)."""
     network, browser = [], []
     for row in rows:
         is_browser = row.get("test") == BROWSER_KIND or engine(row["target"]) == BROWSER_ENGINE

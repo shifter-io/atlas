@@ -3,6 +3,8 @@
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
+from .browser import NOT_BROWSER
+
 
 def group_by_product(rows, drop_id=False):
     """Rows by product_id, without that key when drop_id is set."""
@@ -49,15 +51,18 @@ def cutoff(conn, requested, latest):
     had finished by `requested` (always so for `latest`, a calculation of everything stored now:
     a run is stored only once it has finished), so a run that ended just before the calculation
     is in it. Otherwise it moves to the bucket's start, which leaves out any part of a run that
-    ended after `requested`. Each bucket is in a snapshot once or not at all.
+    ended after `requested`. Each bucket is in a snapshot once or not at all. Only network runs
+    count: a browser run never moves the cutoff (so never a network window); a bucket that holds
+    only browser data waits for a later calculation.
     """
     start = datetime.fromtimestamp(int(requested.timestamp() // 300) * 300, UTC)
     if start == requested:
         return start
     row = conn.execute(
         "SELECT count(*) AS runs,count(*) FILTER (WHERE r.finished_at>%s) AS running "
-        "FROM (SELECT DISTINCT run_key FROM run_buckets WHERE bucket_start=%s) b "
-        "JOIN test_runs r USING(run_key)",
+        "FROM (SELECT DISTINCT run_key FROM run_buckets WHERE bucket_start=%s) k "
+        "JOIN test_runs r USING(run_key) LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
+        f"WHERE {NOT_BROWSER}",
         (requested, start),
     ).fetchone()
     closed = row["runs"] and (latest or not row["running"])
