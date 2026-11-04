@@ -35,9 +35,11 @@ STATEMENTS = (
     "SELECT queryid::text,left(query,%s),calls,total_exec_time FROM pg_stat_statements "
     "WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database())"
 )
+# pg_partition_tree gives no row for a table that is not partitioned: that table counts alone.
 SIZES = (
-    "SELECT c.relname,sum(pg_total_relation_size(t.relid))::bigint FROM pg_class c "
-    "JOIN pg_namespace n ON n.oid=c.relnamespace CROSS JOIN LATERAL pg_partition_tree(c.oid) t "
+    "SELECT c.relname,sum(pg_total_relation_size(coalesce(t.relid,c.oid)))::bigint "
+    "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+    "LEFT JOIN LATERAL pg_partition_tree(c.oid) t ON true "
     "WHERE n.nspname=current_schema() AND c.relkind IN ('r','p') AND NOT c.relispartition "
     "GROUP BY 1 ORDER BY 2 DESC,1"
 )
