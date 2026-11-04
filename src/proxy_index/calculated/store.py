@@ -482,13 +482,12 @@ def read_head(database, snapshot="current"):
 
 
 def read_parts(database, snapshot, kind="products", *, product=None, cohort=None, keys=None):
-    """The snapshot's product groups ("products") or runs ("runs"), in order; see parts.rows()."""
+    """The snapshot's product groups ("products") or runs ("runs"), in order, or None when it has
+    no snapshot; see parts.rows(). One snapshot of the database answers all of it."""
     with connect(database) as conn:
-        conn.execute("SET TRANSACTION READ ONLY")
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         build_id = _build(conn, snapshot)
-        if build_id is None:
-            return []
-        return parts.rows(conn, build_id, kind, product, cohort, keys)
+        return None if build_id is None else parts.rows(conn, build_id, kind, product, cohort, keys)
 
 
 def _fraction(value):

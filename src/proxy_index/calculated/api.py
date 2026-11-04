@@ -64,10 +64,15 @@ def needs(resource, query):
     return ("runs", None, None, None) if resource == "runs" else None
 
 
+class Unavailable(LookupError):
+    """The build has no snapshot any more (pruned or expired since its id was looked up)."""
+
+
 def needed(database, snapshot, kind, product, cohort, keys):
-    """The parts an answer needs (store.read_parts()), each group's series with every bucket."""
+    """The parts an answer needs (store.read_parts()), each group's series with every bucket;
+    None when the build has no snapshot."""
     rows = store.read_parts(database, snapshot, kind, product=product, cohort=cohort, keys=keys)
-    if kind == "runs" or keys:
+    if rows is None or kind == "runs" or keys:
         return rows
     return [p | {"windows": {k: dense(w) for k, w in p["windows"].items()}} for p in rows]
 
@@ -179,9 +184,16 @@ class Cache:
         return body
 
     async def load(self, cache, key, read, database, build_id, *args):
-        """cache[key], read into it (read(database, str(build_id), *args)) unless present."""
+        """cache[key], read into it (read(database, str(build_id), *args)) unless present.
+
+        A read that finds no snapshot (None) raises Unavailable and caches nothing, so a build
+        expired after its head was cached never answers with no groups.
+        """
         if key not in cache:
-            cache[key] = await asyncio.to_thread(read, database, str(build_id), *args)
+            found = await asyncio.to_thread(read, database, str(build_id), *args)
+            if found is None:
+                raise Unavailable(build_id)
+            cache[key] = found
             while len(cache) > PAYLOADS:
                 cache.popitem(last=False)
         cache.move_to_end(key)
@@ -219,6 +231,8 @@ async def handle(request):
     # Pin the body to the token's immutable version if publication moves between reads.
     try:
         body = await cache.answer(request.app[DATABASE], token[0], resource, request.query)
+    except Unavailable as exc:
+        raise web.HTTPNotFound(text="Snapshot unavailable") from exc
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
     return web.Response(body=body, content_type="application/json", headers=headers)

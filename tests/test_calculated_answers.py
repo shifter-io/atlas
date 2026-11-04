@@ -161,3 +161,19 @@ async def test_requests_do_no_database_work_once_cached(monkeypatch, payload):
     now[0] += api.HEAD_SECONDS + 1
     await cache.head(None, "current")
     assert calls["head"] == 2
+
+
+async def test_a_build_without_a_snapshot_is_unavailable_and_nothing_is_cached(
+    monkeypatch, payload
+):
+    head = {k: v for k, v in payload.items() if k not in ("products", "runs")}
+    monkeypatch.setattr(api.store, "read_head", lambda database, snapshot: head)
+    monkeypatch.setattr(api.store, "read_parts", lambda database, snapshot, kind, **kw: None)
+    cache = Cache()
+    with pytest.raises(api.Unavailable):
+        await cache.answer(None, 7, "scores", {"window": "7d"})
+    assert not cache.parts and not cache.answers and list(cache.payloads) == [7]
+    monkeypatch.setattr(api.store, "read_head", lambda database, snapshot: None)
+    with pytest.raises(api.Unavailable):
+        await cache.answer(None, 8, "fleet", {"window": "7d"})
+    assert list(cache.payloads) == [7] and not cache.answers

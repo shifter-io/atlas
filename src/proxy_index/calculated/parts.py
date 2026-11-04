@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from psycopg.rows import tuple_row
 
@@ -107,8 +107,18 @@ def _rows(conn, build_id, kind, value="r.value", named=False, **filters):
 
 
 def rows(conn, build_id, kind, product=None, cohort=None, keys=None):
-    """A build's product groups ("products") or runs ("runs") in order. product and cohort
-    keep the groups of one product id or cohort; keys keeps only those keys of each value."""
+    """A build's product groups ("products") or runs ("runs") in order, or None when the build
+    has no snapshot (never stored, pruned or expired): no groups is not a missing build. product
+    and cohort keep the groups of one product id or cohort; keys keeps only those keys of each
+    group. Runs take none of them. Run it in one snapshot (REPEATABLE READ) for a consistent
+    answer."""
+    if kind == "runs" and (product or cohort or keys):
+        raise ValueError("Runs are read whole: no product, cohort or keys")
+    found = conn.cursor(row_factory=tuple_row).execute(
+        "SELECT FROM calculated_snapshots WHERE build_id=%s", (int(build_id),)
+    )
+    if found.fetchone() is None:
+        return None
     return list(_rows(conn, build_id, kind, product=product, cohort=cohort, keys=keys))
 
 
@@ -186,15 +196,15 @@ def dense(window):
     if window["period"]["hours"] != 24:
         return window
     start, end = (datetime.fromisoformat(window["period"][k]) for k in ("start", "end"))
+    step = timedelta(minutes=5)
     timed = (window.get("latency") or {}).get("target")
+    # The one empty point series() writes for a bucket without data; only "at" differs.
+    empty = series([], [], start, start + step, 24, latency_target=timed)[0]
+    empty = json.loads(json.dumps(empty, default=iso))
+    empty = jsonb_order({k: jsonb_order(v) if isinstance(v, dict) else v for k, v in empty.items()})
     kept = {point["at"]: point for point in window["series"]}
-    points = [
-        kept.get(iso(point["at"])) or _empty(point)
-        for point in series([], [], start, end, 24, latency_target=timed)
-    ]
+    points, at = [], start
+    while at < end:
+        points.append(kept.get(iso(at)) or empty | {"at": iso(at)})
+        at += step
     return window | {"series": points}
-
-
-def _empty(point):
-    point = json.loads(json.dumps(point, default=iso))
-    return jsonb_order({k: jsonb_order(v) if isinstance(v, dict) else v for k, v in point.items()})

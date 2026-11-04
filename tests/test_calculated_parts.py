@@ -22,7 +22,7 @@ from test_storage import measurement
 
 from proxy_index.calculated import calculator, parts, store
 from proxy_index.calculated.aggregate import series
-from proxy_index.calculated.api import RESOURCES, app
+from proxy_index.calculated.api import CACHE, RESOURCES, app
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.policy import digest
 from proxy_index.storage import connect, ingest, initialize, migrate
@@ -316,7 +316,10 @@ async def test_prune_and_discard_drop_the_parts_partition(database, tmp_path, mo
         assert report["bytes"]["calculated_snapshot_parts"] > 0
     assert store.read(database, str(ids[-1])) is None
     assert store.read_head(database, str(ids[-1])) is None
-    assert store.read_parts(database, "current") == []
+    assert store.read_parts(database, "current") is None
+    assert store.read_parts(database, str(ids[-1])) is None
+    with connect(database) as conn, pytest.raises(ValueError, match="Runs are read whole"):
+        parts.rows(conn, ids[-2], "runs", product="1")
 
 
 @pytest.mark.asyncio
@@ -447,3 +450,26 @@ def test_a_failed_v7_check_rolls_back(databases, monkeypatch):
     with connect(database) as conn:
         assert conn.execute("SELECT version FROM calculation_schema").fetchall() == [(7,)]
         assert conn.execute("SELECT to_regclass('calculated_snapshot_parts')").fetchone() == (None,)
+
+
+@pytest.mark.asyncio
+async def test_a_build_gone_after_its_head_was_cached_answers_404_and_caches_nothing(
+    database, tmp_path
+):
+    """Its id and head are cached, then the build is expired (a same-day publication does this
+    to the previous current build): its group answers are 404, never a cached empty 200."""
+    end = await two_providers(database, tmp_path)
+    build = calculate(database, POLICY, as_of=end, publish=True)["snapshot_id"]
+    application = app(database)
+    async with TestClient(TestServer(application)) as client:
+        assert (await client.get(f"/v1/snapshots/{build}")).status == 200
+        with connect(database) as conn:
+            conn.execute("DELETE FROM current_calculation")
+            store.discard(conn, int(build))
+        for _ in range(2):  # the id and head stay cached for HEAD_SECONDS
+            for path in (f"/products?window=24h&product={10**6}", "/runs?window=24h"):
+                response = await client.get(f"/v1/snapshots/{build}{path}")
+                assert (response.status, await response.text()) == (404, "Snapshot unavailable")
+        cache = application[CACHE]
+        assert [key[1] for key in cache.answers] == [None]
+        assert all(key[1][0] == "products" and key[1][3] for key in cache.parts)
