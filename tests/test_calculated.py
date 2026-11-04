@@ -741,7 +741,7 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     import psycopg
     from psycopg import sql
 
-    from proxy_index.calculated import calculator
+    from proxy_index.calculated import lists
 
     store.initialize(database)
     directory = await measurement(tmp_path, requests=5)
@@ -749,13 +749,13 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     raw = json.loads((directory / "summary.json").read_text())
     cutoff = datetime.fromisoformat(raw["finished_at"]) + timedelta(minutes=5)
     first = calculate(database, POLICY, as_of=cutoff, publish=True)
-    original = calculator.persist
+    original = lists.persist
 
     def fail_after_writing(conn, payload, **signed):
         original(conn, payload, **signed)
         raise ValueError("Injected validation/storage failure")
 
-    monkeypatch.setattr(calculator, "persist", fail_after_writing)
+    monkeypatch.setattr(lists, "persist", fail_after_writing)
     with pytest.raises(ValueError, match="Injected"):
         calculate(database, POLICY, as_of=cutoff + timedelta(minutes=5), publish=True)
     assert store.read(database)["snapshot_id"] == first["snapshot_id"]

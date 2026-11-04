@@ -9,7 +9,7 @@ import pytest
 from test_calculated import POLICY, payload_mismatches
 from test_storage import enrichment, measurement
 
-from proxy_index.calculated import calculator, store
+from proxy_index.calculated import calculator, lists, store
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.policy import digest
 from proxy_index.storage import connect, ingest
@@ -133,13 +133,13 @@ async def test_signature_v1_is_the_digest_of_its_frozen_inputs(database, tmp_pat
 
 @pytest.mark.asyncio
 async def test_verify_on_hit_fails_an_incomplete_signature(database, tmp_path, monkeypatch):
-    signatures = calculator.signatures
+    signatures = lists.signatures
 
     def without_runs(conn, payload, runs, buckets):
         """A deliberately incomplete signature: it leaves the runs out."""
         return {key: digest(list(key)) for key in signatures(conn, payload, runs, buckets)}
 
-    monkeypatch.setattr(calculator, "signatures", without_runs)
+    monkeypatch.setattr(lists, "signatures", without_runs)
     store.initialize(database)
     (us, again), end = await runs(tmp_path, "us", "us")
     ingest(us, database)

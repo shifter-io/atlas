@@ -7,7 +7,6 @@ import math
 import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from functools import partial
 from itertools import combinations
 from pathlib import Path
 
@@ -47,8 +46,8 @@ from .aggregate import (
     with_under_load,
 )
 from .fleet import fleet_entry, fleet_totals
-from .inputs import cutoff, group_by_product, previous_products, tested_by_product
-from .lists import CRITERIA, persist, signatures
+from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
+from .lists import CRITERIA, reusing
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .parts import sparse
@@ -238,8 +237,7 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 **scheduled,
             )
             payload = estimates.window.attach(payload, runs, conn, as_of, config)
-            signed = signatures(conn, payload, runs, buckets)  # reused lists (lists.py)
-            payload = write(conn, build_id, payload, config, partial(persist, signed=signed))
+            payload = write(conn, build_id, payload, config, reusing(conn, payload, runs, buckets))
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -508,13 +506,7 @@ def build(
         linked = r.get("batch_id") is not None
         cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
-        r["group"] = key
-        # A light run's histograms count for the breakdowns' latency (and its list signature).
-        r["light"] = (
-            r.get("test") in (None, "pulse")
-            and not flagged_runs.get(r["run_key"])
-            and r["scope"]["target"]["id"] == timed_target
-        )
+        r["group"], r["light"] = key, light_load(r, flagged_runs, timed_target)
         run_map[r["run_key"]] = r
         if linked:
             scheduled_groups[r["product_id"]] = key

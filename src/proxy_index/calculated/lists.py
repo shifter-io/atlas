@@ -16,6 +16,7 @@ and the previous build keeps serving. Census-pulse groups have no signature (NUL
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import partial
 
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
@@ -199,6 +200,11 @@ def signatures(conn, payload, runs, buckets):
             ]
             signed[(*group, hours)] = digest(head | {"hours": hours, "runs": entries})
     return signed
+
+
+def reusing(conn, payload, runs, buckets):
+    """The persist() of a built payload: with its windows' signatures, so it reuses lists."""
+    return partial(persist, signed=signatures(conn, payload, runs, buckets))
 
 
 def persist(conn, payload, signed=None):
