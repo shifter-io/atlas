@@ -228,22 +228,29 @@ async def _process(
     )
 
 
-def _nested(name: str) -> bool:
+def bundle_member(name: str) -> bool:
+    """A K-BP4 `browser/` member or one of its two directories."""
     return MEMBERS.is_member(name) or name in FOLDERS
 
 
-def _open_bundle(work: Path, limit: int) -> tuple[dict, dict]:
-    """Unpack with the run archive's limits (its K-BP4 members besides), move `browser/` out of
-    the run directory, validate the manifest and the files it lists."""
-    run_dir, browser = work / "run", work / "browser"
-    run_dir.mkdir(mode=0o700)
-    names = unpack(
-        work / "bundle.tar.gz",
-        run_dir,
+def unpack_bundle(source: Path, directory: Path, limit: int) -> list[str]:
+    """orchestrator.archive.unpack of a browser bundle: the run archive's limits, its `browser/`
+    members (at most a manifest, the tries and one screenshot per try) besides."""
+    return unpack(
+        source,
+        directory,
         max_bytes=limit,
-        nested=_nested,
+        nested=bundle_member,
         max_members=MAX_MEMBERS + 2 + bc.MAX_TRIES,
     )
+
+
+def _open_bundle(work: Path, limit: int) -> tuple[dict, dict]:
+    """Unpack, move `browser/` out of the run directory, validate the manifest and the files it
+    lists."""
+    run_dir, browser = work / "run", work / "browser"
+    run_dir.mkdir(mode=0o700)
+    names = unpack_bundle(work / "bundle.tar.gz", run_dir, limit)
     if MEMBERS.manifest not in names:
         raise ValueError("the bundle has no browser/manifest.json")
     (run_dir / "browser").replace(browser)

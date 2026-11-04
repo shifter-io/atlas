@@ -15,7 +15,9 @@ that writes the database (so it can be rebuilt from them), uploaded to Spaces af
   recorded as uploaded; an hour with a file not uploaded is never removed.
 - `rebuild` imports the spooled runs of a range of days, oldest first, into a database:
   replays of runs already there are no-ops, and a run whose batch is not in the target is
-  imported without its batch link (reported).
+  imported without its batch link (reported). `rebuild_browser` does the same from Spaces for
+  the browser bundles (K-BP4 objects under `browser.archive_prefix`, by slot day): each one's
+  run directory, its `browser/` members left out.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ FILE = re.compile(
     r"(?P<kind>census|pulse|load|browser|daily)(?:-b(?P<batch>\d+))?-[0-9a-f-]{36}\.tar\.gz"
 )
 UPLOADED = "uploaded.json"
+SLOT_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})T\d{4}Z\.tar\.gz")
 SETTLE = timedelta(minutes=5)  # an hour is packed this long after it ended
 KEEP_DAYS = 30
 MAX_EXTRACTED = 64 << 30  # a rebuild trusts its own spool more than an upload
@@ -180,4 +183,34 @@ def rebuild(root, database, first: date, last: date) -> dict:
                 report["unlinked"].append(path.name)
             report["runs"] += 1
             report["imported"] += _import(path, database, batch, match["kind"])
+    return report
+
+
+def rebuild_browser(spaces: Spaces, database, prefix: str, first: date, last: date) -> dict:
+    """Import the archived browser bundles whose slot falls on the days first..last (CALC-INC
+    Q5: a rebuild downloads from Spaces), like `rebuild`: replays are no-ops."""
+    from ..orchestrator.archive import ArchiveError as UploadError
+    from ..orchestrator.browser_ingest import unpack_bundle
+
+    report = {"runs": 0, "imported": 0, "unlinked": []}
+    for key in spaces.list_keys(f"{prefix}/"):
+        slot = SLOT_NAME.fullmatch(key.rsplit("/", 1)[-1])
+        if slot is None or not first <= date.fromisoformat(slot[1]) <= last:
+            continue
+        with tempfile.TemporaryDirectory(prefix="proxy-index-rebuild-") as temporary:
+            bundle, directory = Path(temporary, "bundle.tar.gz"), Path(temporary, "run")
+            spaces.get_file(key, bundle)
+            directory.mkdir()
+            try:
+                unpack_bundle(bundle, directory, MAX_EXTRACTED)
+                manifest = json.loads((directory / "browser" / "manifest.json").read_text())
+            except (UploadError, OSError, ValueError) as exc:
+                raise ArchiveError(f"{key} is not a readable browser bundle: {exc}") from None
+            shutil.rmtree(directory / "browser")
+            batch = _batch(database, str(manifest.get("batch_id")))
+            if batch is None:
+                report["unlinked"].append(key)
+            done = storage.ingest(directory, database, batch_id=batch, ip_rows=False)
+        report["runs"] += 1
+        report["imported"] += bool(done["imported"])
     return report

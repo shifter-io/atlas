@@ -1,9 +1,10 @@
 """A small DigitalOcean Spaces (S3) client on the standard library: AWS Signature V4.
 
-Only what the archive needs: HEAD, PUT and GET of one object, and the bucket's versioning and
-ACL. Objects are written private (`x-amz-acl: private`) with a signed payload sha256 and a
-Content-MD5, so the server rejects a body that changed on the way; the file's sha256 is also
-stored as `x-amz-meta-sha256`, which HEAD returns for the verification before any deletion.
+Only what the archive needs: HEAD, PUT and GET of one object, a prefix's keys, and the bucket's
+versioning and ACL. Objects are written private (`x-amz-acl: private`) with a signed payload
+sha256 and a Content-MD5, so the server rejects a body that changed on the way; the file's
+sha256 is also stored as `x-amz-meta-sha256`, which HEAD returns for the verification before any
+deletion.
 
 Settings: a `[spaces]` table (endpoint, bucket, access_key_id and optionally region and
 secret_access_key) in a 0600 file. Without secret_access_key the secret is read from the macOS
@@ -238,6 +239,20 @@ class Spaces:
             partial.replace(path)
         finally:
             connection.close()
+
+    def list_keys(self, prefix: str) -> list[str]:
+        """Every key starting with prefix, in key order (ListObjectsV2, paged by start-after:
+        callers' keys are plain path characters)."""
+        keys: list[str] = []
+        while True:
+            query = {"list-type": "2", "prefix": prefix} | (
+                {"start-after": keys[-1]} if keys else {}
+            )
+            _, _, data = self._call("GET", query=query)
+            page = [k.decode() for k in re.findall(rb"<Key>([^<]+)</Key>", data)]
+            keys += page
+            if not page or b"<IsTruncated>true</IsTruncated>" not in data:
+                return keys
 
     def versioning(self) -> str | None:
         _, _, data = self._call("GET", query={"versioning": ""})

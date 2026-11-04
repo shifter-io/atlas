@@ -9,18 +9,23 @@ import tarfile
 import tempfile
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from contextlib import contextmanager
+from datetime import UTC, date, datetime, timedelta
+from http.server import ThreadingHTTPServer
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from test_archive_job import fake_bucket
+from test_archive import empty_database
+from test_archive_job import KEY_ID, SECRET, Bucket
 from test_orchestrator import bearer, planned_run, prepare, query
 from test_storage import measurement
 
 from proxy_index.archive import ArchiveError
 from proxy_index.archive.export import file_digests
+from proxy_index.archive.rawfiles import rebuild_browser
 from proxy_index.archive.spaces import ArchiveChanged, Spaces
 from proxy_index.browser import contracts as bc
+from proxy_index.cli import main
 from proxy_index.models import VERDICTS
 from proxy_index.orchestrator import browser_ingest
 from proxy_index.orchestrator.app import build_app
@@ -37,6 +42,43 @@ SLOT = datetime(2026, 10, 1, 12, tzinfo=UTC)
 MEMBERS = bc.bundle_members()
 HOSTS = {"alpha": "browser-1", "beta": "browser-2", "gamma": "browser-3"}
 KEY = "browser-files/alpha.res/amazon_pdp/de/2026-10-01T1200Z.tar.gz"
+
+
+class ListingBucket(Bucket):
+    """ARCHIVE-1's fake bucket, plus ListObjectsV2 pages of two keys (start-after)."""
+
+    def _handle(self):
+        query = self.path.partition("?")[2]
+        if "list-type=2" not in query:
+            return super()._handle()
+        if not self._signed(None):
+            return self._answer(403, b"<Error><Code>SignatureDoesNotMatch</Code></Error>")
+        params = dict(q.partition("=")[::2] for q in query.split("&"))
+        after, prefix = params.get("start-after", ""), params["prefix"]
+        keys = sorted(k[1:] for k in self.objects if k[1:].startswith(prefix) and k[1:] > after)
+        xml = "".join(f"<Contents><Key>{key}</Key></Contents>" for key in keys[:2])
+        more = str(len(keys) > 2).lower()
+        body = f"<ListBucketResult><IsTruncated>{more}</IsTruncated>{xml}</ListBucketResult>"
+        return self._answer(200, body.encode())
+
+    do_GET = do_PUT = do_HEAD = _handle
+
+
+@contextmanager
+def listing_bucket(tmp_path):
+    handler = type("Handler", (ListingBucket,), {"objects": {}, "state": {}})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    settings = tmp_path / "spaces.toml"
+    settings.write_text(
+        f'[spaces]\nendpoint = "http://127.0.0.1:{server.server_port}"\nbucket = "archive"\n'
+        f'region = "fra1"\naccess_key_id = "{KEY_ID}"\nsecret_access_key = "{SECRET}"\n'
+    )
+    settings.chmod(0o600)
+    try:
+        yield handler, settings
+    finally:
+        server.shutdown()
 
 
 @pytest.fixture
@@ -76,9 +118,15 @@ async def world(database, db, client, tmp_path, scratch):
         reply = await client.post("/v1/register", json=body, headers=bearer(node["token"]))
         assert reply.status == 200, await reply.text()
     spool = tmp_path / "spool"
-    with fake_bucket(tmp_path) as (bucket, settings):
+    with listing_bucket(tmp_path) as (bucket, settings):
         await set_settings(db, {"archive.spaces_file": str(settings), "raw.spool_dir": str(spool)})
-        yield {"tokens": tokens, "bucket": bucket, "spool": spool, "tmp": tmp_path}
+        yield {
+            "tokens": tokens,
+            "bucket": bucket,
+            "spool": spool,
+            "tmp": tmp_path,
+            "file": settings,
+        }
 
 
 async def set_settings(db, values):
@@ -583,6 +631,58 @@ async def test_a_browser_node_must_register_before_it_uploads(database, client, 
     assert status == 403 and "register" in body["error"]
 
 
+# --- the rebuild from Spaces (CALC-INC Q5) ---------------------------------------------------
+
+
+async def test_archive_rebuild_replays_the_browser_bundles_from_spaces(
+    database, databases, client, world, scratch, capsys
+):
+    run_ids = []
+    for target in bc.PAGE_TARGETS[:3]:
+        batch_id = browser_run(database, "alpha", target=target)
+        data, run_id = await make_bundle(world["tmp"], batch_id, target=target)
+        assert (await upload(client, world["tokens"]["alpha"], batch_id, data, run_id))[0] == 200
+        run_ids.append(run_id)
+    world["bucket"].objects["/browser-files/README.txt"] = (b"x", [], "private")  # not a bundle
+    world["bucket"].objects["/raw-files/2026/10/01/2026-10-01T12.tar"] = (b"x", [], "private")
+    target = empty_database(databases)
+    spaces = Spaces.from_file(world["file"])
+    day = date(2026, 10, 1)
+    report = rebuild_browser(spaces, target, "browser-files", day, day)
+    assert report["runs"] == report["imported"] == 3 and len(report["unlinked"]) == 3
+    with connect(target) as conn:
+        found = conn.execute("SELECT run_id::text FROM test_runs ORDER BY 1").fetchall()
+    assert [row[0] for row in found] == sorted(run_ids)
+    # The run linked to its batch where the target has it; a replay imports nothing.
+    assert rebuild_browser(spaces, database, "browser-files", day, day) == {
+        "runs": 3,
+        "imported": 0,
+        "unlinked": [],
+    }
+    args = ["archive", "rebuild", "--spaces-file", str(world["file"]), "--from", "2026-10-01"]
+    assert main([*args, "--to", "2026-10-01", "--database-file", str(target)]) == 0
+    assert json.loads(capsys.readouterr().out)["browser"]["imported"] == 0
+    assert rebuild_browser(spaces, target, "browser-files", day + timedelta(1), day)["runs"] == 0
+    assert (
+        main(
+            [
+                "archive",
+                "rebuild",
+                "--from",
+                "2026-10-01",
+                "--to",
+                "2026-10-01",
+                "--database-file",
+                str(target),
+            ]
+        )
+        == 2
+    )
+    world["bucket"].objects["/" + KEY] = (b"not a bundle", [], "private")
+    with pytest.raises(ArchiveError, match="not a readable browser bundle"):
+        rebuild_browser(spaces, target, "browser-files", day, day)
+
+
 # --- the archive helpers ----------------------------------------------------------------------
 
 
@@ -619,7 +719,7 @@ def test_unpack_admits_only_the_nested_names_asked_for(tmp_path):
                 archive.addfile(info, io.BytesIO(b"{}"))
         return path
 
-    nested = browser_ingest._nested
+    nested = browser_ingest.bundle_member
     out = fresh()
     names = unpack(archive_of(MEMBERS.tries), out, max_bytes=100, nested=nested)
     assert names == ["summary.json", MEMBERS.tries] and (out / MEMBERS.tries).is_file()
