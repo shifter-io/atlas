@@ -1,23 +1,29 @@
-"""The DB-IP release behind each observation (DBIP-DAILY-1).
+"""The DB-IP releases behind each observation (DBIP-DAILY-1, RELEASE-PER-RUN-1).
 
 Each run keeps the release it was enriched with: its observations are read with that run's
 newest entry in `run_enrichments`, never with the newest release overall. So a new release
 (the daily update) changes only the runs enriched with it, and older runs keep their
-locations. The snapshot names the newest release that some run uses; a release the update
-recorded before any run used it changes nothing.
+locations. A release is its file's sha256 (`dbip_releases.sha256`), so a file replaced under
+the same name with new content is a new release. Runs without enrichment (pulse) stay
+unlabelled.
+
+An IP that runs with different releases returned takes the labels of its lowest run_key in the
+window: the rows come ordered by run_key and `aggregate.pool()` keeps an IP's first row.
+
+The snapshot names every release its observations were labelled with (`dbip_releases`,
+ascending ids) and the newest of them (`dbip_release`, null when it used none). A release no
+observation of the window used (recorded by the update before any run used it, or used only by
+runs outside the window) is in neither, so a build at an older cutoff names what it used.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-RELEASE = (
-    "SELECT release_id,sha256,metadata FROM dbip_releases WHERE release_id IN "
-    "(SELECT release_id FROM run_enrichments) ORDER BY release_id DESC LIMIT 1"
-)
+RELEASE = "SELECT release_id,sha256,metadata FROM dbip_releases WHERE release_id=%s"
+RUN_RELEASES = "SELECT run_key,max(release_id) AS release_id FROM run_enrichments GROUP BY run_key"
 OBSERVATIONS = (
-    "WITH run_release AS (SELECT run_key,max(release_id) AS release_id "
-    "FROM run_enrichments GROUP BY run_key) "
+    f"WITH run_release AS ({RUN_RELEASES}) "
     "SELECT o.*,host(a.ip) AS ip,e.matched,e.country_code,e.country,e.region_code,e.region,"
     "e.city,e.latitude,e.longitude,e.isp,e.organization,e.asn,e.asn_organization,"
     "e.connection_type,e.usage_type,m.first_seen AS product_first_seen "
@@ -31,7 +37,17 @@ OBSERVATIONS = (
 )
 
 
-def enriched_observations(conn, start, as_of) -> tuple[dict[str, Any] | None, list]:
-    """The snapshot's release and the window's observations, each with its run's release."""
-    release = conn.execute(RELEASE).fetchone()
-    return release, conn.execute(OBSERVATIONS, (start, as_of)).fetchall()
+def enriched_observations(conn, start, as_of) -> tuple[dict[str, Any], list]:
+    """The snapshot's release fields (snapshot_fields()) and the window's observations, each
+    with its run's release."""
+    observations = conn.execute(OBSERVATIONS, (start, as_of)).fetchall()
+    per_run = {r["run_key"]: r["release_id"] for r in conn.execute(RUN_RELEASES)}
+    observed = {o["run_key"] for o in observations}
+    used = sorted({per_run[k] for k in observed if k in per_run})
+    newest = conn.execute(RELEASE, (used[-1],)).fetchone() if used else None
+    return {"dbip_release": newest, "dbip_releases": used}, observations
+
+
+def snapshot_fields(release: dict[str, Any] | None) -> dict[str, Any]:
+    """The payload's `dbip_release` and `dbip_releases` (none for a build given no release)."""
+    return release or {"dbip_release": None, "dbip_releases": []}
