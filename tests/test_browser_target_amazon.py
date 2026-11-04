@@ -9,6 +9,7 @@ CASES = cases(c.AMAZON_PDP)
 
 
 def test_amazon_pdp_has_its_cases():
+    assert c.AMAZON_PDP in c.PAGE_TARGETS
     assert {path.stem for path in CASES} == {"ok", "captcha", "dogs_page", "no_price", "status_503"}
 
 

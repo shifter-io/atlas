@@ -21,6 +21,7 @@ CASES = cases(c.INSTAGRAM_WEB)
 
 
 def test_instagram_web_has_its_cases():
+    assert c.INSTAGRAM_WEB in c.PAGE_TARGETS
     assert {path.stem for path in CASES} == {
         "instagram_ok",
         "instagram_login_dialog",

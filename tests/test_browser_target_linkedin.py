@@ -21,6 +21,7 @@ CASES = cases(c.LINKEDIN_PUBLIC)
 
 
 def test_linkedin_public_has_its_cases():
+    assert c.LINKEDIN_PUBLIC in c.PAGE_TARGETS
     assert {path.stem for path in CASES} == {
         "ok",
         "ok_login_like_slug",

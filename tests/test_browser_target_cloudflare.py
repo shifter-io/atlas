@@ -24,6 +24,7 @@ CASES = cases(c.CLOUDFLARE_CHALLENGE)
 
 
 def test_cloudflare_challenge_has_its_cases():
+    assert c.CLOUDFLARE_CHALLENGE in c.PAGE_TARGETS
     assert {path.stem for path in CASES} == {
         "cleared",
         "still_challenged",

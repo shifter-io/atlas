@@ -9,6 +9,7 @@ CASES = cases(c.GOOGLE_SEARCH)
 
 
 def test_google_search_has_its_cases():
+    assert c.GOOGLE_SEARCH in c.PAGE_TARGETS
     assert {path.stem for path in CASES} == {
         "ok",
         "sorry",

@@ -24,6 +24,10 @@ from proxy_index.browser.targets.pages import PAGE_TARGET_TYPES
 from proxy_index.targets import PageView, registry
 
 
+def test_every_page_target_has_its_cases():
+    assert all(cases(target) for target in c.PAGE_TARGETS)
+
+
 @pytest.mark.parametrize("path", cases("judge"), ids=lambda p: p.stem)
 def test_shared_judge_cases(path):
     view, expected = load(path)
