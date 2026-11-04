@@ -151,6 +151,17 @@ def _member_path(root: Path, info: zipfile.ZipInfo) -> Path:
     return root.joinpath(*path.parts)
 
 
+def _extract(bundle: zipfile.ZipFile, info: zipfile.ZipInfo, path: Path) -> None:
+    """One member; a directory, or a new file with mode 0755 or 0644."""
+    if info.is_dir():
+        path.mkdir(parents=True, exist_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with bundle.open(info) as source, path.open("xb") as out:
+        shutil.copyfileobj(source, out, CHUNK)
+    path.chmod(0o755 if (info.external_attr >> 16) & 0o111 else 0o644)
+
+
 def _unpack(archive: Path, root: Path) -> None:
     total = 0
     try:
@@ -160,16 +171,10 @@ def _unpack(archive: Path, root: Path) -> None:
                 raise ReleaseError("archive has too many members")
             for info in members:
                 path = _member_path(root, info)
-                if info.is_dir():
-                    path.mkdir(parents=True, exist_ok=True)
-                    continue
-                total += info.file_size
+                total += 0 if info.is_dir() else info.file_size
                 if total > MAX_UNPACKED_BYTES:
                     raise ReleaseError("archive is larger than the unpack limit")
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with bundle.open(info) as source, path.open("xb") as out:
-                    shutil.copyfileobj(source, out, CHUNK)
-                path.chmod(0o755 if (info.external_attr >> 16) & 0o111 else 0o644)
+                _extract(bundle, info, path)
     except (zipfile.BadZipFile, EOFError, OSError, RuntimeError, NotImplementedError) as exc:
         raise ReleaseError(f"unreadable archive ({type(exc).__name__})") from None
 
