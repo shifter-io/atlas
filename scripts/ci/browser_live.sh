@@ -7,7 +7,9 @@
 # so pytest and its plugins are added with `uv run --with` at their exact uv.lock versions.
 set -eu
 
-UV_VERSION=0.12.10  # the same uv as .github/workflows/ci.yml
+# The same uv and CPython as .github/workflows/ci.yml (some pinned wheels exist only for cp312).
+UV_VERSION=0.12.10
+PYTHON_VERSION=3.12.14
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) asset=x86_64-unknown-linux-gnu sha=173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b ;;
   Linux-aarch64) asset=aarch64-unknown-linux-gnu sha=9ff6b9d4665edcdd3a88dcc73cd1eb641754deb927f14e8c62ebfde6bf4f5f5e ;;
@@ -36,7 +38,7 @@ if ! command -v uv >/dev/null 2>&1 || [ "$(uv --version | cut -d' ' -f2)" != "$U
   export PATH
 fi
 
-uv sync --locked --no-dev --extra browser
+uv sync --locked --no-dev --extra browser --python "$PYTHON_VERSION"
 PROXY_INDEX_BROWSER_DIR="${PROXY_INDEX_BROWSER_DIR:-$HOME/.cache/proxy-index/browser}"
 export PROXY_INDEX_BROWSER_DIR
 uv run --no-sync proxy-index browser fetch --dest "$PROXY_INDEX_BROWSER_DIR"
