@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import importlib.util
+import json
 import os
 import subprocess
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from browser_site import (
@@ -153,3 +157,44 @@ async def test_a_pool_of_three_runs_thirty_tries_and_leaks_no_process(executable
             break
         await asyncio.sleep(0.1)
     assert leftover(executable) == ""
+
+
+CAPTURE = Path(__file__).resolve().parents[1] / "scripts" / "browser_capture.py"
+
+
+def load_capture():
+    spec = importlib.util.spec_from_file_location("browser_capture", CAPTURE)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclasses look their module up
+    spec.loader.exec_module(module)
+    return module
+
+
+def check_capture(directory: Path, records: list[dict]) -> None:
+    documents = [json.loads((directory / f"{i:04d}.json").read_text()) for i in range(3)]
+    print(f"capture: {[d['judged'] for d in documents]}")
+    assert [r["error"] for r in records] == [None, "no_content", "proxy_connect"]
+    assert documents[0]["view"]["found"] == {"#content": 1}
+    assert documents[2]["view"] is None
+    assert all((directory / f"{i:04d}.jpg").stat().st_size > 0 for i in range(3))
+    written = b"".join(p.read_bytes() for p in directory.iterdir())
+    assert USERNAME.encode() not in written and PASSWORD.encode() not in written
+
+
+async def test_a_capture_writes_each_try_and_no_credential(executable, tmp_path):
+    capture = load_capture()
+    inputs = ("ok", "empty", "refused")
+    async with site_and_proxy() as (_, _, _, port):
+        plan = capture.Plan(
+            target=SiteTarget(),
+            entry=replace(SETTINGS, inputs=inputs, timeout_s=20),
+            browser=OPTIONS,
+            provider="p",
+            product="q",
+            country="US",
+            tries=len(inputs),
+            proxy=ProxyConfig("http", "127.0.0.1", port, USERNAME, PASSWORD),
+        )
+        launch = functools.partial(driver.launch, executable, locale="en-US", headless=True)
+        records = await capture.capture(plan, tmp_path, launch, "browser-live")
+    check_capture(tmp_path, records)
