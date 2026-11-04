@@ -27,16 +27,21 @@ def month_bounds(moment: datetime) -> tuple[datetime, datetime]:
 
 def partition(conn, table, moment):
     """Create the partition of a range-partitioned table that holds this UTC moment, unless it
-    exists; `conn` must be in a transaction (creation()).
+    exists. On an autocommit connection the creation is a transaction of its own; inside a
+    transaction it is a savepoint, and the parent's lock (creation()) is held until that ends.
 
     Daily for the DAILY tables unless that month has a monthly partition; monthly for the
     others (test_events, by `at`). A partition that exists costs one lookup and no lock.
     """
     name, start, end = monthly(table, moment)
-    if table in DAILY and not _exists(conn, name):
+    if _exists(conn, name):
+        return
+    if table in DAILY:
         start = moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         end, name = start + timedelta(days=1), f"{table}_{start:%Y_%m_%d}"
-    if not _exists(conn, name):
+        if _exists(conn, name):
+            return
+    with conn.transaction():
         for query in creation(table, name, start, end):
             conn.execute(query)
 

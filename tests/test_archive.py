@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -322,7 +323,8 @@ async def at_once(database, table, creators):
         for _ in range(500):
             with connect(database) as conn:
                 (waiting,) = conn.execute(
-                    "SELECT count(*) FROM pg_locks WHERE relation=%s::regclass AND NOT granted",
+                    "SELECT count(*) FROM pg_locks WHERE relation=%s::regclass AND NOT granted "
+                    "AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",
                     (table,),
                 ).fetchone()
             if waiting == len(tasks):
@@ -355,7 +357,10 @@ async def test_transactions_creating_one_missing_day_at_once_all_succeed(databas
         with connect(database) as conn:
             partition(conn, "run_buckets", datetime(2026, 12, 3, 5, tzinfo=UTC))
 
-    await at_once(database, "run_buckets", [asyncio.to_thread(create) for _ in range(6)])
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=6) as pool:  # all six at once, on any CPU count
+        creators = [loop.run_in_executor(pool, create) for _ in range(6)]
+        await at_once(database, "run_buckets", creators)
     with connect(database) as conn:
         assert children(conn, "run_buckets") == [
             ("run_buckets_2026_12_03", date(2026, 12, 3), date(2026, 12, 4))
