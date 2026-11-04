@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 403,
+    "title": "Access denied | www.example.com used Cloudflare to restrict access",
+    "text_head": "Error 1020\nRay ID: 0000000000000000\nAccess denied\nWhat happened?\nThis website is using a security service to protect itself from online attacks.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 1
+    }
+  },
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "cf_block"
+  }
+}
