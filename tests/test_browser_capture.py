@@ -204,14 +204,14 @@ def test_scrub_replaces_addresses_only(text, kept):
     assert (capture.scrub(text) == text) is kept
 
 
-TOKEN_URL = "https://user:pw@www.google.com/sorry/index?continue=x&q=EgQTOKENPROBE#fragprobe"
+TOKEN_URL = "https://user:pw@www.example.org/sorry/index?continue=x&q=EgQTOKENPROBE#fragprobe"
 
 
 def test_the_view_url_keeps_only_scheme_host_and_path(tmp_path):
     run(tmp_path, script=Script(url=TOKEN_URL, found=0), tries=1)
     directory = tmp_path / "out/shifter/residential/amazon_pdp"
     document = json.loads((directory / "0000.json").read_text())
-    assert document["view"]["final_url"] == "https://www.google.com/sorry/index"
+    assert document["view"]["final_url"] == "https://www.example.org/sorry/index"
     for probe in (b"TOKENPROBE", b"fragprobe", b"pw@", b"user:", b"continue="):
         assert not any(probe in data for data in files(tmp_path).values()), probe
 
