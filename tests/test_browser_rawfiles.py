@@ -24,6 +24,7 @@ from test_browser_node import SHIFTER
 from proxy_index.browser import contracts as bc
 from proxy_index.browser import rawfiles
 from proxy_index.browser.rawfiles import Batch, DiskGuard, FileRecorder, Outbox, recover, seal
+from proxy_index.errors import UserError
 from proxy_index.node import NodeAgent
 from proxy_index.orchestrator import browser_ingest
 
@@ -607,3 +608,10 @@ def test_a_half_run_that_cannot_be_deleted_counts_discard_failed(tmp_path, monke
     )
     assert "browser_recover: sealed=0 discarded=0 kept=0 discard_failed=1" in caplog.text
     assert recover(runs, outbox, seal_run) == (1, 0, 0) and not half.exists()
+
+
+def test_the_host_lock_names_a_state_directory_it_cannot_open(tmp_path):
+    refused = r"cannot open the host lock .*host\.lock \(FileNotFoundError\)"
+    with pytest.raises(UserError, match=refused):
+        with rawfiles.host_lock(tmp_path / "absent"):
+            raise AssertionError("not reached")
