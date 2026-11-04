@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
 from ...targets import PageView
 from ..contracts import LINKEDIN_PUBLIC
-from ..judge import OK, Mark, PageAssessment, count, failed, judge, path_has
+from ..judge import OK, Mark, PageAssessment, count, failed, path_has
 from . import PageTarget
 
 
@@ -50,13 +50,11 @@ class LinkedinPublic(PageTarget):
     def wanted(self, value: Any) -> tuple[str, ...]:
         return (self.NAME, self.HEADLINE)
 
-    def judge(self, view: PageView) -> PageAssessment:
-        """The shared judge, except that a page showing the profile's name and headline is the
-        profile: its title and text are the member's own words, so a "captcha" or "rate limit"
-        in them is no challenge or block mark. Statuses (407, 999, 403, ...) still count."""
-        if count(view, self.NAME) and count(view, self.HEADLINE):
-            view = replace(view, title="", text_head="")
-        return judge(view, self.rules, self.MARKS, self.BLOCK_STATUSES)
+    def shown(self, view: PageView) -> bool:
+        """The profile's name and headline: its title and text are then the member's own
+        words, so a "captcha" or "rate limit" in them is no challenge or block mark (see
+        PageTarget.judge). Statuses (407, 999, 403, ...) still count."""
+        return bool(count(view, self.NAME) and count(view, self.HEADLINE))
 
     def rules(self, view: PageView) -> PageAssessment:
         if path_has(view, self.LOGIN_PATHS):

@@ -19,9 +19,8 @@ from typing import Any, ClassVar
 
 from ...models import RequestContext
 from ...targets import PageDriver, PageSpec, PageView
-from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW, PROXY_AUTH_STATUS
+from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW
 from ..judge import (
-    OK,
     Mark,
     PageAssessment,
     count,
@@ -78,6 +77,7 @@ class AiSource(PageTarget):
     STOPS: ClassVar[tuple[str, ...]] = ()
     DISMISS: ClassVar[tuple[str, ...]] = ()
     MIN_SENTENCES: ClassVar[int] = 1
+    SHOWN_OK = True
 
     def try_fields(self, context: RequestContext, inputs: tuple[Any, ...]) -> dict[str, Any]:
         return {"input": choose(context, inputs), "source": self.id}
@@ -127,19 +127,14 @@ class AiSource(PageTarget):
         found = {ANSWER_CHARS: size, ANSWER_SENTENCES: sentences}
         return found | ({ANSWER_MS: round((grown - start) * 1000)} if size else {})
 
-    def answered(self, view: PageView) -> bool:
+    def shown(self, view: PageView) -> bool:
+        """A complete answer, which is ok right after the 407 step (SHOWN_OK): the visible
+        text the markers read holds the answer itself, and the status is the first
+        navigation's (a challenge that cleared by itself was a 403); neither undoes an answer
+        that was read."""
         found = view.found
         chars, sentences = found.get(ANSWER_CHARS, 0), found.get(ANSWER_SENTENCES, 0)
         return chars >= MIN_CHARS and sentences >= self.MIN_SENTENCES
-
-    def judge(self, view: PageView) -> PageAssessment:
-        """A complete answer is ok, then the shared steps (PageTarget.judge). The visible text
-        the markers read holds the answer itself, and the status is the first navigation's
-        (a challenge that cleared by itself was a 403): neither undoes an answer that was
-        read. A 407 still comes first."""
-        if view.status != PROXY_AUTH_STATUS and self.answered(view):
-            return OK
-        return PageTarget.judge(self, view)
 
 
 @dataclass(frozen=True, slots=True)
