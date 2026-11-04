@@ -49,7 +49,7 @@ LIGHT_NONE = "No pulse with enough successes in this window"
 NOT_LATENCY_TARGET = "Latency is measured on the latency target only"
 LATENCY = ("p50", "p90", "p95", "p99")
 FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
-# Payload breakdown name -> calculated_breakdowns dimension code.
+# Payload breakdown name -> calculated_list_rows dimension code.
 BREAKDOWNS = {
     "country": "c",
     "region": "r",

@@ -1,10 +1,10 @@
-"""Build retention (store.expire), breakdown partitions per build and the light browse views."""
+"""Build retention (store.expire), snapshot part partitions per build, shared lists and the light
+browse views."""
 
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import psycopg
 import pytest
 from psycopg import sql
 from test_calculated import POLICY, benchmark_scenario
@@ -22,7 +22,6 @@ DERIVED = (
     "calculated_scores",
     "calculated_score_components",
     "calculated_score_reasons",
-    "calculated_breakdowns",
 )
 
 
@@ -52,7 +51,7 @@ def copy(conn, table, column, old, **values):
 
 
 def clone(conn, source, as_of, *, published=True, payload=True):
-    """A new build with every row of source, at another cutoff."""
+    """A new build with every row of source, at another cutoff; its windows share source's lists."""
     build = copy(
         conn,
         "calculation_builds",
@@ -63,15 +62,13 @@ def clone(conn, source, as_of, *, published=True, payload=True):
         input_hash=uuid.uuid4().hex,
         published=published,
     )[0][0]
-    store.partition(conn, build)
     windows = conn.execute(
         "SELECT result_id FROM calculated_windows WHERE build_id=%s ORDER BY 1", (source,)
     ).fetchall()
     for (old,) in windows:
         new = copy(conn, "calculated_windows", "result_id", old, result_id=None, build_id=build)
         for table in DERIVED:
-            extra = {"build_id": build} if table == "calculated_breakdowns" else {}
-            copy(conn, table, "result_id", old, result_id=new[0][0], **extra)
+            copy(conn, table, "result_id", old, result_id=new[0][0])
     copy(conn, "calculated_overlaps", "build_id", source, build_id=build)
     if payload:
         copy(conn, "calculated_snapshots", "build_id", source, build_id=build)
@@ -95,7 +92,12 @@ def rows_by_build(conn):
     ):
         query = sql.SQL("SELECT build_id,count(*) FROM {} GROUP BY 1").format(sql.Identifier(table))
         counts |= {(table, b): n for b, n in conn.execute(query)}
-    return counts
+    # Shared list rows count under every build whose windows reference them.
+    query = (
+        "SELECT w.build_id,count(*) FROM calculated_list_rows "
+        "JOIN calculated_windows w USING(list_id) GROUP BY 1"
+    )
+    return counts | {("calculated_list_rows", b): n for b, n in conn.execute(query)}
 
 
 def partitions(conn):
@@ -103,7 +105,7 @@ def partitions(conn):
         r[0]
         for r in conn.execute(
             "SELECT inhrelid::regclass::text FROM pg_inherits "
-            "WHERE inhparent='calculated_breakdowns'::regclass"
+            "WHERE inhparent='calculated_snapshot_parts'::regclass"
         )
     }
 
@@ -128,9 +130,10 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
             (base,),
         )
         # The calculator created the build's partition.
-        assert partitions(conn) == {f"calculated_breakdowns_b{base}"}
+        assert partitions(conn) == {f"calculated_snapshot_parts_b{base}"}
         assert {t for t, b in rows_by_build(conn) if b == base} == {
             *DERIVED,
+            "calculated_list_rows",
             "calculated_windows",
             "calculated_overlaps",
             "calculated_snapshots",
@@ -155,7 +158,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
         )
         conn.execute("UPDATE current_calculation SET build_id=%s", (b["current"],))
         store.discard(conn, base)
-        assert f"calculated_breakdowns_b{base}" not in partitions(conn)
+        assert f"calculated_snapshot_parts_b{base}" not in partitions(conn)
     kept = sorted(
         b[k] for k in ("current", "newest of day", "tie, second", "first day of window", "draft")
     )
@@ -174,19 +177,22 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
     argv = ["calculate-expire", "--database-file", str(database)]
     estimate = output(capsys, [*argv, "--dry-run"])
     assert (estimate["schema"], estimate["kept_builds"], estimate["expired_builds"]) == (
-        "v8",
+        "v9",
         kept,
         expired,
     )
-    assert estimate["rows"] == {
+    # Every clone shares the base build's lists, which kept builds still reference.
+    shared = {"calculated_lists": 0, "calculated_list_rows": 0}
+    assert estimate["rows"] == shared | {
         t: sum(n for (table, build), n in before.items() if table == t and build in expired)
         for t in estimate["rows"]
+        if t not in shared
     }
     assert estimate["total_bytes"] >= estimate["bytes"]["calculated_snapshots"] > 0
     with connect(database) as conn:
         assert rows_by_build(conn) == before  # the dry run changed nothing
     assert output(capsys, argv) == {
-        "schema": "v8",
+        "schema": "v9",
         "kept_builds": kept,
         "expired_builds": expired,
     }
@@ -196,28 +202,14 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
         assert [
             r[0] for r in conn.execute("SELECT build_id FROM calculation_builds ORDER BY 1")
         ] == kept
-        assert partitions(conn) == {f"calculated_breakdowns_b{k}" for k in kept}
         # Expired builds' snapshot parts go with their partitions too.
-        assert {
-            r[0]
-            for r in conn.execute(
-                "SELECT inhrelid::regclass::text FROM pg_inherits "
-                "WHERE inhparent='calculated_snapshot_parts'::regclass"
-            )
-        } <= {f"calculated_snapshot_parts_b{k}" for k in kept}
-        assert conn.execute(
-            "SELECT partdefid FROM pg_partitioned_table "
-            "WHERE partrelid='calculated_breakdowns'::regclass"
-        ).fetchone() == (0,)
-    assert output(capsys, argv) == {"schema": "v8", "kept_builds": kept, "expired_builds": []}
-    with pytest.raises(psycopg.errors.CheckViolation), connect(database) as conn:
-        # No default partition: a breakdown of a build without a partition is rejected.
-        conn.execute(
-            "INSERT INTO calculated_breakdowns(build_id,result_id,ips,observations,asn_label_id,"
-            "position,dimension) SELECT %s,result_id,1,1,1,999,'a' FROM calculated_windows "
-            "WHERE build_id=%s LIMIT 1",
-            (expired[0], kept[0]),
-        )
+        assert partitions(conn) <= {f"calculated_snapshot_parts_b{k}" for k in kept}
+        # The kept builds still share every list (the discarded base build wrote them).
+        query = "SELECT count(*),bool_and(created_build=%s) FROM calculated_lists"
+        listed = conn.execute(query, (base,)).fetchone()
+        referenced = conn.execute("SELECT count(DISTINCT list_id) FROM calculated_windows")
+        assert listed == (referenced.fetchone()[0], True) and listed[0]
+    assert output(capsys, argv) == {"schema": "v9", "kept_builds": kept, "expired_builds": []}
 
 
 @pytest.mark.asyncio
@@ -238,7 +230,7 @@ async def test_publication_expires_older_builds_of_the_day(database, tmp_path):
     with connect(database) as conn:
         builds = [r[0] for r in conn.execute("SELECT build_id FROM calculation_builds ORDER BY 1")]
         assert builds == [second, int(draft)]
-        assert partitions(conn) == {f"calculated_breakdowns_b{b}" for b in builds}
+        assert partitions(conn) == {f"calculated_snapshot_parts_b{b}" for b in builds}
     assert store.publish(database, draft) == {
         "published_snapshot": draft,
         "expired_builds": [second],
@@ -256,7 +248,7 @@ def test_retention_without_current_build_or_known_schema(database, capsys):
         )
     argv = ["calculate-expire", "--database-file", str(database)]
     # Nothing is current, so nothing can be dated: nothing expires.
-    assert output(capsys, argv) == {"schema": "v8", "kept_builds": [], "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v9", "kept_builds": [], "expired_builds": []}
     with connect(database) as conn:
         conn.execute("UPDATE calculation_schema SET checksum='edited'")
     # The dry run checks the layer exactly like the real run: unknown fails both.

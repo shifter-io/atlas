@@ -18,7 +18,7 @@ from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 from .slim import slim
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -27,21 +27,21 @@ V4_CHECKSUM = "83d3794413bb56b371ff04ac7f9978652310b20013077c0400d1477d7fb24938"
 V5_CHECKSUM = "ccb566016dba5d6d18b09da7cb88ced16758f0fbf446fcac88495d67d94b8782"
 V6_CHECKSUM = "140ad11f64d300f4e8104da53421bcf00816464fa052d854082831775286dd26"
 V7_CHECKSUM = "66c66164b5915e2015382de9f640d997d1cece6df88f2ab3436f265a597a661a"
+V8_CHECKSUM = "65f217a8497750078be93711d245f9de7c873c933a67146f38b6520bcb4de277"
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.
 KEEP_DRAFTS = 2
 # After each publication expire() keeps the current build, the newest RETAIN_PER_DAY published
 # builds of each of the last RETAIN_DAYS UTC days and the drafts whose payload prune() kept.
 RETAIN_DAYS = 30
 RETAIN_PER_DAY = 1
-# Rows of a build in the tables keyed by its windows' result_id; breakdowns and snapshot parts
-# live in the build's partitions (calculated_breakdowns_b<build_id>, ..._snapshot_parts_b<id>).
+# Rows of a build in the tables keyed by its windows' result_id; snapshot parts live in the
+# build's partition (calculated_snapshot_parts_b<build_id>), breakdowns in shared lists (K2).
 DERIVED_TABLES = (
     "calculated_score_reasons",
     "calculated_score_components",
     "calculated_scores",
     "calculated_series",
 )
-PARTITIONED = ("calculated_breakdowns", "calculated_snapshot_parts")
 # Test kinds of the snapshot's traffic.by_test (load since the latency-under-load test; browser,
 # with estimated bytes, only when there were browser runs).
 TESTS = {"census", "pulse", "load", "browser"}
@@ -75,7 +75,7 @@ V2_SNAPSHOT = (
 V2_CHECKS = {
     "v2 windows": "SELECT count(*) FROM v2_before_windows o FULL JOIN calculated_windows n "
     "USING(result_id) WHERE to_jsonb(o)::text IS DISTINCT FROM (to_jsonb(n) - ARRAY["
-    "'challenge_rate','block_rate','uptime','bytes_up','bytes_down'])::text",
+    "'challenge_rate','block_rate','uptime','bytes_up','bytes_down','list_id'])::text",
     "v2 breakdowns": "SELECT count(*) FROM v2_before_breakdowns o FULL JOIN "
     "calculated_breakdown_details n USING(result_id,dimension,position) WHERE "
     "(o.ips,o.observations,o.label::text) IS DISTINCT FROM (n.ips,n.observations,n.label::text) "
@@ -152,6 +152,22 @@ V7_CHECKS = {
     "(n.content_hash,sha256(convert_to(n.payload::text,'UTF8'))) OR n.payload ? 'parts' "
     "OR EXISTS (SELECT FROM calculated_snapshot_parts p WHERE p.build_id=o.build_id)",
 }
+# A v8 layer's breakdowns move into one list per target-free window (contract K2): every row
+# must keep its values under its window, and each list must name its window's group and build.
+V8_SNAPSHOT = (
+    "CREATE TEMP TABLE v8_before_breakdowns ON COMMIT DROP AS SELECT result_id,dimension,"
+    "position,to_jsonb(b) - 'build_id' - 'result_id' AS row FROM calculated_breakdowns b"
+)
+V8_CHECKS = {
+    "breakdowns into lists": "SELECT count(*) FROM v8_before_breakdowns o FULL JOIN (SELECT "
+    "w.result_id,r.dimension,r.position,to_jsonb(r) - 'list_id' AS row FROM calculated_windows w "
+    "JOIN calculated_list_rows r USING(list_id)) n USING(result_id,dimension,position) "
+    "WHERE o.row::text IS DISTINCT FROM n.row::text",
+    "one list per window": "SELECT count(*) FROM calculated_windows w LEFT JOIN calculated_lists "
+    "l USING(list_id) WHERE (w.target='') IS DISTINCT FROM (l.list_id IS NOT NULL) OR w.target='' "
+    "AND (l.product_id,l.cohort,l.window_hours,l.created_build,l.signature) IS DISTINCT FROM "
+    "(w.product_id,w.cohort,w.window_hours,w.build_id,NULL)",
+}
 
 
 def jsonable(value):
@@ -199,8 +215,8 @@ def prune(conn):
     return conn.execute(query, (builds,)).rowcount
 
 
-def partition(conn, build_id, table="calculated_breakdowns"):
-    """Create the build's partition of table (<table>_b<build_id>), one of PARTITIONED."""
+def partition(conn, build_id, table="calculated_snapshot_parts"):
+    """Create the build's partition of table (<table>_b<build_id>)."""
     conn.execute(
         sql.SQL("CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES IN ({})").format(
             sql.Identifier(f"{table}_b{int(build_id)}"),
@@ -216,21 +232,32 @@ def drop(conn, build_id, table):
     conn.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(name))
 
 
-def discard(conn, build_id):
-    """Delete one build and all of its rows; its breakdowns and parts go with their partitions.
+def lists(conn):
+    """Whether the database has the shared lists (calculated v9); a v5 layer has not."""
+    query = "SELECT to_regclass('calculated_lists') IS NOT NULL"
+    return conn.cursor(row_factory=tuple_row).execute(query).fetchone()[0]
+
+
+def collect(conn):
+    """Delete the lists no window references, their rows first; return how many lists."""
+    orphans = (
+        "SELECT list_id FROM calculated_lists l WHERE NOT EXISTS "
+        "(SELECT FROM calculated_windows w WHERE w.list_id=l.list_id)"
+    )
+    conn.execute(f"DELETE FROM calculated_list_rows WHERE list_id IN ({orphans})")
+    return conn.execute(f"DELETE FROM calculated_lists WHERE list_id IN ({orphans})").rowcount
+
+
+def discard(conn, build_id, *, gc=True):
+    """Delete one build and all of its rows; its parts go with their partition, and (gc) the
+    lists no other build's window references are collected.
 
     The current build cannot be discarded: current_calculation references its snapshot. On a
-    calculated v5 database (no partitions yet) the breakdowns are deleted through their windows.
+    calculated v5 database (no lists yet) the breakdowns are deleted through their windows.
     """
-    partitioned = (
-        conn.cursor(row_factory=tuple_row)
-        .execute("SELECT relkind='p' FROM pg_class WHERE oid='calculated_breakdowns'::regclass")
-        .fetchone()[0]
-    )
-    for table in PARTITIONED:
-        drop(conn, build_id, table)
-    # On v6 the dropped partition held every breakdown of the build.
-    for table in (*(() if partitioned else ("calculated_breakdowns",)), *DERIVED_TABLES):
+    shared = lists(conn)
+    drop(conn, build_id, "calculated_snapshot_parts")
+    for table in (*(() if shared else ("calculated_breakdowns",)), *DERIVED_TABLES):
         conn.execute(
             f"DELETE FROM {table} WHERE result_id IN "
             "(SELECT result_id FROM calculated_windows WHERE build_id=%s)",
@@ -243,6 +270,8 @@ def discard(conn, build_id):
         "calculation_builds",
     ):
         conn.execute(f"DELETE FROM {table} WHERE build_id=%s", (build_id,))
+    if shared and gc:
+        collect(conn)
 
 
 def retained(conn, days=None, per_day=None):
@@ -279,26 +308,35 @@ def expire(conn, days=None, per_day=None):
     """Delete every build outside the retention rule; return the kept and expired build ids."""
     kept, expired = retained(conn, days, per_day)
     for build_id in expired:
-        discard(conn, build_id)
+        discard(conn, build_id, gc=False)
+    if expired and lists(conn):
+        collect(conn)
     return {"kept_builds": kept, "expired_builds": expired}
 
 
 def estimate(conn, expired):
     """Rows and approximate bytes that expiring these builds frees (read-only).
 
-    Breakdowns are counted through their windows, so this also works on a calculated v5
-    database before its migration. Bytes are each table's size (with its partitions, indexes
-    and TOAST) in proportion to the rows removed; payloads and their parts use their stored size.
+    Lists count when no kept window references them; on a calculated v5 database, before its
+    migration, breakdowns count through their windows. Bytes are each table's size (with its
+    partitions, indexes and TOAST) in proportion to the rows removed; payloads and their parts
+    use their stored size.
     """
-    windows = "result_id IN (SELECT result_id FROM calculated_windows WHERE build_id=ANY(%s))"
-    keys = {table: windows for table in (*DERIVED_TABLES, "calculated_breakdowns")} | {
-        table: "build_id=ANY(%s)"
+    windows = "result_id IN (SELECT result_id FROM calculated_windows WHERE build_id=ANY(%(b)s))"
+    freed = (
+        "list_id IN (SELECT list_id FROM calculated_windows WHERE build_id=ANY(%(b)s) "
+        "EXCEPT SELECT list_id FROM calculated_windows WHERE build_id<>ALL(%(b)s))"
+    )
+    shared = {"calculated_list_rows": freed, "calculated_lists": freed}
+    keys = {table: windows for table in DERIVED_TABLES} | {
+        table: "build_id=ANY(%(b)s)"
         for table in ("calculated_snapshots", "calculated_windows", "calculated_overlaps")
     }
+    keys |= shared if lists(conn) else {"calculated_breakdowns": windows}
     rows, size = {}, {}
     for table, key in keys.items():
         rows[table] = conn.execute(
-            f"SELECT count(*) FROM {table} WHERE {key}", (expired,)
+            f"SELECT count(*) FROM {table} WHERE {key}", {"b": expired}
         ).fetchone()[0]
         total, stored = conn.execute(
             f"SELECT (SELECT count(*) FROM {table}),pg_total_relation_size(%s::regclass)"
@@ -322,7 +360,7 @@ def estimate(conn, expired):
 
 
 def layer(conn):
-    """Name the calculated layer that retention accepts ("v8" or an unmodified "v5"), or raise.
+    """Name the calculated layer that retention accepts ("v9" or an unmodified "v5"), or raise.
 
     A v5 database can expire before db-migrate, so that the migration moves only kept rows.
     """

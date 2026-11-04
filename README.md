@@ -155,7 +155,15 @@ rebuild the payload fragments. Calculated schema v7 (`calculated/migrate_v6_v7.s
 breakdown names into the main schema's shared lists: breakdown places are `place_names` rows
 (the same ids as enrichment locations; `places` is gone) and an `asn_labels` row is an
 `asn_names` id plus a usage type, shown with its ASN and name by the view `asn_label_names`.
-`calculated_breakdown_details` and `current_breakdowns` keep their columns and values. Snapshot payloads are kept for the current build, published builds
+`calculated_breakdown_details` and `current_breakdowns` keep their columns and values.
+Calculated schema v9 (`calculated/migrate_v8_v9.sql`, contract K2) stores each target-free
+window's full breakdowns as a list, `calculated_lists` (entries, since-independent pool figures,
+content hash, signature NULL until CALC-LISTS-1b) and `calculated_list_rows`, which the window
+names in `calculated_windows.list_id`; `calculated_breakdowns` and its per-build partitions are
+migrated (one list per window) and dropped. Lists outlive their build and can be shared by later
+builds; after `discard` and `expire` the lists no window references are deleted (`store.collect`).
+`calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
+and keep their columns. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
@@ -255,7 +263,7 @@ The published snapshot keeps only the top rows of each long list: every `breakdo
 N per list from `calculated/policy.py` `PAYLOAD` or a `[payload]` methodology table. Each window
 adds `breakdown_entries` and each pool `list_entries`, the full row count of every list ("25 of
 61,497"). Counts, shares and metrics are computed from the full data first, and
-`calculated_breakdowns` keeps every row; the site API reads the full city x ASN and ASN lists
+`calculated_list_rows` keeps every row; the site API reads the full city x ASN and ASN lists
 from there. The API's `breakdowns` resource returns the counts as `dimension_entries`.
 `detect.detect(conn, now)` writes the Live tape events (`[events]` thresholds, not part of the
 methodology id). `orchestrator/events.py` also writes `daily_test_started`, `daily_test_finished`

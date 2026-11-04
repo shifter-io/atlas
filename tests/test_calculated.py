@@ -898,7 +898,7 @@ def payload_mismatches(database, build_id):
 
 
 def test_score_reasons_split_around_derived_block():
-    from proxy_index.calculated.calculator import split_reasons
+    from proxy_index.calculated.lists import split_reasons
 
     components = {
         "reliability": {"state": "ready", "reason": None},
@@ -1025,7 +1025,7 @@ async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_pa
         # Labels are shared across builds instead of repeated per row: two cities, their
         # (shared) region and country. The cities and the ASN name are the enrichment's own rows.
         assert conn.execute(
-            "SELECT count(DISTINCT place_id),count(DISTINCT l.place_id) FROM calculated_breakdowns "
+            "SELECT count(DISTINCT place_id),count(DISTINCT l.place_id) FROM calculated_list_rows "
             "LEFT JOIN enrichment_locations l USING(place_id)"
         ).fetchone() == (4, 2)
         assert conn.execute(
@@ -1044,7 +1044,8 @@ async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_pa
 def test_cohort_criteria_keep_unusual_values(database):
     from psycopg.rows import dict_row
 
-    from proxy_index.calculated.calculator import cohort_for, store_cohort
+    from proxy_index.calculated.calculator import cohort_for
+    from proxy_index.calculated.lists import store_cohort
 
     store.initialize(database)
     scope = {

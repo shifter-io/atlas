@@ -1,6 +1,6 @@
 """The published snapshot: the calculated payload with each long list cut to its top rows.
 
-calculate() persists the full payload into the typed tables (calculated_breakdowns keeps every
+calculate() persists the full payload into the typed tables (calculated_list_rows keeps every
 breakdown row) and stores and serves this capped copy. Every total stays exact: pool counts
 (unique_ips, countries, regions, cities, asns), shares and window metrics are computed from the
 full data before capping and are not touched here, and each capped list records how many rows it
