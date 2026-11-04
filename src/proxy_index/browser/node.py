@@ -10,8 +10,10 @@ settings do not list, is refused and reported failed. A network in `[networks] u
 (D11) runs with no country parameter and records no requested country.
 
 Every finished run writes one JSON timing line, and the host one line an hour, to
-<state>/logs/browser-node.jsonl (size-rotated). Uploads are the node's plain upload; BP-DATA
-replaces them with the outbox.
+<state>/logs/browser-node.jsonl (size-rotated). A run's tries and screenshots go into its run
+directory (rawfiles.FileRecorder); when it ends it is sealed into the outbox and sent from
+there (rawfiles.Outbox): after every run, at start and every 5 minutes, at most 2 at a time.
+An unconfirmed upload never fails the run: the bundle stays and is sent again (K-BP7).
 """
 
 from __future__ import annotations
@@ -35,11 +37,15 @@ from typing import Any
 from ..errors import UserError
 from ..models import ProxySource, RunConfig
 from ..node import NodeAgent, ProxyFactory, provider_factory, read_token, resident_mb
+from ..sinks import JsonSink
 from ..targets import Target, TargetRegistry, registry
-from .contracts import BROWSER_KIND, BROWSER_REGION
+from . import rawfiles, release
+from .contracts import BROWSER_KIND, BROWSER_REGION, user_agent
+from .contracts import CAMOUFOX_FIELDS as CAMOUFOX
+from .driver import host_os
 from .pool import BrowserPool, Pooled
 from .settings import BrowserSettings, TargetSettings, load_settings
-from .transport import BrowserTransport, NullRecorder, Recorder
+from .transport import BrowserTransport, Recorder
 
 log = logging.getLogger(__name__)
 
@@ -48,9 +54,8 @@ LOG_NAME = "browser-node.jsonl"
 LOG_BYTES = 20 << 20
 LOG_BACKUPS = 5
 HOUR_S = 3600.0
+OUTBOX_EVERY_S = 300.0
 NETWORK_FILES = ("provider.toml", "credentials.toml", "node.token")
-
-RecorderFactory = Callable[["Network", dict[str, Any]], Recorder]
 
 
 class UnexpectedKind(Exception):
@@ -153,11 +158,15 @@ def try_seconds(target: Target, page_timeout_s: int) -> float:
     return float(page_timeout_s + wait)
 
 
+def slot_start(start_at: str, every_minutes: int) -> int:
+    """The start (Unix time) of the target slot holding start_at."""
+    every = every_minutes * 60
+    return math.floor(datetime.fromisoformat(start_at).timestamp() / every) * every
+
+
 def slot_deadline(start_at: str, every_minutes: int) -> float:
     """The run deadline: the end of the target slot holding start_at, minus 2 minutes."""
-    every = every_minutes * 60
-    start = datetime.fromisoformat(start_at).timestamp()
-    return math.floor(start / every) * every + every - DEADLINE_MARGIN_S
+    return slot_start(start_at, every_minutes) + every_minutes * 60 - DEADLINE_MARGIN_S
 
 
 def _iso(moment: float) -> str:
@@ -219,9 +228,22 @@ class JsonLog:
         self.handler.close()
 
 
+class BundleSink(JsonSink):
+    """The run's JsonSink; its run directory, once made, is the recorder's."""
+
+    def __init__(self, output: Path, recorder: rawfiles.FileRecorder) -> None:
+        super().__init__(output)
+        self.recorder = recorder
+
+    def start(self, run_id: str) -> None:
+        super().start(run_id)
+        assert self.directory is not None
+        self.recorder.bind(self.directory)
+
+
 class BrowserAgent(NodeAgent):
-    """One network's node agent on a browser host: its targets, run options and transport
-    come from the host (NodeAgent's registry, config_options and run_options hooks)."""
+    """One network's node agent on a browser host: its targets, run options, transport, sink
+    and upload come from the host (NodeAgent's hooks); its upload is the outbox."""
 
     def __init__(self, host: BrowserHost, network: Network, orchestrator: str, **options):
         super().__init__(
@@ -237,12 +259,41 @@ class BrowserAgent(NodeAgent):
         )
         self.browser_host, self.network = host, network
         self.registry = host.registry
+        # Each run's recorder, from run_options() until result_sink() binds it.
+        self.recorders: dict[int, rawfiles.FileRecorder] = {}
 
     def config_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
         return self.browser_host.config_options(self.network, assignment)
 
     def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
-        return self.browser_host.run_options(self.network, assignment)
+        recorder = self.browser_host.recorder(assignment)
+        self.recorders[assignment["batch_id"]] = recorder
+        return self.browser_host.run_options(self.network, assignment, recorder)
+
+    def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
+        return BundleSink(self.work_dir, self.recorders.pop(assignment["batch_id"]))
+
+    async def execute(self, active: Any) -> None:
+        try:
+            await super().execute(active)
+        finally:
+            self.recorders.pop(active.assignment["batch_id"], None)
+
+    async def register(self) -> int:
+        node_id = await super().register()
+        self.browser_host.wake_outbox()  # host start: send what earlier runs left
+        return node_id
+
+    async def upload(self, batch_id: int, directory: Path) -> dict[str, Any]:
+        """Seal the run into the outbox and wake the outbox loop. Never raises: a run that
+        cannot be sealed keeps its directory, and the next start seals it (rawfiles.recover)."""
+        try:
+            bundle = await asyncio.to_thread(self.browser_host.seal, directory)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            log.warning("batch %s: run not sealed (%s); kept", batch_id, type(exc).__name__)
+            return {}
+        self.browser_host.wake_outbox()
+        return {"bundle": bundle.run_id}
 
 
 class BrowserHost:
@@ -255,7 +306,6 @@ class BrowserHost:
         orchestrator: str,
         *,
         launch: Callable[[], Awaitable[Pooled]],
-        recorder: RecorderFactory | None = None,
         **agent_options: Any,
     ) -> None:
         self.settings, self.state = settings, Path(state)
@@ -263,15 +313,89 @@ class BrowserHost:
         self.targets: dict[str, TargetSettings] = {t.id: t for t in settings.targets}
         self.registry = bound_registry(settings)
         options = settings.browser
+        self._launch = launch
         self.pool = BrowserPool(
-            options.browsers_per_host, launch, recycle_after=options.recycle_after
+            options.browsers_per_host, self._launch_one, recycle_after=options.recycle_after
         )
-        self.recorder = recorder or (lambda network, assignment: NullRecorder())
+        # The manifest's camoufox block: the last launched browser's, else the pinned one's.
+        self.identity = {
+            "release": release.RELEASE,
+            "engine_version": release.ENGINE_VERSION,
+            "user_agent": user_agent(release.ENGINE_VERSION, host_os()),
+        }
         self.hour_interval = HOUR_S
+        self.outbox_interval = OUTBOX_EVERY_S
         self.busy_ms = 0
         self.networks = load_networks(self.state, settings)
         self.log = JsonLog(self.state / "logs" / LOG_NAME)
+        self.runs, self.outbox_dir = self.state / "runs", self.state / settings.outbox.dir
+        self.outbox = rawfiles.Outbox(self.outbox_dir)
+        self.guard = rawfiles.DiskGuard(
+            (self.runs, self.outbox_dir), settings.outbox.max_pending_gb, notify=self._full_line
+        )
+        self.incomplete = 0
+        self._wake: asyncio.Event | None = None
         self.agents = [BrowserAgent(self, n, orchestrator, **agent_options) for n in self.networks]
+        self.by_network = {agent.network.name: agent for agent in self.agents}
+
+    async def _launch_one(self) -> Pooled:
+        handle = await self._launch()
+        identity = getattr(handle, "identity", None)
+        if isinstance(identity, dict) and set(CAMOUFOX) <= set(identity):
+            self.identity = {key: identity[key] for key in CAMOUFOX}
+        return handle
+
+    def _full_line(self, line: dict[str, Any]) -> None:
+        self.log.write(line | {"at": _iso(time.time())})
+
+    def recorder(self, assignment: dict[str, Any]) -> rawfiles.FileRecorder:
+        """The run's FileRecorder with its batch facts (the slot of its target's interval)."""
+        every = self.targets[assignment["target_id"]].every_minutes
+        slot = datetime.fromtimestamp(slot_start(assignment["start_at"], every), UTC)
+        batch = rawfiles.Batch(assignment["batch_id"], assignment["country_code"], slot, self.name)
+        return rawfiles.FileRecorder(batch, self.settings.sha256, self.guard)
+
+    def seal(self, run_dir: Path) -> rawfiles.Bundle:
+        """A finished run directory into the outbox, with the facts its recorder kept."""
+        batch, settings_sha256 = rawfiles.run_facts(run_dir)
+        summary = json.loads((run_dir / "summary.json").read_bytes())
+        return self.seal_run(run_dir, batch, summary, settings_sha256)
+
+    def seal_run(
+        self, run_dir: Path, batch: rawfiles.Batch, summary: dict, settings_sha256: str
+    ) -> rawfiles.Bundle:
+        camoufox = self.identity
+        return rawfiles.seal(
+            run_dir, batch, summary, settings_sha256, camoufox, outbox=self.outbox_dir
+        )
+
+    def wake_outbox(self) -> None:
+        if self._wake is not None:
+            self._wake.set()
+
+    async def flush(self) -> list[str]:
+        """Send every due pending bundle through its network's registered agent, oldest
+        first, at most INGEST_PARALLEL at once; their outcomes."""
+        sends = []
+        for bundle in await asyncio.to_thread(self.outbox.pending):
+            agent = self.by_network.get(bundle.network)
+            if agent is None or agent.node_id is None or agent.session is None:
+                continue  # not this host's network, or not registered yet
+            if self.outbox.due(bundle):
+                sends.append(self.outbox.send(bundle, agent))
+        return list(await asyncio.gather(*sends))
+
+    async def _outbox_loop(self, stop: asyncio.Event) -> None:
+        """A pass after every run end, at start and every outbox_interval seconds."""
+        assert self._wake is not None
+        while not stop.is_set():  # run() cancels it when it stops
+            self._wake.clear()
+            try:
+                await self.flush()
+            except Exception as exc:  # noqa: BLE001 - the next pass retries; type only
+                log.warning("outbox pass failed (%s)", type(exc).__name__)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._wake.wait(), self.outbox_interval)
 
     def config_options(self, network: Network, assignment: dict[str, Any]) -> dict[str, Any]:
         """The RunConfig fields from the settings; refuses other kinds and unlisted targets."""
@@ -290,11 +414,13 @@ class BrowserHost:
             options["requested_country"] = None
         return options
 
-    def run_options(self, network: Network, assignment: dict[str, Any]) -> dict[str, Any]:
+    def run_options(
+        self, network: Network, assignment: dict[str, Any], recorder: Recorder
+    ) -> dict[str, Any]:
         """runner.run's deadline and this run's transport on the shared pool."""
         entry = self.targets[assignment["target_id"]]
         deadline = slot_deadline(assignment["start_at"], entry.every_minutes)
-        timing = RunTiming(self.recorder(network, assignment))
+        timing = RunTiming(recorder)
         finished = partial(self._run_line, network, assignment, timing, deadline)
         transport = partial(
             RunTransport,
@@ -348,6 +474,8 @@ class BrowserHost:
         line = {"kind": "hour", "at": _iso(time.time()), "browsers": self.pool.size}
         line |= {"browser_seconds": seconds, "pool": stats, "rss_mb": resident_mb()}
         line["utilization"] = round(seconds / (self.pool.size * self.hour_interval), 4)
+        line |= self.outbox.hour_stats()
+        line["incomplete"] = self.incomplete
         self.log.write(line)
         return line
 
@@ -361,15 +489,20 @@ class BrowserHost:
     async def run(self, stop: asyncio.Event) -> None:
         """Serve every network until `stop`; then their runs end as NodeAgent ends them and
         the pool closes every browser. A network that cannot serve stops the host."""
+        self._wake = asyncio.Event()
+        self.incomplete = await asyncio.to_thread(
+            rawfiles.recover, self.runs, self.outbox_dir, self.seal_run
+        )
         tasks = [asyncio.create_task(agent.run(stop)) for agent in self.agents]
-        hourly = asyncio.create_task(self._hourly(stop))
+        helpers = [asyncio.create_task(loop(stop)) for loop in (self._hourly, self._outbox_loop)]
         try:
             done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
         finally:
             stop.set()
             await asyncio.gather(*tasks, return_exceptions=True)
-            hourly.cancel()
-            await asyncio.gather(hourly, return_exceptions=True)
+            for helper in helpers:
+                helper.cancel()
+            await asyncio.gather(*helpers, return_exceptions=True)
             await self.pool.close()
             self.log.close()
         for task in done:
@@ -386,7 +519,6 @@ async def check(
 ) -> dict[str, Any]:
     """--check: the state files, then `browsers` browsers open together (each checks the UA
     rule at launch), their identity and resident memory; no proxy traffic."""
-    from . import release
     from .pool import resident_bytes
 
     memory = memory or resident_bytes
@@ -446,7 +578,7 @@ def register(commands) -> None:
 
 
 def dispatch(args) -> int:
-    from . import driver, release
+    from . import driver
 
     settings = load_settings(args.settings).host(args.host)
     state = args.state.expanduser()

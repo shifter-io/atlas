@@ -298,6 +298,10 @@ class NodeAgent:
         """Extra keyword arguments for runner.run, such as `deadline` (a subclass hook)."""
         return {}
 
+    def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
+        """The run's sink, whose directory upload() sends (a subclass hook)."""
+        return JsonSink(self.work_dir)
+
     def config(self, assignment: dict[str, Any]) -> RunConfig:
         overrides = self.config_options(assignment)
         proxy = self.proxy_factory(assignment["country_code"])
@@ -378,7 +382,7 @@ class NodeAgent:
             )
             # The first progress post marks the run (and the batch) started.
             await self._progress(active, {"requests": 0})
-            sink = JsonSink(self.work_dir)
+            sink = self.result_sink(assignment)
             try:
                 summary = await run(
                     config,
