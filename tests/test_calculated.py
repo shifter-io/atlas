@@ -751,8 +751,8 @@ async def test_api_is_prepared_only_and_calculation_failure_is_atomic(
     first = calculate(database, POLICY, as_of=cutoff, publish=True)
     original = calculator.persist
 
-    def fail_after_writing(conn, payload):
-        original(conn, payload)
+    def fail_after_writing(conn, payload, **signed):
+        original(conn, payload, **signed)
         raise ValueError("Injected validation/storage failure")
 
     monkeypatch.setattr(calculator, "persist", fail_after_writing)

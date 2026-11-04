@@ -7,6 +7,7 @@ import math
 import re
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from itertools import combinations
 from pathlib import Path
 
@@ -47,7 +48,7 @@ from .aggregate import (
 )
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, previous_products, tested_by_product
-from .lists import CRITERIA, persist
+from .lists import CRITERIA, persist, signatures
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .parts import sparse
@@ -230,7 +231,8 @@ def calculate(database, methodology, *, as_of=None, publish=False):
                 **scheduled,
             )
             payload = estimates.window.attach(payload, runs, conn, as_of, config)
-            payload = write(conn, build_id, payload, config, persist)  # head and parts
+            signed = signatures(conn, payload, runs, buckets)  # reused lists (lists.py)
+            payload = write(conn, build_id, payload, config, partial(persist, signed=signed))
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
                 raise ValueError("Cannot replace current snapshot with an older cutoff")
@@ -500,6 +502,12 @@ def build(
         cohort, criteria = cohort_for(r["scope"], cfg.get("kind", r["name"]), linked)
         key = (r["product_id"], cohort)
         r["group"] = key
+        # A light run's histograms count for the breakdowns' latency (and its list signature).
+        r["light"] = (
+            r.get("test") in (None, "pulse")
+            and not flagged_runs.get(r["run_key"])
+            and r["scope"]["target"]["id"] == timed_target
+        )
         run_map[r["run_key"]] = r
         if linked:
             scheduled_groups[r["product_id"]] = key
@@ -553,9 +561,7 @@ def build(
                 "test": test,
                 "during_census": bool(overlapped),
                 "census_batches": overlapped,
-                "light": test in (None, "pulse")
-                and not overlapped
-                and r["scope"]["target"]["id"] == timed_target,
+                "light": r["light"],
                 "slot": floor_time(at or b["bucket_start"], slot_seconds),
                 "country": country.strip().upper() if country else None,
                 "region": r.get("batch_region"),
