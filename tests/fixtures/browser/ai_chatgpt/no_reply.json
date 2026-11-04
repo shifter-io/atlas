@@ -1,0 +1,21 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "no_reply",
+    "answer_chars": 0,
+    "asked": true,
+    "waited_s": 30
+  }
+}

@@ -11,7 +11,7 @@ import pytest
 from helpers import FakeTransport, Gateway, server
 
 from proxy_index import JsonSink, ProxyConfig, RunConfig, run
-from proxy_index.browser.contracts import PAGE_TARGETS
+from proxy_index.browser.contracts import RUN_TARGETS
 from proxy_index.cli import main
 from proxy_index.enrichment import LocalEnricher, enrich_run, find_database
 from proxy_index.storage import ENRICHMENT_FIELDS
@@ -110,7 +110,7 @@ def test_cli_targets_and_missing_secret(monkeypatch, capsys):
     assert main(["targets"]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert [t["id"] for t in listed if t["engine"] == "http"] == ["generic_http", "generic_https"]
-    assert [t["id"] for t in listed if t["engine"] == "browser"] == list(PAGE_TARGETS)
+    assert [t["id"] for t in listed if t["engine"] == "browser"] == list(RUN_TARGETS)
     monkeypatch.delenv("PROXY_URL", raising=False)
     assert main(["run", "--target", "generic_http"]) == 2
     assert "ValueError" in capsys.readouterr().err

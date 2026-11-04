@@ -1,0 +1,19 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 403,
+    "title": "Just a moment...",
+    "text_head": "Verify you are human by completing the action below.",
+    "counts": {
+      "#challenge-form": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "challenge_page",
+    "asked": false
+  }
+}

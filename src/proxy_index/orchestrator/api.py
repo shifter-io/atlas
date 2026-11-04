@@ -8,8 +8,10 @@ provider and product: a node can only see, report and upload its own runs.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import re
 import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -19,6 +21,7 @@ import psycopg
 from aiohttp import web
 
 from .. import storage
+from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
 from . import batches
 from .archive import ArchiveError, unpack
@@ -116,6 +119,11 @@ async def register(request: web.Request) -> web.Response:
         raise _error(web.HTTPBadRequest, "region or host matches no runner region") from None
     if region != node["region"]:
         raise _error(web.HTTPForbidden, f"token belongs to region {node['region']}")
+    if region == BROWSER_REGION:  # D2: a browser token is bound to its host's logical name
+        from .browser_ingest import check_host
+
+        async with request.app[DB_KEY].connection() as conn:
+            await check_host(conn, node, body.get("host"))
     values: dict[str, Any] = {}
     if isinstance(body.get("host"), str):
         values["host"] = body["host"][:255]
@@ -174,17 +182,41 @@ async def failed(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "status": status})
 
 
-async def _receive(request: web.Request, path: Path, limit: int) -> None:
-    size = 0
+def _write(stream: Any, chunk: bytes, sha: Any, md5: Any) -> None:
+    stream.write(chunk)
+    sha.update(chunk)
+    md5.update(chunk)
+
+
+async def _receive(request: web.Request, path: Path, limit: int) -> dict[str, Any]:
+    """Stream the body to path, hashing it: its archive.export.file_digests (bytes, sha256,
+    md5) without reading it again."""
+    size, sha, md5 = 0, hashlib.sha256(), hashlib.md5(usedforsecurity=False)
     stream = await asyncio.to_thread(path.open, "xb")
     try:
         async for chunk in request.content.iter_chunked(CHUNK):
             size += len(chunk)
             if size > limit:
                 raise _error(web.HTTPRequestEntityTooLarge, "upload exceeds the size limit")
-            await asyncio.to_thread(stream.write, chunk)
+            await asyncio.to_thread(_write, stream, chunk, sha, md5)
     finally:
         await asyncio.to_thread(stream.close)
+    return {"bytes": size, "sha256": sha.hexdigest(), "md5": md5.hexdigest()}
+
+
+def _sent_sha256(request: web.Request, *, required: bool) -> str | None:
+    """The sender's X-Content-SHA256 (K-BP7), lower-cased; required for browser bundles."""
+    value = request.headers.get(HEADER_SHA256)
+    if value is None and not required:
+        return None
+    if value is None or not re.fullmatch(r"[0-9a-fA-F]{64}", value.strip()):
+        raise _error(web.HTTPBadRequest, f"{HEADER_SHA256} must be 64 hex digits")
+    return value.strip().lower()
+
+
+def _check_sha256(sent: str | None, digests: dict[str, Any]) -> None:
+    if sent is not None and sent != digests["sha256"]:
+        raise _error(web.HTTPBadRequest, ERROR_CHECKSUM_MISMATCH)
 
 
 def _open_upload(archive: Path, directory: Path, limit: int) -> Any:
@@ -215,6 +247,11 @@ async def results(request: web.Request) -> web.Response:
     run = await batches.begin_upload(db, node, batch_id)
     if run is None:
         raise _error(web.HTTPNotFound, "no such run for this node")
+    if run["kind"] == BROWSER_KIND:  # K-BP7: archived per run, so no generic raw spool
+        from .browser_ingest import ingest_bundle
+
+        return await ingest_bundle(request, run, node)
+    sent = _sent_sha256(request, required=False)
     if run["status"] in ("killed", "skipped"):
         # An operator stopped it: the node discards the data.
         return web.json_response({"ok": True, "ingested": False, "status": run["status"]})
@@ -231,7 +268,7 @@ async def results(request: web.Request) -> web.Response:
         spool_dir = await setting(conn, "raw.spool_dir")
     with tempfile.TemporaryDirectory(prefix="proxy-index-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
-        await _receive(request, archive, upload_limit)
+        _check_sha256(sent, await _receive(request, archive, upload_limit))
         try:
             summary = await asyncio.to_thread(_open_upload, archive, directory, extract_limit)
             if not isinstance(summary, dict):
@@ -248,22 +285,7 @@ async def results(request: web.Request) -> web.Response:
             reason = str(exc) if isinstance(exc, ArchiveError) else "unreadable summary.json"
             await _reject(request, batch_id, f"bad archive: {reason}", "results_rejected")
             raise _error(web.HTTPBadRequest, reason) from None
-        try:
-            imported = await asyncio.to_thread(
-                storage.ingest,
-                directory,
-                request.app[CREDENTIALS_KEY],
-                batch_id=batch_id,
-                ip_rows=run["kind"] != "pulse",
-            )
-        except psycopg.OperationalError:
-            # The database is unreachable: the node keeps the directory and retries.
-            log.exception("ingest of batch %s could not reach the database", batch_id)
-            raise _error(web.HTTPServiceUnavailable, "database unavailable; retry") from None
-        except (ValueError, KeyError, TypeError, psycopg.Error) as exc:
-            log.warning("ingest of batch %s rejected: %s", batch_id, exc)
-            await _reject(request, batch_id, f"ingest: {exc}"[:500], "ingest_failed")
-            raise _error(web.HTTPUnprocessableEntity, f"ingest rejected: {exc}"[:300]) from None
+        imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
             await _spool(db, spool_dir, run["kind"], batch_id, summary, archive)
     status = await batches.finish_run(db, node, batch_id, summary, imported["run_key"])
@@ -276,6 +298,26 @@ async def results(request: web.Request) -> web.Response:
             "imported": imported["imported"],
         }
     )
+
+
+async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool):
+    """storage.ingest of an upload's run directory: 503 when the database is unreachable (the
+    node keeps its file and retries), 422 and a failed run when the data is refused."""
+    try:
+        return await asyncio.to_thread(
+            storage.ingest,
+            directory,
+            request.app[CREDENTIALS_KEY],
+            batch_id=batch_id,
+            ip_rows=ip_rows,
+        )
+    except psycopg.OperationalError:
+        log.exception("ingest of batch %s could not reach the database", batch_id)
+        raise _error(web.HTTPServiceUnavailable, "database unavailable; retry") from None
+    except (ValueError, KeyError, TypeError, psycopg.Error) as exc:
+        log.warning("ingest of batch %s rejected: %s", batch_id, exc)
+        await _reject(request, batch_id, f"ingest: {exc}"[:500], "ingest_failed")
+        raise _error(web.HTTPUnprocessableEntity, f"ingest rejected: {exc}"[:300]) from None
 
 
 async def _spool(db: Database, root: str, kind: str, batch_id: int, summary: dict, archive):

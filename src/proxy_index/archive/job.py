@@ -66,17 +66,11 @@ def waiting(database, day: date, now: datetime) -> str | None:
 def store(spaces: Spaces, path: Path, manifest: dict) -> dict[str, Any]:
     """Upload the day file unless its facts are already stored; return the verified object."""
     key = object_key(date.fromisoformat(manifest["day"]))
-    digests, facts = file_digests(path), facts_digest(manifest)
-    found = spaces.head(key)
-    if found is None:
-        spaces.put_file(key, path, digests, {"facts": facts})
-        found = spaces.head(key)
-        expected = {k: digests[k] for k in ("bytes", "md5", "sha256")} | {"facts": facts}
-    else:
-        expected = {"facts": facts}
-    if found is None or any(found.get(k) != v for k, v in expected.items()):
-        raise ArchiveError(f"archive_changed: {key} in the bucket differs from the day's rows")
-    return {"key": key, **found}
+    meta = {"facts": facts_digest(manifest)}
+    # A rerun after a crash finds the object: only the day's facts must still be the same.
+    return spaces.put_verified(
+        key, path, file_digests(path), meta, existing=("facts",), what="the day's rows"
+    )
 
 
 def archive_day(database, spaces: Spaces, day: date, workdir: Path, now: datetime) -> dict:

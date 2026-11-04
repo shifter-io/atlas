@@ -1,0 +1,20 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Gemini",
+    "text_head": "Sign in to continue",
+    "counts": {
+      "rich-textarea .ql-editor": 1,
+      "div[role=\"dialog\"]:has-text(\"Sign in\")": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_dialog",
+    "asked": false
+  }
+}

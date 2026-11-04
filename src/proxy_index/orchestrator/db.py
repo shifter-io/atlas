@@ -127,6 +127,12 @@ DEFAULTS: dict[str, Any] = {
     # the path of the private browser settings file (schema 2); None plans nothing.
     "browser.enabled": False,
     "browser.settings_file": None,
+    # Browser bundle ingest (orchestrator/browser_ingest.py, K-BP7): bundles processed at once
+    # by this process, the Spaces prefix of their objects, and a local directory used instead
+    # of Spaces with the same key layout (staging and tests only, never production).
+    "browser.ingest_concurrency": 4,
+    "browser.archive_prefix": "browser-files",
+    "browser.archive_dir": None,
 }
 
 
@@ -251,3 +257,15 @@ async def put_setting(conn: psycopg.AsyncConnection, key: str, value: Any) -> No
         "SET value=excluded.value,updated_at=now()",
         (key, Jsonb(value)),
     )
+
+
+@contextlib.asynccontextmanager
+async def session(db: Database) -> AsyncIterator[psycopg.AsyncConnection]:
+    """A connection of its own, outside the pool, closed on exit (which ends its session locks):
+    for a lock held while the work it guards uses the pool, so it can never take the slot that
+    work waits for (browser_ingest's per-run advisory lock)."""
+    conn = await db._open()
+    try:
+        yield conn
+    finally:
+        await conn.close()
