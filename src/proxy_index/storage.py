@@ -956,7 +956,7 @@ def migrate(credentials_file):
     names into the shared lists, v10 adds the batch kind browser, v11 swaps an index). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
-    v6 → v7 (shared breakdown names), v7 → v8 (snapshot parts); each step is verified after it.
+    v6 → v7 (shared names), v7 → v8 (snapshot parts), v8 → v9 (shared lists); each is verified.
     A v6 or later database with an older calculated layer starts at its step. Every rebuilt pool,
     scope, bucket and run summary, every test batch, location, network and per-IP enrichment, and
     every calculated window, breakdown and score, must equal its original.
@@ -1055,7 +1055,7 @@ def migrate(credentials_file):
     if start == 4 and layered:
         tables += ["calculated_windows", "calculated_scores"]
     if layered and not upgraded:
-        tables += ["asn_labels", "calculated_breakdowns"]
+        tables += ["asn_labels"]  # calculated v9 drops calculated_breakdowns
     if tables:
         with connect(credentials_file) as conn:
             conn.autocommit = True

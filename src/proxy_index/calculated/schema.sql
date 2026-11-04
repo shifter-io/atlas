@@ -33,6 +33,20 @@ CREATE TABLE IF NOT EXISTS calculation_builds (
  created_at timestamptz NOT NULL DEFAULT now(), published boolean NOT NULL DEFAULT false,
  UNIQUE(methodology_id,as_of,input_hash)
 );
+-- Contract K2 (calculated v9, lists.py): a target-free window's full breakdown lists, written
+-- once and shared by the builds whose windows reference it (calculated_windows.list_id). entries
+-- holds each breakdown's row count, figures the window's since-independent pool figures and its
+-- pool lists' entry counts; signature is NULL until CALC-LISTS-1b (NULLs never conflict).
+-- created_build has no foreign key: a list outlives the build that wrote it. store.collect()
+-- deletes the lists no window references, after store.discard() and store.expire().
+CREATE TABLE IF NOT EXISTS calculated_lists (
+ list_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ product_id integer NOT NULL REFERENCES products(product_id), cohort text NOT NULL,
+ window_hours integer NOT NULL, signature text, content_hash text NOT NULL,
+ entries jsonb NOT NULL, figures jsonb NOT NULL, created_build bigint NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(product_id,cohort,window_hours,signature)
+);
 CREATE TABLE IF NOT EXISTS calculated_windows (
  result_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  build_id bigint NOT NULL REFERENCES calculation_builds(build_id),
@@ -48,9 +62,12 @@ CREATE TABLE IF NOT EXISTS calculated_windows (
  challenge_rate double precision, block_rate double precision, uptime double precision,
  bytes_up bigint, bytes_down bigint,
  UNIQUE(build_id,product_id,cohort,target,window_hours),
- -- Lets breakdown rows carry their build (the partition key) consistently.
- UNIQUE(result_id,build_id)
+ -- Kept from calculated v5 to v8, whose per-build breakdown partitions referenced it.
+ UNIQUE(result_id,build_id),
+ -- The window's lists (target '' only; NULL on a target's window).
+ list_id bigint REFERENCES calculated_lists(list_id)
 );
+CREATE INDEX IF NOT EXISTS calculated_windows_list ON calculated_windows(list_id);
 -- Coordinate-free breakdown labels, shared by every build: places are the main schema's
 -- place_names (shared with enrichment locations), and an ASN label is an asn_names entry with a
 -- usage type.
@@ -62,23 +79,21 @@ CREATE TABLE IF NOT EXISTS asn_labels (
 -- dimension: g city (geography), r state/region and c country reference place_names; a asn
 -- references asn_labels; x country x ASN and y city x ASN reference both. position is the payload
 -- order within the dimension. Request counters and percentiles come from run_geo_buckets; they
--- are NULL on rows calculated before v3, which held IP counts only.
--- One LIST partition per build (calculated_breakdowns_b<build_id>, created by
--- calculator.persist); store.discard drops a build's partition instead of deleting its rows.
--- There is no default partition: a row for a build without a partition is rejected.
-CREATE TABLE IF NOT EXISTS calculated_breakdowns (
- build_id bigint NOT NULL, result_id bigint NOT NULL,
- ips bigint NOT NULL, observations bigint NOT NULL,
+-- are NULL on rows calculated before calculated v3, which held IP counts only. Unpartitioned:
+-- lists are shared by builds, and store.collect() deletes the rows of unreferenced lists, so
+-- autovacuum runs at 1% of the table.
+CREATE TABLE IF NOT EXISTS calculated_list_rows (
+ list_id bigint NOT NULL REFERENCES calculated_lists(list_id), dimension "char" NOT NULL
+  CHECK(dimension IN ('g','c','a','r','x','y')), position integer NOT NULL,
  place_id integer REFERENCES place_names(place_id),
  asn_label_id integer REFERENCES asn_labels(asn_label_id),
- position integer NOT NULL, dimension "char" NOT NULL CHECK(dimension IN ('g','c','a','r','x','y')),
+ ips bigint NOT NULL, observations bigint NOT NULL,
  completed bigint, successes bigint, challenges bigint, blocks bigint,
  p50 integer, p90 integer, p99 integer,
  CHECK((place_id IS NULL) = (dimension = 'a')
   AND (asn_label_id IS NULL) = (dimension IN ('g','c','r'))),
- PRIMARY KEY(result_id,dimension,position,build_id),
- FOREIGN KEY(result_id,build_id) REFERENCES calculated_windows(result_id,build_id)
-) PARTITION BY LIST(build_id);
+ PRIMARY KEY(list_id,dimension,position)
+) WITH (autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_insert_scale_factor = 0.01);
 CREATE TABLE IF NOT EXISTS calculated_series (
  result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
  bucket_start timestamptz NOT NULL,
@@ -153,8 +168,9 @@ FROM cohorts;
 CREATE OR REPLACE VIEW asn_label_names AS
 SELECT l.asn_label_id,n.asn,n.name,l.usage_type FROM asn_labels l
 JOIN asn_names n USING(asn_name_id);
-CREATE OR REPLACE VIEW calculated_breakdown_details AS
-SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country'
+-- A list's rows with their labels, by list_id; calculated_breakdown_details shows them per window.
+CREATE OR REPLACE VIEW calculated_list_details AS
+SELECT b.list_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country'
  WHEN 'r' THEN 'region' WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END
  AS dimension,b.position,b.ips,b.observations,CASE b.dimension
  WHEN 'g' THEN jsonb_build_object('country_code',p.country_code,'country',p.country,
@@ -170,8 +186,12 @@ SELECT b.result_id,CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'cou
  ELSE jsonb_build_object('asn',a.asn,'name',a.name,'usage_type',a.usage_type) END AS label,
  b.completed,b.successes,b.successes::double precision/nullif(b.completed,0) AS success_rate,
  b.challenges,b.blocks,b.p50,b.p90,b.p99
-FROM calculated_breakdowns b LEFT JOIN place_names p USING(place_id)
+FROM calculated_list_rows b LEFT JOIN place_names p USING(place_id)
 LEFT JOIN asn_label_names a USING(asn_label_id);
+CREATE OR REPLACE VIEW calculated_breakdown_details AS
+SELECT w.result_id,d.dimension,d.position,d.ips,d.observations,d.label,d.completed,d.successes,
+ d.success_rate,d.challenges,d.blocks,d.p50,d.p90,d.p99
+FROM calculated_windows w JOIN calculated_list_details d USING(list_id);
 CREATE OR REPLACE VIEW calculated_score_details AS
 SELECT s.*,
  (SELECT jsonb_object_agg(c.component,jsonb_build_object('state',c.state,'value',c.value,
@@ -203,14 +223,14 @@ SELECT p.provider,p.name AS product,w.*
 FROM calculated_windows w JOIN products p USING(product_id)
 WHERE w.build_id=(SELECT build_id FROM current_calculation);
 CREATE OR REPLACE VIEW current_breakdowns AS
-SELECT b.build_id,b.result_id,pr.provider,pr.name AS product,w.cohort,w.window_hours,
+SELECT w.build_id,w.result_id,pr.provider,pr.name AS product,w.cohort,w.window_hours,
  CASE b.dimension WHEN 'g' THEN 'geography' WHEN 'c' THEN 'country' WHEN 'r' THEN 'region'
  WHEN 'x' THEN 'country_asn' WHEN 'y' THEN 'city_asn' ELSE 'asn' END AS dimension,b.position,
  p.country_code,p.country,p.region_code,p.region,p.city,a.asn,a.name AS asn_name,a.usage_type,
  b.ips,b.observations,b.completed,b.successes,
  b.successes::double precision/nullif(b.completed,0) AS success_rate,
  b.challenges,b.blocks,b.p50,b.p90,b.p99
-FROM calculated_breakdowns b JOIN calculated_windows w USING(result_id,build_id)
+FROM calculated_windows w JOIN calculated_list_rows b USING(list_id)
 JOIN products pr USING(product_id)
 LEFT JOIN place_names p USING(place_id) LEFT JOIN asn_label_names a USING(asn_label_id)
-WHERE b.build_id=(SELECT build_id FROM current_calculation);
+WHERE w.build_id=(SELECT build_id FROM current_calculation);

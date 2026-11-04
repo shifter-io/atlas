@@ -10,17 +10,15 @@ from datetime import UTC, datetime, timedelta
 from itertools import combinations
 from pathlib import Path
 
-from psycopg.rows import dict_row, tuple_row
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from .. import detect, estimates, traffic
-from ..names import labels as shared_labels
-from ..storage import RAW_DAYS, column, connect
+from ..storage import RAW_DAYS, connect
 from ..targets import registry
 from . import browser
+from .aggregate import LATENCY as PERCENTILES
 from .aggregate import (
-    BREAKDOWNS,
-    NETWORK,
     NOT_LATENCY_TARGET,
     PLACE,
     PRICES,
@@ -47,9 +45,9 @@ from .aggregate import (
     uptime,
     with_under_load,
 )
-from .aggregate import LATENCY as PERCENTILES
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, previous_products, tested_by_product
+from .lists import CRITERIA, persist
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .parts import sparse
@@ -63,7 +61,7 @@ from .policy import (
     uptime_settings,
 )
 from .releases import enriched_observations, snapshot_fields
-from .store import discard, expire, jsonable, partition, prune, write
+from .store import discard, expire, jsonable, prune, write
 
 SCHEMA_VERSION = 2
 IMPLEMENTATION_ID = hashlib.sha256(
@@ -1014,283 +1012,3 @@ def rank(scores):
         return
     for s in eligible:
         s["rank"] = 1 + sum(other["score"] > s["score"] for other in eligible)
-
-
-CRITERIA = {
-    "kind": "text",
-    "country": "text",
-    "runner_location": "text",
-    "concurrency": "integer",
-    "timeout_seconds": "number",
-    "rate": "number",
-    "proxy_protocol": "text",
-    "session_policy": "text",
-    "ttl_seconds": "integer",
-    "parameters": "json",
-    "flags": "json",
-    "target_variant": "json",
-}
-# Label fields of each breakdown: its place columns and whether it names an ASN.
-FIELDS = {
-    "country": (PLACE[:2], False),
-    "region": (PLACE[:4], False),
-    "city": (PLACE, False),
-    "asn": ((), True),
-    "country_asn": (PLACE[:2], True),
-    "city_asn": (PLACE, True),
-}
-COUNTERS = ("ips", "observations", "completed", "successes", "success_rate", "challenges", "blocks")
-LATENCY = ("p50", "p90", "p99")
-# Place and ASN labels use the shared name lists (shared_labels); reasons stay calculator-only.
-LABELS = {"score_reasons": ("reason_id", ("reason",), ("text",))}
-
-
-def labels(conn, table, wanted):
-    """Map label tuples to shared ids, inserting only the missing ones."""
-    key, columns, types = LABELS[table]
-    cur = conn.cursor(row_factory=tuple_row)
-    query = (
-        f"SELECT {key},{','.join(columns)} FROM {table} "
-        f"WHERE {columns[0]}=ANY(%s) OR {columns[0]} IS NULL"
-    )
-    firsts = sorted({w[0] for w in wanted if w[0] is not None})
-    found = {tuple(row[1:]): row[0] for row in cur.execute(query, (firsts,))}
-    missing = sorted(set(wanted) - set(found), key=str)
-    if missing:
-        cur.execute(
-            f"INSERT INTO {table}({','.join(columns)}) SELECT * FROM unnest("
-            + ",".join(f"%s::{t}[]" for t in types)
-            + ") ON CONFLICT DO NOTHING",
-            [list(values) for values in zip(*missing, strict=True)],
-        )
-        found = {tuple(row[1:]): row[0] for row in cur.execute(query, (firsts,))}
-    return found
-
-
-def store_cohort(conn, cohort, criteria):
-    extra = {k: v for k, v in criteria.items() if k not in CRITERIA}
-    values = []
-    for key, kind in CRITERIA.items():
-        try:
-            values.append(column(kind, criteria[key]))
-        except (KeyError, TypeError):
-            values.append(None)
-            if key in criteria:
-                extra[key] = criteria[key]
-    conn.execute(
-        "INSERT INTO cohorts(cohort,"
-        + ",".join(CRITERIA)
-        + ",extra) VALUES ("
-        + ",".join(["%s"] * (len(CRITERIA) + 2))
-        + ") ON CONFLICT DO NOTHING",
-        (cohort, *values, Jsonb(extra) if extra else None),
-    )
-    rebuilt = conn.execute(
-        "SELECT criteria FROM cohort_criteria WHERE cohort=%s", (cohort,)
-    ).fetchone()["criteria"]
-    if digest(rebuilt) != digest(criteria):
-        raise ValueError("Cohort criteria cannot be stored losslessly")
-
-
-def split_reasons(score, product):
-    """Reasons a product score derives from its weighted, not-ready components, plus the rest."""
-    if set(score["weights"]) != set(score["components"]):
-        raise ValueError("Score weights and components differ")
-    derived = [
-        c["reason"] or f"{k} not ready"
-        for k, c in score["components"].items()
-        if product and score["weights"][k] > 0 and c["state"] != "ready"
-    ]
-    reasons, size = score["reasons"], len(derived)
-    start = next(
-        (i for i in range(len(reasons) - size + 1) if reasons[i : i + size] == derived), None
-    )
-    if start is None:
-        raise ValueError("Score reasons cannot be rebuilt from their components")
-    return [(i - start, r) for i, r in enumerate(reasons[:start])] + [
-        (i, r) for i, r in enumerate(reasons[start + size :], 1)
-    ]
-
-
-def persist(conn, payload):
-    build_id = int(payload["snapshot_id"])
-    for p in payload["products"]:
-        store_cohort(conn, p["cohort"], p["criteria"])
-    texts = set()  # derived reasons are rebuilt from components, never stored
-    for p in payload["products"]:
-        for w in p["windows"].values():
-            for target, score in [("", s) for s in w["scores"].values()] + [
-                (t, v["score"]) for t, v in w["targets"].items()
-            ]:
-                texts.update(c["reason"] for c in score["components"].values() if c["reason"])
-                texts.update(r for _, r in split_reasons(score, not target))
-    reason_ids = {k[0]: v for k, v in labels(conn, "score_reasons", {(t,) for t in texts}).items()}
-    breakdowns = []
-    for p in payload["products"]:
-        for w in p["windows"].values():
-            for target, m, scores in [
-                ("", w["metrics"], w["scores"]),
-                *[(t, v["metrics"], {"balanced": v["score"]}) for t, v in w["targets"].items()],
-            ]:
-                ps = w["pool"] if not target else {}
-                result = conn.execute(
-                    "INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,"
-                    "completed,successes,errors,body_bytes,success_rate,timeout_rate,"
-                    "p50,p90,p95,p99,unique_ips,new_ips,"
-                    "recurring_share,countries,regions,cities,asns,"
-                    "coverage,last_observed,readiness,challenge_rate,block_rate,uptime,"
-                    "bytes_up,bytes_down) "
-                    "VALUES (" + ",".join(["%s"] * 30) + ") RETURNING result_id",
-                    (
-                        build_id,
-                        p["product_id"],
-                        p["cohort"],
-                        target,
-                        w["period"]["hours"],
-                        *[
-                            m[k]
-                            for k in (
-                                "completed",
-                                "successes",
-                                "errors",
-                                "body_bytes",
-                                "success_rate",
-                                "timeout_rate",
-                            )
-                        ],
-                        *[m["latency_ms"][k] for k in ("p50", "p90", "p95", "p99")],
-                        *[
-                            ps.get(k)
-                            for k in (
-                                "unique_ips",
-                                "new_ips",
-                                "recurring_share",
-                                "countries",
-                                "regions",
-                                "cities",
-                                "asns",
-                            )
-                        ],
-                        m["coverage"],
-                        m["last_observed"],
-                        w["readiness"],
-                        *[
-                            m[k]
-                            for k in (
-                                "challenge_rate",
-                                "block_rate",
-                                "uptime",
-                                "bytes_up",
-                                "bytes_down",
-                            )
-                        ],
-                    ),
-                ).fetchone()["result_id"]
-                for profile, s in scores.items():
-                    explicit = split_reasons(s, not target)
-                    conn.execute(
-                        "INSERT INTO calculated_scores(result_id,profile,score,grade,rank,"
-                        "previous_rank,state,scored_at,valid_until) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (
-                            result,
-                            profile,
-                            *[
-                                s[k]
-                                for k in (
-                                    "score",
-                                    "grade",
-                                    "rank",
-                                    "previous_rank",
-                                    "state",
-                                    "scored_at",
-                                    "valid_until",
-                                )
-                            ],
-                        ),
-                    )
-                    with conn.cursor() as cur:
-                        cur.executemany(
-                            "INSERT INTO calculated_score_components(result_id,profile,component,"
-                            "position,state,weight,value,inputs,reason_id) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                            [
-                                (
-                                    result,
-                                    profile,
-                                    k,
-                                    i,
-                                    c["state"],
-                                    column("number", s["weights"][k]),
-                                    column("number", c["value"]),
-                                    column("json", c["inputs"]),
-                                    reason_ids.get(c["reason"]),
-                                )
-                                for i, (k, c) in enumerate(s["components"].items())
-                            ],
-                        )
-                        cur.executemany(
-                            "INSERT INTO calculated_score_reasons VALUES (%s,%s,%s,%s)",
-                            [(result, profile, i, reason_ids[r]) for i, r in explicit],
-                        )
-                if target:
-                    continue
-                for name, code in BREAKDOWNS.items():
-                    places, named = FIELDS[name]
-                    for position, row in enumerate(w["breakdowns"][name]):
-                        label = set(row) - set(COUNTERS) - set(LATENCY)
-                        if label != set(places) | (set(NETWORK) if named else set()):
-                            raise ValueError("Unexpected breakdown label")
-                        place = tuple(row.get(f) for f in PLACE) if places else None
-                        network = tuple(row[f] for f in NETWORK) if named else None
-                        breakdowns.append((result, code, position, place, network, row))
-                for row in w["series"]:
-                    conn.execute(
-                        "INSERT INTO calculated_series VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (
-                            result,
-                            row["at"],
-                            row["completed"],
-                            row["successes"],
-                            *[row["latency_ms"][k] for k in ("p50", "p90", "p99")],
-                            row["unique_ips"],
-                            row["uptime"],
-                        ),
-                    )
-    places, networks = shared_labels(conn, *({b[i] for b in breakdowns if b[i]} for i in (3, 4)))
-    partition(conn, build_id)
-    with conn.cursor().copy(
-        "COPY calculated_breakdowns(build_id,result_id,dimension,position,place_id,asn_label_id,"
-        "ips,observations,completed,successes,challenges,blocks,p50,p90,p99) FROM STDIN"
-    ) as copy:
-        for result, code, position, place, network, row in breakdowns:
-            copy.write_row(
-                (
-                    build_id,
-                    result,
-                    code,
-                    position,
-                    places[place] if place else None,
-                    networks[network] if network else None,
-                    *[row[k] for k in ("ips", "observations", "completed", "successes")],
-                    *[row[k] for k in ("challenges", "blocks", *LATENCY)],
-                )
-            )
-    for o in payload["overlap"]:
-        a, b = o["product_a"], o["product_b"]
-        na, nb = o["ips_a"], o["ips_b"]
-        if a > b:
-            a, b, na, nb = b, a, nb, na
-        conn.execute(
-            "INSERT INTO calculated_overlaps VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (
-                build_id,
-                o["cohort"],
-                payload["periods"][o["window"]]["hours"],
-                a,
-                b,
-                o["shared_ips"],
-                na,
-                nb,
-            ),
-        )

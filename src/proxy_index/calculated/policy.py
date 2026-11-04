@@ -53,10 +53,10 @@ EVENTS = {
     "initial_lookback_minutes": 60,
 }
 # Rows each list of the published snapshot keeps ([payload] in the methodology file): the
-# breakdowns (by completed requests) and the pool lists (by IPs), top first. calculated_breakdowns
+# breakdowns (by completed requests) and the pool lists (by IPs), top first. calculated_list_rows
 # keeps every row and every total is computed before capping (calculated/slim.py); 0 publishes
 # only the list's entry count. The country lists are bounded by the countries there are, so they
-# stay whole; the site API restores the full city x ASN and ASN lists from calculated_breakdowns.
+# stay whole; the site API restores the full city x ASN and ASN lists from calculated_list_rows.
 PAYLOAD = {
     "country": 1000,
     "region": 25,

@@ -89,7 +89,7 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     assert report["pg_stat_statements_preloaded"] is False
     assert {r["name"] for r in report["roles"]} >= set(roles)
     owners = {t["name"]: t["owner"] for t in report["partitioned"]}
-    calculated = {"calculated_breakdowns", "calculated_snapshot_parts"}
+    calculated = {"calculated_snapshot_parts"}
     assert owners == {f"public.{name}": roles.admin for name in PARENTS | calculated}
     kinds = [g["kind"] for g in report["gaps"]]
     assert kinds == [

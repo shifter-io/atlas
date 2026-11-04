@@ -124,8 +124,8 @@ async def test_published_snapshot_is_capped_while_typed_rows_and_totals_stay_who
     assert truncated
     with connect(database) as conn:
         typed = conn.execute(
-            "SELECT count(*) FROM calculated_breakdowns b JOIN calculated_windows w "
-            "USING(result_id) WHERE w.build_id=%s",
+            "SELECT count(*) FROM calculated_list_rows JOIN calculated_windows w "
+            "USING(list_id) WHERE w.build_id=%s",
             (int(capped["snapshot_id"]),),
         ).fetchone()[0]
     assert typed == sum(
