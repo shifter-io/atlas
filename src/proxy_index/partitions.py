@@ -26,24 +26,52 @@ def month_bounds(moment: datetime) -> tuple[datetime, datetime]:
 
 
 def partition(conn, table, moment):
-    """Create the partition of a range-partitioned table that holds this UTC moment.
+    """Create the partition of a range-partitioned table that holds this UTC moment, unless it
+    exists. On an autocommit connection the creation is a transaction of its own; inside a
+    transaction it is a savepoint, and the parent's lock (creation()) is held until that ends.
 
     Daily for the DAILY tables unless that month has a monthly partition; monthly for the
-    others (test_events, by `at`). The monthly path sends only the CREATE statement.
+    others (test_events, by `at`). A partition that exists costs one lookup and no lock.
     """
-    start, end = month_bounds(moment)
-    name = f"{table}_{start:%Y_%m}"
+    name, start, end = monthly(table, moment)
+    if _exists(conn, name):
+        return
     if table in DAILY:
-        exists = conn.cursor(row_factory=tuple_row).execute("SELECT to_regclass(%s)", (name,))
-        if exists.fetchone()[0] is not None:
-            return
         start = moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
         end, name = start + timedelta(days=1), f"{table}_{start:%Y_%m_%d}"
-    conn.execute(
+        if _exists(conn, name):
+            return
+    with conn.transaction():
+        for query in creation(table, name, start, end):
+            conn.execute(query)
+
+
+def monthly(table, moment):
+    """The monthly partition of a table that holds this UTC moment: (name, start, end)."""
+    start, end = month_bounds(moment)
+    return f"{table}_{start:%Y_%m}", start, end
+
+
+def creation(table, name, start, end):
+    """The statements that create one partition, to run in one transaction.
+
+    CREATE TABLE IF NOT EXISTS ... PARTITION OF looks for the name before it locks the parent,
+    so sessions creating the same missing partition at once all find it missing, and each but
+    the first fails with DuplicateTable once the first commits. Taking the parent's ACCESS
+    EXCLUSIVE lock first (the lock the CREATE takes anyway, held until the transaction ends;
+    ONLY: not its partitions) makes them create one at a time: the later ones find it and skip.
+    """
+    return (
+        sql.SQL("LOCK TABLE ONLY {} IN ACCESS EXCLUSIVE MODE").format(sql.Identifier(table)),
         sql.SQL(
             "CREATE TABLE IF NOT EXISTS {} PARTITION OF {} FOR VALUES FROM ({}) TO ({})"
-        ).format(sql.Identifier(name), sql.Identifier(table), sql.Literal(start), sql.Literal(end))
+        ).format(sql.Identifier(name), sql.Identifier(table), sql.Literal(start), sql.Literal(end)),
     )
+
+
+def _exists(conn, name):
+    found = conn.cursor(row_factory=tuple_row).execute("SELECT to_regclass(%s)", (name,))
+    return found.fetchone()[0] is not None
 
 
 def children(conn, table) -> list[tuple[str, date, date]]:

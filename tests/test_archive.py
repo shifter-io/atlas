@@ -1,11 +1,15 @@
 """ARCHIVE-1: one re-importable file per UTC day (export, restore, CLI) and daily partitions."""
 
+import asyncio
 import io
 import json
 import tarfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from functools import partial
 
 import pytest
+from psycopg import sql
 from test_storage import enrichment, measurement
 from test_storage_v6 import census
 
@@ -15,6 +19,7 @@ from proxy_index.archive.restore import restore_file
 from proxy_index.archive.tables import TABLES
 from proxy_index.calculated import store
 from proxy_index.cli import main
+from proxy_index.orchestrator.db import Database
 from proxy_index.partitions import children, partition
 from proxy_index.storage import SCHEMA_VERSION, connect, ingest, initialize, seed
 
@@ -306,3 +311,58 @@ def test_raw_tables_get_daily_partitions_unless_the_month_has_one(database):
             ("ip_observations_2027_01_02", date(2027, 1, 2), date(2027, 1, 3)),
         ]
         assert [name for name, _, _ in children(conn, "test_events")] == ["test_events_2026_12"]
+
+
+async def at_once(database, table, starters):
+    """Start the creators (each starter returns an awaitable) while a transaction holds the
+    parent table, so each queues for its lock after any name check it makes; release them
+    together once all of them wait."""
+    with connect(database) as holder:
+        holder.execute(
+            sql.SQL("LOCK TABLE ONLY {} IN ACCESS SHARE MODE").format(sql.Identifier(table))
+        )
+        tasks = [asyncio.ensure_future(start()) for start in starters]
+        for _ in range(500):
+            with connect(database) as conn:
+                (waiting,) = conn.execute(
+                    "SELECT count(*) FROM pg_locks WHERE relation=%s::regclass AND NOT granted "
+                    "AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",
+                    (table,),
+                ).fetchone()
+            if waiting == len(tasks):
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("the creators never queued for the parent table's lock")
+    await asyncio.gather(*tasks)
+
+
+async def test_processes_creating_one_missing_month_at_once_all_succeed(database):
+    """Six processes (a Database and its cache each) create the same month of test_events at
+    once, as two browser ingests finishing together did: one creates it, the others find it."""
+    pools = [Database(database) for _ in range(6)]
+    moment = datetime(2026, 12, 9, tzinfo=UTC)
+    try:
+        starters = [partial(pool.ensure_partition, "test_events", moment) for pool in pools]
+        await at_once(database, "test_events", starters)
+    finally:
+        for pool in pools:
+            await pool.close()
+    with connect(database) as conn:
+        assert [name for name, _, _ in children(conn, "test_events")] == ["test_events_2026_12"]
+
+
+async def test_transactions_creating_one_missing_day_at_once_all_succeed(database):
+    """The same for a daily raw table through partition(), as concurrent ingests do."""
+
+    def create():
+        with connect(database) as conn:
+            partition(conn, "run_buckets", datetime(2026, 12, 3, 5, tzinfo=UTC))
+
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor(max_workers=6) as pool:  # all six at once, on any CPU count
+        await at_once(database, "run_buckets", [partial(loop.run_in_executor, pool, create)] * 6)
+    with connect(database) as conn:
+        assert children(conn, "run_buckets") == [
+            ("run_buckets_2026_12_03", date(2026, 12, 3), date(2026, 12, 4))
+        ]
