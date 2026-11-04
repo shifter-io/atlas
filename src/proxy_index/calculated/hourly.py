@@ -26,11 +26,23 @@ FROM unnest(%s::int[],%s::bigint[],%s::timestamptz[],%s::timestamptz[],%s::inter
 JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.start
  AND o.bucket_start<k.until
 GROUP BY 1,2"""
+# IPs per 5-minute bin of their product's first sighting (sqlwindow's bins), of each slot's runs'
+# observations in [since, until): no labels, so no enrichment join.
+FIRST_SEEN = """SELECT k.slot,
+ date_bin('5 minutes',m.first_seen,'1970-01-01 00:00:00+00'::timestamptz) AS bin,count(*) AS ips
+FROM (SELECT DISTINCT k.slot,k.product_id,o.ip_id
+ FROM unnest(%s::int[],%s::bigint[],%s::int[],%s::timestamptz[],%s::timestamptz[])
+  AS k(slot,run_key,product_id,since,until)
+ JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.since
+  AND o.bucket_start<k.until) k
+JOIN product_ips m ON m.product_id=k.product_id AND m.ip_id=k.ip_id GROUP BY 1,2"""
 
 
 def new_ips(figures, since):
     """IPs of a window first seen by its product at or after since (on the 5-minute grid):
-    the bins of figures["first_seen"] (slice_figures() of the window's range) from since on."""
+    the bins of figures["first_seen"] from since on. figures may be slice_figures() of any range
+    ending at the window's end that holds it: an IP first seen at or after since was seen inside
+    the window, so the widest window's bins serve every window of its group."""
     return sum(n for start, n in (figures or {}).get("first_seen", {}).items() if start >= since)
 
 
@@ -42,14 +54,17 @@ def slice_figures(conn, group_runs, slices):
     its observations (each run labelled by its own newest release, as the calculator reads them;
     shares with the default hosting usage types) plus "first_seen", the IPs per 5-minute bin of
     the product's first sighting; a slice without observations is None, as daily_pools() has it.
+    A slice (since, until, "first_seen") gets only {"first_seen": bins}, counted without labels.
     """
-    specs = [
-        WindowSpec((key, n), product, tuple(asked), since, until, asked)
-        for key, (product, asked) in group_runs.items()
-        for n, (since, until) in enumerate(slices.get(key, ()))
-    ]
+    specs, first = [], []
+    for key, (product, asked) in group_runs.items():
+        for n, (since, until, *only) in enumerate(slices.get(key, ())):
+            spec = WindowSpec((key, n), product, tuple(asked), since, until, asked)
+            (first if only == ["first_seen"] else specs).append(spec)
     found = window_inputs(conn, specs, release_mode="per_run", release_id=None)
     result = {key: [None] * len(slices.get(key, ())) for key in group_runs}
+    for spec, bins in zip(first, _first_seen(conn, first), strict=True):
+        result[spec.key[0]][spec.key[1]] = {"first_seen": bins}
     for spec in specs:
         inputs = found[spec.key]
         if inputs.unique_ips:
@@ -57,6 +72,21 @@ def slice_figures(conn, group_runs, slices):
             figures = pool_figures(inputs, spec.since, hours) | {"first_seen": inputs.first_seen}
             result[spec.key[0]][spec.key[1]] = figures
     return result
+
+
+def _first_seen(conn, specs):
+    """Each spec's first-seen bins (FIRST_SEEN): [{bin start: IPs}] in specs' order."""
+    columns = [[] for _ in range(5)]
+    for slot, spec in enumerate(specs):
+        for run_key in sorted(spec.runs):
+            values = (slot, run_key, spec.product_id, spec.since, spec.until)
+            for column, value in zip(columns, values, strict=True):
+                column.append(value)
+    bins = [{} for _ in specs]
+    if columns[0]:
+        for row in conn.cursor(row_factory=dict_row).execute(FIRST_SEEN, columns):
+            bins[row["slot"]][row["bin"]] = row["ips"]
+    return bins
 
 
 def bucket_ips(conn, group_runs, buckets):

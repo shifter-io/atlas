@@ -1,7 +1,7 @@
 -- Transactional calculated v9 → v10 migration (contract K6), applied by storage.migrate() after
 -- the earlier calculated steps: the incremental calculation's memo tables, empty (schema.sql
--- describes them). Nothing else changes; store.V9_CHECKS compares every list and window list
--- reference with the copy taken by store.V9_SNAPSHOT and checks the new tables are empty.
+-- describes them). Nothing else changes; store.V9_CHECKS compares every calculated_lists row with
+-- the copy taken by store.V9_SNAPSHOT.
 CREATE TABLE calculated_run_ranges (
  run_key bigint NOT NULL, release_id integer NOT NULL, first_bucket timestamptz NOT NULL,
  last_bucket timestamptz NOT NULL, figures jsonb NOT NULL,
