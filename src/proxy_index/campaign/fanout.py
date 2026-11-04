@@ -181,7 +181,11 @@ async def run_process(
     finally:
         if process.returncode is None:
             process.kill()
-            await process.wait()
+        # wait() returns only once stdout reaches EOF, and a pipe left unread past the
+        # reader's buffer is paused and never does: read the rest away first.
+        while await process.stdout.read(1 << 16):
+            pass
+        await process.wait()
 
 
 def owned_dir(path: Path) -> None:
