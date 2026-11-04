@@ -70,7 +70,21 @@ async def history(database, tmp_path, end):
 
 
 def without(payload):
-    return {k: v for k, v in payload.items() if k not in VOLATILE}
+    """payload without its per-build values: ids, generated_at and its networks' list ids
+    (every build writes its own network lists)."""
+    found = {k: v for k, v in payload.items() if k not in VOLATILE}
+    if "networks" in found:
+        found["networks"] = [
+            n
+            | {
+                "windows": {
+                    k: w | {"lists": w["lists"] and w["lists"]["entries"]}
+                    for k, w in n["windows"].items()
+                }
+            }
+            for n in found["networks"]
+        ]
+    return found
 
 
 def first_difference(a, b, path="$"):

@@ -396,10 +396,13 @@ def network_only(payload):
     for key in ("generated_at", "snapshot_id"):
         del payload[key]
     payload["traffic"]["by_test"].pop("browser", None)
-    for p in payload["products"]:
+    for p in [*payload["products"], *payload["networks"]]:
         for w in p["windows"].values():
             for target in contracts.BROWSER_TARGETS:
                 w["targets"].pop(target, None)
+    for n in payload["networks"]:  # each build writes its own network lists (NET-SUM-1)
+        for w in n["windows"].values():
+            w["lists"] = w["lists"]["entries"]
     return payload
 
 
@@ -427,14 +430,15 @@ async def test_browser_runs_leave_every_network_figure_byte_identical(
     assert "browser" not in before["traffic"]["by_test"]
     assert after["traffic"]["by_test"]["browser"]["bytes_exact"] is False
     assert after["traffic"]["by_test"]["browser"]["runs"] == 48
-    for p in after["products"]:
+    assert [n["provider"] for n in a["networks"]] == list(PROVIDERS)
+    for p in [*after["products"], *after["networks"]]:  # networks: per target too (NET-SUM-1)
         found = p["windows"]["24h"]["targets"]
         listed = [t for t in found if t in contracts.BROWSER_TARGETS]
         assert listed == list(contracts.BROWSER_TARGETS)  # K-BP1 order, after the network ones
         assert list(found)[: -len(listed)] == ["generic_http", "generic_https"]
         for target in contracts.RUN_TARGETS:
             check_browser_target(found[target], target)
-        minutes = p["scoring"]["slots"]["minutes"]
+        minutes = p["windows"]["24h"]["metrics"]["time_slots"]["minutes"]
         check_group(found, union_rate(summaries, p["provider"], minutes))
 
 

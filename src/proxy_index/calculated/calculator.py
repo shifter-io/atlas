@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
-from . import browser, incremental
+from . import browser, incremental, network
 from .aggregate import LATENCY as PERCENTILES
 from .aggregate import (
     NOT_LATENCY_TARGET,
@@ -59,11 +59,11 @@ from .policy import (
 from .releases import snapshot_fields
 from .store import discard, expire, prune
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # The calculation's modules (and detect, traffic, browser): a change to any changes the id, so the
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists incremental hourly fleetsql rollups "
-SOURCES += "sqlwindow poolfig"
+SOURCES += "sqlwindow poolfig network"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
@@ -551,21 +551,8 @@ def build(
         # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
         scheduled = scheduled_groups.get(p["product_id"]) == key
         batches = pulse_groups[p["product_id"]] if scheduled else []
-        # Done pulse runs in their time slots (time_slots() adds the observed live counters of
-        # one whose artifact was never ingested).
-        slot_runs = [
-            {
-                "slot": floor_time(b["scheduled_for"], slot_seconds),
-                "scheduled_for": b["scheduled_for"],
-                "target": b["target_id"],
-                "requests": b["requests"],
-                "successes": b["successes"],
-                "counted": b.get("run_key") is not None,
-                "during_census": bool(flagged_batches.get((b.get("batch_id"), b["product_id"]))),
-                "census_batches": flagged_batches.get((b.get("batch_id"), b["product_id"]), []),
-            }
-            for b in batches
-        ]
+        # Done pulse runs in their time slots.
+        slot_runs = network.slot_runs(batches, slot_seconds, flagged_batches)
         p["pricing"], price_rows = pricing(evidence_rows, p["product_id"], p["cohort"], as_of)
         down = (
             [o | {"country": o["country"].strip()} for o in outage_groups[p["product_id"]]]
@@ -827,6 +814,15 @@ def build(
         "products": list(groups.values()),
         "fleet": fleets,
         "overlap": overlaps,
+        # Payload v4: one summary per network over all its groups (network.py, contract K9).
+        "networks": network.summaries(
+            fleet_groups,
+            bucket_groups,
+            (scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
+            flagged_batches,
+            as_of,
+            config,
+        ),
         **snapshot_fields(release),
         "targets": [
             {
