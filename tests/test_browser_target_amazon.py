@@ -28,6 +28,7 @@ def test_amazon_pdp_has_its_cases():
         "status_503",
         "not_found",
         "no_price",
+        "no_title",
         "signin_redirect",
         "empty_page",
     }
@@ -56,4 +57,3 @@ def test_the_dogs_error_pages_end_the_wait():
     marks no block: the 404 page of an unknown ASIN has it too (fixture not_found)."""
     spec = registry.get(c.AMAZON_PDP).page(context(0), ("0000000000",))
     assert DOGS_LINK in j.selectors(spec.wait_for)
-

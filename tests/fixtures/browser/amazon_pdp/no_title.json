@@ -1,0 +1,22 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/dp/0000000000",
+    "status": 200,
+    "title": "Amazon.com",
+    "text_head": "Visit the Example Brand Store. $19.99. Add to Cart. Buy Now.",
+    "found": {
+      "#productTitle": 0,
+      "#corePrice_feature_div .a-price": 1,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 0,
+      "a[href*=\"/dogsofamazon\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_title"
+  }
+}
