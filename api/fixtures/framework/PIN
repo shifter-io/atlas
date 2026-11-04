@@ -1,0 +1,8 @@
+# The framework schema the API's database tests load in CI (PG_TEST_FRAMEWORK_DIR).
+# Byte-for-byte copies of Zeus-Development/proxy-index src/proxy_index/ at this commit
+# (calculated schema v9); CI checks them with `sha256sum -c` before the tests.
+# To move to a newer framework: copy both files from that commit, update the commit
+# and the two lines below, and update the test fixtures in the same pull request.
+commit 372306ff97a0d611ba590fd3462f2471189d56f3
+f7c2e9be2e168ac30d0542a71ed1c243a398b0436c36a4e790c3ee8d38d6b7e2  schema.sql
+0efaf3f1c8b25cf7866263c851499edf73ee997dce8211c265c1707c1bd49a54  calculated/schema.sql

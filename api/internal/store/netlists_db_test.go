@@ -19,13 +19,12 @@ func networkLists(t *testing.T) (*testdb.DB, *pgxpool.Pool) {
 	t.Helper()
 	db := testdb.New(t)
 	emptyBuild(t, db)
-	db.Exec(t, testdb.ListTables)
 	db.Exec(t, `INSERT INTO place_names(country_code,country) VALUES ('DE','Germany'),('US','United States');
  INSERT INTO place_names(country_code,country,region_code,region) VALUES ('US','United States','CA','California');
  INSERT INTO place_names(country_code,country,region_code,region,city) VALUES ('US','United States','CA','California','San Jose');
  INSERT INTO asn_names(asn,name) VALUES (64512,'United Transit'), (NULL,'Unnamed');
  INSERT INTO asn_labels(asn_name_id,usage_type) SELECT asn_name_id,'hosting' FROM asn_names WHERE asn = 64512 OR asn IS NULL;
- INSERT INTO calculated_lists(product_id,cohort,window_hours) SELECT 1,'network',h FROM unnest('{24,168,720}'::int[]) h;
+ INSERT INTO calculated_lists(`+testdb.ListColumns+`) SELECT 1,'network',h,`+testdb.ListFill+` FROM unnest('{24,168,720}'::int[]) h;
  INSERT INTO calculated_list_rows(list_id,dimension,position,place_id,asn_label_id,ips,observations,completed,successes,challenges,blocks,p50,p90,p99)
  SELECT l.list_id, v.d::"char", v.pos,
   (SELECT place_id FROM place_names p WHERE p.country_code = v.cc AND p.region IS NOT DISTINCT FROM v.region AND p.city IS NOT DISTINCT FROM v.city),

@@ -332,12 +332,14 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` job runs `gofmt`, `go vet` and `go test ./...` on every ready pull request (and `-race` on `main`); its database tests skip until CI gets PostgreSQL and the framework schema.
+CI's `api` job runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema pinned in `fixtures/framework/` (`PG_TEST_FRAMEWORK_DIR`; `PIN` names its framework commit and checksums), on every ready pull request; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema from `proxy-index/src/proxy_index/` (or
 `PG_TEST_FRAMEWORK_DIR`) and drop the database afterwards. `proxy_reviews` is never
-touched. The suite covers:
+touched. The framework schema must be calculated v9; the tests of the read before
+v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), and
+`testdb.MoveToLists` moves it on to v9 the way the framework's migration does. The suite covers:
 
 - `store`:
   - migrations are idempotent and checksummed

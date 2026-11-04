@@ -39,14 +39,16 @@ var listLabels = map[string][][]any{
 
 var listNames = map[string]string{"c": "country", "r": "region", "g": "city", "a": "asn", "x": "country_asn", "y": "city_asn"}
 
-// writeList stores one list's typed rows (K2) and returns its id. Counters
-// differ per seed; success rates are never whole, the last row of a dimension
-// has no request and the second no p99.
+// writeList stores one list's typed rows (K2) of the fixture's product and
+// returns its id. Counters differ per seed; success rates are never whole, the
+// last row of a dimension has no request and the second no p99.
 func writeList(t *testing.T, c *pgx.Conn, seed int) int64 {
 	t.Helper()
 	ctx := context.Background()
+	product := testdb.Product(t, c, "shifter", "residential")
 	var id int64
-	if err := c.QueryRow(ctx, `INSERT INTO calculated_lists(product_id,cohort,window_hours) VALUES (1,$1,1) RETURNING list_id`, fmt.Sprint("seed", seed)).Scan(&id); err != nil {
+	if err := c.QueryRow(ctx, `INSERT INTO calculated_lists(`+testdb.ListColumns+`) VALUES ($1,$2,1,`+testdb.ListFill+`) RETURNING list_id`,
+		product, fmt.Sprint("seed", seed)).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	for code, labels := range listLabels {
@@ -248,7 +250,6 @@ func datasetText(t *testing.T, res *build.Result) []byte {
 
 func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
 	db := testdb.New(t)
-	db.Exec(t, testdb.ListTables)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
 	lists := map[string]int64{"24h": writeList(t, c, 0), "7d": writeList(t, c, 1), "30d": writeList(t, c, 2)}
@@ -301,7 +302,6 @@ func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
 
 func TestOnlyNewListsAreFetched(t *testing.T) {
 	db := testdb.New(t)
-	db.Exec(t, testdb.ListTables)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
 	first := map[string]int64{"24h": writeList(t, c, 0), "7d": writeList(t, c, 1), "30d": writeList(t, c, 2)}

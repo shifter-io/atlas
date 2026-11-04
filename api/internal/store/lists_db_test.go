@@ -83,6 +83,7 @@ func emptyBuild(t *testing.T, db *testdb.DB) int64 {
 func TestBreakdownQueryEstimatesTheStoredCode(t *testing.T) {
 	db := testdb.New(t)
 	build := emptyBuild(t, db)
+	db.CalculatedV8(t)
 	db.Exec(t, fmt.Sprintf(`CREATE TABLE calculated_breakdowns_b%[1]d PARTITION OF calculated_breakdowns FOR VALUES IN (%[1]d);
  INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,body_bytes,coverage,readiness)
   SELECT %[1]d,(SELECT product_id FROM products),'c','',h,0,0,0,0,0,'ready' FROM unnest('{24,168,720}'::int[]) h;
@@ -121,10 +122,10 @@ func TestBreakdownQueryEstimatesTheStoredCode(t *testing.T) {
 func TestListQueryUsesThePrimaryKey(t *testing.T) {
 	db := testdb.New(t)
 	emptyBuild(t, db)
-	db.Exec(t, testdb.ListTables)
-	db.Exec(t, `INSERT INTO calculated_lists(product_id,cohort,window_hours) SELECT 1,'c'||i,1 FROM generate_series(1,100) i;
+	db.Exec(t, `INSERT INTO calculated_lists(`+testdb.ListColumns+`) SELECT 1,'c'||i,1,`+testdb.ListFill+` FROM generate_series(1,100) i;
  INSERT INTO calculated_list_rows(list_id,dimension,position,place_id,asn_label_id,ips,observations)
-  SELECT l.list_id, d.code, p, (SELECT place_id FROM place_names), (SELECT asn_label_id FROM asn_labels), 1, 1
+  SELECT l.list_id, d.code, p, CASE WHEN d.code <> 'a' THEN (SELECT place_id FROM place_names) END,
+   CASE WHEN d.code IN ('a','x','y') THEN (SELECT asn_label_id FROM asn_labels) END, 1, 1
   FROM calculated_lists l, (VALUES ('c'::"char",40),('r',150),('g',200),('a',150),('x',120),('y',340)) d(code,n), generate_series(0,d.n-1) p;
  ANALYZE calculated_list_rows`)
 	if n := text(t, db, `SELECT count(*)::text FROM calculated_list_rows`); n != "100000" {
@@ -148,7 +149,7 @@ const slimmedGroup = `{"as_of": "2026-11-04T00:00:00+00:00", "methodology": {"id
  "pool": {"list_entries": {}}, "breakdowns": {"city_asn": [{"city": "Berlin"}]}, "breakdown_entries": {"city_asn": 3}}}}]}`
 
 // concurrentDrop publishes the group with its typed rows (in a K2 list or in
-// the build's partition), pauses a load once it has read the snapshot row,
+// the build's calculated v8 partition), pauses a load once it has read the snapshot row,
 // runs gc in another session meanwhile, and returns the loaded payload's
 // city x ASN rows and gc's error.
 func concurrentDrop(t *testing.T, k2, lock bool, gc func(db *testdb.DB, build int64) error) (int, error) {
@@ -159,6 +160,7 @@ func concurrentDrop(t *testing.T, k2, lock bool, gc func(db *testdb.DB, build in
 	var p int
 	fmt.Sscan(product, &p)
 	build := db.Publish(t, []byte(fmt.Sprintf(slimmedGroup, p)))
+	db.CalculatedV8(t)
 	db.Exec(t, fmt.Sprintf(`CREATE TABLE calculated_breakdowns_b%[1]d PARTITION OF calculated_breakdowns FOR VALUES IN (%[1]d);
  INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,body_bytes,coverage,readiness)
   VALUES (%[1]d,%[2]d,'c','',24,0,0,0,0,0,'ready');
@@ -246,6 +248,7 @@ func TestALoadAfterAFailedReadDoesNotCrash(t *testing.T) {
 	fmt.Sscan(text(t, db, `SELECT place_id::text FROM place_names WHERE city = 'Paris'`), &stale)
 	fmt.Sscan(text(t, db, `SELECT product_id::text FROM products`), &p)
 	build := db.Publish(t, []byte(fmt.Sprintf(slimmedGroup, p)))
+	db.CalculatedV8(t)
 	db.Exec(t, fmt.Sprintf(`CREATE TABLE calculated_breakdowns_b%[1]d PARTITION OF calculated_breakdowns FOR VALUES IN (%[1]d);
  INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,body_bytes,coverage,readiness)
   VALUES (%[1]d,%[2]d,'c','',24,0,0,0,0,0,'ready');

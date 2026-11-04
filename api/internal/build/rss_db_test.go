@@ -137,12 +137,11 @@ func publishScale(t *testing.T, db *testdb.DB, n int) int {
 		}
 	}
 	db.PublishParts(t, head, products, runs)
-	db.Exec(t, testdb.ListTables)
 	db.Exec(t, fmt.Sprintf(`INSERT INTO place_names(country_code,country,region_code,region,city)
   SELECT 'C'||i%%250, 'Country '||i%%250, 'R'||i%%40, 'Region '||i%%40, 'City '||i FROM generate_series(0,999) i;
  INSERT INTO asn_names(asn,name) SELECT 64512+i, 'Example Networks '||i FROM generate_series(0,999) i;
  INSERT INTO asn_labels(asn_name_id,usage_type) SELECT asn_name_id,'isp' FROM asn_names;
- INSERT INTO calculated_lists(product_id,cohort,window_hours) SELECT 1,'w'||i,1 FROM generate_series(1,%[1]d) i;
+ INSERT INTO calculated_lists(`+testdb.ListColumns+`) SELECT 1,'w'||i,1,`+testdb.ListFill+` FROM generate_series(1,%[1]d) i;
  INSERT INTO calculated_list_rows SELECT l.list_id, d.code, p, CASE WHEN d.code <> 'a' THEN 1+(p+l.list_id)%%1000 END,
   CASE WHEN d.code IN ('a','x','y') THEN 1+(p+l.list_id)%%1000 END, 1000-p, 2000-2*p, 3000-3*p, 2000-2*p, 0, 0, 400+p, 900+p, 2000+p
   FROM calculated_lists l, (VALUES ('c'::"char",%[2]d),('r',%[3]d),('g',%[3]d),('a',%[3]d),('x',%[3]d),('y',%[3]d)) d(code,n), generate_series(0,d.n-1) p;

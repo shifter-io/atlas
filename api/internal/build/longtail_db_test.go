@@ -66,7 +66,8 @@ func snapshotVariants(t *testing.T) (whole, capped []byte, products []map[string
 
 // storeTypedRows writes the typed breakdown rows calculate() persists for the whole lists:
 // city x ASN rows by position and ASN rows in reverse IP order, plus an ASN without IPs, in
-// the build's partition with the shared place and ASN names (proxy-index calculated/schema.sql).
+// the build's partition with the shared place and ASN names, as calculated v8 stores them
+// (testdb.CalculatedV8; MoveToLists makes them v9 lists).
 func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[string]any) {
 	ctx := context.Background()
 	c := db.Conn(t)
@@ -95,6 +96,7 @@ func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[s
 		db.Exec(t, `INSERT INTO calculated_breakdowns(build_id,result_id,dimension,position,ips,observations,place_id,asn_label_id,
  completed,successes,challenges,blocks,p50,p90,p99) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`, args...)
 	}
+	db.CalculatedV8(t)
 	db.Exec(t, fmt.Sprintf("CREATE TABLE calculated_breakdowns_b%d PARTITION OF calculated_breakdowns FOR VALUES IN (%d)", buildID, buildID))
 	for _, p := range products {
 		product := id("SELECT product_id FROM products WHERE provider=$1 AND name=$2", p["provider"], p["product"])

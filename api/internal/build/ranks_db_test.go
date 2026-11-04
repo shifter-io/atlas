@@ -134,7 +134,8 @@ func rankedSnapshot(t *testing.T, db *testdb.DB) int64 {
 	return build
 }
 
-// storeRankRows writes the typed rows calculate() persists for whole place lists.
+// storeRankRows writes the typed rows calculate() persists for whole place
+// lists, as calculated v8 stores them (testdb.CalculatedV8).
 func storeRankRows(t *testing.T, db *testdb.DB, build int64, cohort string, whole map[[2]any]map[string][]rankPlace) {
 	ctx := context.Background()
 	c := db.Conn(t)
@@ -153,6 +154,7 @@ func storeRankRows(t *testing.T, db *testdb.DB, build int64, cohort string, whol
 		return s
 	}
 	db.Exec(t, "INSERT INTO cohorts(cohort) VALUES ($1) ON CONFLICT DO NOTHING", cohort)
+	db.CalculatedV8(t)
 	db.Exec(t, fmt.Sprintf("CREATE TABLE calculated_breakdowns_b%d PARTITION OF calculated_breakdowns FOR VALUES IN (%d)", build, build))
 	for k, lists := range whole {
 		result := one(`INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,
@@ -198,9 +200,22 @@ func sameDBRank(got model.Rank, rank *int64, peers int64) bool {
 	return float64(got.Rank) == float64(*rank) && int64(got.Peers) == peers
 }
 
+// The ranks are the same read from calculated v8's breakdown partition and
+// from v9's lists.
 func TestRanksMatchADirectSQLRanking(t *testing.T) {
-	db := testdb.New(t)
-	build := rankedSnapshot(t, db)
+	for _, k2 := range []bool{false, true} {
+		t.Run(map[bool]string{false: "calculated_breakdowns", true: "lists"}[k2], func(t *testing.T) {
+			db := testdb.New(t)
+			build := rankedSnapshot(t, db)
+			if k2 {
+				db.MoveToLists(t)
+			}
+			ranksMatchSQL(t, db, build)
+		})
+	}
+}
+
+func ranksMatchSQL(t *testing.T, db *testdb.DB, build int64) {
 	res := buildFrom(t, db)
 	ctx := context.Background()
 	c := db.Conn(t)

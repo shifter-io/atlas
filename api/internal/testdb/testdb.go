@@ -2,7 +2,8 @@
 //
 // Tests that need a database call New, which skips the test unless
 // PG_TEST_ADMIN_FILE names a credentials TOML (e.g. proxy-index/.secrets/postgres-admin.toml)
-// for a role allowed to CREATE DATABASE. Each test gets its own database named
+// for a role allowed to CREATE DATABASE; with PG_TEST_REQUIRED set (CI) a
+// missing PG_TEST_ADMIN_FILE fails the test instead. Each test gets its own database named
 // siteapi_test_<random>, loaded with the framework schema read from the proxy-index/
 // checkout (PG_TEST_FRAMEWORK_DIR overrides), and dropped afterwards. The real
 // proxy_reviews database is never touched.
@@ -60,6 +61,9 @@ func New(t testing.TB) *DB {
 func NewFramework(t testing.TB) *DB {
 	t.Helper()
 	file := os.Getenv("PG_TEST_ADMIN_FILE")
+	if file == "" && os.Getenv("PG_TEST_REQUIRED") != "" {
+		t.Fatal("PG_TEST_REQUIRED is set and PG_TEST_ADMIN_FILE is not: the database tests must run")
+	}
 	if file == "" {
 		t.Skip("database tests skipped: set PG_TEST_ADMIN_FILE=<path to proxy-index/.secrets/postgres-admin.toml> to run them against a scratch database")
 	}
@@ -99,17 +103,10 @@ func NewFramework(t testing.TB) *DB {
 			t.Logf("drop %s: %v", name, err)
 		}
 	})
+	db.loadFramework(t, "schema.sql")
+	db.loadCalculated(t)
 	w := db.Conn(t)
 	defer w.Close(context.Background())
-	for _, f := range []string{"schema.sql", filepath.Join("calculated", "schema.sql")} {
-		sql, err := os.ReadFile(filepath.Join(fw, f))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Exec(ctx, string(sql)); err != nil {
-			t.Fatalf("framework %s: %v", f, err)
-		}
-	}
 	// Scratch partitions (the framework creates monthly ones on demand) and the
 	// reference rows the real database has.
 	if _, err := w.Exec(ctx, `CREATE TABLE test_events_default PARTITION OF test_events DEFAULT;
@@ -121,6 +118,29 @@ INSERT INTO countries(country_code,name,region_id,census_time) VALUES ('US','Uni
 		t.Fatalf("scratch reference rows: %v", err)
 	}
 	return db
+}
+
+// loadFramework runs one of the framework's schema files (relative to
+// FrameworkDir) on the database.
+func (d *DB) loadFramework(t testing.TB, file string) {
+	t.Helper()
+	sql, err := os.ReadFile(filepath.Join(FrameworkDir(), file))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	c := d.Conn(t)
+	defer c.Close(context.Background())
+	if _, err := c.Exec(ctx, string(sql)); err != nil {
+		t.Fatalf("framework %s: %v", file, err)
+	}
+}
+
+// loadCalculated runs the framework's calculated schema, which is idempotent.
+func (d *DB) loadCalculated(t testing.TB) {
+	t.Helper()
+	d.loadFramework(t, filepath.Join("calculated", "schema.sql"))
 }
 
 // Conn opens a read-write connection.
