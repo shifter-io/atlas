@@ -17,6 +17,9 @@ def test_google_search_has_its_cases():
         "consent",
         "consent_form",
         "consent_banner_with_results",
+        "login_redirect",
+        "empty_page",
+        "no_results",
     }
 
 

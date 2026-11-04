@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://accounts.google.com/v3/signin/identifier",
+    "status": 200,
+    "title": "Sign in - Google Accounts",
+    "text_head": "Sign in. Use your Google Account. Email or phone. Forgot email? Not your computer? Use a private browsing window to sign in. Create account.",
+    "found": {
+      "#search a h3": 0,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_redirect"
+  }
+}
