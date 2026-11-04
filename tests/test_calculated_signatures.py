@@ -3,10 +3,10 @@ stored list, a new test gives a new list, and verify-on-hit fails a build whose 
 an input, so the previous build keeps serving."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_calculated import POLICY, payload_mismatches
+from test_calculated import POLICY, payload_mismatches, spread
 from test_storage import enrichment, measurement
 
 from proxy_index.calculated import calculator, lists, store
@@ -38,6 +38,28 @@ async def runs(tmp_path, *countries):
 def lists_of(conn, build):
     """(product_id, cohort, hours) -> list_id of a build's target-free windows."""
     return {tuple(r[:3]): r[3] for r in conn.execute(LISTS, (int(build["snapshot_id"]),))}
+
+
+def signed(conn, build, hours, spans):
+    """Signature v1 of a build's target-free window of `hours` (expected, by hand): spans maps each
+    unenriched run_key to its first and last bucket in the window."""
+    countries = conn.execute("SELECT country_code,name FROM countries").fetchall()
+    runs = []
+    for run_key, (first, last) in sorted(spans.items()):
+        (summary,) = conn.execute(
+            "SELECT summary_sha256 FROM test_runs WHERE run_key=%s", (run_key,)
+        ).fetchone()
+        runs.append([run_key, summary, None, None, first.isoformat(), last.isoformat(), True])
+    return digest(
+        {
+            "v": 1,
+            "impl": calculator.IMPLEMENTATION_ID,
+            "method": build["methodology"]["id"],
+            "hours": hours,
+            "countries": digest(sorted([list(c) for c in countries])),
+            "runs": runs,
+        }
+    )
 
 
 def by_country(build):
@@ -154,3 +176,61 @@ async def test_verify_on_hit_fails_an_incomplete_signature(database, tmp_path, m
     monkeypatch.undo()
     fixed = calculate(database, POLICY, as_of=end, publish=True)
     assert fixed["products"][0]["windows"]["24h"]["metrics"]["completed"] == 20
+
+
+@pytest.mark.asyncio
+async def test_a_window_edge_through_a_run_signs_its_clipped_buckets(
+    database, tmp_path, monkeypatch
+):
+    """A run split by window edges (CALC-LISTS-1b review m1): its buckets at W, +5, +10, +30 and
+    +35 minutes. Each window signs only the buckets inside it, so a cutoff that clips the run
+    gives a new list (a miss) and a later cutoff with the same clipped first and last bucket
+    reuses it (a hit, verified)."""
+    store.initialize(database)
+    w = datetime(2026, 10, 1, 12, tzinfo=UTC)
+    minute = timedelta(minutes=1)
+    ingest(await spread(tmp_path, monkeypatch, w + minute, [0, 300, 600, 1800, 2100]), database)
+    with connect(database) as conn:
+        (run_key,) = conn.execute("SELECT run_key FROM test_runs").fetchone()
+    day, at = timedelta(hours=24), lambda m: w + m * minute
+    # (cutoff, 24h span and completed, 7d/30d span): a late run (it ends after the first cutoff),
+    # the whole run, then the 24h window's start moving through it.
+    cases = [
+        (at(20), (at(0), at(10)), 3, (at(0), at(10))),
+        (at(40), (at(0), at(35)), 5, (at(0), at(35))),
+        (day + at(15), (at(30), at(35)), 2, (at(0), at(35))),
+        (day + at(25), (at(30), at(35)), 2, (at(0), at(35))),
+        (day + at(35), (at(35), at(35)), 1, (at(0), at(35))),
+    ]
+    found = []
+    for as_of, short, completed, long in cases:
+        build = calculate(database, POLICY, as_of=as_of, publish=True)
+        windows = build["products"][0]["windows"]
+        assert windows["24h"]["metrics"]["completed"] == completed
+        assert (
+            windows["7d"]["metrics"]["completed"]
+            == windows["30d"]["metrics"]["completed"]
+            == (5 if long[1] == at(35) else 3)
+        )
+        with connect(database) as conn:
+            ids = {k[2]: v for k, v in lists_of(conn, build).items()}
+            stored = dict(
+                conn.execute(
+                    "SELECT l.window_hours,l.signature FROM calculated_lists l "
+                    "WHERE l.list_id=ANY(%s)",
+                    (list(ids.values()),),
+                ).fetchall()
+            )
+            for hours, span in ((24, short), (168, long), (720, long)):
+                assert stored[hours] == signed(conn, build, hours, {run_key: span}), (as_of, hours)
+        assert payload_mismatches(database, int(build["snapshot_id"])) == []
+        found.append(ids)
+    late, whole, clipped, same, last = found
+    assert set(whole.values()).isdisjoint(late.values())  # the late run's tail arrived: misses
+    # The 24h window clips the run: a miss; 7d and 30d still hold the whole run: hits.
+    assert clipped[24] not in (whole[24], late[24])
+    assert clipped[168] == whole[168] and clipped[720] == whole[720]
+    # Its start moves on, but the clipped first and last bucket stay +30 and +35: a hit.
+    assert same == clipped
+    # The start passes +30: a miss for 24h only.
+    assert last[24] != same[24] and (last[168], last[720]) == (whole[168], whole[720])

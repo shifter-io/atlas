@@ -248,7 +248,8 @@ def try_record(**fields: Any) -> dict[str, Any]:
     optional(check_string, record["error"], "error", TOKEN)
     if record["verdict"] != (CODE_VERDICTS.get(record["error"]) if record["error"] else "ok"):
         raise ValueError("verdict: must be the one its error code implies")
-    optional(check_int, record["status"], "status", 100, 599)
+    # Any three-digit status: LinkedIn answers its block with 999 (K-BP2 reads it as block).
+    optional(check_int, record["status"], "status", 100, 999)
     record["final_url"] = optional(lambda url, _: page_url(url), record["final_url"], "final_url")
     timings = check_fields(record["timings_ms"], TIMINGS, "timings_ms")
     for key, ms in timings.items():
