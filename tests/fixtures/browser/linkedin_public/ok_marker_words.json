@@ -1,0 +1,17 @@
+{
+  "view": {
+    "final_url": "https://www.linkedin.com/in/example-person/",
+    "status": 200,
+    "title": "Example Person - Engineer at Example hCaptcha | LinkedIn",
+    "text_head": "Example Person. Engineer at Example hCaptcha. Rate limit and access denied handling for APIs. Example City.",
+    "found": {
+      "h1.top-card-layout__title": 1,
+      ".top-card-layout__headline": 1
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}
