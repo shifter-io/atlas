@@ -130,11 +130,13 @@ class BrowserTransport:
             self._index += 1
         began = time.perf_counter()
         timings: dict[str, int | None] = dict.fromkeys(TIMINGS)
-        state: dict[str, Any] = {"status": None, "final_url": None, "bytes": None, "shot": None}
+        # The try's facts as its steps learn them (timings_ms, main status, URL, bytes, shot).
+        state: dict[str, Any] = {"timings": timings, "status": None, "final_url": None}
+        state |= {"bytes": None, "shot": None}
         budget = self._budget()
         try:
             async with budget:
-                assessment = await self._attempt(target, context, timings, state)
+                assessment = await self._attempt(target, context, state)
         except UserAgentRefused:
             raise
         except Exception as exc:
@@ -154,12 +156,11 @@ class BrowserTransport:
             bytes_exact=False,
             completed_at=time.perf_counter(),
         )
-        self._record(target, context, outcome, getattr(assessment, "reason", None), timings, state)
+        self._record(target, context, outcome, getattr(assessment, "reason", None), state)
         return outcome
 
-    async def _attempt(
-        self, target: BrowserTarget, context: RequestContext, timings: dict, state: dict
-    ) -> Any:
+    async def _attempt(self, target: BrowserTarget, context: RequestContext, state: dict) -> Any:
+        timings = state["timings"]
         proxy = self.config.proxy.resolve(context)
         if proxy.scheme == "socks5" and proxy.username is not None:
             network = (self.config.provider, self.config.product)
@@ -174,13 +175,11 @@ class BrowserTransport:
             mark = time.perf_counter()
             async with browser.context(proxy, self.block) as page:
                 timings["context"] = _ms(mark)
-                return await self._on_page(page, target, spec, timings, state)
+                return await self._on_page(page, target, spec, state)
 
-    async def _on_page(
-        self, page: Page, target: BrowserTarget, spec: PageSpec, timings: dict, state: dict
-    ) -> Any:
+    async def _on_page(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
         try:
-            assessment = await self._load(page, target, spec, timings, state)
+            assessment = await self._load(page, target, spec, state)
         except NavigationError as exc:
             code, verdict = classify_navigation_error(exc.name)
             assessment = PageAssessment(error=code, verdict=verdict, reason=_reason(exc.name))
@@ -192,10 +191,9 @@ class BrowserTransport:
                 state["shot"] = await page.screenshot()
         return assessment
 
-    async def _load(
-        self, page: Page, target: BrowserTarget, spec: PageSpec, timings: dict, state: dict
-    ) -> Any:
+    async def _load(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
         """Navigate, then settle: consent, wait_for, settle_ms and the target's interact()."""
+        timings = state["timings"]
         timeout_ms = self.timeout_s * 1000
         mark = time.perf_counter()
         state["status"] = await page.goto(spec.url, timeout_ms)
@@ -225,7 +223,6 @@ class BrowserTransport:
         context: RequestContext,
         outcome: Outcome,
         reason: str | None,
-        timings: dict,
         state: dict,
     ) -> None:
         i, shot = context.request_index, state["shot"]
@@ -236,7 +233,7 @@ class BrowserTransport:
             error=outcome.error,
             status=outcome.status,
             final_url=state["final_url"],
-            timings_ms=timings,
+            timings_ms=state["timings"],
             bytes_down_est=state["bytes"],
             reason=reason,
             screenshot=bundle_members().screenshot(i) if shot is not None else None,
