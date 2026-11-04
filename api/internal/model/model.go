@@ -157,16 +157,6 @@ func NewBreakdown() Breakdown {
 	return b
 }
 
-type TargetMeta struct {
-	ID            string   `json:"id"`
-	Label         Str      `json:"label"`
-	Category      Str      `json:"category"`
-	PassCondition Str      `json:"passCondition"`
-	Difficulty    Num      `json:"difficulty"`
-	Source        string   `json:"source"`
-	NA            []string `json:"na"`
-}
-
 type TestScope struct {
 	ID             string   `json:"id"`
 	Label          Str      `json:"label"`
@@ -354,22 +344,6 @@ type TrustSignals struct {
 	LeakChecks              []LeakCheck `json:"leakChecks"`
 	KycVerified             Bool        `json:"kycVerified"`
 	ConsentDisclosed        Bool        `json:"consentDisclosed"`
-}
-
-type TargetBenchmark struct {
-	Target      string `json:"target"`
-	SuccessRate Num    `json:"successRate"`
-	CaptchaRate Num    `json:"captchaRate"`
-	BlockRate   Num    `json:"blockRate"`
-	LatencyP50  Num    `json:"latencyP50"`
-	LatencyP90  Num    `json:"latencyP90"`
-	Requests    Num    `json:"requests"`
-	Delta24h    Num    `json:"delta24h"`
-}
-
-func (v *TargetBenchmark) UnmarshalJSON(d []byte) error {
-	type plain TargetBenchmark
-	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 type SeriesPoint struct {

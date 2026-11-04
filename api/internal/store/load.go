@@ -53,7 +53,7 @@ const fingerprintSQL = `SELECT
  %s,
  %s,
  (SELECT count(*) FROM public.products),
- (SELECT md5(string_agg(target_id || '|' || coalesce(label,'') || '|' || coalesce(pass_condition,'') || '|' || sort_order, ',' ORDER BY target_id)) FROM public.targets)`
+ (SELECT md5(string_agg(target_id || '|' || coalesce(label,'') || '|' || coalesce(pass_condition,'') || '|' || sort_order || '|' || engine, ',' ORDER BY target_id)) FROM public.targets)`
 
 // ReadFingerprint runs the change-detection queries: the site layout, then
 // one query over the framework tables and the site tables that exist.
@@ -86,6 +86,9 @@ type FrameworkTarget struct {
 	Label         *string
 	PassCondition *string
 	SortOrder     int32
+	// Engine is "http" or "browser" (public.targets.engine, NOT NULL since
+	// framework schema v1).
+	Engine string
 }
 
 type ScopeRow struct {
@@ -438,9 +441,9 @@ func Load(ctx context.Context, db TxBeginner) (*Inputs, error) {
 			return
 		},
 		func() (err error) {
-			in.FrameworkTargets, err = collect(ctx, tx, `SELECT target_id, label, pass_condition, sort_order FROM public.targets ORDER BY sort_order, target_id`,
+			in.FrameworkTargets, err = collect(ctx, tx, `SELECT target_id, label, pass_condition, sort_order, engine FROM public.targets ORDER BY sort_order, target_id`,
 				func(r pgx.Rows, v *FrameworkTarget) error {
-					return r.Scan(&v.ID, &v.Label, &v.PassCondition, &v.SortOrder)
+					return r.Scan(&v.ID, &v.Label, &v.PassCondition, &v.SortOrder, &v.Engine)
 				})
 			return
 		},

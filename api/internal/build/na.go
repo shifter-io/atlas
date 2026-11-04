@@ -26,11 +26,12 @@ var contractNull = map[string]bool{
 	"providerSlug":                 true, // changelog: fleet-wide entries have no provider
 	"providerName":                 true,
 	"delta":                        true,
+	"group":                        true, // targets: only a group target's sources belong to a group
 }
 
 // Array fields whose elements are named by a key in N/A paths, so a gap reads
 // "targets[google_search].delta24h" instead of a position.
-var identityKey = map[string]string{"targets": "target", "products": "kind"}
+var identityKey = map[string]string{"targets": "target", "sources": "target", "products": "kind"}
 
 var bracket = regexp.MustCompile(`\[[^\]]*\]`)
 
@@ -236,6 +237,10 @@ var reasons = map[string]string{
 	"targets[].latencyP50":                 "Target not measured, or no load test for its latency under load in the window",
 	"targets[].latencyP90":                 "Target not measured, or no load test for its latency under load in the window",
 	"targets[].delta24h":                   "Per-target 24h deltas are not published by the framework snapshot",
+	"targets[].pageLoadP50":                "Browser target not measured for this product in the published snapshot, or no successful try",
+	"targets[].pageLoadP90":                "Browser target not measured for this product in the published snapshot, or no successful try",
+	"targets[].sources[].label":            "No label in public.targets for this source target",
+	"targets[].sources[].successRate":      "Source target not measured for this product in the published snapshot",
 	"series.pricePerGb90d":                 "Price history is not collected",
 	"series.latency24h":                    "No completed 5-minute buckets in the 24h window",
 	"series.success24h":                    "No completed 5-minute buckets in the 24h window",
@@ -266,6 +271,7 @@ var reasons = map[string]string{
 	"runId":                                "No published snapshot",
 	"collectorVersion":                     "No published snapshot implementation id",
 	"category":                             "No site.targets.category for this framework target",
+	"engine":                               "Catalog-only target (no public.targets row): not measured, so it has no engine",
 	"difficulty":                           "No site.targets.difficulty for this framework target",
 }
 
@@ -273,6 +279,9 @@ func reasonFor(path string) string {
 	p := pattern(path)
 	if r, ok := reasons[p]; ok {
 		return r
+	}
+	if strings.HasPrefix(p, "targets[].outcomes.") || strings.HasPrefix(p, "targets[].sources[].outcomes.") {
+		return "Browser target not measured for this product in the published snapshot (no completed tries)"
 	}
 	if strings.HasPrefix(p, "score.breakdown.") {
 		return "Score component unavailable in the published snapshot"

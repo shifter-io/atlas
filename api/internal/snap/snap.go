@@ -201,6 +201,42 @@ func EmptyScore() Score {
 
 type TargetResult struct {
 	Metrics Metrics `json:"metrics"`
+	// Browser is present exactly on browser targets (browser pulse, K-BP6);
+	// nil means a network target, as in every older snapshot.
+	Browser *BrowserResult `json:"browser"`
+}
+
+// BrowserResult is a browser target's targets.<id>.browser: its outcome
+// shares, the page-load times of its successful tries, the group target it is
+// a source of (nil when none) and, on a group target, its sources in order.
+type BrowserResult struct {
+	OutcomeRates OutcomeRates `json:"outcome_rates"`
+	PageLoadMs   Latency      `json:"page_load_ms"`
+	Group        *string      `json:"group"`
+	Sources      []string     `json:"sources"`
+}
+
+func (v *BrowserResult) UnmarshalJSON(d []byte) error {
+	type plain BrowserResult
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// OutcomeRates are fractions of the completed tries (all null when none).
+type OutcomeRates struct {
+	Ok         Num `json:"ok"`
+	Challenge  Num `json:"challenge"`
+	Block      Num `json:"block"`
+	LoginWall  Num `json:"login_wall"`
+	Timeout    Num `json:"timeout"`
+	ProxyError Num `json:"proxy_error"`
+	NoContent  Num `json:"no_content"`
+	NoAnswer   Num `json:"no_answer"`
+	OtherError Num `json:"other_error"`
+}
+
+func (v *OutcomeRates) UnmarshalJSON(d []byte) error {
+	type plain OutcomeRates
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *TargetResult) UnmarshalJSON(d []byte) error {
@@ -454,6 +490,9 @@ type Methodology struct {
 	ID       string `json:"id"`
 	Settings struct {
 		Weights map[string]float64 `json:"weights"`
+		// TargetGroups is each group target's sources, in order (browser
+		// pulse methodology [target_groups]; nil before it).
+		TargetGroups map[string][]string `json:"target_groups"`
 	} `json:"settings"`
 }
 

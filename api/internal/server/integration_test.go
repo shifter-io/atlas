@@ -19,6 +19,7 @@ import (
 	"github.com/Zeus-Development/proxy-index-website/api/internal/server"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
 	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index-website/api/internal/testscale"
 )
 
 // siteCatalog is test-only site data in every table the network pages read:
@@ -178,6 +179,11 @@ func TestAFreshDatabaseServesEveryPageOfOnePublishedProduct(t *testing.T) {
 			db.Exec(t, "DROP TABLE site.reviews, site.tape_events, site.ranking_profiles; ALTER TABLE site.pricing_plans DROP COLUMN catalog")
 			return db
 		}, 4},
+		{"browser targets", func(t *testing.T) *testdb.DB {
+			db := testdb.NewFramework(t)
+			db.Exec(t, testscale.BrowserTargetsSQL())
+			return db
+		}, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) { freshDatabaseServesEveryPage(t, c.db(t), c.gaps) })
 	}

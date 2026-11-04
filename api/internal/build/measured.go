@@ -147,6 +147,10 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		meas.Trust.ResidentialAuthenticity, meas.Trust.ClaimGap = w.Pool.GeoAccuracy, nan
 	}
 	meas.Targets = make([]model.TargetBenchmark, 0, len(targets))
+	labels := map[string]model.Str{}
+	for _, t := range targets {
+		labels[t.ID] = t.Label
+	}
 	for _, t := range targets {
 		tr, has := w.Targets[t.ID]
 		b := model.TargetBenchmark{Target: t.ID, SuccessRate: nan, CaptchaRate: nan, BlockRate: nan, LatencyP50: nan, LatencyP90: nan, Requests: 0, Delta24h: nan}
@@ -159,6 +163,10 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 				lat := headlineLatency(r)
 				b.LatencyP50, b.LatencyP90 = lat.P50, lat.P90
 			}
+		}
+		// Browser cards show page loads instead (browser.go).
+		if isBrowser(t, tr, has) {
+			b.BrowserBenchmark = browserBenchmark(w, t, labels)
 		}
 		meas.Targets = append(meas.Targets, b)
 	}
@@ -383,7 +391,8 @@ func windowLatencyIsHTTP(w snap.Window) bool {
 		return true
 	}
 	for id, t := range w.Targets {
-		if id != latencyTarget && t.Metrics.Completed > 0 {
+		// Browser targets have no latency: they never vote (page loads instead).
+		if id != latencyTarget && t.Browser == nil && t.Metrics.Completed > 0 {
 			return false
 		}
 	}

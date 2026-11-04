@@ -261,18 +261,22 @@ func Build(in *store.Inputs) (*Result, error) {
 		return Num(math.Max(0, jsnum.Round(generated.Sub(at).Seconds())))
 	}
 
-	// Targets: catalog rows first (their order), then framework targets without one.
+	// Targets by sort_order (a framework target's own, else the catalog row's):
+	// catalog rows first on a tie, in their order, then framework targets
+	// without one. Group and sources come from the snapshot (browser.go).
 	frameworkTarget := map[string]store.FrameworkTarget{}
 	for _, t := range in.FrameworkTargets {
 		frameworkTarget[t.ID] = t
 	}
 	ds.Targets = []model.TargetMeta{}
+	order := map[string]int32{}
 	seen := map[string]bool{}
 	for _, r := range in.Targets {
 		ft, inFramework := frameworkTarget[r.ID]
 		t := model.TargetMeta{ID: r.ID, Label: r.Label, Category: r.Category, PassCondition: r.PassCondition, Difficulty: ptrNum(r.Difficulty), Source: "catalog"}
+		order[r.ID] = r.SortOrder
 		if inFramework {
-			t.Source = model.SourceMeasured
+			t.Source, t.Engine, order[r.ID] = model.SourceMeasured, frameworkEngine(ft), ft.SortOrder
 			if t.Label == nil {
 				t.Label = ft.Label
 			}
@@ -285,9 +289,13 @@ func Build(in *store.Inputs) (*Result, error) {
 	}
 	for _, ft := range in.FrameworkTargets {
 		if !seen[ft.ID] {
-			ds.Targets = append(ds.Targets, model.TargetMeta{ID: ft.ID, Label: ft.Label, PassCondition: ft.PassCondition, Difficulty: nan, Source: model.SourceMeasured})
+			ds.Targets = append(ds.Targets, model.TargetMeta{ID: ft.ID, Label: ft.Label, PassCondition: ft.PassCondition, Difficulty: nan,
+				Source: model.SourceMeasured, Engine: frameworkEngine(ft)})
+			order[ft.ID] = ft.SortOrder
 		}
 	}
+	sort.SliceStable(ds.Targets, func(i, j int) bool { return order[ds.Targets[i].ID] < order[ds.Targets[j].ID] })
+	addTargetGroups(ds.Targets, s)
 	ds.Scopes = []model.TestScope{}
 	for _, r := range in.Scopes {
 		var targets any = "all"

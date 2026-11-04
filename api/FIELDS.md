@@ -38,6 +38,10 @@ General rules:
   - review `invoiceMonth`, `linkedRunId`, `providerReply`.
   - community run `rejectionReason`, `overlapShare`.
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
+  - target `group` for a target that is not a source of a group target.
+- Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`) are written
+  only on browser targets' entries; a network target's entry has exactly its
+  older fields (see "Browser targets" below).
 - Reasons for every N/A path are in `/v1/coverage` (`build/na.go` `reasons`).
 
 ## Dataset (top level)
@@ -51,7 +55,7 @@ General rules:
 | `runId` | `preview-<snapshot_id>` when published (as `presentationDataset`) | data |
 | `collectorVersion` | snapshot `implementation_id` | data |
 | `windowHours` | 24 | never |
-| `targets[]` | `site.targets`, plus `public.targets` (label, pass_condition) for framework targets without a site row | `category`, `difficulty`: catalog (`site.targets`) |
+| `targets[]` | `site.targets`, plus `public.targets` (label, pass_condition, engine) for framework targets without a site row; ordered by `sort_order` (a framework target's `public.targets.sort_order`, else its catalog row's; ties keep catalog rows first, in their order) | `category`, `difficulty`: catalog (`site.targets`); `engine`: catalog-only targets |
 | `scopes[]` | `site.scopes` (catalog) | catalog |
 | `weights` | `site.score_weights`, replaced by the snapshot `methodology.settings.weights` when published (the weights its scores used) | data |
 | `profiles[]` | `site.ranking_profiles` (catalog) | catalog |
@@ -157,6 +161,7 @@ not read).
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | always (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are set for `generic_http` only (its headline latency, under load in every-request snapshots) and null for every other target | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
+| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -288,6 +293,40 @@ or an active outage in that bucket. Buckets without monitoring evidence, and
 older snapshots without this field, remain null. The shared Availability metric
 card displays this series for every tested product category.
 
+## Browser targets
+
+Browser targets (`engine = "browser"`, browser pulse) are measured per target
+only: their runs never enter a network's window metrics, scores, rankings or
+fleet figures, so those are the same with and without them. The snapshot
+publishes each one at `w.targets.<id>.browser` (absent on network targets, and
+in every snapshot before the browser pulse).
+
+**Cards.** Show the targets whose `group` is null as cards: the Generic HTTP and
+HTTPS targets plus the browser cards (`amazon_pdp`, `google_search`,
+`linkedin_public`, `instagram_web`, `cloudflare_challenge`, `ai_answers`). A
+group target (`ai_answers`) is measured over the union of its sources' tries
+and is never scheduled itself; its `sources` is its breakdown. Each source
+(`ai_overview`, `ai_chatgpt`, `ai_gemini`) is also listed as a target, with its
+`group` set, so it is not a card of its own.
+
+On a browser target's `targets[<id>]` entry (network answers, providers and
+`productMeasurements`), besides `successRate`, `captchaRate`, `blockRate` and
+`requests` as for every target:
+
+| Field | Unit | Source (`w` = the 30d window) | N/A |
+|---|---|---|---|
+| `outcomes.ok`, `challenge`, `block`, `loginWall`, `timeout`, `proxyError`, `noContent`, `noAnswer`, `otherError` | fraction of the completed tries (they sum to 1) | `w.targets[id].browser.outcome_rates` (`login_wall`, `proxy_error`, `no_content`, `no_answer`, `other_error`) | the target is not measured for the product (or no try completed) |
+| `pageLoadP50`, `pageLoadP90` | milliseconds, successful tries only | `w.targets[id].browser.page_load_ms.p50` / `.p90` | not measured, or no successful try |
+| `sources[]` | group targets only (not written on any other target) | one entry per `w.targets[id].browser.sources` id, in that order | |
+| `sources[].target`, `label` | | the source's id and its dataset target label | `label`: no label for the source |
+| `sources[].successRate`, `requests` | fraction, tries | `w.targets[source].metrics.success_rate` / `.completed` (`requests` is 0 when unmeasured) | `successRate`: the source is not measured for the product |
+| `sources[].outcomes.*` | fraction | `w.targets[source].browser.outcome_rates` | as `outcomes` |
+
+`latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP
+target's only, and browser cards show `pageLoadP50`/`P90` instead. A browser
+target never counts as another target in the window-latency rule
+(`windowLatencyIsHTTP`).
+
 ## Records
 
 | Entity | Fields | Source |
@@ -296,7 +335,7 @@ card displays this series for every tested product category.
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
 | `UserReview` | all + `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
-| `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `na` | `site.targets`, falling back to `public.targets` |
+| `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
 | `TestScope` | all + `na` | `site.scopes` (`targets` is `"all"` when `all_targets`, else `target_ids`) |
 | `RankingProfile` | all + `na` | `site.ranking_profiles` (`weights` JSONB, all 8 keys always present) |
 

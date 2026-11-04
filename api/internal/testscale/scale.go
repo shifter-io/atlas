@@ -11,7 +11,8 @@
 // (21, three of them with a product but no published group, so nearly every
 // field is N/A), their products, the framework targets and the test events
 // (556 hour releases and three pulse events). Its site.* catalog tables were
-// empty, so Inputs has no catalog or demo rows either.
+// empty, so Inputs has no catalog or demo rows either. QA1 also carries the
+// nine browser pulse targets in every window, so size bounds hold with them.
 //
 // Current and Parts give a payload as the framework stores it since
 // calculated v8: in parts, the daily groups' 24-hour series sparse.
@@ -41,6 +42,8 @@ type Shape struct {
 	// NoFleetAll leaves out the every-group fleet entries (cohort "*"), as
 	// in snapshots built before the framework published them.
 	NoFleetAll bool
+	// Browser adds the nine browser pulse targets to every window (AddBrowser).
+	Browser bool
 }
 
 // FleetUniqueIps is the distinct IPs of every every-group fleet entry, and
@@ -53,7 +56,7 @@ const (
 
 // QA1 is the QA-1 build: 18 networks x 40 requested countries, about 240
 // exit countries per window.
-var QA1 = Shape{Networks: 18, Countries: 40, Exits: 240, Tail: 200, Unmeasured: 3, Events: 559}
+var QA1 = Shape{Networks: 18, Countries: 40, Exits: 240, Tail: 200, Unmeasured: 3, Events: 559, Browser: true}
 
 // capped is how many rows the framework's [payload] settings keep.
 var capped = map[string]int{"region": 25, "city": 25, "asn": 25, "country_asn": 25, "city_asn": 25}
@@ -99,6 +102,11 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		}
 	}
 	doc["products"] = products
+	if shape.Browser {
+		if err := AddBrowser(doc); err != nil {
+			return nil, err
+		}
+	}
 	if !shape.NoFleetAll {
 		fleet, err := fleetAll(doc["fleet"], template, shape)
 		if err != nil {
@@ -119,7 +127,8 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 	}
 	for i, t := range doc["targets"].([]any) {
 		label := t.(map[string]any)["label"].(string)
-		in.FrameworkTargets = append(in.FrameworkTargets, store.FrameworkTarget{ID: t.(map[string]any)["id"].(string), Label: &label, SortOrder: int32(i)})
+		engine, _ := t.(map[string]any)["engine"].(string)
+		in.FrameworkTargets = append(in.FrameworkTargets, store.FrameworkTarget{ID: t.(map[string]any)["id"].(string), Label: &label, SortOrder: int32(i), Engine: engine})
 	}
 	return in, nil
 }
