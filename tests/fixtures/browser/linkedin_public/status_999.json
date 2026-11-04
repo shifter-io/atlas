@@ -1,0 +1,17 @@
+{
+  "view": {
+    "final_url": "https://www.linkedin.com/in/example-person/",
+    "status": 999,
+    "title": "",
+    "text_head": "",
+    "found": {
+      "h1.top-card-layout__title": 0,
+      ".top-card-layout__headline": 0
+    }
+  },
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "block_status"
+  }
+}

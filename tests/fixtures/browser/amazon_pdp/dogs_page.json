@@ -1,0 +1,21 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/dp/0000000000",
+    "status": 500,
+    "title": "Sorry! Something went wrong!",
+    "text_head": "Sorry! Something went wrong! Meet the dogs of Example.",
+    "found": {
+      "#productTitle": 0,
+      "#corePrice_feature_div .a-price": 0,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "dogs_page"
+  }
+}

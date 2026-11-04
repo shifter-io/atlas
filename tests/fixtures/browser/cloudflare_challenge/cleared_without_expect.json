@@ -1,0 +1,19 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 200,
+    "title": "Example Domain",
+    "text_head": "An example page that does not show the expected text.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_expect"
+  }
+}

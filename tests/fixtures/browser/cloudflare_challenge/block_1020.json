@@ -1,0 +1,19 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 403,
+    "title": "Attention Required! | Cloudflare",
+    "text_head": "Sorry, you have been blocked. You are unable to access example.com.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "#cf-error-details": 1
+    }
+  },
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "cf_block"
+  }
+}
