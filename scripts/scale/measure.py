@@ -222,7 +222,8 @@ def markdown(report: dict) -> str:
     lines = ["# Scale cycle report (SCALE-GEN-1b)", ""]
     lines.append(
         f"Database `{report['database']}`, schema `{report.get('schema')}`, statement timings "
-        f"from {report['statements_from']}, pulse rate {report['pulse_rate']} runs/s, written {report['written_at']}."
+        f"from {report['statements_from']}, pulse rate {report['pulse_rate']} runs/s, "
+        f"written {report['written_at']}."
     )
     rows = [[cell(r, r["steps"]) for _, cell in COLUMNS] for r in report["hours"]]
     lines += ["", *table([name for name, _ in COLUMNS], rows)]

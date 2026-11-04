@@ -127,7 +127,8 @@ def test_other_targets_and_a_wider_search_path_are_refused(databases, pgoptions,
     with pytest.raises(generate.Refused, match="writes only to 'proxy_scale'"):
         generate.generate(schema_args(config))
     scratch_schema(config)
-    for options in (None, "-c search_path=proxy_scale,public", '-c search_path="$user",proxy_scale'):
+    wider = ("-c search_path=proxy_scale,public", '-c search_path="$user",proxy_scale')
+    for options in (None, *wider):
         pgoptions(options)
         with pytest.raises(generate.Refused, match="with search_path"):
             generate.generate(schema_args(config))

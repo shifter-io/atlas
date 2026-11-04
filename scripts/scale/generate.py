@@ -29,8 +29,8 @@ from concurrent.futures import ProcessPoolExecutor
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from psycopg.types.json import Jsonb
 import target
+from psycopg.types.json import Jsonb
 from synthetic import Model, Settings
 from writer import MARKER, Writer
 

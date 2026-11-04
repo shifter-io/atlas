@@ -546,7 +546,8 @@ class Cycle:
         if current:
             done = [name for name, step in current["steps"].items() if step["done"]]
             current = {"index": current["index"], "steps_done": done}
-        found = dict(zip(("database", "schema"), self.conn.execute(target.STATE).fetchone()))
+        database, schema, _ = self.conn.execute(target.STATE).fetchone()
+        found = {"database": database, "schema": schema}
         found |= {"settings": self.model.settings.to_json(), "current": current}
         found |= {key: state[key] for key in ("first_day", "first_hour", "hours")}
         found["statements_from"] = "pg_stat_statements" if self.pg_stat else "the driver"
