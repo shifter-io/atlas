@@ -1,10 +1,10 @@
 """What a calculation reads before build(), in its two modes (contract K6).
 
-"full" (`calculate --full`; calculator.calculate()'s default) reads every run and every IP
+"full" (`calculate`'s and calculator.calculate()'s default) reads every run and every IP
 observation of the 30-day window and aggregates them in Python (Full): the oracle
 every test compares the incremental calculation with.
 
-"incremental" (the `calculate` command's default) reads metadata first: the runs (every run
+"incremental" (`calculate --incremental`) reads metadata first: the runs (every run
 outside a batch, whose payload rows list them; batch runs started since a day before the window,
 with a slot or a bucket in it, and each product's first, so every group exists in payload order;
 census and pulse summaries are not read), the window's buckets and each daily window's list

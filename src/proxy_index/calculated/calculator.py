@@ -142,7 +142,7 @@ def retain(score, previous, as_of, valid_hours, observed, method_id=None):
 
 def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (the CLI's default) reads only the missed windows' (incremental.py)."""
+    oracle; "incremental" (`calculate --incremental`) reads only the missed windows'."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
