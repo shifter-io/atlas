@@ -44,6 +44,14 @@ ESTIMATED = (
     "h.unique_ips,h.requests FROM estimated_hours h JOIN test_runs r USING(run_key) "
     "WHERE r.started_at>=%s AND r.started_at<%s ORDER BY 1,2,3,4"
 )
+PULSES = (
+    "SELECT s.product_id,trim(b.country_code),g.location_id,g.network_id,g.completed,"
+    "g.successes,g.timeouts,g.bytes_up,g.bytes_down,g.histogram_steps,g.histogram_counts,"
+    "u.completed,u.successes,u.timeouts,u.histogram_steps,u.histogram_counts "
+    "FROM run_geo_buckets g JOIN test_runs r USING(run_key) JOIN run_buckets u USING(run_key) "
+    "JOIN scope_stats s USING(scope_id) JOIN test_batches b USING(batch_id) "
+    "WHERE b.kind='pulse' AND b.scheduled_for=%s ORDER BY 1,2,3,4,5,6"
+)
 # The calculator adds its breakdown labels to place_names and asn_names; these lists only ingest.
 LISTS = ("pool_stats", "scope_stats", "enrichment_locations", "enrichment_networks")
 
@@ -69,7 +77,7 @@ def first_test_hour(config):
 
 def options(config, tmp_path, **changes):
     values = {"database": config, "hours": 1, "out": str(tmp_path / "report"), "max_minutes": 25.0}
-    values |= {"first_hour": 0}
+    values |= {"first_hour": 0, "pulse_rate": 0.0, "pulse_concurrency": 4, "node_api": None}
     values |= {"siteapi": None, "siteapi_pid": None, "siteapi_timeout": 30.0}
     values |= {"methodology": str(cycle.METHODOLOGY), "formulas": str(generate.FORMULAS)}
     return Namespace(**(values | changes))
@@ -137,6 +145,8 @@ def test_two_hours_go_through_the_real_paths_and_store_what_the_generator_does(d
     assert one["ingest"]["tests"] == len(lanes) > 0
     assert one["ingest"]["statements"] and one["ingest"]["per_test"]["count"] == len(lanes)
     for steps in (one, two):
+        assert steps["pulses"]["planned"] == steps["pulses"]["uploads"] == 6
+        assert steps["pulses"]["failed"] == 0 and steps["pulses"]["latency"]["p95"] > 0
         assert steps["calculate"]["exit"] == 0 and steps["calculate"]["peak_rss_kb"] > 0
         assert steps["calculate"]["statements"]  # traced in the child process
         assert steps["siteapi"]["reached"] and steps["siteapi"]["status"] == "ok"
@@ -149,7 +159,7 @@ def test_two_hours_go_through_the_real_paths_and_store_what_the_generator_does(d
     markdown = (tmp_path / "report" / "scale-report.md").read_text()
     assert markdown.count("| 2026-10-02T") == 2 and "## Largest tables" in markdown
 
-    # The real ingest, enrichment and estimate paths stored the generator's rows.
+    # The real ingest, enrichment, estimate and pulse paths stored the generator's rows.
     start = datetime(2026, 10, 2, first, tzinfo=UTC)
     window = (start, start + timedelta(hours=2))
     assert rows(config, DAILY, *window) == rows(reference, DAILY, *window)
@@ -159,6 +169,8 @@ def test_two_hours_go_through_the_real_paths_and_store_what_the_generator_does(d
     release = generate.Writer(None, model(config), {}).release(2)
     assert rows(config, ENRICHED, release, *window) == rows(reference, ENRICHED, release, *window)
     assert rows(config, ESTIMATED, *window) == rows(reference, ESTIMATED, *window)
+    for slot in (start, start + timedelta(hours=1)):
+        assert rows(config, PULSES, slot) == rows(reference, PULSES, slot) != []
     for table in LISTS:  # no new pool, scope, location or network: ingest found the generator's
         count = f"SELECT count(*) FROM {table}"
         assert rows(config, count) == rows(reference, count)
@@ -170,7 +182,7 @@ def test_an_interrupted_hour_continues_where_it_stopped(databases, tmp_path, mon
     config = databases()
     dataset(config, "1")
     first = first_test_hour(config)
-    real_daily = cycle.Cycle.daily
+    real_daily, real_upload = cycle.Cycle.daily, cycle.Cycle.upload
 
     def out_of_time_after_one(self, test):
         found = real_daily(self, test)
@@ -184,7 +196,18 @@ def test_an_interrupted_hour_continues_where_it_stopped(databases, tmp_path, mon
     assert report["current"]["index"] == 0 and report["hours"] == []
     assert "Hour 0 is in progress." in (tmp_path / "report" / "scale-report.md").read_text()
 
+    lost = []
+
+    async def lost_once(self, *args):
+        if not lost:
+            lost.append(1)
+            raise cycle.Failed("connection lost")
+        return await real_upload(self, *args)
+
     monkeypatch.setattr(cycle.Cycle, "daily", real_daily)
+    monkeypatch.setattr(cycle.Cycle, "upload", lost_once)
+    stopped = drive(config, tmp_path, first_hour=first, pulse_rate=50.0)
+    assert not stopped["complete"]  # one pulse is left to upload
     assert not drive(config, tmp_path, max_minutes=0)["complete"]  # no time: nothing runs
     with pytest.raises(cycle.Failed, match="calculate exited with 2"):
         drive(config, tmp_path, methodology=str(tmp_path / "missing.toml"))
@@ -194,6 +217,10 @@ def test_an_interrupted_hour_continues_where_it_stopped(databases, tmp_path, mon
     steps = record["steps"]
     tests = sum(lane.hour == first for lane in model(config).lanes)
     assert steps["ingest"]["parts"] == (2 if tests > 1 else 1) and steps["ingest"]["tests"] == tests
+    assert steps["pulses"]["parts"] == 2 and steps["pulses"]["failed"] == 1
+    assert steps["pulses"]["uploads"] == steps["pulses"]["planned"] == 6
+    (failure,) = steps["pulses"]["failures"]
+    assert failure.startswith("batch ") and failure.endswith(": connection lost")
     assert steps["siteapi"]["skipped"] == "no --siteapi" and steps["calculate"]["parts"] == 1
     daily = rows(
         config,
@@ -239,6 +266,11 @@ def test_guards_refuse_other_databases_runs_hours_and_data_sets(databases, tmp_p
         assert found.bounds(0)[0] == 2
         with pytest.raises(cycle.Refused, match="ends before day 3"):
             found.bounds(1)
+    assert rows(config, "SELECT country_code FROM countries WHERE enabled ORDER BY 1") == [
+        ("AQ",),
+        ("DE",),
+        ("US",),
+    ]
 
     later = databases()
     tomorrow = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
@@ -247,7 +279,7 @@ def test_guards_refuse_other_databases_runs_hours_and_data_sets(databases, tmp_p
         drive(later, tmp_path, first_hour=23)
 
 
-def test_siteapi_waits_reads_health_and_statements_from_counters(monkeypatch):
+def test_siteapi_waits_reads_health_and_the_node_api_can_be_external(monkeypatch):
     found = object.__new__(cycle.Cycle)
     found.state = {"current": {"steps": {"calculate": {"parts": [{"build_id": 99}]}}}}
     found.args = Namespace(siteapi="http://127.0.0.1:9/", siteapi_timeout=1.5, siteapi_pid=None)
@@ -256,6 +288,13 @@ def test_siteapi_waits_reads_health_and_statements_from_counters(monkeypatch):
         key: None for key in ("buildMs", "loadMs", "assembleMs", "renderMs")
     } | {"unserved": 0}
     assert cycle.healthz("http://127.0.0.1:9") == {}
+
+    async def base():
+        async with found.node_api(None) as url:
+            return url
+
+    found.args = Namespace(node_api="http://node.invalid:8443/")
+    assert asyncio.run(base()) == "http://node.invalid:8443"
 
     # With pg_stat_statements, a step's statements are the change of its counters.
     snapshots = iter([{}, {"q": ("SELECT 1", 2, 3000.0)}])
