@@ -136,7 +136,8 @@ CREATE TABLE IF NOT EXISTS ip_observations (
  first_seen timestamptz NOT NULL, last_seen timestamptz NOT NULL,
  CHECK(first_seen <= last_seen), PRIMARY KEY(run_key,bucket_start,ip_id)
 ) PARTITION BY RANGE(bucket_start);
-CREATE INDEX IF NOT EXISTS ip_observations_ip_time ON ip_observations(ip_id,bucket_start);
+-- Counting a time slice's distinct IPs across runs (schema v12) reads (bucket_start, ip_id).
+CREATE INDEX IF NOT EXISTS ip_observations_time_ip ON ip_observations(bucket_start,ip_id);
 -- Latency bins keep artifact order as parallel arrays; each step is the millisecond gap from the
 -- previous bin (the first is absolute), which compresses far better than absolute values.
 -- extra holds unknown counter keys and a non-canonical bucket_start label verbatim;
