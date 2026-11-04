@@ -309,7 +309,7 @@ async def test_seed_is_idempotent_and_keeps_operator_edits(database, tmp_path):
         ).fetchone() == (249, 8)
         assert conn.execute(
             "SELECT target_id,census,pulse_enabled,pulse_interval_minutes FROM targets "
-            "ORDER BY sort_order"
+            "WHERE engine='http' ORDER BY sort_order"
         ).fetchall() == [("generic_http", True, True, 30), ("generic_https", False, True, 30)]
         original = conn.execute("SELECT census_time FROM countries WHERE country_code='NO'")
         original = original.fetchone()[0]

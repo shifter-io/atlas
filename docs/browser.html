@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proxy Index · Browser pulse contracts</title>
+<style>
+:root{color-scheme:light;--ink:#192b34;--muted:#556772;--line:#d7dfdf;--accent:#086e62;--paper:#fafbf8}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,sans-serif}
+main{max-width:1050px;margin:auto;padding:50px 32px 90px}header{border-top:5px solid var(--accent);padding-top:24px;margin-bottom:32px}
+.eyebrow{font:12px/1.4 ui-monospace,monospace;text-transform:uppercase;letter-spacing:.13em;color:var(--accent)}
+h1{font-size:34px;line-height:1.18;letter-spacing:-.03em;margin:14px 0}h2{font-size:23px;line-height:1.3;margin:38px 0 14px}
+h3{font-size:17px;margin:24px 0 8px}p{max-width:82ch}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 22px;border-block:1px solid var(--line);padding:14px 0}
+pre{overflow:auto;background:#152c35;color:#edf4ef;padding:20px;font:13px/1.7 ui-monospace,monospace;border-radius:4px}
+code{font-family:ui-monospace,monospace;font-size:.9em}li{margin:6px 0}.note{padding:15px 20px;background:#eef4ef;border-left:3px solid var(--accent)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:28px}.muted,footer{color:var(--muted);font-size:14px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:12px 10px}th{background:#eff3ef}td:first-child{width:25%;font-family:ui-monospace,monospace}footer{margin-top:48px;border-top:1px solid var(--line);padding-top:18px}
+@media(max-width:650px){main{padding:25px 18px}.grid{grid-template-columns:1fr}h1{font-size:28px}table{font-size:12px}td,th{padding:9px 5px}}@media print{pre{white-space:pre-wrap}nav{display:none}main{max-width:none;padding:0}}
+td:first-child{width:auto}</style>
+<main>
+<header><div class="eyebrow">Proxy Index · Browser pulse</div><h1>Browser pulse: targets, outcomes, settings and bundles</h1>
+<p>The browser pulse measures real-browser targets (a marketplace product page, a search results page, AI answers and others) through each network from dedicated browser hosts. This page is the operator reference for its frozen contracts: target identities (K-BP1), outcomes (K-BP2), the settings file (K-BP3), the run bundle (K-BP4), scheduling (K-BP5) and the manager's ingest endpoint (K-BP7). The code holding them is <code>proxy_index.browser.contracts</code> and <code>proxy_index.browser.settings</code>. Snapshot and API fields (K-BP6) are documented with the calculator and the API.</p>
+<p class="note">Status: the names, formats and checks exist and are tested. Nothing schedules, runs or uploads a browser run yet; the planner, the hosts and the ingest endpoint follow in their own changes.</p></header>
+<nav><a href="index.html">Developer guide</a><a href="#targets">Targets</a><a href="#outcomes">Outcomes</a><a href="#settings">Settings</a><a href="#bundle">Bundle</a><a href="#schedule">Scheduling</a><a href="#ingest">Ingest</a></nav>
+
+<section id="targets"><h2>1. Targets (K-BP1)</h2>
+<p>Browser targets are rows of <code>configs/targets.toml</code> with <code>engine = "browser"</code>, <code>pulse_enabled = false</code> and <code>census = false</code>: the settings file schedules them, never the HTTP pulse or the census. <code>load_targets</code>, and so <code>db-seed</code>, refuses a browser row with <code>pulse_enabled</code> or <code>census</code> true. Their <code>pulse_*</code> columns are unused. A target's <code>version</code> starts at <code>"1"</code>; a judge or selector change bumps it.</p>
+<table><thead><tr><th>id</th><th>Label</th><th>Base URL</th><th>Role</th><th>Sort</th></tr></thead><tbody>
+<tr><td><code>amazon_pdp</code></td><td>Marketplace product page</td><td><code>https://www.amazon.com/dp/</code></td><td>card</td><td>30</td></tr>
+<tr><td><code>google_search</code></td><td>Google Search SERP</td><td><code>https://www.google.com/search</code></td><td>card</td><td>40</td></tr>
+<tr><td><code>linkedin_public</code></td><td>Public professional profile</td><td><code>https://www.linkedin.com/in/</code></td><td>card</td><td>50</td></tr>
+<tr><td><code>instagram_web</code></td><td>Social media web app</td><td><code>https://www.instagram.com/</code></td><td>card (Instagram and X)</td><td>60</td></tr>
+<tr><td><code>cloudflare_challenge</code></td><td>Managed challenge page</td><td><code>https://challenges.cloudflare.com/</code></td><td>card</td><td>70</td></tr>
+<tr><td><code>ai_answers</code></td><td>AI answers</td><td><code>https://www.google.com/search</code></td><td>group card, never scheduled</td><td>80</td></tr>
+<tr><td><code>ai_overview</code></td><td>AI answers: Google AI Overview</td><td><code>https://www.google.com/search</code></td><td>source of <code>ai_answers</code></td><td>81</td></tr>
+<tr><td><code>ai_chatgpt</code></td><td>AI answers: ChatGPT</td><td><code>https://chatgpt.com/</code></td><td>source of <code>ai_answers</code></td><td>82</td></tr>
+<tr><td><code>ai_gemini</code></td><td>AI answers: Gemini</td><td><code>https://gemini.google.com/app</code></td><td>source of <code>ai_answers</code></td><td>83</td></tr>
+</tbody></table>
+<p>In code a browser target is a <code>proxy_index.targets.BrowserTarget</code>: <code>engine = "browser"</code>, <code>pool_eligible = False</code> (it records no exit IP), and <code>build_request()</code> only names the base URL. For each try, <code>page(context, inputs)</code> builds a <code>PageSpec(url, wait_for, settle_ms)</code> from the settings inputs; <code>interact(driver, spec)</code> may act on the page through a <code>PageDriver</code> (<code>goto</code>, <code>fill</code>, <code>press</code>, <code>click</code>, <code>wait_for</code>, <code>count</code>, <code>text</code>, <code>url</code>, <code>title</code>, <code>screenshot</code>; timeouts in milliseconds); and <code>judge(view)</code> returns an <code>Assessment</code>. The <code>PageView</code> holds the final URL, the main document's status, the title, the first 4 KB of visible text, the match count of each named selector and the timings. No browser target is registered in the HTTP target registry.</p>
+</section>
+
+<section id="outcomes"><h2>2. Outcomes (K-BP2)</h2>
+<p>Every try lands in one of the existing verdicts. Four error codes are new, all under the <code>error</code> verdict, so no counter or column changes: <code>login_wall</code>, <code>no_content</code>, <code>no_answer</code> and <code>browser_error</code>.</p>
+<table><thead><tr><th>Outcome</th><th>Verdict</th><th>Error code</th></tr></thead><tbody>
+<tr><td>success (real content)</td><td><code>ok</code></td><td>none</td></tr>
+<tr><td>challenge or captcha (Cloudflare, Google <code>/sorry</code>, marketplace captcha)</td><td><code>challenge</code></td><td><code>challenge</code></td></tr>
+<tr><td>blocked (403, 429, 451, a block page, LinkedIn 999, "too many requests")</td><td><code>block</code></td><td><code>blocked</code></td></tr>
+<tr><td>login wall (LinkedIn authwall, Instagram or X login overlay, ChatGPT or Gemini sign-in required)</td><td><code>error</code></td><td><code>login_wall</code></td></tr>
+<tr><td>timeout (navigation or wait budget)</td><td><code>timeout</code></td><td><code>timeout</code></td></tr>
+<tr><td>proxy error</td><td><code>proxy_error</code></td><td><code>proxy_connect</code>, <code>proxy_auth</code>, <code>connection</code>, <code>dns</code></td></tr>
+<tr><td>loaded, pass condition not met</td><td><code>error</code></td><td><code>no_content</code></td></tr>
+<tr><td>AI: loaded, no AI Overview or no answer</td><td><code>error</code></td><td><code>no_answer</code></td></tr>
+<tr><td>anything else (browser crash, unexpected exception)</td><td><code>error</code></td><td><code>browser_error</code></td></tr>
+<tr><td>TLS failure</td><td><code>error</code></td><td><code>tls</code></td></tr>
+</tbody></table>
+<p>Evaluation order: the navigation error first, then the main document's status and the shared challenge and block markers on the title plus the first 4 KB of visible text, then the target's own judge. Firefox network errors map by a fixed table (<code>classify_navigation_error</code>); exact names win over prefixes:</p>
+<ul>
+<li><code>NS_ERROR_PROXY_*</code> and <code>NS_ERROR_UNKNOWN_PROXY_HOST</code>: <code>proxy_connect</code>;</li>
+<li>an HTTP 407 or <code>NS_ERROR_PROXY_AUTHENTICATION_FAILED</code>: <code>proxy_auth</code>;</li>
+<li><code>NS_ERROR_NET_RESET</code>, <code>NS_ERROR_NET_INTERRUPT</code> and <code>NS_ERROR_CONNECTION_REFUSED</code>: <code>connection</code>;</li>
+<li><code>NS_ERROR_UNKNOWN_HOST</code>: <code>dns</code>;</li>
+<li><code>NS_ERROR_NET_TIMEOUT</code> and Playwright's <code>TimeoutError</code>: <code>timeout</code>;</li>
+<li><code>SEC_ERROR_*</code>, <code>SSL_ERROR_*</code> and <code>NS_ERROR_NET_INADEQUATE_SECURITY</code>: <code>tls</code>;</li>
+<li>anything else, or no name: <code>browser_error</code>.</li>
+</ul>
+</section>
+
+<section id="settings"><h2>3. Settings file (K-BP3)</h2>
+<p>One file, <code>schema = 2</code>, read by the orchestrator's planner and by every host. <code>load_settings(path)</code> returns a frozen tree, and <code>settings_sha256(path)</code> the hash every bundle records. The real file is private: it names each host's networks and the real inputs, which can be personal data. <a href="../configs/browser-pulse.example.toml">configs/browser-pulse.example.toml</a> shows every field with neutral placeholders.</p>
+<table><thead><tr><th>Field</th><th>Rule</th></tr></thead><tbody>
+<tr><td>schema, enabled</td><td><code>schema</code> must be 2. Nothing is planned or run until <code>enabled = true</code>.</td></tr>
+<tr><td>[schedule]</td><td><code>countries</code>: known upper-case alpha-2 codes, once each. <code>lead_seconds</code>: 0 to 3600.</td></tr>
+<tr><td>[browser]</td><td><code>browsers_per_host</code> 1 to 16; <code>recycle_after</code> 1 to 10000 tries per browser process; <code>page_timeout_s</code> 5 to 600; <code>headless</code>; <code>block_resources</code> (Playwright resource types, never the document); <code>screenshots</code> <code>failures</code>, <code>all</code> or <code>none</code>; <code>locale</code> such as <code>en-US</code>.</td></tr>
+<tr><td>[outbox]</td><td><code>dir</code> relative to the host state directory, with no <code>.</code> or <code>..</code> segment; <code>max_pending_gb</code> above 0 (above it, the host stops taking screenshots).</td></tr>
+<tr><td>[[target]]</td><td>In start order within a slot. <code>id</code>: a browser run target of <code>targets.toml</code> (never the group <code>ai_answers</code>), once. <code>tries</code> (1 to 10000 per network per run) and <code>every_minutes</code> (5 to 1440, slots aligned to the epoch) are <strong>required per target</strong>; there is no global tries, interval or budget. Optional: <code>timeout_s</code> 5 to 600, <code>block_resources</code>, <code>challenge_wait_s</code> and <code>answer_wait_s</code> 0 to 600.</td></tr>
+<tr><td>inputs</td><td><code>amazon_pdp</code>: ASINs (10 digits or capital letters). <code>google_search</code> and <code>ai_overview</code>: strings. <code>linkedin_public</code>: profile slugs (3 to 100 of <code>a-z0-9-</code>). <code>instagram_web</code>: <code>{site = "instagram" | "x", handle = "..."}</code>. <code>cloudflare_challenge</code>: <code>{url = "https://...", expect = "text only the real page shows"}</code>. <code>ai_chatgpt</code> and <code>ai_gemini</code>: exactly one fixed question.</td></tr>
+<tr><td>[[host]]</td><td><code>name</code>: the logical name <code>browser-&lt;n&gt;</code> the host registers with, never its machine name. <code>networks</code>: <code>provider/product</code> in lower case; every network runs on at most one host.</td></tr>
+<tr><td>[networks]</td><td>Optional <code>untargeted</code>: networks that cannot be targeted by country run with no country flag (D11). Each must be a network some host runs; <code>is_untargeted(network)</code> answers it.</td></tr>
+</tbody></table>
+<p>Errors are <code>UserError</code> messages naming the field path, such as <code>target[2].inputs[0]: must be a profile slug</code>; they never repeat the value. <code>host(name)</code> returns one host's view (only its own <code>[[host]]</code> and untargeted networks); <code>targets_for_planner()</code> returns <code>(id, tries, every_minutes)</code> in order.</p>
+<p>Host state directory: <code>settings.toml</code> (a copy of the private file); <code>networks/&lt;provider&gt;.&lt;product&gt;/{provider.toml, credentials.toml, node.token}</code>, all mode 0600; <code>camoufox/&lt;release&gt;/</code>; <code>runs/</code>; <code>outbox/</code>; <code>logs/</code>. No storage settings or keys live on a host.</p>
+</section>
+
+<section id="bundle"><h2>4. Run bundle (K-BP4)</h2>
+<p>One bundle per run (network × target × country × slot): the node's usual run directory (<code>summary.json</code>, buckets) plus <code>browser/manifest.json</code>, <code>browser/tries.jsonl</code> and <code>browser/screenshots/NNNN.jpg</code> (NNNN is the try index; JPEG quality 60, the viewport only, failures only by default). It is packed into <code>outbox/&lt;run_id&gt;.tar.gz</code> with <code>outbox/&lt;run_id&gt;.json</code> beside it (batch id, sha256, bytes, network, target, slot): <code>outbox_paths(root, run_id)</code>. The tar is deterministic: sorted members, uid and gid 0, mtime the slot start, gzip level 6.</p>
+<h3>browser/manifest.json</h3>
+<p>Format <code>proxy-index-browser-raw</code>, version 1, built with <code>manifest(...)</code> and checked when read back with <code>check_manifest(doc)</code>:</p>
+<ul>
+<li><code>run_id</code>, <code>batch_id</code>, <code>network {provider, product}</code>, <code>target</code>, <code>host</code> (the logical name);</li>
+<li><code>country</code> (the batch's), <code>requested_country</code> (null when untargeted) and <code>geo_targeting</code>: they must agree, and a targeted run requests its batch's country;</li>
+<li><code>slot</code>, <code>started_at</code>, <code>finished_at</code>: UTC, ISO 8601;</li>
+<li><code>tries</code> and <code>outcomes {verdicts, errors}</code>: every verdict and every browser error code, zeros included; each failed try has exactly one code;</li>
+<li><code>settings_sha256</code>, and <code>camoufox {release, engine_version, user_agent}</code>, whose user agent's Firefox version equals the engine's major version;</li>
+<li><code>files [{name, bytes, sha256}]</code>: each member once, <code>browser/tries.jsonl</code> always, never the manifest itself.</li>
+</ul>
+<h3>browser/tries.jsonl</h3>
+<p>One line per try, built with <code>try_record(...)</code>: <code>i</code> (zero-based), <code>input</code> (the settings input exactly as given: a string, or for <code>instagram_web</code> and <code>cloudflare_challenge</code> the <code>{site, handle}</code> or <code>{url, expect}</code> object; each string at most 2048 characters), <code>source</code>, <code>verdict</code>, <code>error</code> (the verdict must be the one the code implies), <code>status</code> (main document), <code>final_url</code> (scheme, host and path: no credentials, query or fragment), <code>timings_ms {queue, context, navigate, settle, total}</code>, <code>bytes_down_est</code>, <code>reason</code> (a lower-case enum from the judge) and <code>screenshot</code> (this try's member or null). Records never hold page text, answer text, cookies, credentials or proxy user names: fields named <code>text</code>, <code>answer</code>, <code>cookies</code>, <code>username</code>, <code>password</code>, <code>credentials</code>, <code>proxy</code> or <code>token</code> are refused, as is any unknown field.</p>
+<h3>Storage object</h3>
+<p>Only the manager writes it: <code>object_key(prefix, network, target, country, slot)</code> is <code>&lt;prefix&gt;/&lt;network&gt;/&lt;target&gt;/&lt;cc&gt;/&lt;YYYY-MM-DDTHHMMZ&gt;.tar.gz</code>.</p>
+<ul>
+<li><code>prefix</code> is the database setting <code>browser.archive_prefix</code> (default <code>browser-files</code>) and never shares the top level of another archive (<code>raw</code>, <code>raw-files</code>, <code>inputs</code>);</li>
+<li><code>network</code> is <code>network_slug(provider, product)</code>: <code>&lt;provider&gt;.&lt;product&gt;</code> in lower case;</li>
+<li><code>cc</code> is the lower-case requested country, or <code>untargeted</code> when the run requested none;</li>
+<li>the time is the slot start (<code>slot_stamp</code>: UTC, whole minutes; a naive time is refused).</li>
+</ul>
+<p>The object holds the exact bytes the host sent; its metadata carries <code>sha256</code>, <code>run-id</code> and <code>batch-id</code>.</p>
+</section>
+
+<section id="schedule"><h2>5. Scheduling and region (K-BP5)</h2>
+<p>Browser runs are batches of kind <code>browser</code>. All browser hosts share one runner region: slug <code>browser</code>, region id 20, cloud <code>local</code>, pattern <code>browser(-[a-z0-9]+)?</code>; it is not one of the cloud regions. A host's node tokens are bound to its logical name, and the manager refuses a browser token presenting another host. Per settings target (index i of n) and country, the planner opens one batch per slot of that target's own interval, starting <code>lead_seconds + i × interval / n</code> into the slot; a slot opened late spreads over what is left of it, minus 10 minutes. Hosts take tries, concurrency (<code>browsers_per_host</code>) and timeouts from the settings file, and no try starts after the slot end minus 2 minutes. Pulse and census participants exclude browser-region nodes.</p>
+</section>
+
+<section id="ingest"><h2>6. Ingest endpoint (K-BP7)</h2>
+<p>Hosts upload a bundle through the existing node route and bearer token: <code>POST /v1/results?batch_id=&lt;id&gt;</code> with <code>Content-Type: application/gzip</code>, <code>X-Content-SHA256: &lt;64 hex&gt;</code> (required for kind <code>browser</code>, verified for any kind when present) and <code>X-Bundle-Id: &lt;run_id&gt;</code> (it must equal the bundle's <code>summary.run_id</code>). The manager checks the checksum while it receives the body, bounds concurrent ingests, archives the exact bytes once, ingests the run directory into the database and keeps nothing.</p>
+<table><thead><tr><th>Reply</th><th>Meaning · what the host does</th></tr></thead><tbody>
+<tr><td>200 <code>{"ok": true, "ingested": true, "status", "run_key", "archived": {"key", "sha256"}}</code></td><td>Stored, or an idempotent replay. The host deletes its bundle only when <code>archived.sha256</code> equals its own.</td></tr>
+<tr><td>200 <code>{"ingested": false}</code></td><td>The run was killed or skipped. The host deletes its bundle.</td></tr>
+<tr><td>400 <code>checksum_mismatch</code></td><td>Nothing kept. The host re-hashes and retries once.</td></tr>
+<tr><td>409 <code>bundle_changed</code></td><td>An object with other bytes exists; it is never overwritten, and the alert <code>browser_bundle_changed</code> is raised. The host keeps its file, marked.</td></tr>
+<tr><td>429 (<code>Retry-After</code>), 503</td><td>Busy, a duplicate in flight, or storage or the database unreachable. Retried with backoff.</td></tr>
+<tr><td>any other</td><td>Kept with a <code>.conflict</code> or <code>.rejected</code> marker and a log line.</td></tr>
+</tbody></table>
+<p><code>confirmed(reply, local_sha256)</code> is the single rule a host uses to delete a bundle: true only for a 200 with <code>ingested: true</code> and an equal <code>archived.sha256</code>, or a 200 with <code>ingested: false</code>; false for every other status and for a missing or malformed field. Nothing unconfirmed is ever deleted, and a host never reports an unconfirmed browser upload as failed.</p>
+<p>The reported user agent is the standard Firefox one for the engine (<code>user_agent(engine_version, os)</code>): its Firefox version always equals the engine's major version, and a host refuses to start otherwise.</p>
+</section>
+<footer>Standalone HTML · no server, build step or external assets required.</footer>
+</main></html>

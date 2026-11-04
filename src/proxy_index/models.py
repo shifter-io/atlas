@@ -23,6 +23,11 @@ ErrorCode = Literal[
     # A 200 whose body is a challenge or block page (see outcome.sniff_body).
     "challenge",
     "blocked",
+    # Browser tries (K-BP2), all under the error verdict (see browser.contracts.OUTCOMES).
+    "login_wall",
+    "no_content",
+    "no_answer",
+    "browser_error",
 ]
 VerdictName = Literal["ok", "challenge", "block", "timeout", "proxy_error", "error"]
 VERDICTS = ("ok", "challenge", "block", "timeout", "proxy_error", "error")

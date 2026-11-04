@@ -135,7 +135,7 @@ def test_country_names_file(tmp_path):
 
 
 def test_targets_seed(tmp_path):
-    targets = {row["target_id"]: row for row in load_targets()}
+    targets = {row["target_id"]: row for row in load_targets() if row["engine"] == "http"}
     assert set(targets) == {"generic_http", "generic_https"}
     http, https = targets["generic_http"], targets["generic_https"]
     assert http["census"] and http["pulse_enabled"] and http["census_concurrency"] == 1000
