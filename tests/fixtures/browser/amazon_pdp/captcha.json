@@ -1,0 +1,21 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/errors/validateCaptcha",
+    "status": 200,
+    "title": "Amazon.com",
+    "text_head": "Enter the characters you see below. Sorry, we just need to make sure you're not a robot.",
+    "found": {
+      "#productTitle": 0,
+      "#corePrice_feature_div .a-price": 0,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 1
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "captcha_page"
+  }
+}

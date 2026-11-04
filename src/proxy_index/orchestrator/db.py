@@ -123,6 +123,10 @@ DEFAULTS: dict[str, Any] = {
     # the CDN directory holding dbip-full-YYYY-MM-DD.mmdb (None: $DBIP_BASE_URL).
     "dbip.dir": None,
     "dbip.base_url": None,
+    # The browser pulse planner (orchestrator/browser.py, job browser_plan): off until true, and
+    # the path of the private browser settings file (schema 2); None plans nothing.
+    "browser.enabled": False,
+    "browser.settings_file": None,
 }
 
 

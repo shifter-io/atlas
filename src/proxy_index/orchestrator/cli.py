@@ -44,7 +44,7 @@ def register(commands) -> None:
     token.add_argument("--provider", required=True)
     token.add_argument("--product", required=True)
     token.add_argument("--region", required=True, help="Region slug or host name")
-    token.add_argument("--host-name")
+    token.add_argument("--host-name", "--host", help="Required for --region browser")
 
     switch = commands.add_parser(
         "scheduler", help="Switch the census and/or pulse planner on or off, or show them"

@@ -1,0 +1,17 @@
+{
+  "view": {
+    "final_url": "https://www.linkedin.com/authwall",
+    "status": 200,
+    "title": "Sign Up | LinkedIn",
+    "text_head": "Join LinkedIn. Sign in to see the full profile.",
+    "found": {
+      "h1.top-card-layout__title": 0,
+      ".top-card-layout__headline": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "authwall_redirect"
+  }
+}
