@@ -158,10 +158,16 @@ breakdown names into the main schema's shared lists: breakdown places are `place
 `calculated_breakdown_details` and `current_breakdowns` keep their columns and values.
 Calculated schema v9 (`calculated/migrate_v8_v9.sql`, contract K2) stores each target-free
 window's full breakdowns as a list, `calculated_lists` (entries, since-independent pool figures,
-content hash, signature NULL until CALC-LISTS-1b) and `calculated_list_rows`, which the window
-names in `calculated_windows.list_id`; `calculated_breakdowns` and its per-build partitions are
-migrated (one list per window) and dropped. Lists outlive their build and can be shared by later
-builds; after `discard` and `expire` the lists no window references are deleted (`store.collect`).
+content hash, signature) and `calculated_list_rows`, which the window names in
+`calculated_windows.list_id`; `calculated_breakdowns` and its per-build partitions are migrated
+(one list per window, signature NULL) and dropped. Lists outlive their build and are shared by
+later builds: a daily group's window has list signature v1 (`lists.signatures`, the digest of the
+implementation, methodology, window, country names and each run of the group in the window with
+its summary hash, enrichment release and artifact hash, clipped bucket span and light-load flag),
+and a build with a stored list's signature reuses it without writing rows. The list is still
+computed and its content hash compared; a mismatch fails the calculation ("list signature is
+incomplete") and the previous build keeps serving. Census-pulse lists keep signature NULL. After
+`discard` and `expire` the lists no window references are deleted (`store.collect`).
 `calculated_list_details` shows a list's rows by `list_id`; the two breakdown views read the lists
 and keep their columns. Snapshot payloads are kept for the current build, published builds
 and the two newest unpublished drafts; older draft payloads are pruned on calculate/publish.

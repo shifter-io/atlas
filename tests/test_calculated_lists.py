@@ -323,4 +323,6 @@ def test_implementation_id_hashes_the_list_writer():
         + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
     ).hexdigest()
     assert calculator.IMPLEMENTATION_ID == expected
-    assert Path(sys.modules[calculator.persist.__module__].__file__).name in hashed
+    # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.
+    for writer in (calculator.reusing, lists.persist, lists.signatures):
+        assert Path(sys.modules[writer.__module__].__file__).name in hashed

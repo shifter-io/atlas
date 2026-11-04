@@ -498,12 +498,12 @@ async def test_an_hourly_offset_too_short_for_the_release_is_raised(database, db
 
 
 async def test_calculate_follows_the_trigger_setting(database, db, monkeypatch):
-    import sys
-    import types
+    from proxy_index.orchestrator import jobs
 
-    module = types.ModuleType("proxy_index.calculated.calculator")
-    module.calculate = lambda *args, publish: {"snapshot_id": "s1", "as_of": "now"}
-    monkeypatch.setitem(sys.modules, "proxy_index.calculated.calculator", module)
+    async def run_calculation(argv, limit_s):  # the subprocess (test_manager_orch runs it)
+        return {"snapshot_id": "s1", "as_of": "now"}
+
+    monkeypatch.setattr(jobs, "run_calculation", run_calculation)
     assert await calculate(db, database, "m.toml") == {"snapshot_id": "s1", "as_of": "now"}
     with connect(database) as conn:
         conn.execute("INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',now())")
