@@ -404,32 +404,43 @@ SealRun = Callable[[Path, Batch, dict, str], Bundle]
 def recover(runs: Path, outbox: Path, seal_run: SealRun) -> int:
     """At host start: seal every finished run directory a killed process left (a tar.gz
     without its sidecar is rebuilt), drop a run directory whose bundle is already sealed and
-    verified, and drop half-written sidecars and those of bundles already confirmed. A
-    directory without summary.json (killed during its run) is kept as it is and counted: the
-    return value."""
-    incomplete = 0
+    verified, and drop half-written sidecars and those of bundles already confirmed. A run
+    directory it does not seal (killed during its run, so no summary.json; or a file that cannot
+    be read or sealed) is kept as it is, with its sidecar, and counted: the return value. One
+    bad file never stops the start."""
     if outbox.is_dir():
         for sidecar in [*outbox.glob("*.json.partial"), *outbox.glob("*.json")]:
-            if sidecar.suffix == ".partial" or not sidecar.with_suffix(".tar.gz").exists():
-                sidecar.unlink()
+            try:
+                if sidecar.suffix == ".partial" or not sidecar.with_suffix(".tar.gz").exists():
+                    sidecar.unlink()
+            except OSError as exc:
+                log.warning("sidecar %s kept (%s)", sidecar.name, type(exc).__name__)
+    kept = 0
     for run_dir in sorted(p for p in runs.glob("*/*") if p.is_dir() and not p.is_symlink()):
         if not re.fullmatch(bc.RUN_ID, run_dir.name):
             continue
-        archive, sidecar = bc.outbox_paths(outbox, run_dir.name)
-        if sidecar.exists() and archive.exists():
-            if file_digests(archive)["sha256"] == read_bundle(sidecar).sha256:
-                shutil.rmtree(run_dir)
-                continue
-            sidecar.unlink()
-        if not (run_dir / "summary.json").is_file() or not (run_dir / BATCH_FILE).is_file():
-            incomplete += 1
-            continue
         try:
-            summary = json.loads((run_dir / "summary.json").read_bytes())
-            batch, settings_sha256 = run_facts(run_dir)
-            seal_run(run_dir, batch, summary, settings_sha256)
+            sealed = _recover_run(run_dir, outbox, seal_run)
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            log.warning("run %s could not be sealed (%s)", run_dir.name, type(exc).__name__)
-    if incomplete:
-        log.warning("browser_run_incomplete: %s run directories kept unsealed", incomplete)
-    return incomplete
+            log.warning("run %s kept unsealed (%s)", run_dir.name, type(exc).__name__)
+            sealed = False
+        kept += not sealed
+    if kept:
+        log.warning("browser_run_incomplete: %s run directories kept unsealed", kept)
+    return kept
+
+
+def _recover_run(run_dir: Path, outbox: Path, seal_run: SealRun) -> bool:
+    """Whether the run is in the outbox now: sealed before (its directory goes) or here."""
+    archive, sidecar = bc.outbox_paths(outbox, run_dir.name)
+    if sidecar.exists() and archive.exists():
+        if file_digests(archive)["sha256"] == read_bundle(sidecar).sha256:
+            shutil.rmtree(run_dir)
+            return True
+        sidecar.unlink()
+    if not (run_dir / "summary.json").is_file() or not (run_dir / BATCH_FILE).is_file():
+        return False
+    summary = json.loads((run_dir / "summary.json").read_bytes())
+    batch, settings_sha256 = run_facts(run_dir)
+    seal_run(run_dir, batch, summary, settings_sha256)
+    return True

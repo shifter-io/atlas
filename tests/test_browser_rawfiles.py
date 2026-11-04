@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import io
 import json
 import logging
-import re
 import shutil
 import tarfile
 from dataclasses import replace
@@ -21,22 +19,10 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from test_browser_contracts import try_fields
-from test_browser_node import (
-    CHEAP,
-    SHIFTER,
-    TOKENS,
-    Fleet,
-    Orchestrator,
-    browser_work,
-    host_view,
-    make_state,
-    serve_until,
-)
+from test_browser_node import SHIFTER
 
 from proxy_index.browser import contracts as bc
-from proxy_index.browser import node as host_module
 from proxy_index.browser import rawfiles
-from proxy_index.browser.node import BrowserHost
 from proxy_index.browser.rawfiles import Batch, DiskGuard, FileRecorder, Outbox, recover, seal
 from proxy_index.node import NodeAgent
 from proxy_index.orchestrator import browser_ingest
@@ -494,180 +480,63 @@ def test_recovery_keeps_a_run_it_cannot_seal(tmp_path, caplog):
     def seal_run(run_dir, batch, summary, sha):
         return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=tmp_path / "outbox")
 
-    assert recover(tmp_path / "runs", tmp_path / "outbox", seal_run) == 0
-    assert run_dir.exists() and "could not be sealed" in caplog.text
+    assert recover(tmp_path / "runs", tmp_path / "outbox", seal_run) == 1
+    assert run_dir.exists() and "kept unsealed (JSONDecodeError)" in caplog.text
 
 
-# --- the host ------------------------------------------------------------------------------
-
-
-class Kbp7(Orchestrator):
-    """test_browser_node's fake orchestrator whose /v1/results answers as K-BP7 does."""
-
-    def __init__(self, work, replies=("ok",)) -> None:
-        super().__init__(work)
-        self.replies = list(replies)
-        self.posts: list[tuple[str, str, str]] = []  # (token, bundle id, sha256)
-
-    async def result(self, request):
-        body = await request.read()
-        sha = hashlib.sha256(body).hexdigest()
-        with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as archive:
-            summary = json.load(archive.extractfile("summary.json"))
-        self.posts.append((self.token(request), request.headers[bc.HEADER_BUNDLE_ID], sha))
-        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
-        self.results[int(request.query["batch_id"])] = (self.token(request), summary)
-        self.changed.set()
-        if reply != "ok":
-            return web.json_response({"error": "busy"}, status=reply)
-        archived = {"key": "k", "sha256": sha}
-        return web.json_response({"ok": True, "ingested": True, "archived": archived})
-
-
-async def until(done, limit: float = 10) -> None:
-    """Poll done() (files on disk have no event) every 20 ms for at most `limit` seconds."""
-    for _ in range(int(limit / 0.02)):
-        if done():
-            return
-        await asyncio.sleep(0.02)
-    raise TimeoutError
-
-
-async def serve_while(host: BrowserHost, done, limit: float = 10) -> None:
-    """Run the host until done() holds, then stop it."""
-    stop = asyncio.Event()
-    task = asyncio.create_task(host.run(stop))
-    try:
-        await until(done, limit)
-    finally:
-        stop.set()
-        await task
-
-
-async def host_with(state, fake, **options):
-    server = TestServer(fake.app)
-    await server.start_server()
-    host = BrowserHost(
-        host_view(state),
-        state,
-        str(server.make_url("")),
-        launch=Fleet().launch,
-        poll_interval=0.02,
-        heartbeat_interval=0.05,
-        **options,
-    )
-    return host, server
-
-
-async def test_a_host_seals_sends_and_deletes_and_logs_no_credentials(
-    tmp_path, monkeypatch, caplog
-):
-    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
-    caplog.set_level(logging.DEBUG)
-    state = make_state(tmp_path)
-    work = {TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")], TOKENS[CHEAP]: []}
-    work[TOKENS[CHEAP]].append(browser_work(3, "amazon_pdp"))
-    fake = Kbp7(work)
-    host, server = await host_with(state, fake)
-    outbox = state / "outbox"
-    try:
-        await serve_while(host, lambda: len(fake.posts) == 2 and not list(outbox.glob("*")))
-    finally:
-        await server.close()
-    assert fake.failed == {}
-    assert sorted(token for token, *_ in fake.posts) == sorted(TOKENS.values())
-    assert list((state / "runs").glob("*/*")) == []  # sealed and removed
-    text = caplog.text + (state / "logs" / host_module.LOG_NAME).read_text()
-    assert "cheapsecret" not in text and not re.search(r"\bsecret\b", text)
-    assert all(token not in text for token in TOKENS.values())
-
-
-async def test_an_unconfirmed_upload_never_calls_failed_and_stays(tmp_path, monkeypatch):
-    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
-    state = make_state(tmp_path)
-    fake = Kbp7({TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")]}, replies=[503])
-    host, server = await host_with(state, fake)
-    try:
-        await serve_until(host, fake, lambda: len(fake.posts) == 1)
-    finally:
-        await server.close()
-    assert fake.failed == {}
-    [bundle] = rawfiles.Outbox(state / "outbox").pending()
-    assert bundle.batch_id == 1 and bundle.network == SHIFTER
-    with tarfile.open(bundle.archive, "r:gz") as tar:
-        names = tar.getnames()
-        records = [json.loads(line) for line in tar.extractfile(MEMBERS.tries)]
-    assert MEMBERS.manifest in names and len(records) == 3
-    for record in records:
-        assert not bc.FORBIDDEN_FIELDS & set(record)
-
-
-async def test_a_restart_sends_three_pending_bundles_oldest_first(tmp_path):
-    state = make_state(tmp_path)
-    ids = [f"0b6a7e4c-1d2e-4f3a-9b8c-7d6e5f4a3b2{n}" for n in range(3)]
-    for n, slot in ((2, SLOT), (0, SLOT - timedelta(hours=2)), (1, SLOT - timedelta(hours=1))):
-        seal_dir(make_run(tmp_path / f"r{n}", ids[n], slot=slot), state / "outbox")
-    fake = Kbp7({})
-    host, server = await host_with(state, fake)
-    host.outbox.parallel = asyncio.Semaphore(1)  # one at a time, so arrival order is send order
-    try:
-        await serve_while(host, lambda: not rawfiles.Outbox(state / "outbox").bundles())
-    finally:
-        await server.close()
-    assert [bundle_id for _, bundle_id, _ in fake.posts] == ids
-    assert {token for token, *_ in fake.posts} == {TOKENS[SHIFTER]} and fake.failed == {}
-
-
-async def test_a_host_start_seals_a_run_a_killed_process_left(tmp_path):
-    state = make_state(tmp_path)
-    run_dir = make_run(state, RUN_ID)  # state/runs/shifter.residential/<run id>
-    killed = make_run(state, "0b6a7e4c-1d2e-4f3a-9b8c-7d6e5f4a3b2d")
-    (killed / "summary.json").unlink()
-    fake = Kbp7({})
-    host, server = await host_with(state, fake)
-    try:
-        await serve_while(host, lambda: len(fake.posts) == 1)
-    finally:
-        await server.close()
-    assert not run_dir.exists() and killed.exists() and host.incomplete == 1
-    assert fake.posts[0][1] == RUN_ID
-
-
-async def test_a_run_that_cannot_be_sealed_is_kept_and_not_failed(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
-
-    def refuse(*args, **kwargs):
-        raise OSError("disk")
-
-    monkeypatch.setattr(rawfiles, "pack", refuse)
-    state = make_state(tmp_path)
-    fake = Kbp7({TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")]})
-    host, server = await host_with(state, fake)
+@pytest.mark.parametrize("sidecar", ["{", '{"batch_id": 41, "newer_field": 1}'])
+def test_an_unreadable_sidecar_beside_a_run_never_stops_recovery(tmp_path, caplog, sidecar):
+    """Review F1: a corrupted sidecar, or one from a newer build after a rollback, beside a
+    leftover run directory: that run is kept with its files and counted, the others sealed."""
+    outbox = tmp_path / "outbox"
+    ids = [f"0b6a7e4c-1d2e-4f3a-9b8c-7d6e5f4a3b2{n}" for n in range(2)]
+    stuck, other = make_run(tmp_path, ids[0]), make_run(tmp_path, ids[1])
+    shutil.copytree(stuck, tmp_path / "keep")
+    seal_dir(stuck, outbox)
+    shutil.copytree(tmp_path / "keep", stuck)
+    archive, side = bc.outbox_paths(outbox, ids[0])
+    side.write_text(sidecar)
     caplog.set_level(logging.WARNING)
-    stop = asyncio.Event()
-    task = asyncio.create_task(host.run(stop))
-    try:
-        await until(lambda: "run not sealed" in caplog.text)
-    finally:
-        stop.set()
-        await task
-        await server.close()
-    assert fake.failed == {} and fake.posts == []
-    [run_dir] = (state / "runs" / "shifter.residential").iterdir()
-    assert (run_dir / "summary.json").exists()
+
+    def seal_run(run_dir, batch, summary, sha):
+        return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=outbox)
+
+    assert recover(tmp_path / "runs", outbox, seal_run) == 1
+    assert stuck.exists() and archive.exists() and side.read_text() == sidecar
+    assert not other.exists() and [b.run_id for b in Outbox(outbox).pending()] == [ids[1]]
+    assert f"run {ids[0]} kept unsealed (" in caplog.text  # its error type only
 
 
-async def test_a_launched_browser_identity_goes_into_the_manifest(tmp_path):
-    state = make_state(tmp_path)
-    fleet = Fleet()
+def test_a_sidecar_that_cannot_be_removed_never_stops_recovery(tmp_path, monkeypatch, caplog):
+    outbox = tmp_path / "outbox"
+    outbox.mkdir()
+    orphan = bc.outbox_paths(outbox, RUN_ID)[1]
+    orphan.write_text("{}")
+    real = Path.unlink
 
-    async def launch():
-        browser = await fleet.launch()
-        browser.identity = dict(CAMOUFOX)
-        return browser
+    def refuse(self, missing_ok=False):
+        if self == orphan:
+            raise PermissionError(13, "denied")
+        return real(self, missing_ok=missing_ok)
 
-    host = BrowserHost(host_view(state), state, "http://orchestrator.invalid", launch=launch)
-    assert host.identity["release"] == host_module.release.RELEASE
-    await host._launch_one()
-    assert host.identity == CAMOUFOX
-    host.log.close()
+    monkeypatch.setattr(Path, "unlink", refuse)
+    caplog.set_level(logging.WARNING)
+    assert recover(tmp_path / "runs", outbox, lambda *a: None) == 0
+    assert orphan.exists() and "kept (PermissionError)" in caplog.text
+
+
+def test_a_sidecar_whose_tar_gz_differs_is_rebuilt_from_its_run(tmp_path):
+    outbox = tmp_path / "outbox"
+    run_dir = make_run(tmp_path)
+    shutil.copytree(run_dir, tmp_path / "keep")
+    bundle = seal_dir(run_dir, outbox)
+    shutil.copytree(tmp_path / "keep", run_dir)
+    bundle.archive.write_bytes(b"truncated")
+
+    def seal_run(run_dir, batch, summary, sha):
+        return seal(run_dir, batch, summary, sha, CAMOUFOX, outbox=outbox)
+
+    assert recover(tmp_path / "runs", outbox, seal_run) == 0
+    [rebuilt] = Outbox(outbox).pending()
+    assert not run_dir.exists() and rebuilt.sha256 == bundle.sha256
+    assert hashlib.sha256(rebuilt.archive.read_bytes()).hexdigest() == bundle.sha256

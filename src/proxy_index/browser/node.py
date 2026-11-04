@@ -287,12 +287,17 @@ class BrowserAgent(NodeAgent):
     async def upload(self, batch_id: int, directory: Path) -> dict[str, Any]:
         """Seal the run into the outbox and wake the outbox loop. Never raises: a run that
         cannot be sealed keeps its directory, and the next start seals it (rawfiles.recover)."""
+        host = self.browser_host
+        host.sealing.add(directory.name)  # no outbox pass sends it before the seal ends
         try:
-            bundle = await asyncio.to_thread(self.browser_host.seal, directory)
+            bundle = await asyncio.to_thread(host.seal, directory)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             log.warning("batch %s: run not sealed (%s); kept", batch_id, type(exc).__name__)
+            host.incomplete += 1
             return {}
-        self.browser_host.wake_outbox()
+        finally:
+            host.sealing.discard(directory.name)
+        host.wake_outbox()
         return {"bundle": bundle.run_id}
 
 
@@ -333,7 +338,10 @@ class BrowserHost:
         self.guard = rawfiles.DiskGuard(
             (self.runs, self.outbox_dir), settings.outbox.max_pending_gb, notify=self._full_line
         )
+        # Run directories kept unsealed (recover() at start, and seals that failed since).
         self.incomplete = 0
+        # Run ids being sealed now: a pass must not send a bundle before its seal has ended.
+        self.sealing: set[str] = set()
         self._wake: asyncio.Event | None = None
         self.agents = [BrowserAgent(self, n, orchestrator, **agent_options) for n in self.networks]
         self.by_network = {agent.network.name: agent for agent in self.agents}
@@ -375,15 +383,25 @@ class BrowserHost:
 
     async def flush(self) -> list[str]:
         """Send every due pending bundle through its network's registered agent, oldest
-        first, at most INGEST_PARALLEL at once; their outcomes."""
+        first, at most INGEST_PARALLEL at once; their outcomes ("error" for a send that raised:
+        logged by type, the bundle kept for the next pass)."""
         sends = []
         for bundle in await asyncio.to_thread(self.outbox.pending):
             agent = self.by_network.get(bundle.network)
             if agent is None or agent.node_id is None or agent.session is None:
                 continue  # not this host's network, or not registered yet
-            if self.outbox.due(bundle):
-                sends.append(self.outbox.send(bundle, agent))
-        return list(await asyncio.gather(*sends))
+            if bundle.run_id not in self.sealing and self.outbox.due(bundle):
+                sends.append((bundle, self.outbox.send(bundle, agent)))
+        results = await asyncio.gather(*(send for _, send in sends), return_exceptions=True)
+        outcomes = []
+        for (bundle, _), result in zip(sends, results, strict=True):
+            if isinstance(result, BaseException):
+                if not isinstance(result, Exception):
+                    raise result  # cancellation
+                log.warning("bundle %s not sent (%s)", bundle.run_id, type(result).__name__)
+                result = "error"
+            outcomes.append(result)
+        return outcomes
 
     async def _outbox_loop(self, stop: asyncio.Event) -> None:
         """A pass after every run end, at start and every outbox_interval seconds."""
