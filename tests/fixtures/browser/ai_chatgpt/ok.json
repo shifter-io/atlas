@@ -1,0 +1,52 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER The sky "
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.0,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER The sky looks blue because air scatters short blue light far more th"
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.5,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER The sky looks blue because air scatters short blue light far more than red light. This effect is called Rayleigh scattering."
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 146,
+    "answer_ms": 1500,
+    "asked": true
+  }
+}

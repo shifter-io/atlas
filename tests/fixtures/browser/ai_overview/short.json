@@ -1,0 +1,23 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "why is the sky blue - Google Search",
+    "text_head": "",
+    "counts": {
+      "div[aria-label=\"AI Overview\"]": 1,
+      "#search a h3": 8
+    },
+    "texts": {
+      "div[aria-label=\"AI Overview\"]": "PRIVATE-ANSWER-MARKER Blue light scatters."
+    }
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "short_overview",
+    "answer_chars": 42,
+    "asked": false
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Gemini",
+    "text_head": "",
+    "counts": {
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "counts": {
+        "model-response message-content": 1
+      },
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER The sky looks blue because the air scatters short blue light more than red light"
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 102,
+    "answer_ms": 500,
+    "asked": true
+  }
+}

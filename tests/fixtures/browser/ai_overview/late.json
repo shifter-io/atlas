@@ -1,0 +1,31 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "why is the sky blue - Google Search",
+    "text_head": "",
+    "counts": {
+      "#search a h3": 8
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 3.0,
+      "counts": {
+        "div[aria-label=\"AI Overview\"]": 1
+      },
+      "texts": {
+        "div[aria-label=\"AI Overview\"]": "PRIVATE-ANSWER-MARKER The sky looks blue because air scatters short blue light far more than red light. This effect is called Rayleigh scattering."
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 146,
+    "answer_ms": 0,
+    "asked": false
+  }
+}

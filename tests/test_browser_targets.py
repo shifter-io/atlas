@@ -246,7 +246,7 @@ def test_registered_targets_match_the_targets_file():
         assert (target.id, target.engine, target.pool_eligible) == (target_id, "browser", False)
         assert target.version == "1" and isinstance(target, PageTarget)
         assert target.build_request().url == urls[target_id]
-    assert {t.id for t in registry.all() if t.engine == c.BROWSER_ENGINE} == set(c.PAGE_TARGETS)
+    assert {t.id for t in registry.all() if t.engine == c.BROWSER_ENGINE} == set(c.RUN_TARGETS)
 
 
 class FakeDriver:

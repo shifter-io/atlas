@@ -1,0 +1,21 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Gemini",
+    "text_head": "",
+    "counts": {
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "no_reply",
+    "answer_chars": 0,
+    "asked": true,
+    "waited_s": 30
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "why is the sky blue - Google Search",
+    "text_head": "",
+    "counts": {
+      "#search a h3": 8
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "no_overview",
+    "answer_chars": 0,
+    "asked": false
+  }
+}

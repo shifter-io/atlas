@@ -1,0 +1,17 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "Google Search",
+    "text_head": "",
+    "counts": {},
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_results",
+    "asked": false
+  }
+}

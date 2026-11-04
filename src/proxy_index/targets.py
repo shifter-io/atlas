@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -128,8 +129,9 @@ class BrowserTarget(Target):
         """The page for try context.request_index, from the target's settings inputs."""
         raise NotImplementedError
 
-    async def interact(self, driver: PageDriver, spec: PageSpec) -> None:
-        """Act on the loaded page before it is read; most targets only read it."""
+    async def interact(self, driver: PageDriver, spec: PageSpec) -> Mapping[str, int] | None:
+        """Act on the loaded page before it is read; most targets only read it. Named numbers
+        it returns (an AI source's answer length) are added to PageView.found."""
         return None
 
     def judge(self, view: PageView) -> Assessment:
@@ -183,3 +185,10 @@ registry.register(pages.GoogleSearch())
 registry.register(pages.LinkedinPublic())
 registry.register(pages.InstagramWeb())
 registry.register(pages.CloudflareChallenge())
+
+# The AI answer sources (K-BP1, browser.targets.ai), imported the same way.
+from .browser.targets import ai  # noqa: E402
+
+registry.register(ai.AiOverview())
+registry.register(ai.ChatGpt())
+registry.register(ai.Gemini())
