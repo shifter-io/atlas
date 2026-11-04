@@ -76,7 +76,6 @@ def test_cloudflare_waits_for_the_challenge_to_clear():
     assert hidden.calls[1][2] == 5_000
 
 
-
 PAGE = {"url": "https://www.example.com/", "expect": EXPECT}
 SHOWN = {'body:has-text("Example Domain")': 1}
 
