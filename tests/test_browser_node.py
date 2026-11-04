@@ -27,11 +27,12 @@ from proxy_index.browser.node import (
     load_networks,
     slot_deadline,
     try_seconds,
+    untargeted_factory,
 )
 from proxy_index.browser.settings import load_settings
 from proxy_index.browser.transport import NullRecorder
 from proxy_index.errors import UserError
-from proxy_index.node import Rejected
+from proxy_index.node import Rejected, provider_factory
 
 CONFIGS = Path(__file__).resolve().parents[1] / "configs"
 SHIFTER, CHEAP = "shifter/residential", "proxy-cheap/residential"
@@ -383,6 +384,28 @@ def test_a_linked_token_is_refused(tmp_path):
     (directory / "node.token").symlink_to(tmp_path / "token")
     with pytest.raises(UserError, match="node.token"):
         load_networks(state, host_view(state))
+
+
+GEONODE_ROTATING = (CONFIGS / "geonode.toml").read_text().replace("port = 10000", "port = 9000")
+
+
+@pytest.mark.parametrize("factory", [provider_factory, untargeted_factory])
+@pytest.mark.parametrize(
+    ("provider", "config", "policy"),
+    [
+        ("proxy-seller", (CONFIGS / "proxy-seller.toml").read_text(), "per_request"),
+        ("shifter", (CONFIGS / "shifter.toml").read_text(), "rotate"),
+        ("geonode", GEONODE_ROTATING, "rotate"),
+    ],
+)
+def test_networks_get_a_new_exit_per_request_in_their_grammars_policy(
+    tmp_path, factory, provider, config, policy
+):
+    # Proxy-Seller rotates by port and refuses "rotate"; the others keep it.
+    private(tmp_path / "provider.toml", config)
+    private(tmp_path / "credentials.toml", f'[{provider}]\naccount = "acct"\npassword = "pw"\n')
+    proxies = factory(tmp_path / "provider.toml", tmp_path / "credentials.toml")("US")
+    assert proxies.session_policy == policy
 
 
 def test_run_timing_counts_tries_latency_queue_and_browser_time():

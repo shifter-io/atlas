@@ -24,6 +24,7 @@ import stat
 import sys
 import tempfile
 import time
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -67,18 +68,35 @@ def read_token(path: str | Path) -> str:
 def provider_factory(
     provider_config: str | Path, credentials_file: str | Path | None = None
 ) -> ProxyFactory:
-    """Proxies from the node's provider TOML, targeted at one country with rotating sessions."""
+    """Proxies from the node's provider TOML, targeted at one country, a new exit per request."""
     from .providers import load_provider
 
     def build(country_code: str) -> ProxySource:
         return load_provider(
             provider_config,
             parameters={"country": country_code.lower()},
-            session_policy="rotate",
+            session_policy=rotating_policy(provider_config),
             credentials_file=credentials_file,
         )
 
     return build
+
+
+def rotating_policy(provider_config: str | Path) -> str | None:
+    """The session policy for a new exit per request: "rotate", or None (the grammar default).
+
+    A grammar whose default is not "rotate" and that has no rotating ports sets rotation
+    itself and refuses "rotate" (Proxy-Seller: the next port per request). Geonode, default
+    "gateway" with rotating ports, keeps "rotate".
+    """
+    from .providers.grammar import load_grammar
+
+    with Path(provider_config).open("rb") as stream:
+        provider = tomllib.load(stream).get("provider")
+    if not isinstance(provider, str):
+        return "rotate"  # load_provider refuses the file with its own error
+    grammar = load_grammar(provider)
+    return "rotate" if grammar.no_session_policy == "rotate" or grammar.rotating_ports else None
 
 
 def resident_mb() -> int | None:
