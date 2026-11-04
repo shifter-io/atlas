@@ -66,9 +66,6 @@ class AiSource(PageTarget):
     `page_timeout_s` (the try's page timeout) from the settings with dataclasses.replace; the
     wait ends at the smaller one. `clock` and `sleep` are replaced only by tests."""
 
-    # 2: a complete answer is ok before the page's words and status are read (judge()), and
-    # a stop sign ends only a wait with no answer yet (read_answer()).
-    version: str = "2"
     answer_wait_s: int | None = ANSWER_WAIT_S
     page_timeout_s: int | None = None
     clock: Callable[[], float] = field(default=time.monotonic, repr=False, compare=False)

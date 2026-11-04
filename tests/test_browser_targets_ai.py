@@ -319,7 +319,7 @@ def test_registered_sources_match_the_targets_file():
     for target_id in c.AI_SOURCES:
         target = registry.get(target_id)
         assert (target.id, target.engine, target.pool_eligible) == (target_id, "browser", False)
-        assert target.version == "2" and isinstance(target, PageTarget)
+        assert target.version == "1" and isinstance(target, PageTarget)
         assert target.build_request().url == urls[target_id]
         assert target.answer_wait_s == 30 and target.page_timeout_s is None
     assert {t.id for t in registry.all() if t.engine == c.BROWSER_ENGINE} == set(c.RUN_TARGETS)
