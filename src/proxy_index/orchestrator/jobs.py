@@ -14,12 +14,18 @@ detect                    every minute: proxy_index.detect.detect(conn, now) wri
                           incident events from finished pulse batches (optional module)
 retention                 daily: test_events older than retention.events_days (whole monthly
                           partitions are dropped), job_runs older than retention.job_runs_days,
-                          estimated_hours older than retention.estimates_days
+                          estimated_hours older than retention.estimates_days (not while
+                          archive.enabled: the archive deletes them with their run)
+archive                   daily at 00:40 UTC, when `archive.enabled`: proxy_index.archive.job
+                          archives the due days to Spaces and deletes their raw rows
 reports                   every 30 s, when the `reports.dir` setting is set: index.html and a
                           live page for every running batch (report_html.write(live=True))
 dbip_update               daily at 05:23 UTC, when the `dbip.dir` setting is set: dbip.update
                           renames the newest dated DB-IP MMDB from `dbip.base_url` over
                           `dbip.dir`/dbip-full.mmdb and records it; unchanged is 'skipped'
+browser_plan              every minute, on the minute, while `browser.enabled` and the settings
+                          file at `browser.settings_file` say so: open each browser target's
+                          slot in the browser region (browser.py)
 
 Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
 and the index are written there (report_html.write, in a thread; install_reports).
@@ -40,6 +46,7 @@ from psycopg import sql
 from .. import storage
 from ..regions import CONFIGS
 from . import batches, pulse
+from .browser import browser_plan
 from .db import Database, setting
 from .scheduler import Scheduler
 
@@ -155,18 +162,35 @@ async def retention(db: Database, now: datetime | None = None) -> dict[str, Any]
             )
         ).rowcount
         estimates_days = int(await setting(conn, "retention.estimates_days"))
-        estimates = (
-            await conn.execute(
-                "DELETE FROM estimated_hours WHERE day<%s",
-                ((now - timedelta(days=estimates_days)).date(),),
-            )
-        ).rowcount
+        estimates = 0
+        # With the raw archive on, estimated hours go only with their run, after its day file
+        # is verified in the bucket (ARCHIVE-1); this fallback would delete them unarchived.
+        if not await setting(conn, "archive.enabled"):
+            estimates = (
+                await conn.execute(
+                    "DELETE FROM estimated_hours WHERE day<%s",
+                    ((now - timedelta(days=estimates_days)).date(),),
+                )
+            ).rowcount
     return {
         "dropped_partitions": dropped,
         "events_deleted": events,
         "job_runs_deleted": jobs,
         "estimated_hours_deleted": estimates,
     }
+
+
+async def archive(db: Database, credentials_file: str) -> dict[str, Any]:
+    from ..archive.job import run_due
+    from ..archive.spaces import Spaces
+
+    async with db.connection() as conn:
+        if not await setting(conn, "archive.enabled"):
+            return {"skipped": "archive.enabled is off"}
+        spaces_file = await setting(conn, "archive.spaces_file")
+        work_dir = Path(await setting(conn, "archive.work_dir"))
+    spaces = await asyncio.to_thread(Spaces.from_file, spaces_file)
+    return await asyncio.to_thread(run_due, credentials_file, spaces, work_dir, datetime.now(UTC))
 
 
 async def write_reports(db: Database, batch_ids: list[int]) -> dict[str, Any] | None:
@@ -278,6 +302,9 @@ def register_jobs(
     async def retention_job() -> dict[str, Any]:
         return await retention(db)
 
+    async def archive_job() -> dict[str, Any]:
+        return await archive(db, credentials_file)
+
     async def reports_job() -> dict[str, Any]:
         return await live_reports(db)
 
@@ -293,5 +320,11 @@ def register_jobs(
     scheduler.add("estimates_release", estimates_release_job, every_s=RELEASE_EVERY_S)
     scheduler.add("detect", detect_job, every_s=60)
     scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
+    scheduler.add("archive", archive_job, at_utc_minute=40)
     scheduler.add("reports", reports_job, every_s=30)
     scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
+
+    async def browser_plan_job() -> dict[str, Any]:
+        return await browser_plan(db)
+
+    scheduler.add("browser_plan", browser_plan_job, every_s=60, aligned=True)

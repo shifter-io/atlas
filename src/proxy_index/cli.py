@@ -199,6 +199,9 @@ def main(argv: list[str] | None = None) -> int:
     from .orchestrator import cli as fleet
 
     fleet.register(commands)
+    from .browser import release as browser_release
+
+    browser_release.register(commands)
     private = _operator_groups(commands)
     args = parser.parse_args(argv)
     try:
@@ -206,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
             return private[args.command](args)
         if args.command in fleet.COMMANDS:
             return fleet.dispatch(args)
+        if args.command == "browser":
+            return browser_release.dispatch(args)
         if args.command in {
             "calculate-init",
             "calculate",

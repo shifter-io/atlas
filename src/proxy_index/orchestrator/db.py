@@ -113,10 +113,18 @@ DEFAULTS: dict[str, Any] = {
     "scheduler.pulse_enabled": True,
     # Directory for the HTML batch reports written when a batch closes; None writes none.
     "reports.dir": None,
+    # The daily raw-data archive (proxy_index.archive): off until the bucket is set up.
+    "archive.enabled": False,
+    "archive.spaces_file": ".secrets/spaces.toml",
+    "archive.work_dir": ".state/archive",
     # The daily DB-IP update (jobs.dbip_update): the release directory (None runs no update) and
     # the CDN directory holding dbip-full-YYYY-MM-DD.mmdb (None: $DBIP_BASE_URL).
     "dbip.dir": None,
     "dbip.base_url": None,
+    # The browser pulse planner (orchestrator/browser.py, job browser_plan): off until true, and
+    # the path of the private browser settings file (schema 2); None plans nothing.
+    "browser.enabled": False,
+    "browser.settings_file": None,
 }
 
 

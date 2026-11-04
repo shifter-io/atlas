@@ -280,7 +280,7 @@ async def test_archive_cli_exports_and_restores(database, databases, tmp_path, c
     with connect(target) as conn:
         conn.execute("UPDATE schema_versions SET version=9")
     assert main(args) == 2
-    assert "Restore refused" in capsys.readouterr().err
+    assert "Archive restore refused" in capsys.readouterr().err
 
 
 def test_raw_tables_get_daily_partitions_unless_the_month_has_one(database):
