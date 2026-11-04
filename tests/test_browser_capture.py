@@ -194,7 +194,7 @@ def test_no_credential_token_or_shown_address_is_written(tmp_path):
     [
         ("12:30:45 on 1.2", True),
         ("std::vector", True),
-        ("10.0.0.1", False),
+        ("198.51.100.1", False),
         ("from fe80::1 now", False),
         ("::1", False),
         ("2001:db8:0:0:1:0:0:1", False),
