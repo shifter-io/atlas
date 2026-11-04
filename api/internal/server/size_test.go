@@ -20,6 +20,12 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	if testing.Short() {
 		t.Skip("renders a QA-1-sized build")
 	}
+	if underRace {
+		// The race detector multiplies this build's memory; on the 4 GB CI
+		// runner the process is killed and the job is lost. The build is
+		// covered, without the detector, by the go test step.
+		t.Skip("a QA-1-sized build does not fit the CI runner under -race")
+	}
 	in, err := testscale.Inputs(testscale.QA1)
 	if err != nil {
 		t.Fatal(err)
