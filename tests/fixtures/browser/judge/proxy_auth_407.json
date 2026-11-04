@@ -1,0 +1,14 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 407,
+    "title": "",
+    "text_head": "",
+    "found": {}
+  },
+  "expect": {
+    "verdict": "proxy_error",
+    "error": "proxy_auth",
+    "reason": "proxy_auth_status"
+  }
+}
