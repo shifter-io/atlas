@@ -300,7 +300,11 @@ func TestNoAnswerNamesTheEstimate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bodies := map[string][]byte{"/v1/dataset": v.Dataset.Identity}
+	var dataset bytes.Buffer
+	if err := build.WriteDataset(&dataset, res.Dataset); err != nil {
+		t.Fatal(err)
+	}
+	bodies := map[string][]byte{"/v1/dataset": dataset.Bytes()}
 	for path, r := range v.Static {
 		bodies[path] = r.Identity
 	}

@@ -124,11 +124,12 @@ func TestDataAnswersAreCachedUntilTheNextUpdate(t *testing.T) {
 	}
 }
 
-// TestANewEventChangesTheVersionWithinItsShortTTL: a rebuild caused only by a
-// new test event (same snapshot, same next update) changes the dataset and so
-// the revision, and /v1/version, which open pages poll, stays short-lived even
-// while data answers are cached until the next update.
-func TestANewEventChangesTheVersionWithinItsShortTTL(t *testing.T) {
+// TestANewEventKeepsTheDatasetFile: even a rebuild caused only by a new test
+// event (same snapshot, same next update) writes no new dataset file, so the
+// revision stays (contract K4); a data change writes one, and /v1/version,
+// which open pages poll, stays short-lived even while data answers are cached
+// until the next update.
+func TestANewEventKeepsTheDatasetFile(t *testing.T) {
 	src := &fakeSource{rev: 1, complete: true}
 	s := newTestServer(t, src)
 	h := s.Handler()
@@ -144,8 +145,15 @@ func TestANewEventChangesTheVersionWithinItsShortTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := s.current.Load()
-	if Revision(v) == before {
-		t.Fatal("a new event did not change the revision")
+	if Revision(v) != before || v.Dataset != s.files.lookup(v.Dataset.Name(), time.Now()) {
+		t.Fatal("a new event wrote a new dataset file")
+	}
+	src.set(2, nil)
+	if _, err := s.Refresh(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if v = s.current.Load(); Revision(v) == before {
+		t.Fatal("a data change kept the dataset file")
 	}
 	if !v.NextData.Equal(nextData(v.Result.Dataset.Snapshot.AsOf, s.opts.DataPeriod)) {
 		t.Fatalf("NextData %v changed without a snapshot", v.NextData)

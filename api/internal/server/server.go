@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,16 +37,12 @@ type Version struct {
 	search                             *LRU
 	events                             *LRU
 	pages                              *LRU
-	// Dataset is the /v1/dataset body, rendered once per build as a static
-	// file named by its hash, DatasetPath (/v1/files/dataset-<sha256>.json),
-	// cached for a year; /v1/dataset redirects to it.
-	Dataset     *Rendered
+	// Dataset is the dataset file on disk (datasetfile.go), named by its
+	// hash, DatasetPath (/v1/files/dataset-<sha256>.json), cached for a year;
+	// /v1/dataset redirects to it. Nil when the Version has none (a
+	// RenderVersion without Options.FilesDir).
+	Dataset     *DatasetFile
 	DatasetPath string
-	// previous is the build before's dataset file, still served under its
-	// own name until the next rebuild, so a client that got the old redirect
-	// (cached for up to 5 s, or racing the swap) still gets its file.
-	previous     *Rendered
-	previousPath string
 	// NextData is when the next data update is due (the published snapshot's
 	// cutoff plus Options.DataPeriod, on its grid); zero when unknown. Data
 	// answers are cached until then (dataCache).
@@ -75,6 +70,13 @@ type Options struct {
 	DataPeriod time.Duration
 	CacheFloor time.Duration
 	Now        func() time.Time
+	// FilesDir is the directory the dataset file is written to (siteapi
+	// serve -files-dir). Refresh needs it.
+	FilesDir string
+	// CodeID identifies the code that encodes the dataset file (default:
+	// CodeID(BinaryInfo())). A restart reuses a file only when it was written
+	// by the same, known code.
+	CodeID string
 }
 
 // Server holds the current Version and refresh state.
@@ -84,6 +86,7 @@ type Server struct {
 	current   atomic.Pointer[Version]
 	refreshMu sync.Mutex
 	nextID    atomic.Uint64
+	files     *datasetFiles
 	state     struct {
 		sync.Mutex
 		lastError   string
@@ -124,7 +127,14 @@ func New(src Source, opts Options) *Server {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
-	return &Server{src: src, opts: opts, log: opts.Logger}
+	if opts.CodeID == "" {
+		opts.CodeID = CodeID(BinaryInfo())
+	}
+	s := &Server{src: src, opts: opts, log: opts.Logger}
+	if opts.FilesDir != "" {
+		s.files = newDatasetFiles(opts.FilesDir, opts.CodeID, opts.Logger)
+	}
+	return s
 }
 
 // Current returns the serving Version (nil before the first build).
@@ -132,12 +142,20 @@ func (s *Server) Current() *Version { return s.current.Load() }
 
 // Refresh rebuilds when the fingerprint's data part changed (or force), and
 // only refreshes the events answers when nothing but the newest event id did
-// (refreshEvents). Concurrent calls are single-flight: one build at a time,
-// and a caller that waited re-checks the fingerprint instead of building the
-// same thing twice.
+// (refreshEvents). A rebuild writes a new dataset file only when its marker
+// changed (datasetfile.go). Concurrent calls are single-flight: one build at a
+// time, and a caller that waited re-checks the fingerprint instead of building
+// the same thing twice. Every call also drops the replaced dataset files whose
+// grace ended.
 func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
+	if s.files == nil {
+		err := errors.New("no files directory (Options.FilesDir) for the dataset file")
+		s.fail(err)
+		return false, err
+	}
+	s.files.expire(s.opts.Now())
 	fp, err := s.src.Fingerprint(ctx)
 	s.state.Lock()
 	s.state.lastCheck = time.Now()
@@ -159,10 +177,15 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		s.fail(err)
 		return false, err
 	}
-	v.BuildTime = time.Since(start)
-	if cur != nil && cur.DatasetPath != v.DatasetPath {
-		v.previous, v.previousPath = cur.Dataset, cur.DatasetPath
+	f, err := s.files.ensure(v.Result.Dataset, datasetMarker(v.Result.Fingerprint), s.opts.Now())
+	if err == nil {
+		err = setDataset(v, f)
 	}
+	if err != nil {
+		s.fail(err)
+		return false, err
+	}
+	v.BuildTime = time.Since(start)
 	s.current.Store(v)
 	unserved := s.unservedPages(v)
 	s.state.Lock()
@@ -176,7 +199,7 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		s.log.Warn("site tables missing; serving them empty", "version", v.ID, "gaps", v.Result.SiteGaps)
 	}
 	s.log.Info("cache rebuilt", "version", v.ID, "build_ms", v.BuildTime.Milliseconds(), "load_ms", v.LoadTime.Milliseconds(),
-		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", len(v.Dataset.Identity))
+		"assemble_ms", v.AssembleTime.Milliseconds(), "render_ms", v.RenderTime.Milliseconds(), "providers", len(v.Result.Dataset.Providers), "dataset_bytes", v.Dataset.Bytes)
 	if len(unserved) > 0 {
 		s.log.Warn("published products without their network pages", "version", v.ID, "pages", unserved)
 	}
@@ -214,9 +237,18 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	return v, nil
 }
 
-// RenderVersion pre-renders every static response of a build.
+// RenderVersion pre-renders every static response of a build and, with
+// opts.FilesDir, writes its dataset file there (always: no meta is read).
 func RenderVersion(id uint64, res *build.Result, opts Options) (*Version, error) {
-	return renderVersion(id, res, opts, nil)
+	v, err := renderVersion(id, res, opts, nil)
+	if err != nil || opts.FilesDir == "" {
+		return v, err
+	}
+	f, err := newDatasetFiles(opts.FilesDir, "", slog.Default()).write(res.Dataset)
+	if err != nil {
+		return nil, err
+	}
+	return v, setDataset(v, f)
 }
 
 func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*Version, error) {
@@ -229,7 +261,6 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 		cache string
 	}
 	jobs := []job{
-		{datasetJob, res.Dataset, CacheFile},
 		{"/v1/search-index", res.Search, CacheData},
 		{"/v1/coverage", res.Coverage.Index(), CacheData},
 	}
@@ -262,23 +293,31 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 	if err := <-errs; err != nil {
 		return nil, err
 	}
-	v.Dataset = v.Static[datasetJob]
-	delete(v.Static, datasetJob)
-	v.DatasetPath = "/v1/files/dataset-" + strings.Trim(v.Dataset.ETag, `"`) + ".json"
-	// What a browser polls to learn that the data changed. The revision is the
-	// dataset body's own hash (its ETag without quotes), so it changes exactly
-	// when the published data does, and a site built from a `siteapi dump` file
-	// can compute it from the bytes. No extra database work: it is rendered once
-	// per Version, like everything else.
-	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: res.BuiltAt.UTC()}, CacheVersion, LevelFast)
-	if err != nil {
+	if err := setDataset(v, nil); err != nil {
 		return nil, err
 	}
-	v.Static[versionPath] = ver
 	if err := addDefaultEvents(v); err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+// setDataset names v's dataset file (nil: none) and renders /v1/version,
+// what a browser polls to learn that the data changed. The revision is the
+// dataset file's own hash, so it changes exactly when the published file
+// does, and a site built from a `siteapi dump` file can compute it from the
+// bytes. No extra database work: it is rendered once per Version.
+func setDataset(v *Version, f *DatasetFile) error {
+	v.Dataset, v.DatasetPath = f, ""
+	if f != nil {
+		v.DatasetPath = f.Path()
+	}
+	ver, err := Render(http.StatusOK, VersionInfo{Revision: Revision(v), BuiltAt: v.Result.BuiltAt.UTC()}, CacheVersion, LevelFast)
+	if err != nil {
+		return err
+	}
+	v.Static[versionPath] = ver
+	return nil
 }
 
 // VersionInfo is /v1/version.
@@ -293,7 +332,7 @@ func Revision(v *Version) string {
 	if v.Dataset == nil {
 		return ""
 	}
-	return strings.Trim(v.Dataset.ETag, `"`)
+	return v.Dataset.SHA256
 }
 
 // Run polls for changes until the context ends.
@@ -623,56 +662,5 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
 		w.Write(body) //nolint:errcheck
-	}
-}
-
-// datasetJob renders the dataset beside the answers; it is then moved out of
-// Static, which holds only the (capped) API answers.
-const datasetJob = "dataset file"
-
-// serveDataset redirects to the current dataset file. The Location is
-// relative (files/dataset-<sha>.json), so it resolves under any path prefix
-// a proxy adds (the site's /api/site/v1/dataset).
-func (s *Server) serveDataset(w http.ResponseWriter, r *http.Request) {
-	v := s.current.Load()
-	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
-		return
-	}
-	h := w.Header()
-	h.Set("Location", strings.TrimPrefix(v.DatasetPath, "/v1/"))
-	h.Set("Cache-Control", CacheVersion)
-	h.Set("Access-Control-Allow-Origin", "*")
-	h.Set("X-Site-Version", strconv.FormatUint(v.ID, 10))
-	w.WriteHeader(http.StatusFound)
-}
-
-// datasetName is a dataset file's name: dataset-<hex sha256>.json.
-var datasetName = regexp.MustCompile(`^dataset-[0-9a-f]{64}\.json$`)
-
-// serveFile serves the current dataset file and, until the next rebuild, the
-// previous one. Any other dataset name (an older revision) is redirected,
-// uncached, to the current file, so a download or a build never gets a 404
-// because the data changed under it; other names are 404.
-func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
-	v := s.current.Load()
-	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
-		return
-	}
-	name := r.PathValue("name")
-	switch path := "/v1/files/" + name; {
-	case path == v.DatasetPath:
-		s.write(w, r, v, v.Dataset)
-	case path == v.previousPath:
-		s.write(w, r, v, v.previous)
-	case datasetName.MatchString(name):
-		h := w.Header()
-		h.Set("Location", strings.TrimPrefix(v.DatasetPath, "/v1/files/"))
-		h.Set("Cache-Control", CacheNone)
-		h.Set("Access-Control-Allow-Origin", "*")
-		w.WriteHeader(http.StatusFound)
-	default:
-		writeError(w, http.StatusNotFound, "not found")
 	}
 }

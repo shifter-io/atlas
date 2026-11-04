@@ -71,7 +71,7 @@ func (f *freshSource) Events(context.Context, store.EventFilter) ([]store.Event,
 func freshServer(t *testing.T, src Source) (*Server, *bytes.Buffer) {
 	t.Helper()
 	var log bytes.Buffer
-	s := New(src, Options{Logger: slog.New(slog.NewTextHandler(&log, nil))})
+	s := New(src, Options{Logger: slog.New(slog.NewTextHandler(&log, nil)), FilesDir: t.TempDir()})
 	if _, err := s.Refresh(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}

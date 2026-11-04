@@ -58,7 +58,7 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
 	}
 	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
-	v, err := RenderVersion(1, res, Options{})
+	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
 		h := sha256.Sum256(bytes.ReplaceAll(b, newTargetFields, nil))
 		out[name] = hex.EncodeToString(h[:])
 	}
-	sum("dataset", v.Dataset.Identity)
+	sum("dataset", fileBytes(t, v.Dataset))
 	for p, r := range v.Static {
 		if p != versionPath {
 			sum(p, r.Identity)

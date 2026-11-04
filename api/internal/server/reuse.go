@@ -4,10 +4,11 @@ package server
 // the fingerprint, and only the events answers read the events directly, so
 // such a change reads the events alone and makes a Version that shares every
 // other body (refreshEvents): no snapshot decode, no build, no compression.
-// The dataset's tape and the network answers' tapes are built from events too;
-// they keep the events of the last full build until the next one (a new
-// snapshot or a catalog edit), as cached copies of those answers already lag
-// up to the next data update (cache.go). A full build re-renders everything
+// The network answers' tapes are built from events too; they keep the events
+// of the last full build until the next one (a new snapshot or a catalog
+// edit), as cached copies of those answers already lag up to the next data
+// update (cache.go). The dataset file's tape keeps those of the build that
+// last wrote it (datasetfile.go). A full build re-renders everything
 // but keeps the previous Version's body wherever the new bytes are the same
 // (bodies.render), so only bodies that changed are compressed again.
 
@@ -51,7 +52,7 @@ func change(cur *Version, fp store.Fingerprint, force bool) changeKind {
 // refreshEvents serves the current events without a full build. It reads only
 // the events (Source.LoadEvents) and swaps in a copy of cur with the new
 // events window, a new events LRU (its default query pre-rendered) and a new
-// ID; the rendered answers, the dataset files and the search and page LRUs are
+// ID; the rendered answers, the dataset file and the search and page LRUs are
 // cur's own. A failure keeps cur serving and is reported like a failed build.
 func (s *Server) refreshEvents(ctx context.Context, cur *Version) (bool, error) {
 	start := time.Now()
@@ -104,8 +105,8 @@ type bodyKey struct {
 }
 
 // bodies is a previous Version's precomputed bodies: its static answers
-// except /v1/version, and its dataset file. All of them were rendered at
-// LevelBest, like every job of renderVersion.
+// except /v1/version. All of them were rendered at LevelBest, like every job
+// of renderVersion.
 type bodies map[bodyKey]*Rendered
 
 // reusable indexes prev's bodies (none for a nil prev).
@@ -124,7 +125,6 @@ func reusable(prev *Version) bodies {
 			add(r)
 		}
 	}
-	add(prev.Dataset)
 	return out
 }
 

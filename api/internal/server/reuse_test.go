@@ -51,8 +51,8 @@ func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
 			t.Errorf("%s reused %v", path, reused)
 		}
 	}
-	if same.Dataset != prev.Dataset {
-		t.Error("an unchanged dataset was compressed again")
+	if same.Dataset != nil {
+		t.Error("renderVersion wrote a dataset file: the refresh does (datasetfile.go)")
 	}
 	changed := *prev.Result
 	ds := *changed.Dataset
@@ -62,15 +62,12 @@ func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Dataset == prev.Dataset || next.Dataset.ETag == prev.Dataset.ETag || next.DatasetPath == prev.DatasetPath {
-		t.Error("a changed dataset kept the old body")
-	}
 	if next.Static["/v1/search-index"] != prev.Static["/v1/search-index"] {
 		t.Error("the unchanged search index was compressed again")
 	}
 	fresh, err := RenderVersion(4, prev.Result, s.opts)
-	if err != nil || fresh.Dataset == prev.Dataset || fresh.Dataset.ETag != prev.Dataset.ETag {
-		t.Fatalf("without a previous version every body is new: %v", err)
+	if err != nil || fresh.Dataset == prev.Dataset || fresh.Dataset.SHA256 != prev.Dataset.SHA256 {
+		t.Fatalf("the same data gives the same dataset file: %v", err)
 	}
 }
 

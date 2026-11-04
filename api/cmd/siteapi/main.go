@@ -1,7 +1,8 @@
 // Command siteapi serves every piece of data the website needs from the
-// proxy_reviews database, precomputed and precompressed in memory.
+// proxy_reviews database, precomputed and precompressed in memory, and the
+// dataset as a file on disk.
 //
-//	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s]
+//	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s] [--files-dir D]
 //	siteapi migrate      [--database-file F]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //
@@ -104,9 +105,13 @@ func serve(args []string) error {
 	interval := fs.Duration("interval", 10*time.Second, "change-detection interval")
 	dataPeriod := fs.Duration("data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
 	cacheFloor := fs.Duration("cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
+	filesDir := fs.String("files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
 	fs.Parse(args) //nolint:errcheck
 	if err := server.ValidDataPeriod(*dataPeriod); err != nil {
 		return err
+	}
+	if err := os.MkdirAll(*filesDir, 0o755); err != nil {
+		return fmt.Errorf("files directory: %w", err)
 	}
 	dsn, err := c.dsn()
 	if err != nil {
@@ -121,7 +126,8 @@ func serve(args []string) error {
 	defer pool.Close()
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
-	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: *interval, DataPeriod: *dataPeriod, CacheFloor: *cacheFloor})
+	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: *interval, DataPeriod: *dataPeriod, CacheFloor: *cacheFloor,
+		FilesDir: *filesDir})
 	if _, err := srv.Refresh(ctx, true); err != nil {
 		return fmt.Errorf("initial build: %w", err)
 	}
@@ -201,8 +207,13 @@ func dump(args []string) error {
 	}
 	rendered, ok := v.Static[*endpoint]
 	if *endpoint == "/v1/dataset" {
-		// The dataset is served as a file (/v1/dataset redirects to it).
-		rendered, ok = v.Dataset, true
+		// The dataset is served as a file (/v1/dataset redirects to it),
+		// written by the same streaming writer.
+		var buf bytes.Buffer
+		if err := build.WriteDataset(&buf, res.Dataset); err != nil {
+			return err
+		}
+		rendered, ok = &server.Rendered{Status: http.StatusOK, Identity: buf.Bytes()}, true
 	}
 	if !ok {
 		return fmt.Errorf("unknown endpoint %s", *endpoint)

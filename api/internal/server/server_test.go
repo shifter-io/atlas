@@ -101,7 +101,7 @@ func fixture(rev int64, events []store.Event, complete bool) *store.Inputs {
 
 func newTestServer(t testing.TB, src Source) *Server {
 	t.Helper()
-	s := New(src, Options{Interval: 20 * time.Millisecond, SearchLRU: 4, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s := New(src, Options{Interval: 20 * time.Millisecond, SearchLRU: 4, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()})
 	if _, err := s.Refresh(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -550,7 +550,7 @@ func TestTheDatasetIsAHashNamedFileBehindARedirect(t *testing.T) {
 		t.Fatal("the Location does not resolve under a prefix")
 	}
 	file := getOnce(h, v.DatasetPath)
-	if file.Code != 200 || file.Header().Get("Cache-Control") != CacheFile || !bytes.Equal(file.Body.Bytes(), v.Dataset.Identity) {
+	if file.Code != 200 || file.Header().Get("Cache-Control") != CacheFile || !bytes.Equal(file.Body.Bytes(), fileBytes(t, v.Dataset)) {
 		t.Fatalf("file %d %v", file.Code, file.Header())
 	}
 	for _, path := range []string{"/v1/files/dataset-0000.json", "/v1/files/other.json"} {
@@ -558,33 +558,22 @@ func TestTheDatasetIsAHashNamedFileBehindARedirect(t *testing.T) {
 			t.Errorf("%s: %d", path, r.Code)
 		}
 	}
-	// A new build names a new file. The previous one is still served as it was
-	// until the next rebuild (a client may hold the old redirect for 5 s, or race
-	// the swap); after that an old name redirects, uncached, to the current file.
-	// Never a 404 for a dataset name.
-	rebuild := func(rev int64) *Version {
-		src.set(rev, nil)
-		if _, err := s.Refresh(context.Background(), false); err != nil {
-			t.Fatal(err)
-		}
-		return s.current.Load()
+	// A new build names a new file; the previous one is still served as it
+	// was (its grace is TestAReplacedFileAnswersUntilItsGraceEnds).
+	src.set(2, nil)
+	if _, err := s.Refresh(context.Background(), false); err != nil {
+		t.Fatal(err)
 	}
-	v2 := rebuild(2)
-	if old := getOnce(h, v.DatasetPath); old.Code != 200 || !bytes.Equal(old.Body.Bytes(), v.Dataset.Identity) ||
+	v2 := s.current.Load()
+	if old := getOnce(h, v.DatasetPath); old.Code != 200 || !bytes.Equal(old.Body.Bytes(), fileBytes(t, v.Dataset)) ||
 		getOnce(h, v2.DatasetPath).Code != 200 || v2.DatasetPath == v.DatasetPath {
 		t.Fatalf("previous file after a rebuild: %d", old.Code)
 	}
-	v3 := rebuild(3)
-	moved := getOnce(h, v.DatasetPath)
-	if moved.Code != http.StatusFound || moved.Header().Get("Location") != strings.TrimPrefix(v3.DatasetPath, "/v1/files/") ||
+	// Any other dataset name redirects, uncached, to the current file.
+	moved := getOnce(h, "/v1/files/dataset-"+strings.Repeat("0", 64)+".json")
+	if moved.Code != http.StatusFound || moved.Header().Get("Location") != strings.TrimPrefix(v2.DatasetPath, "/v1/files/") ||
 		moved.Header().Get("Cache-Control") != CacheNone {
 		t.Fatalf("an older file: %d %v", moved.Code, moved.Header())
-	}
-	if r := get(h, v.DatasetPath); r.Code != 200 || !bytes.Equal(r.Body.Bytes(), v3.Dataset.Identity) {
-		t.Fatalf("following an older file's redirect: %d", r.Code)
-	}
-	if r := getOnce(h, v2.DatasetPath); r.Code != 200 || !bytes.Equal(r.Body.Bytes(), v2.Dataset.Identity) {
-		t.Fatalf("the previous file after another rebuild: %d", r.Code)
 	}
 	cold := New(&fakeSource{rev: 1}, Options{}).Handler()
 	if getOnce(cold, "/v1/dataset").Code != http.StatusServiceUnavailable || getOnce(cold, v.DatasetPath).Code != http.StatusServiceUnavailable {

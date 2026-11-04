@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,7 +36,7 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := RenderVersion(1, res, Options{})
+	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,8 +99,12 @@ func TestEveryAnswerFitsTheCap(t *testing.T) {
 	if r := getOnce(h, "/v1/dataset"); r.Code != http.StatusFound || r.Body.Len() > 0 {
 		t.Errorf("/v1/dataset: %d, %d bytes", r.Code, r.Body.Len())
 	}
+	// The streamed file is today's encoding of the whole dataset, byte for byte.
+	if want, err := Marshal(res.Dataset); err != nil || !bytes.Equal(fileBytes(t, v.Dataset), want) {
+		t.Errorf("the dataset file is not the dataset's encoding (%v)", err)
+	}
 	report := []string{fmt.Sprintf("build+render %v, %d answers, whole coverage %d, dataset file %d (gzip %d, br %d)", took.Round(time.Millisecond),
-		len(paths), len(whole), len(v.Dataset.Identity), len(v.Dataset.Gzip), len(v.Dataset.Brotli))}
+		len(paths), len(whole), v.Dataset.Bytes, v.Dataset.Gzip, v.Dataset.Brotli)}
 	for g, n := range largest {
 		report = append(report, fmt.Sprintf("%-48s %9d", g, n))
 	}

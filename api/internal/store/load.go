@@ -13,10 +13,13 @@ import (
 
 // Fingerprint is the cheap change detector polled every refresh interval.
 type Fingerprint struct {
-	BuildID       *int64     `json:"build_id"`
-	MaxEventID    *int64     `json:"max_event_id"`
-	SiteRevision  int64      `json:"site_revision"`
-	SiteUpdatedAt *time.Time `json:"site_updated_at"`
+	BuildID *int64 `json:"build_id"`
+	// BuildCreatedAt is the published build's created_at, part of the
+	// dataset file's marker (server.datasetMarker).
+	BuildCreatedAt *time.Time `json:"build_created_at"`
+	MaxEventID     *int64     `json:"max_event_id"`
+	SiteRevision   int64      `json:"site_revision"`
+	SiteUpdatedAt  *time.Time `json:"site_updated_at"`
 	// SiteTables is the site tables that exist (comma separated), so a site
 	// schema created or changed under a running server is picked up.
 	SiteTables    string  `json:"site_tables"`
@@ -49,6 +52,7 @@ func (f Fingerprint) EventsKey() string {
 
 const fingerprintSQL = `SELECT
  (SELECT build_id FROM public.current_calculation WHERE singleton),
+ (SELECT b.created_at FROM public.calculation_builds b JOIN public.current_calculation c USING (build_id) WHERE c.singleton),
  (SELECT max(event_id) FROM public.test_events),
  %s,
  %s,
@@ -68,7 +72,7 @@ func ReadFingerprint(ctx context.Context, q Querier) (Fingerprint, error) {
 func readFingerprint(ctx context.Context, q Querier, l SiteLayout) (Fingerprint, error) {
 	revision, updated, tables := siteFingerprintSQL(l)
 	f := Fingerprint{SiteTables: tables}
-	err := q.QueryRow(ctx, fmt.Sprintf(fingerprintSQL, revision, updated)).Scan(&f.BuildID, &f.MaxEventID, &f.SiteRevision, &f.SiteUpdatedAt, &f.Products, &f.TargetsDigest)
+	err := q.QueryRow(ctx, fmt.Sprintf(fingerprintSQL, revision, updated)).Scan(&f.BuildID, &f.BuildCreatedAt, &f.MaxEventID, &f.SiteRevision, &f.SiteUpdatedAt, &f.Products, &f.TargetsDigest)
 	return f, err
 }
 

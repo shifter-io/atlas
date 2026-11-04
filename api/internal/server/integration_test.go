@@ -62,13 +62,13 @@ func TestServeFromDatabase(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO site.targets(target_id) VALUES ('nope')"); err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Fatalf("runtime pool could write: %v", err)
 	}
-	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()})
 	if _, err := s.Refresh(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	cur := s.Current()
 	t.Logf("build took %v (load %v, assemble %v, render %v); dataset %d bytes identity, %d gzip, %d br", cur.BuildTime, cur.LoadTime, cur.AssembleTime, cur.RenderTime,
-		len(cur.Dataset.Identity), len(cur.Dataset.Gzip), len(cur.Dataset.Brotli))
+		cur.Dataset.Bytes, cur.Dataset.Gzip, cur.Dataset.Brotli)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4, DisableCompression: true}}
@@ -202,7 +202,7 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 	}
 	defer pool.Close()
 	var logs bytes.Buffer
-	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	s := server.New(server.DBSource{Pool: pool}, server.Options{Logger: slog.New(slog.NewTextHandler(&logs, nil)), FilesDir: t.TempDir()})
 	for range 2 {
 		if _, err := s.Refresh(ctx, true); err != nil {
 			t.Fatal(err)

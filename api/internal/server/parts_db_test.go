@@ -46,11 +46,11 @@ func answers(t *testing.T, db *testdb.DB, id int64, pages []string) map[string][
 	}
 	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
-	v, err := RenderVersion(1, res, Options{})
+	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := map[string][32]byte{"dataset": sha256.Sum256(v.Dataset.Identity)}
+	out := map[string][32]byte{"dataset": sha256.Sum256(fileBytes(t, v.Dataset))}
 	for p, r := range v.Static {
 		out[p] = sha256.Sum256(r.Identity)
 	}

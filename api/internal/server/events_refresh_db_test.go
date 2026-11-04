@@ -53,7 +53,7 @@ func TestEventAnswersAfterAnEventsOnlyRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	quiet := server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	quiet := server.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FilesDir: t.TempDir()}
 	src := &loadCounter{DBSource: server.DBSource{Pool: pool}}
 	s := server.New(src, quiet)
 	if _, err := s.Refresh(ctx, true); err != nil {

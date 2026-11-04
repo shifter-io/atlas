@@ -20,8 +20,9 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
   snapshot and provider list) or from a catalog row in `site.providers`. Rows an earlier
   build loaded as `is_demo = true` (the four design networks) are never read; `seed-demo`
   and `unseed-demo` are gone.
-- Every response is precomputed and precompressed in memory. Requests never touch
-  the database (except an uncommon `/v1/events` filter, see below).
+- Every response is precomputed and precompressed in memory, except the dataset,
+  which is a precompressed file on disk (`--files-dir`). Requests never touch the
+  database (except an uncommon `/v1/events` filter, see below).
 
 Module: `github.com/Zeus-Development/proxy-index-website/api`, Go 1.27.
 
@@ -52,6 +53,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--interval` | `10s` | serve: change-detection poll |
 | `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
+| `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 
 ### Where the site schema comes from
@@ -77,7 +79,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
-| `/v1/files/dataset-<sha256>.json` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"): a static file rendered (and compressed) once per data update, named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current build's file and, until the next rebuild, the previous one are served as they are (a client may hold the old redirect for 5 s or race a rebuild); any older `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
+| `/v1/files/dataset-<sha256>.json` | The full `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"): a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
 | `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex` without its articles: networks, pages, targets, actions, plus a new `Countries` group) and the palette's constants (`groupBonus` has no `Guides` group). Guides and network reviews are not searched, and the pages only the old website had (`/guides`, `/contribute`, `/disclosure`) are not listed, nor its "Download the raw dataset" action (`/data/design-preview.json`, the old site's demo file). |
@@ -92,13 +94,13 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/countries` | Every country any network was seen in (30d): networks and `ipsSum`. |
 | `/v1/countries/{cc}` | That country's row of every network and category per range, with `ipsSumRank` and `latencyRank` among the networks of the same category, and the city count per range. |
 | `/v1/countries/{cc}/cities?range=&q=&page=` | One page of that country's cities across networks (each row names its network and category). |
-| `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when the published data does (a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
+| `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
 | `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes, `unserved`, `siteGaps` and `binary`. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders a QA-1-sized
 build (`internal/testscale`: 21 framework providers, 18 with 40 per-country product groups, the framework
 targets and 559 test events) and fails when any answer or page is larger. It has no
-exemptions: the dataset is not an answer but the file `/v1/dataset` redirects to (11.5 MB at the QA-1
+exemptions: the dataset is not an answer but the file `/v1/dataset` redirects to (about 13 MB at the QA-1
 scale; the test logs its identity, gzip and brotli sizes). `/v1/overview`, `/v1/providers`, `/v1/providers/{slug}` and `/v1/snapshot` are gone:
 `/v1/rankings`, `/v1/networks/{slug}` and `/v1/networks/{slug}/chart` answer what a page needs. A place row adds the requests of every product group that saw the place and keeps the latency
 p50 of the row with the most successes; `ipsSum` adds each group's distinct IPs, so an IP seen by two
@@ -170,8 +172,9 @@ editorial ones.
   and changelog are built from test events and site rows, and catalog edits change
   names and texts. A catalog edit rebuilds the cache at once, but cached copies of the
   data answers show it only after they expire, at most at the next update. A new test
-  event refreshes only `/v1/events` (see Change detection): the dataset's and the
-  network answers' tapes keep the events of the last full build until the next one.
+  event refreshes only `/v1/events` (see Change detection): the network answers'
+  tapes keep the events of the last full build until the next one, the dataset
+  file's those of the build that last wrote it.
   `/v1/version` and the `/v1/dataset` redirect stay `public, max-age=5, s-maxage=5`, so
   open pages notice every data change within seconds and always get the current
   dataset file; the live tape follows events through `/v1/events`.
@@ -179,7 +182,7 @@ editorial ones.
   is `public, max-age=31536000, immutable` (its name changes with its bytes);
   `/healthz` and errors are `no-store`.
 - **Change detection.** Every 10 s one cheap query reads a fingerprint:
-  - `current_calculation.build_id`
+  - `current_calculation.build_id` and that build's `created_at`
   - `max(test_events.event_id)`
   - `site.revision`, which statement triggers on every site table bump, so deletes
     count too
@@ -197,7 +200,8 @@ editorial ones.
   default query pre-rendered) answers from the new events. A full rebuild re-renders
   every answer but keeps the serving version's precompressed body wherever the new
   bytes are identical (same SHA-256 and bytes, same `Cache-Control` and status), so
-  only changed bodies are compressed again. Refreshes are single-flight: one at a
+  only changed bodies are compressed again; the dataset file is written only when its
+  marker changed (see "The dataset file"). Refreshes are single-flight: one at a
   time, and waiters re-check rather than rebuild. The previous version keeps serving
   during a refresh. A failed one keeps it serving, is logged, and shows in `/healthz`
   (`status: degraded`, `lastError`).
@@ -217,12 +221,40 @@ editorial ones.
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version (a new event starts a new one).
-- **Measured (Apple Silicon, localhost).** Serving the cached dataset file through the
-  handler takes about 1.8 µs (`BenchmarkCachedDataset`). Over loopback HTTP with
+- **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
+  `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
+  published build's `created_at`, the site tables' newest `updated_at`,
+  `site.revision` (which also counts deletes), and the framework product count and
+  targets digest (the dataset's targets and providers' products come from them). A
+  rebuild for anything else (a new event) keeps the file, and so the `/v1/version`
+  revision. The marker is part of the fingerprint, so it is checked every poll. The
+  file is never held whole in memory: its JSON is written one provider at a time
+  (`build.WriteDataset`, byte for byte what encoding the whole `Dataset` gives), then
+  compressed from disk (gzip level 9, brotli quality 10 with a 4 MB window, in
+  parallel). Each file is written as a `.tmp` (mode 0644), fsynced and renamed. A
+  replaced file is still served for 10 minutes after its replacement, then deleted
+  (checked every poll). `dataset.meta.json` records the marker, the code that wrote
+  the file (the binary's git revision) and the files, so a restart reuses a file whose
+  marker and code match (after checking its three sizes); a new binary, or one built
+  from a modified tree or without git information, writes the file again, so a deploy
+  that changes the dataset's encoding takes effect at once. A restart also removes
+  what an interrupted write left, so run one `serve` per files directory. A failed
+  write fails the whole refresh: every answer stays at the serving version (so
+  `/v1/version` always names the served file) until a write succeeds, and `/healthz`
+  shows it like a failed rebuild. `TestWritingTheDatasetFileHasBoundedMemory` builds
+  a small synthetic shape with QA-1's per-network content (240 exit countries per
+  window) and repeats its providers to at least 90 MB, a stand-in for 18 networks x
+  249 countries, which the synthetic generator cannot build within a test machine's
+  memory: encoding its JSON adds at most 32 MB of heap (holding the file would take
+  all of it), and the whole write adds at most 160 MB (most of it brotli's state).
+- **Measured (Apple Silicon, localhost).** `BenchmarkCachedDataset` measures serving
+  the dataset file through the handler (not measured since the file moved to disk).
+  Over loopback HTTP with
   keep-alive and brotli bodies, p50 is about 0.15-0.2 ms and p99 about 0.5-0.7 ms
   for the dataset, rankings, a network, search and events (`TestServeFromDatabase`
-  asserts p99 < 2 ms). A full rebuild with the measured snapshot published takes
-  about 1 s, mostly brotli on the 1.9 MB dataset.
+  asserts p99 < 2 ms). A full rebuild with the measured snapshot published took
+  about 1 s, mostly brotli on the 1.9 MB dataset, before the dataset became a file
+  written only on a new marker.
 
 ## Database: the `site` schema
 
