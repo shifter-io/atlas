@@ -13,7 +13,7 @@ from psycopg.rows import tuple_row
 
 from ..storage import connect
 from ..storage import initialize as initialize_history
-from . import parts
+from . import netlists, parts
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 from .slim import refer, slim
@@ -245,14 +245,8 @@ def lists(conn):
     return conn.cursor(row_factory=tuple_row).execute(query).fetchone()[0]
 
 
-def collect(conn):
-    """Delete the lists no window references, their rows first; return how many lists."""
-    orphans = (
-        "SELECT list_id FROM calculated_lists l WHERE NOT EXISTS "
-        "(SELECT FROM calculated_windows w WHERE w.list_id=l.list_id)"
-    )
-    conn.execute(f"DELETE FROM calculated_list_rows WHERE list_id IN ({orphans})")
-    return conn.execute(f"DELETE FROM calculated_lists WHERE list_id IN ({orphans})").rowcount
+# Group lists live while a window references them, network lists while their build has windows.
+collect = netlists.collect
 
 
 def discard(conn, build_id, *, gc=True):
@@ -324,15 +318,17 @@ def expire(conn, days=None, per_day=None):
 def estimate(conn, expired):
     """Rows and approximate bytes that expiring these builds frees (read-only).
 
-    Lists count when no kept window references them; on a calculated v5 database, before its
-    migration, breakdowns count through their windows. Bytes are each table's size (with its
-    partitions, indexes and TOAST) in proportion to the rows removed; payloads and their parts
-    use their stored size.
+    Lists count when no kept window references them, network lists when their build expires; on
+    a calculated v5 database, before its migration, breakdowns count through their windows.
+    Bytes are each table's size (with its partitions, indexes and TOAST) in proportion to the
+    rows removed; payloads and their parts use their stored size.
     """
     windows = "result_id IN (SELECT result_id FROM calculated_windows WHERE build_id=ANY(%(b)s))"
     freed = (
         "list_id IN (SELECT list_id FROM calculated_windows WHERE build_id=ANY(%(b)s) "
-        "EXCEPT SELECT list_id FROM calculated_windows WHERE build_id<>ALL(%(b)s))"
+        "EXCEPT SELECT list_id FROM calculated_windows WHERE build_id<>ALL(%(b)s) "
+        "UNION SELECT list_id FROM calculated_lists "
+        "WHERE cohort='network' AND created_build=ANY(%(b)s))"
     )
     shared = {"calculated_list_rows": freed, "calculated_lists": freed}
     keys = {table: windows for table in DERIVED_TABLES} | {
@@ -649,20 +645,22 @@ def write(conn, build_id, payload, config, persist):
     inserted), persisted (persist(conn, payload) writes its typed rows and returns its windows'
     list ids) and slimmed (slim.py) on its own, and so is each part of the runs, so the whole
     payload is never copied or serialized at once. A part is the payload v3 group: each window
-    names its list (slim.refer()). payload is not changed. Returns the slimmed payload as read()
-    assembles it (v2 windows).
+    names its list (slim.refer()). Then each network window gets its list, merged from the
+    groups' lists (netlists.py, contract K10). payload is not changed. Returns the slimmed payload
+    as read() assembles it (v2 windows).
     """
     head = jsonable({k: v for k, v in payload.items() if k not in parts.KINDS})
     validate_payload(head, ())
-    groups, rows = [], []
+    groups, rows, members = [], [], {}
     for position, group in enumerate(payload["products"]):
         group = jsonable(group)
         validate_payload(head, [group])
-        lists = persist(conn, head | {"products": [group], "overlap": []})
+        members |= (lists := persist(conn, head | {"products": [group], "overlap": []}))
         groups.append(kept := slim({"products": [group]}, config)["products"][0])
         part = refer(kept, {label: lists[group["id"], label] for label in group["windows"]})
         rows.append(("product", position, group["id"], group["product_id"], group["cohort"], part))
     persist(conn, head | {"products": []})
+    netlists.write_network_lists(conn, build_id, payload, members)
     runs = [jsonable(chunk) for chunk in parts.chunks(payload["runs"])]
     rows += [("runs", n, f"runs:{n}", None, None, chunk) for n, chunk in enumerate(runs)]
     head["parts"] = {"products": len(groups), "runs": len(runs)}
