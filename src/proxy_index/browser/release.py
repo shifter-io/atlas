@@ -112,24 +112,30 @@ def executable(dest: str | Path, platform_name: str | None = None) -> Path:
     return target / build.executable
 
 
+def _copy(response, out, build: Build, step: str) -> tuple[int, str]:
+    """Stream the body into `out`, stopping as soon as it passes the pinned size."""
+    digest, size = hashlib.sha256(), 0
+    while chunk := response.read(CHUNK):
+        size += len(chunk)
+        if size > build.bytes:
+            raise ReleaseError(f"{step}: larger than the pinned {build.bytes} bytes")
+        digest.update(chunk)
+        out.write(chunk)
+    return size, digest.hexdigest()
+
+
 def _download(build: Build, partial: Path) -> None:
     step = f"download {build.url.rsplit('/', 1)[1]}"
-    digest, size = hashlib.sha256(), 0
     try:
         with _open(build.url, step) as response, private_file(partial) as out:
-            while chunk := response.read(CHUNK):
-                size += len(chunk)
-                if size > build.bytes:
-                    raise ReleaseError(f"{step}: larger than the pinned {build.bytes} bytes")
-                digest.update(chunk)
-                out.write(chunk)
+            size, sha256 = _copy(response, out, build, step)
     except UpdateError as exc:
         raise ReleaseError(str(exc)) from None
     except (OSError, HTTPException) as exc:
         raise ReleaseError(f"{step}: {type(exc).__name__}") from None
     if size != build.bytes:
         raise ReleaseError(f"{step}: {size} bytes, not the pinned {build.bytes}")
-    if digest.hexdigest() != build.sha256:
+    if sha256 != build.sha256:
         raise ReleaseError(f"{step}: SHA-256 differs from the pinned one")
 
 
@@ -162,19 +168,23 @@ def _extract(bundle: zipfile.ZipFile, info: zipfile.ZipInfo, path: Path) -> None
     path.chmod(0o755 if (info.external_attr >> 16) & 0o111 else 0o644)
 
 
-def _unpack(archive: Path, root: Path) -> None:
+def _extract_all(bundle: zipfile.ZipFile, root: Path) -> None:
+    members = bundle.infolist()
+    if len(members) > MAX_MEMBERS:
+        raise ReleaseError("archive has too many members")
     total = 0
+    for info in members:
+        path = _member_path(root, info)
+        total += 0 if info.is_dir() else info.file_size
+        if total > MAX_UNPACKED_BYTES:
+            raise ReleaseError("archive is larger than the unpack limit")
+        _extract(bundle, info, path)
+
+
+def _unpack(archive: Path, root: Path) -> None:
     try:
         with zipfile.ZipFile(archive) as bundle:
-            members = bundle.infolist()
-            if len(members) > MAX_MEMBERS:
-                raise ReleaseError("archive has too many members")
-            for info in members:
-                path = _member_path(root, info)
-                total += 0 if info.is_dir() else info.file_size
-                if total > MAX_UNPACKED_BYTES:
-                    raise ReleaseError("archive is larger than the unpack limit")
-                _extract(bundle, info, path)
+            _extract_all(bundle, root)
     except (zipfile.BadZipFile, EOFError, OSError, RuntimeError, NotImplementedError) as exc:
         raise ReleaseError(f"unreadable archive ({type(exc).__name__})") from None
 
