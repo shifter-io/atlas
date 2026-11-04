@@ -120,6 +120,8 @@ def assert_equal_builds(database, tmp_path, new, legacy):
             assert w["pool"]["list_entries"] == full["pool"]["list_entries"]
             truncated += any(kept[n] < full["breakdown_entries"][n] for n in BREAKDOWNS)
     assert truncated
+    # The parts no longer copy the lists' rows.
+    assert sum(map(len, map(json.dumps, groups))) < sum(map(len, map(json.dumps, old)))
     return a
 
 
