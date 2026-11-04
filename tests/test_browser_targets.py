@@ -60,8 +60,15 @@ def test_every_target_has_its_cases():
     names = {target: {path.stem for path in cases(target)} for target in c.PAGE_TARGETS}
     assert names == {
         c.AMAZON_PDP: {"ok", "captcha", "dogs_page", "no_price", "status_503"},
-        c.GOOGLE_SEARCH: {"ok", "sorry", "few_results", "consent"},
-        c.LINKEDIN_PUBLIC: {"ok", "authwall", "status_999", "no_name"},
+        c.GOOGLE_SEARCH: {
+            "ok",
+            "sorry",
+            "few_results",
+            "consent",
+            "consent_form",
+            "consent_banner_with_results",
+        },
+        c.LINKEDIN_PUBLIC: {"ok", "ok_login_like_slug", "authwall", "status_999", "no_name"},
         c.INSTAGRAM_WEB: {
             "instagram_ok",
             "instagram_login_dialog",
@@ -127,6 +134,24 @@ def test_marks():
     assert j.Mark("challenge", "r", found=("#a",)).seen(view)
     assert j.Mark("challenge", "r", text=("body",)).seen(view)
     assert not j.Mark("challenge", "r", text=("other",), paths=("/x",), found=("#b",)).seen(view)
+    # Paths match as prefixes of the final path, never inside it (a slug may contain "login").
+    assert not j.Mark("challenge", "r", paths=("/check",)).seen(view)
+    assert not j.path_has(
+        replace(view, final_url="https://www.example.com/in/loginov-a/"), ["/login"]
+    )
+    for path, fragment, hit in [
+        ("/login?x=/in/", "/login", True),
+        ("/login/", "/login", True),
+        ("/signup/cold-join", "/signup", True),
+        ("/uas/login", "/uas/", True),
+        ("/sorry/index", "/sorry/", True),
+        ("/Errors/ValidateCaptcha", "/errors/validatecaptcha", True),
+        ("/loginov", "/login", False),
+        ("/in/uas/", "/uas/", False),
+        ("/sorryx/", "/sorry/", False),
+    ]:
+        moved = replace(view, final_url=f"https://www.example.com{path}")
+        assert j.path_has(moved, [fragment]) is hit, path
     assert j.count(view, "#a", "#b") == 2 and j.host_of(view) == "www.example.com"
     assert j.host_of(replace(view, final_url="about:blank")) == ""
 
@@ -262,6 +287,17 @@ def test_other_targets_only_read_the_page():
         spec = target.page(context(0), (INPUTS.get(target_id, {"site": "x", "handle": "a"}),))
         assert asyncio.run(target.interact(driver, spec)) is None
     assert driver.calls == []
+
+
+@pytest.mark.parametrize("slug", ["loginov-example", "signup-example", "uas", "authwall-a"])
+def test_a_profile_slug_that_looks_like_a_login_path_is_the_profile(slug):
+    view, _ = load(FIXTURES / c.LINKEDIN_PUBLIC / "ok.json")
+    profile = replace(view, final_url=f"https://www.linkedin.com/in/{slug}/")
+    assert outcome(registry.get(c.LINKEDIN_PUBLIC).judge(profile)) == ("ok", None, None)
+    view, _ = load(FIXTURES / c.INSTAGRAM_WEB / "instagram_ok.json")
+    for path in ("/loginov-example/", "/accounts/loginov/", "/i/flow/logins"):
+        moved = replace(view, final_url=f"https://www.instagram.com{path}")
+        assert outcome(registry.get(c.INSTAGRAM_WEB).judge(moved)) == ("ok", None, None)
 
 
 def test_page_target_base_needs_its_parts():

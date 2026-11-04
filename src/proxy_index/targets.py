@@ -174,6 +174,8 @@ registry.register(EchoIpTarget("generic_http", "http://ip-info.com/myip"))
 registry.register(EchoIpTarget("generic_https", "https://ip-info.com/myip"))
 
 # The browser page targets (K-BP1, browser.targets.pages), imported after the protocol above.
+# They import this module back: that works because everything they use is defined above and
+# proxy_index/__init__ (through runner) always loads this module before browser.targets.
 from .browser.targets import pages  # noqa: E402
 
 registry.register(pages.AmazonPdp())

@@ -53,8 +53,8 @@ def failed(code: str, reason: str) -> PageAssessment:
 @dataclass(frozen=True, slots=True)
 class Mark:
     """A site's own sign of a challenge or block page (code `challenge` or `blocked`): any of
-    its lower-case texts in the title or visible text, path fragments of the final URL, or
-    selectors found on the page."""
+    its lower-case texts in the title or visible text, path prefixes of the final URL (see
+    path_has), or selectors found on the page."""
 
     code: str
     reason: str
@@ -71,10 +71,15 @@ class Mark:
         )
 
 
-def path_has(view: PageView, fragments: Collection[str]) -> bool:
-    """Whether the final URL's lower-cased path contains any of these fragments."""
+def path_has(view: PageView, prefixes: Collection[str]) -> bool:
+    """Whether the final URL's lower-cased path starts with any of these whole path segments:
+    `/login` matches `/login` and `/login/...`, never `/loginov` or `/in/login`; a prefix
+    ending in `/` matches anything below it."""
     path = urlsplit(view.final_url).path.lower()
-    return any(fragment in path for fragment in fragments)
+    return any(
+        path == prefix or path.startswith(prefix if prefix.endswith("/") else f"{prefix}/")
+        for prefix in prefixes
+    )
 
 
 def host_of(view: PageView) -> str:

@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.google.com/search",
+    "status": 200,
+    "title": "Before you continue to Google Search",
+    "text_head": "Before you continue to Google. We use cookies and data to deliver and maintain services.",
+    "found": {
+      "#search a h3": 0,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 1
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "consent_page"
+  }
+}

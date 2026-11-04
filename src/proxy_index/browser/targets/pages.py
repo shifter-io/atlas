@@ -98,11 +98,14 @@ class GoogleSearch(PageTarget):
         return (self.RESULTS, self.CAPTCHA_FORM, self.CONSENT_FORM)
 
     def rules(self, view: PageView) -> PageAssessment:
-        # The transport accepts a consent wall once; one still in place hides the results.
-        if host_of(view).startswith("consent.") or count(view, self.CONSENT_FORM):
+        # The transport accepts a consent wall once, when it hides the results; a consent
+        # banner left beside the results does not count against them.
+        if host_of(view).startswith("consent."):
             return failed("no_content", "consent_page")
         if count(view, self.RESULTS) >= self.MIN_RESULTS:
             return OK
+        if count(view, self.CONSENT_FORM):
+            return failed("no_content", "consent_page")
         return failed("no_content", "few_results")
 
 
