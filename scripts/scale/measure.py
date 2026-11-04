@@ -195,6 +195,8 @@ COLUMNS = (  # the report's hour table: (header, cell of (record, steps))
     ("Hour (UTC)", lambda r, s: r["start"]),
     ("Daily tests", lambda r, s: s["ingest"]["tests"]),
     ("Ingest s", lambda r, s: f"{s['ingest']['seconds']:.0f}"),
+    ("Pulses done/planned", lambda r, s: f"{s['pulses']['uploads']}/{s['pulses']['planned']}"),
+    ("Upload p50/p95 s", lambda r, s: "{p50}/{p95}".format(**s["pulses"]["latency"])),
     ("Release s", lambda r, s: f"{s['release']['seconds']:.1f}"),
     ("Calculate s", lambda r, s: f"{s['calculate']['seconds']:.0f}"),
     ("Calculate RSS MB", lambda r, s: _mb(s["calculate"].get("peak_rss_kb"))),
@@ -214,7 +216,7 @@ def markdown(report: dict) -> str:
     lines = ["# Scale cycle report (SCALE-GEN-1b)", ""]
     lines.append(
         f"Database `{report['database']}`, statement timings from {report['statements_from']}, "
-        f"written {report['written_at']}."
+        f"pulse rate {report['pulse_rate']} runs/s, written {report['written_at']}."
     )
     rows = [[cell(r, r["steps"]) for _, cell in COLUMNS] for r in report["hours"]]
     lines += ["", *table([name for name, _ in COLUMNS], rows)]

@@ -4,6 +4,7 @@ privileges the run-time and API roles get on the new tables and views."""
 
 import hashlib
 import secrets
+import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,7 +18,8 @@ from test_dbserver import apply, toml
 from test_migration import catalog
 from test_retention import clone
 
-from proxy_index.calculated import lists, store
+from proxy_index import detect, traffic
+from proxy_index.calculated import browser, calculator, lists, store
 from proxy_index.calculated.aggregate import BREAKDOWNS
 from proxy_index.calculated.calculator import calculate
 from proxy_index.dbserver import Roles
@@ -309,3 +311,16 @@ def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
         # No window references the list: collection deletes it, its rows first.
         assert store.collect(conn) == 1
         assert conn.execute("SELECT count(*) FROM calculated_list_rows").fetchone() == (0,)
+
+
+def test_implementation_id_hashes_the_list_writer():
+    """persist and the list figures live in lists.py: a change there must change the build
+    fingerprint (and the list signature's implementation id), as it did inside calculator.py."""
+    hashed = ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py", "lists.py")
+    here = Path(calculator.__file__).parent
+    expected = hashlib.sha256(
+        b"".join((here / name).read_bytes() for name in hashed)
+        + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
+    ).hexdigest()
+    assert calculator.IMPLEMENTATION_ID == expected
+    assert Path(sys.modules[calculator.persist.__module__].__file__).name in hashed

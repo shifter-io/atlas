@@ -3,15 +3,16 @@
 
 Usage:
   cycle.py --database <proxy_scale.toml> --hours N [--out DIR] [--max-minutes 25]
-           [--first-hour H] [--siteapi URL] [--siteapi-pid PID] [--siteapi-timeout S]
-           [--methodology PATH]
+           [--first-hour H] [--pulse-rate R] [--pulse-concurrency C] [--node-api URL]
+           [--siteapi URL] [--siteapi-pid PID] [--siteapi-timeout S] [--methodology PATH]
 
 generate.py writes days 1..D-1 of a D-day data set; the cycle drives day D (and later days the
 set has) hour by hour from --first-hour. Each hour: ingest its daily tests (storage.ingest, then
-their estimated hours), release the ended estimated hours, `proxy-index calculate --publish` in a
+their estimated hours), plan its pulse slot and upload every pulse run to the node API
+(POST /v1/results), release the ended estimated hours, `proxy-index calculate --publish` in a
 child process, and wait for siteapi (--siteapi) to serve the new build. README.md describes the
 steps, the measurements (measure.py) and the report. Progress is kept in the settings row
-scale.cycle: past --max-minutes a run stops between steps (or inside the ingest step),
+scale.cycle: past --max-minutes a run stops between steps (or inside the ingest and pulse steps),
 and the same command continues it until N hours are done.
 
 Guards: the database must be named proxy_scale, hold a whole-day generator data set, and no
@@ -36,32 +37,48 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import aiohttp
 import generate
 import measure
 import synthetic
 import writer
+from aiohttp import web
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from synthetic import Model, address, apportion
-from writer import BODY, DOWN, Writer
+from writer import BODY, DOWN, TARGET, Writer
 
 from proxy_index import daily, storage
 from proxy_index.calculated import store
 from proxy_index.estimates import compute
 from proxy_index.estimates.release import release_due
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.app import build_app
+from proxy_index.orchestrator.archive import pack
 from proxy_index.orchestrator.db import Database
+from proxy_index.orchestrator.nodes import issue_token
 from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS, Histogram
 from proxy_index.storage import GEO_COUNTERS
 
 DATABASE, SETTING, MARKER = "proxy_scale", "scale.cycle", "scale_cycle"
-STEPS = ("ingest", "release", "calculate", "siteapi")
+STEPS = ("ingest", "pulses", "release", "calculate", "siteapi")
 HOUR = timedelta(hours=1)
 MEASURE = Path(__file__).resolve().with_name("measure.py")
 METHODOLOGY = Path(__file__).resolve().parents[2] / "configs" / "methodology.toml"
-# The scope settings the generator gives daily tests (Writer.scope).
+# The scope settings the generator gives daily tests and pulses (Writer.scope).
 DAILY_SCOPE = {"concurrency": writer.DAILY_CONCURRENCY, "timeout_seconds": writer.TIMEOUT}
 DAILY_SCOPE["requests_per_second"] = None
+PULSE_SCOPE = DAILY_SCOPE | {"concurrency": writer.PULSE_CONCURRENCY}
 DAILY_LENGTH = {"requests": None, "stop_rule": "unique_ratio", "min_sample": 1000}
 DAILY_LENGTH["stall_seconds"] = 600
+# The generator's pulse schedule: generic_http hourly in the data set's countries, nothing else.
+SCHEDULE = (
+    "UPDATE targets SET pulse_enabled=(target_id=%(target)s),pulse_interval_minutes=CASE "
+    "WHEN target_id=%(target)s THEN 60 ELSE pulse_interval_minutes END",
+    "UPDATE countries SET enabled=(country_code=ANY(%(countries)s))",
+    "INSERT INTO settings(key,value) VALUES ('load.enabled','false') "
+    "ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()",
+)
 LISTS = (
     "SELECT l.location_id,p.country_code,p.country,p.region_code,p.region,p.city,l.latitude,"
     "l.longitude FROM enrichment_locations l JOIN place_names p USING(place_id) "
@@ -69,6 +86,12 @@ LISTS = (
     "SELECT n.network_id,n.isp,n.organization,a.asn,a.name,n.connection_type,n.usage_type "
     "FROM enrichment_networks n JOIN asn_names a USING(asn_name_id) WHERE a.asn IS NOT NULL",
 )
+RUNS = (
+    "SELECT br.batch_id,br.product_id,br.node_id,br.status,trim(b.country_code) AS country,"
+    "b.start_at FROM batch_runs br JOIN test_batches b USING(batch_id) WHERE b.kind='pulse' "
+    "AND b.target_id=%s AND b.scheduled_for=%s ORDER BY b.start_at,br.batch_id"
+)
+PENDING = ("queued", "running", "uploading")
 
 
 class Refused(Exception):
@@ -106,7 +129,7 @@ def gzip_rows(path: Path, rows: list) -> dict:
 
 
 def bucket(moment: datetime, successes: int, errors: int, bins) -> dict:
-    """Counters of a summary bucket; timeouts are the only errors, as generated."""
+    """Counters of a summary bucket or geo row; timeouts are the only errors, as generated."""
     completed, found = successes + errors, [[ms, n] for ms, n in sorted(bins) if n]
     values = (completed, successes, 0, 0, errors, completed * writer.UP, successes * DOWN)
     return (
@@ -155,7 +178,25 @@ def reduce(name: str, parts: list[dict]) -> dict:
         rows = sum(part["observation_rows"] for part in parts)
         result |= {"tests": len(timings), "observation_rows": rows}
         return result | {"per_test": measure.percentiles(timings)}
+    if name == "pulses":
+        latencies = [value for part in parts for value in part["latencies"]]
+        result |= {"planned": parts[-1]["planned"], "uploads": len(latencies)}
+        result["statuses"] = parts[-1]["statuses"]
+        result["failed"] = sum(part["failed"] for part in parts)
+        result["failures"] = [text for part in parts for text in part["failures"]][:20]
+        result["rate"] = round(len(latencies) / seconds, 3) if seconds else None
+        return result | {"latency": measure.percentiles(latencies)}
     return {key: value for key, value in parts[-1].items() if key not in result} | result
+
+
+def bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def work(session, base: str, token: str) -> None:
+    """GET /v1/work as a node does: its queued runs start."""
+    async with session.get(f"{base}/v1/work", headers=bearer(token)) as reply:
+        reply.raise_for_status()
 
 
 class Cycle:
@@ -172,12 +213,15 @@ class Cycle:
             "JOIN runner_regions r USING(region_id)"
         )
         self.writer = Writer(conn, self.model, {c: (r, slug) for c, r, slug in regions})
+        self.positions = {code: c for c, code in enumerate(settings.countries)}
         self.state = self.load(progress)
         self.pg_stat = measure.has_statements(conn)
         self.locations, self.networks = (
             {row[0]: dict(zip(fields, row[1:], strict=True)) for row in conn.execute(query)}
             for query, fields in zip(LISTS, (LOCATION_FIELDS, NETWORK_FIELDS), strict=True)
         )
+        rate = len(self.model.lanes) / 3600 if args.pulse_rate is None else args.pulse_rate
+        self.rate = rate or None
 
     def load(self, progress: dict) -> dict:
         """The stored state; on the first run, check the data set and set up the database."""
@@ -193,6 +237,8 @@ class Cycle:
             raise Refused("--first-hour is 0..23")
         self.state = {"first_day": first, "first_hour": self.args.first_hour}
         self.state |= {"hours": [], "current": None}
+        for statement in SCHEDULE:
+            self.conn.execute(statement, {"target": TARGET, "countries": list(self.positions)})
         store.initialize(self.args.database)
         self.save()
         return self.state
@@ -339,7 +385,117 @@ class Cycle:
                 found[n] |= self.locations[location] | self.networks[network]
         return found
 
-    # Steps 2 to 4.
+    # Step 2: the hour's pulses, through the node API.
+
+    def pulses(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
+        tokens = {}
+        slugs = {self.writer.regions[code][1] for code in self.positions}
+        for n, network in enumerate(self.model.settings.networks):
+            product = self.model.formulas[n].get("product", "residential")
+            for slug in sorted(slugs):
+                node = issue_token(
+                    self.args.database, provider=network, product=product, region=slug
+                )
+                tokens[node["node_id"]] = node["token"]
+        part = asyncio.run(self.upload_hour(day, start, tokens))
+        runs = self.conn.cursor(row_factory=dict_row).execute(RUNS, (TARGET, start)).fetchall()
+        part["planned"] = len(runs)
+        part["statuses"] = dict(Counter(run["status"] for run in runs))  # the runs' final states
+        return part, not any(run["status"] in PENDING for run in runs)
+
+    @contextlib.asynccontextmanager
+    async def node_api(self, db: Database):
+        """The node API's base URL: --node-api, or an orchestrator app served on loopback."""
+        if self.args.node_api:
+            yield self.args.node_api.rstrip("/")
+            return
+        app = build_app(str(self.args.database), with_scheduler=False, db=db, admin_credential=None)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        try:
+            await web.TCPSite(runner, "127.0.0.1", 0).start()
+            yield f"http://127.0.0.1:{runner.addresses[0][1]}"
+        finally:
+            await runner.cleanup()
+
+    async def upload_hour(self, day: int, start: datetime, tokens: dict[int, str]) -> dict:
+        """Plan the hour's slot as the scheduler does, then upload its runs at the pulse rate."""
+        db = Database(str(self.args.database), size=4)
+        try:
+            await batches.pulse_plan(db, start)
+            # Concurrent first events of a month can race on CREATE TABLE IF NOT EXISTS of
+            # the test_events partition; the app shares this pool, which creates it once here.
+            await db.ensure_partition("test_events", datetime.now(UTC))
+            runs = self.conn.cursor(row_factory=dict_row).execute(RUNS, (TARGET, start))
+            runs = [run for run in runs.fetchall() if run["status"] in PENDING]
+            async with self.node_api(db) as base, aiohttp.ClientSession() as session:
+                await asyncio.gather(*(work(session, base, token) for token in tokens.values()))
+                return await self.upload_runs(session, base, (day, start), runs, tokens)
+        finally:
+            await db.close()
+
+    async def upload_runs(self, session, base: str, slot, runs: list[dict], tokens) -> dict:
+        gate, began = asyncio.Semaphore(self.args.pulse_concurrency), time.monotonic()
+        latencies, failures, tasks = [], [], []
+
+        async def one(run):
+            async with gate:
+                try:
+                    latencies.append(await self.upload(session, base, slot, run, tokens))
+                # A timeout (aiohttp's, or a slow ingest) or a 200 that is not JSON is a
+                # failed upload like a rejected one: recorded, and the run stays open.
+                except (Failed, aiohttp.ClientError, TimeoutError, ValueError) as exc:
+                    failures.append(f"batch {run['batch_id']}: {exc}"[:300])
+
+        for i, run in enumerate(runs):
+            if self.rate:
+                await asyncio.sleep(max(0.0, began + i / self.rate - time.monotonic()))
+            if self.late():
+                break
+            tasks.append(asyncio.create_task(one(run)))
+        await asyncio.gather(*tasks)
+        return {"latencies": latencies, "failures": failures[:20], "failed": len(failures)}
+
+    async def upload(self, session, base: str, slot, run: dict, tokens) -> float:
+        """POST one pulse run directory; the seconds the node API took to answer."""
+        data = await asyncio.to_thread(self.pulse_archive, slot, run)
+        url, began = f"{base}/v1/results?batch_id={run['batch_id']}", time.monotonic()
+        async with session.post(url, data=data, headers=bearer(tokens[run["node_id"]])) as reply:
+            text = await reply.text()
+        if reply.status != 200 or not json.loads(text).get("ingested"):  # a 200 is JSON
+            raise Failed(f"{reply.status} {text[:200]}")
+        return round(time.monotonic() - began, 3)
+
+    def pulse_archive(self, slot, run: dict) -> bytes:
+        """A pulse's run directory as a node uploads it (tar.gz), started at the batch start."""
+        (day, start), country = slot, self.positions[run["country"]]
+        lane = self.model.lane(run["product_id"] - 1, country)
+        errors, rows = self.model.pulse(lane, day, start.hour)
+        begin = run["start_at"].astimezone(UTC)
+        moment = begin.replace(minute=begin.minute - begin.minute % 5, second=0, microsecond=0)
+        geo, bins = [], Counter()
+        for location, network, completed, successes, ms in rows:
+            item = bucket(moment, successes, completed - successes, [(ms, successes)])
+            item |= {"location": self.locations.get(location)}
+            geo.append(item | {"network": self.networks.get(network)})
+            bins[ms] += successes
+        successes = synthetic.PULSE_REQUESTS - errors
+        duration = 30 + run["batch_id"] % 10
+        buckets = [run_bucket(moment, successes, errors, ((ms, n) for ms, n in bins.items() if n))]
+        run_id = self.run_id("pulse", run["batch_id"], run["product_id"])
+        summary = self.summary(run_id, lane, begin, duration, buckets)
+        summary["config"] |= PULSE_SCOPE | {"requests": synthetic.PULSE_REQUESTS}
+        summary |= {"requested": synthetic.PULSE_REQUESTS, "unique_ips": successes}
+        with tempfile.TemporaryDirectory(prefix="scale-pulse-") as temporary:
+            directory = Path(temporary, "run")
+            directory.mkdir()
+            artifacts = {"ips": gzip_rows(directory / "ips.jsonl.gz", [])}
+            artifacts["geo"] = gzip_rows(directory / "geo.jsonl.gz", geo)
+            summary |= {"stop_reason": "requests", "artifacts": artifacts}
+            (directory / "summary.json").write_text(json.dumps(summary))
+            return pack(directory, Path(temporary, "run.tar.gz")).read_bytes()
+
+    # Steps 3 to 5.
 
     def release(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
         async def released():
@@ -392,6 +548,7 @@ class Cycle:
         found |= {"settings": self.model.settings.to_json(), "current": current}
         found |= {key: state[key] for key in ("first_day", "first_hour", "hours")}
         found["statements_from"] = "pg_stat_statements" if self.pg_stat else "the driver"
+        found["pulse_rate"] = round(self.rate, 4) if self.rate else "unpaced"
         return found | {"written_at": datetime.now(UTC).isoformat(timespec="seconds")}
 
 
@@ -417,6 +574,13 @@ def arguments(argv=None):
     parser.add_argument("--out", default="scale-report", help="directory of the reports")
     parser.add_argument("--max-minutes", type=float, default=25.0, help="budget of this run")
     parser.add_argument("--first-hour", type=int, default=0, help="UTC hour the cycle starts at")
+    parser.add_argument("--pulse-rate", type=float, help="uploads a second (0: unpaced)")
+    parser.add_argument("--pulse-concurrency", type=int, default=32)
+    parser.add_argument(
+        "--node-api",
+        help="node API of an orchestrator on this database run WITHOUT its scheduler "
+        "(its reaper would fail the past hour's runs); default: in-process, loopback",
+    )
     parser.add_argument("--siteapi", help="base URL of a siteapi serving this database")
     parser.add_argument("--siteapi-pid", type=int, help="its process id, for its peak RSS")
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)

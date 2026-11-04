@@ -7,6 +7,8 @@ links, devices or duplicates), with limits on member count and extracted size.
 
 from __future__ import annotations
 
+import gzip
+import os
 import re
 import tarfile
 import zlib
@@ -16,19 +18,53 @@ from pathlib import Path
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 MAX_MEMBERS = 64
 CHUNK = 1 << 20
+GZIP_LEVEL = 6
 
 
 class ArchiveError(ValueError):
     """The upload is not an acceptable run archive."""
 
 
-def pack(directory: str | Path, destination: str | Path) -> Path:
+def pack(
+    directory: str | Path,
+    destination: str | Path,
+    *,
+    nested: Callable[[str], bool] | None = None,
+    mtime: int | None = None,
+) -> Path:
+    """The run directory's plain top-level files as tar.gz. `nested` (as unpack's) adds the
+    files below it whose relative path it admits. With `mtime` the archive is deterministic:
+    members sorted by name, uid/gid 0 without owner names, mode 0600, that mtime, gzip level 6
+    with the same header time and no file name."""
     directory, destination = Path(directory), Path(destination)
-    with tarfile.open(destination, "w:gz") as archive:
-        for path in sorted(directory.iterdir()):
-            if path.is_file() and not path.is_symlink() and NAME.fullmatch(path.name):
-                archive.add(path, arcname=path.name, recursive=False)
+    names = [p.name for p in directory.iterdir() if NAME.fullmatch(p.name) and _regular(p)]
+    if nested is not None:
+        for folder, _, files in os.walk(directory):  # links to directories are not followed
+            found = (Path(folder, file).relative_to(directory).as_posix() for file in files)
+            names += [name for name in found if "/" in name and nested(name)]
+    names = sorted(name for name in names if _regular(directory / name))
+    if mtime is None:
+        with tarfile.open(destination, "w:gz") as archive:
+            for name in names:
+                archive.add(directory / name, arcname=name, recursive=False)
+        return destination
+    with (
+        destination.open("wb") as raw,
+        gzip.GzipFile("", "wb", GZIP_LEVEL, raw, mtime) as stream,
+        tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive,
+    ):
+        for name in names:
+            info = archive.gettarinfo(directory / name, arcname=name)
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mode, info.mtime = 0o600, mtime
+            with (directory / name).open("rb") as source:
+                archive.addfile(info, source)
     return destination
+
+
+def _regular(path: Path) -> bool:
+    return path.is_file() and not path.is_symlink()
 
 
 def unpack(
