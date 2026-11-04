@@ -108,8 +108,12 @@ async def test_images_load_when_not_blocked_and_bad_credentials_are_proxy_auth(e
     async with site_and_proxy() as (site, proxy, _, port), make_pool(executable, 1) as pool:
         outcomes, _ = await tries(pool, port, ["ok"], block=())
         assert outcomes[0].verdict == "ok" and site.images == 1
-        outcomes, _ = await tries(pool, port, ["ok"], password="wrong")
-    assert (outcomes[0].verdict, outcomes[0].error) == ("proxy_error", "proxy_auth")
+        outcomes, records = await tries(pool, port, ["ok"], password="wrong")
+    print(f"wrong credentials: {records[0]['status']} {records[0]['reason']}")
+    # Firefox gives up on refused credentials with NS_ERROR_PROXY_CONNECTION_REFUSED, which
+    # K-BP2 maps to proxy_connect; only a 407 shown as the page is proxy_auth.
+    assert (outcomes[0].verdict, outcomes[0].error) == ("proxy_error", "proxy_connect")
+    assert records[0]["reason"] == "ns_error_proxy_connection_refused"
 
 
 def leftover(executable) -> str:
@@ -124,7 +128,10 @@ async def test_a_pool_of_three_runs_thirty_tries_and_leaks_no_process(executable
     registry.register(SiteTarget())
     async with site_and_proxy() as (_, proxy, _, port):
         async with make_pool(executable, 3) as pool:
-            factory = BrowserTransport.factory(pool, browser=OPTIONS, settings=SETTINGS)
+            records = Records()
+            # A fresh browser's first loads can take seconds: a generous page timeout here.
+            settings = replace(SETTINGS, timeout_s=20)
+            factory = BrowserTransport.factory(pool, records, browser=OPTIONS, settings=settings)
             summary = await run(
                 config(port, requests=30, concurrency=6),
                 JsonSink(tmp_path),
@@ -133,6 +140,9 @@ async def test_a_pool_of_three_runs_thirty_tries_and_leaks_no_process(executable
             )
             stats = pool.stats()
     print(f"30 tries: {summary.successes} ok, latency {summary.latency_ms}, pool {stats}")
+    for record in records.tries:
+        if record["error"]:
+            print(f"try {record['i']}: {record['error']} {record['reason']} {record['timings_ms']}")
     assert summary.completed == 30 and summary.successes == 30
     assert stats["leases"] == 30 and stats["recycles"] >= 2 and stats["crashes"] == 0
     for _ in range(50):

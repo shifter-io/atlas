@@ -89,20 +89,21 @@ class Proxy:
         return False
 
     async def __call__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        head = await reader.readuntil(b"\r\n\r\n")
-        method, target, _ = head.split(b"\r\n", 1)[0].decode().split(" ")
-        ok = self.authorized(head)
-        if method == "CONNECT":
-            self.connects.append((target.rsplit(":", 1)[0], ok))
-        if not ok:
+        # Like a real gateway, a 407 keeps the connection open for the retry with credentials.
+        while True:
+            head = await reader.readuntil(b"\r\n\r\n")
+            method, target, _ = head.split(b"\r\n", 1)[0].decode().split(" ")
+            ok = self.authorized(head)
+            if method == "CONNECT":
+                self.connects.append((target.rsplit(":", 1)[0], ok))
+            if ok:
+                break
             self.challenged += 1
             writer.write(
                 b"HTTP/1.1 407 Proxy Authentication Required\r\n"
-                b'Proxy-Authenticate: Basic realm="test"\r\nContent-Length: 0\r\n'
-                b"Connection: close\r\n\r\n"
+                b'Proxy-Authenticate: Basic realm="test"\r\nContent-Length: 0\r\n\r\n'
             )
             await writer.drain()
-            return
         if method == "CONNECT":
             await self.tunnel(target, reader, writer)
         else:

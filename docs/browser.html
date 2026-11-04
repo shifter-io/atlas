@@ -183,6 +183,7 @@ td:first-child{width:auto}</style>
 <h3>Limits</h3>
 <ul>
 <li>The runner starts no try at or after its deadline; the transport cancels a try still running at the deadline plus one page timeout (<code>timeout</code>, reason <code>deadline</code>).</li>
+<li>Refused proxy credentials: Firefox gives up with <code>NS_ERROR_PROXY_CONNECTION_REFUSED</code> (seen live with the pinned release), which the K-BP2 table maps to <code>proxy_connect</code>; <code>proxy_auth</code> appears only when a 407 is the page's own status.</li>
 <li>Any other exception, a browser crash included, is <code>browser_error</code> (reason <code>exception</code>); a refused user agent ends the run.</li>
 <li>Live check: <code>sh scripts/ci/browser_live.sh</code>, remote only (a disposable Linux server, the pool's Mac class). It installs the pinned uv when absent, <code>uv sync --locked --no-dev --extra browser</code>, fetches the browser and runs <code>pytest -m browser_live</code> with pytest at its <code>uv.lock</code> versions: the real browser against <code>tests/browser_site.py</code>, a local site with one page per outcome behind a local authenticated proxy. CI never installs a browser; there the live tests skip.</li>
 </ul>
