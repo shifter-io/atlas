@@ -7,6 +7,7 @@
     "found": {
       "header h2": 1,
       "main a[href*=\"/p/\"]": 12,
+      "main a[href*=\"/reel/\"]": 0,
       "div[role=\"dialog\"] input[name=\"username\"]": 1
     }
   },
