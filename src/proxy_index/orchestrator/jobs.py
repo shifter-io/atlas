@@ -7,7 +7,10 @@ calculate                 every minute, due by calculate.trigger: "hourly" (defa
                           UTC hour, calculate.hour_offset_seconds past it (at least
                           MIN_HOUR_OFFSET_S, so the hour just released is in), or "batch"
                           debounced to calculate.min_interval_seconds and only after a batch
-                          finished; runs calculated.calculator.calculate(publish=True)
+                          finished; runs `proxy-index calculate --publish` as a subprocess,
+                          killed after calculate.timeout_seconds, under
+                          `systemd-run --scope -p MemoryMax=…` when
+                          $PROXY_INDEX_CALCULATE_MEMORY_MAX is set (the manager's unit)
 estimates_release         every minute: estimates.release.release_due(db) releases the estimated
                           hours that ended, with their estimate_hour_released events
 detect                    every minute: proxy_index.detect.detect(conn, now) writes the
@@ -36,8 +39,12 @@ and the index are written there (report_html.write, in a thread; install_reports
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import re
+import signal
+import sys
 import weakref
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -62,6 +69,13 @@ PARTITION = re.compile(r"test_events_(\d{4})_(\d{2})")
 # calculation sees hour H only at H+1:00 + 300 s + RELEASE_EVERY_S or later.
 RELEASE_EVERY_S = 60
 MIN_HOUR_OFFSET_S = 300 + RELEASE_EVERY_S
+# The calculation's memory cap (a systemd size such as 8G), set by the manager's unit.
+MEMORY_ENV = "PROXY_INDEX_CALCULATE_MEMORY_MAX"
+MEMORY_RE = re.compile(r"[1-9][0-9]*[KMGT]?")
+
+
+class CalculationFailed(RuntimeError):
+    """The calculation subprocess failed: its exit code, or the timeout, and stderr's last line."""
 
 
 def _batch_skip(state: dict, now: datetime, interval: timedelta) -> str | None:
@@ -111,14 +125,72 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
     now = datetime.now(UTC)
     async with db.connection() as conn:
         skipped = await _calculate_skip(conn, now)
+        timeout = float(await setting(conn, "calculate.timeout_seconds"))
     if skipped:
         return {"skipped": skipped}
-    from ..calculated.calculator import calculate as run_calculation
+    argv = calculation_argv(credentials_file, methodology, os.environ.get(MEMORY_ENV))
+    return await run_calculation(argv, timeout)
 
-    payload = await asyncio.to_thread(
-        run_calculation, credentials_file, str(methodology), publish=True
+
+def calculation_argv(
+    credentials_file: str, methodology: Path | str, memory_max: str | None = None
+) -> list[str]:
+    """`proxy-index calculate --publish` of this installation, under a systemd scope capped at
+    `memory_max` when given (the database file is passed by path, never read here)."""
+    script = Path(sys.executable).with_name("proxy-index")
+    command = (
+        [str(script)]
+        if script.exists()
+        else [
+            sys.executable,
+            "-c",
+            "import sys; from proxy_index.cli import main; sys.exit(main())",
+        ]
     )
-    return {"snapshot_id": payload.get("snapshot_id"), "as_of": str(payload.get("as_of"))}
+    command += ["calculate", "--database-file", str(credentials_file)]
+    command += ["--methodology", str(methodology), "--publish"]
+    if not memory_max:
+        return command
+    if not MEMORY_RE.fullmatch(memory_max):
+        raise ValueError(f"{MEMORY_ENV} must be a size such as 8G")
+    return ["systemd-run", "--scope", "--quiet", "-p", f"MemoryMax={memory_max}", "--", *command]
+
+
+async def run_calculation(argv: list[str], limit_s: float) -> dict[str, Any]:
+    """Run the calculation; its stdout JSON gives the snapshot. A non-zero exit or the timeout
+    (the whole process group is killed) raises CalculationFailed, which the job records."""
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        out, err = await asyncio.wait_for(process.communicate(), limit_s)
+    except BaseException as exc:  # the timeout, or the orchestrator stopping
+        _kill_group(process.pid)
+        await process.wait()
+        if isinstance(exc, TimeoutError):
+            raise CalculationFailed(f"timed out after {limit_s:g} s (killed)") from None
+        raise
+    lines = err.decode(errors="replace").strip().splitlines()
+    tail = lines[-1][:200] if lines else ""
+    if process.returncode != 0:
+        raise CalculationFailed(f"exit {process.returncode}: {tail}".rstrip(": "))
+    try:
+        payload = json.loads(out)
+        snapshot, as_of = payload["snapshot_id"], payload["as_of"]
+    except (ValueError, TypeError, KeyError):
+        raise CalculationFailed("exit 0 without the JSON result on stdout") from None
+    return {"snapshot_id": snapshot, "as_of": str(as_of), "exit_code": 0}
+
+
+def _kill_group(pid: int) -> None:
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 async def detect(credentials_file: str) -> dict[str, Any]:

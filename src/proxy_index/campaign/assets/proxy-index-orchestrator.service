@@ -1,0 +1,30 @@
+# MANAGER-ORCH-1: the orchestrator on the manager: node API (HTTPS, one port; K7), scheduler
+# and every job (calculation, estimates, pulse evaluation, DB-IP, archive, raw files).
+# Installed and enabled only by `campaign manager orchestrator-enable --apply` (owner's go).
+[Unit]
+Description=Proxy Index orchestrator: node API on 8443 (HTTPS), scheduler and jobs
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# ADMIN_USER and ADMIN_PASSWORD, made on the manager by orchestrator-enable (root-only 0600).
+EnvironmentFile=/opt/proxy-index-campaign/.secrets/orchestrator.env
+# The calculation runs in its own scope, `systemd-run --scope -p MemoryMax=8G`; a stop of
+# this unit kills it (jobs.run_calculation).
+Environment=PROXY_INDEX_CALCULATE_MEMORY_MAX=8G
+# The one DB-IP file the dbip_update job replaces atomically (setting dbip.dir is its folder).
+Environment=DBIP_MMDB=/opt/proxy-index-campaign/db-ip/dbip-full.mmdb
+# The database file installed on the manager is read in place, never copied (root-only 0600).
+ExecStart=/opt/proxy-index-campaign/venv/bin/proxy-index orchestrator --host 0.0.0.0 --port 8443 --database-file /etc/proxy-index/database.toml --tls-cert /opt/proxy-index-campaign/.secrets/tls/orchestrator.crt --tls-key /opt/proxy-index-campaign/.secrets/tls/orchestrator.key
+# Relative settings (archive.spaces_file .secrets/spaces.toml, archive.work_dir) resolve here.
+WorkingDirectory=/opt/proxy-index-campaign
+Restart=always
+RestartSec=5
+MemoryMax=12G
+LimitNOFILE=65536
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

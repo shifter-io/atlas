@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from ..onboarding.files import atomic_json, digest, read_json
-from . import ops_api
+from . import manager_orch, ops_api
 from .contracts import (
     CAMPAIGN_ROLES,
     MANAGER_TAG,
@@ -358,9 +358,9 @@ async def deploy(
         known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
         campaigns_root=f"{BASE}/campaigns",
     )
-    manager = await _ensure_manager(cloud, job, inventory, now, sleep)
+    await _ensure_manager(cloud, job, inventory, now, sleep)
     scope = manager_scope(inventory)
-    rules = ops_api.manager_firewall(job.mac_ipv4, manager.id)
+    rules = manager_orch.manager_rules(inventory, job.mac_ipv4)
     save(
         path,
         inventory,
@@ -620,7 +620,7 @@ async def allow_me(cloud: DigitalOcean, inventory_path: Path, address: str) -> d
     """Point the manager firewall's only SSH rule at this Mac's current public IPv4."""
     inventory, address = load_inventory(inventory_path), checked_ipv4(address)
     await check_account(cloud, inventory, inventory.get("account", ""))
-    rules = ops_api.manager_firewall(address, str(inventory["manager_id"]))
+    rules = manager_orch.manager_rules(inventory, address)
     firewall = await ops_api.apply_firewall(
         cloud, manager_scope(inventory), rules, inventory["manager_firewall_id"]
     )
