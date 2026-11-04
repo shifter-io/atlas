@@ -192,6 +192,7 @@ async def test_a_capture_writes_each_try_and_no_credential(executable, tmp_path)
             provider="p",
             product="q",
             country="US",
+            untargeted=False,
             tries=len(inputs),
             proxy=ProxyConfig("http", "127.0.0.1", port, USERNAME, PASSWORD),
         )

@@ -202,3 +202,39 @@ def test_no_credential_token_or_shown_address_is_written(tmp_path):
 )
 def test_scrub_replaces_addresses_only(text, kept):
     assert (capture.scrub(text) == text) is kept
+
+
+TOKEN_URL = "https://user:pw@www.google.com/sorry/index?continue=x&q=EgQTOKENPROBE#fragprobe"
+
+
+def test_the_view_url_keeps_only_scheme_host_and_path(tmp_path):
+    run(tmp_path, script=Script(url=TOKEN_URL, found=0), tries=1)
+    directory = tmp_path / "out/shifter/residential/amazon_pdp"
+    document = json.loads((directory / "0000.json").read_text())
+    assert document["view"]["final_url"] == "https://www.google.com/sorry/index"
+    for probe in (b"TOKENPROBE", b"fragprobe", b"pw@", b"user:", b"continue="):
+        assert not any(probe in data for data in files(tmp_path).values()), probe
+
+
+@pytest.mark.parametrize(
+    ("url", "written"),
+    [
+        ("http://203.0.113.7:8080/a?b=c", "http://<ip>:8080/a"),
+        ("https://[2001:db8::7]/x#y", "https://[<ip>]/x"),
+        ("about:blank", "about:blank"),
+        ("about:neterror?e=dnsNotFound&u=https%3A//x/?q=TOKEN", "about:"),
+        ("data:text/html,secret", "data:"),
+        ("not a url", ""),
+    ],
+)
+def test_view_url(url, written):
+    assert capture.view_url(url) == written
+
+
+def test_every_file_is_private_and_an_untargeted_network_says_so(tmp_path):
+    run(tmp_path, network="proxy-cheap/residential", tries=1)
+    directory = tmp_path / "out/proxy-cheap/residential/amazon_pdp"
+    assert {p.stat().st_mode & 0o777 for p in directory.iterdir()} == {0o600}
+    assert directory.stat().st_mode & 0o777 == 0o700
+    summary = (directory / "summary.md").read_text()
+    assert "country: US (untargeted network: no country parameter)" in summary

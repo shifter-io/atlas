@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -33,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from proxy_index.browser import driver, release
-from proxy_index.browser.contracts import AI_SOURCES
+from proxy_index.browser.contracts import AI_SOURCES, page_url
 from proxy_index.browser.node import bound_registry, load_network, try_seconds
 from proxy_index.browser.pool import BrowserPool
 from proxy_index.browser.settings import BrowserOptions, TargetSettings, load_settings
@@ -59,6 +60,19 @@ def scrub(text: str | None) -> str | None:
     return None if text is None else IP.sub("<ip>", text)
 
 
+def view_url(url: str) -> str:
+    """The view's final URL as the host records one: scheme, host and path only (no
+    credentials, query or fragment); a page like about:blank as it is, any other URL as its
+    scheme alone (about:neterror?e=... is about:)."""
+    try:
+        return scrub(page_url(url))
+    except ValueError:
+        if re.fullmatch(r"about:[a-z-]+", url):
+            return url
+        scheme = re.match(r"[a-z][a-z0-9+.-]*:", url, re.IGNORECASE)
+        return scheme.group().lower() if scheme else ""
+
+
 @dataclass(frozen=True, slots=True)
 class Plan:
     """One capture: the bound target, its [[target]], the [browser] options and the network."""
@@ -69,6 +83,7 @@ class Plan:
     provider: str
     product: str
     country: str
+    untargeted: bool
     tries: int
     proxy: ProxySource = field(repr=False)
 
@@ -79,7 +94,7 @@ def view_fields(target_id: str, view: PageView) -> dict[str, Any]:
     if target_id in AI_SOURCES and answer > 0:
         text = f"<answer: {answer} chars>"
     return {
-        "final_url": scrub(view.final_url),
+        "final_url": view_url(view.final_url),
         "status": view.status,
         "title": scrub(view.title),
         "text_head": scrub(text),
@@ -121,8 +136,7 @@ class Capture:
             "bytes_down_est": record["bytes_down_est"],
         }
         _write(self.directory / f"{index:04d}.json", _json(document, indent=2).encode())
-        with (self.directory / "tries.jsonl").open("a") as stream:
-            stream.write(_json(record) + "\n")
+        _append(self.directory / "tries.jsonl", (_json(record) + "\n").encode())
 
 
 def _json(value: Any, **options: Any) -> str:
@@ -135,15 +149,24 @@ def _write(path: Path, data: bytes) -> None:
     path.chmod(0o600)
 
 
+def _append(path: Path, data: bytes) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, "ab") as stream:
+        stream.write(data)
+
+
 def summary(plan: Plan, host: str, capture: Capture, began: str) -> str:
     """summary.md: what ran and the count of each verdict, error and reason."""
     records = capture.records
     outcomes = Counter((r["verdict"], r["error"], r["reason"]) for r in records)
     loads = sum(r["timings_ms"]["context"] is not None for r in records)
+    country = plan.country
+    if plan.untargeted:
+        country += " (untargeted network: no country parameter)"
     lines = [
         f"# Capture: {plan.target.id} on {plan.provider}/{plan.product}",
         "",
-        f"- Host: {host}; country: {plan.country}; release: {release.RELEASE}",
+        f"- Host: {host}; country: {country}; release: {release.RELEASE}",
         f"- Started: {began}; ended: {datetime.now(UTC).isoformat(timespec='seconds')}",
         f"- Tries: {len(records)} of {plan.tries}; page loads used: {loads}",
         f"- Tries without a view (no page was read, a navigation error): {capture.no_view}",
@@ -187,7 +210,7 @@ async def capture(plan: Plan, directory: Path, launch: Any, host: str) -> list[d
             transport.deadline = time.time() + seconds
             await transport.execute(plan.target, context=RequestContext(run_id, index, 0))
             recorder.write(index)
-    (directory / "summary.md").write_text(summary(plan, host, recorder, began))
+    _write(directory / "summary.md", summary(plan, host, recorder, began).encode())
     return recorder.records
 
 
@@ -216,6 +239,7 @@ def prepare(args: argparse.Namespace) -> Plan:
         provider=network.provider,
         product=network.product,
         country=country,
+        untargeted=network.untargeted,
         tries=args.tries,
         proxy=network.proxy_factory(country),
     )
