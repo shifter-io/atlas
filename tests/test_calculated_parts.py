@@ -76,15 +76,19 @@ async def test_a_build_is_a_head_and_parts_that_read_back_as_one_payload(
         head["parts"] == {"products": len(groups), "runs": len(runs)} == {"products": 2, "runs": 2}
     )
     assert {r[0] for r in rows} == {f"calculated_snapshot_parts_b{build_id}"}
+    # Each part is its payload v3 group: its windows name their lists (SNAP-LISTREF-1).
+    with connect(database) as conn:
+        filled = parts.fill(conn, [r[7] for r in groups])
     for position, (_, _, at, part_id, product_id, cohort, part_hash, part) in enumerate(groups):
         group = payload["products"][position]
-        assert (at, part_id, product_id, cohort, part) == (
+        assert (at, part_id, product_id, cohort, filled[position]) == (
             position,
             group["id"],
             group["product_id"],
             group["cohort"],
             group,
         )
+        assert all("lists" in w for w in part["windows"].values())
         assert part_hash == digest(part)
     assert [r[7] for r in runs] == [[run] for run in payload["runs"]]
     assert [r[3] for r in runs] == ["runs:0", "runs:1"] and {r[4] for r in runs} == {None}

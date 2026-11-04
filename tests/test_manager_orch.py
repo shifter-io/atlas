@@ -819,13 +819,32 @@ async def test_a_cancelled_calculation_is_killed_and_the_cancel_propagates(tmp_p
         assert not _alive(pid)
 
 
-def _alive(pid):
+def _proc_stat(pid):
+    with open(f"/proc/{pid}/stat") as stat:
+        return stat.read()
+
+
+def _alive(pid, read=_proc_stat):
+    """Whether `pid` still runs: not gone, not a zombie waiting to be reaped. A process reaped
+    between the signal check and the /proc read (ENOENT, or ESRCH from the read) is gone."""
     try:
         os.kill(pid, 0)
-    except ProcessLookupError:
+        state = read(pid).split(")")[-1].split()[0]
+    except (ProcessLookupError, FileNotFoundError):
         return False
-    with open(f"/proc/{pid}/stat") as stat:  # a reaped-later zombie is not running
-        return stat.read().split(")")[-1].split()[0] != "Z"
+    return state != "Z"
+
+
+@pytest.mark.parametrize("gone", [ProcessLookupError, FileNotFoundError])
+def test_a_process_reaped_during_the_check_is_not_alive(gone):
+    """The race CI hit (run 41887321826): kill(pid, 0) succeeds, then /proc says it is gone."""
+
+    def reaped(pid):
+        raise gone(3 if gone is ProcessLookupError else 2, "No such process")
+
+    assert _alive(os.getpid()) is True
+    assert _alive(os.getpid(), read=reaped) is False
+    assert _alive(os.getpid(), read=lambda pid: f"{pid} (python) Z 1 2 3") is False
 
 
 async def test_the_scheduler_records_the_calculation_outcome(database, monkeypatch):

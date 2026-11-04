@@ -1,0 +1,19 @@
+{
+  "view": {
+    "final_url": "https://www.instagram.com/example_person/",
+    "status": 200,
+    "title": "Example Person (@example_person) - Instagram photos and videos",
+    "text_head": "example_person. Example Person. 12 posts. New post: how a captcha works, and why you should verify you are human.",
+    "found": {
+      "header h2": 1,
+      "main a[href*=\"/p/\"]": 12,
+      "main a[href*=\"/reel/\"]": 0,
+      "div[role=\"dialog\"] input[name=\"username\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}

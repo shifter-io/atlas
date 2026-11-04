@@ -1,0 +1,53 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER No server"
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      }
+    },
+    {
+      "t": 1.0,
+      "after_submit": true,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER No server sees too many requests here."
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1,
+        "body:has-text(\"Too many requests\")": 1
+      }
+    },
+    {
+      "t": 1.5,
+      "after_submit": true,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER No server sees too many requests here. Air scatters blue light more than red light, so the whole sky looks blue."
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1,
+        "body:has-text(\"Too many requests\")": 1
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 134,
+    "asked": true
+  }
+}

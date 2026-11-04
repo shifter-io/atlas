@@ -1,0 +1,42 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Gemini",
+    "text_head": "",
+    "counts": {
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER Air scatters blue "
+      },
+      "counts": {
+        "model-response message-content": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.0,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER Air scatters blue sunlight more than red, so blue reaches your eyes from every direction. Nothing about it is unusual traffic for light."
+      },
+      "counts": {
+        "model-response message-content": 1
+      },
+      "after_submit": true
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 158,
+    "answer_ms": 1000,
+    "asked": true
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.google.com/search",
+    "status": 200,
+    "title": "",
+    "text_head": "  \n ",
+    "found": {
+      "#search a h3": 0,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "empty_page"
+  }
+}

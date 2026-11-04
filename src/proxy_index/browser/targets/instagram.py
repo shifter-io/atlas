@@ -3,51 +3,84 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote
 
 from ...targets import PageView
 from ..contracts import INSTAGRAM_WEB
-from ..judge import OK, PageAssessment, count, failed, path_has
+from ..judge import OK, Mark, PageAssessment, count, failed, path_has
 from . import PageTarget
+
+
+class Site(NamedTuple):
+    """One site's selectors: the profile header, its posts (any counts) and a login dialog."""
+
+    header: str
+    posts: tuple[str, ...]
+    dialog: str
 
 
 @dataclass(frozen=True, slots=True)
 class InstagramWeb(PageTarget):
     """Social web app profile, on Instagram or X (input `site`): ok when the profile header
-    and at least one post are shown, with no login dialog over them."""
+    and at least one post (on Instagram a photo or a reel) are shown, with no login dialog
+    over them."""
 
     id: str = INSTAGRAM_WEB
     url: str = "https://www.instagram.com/"
 
-    # Per site: profile URL, then the profile header, posts and a blocking login dialog.
     PROFILES = {"instagram": "https://www.instagram.com/{}/", "x": "https://x.com/{}"}
     SITES = {
-        "instagram": (
+        "instagram": Site(
             "header h2",
-            'main a[href*="/p/"]',
+            ('main a[href*="/p/"]', 'main a[href*="/reel/"]'),
             'div[role="dialog"] input[name="username"]',
         ),
-        "x": (
+        "x": Site(
             '[data-testid="UserName"]',
-            'article[data-testid="tweet"]',
+            ('article[data-testid="tweet"]',),
             '[data-testid="sheetDialog"]',
         ),
     }
     LOGIN_PATHS = ("/accounts/login", "/i/flow/login")
+    SHOWN_UNREAD = ("text_head",)
+    MARKS = (
+        # Instagram's checkpoint ("Help us confirm it's you"); `/challenge/` and below only,
+        # so an X profile at /challenge stays a profile.
+        Mark("challenge", "checkpoint_page", paths=("/challenge/",)),
+        # Instagram's rate-limit page, served with a 200.
+        Mark("blocked", "wait_page", text=("please wait a few minutes before you try again",)),
+    )
 
     def address(self, value: Any) -> str:
         return self.PROFILES[value["site"]].format(quote(value["handle"], safe=""))
 
     def wanted(self, value: Any) -> tuple[str, ...]:
-        return self.SITES[value["site"]]
+        site = self.SITES[value["site"]]
+        return (site.header, *site.posts, site.dialog)
+
+    def shown(self, view: PageView) -> bool:
+        """The profile header and a post: the visible text is then the profile's own (bio,
+        posts), so the markers no longer read it (SHOWN_UNREAD) and a post saying "captcha"
+        or "access denied" is not a challenge or block page. The title is still read."""
+        header, posts, _ = self._counts(view)
+        return bool(header and posts)
 
     def rules(self, view: PageView) -> PageAssessment:
-        headers, posts, dialogs = zip(*self.SITES.values(), strict=True)
+        header, posts, dialog = self._counts(view)
         if path_has(view, self.LOGIN_PATHS):
             return failed("login_wall", "login_redirect")
-        if count(view, *dialogs):
+        if dialog:
             return failed("login_wall", "login_dialog")
-        if not count(view, *headers):
+        if not header:
             return failed("no_content", "no_profile")
-        return OK if count(view, *posts) else failed("no_content", "no_posts")
+        return OK if posts else failed("no_content", "no_posts")
+
+    def _counts(self, view: PageView) -> tuple[int, int, int]:
+        """The header, post and login dialog counts; a page counts only its own site's."""
+        sites = self.SITES.values()
+        return (
+            count(view, *(site.header for site in sites)),
+            count(view, *(post for site in sites for post in site.posts)),
+            count(view, *(site.dialog for site in sites)),
+        )

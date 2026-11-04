@@ -1,0 +1,53 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Gemini",
+    "text_head": "",
+    "counts": {
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER Light"
+      },
+      "counts": {
+        "model-response message-content": 1
+      }
+    },
+    {
+      "t": 1.0,
+      "after_submit": true,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER Light sees no unusual traffic."
+      },
+      "counts": {
+        "model-response message-content": 1,
+        "body:has-text(\"unusual traffic\")": 1
+      }
+    },
+    {
+      "t": 1.5,
+      "after_submit": true,
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER Light sees no unusual traffic. Air scatters blue sunlight more than red, so blue reaches you from every side."
+      },
+      "counts": {
+        "model-response message-content": 1,
+        "body:has-text(\"unusual traffic\")": 1
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 131,
+    "asked": true
+  }
+}

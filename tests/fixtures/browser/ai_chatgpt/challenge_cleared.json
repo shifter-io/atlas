@@ -1,0 +1,42 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 403,
+    "title": "ChatGPT",
+    "text_head": "",
+    "counts": {
+      "#prompt-textarea": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER Air scatters the s"
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    },
+    {
+      "t": 1.0,
+      "texts": {
+        "[data-message-author-role=\"assistant\"]": "PRIVATE-ANSWER-MARKER Air scatters the short blue waves of sunlight far more than the red ones. That scattering, called Rayleigh scattering, makes the sky look blue."
+      },
+      "counts": {
+        "[data-message-author-role=\"assistant\"]": 1
+      },
+      "after_submit": true
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 165,
+    "answer_ms": 1000,
+    "asked": true
+  }
+}

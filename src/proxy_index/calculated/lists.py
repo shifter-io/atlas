@@ -208,16 +208,17 @@ def reusing(conn, payload, runs, buckets):
 
 
 def persist(conn, payload, signed=None):
-    """Write payload's typed rows; signed: the signatures() of its windows (none: NULL)."""
+    """Write payload's typed rows; signed: the signatures() of its windows (none: NULL). Returns
+    each window's list_id by (group id, window label)."""
     build_id = int(payload["snapshot_id"])
     for p in payload["products"]:
         store_cohort(conn, p["cohort"], p["criteria"])
     reason_ids = _reasons(conn, payload["products"])
-    rows = []
+    rows, lists = [], {}
     for p in payload["products"]:
-        for w in p["windows"].values():
+        for label, w in p["windows"].items():
             signature = (signed or {}).get((p["product_id"], p["cohort"], w["period"]["hours"]))
-            list_id = write_list(conn, build_id, p, w, rows, signature)
+            list_id = lists[p["id"], label] = write_list(conn, build_id, p, w, rows, signature)
             for target, m, scores in [
                 ("", w["metrics"], w["scores"]),
                 *[(t, v["metrics"], {"balanced": v["score"]}) for t, v in w["targets"].items()],
@@ -247,6 +248,7 @@ def persist(conn, payload, signed=None):
                 nb,
             ),
         )
+    return lists
 
 
 def _reasons(conn, products):

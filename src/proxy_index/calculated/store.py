@@ -16,7 +16,7 @@ from ..storage import initialize as initialize_history
 from . import parts
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
-from .slim import slim
+from .slim import refer, slim
 
 SCHEMA_VERSION = 9
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
@@ -522,42 +522,67 @@ def read_head(database, snapshot="current"):
 
 def read_parts(database, snapshot, kind="products", *, product=None, cohort=None, keys=None):
     """The snapshot's product groups ("products") or runs ("runs"), in order, or None when it has
-    no snapshot; see parts.rows(). One snapshot of the database answers all of it."""
+    no snapshot; see parts.rows(). A v3 group's windows come back in their v2 form, their lists
+    from calculated_list_rows (parts.fill()). One snapshot of the database answers all of it."""
     with connect(database) as conn:
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         build_id = _build(conn, snapshot)
-        return None if build_id is None else parts.rows(conn, build_id, kind, product, cohort, keys)
+        found = (
+            None if build_id is None else parts.rows(conn, build_id, kind, product, cohort, keys)
+        )
+        return parts.fill(conn, found) if found and kind == "products" else found
 
 
 def _fraction(value):
     return value is None or (type(value) in (int, float) and 0 <= value <= 1)
 
 
+def _rows(window, version):
+    """The breakdown rows of a window to check: every row of a v2 window; those of a v3 window
+    before they are inserted (write() validates each group before persisting it), none once the
+    stored window names its list ("lists": its int id and the rows kept of each list)."""
+    if version == 2:
+        return [row for rows in window["breakdowns"].values() for row in rows]
+    found = window.get("lists")
+    if found is None and isinstance(window.get("breakdowns"), dict):
+        return [row for rows in window["breakdowns"].values() for row in rows]
+    entries = (found or {}).get("entries")
+    if (
+        found is None
+        or type(found.get("id")) is not int
+        or not isinstance(entries, dict)
+        or not all(type(n) is int and n >= 0 for n in entries.values())
+    ):
+        raise ValueError("Invalid snapshot contract")
+    return []
+
+
 def validate_payload(payload, products=None):
-    """Check the reconciling invariants of a v1 or v2 snapshot before it is stored or published.
+    """Check the reconciling invariants of a v1, v2 or v3 snapshot before it is stored or
+    published.
 
     products, an iterable of product groups, replaces payload["products"]: a stored head and its
-    groups are checked one group at a time (already JSON-ready: json.dumps is not repeated).
+    groups are checked one group at a time (already JSON-ready: json.dumps is not repeated). A v3
+    window's breakdown rows are checked when they are inserted, as write() validates each group
+    before persisting its lists; a stored v3 window names its list ("lists") instead.
     """
     version = payload["schema_version"]
-    if version not in (1, 2) or not payload["methodology"]["id"]:
+    if version not in (1, 2, 3) or not payload["methodology"]["id"]:
         raise ValueError("Invalid snapshot contract")
-    if version == 2 and (
+    if version >= 2 and (
         not isinstance(payload["events"], list)
         or not {"census", "pulse"} <= set(payload["traffic"]["by_test"]) <= TESTS
     ):
         raise ValueError("Invalid snapshot contract")
     for product in payload["products"] if products is None else products:
-        if version == 2 and not isinstance(product["census"], list):
+        if version >= 2 and not isinstance(product["census"], list):
             raise ValueError("Invalid snapshot contract")
         for window in product["windows"].values():
             if any(not _fraction(point.get("uptime")) for point in window["series"]):
                 raise ValueError("Availability series must contain fractions or null")
-            if version == 2:
-                for rows in window["breakdowns"].values():
-                    for row in rows:
-                        if not 0 <= row["successes"] <= row["completed"]:
-                            raise ValueError("Breakdown counters do not reconcile")
+            if version >= 2:
+                if any(not 0 <= r["successes"] <= r["completed"] for r in _rows(window, version)):
+                    raise ValueError("Breakdown counters do not reconcile")
                 if not all(
                     _fraction(window["metrics"][k])
                     for k in ("challenge_rate", "block_rate", "uptime")
@@ -613,10 +638,12 @@ def publish(database, snapshot):
 def write(conn, build_id, payload, config, persist):
     """Store a built payload as its head and parts (parts.py), one part at a time.
 
-    Each product group is made JSON-ready, validated, persisted (persist(conn, payload) writes
-    its typed rows) and slimmed (slim.py) on its own, and so is each part of the runs, so the
-    whole payload is never copied or serialized at once. payload is not changed. Returns the
-    slimmed payload as read() assembles it.
+    Each product group is made JSON-ready, validated (its breakdown rows before they are
+    inserted), persisted (persist(conn, payload) writes its typed rows and returns its windows'
+    list ids) and slimmed (slim.py) on its own, and so is each part of the runs, so the whole
+    payload is never copied or serialized at once. A part is the payload v3 group: each window
+    names its list (slim.refer()). payload is not changed. Returns the slimmed payload as read()
+    assembles it (v2 windows).
     """
     head = jsonable({k: v for k, v in payload.items() if k not in parts.KINDS})
     validate_payload(head, ())
@@ -624,9 +651,10 @@ def write(conn, build_id, payload, config, persist):
     for position, group in enumerate(payload["products"]):
         group = jsonable(group)
         validate_payload(head, [group])
-        persist(conn, head | {"products": [group], "overlap": []})
-        groups.append(group := slim({"products": [group]}, config)["products"][0])
-        rows.append(("product", position, group["id"], group["product_id"], group["cohort"], group))
+        lists = persist(conn, head | {"products": [group], "overlap": []})
+        groups.append(kept := slim({"products": [group]}, config)["products"][0])
+        part = refer(kept, {label: lists[group["id"], label] for label in group["windows"]})
+        rows.append(("product", position, group["id"], group["product_id"], group["cohort"], part))
     persist(conn, head | {"products": []})
     runs = [jsonable(chunk) for chunk in parts.chunks(payload["runs"])]
     rows += [("runs", n, f"runs:{n}", None, None, chunk) for n, chunk in enumerate(runs)]
