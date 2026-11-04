@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, NamedTuple
 from urllib.parse import quote
 
@@ -43,6 +43,7 @@ class InstagramWeb(PageTarget):
         ),
     }
     LOGIN_PATHS = ("/accounts/login", "/i/flow/login")
+    SHOWN_UNREAD = ("text_head",)
     MARKS = (
         # Instagram's checkpoint ("Help us confirm it's you"); `/challenge/` and below only,
         # so an X profile at /challenge stays a profile.
@@ -58,14 +59,12 @@ class InstagramWeb(PageTarget):
         site = self.SITES[value["site"]]
         return (site.header, *site.posts, site.dialog)
 
-    def judge(self, view: PageView) -> PageAssessment:
-        """The shared judge, except that once the profile header and a post are shown the
-        visible text is the profile's own (bio, posts): the markers no longer read it, so a
-        post saying "captcha" or "access denied" is not a challenge or block page."""
+    def shown(self, view: PageView) -> bool:
+        """The profile header and a post: the visible text is then the profile's own (bio,
+        posts), so the markers no longer read it (SHOWN_UNREAD) and a post saying "captcha"
+        or "access denied" is not a challenge or block page. The title is still read."""
         header, posts, _ = self._counts(view)
-        if header and posts:
-            view = replace(view, text_head="")
-        return PageTarget.judge(self, view)
+        return bool(header and posts)
 
     def rules(self, view: PageView) -> PageAssessment:
         header, posts, dialog = self._counts(view)
