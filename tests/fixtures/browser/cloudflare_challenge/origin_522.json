@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 522,
+    "title": "www.example.com | 522: Connection timed out",
+    "text_head": "Connection timed out\nError code 522\nVisit cloudflare.com for more information.\nYou\nBrowser\nWorking\nCloudflare\nWorking\nwww.example.com\nHost\nError",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 1
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "cf_error_page"
+  }
+}

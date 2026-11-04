@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.example.com/",
+    "status": 403,
+    "title": "Just a moment...",
+    "text_head": "www.example.com\nVerify you are human by completing the action below.\nwww.example.com needs to review the security of your connection before proceeding.\nRay ID: 0000000000000000\nPerformance & security by Cloudflare",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 1,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "challenge_page"
+  }
+}
