@@ -316,8 +316,8 @@ async def test_the_fixture_covers_the_edge_cases(scenario, database):
 
 
 async def test_window_inputs_match_a_whole_calculation(scenario, database, monkeypatch):
-    """Every product window of calculate() (newest release): pool counts and per-label IP and
-    observation counts of every breakdown."""
+    """Every product window of calculate() (each run's own release, none for a run without
+    one): pool counts and per-label IP and observation counts of every breakdown."""
     seen = {}
     original = calculator.build
 
@@ -346,9 +346,10 @@ async def test_window_inputs_match_a_whole_calculation(scenario, database, monke
             spec = WindowSpec(key, product["product_id"], tuple(asked), since, as_of, asked)
             specs.append((spec, product, w))
     with connect(database) as conn:
-        release = conn.execute("SELECT max(release_id) FROM dbip_releases").fetchone()[0]
+        # calculate() labels each run with its own newest release (calculated/releases.py) and
+        # leaves a run without one unlabelled: "per_run" mode with no fallback release.
         found = window_inputs(
-            conn, [s for s, _, _ in specs], release_mode="newest", release_id=release
+            conn, [s for s, _, _ in specs], release_mode="per_run", release_id=None
         )
     assert len(specs) >= 12
     for spec, product, w in specs:

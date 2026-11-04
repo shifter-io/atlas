@@ -8,10 +8,11 @@ first-seen histogram that `poolfig.pool_figures()` turns into `aggregate.pool()`
 Each IP of a window is counted once, as `aggregate.pool()` does:
 
 - its labels are its DB-IP enrichment in one release. In "newest" mode that is `release_id` for
-  every run (the calculator's join today); in "per_run" mode it is the newest release the run was
-  enriched with (`run_enrichments`), else `release_id` (pulse runs have none). An IP seen by runs
-  with different releases takes the release of its lowest run_key in the window, the run whose
-  row `pool()` meets first;
+  every run; in "per_run" mode it is the newest release the run was enriched with
+  (`run_enrichments`), else `release_id` (pulse runs have none). The calculator's join today
+  (`releases.py`) is "per_run" with no `release_id`: a run without a release stays unlabelled.
+  An IP seen by runs with different releases takes the release of its lowest run_key in the
+  window, the run whose row `pool()` meets first;
 - it is located when it has a DB-IP country code and some run that returned it asked for a
   country; it matches when every asking run asked for that country (`asked == {cc.lower()}`);
 - its days are the distinct dates of its buckets in the session time zone (`datetime.date()` of
