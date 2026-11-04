@@ -77,15 +77,22 @@ func (l *List) Rows(name string) []ListRow {
 // kept for the process's life: they are bounded by place_names and
 // asn_label_names.
 type Lists struct {
-	mu       sync.Mutex
-	k2       bool // ids are list ids (else result ids)
-	held     map[int64]*List
-	places   map[int32]*Place
-	networks map[int32]*Network
-	missing  []int32 // labels the current fetch created, not read yet: place ids >= 0, network ids as -1-id
+	mu   sync.Mutex
+	k2   bool // ids are list ids (else result ids)
+	held map[int64]*List
+	labels
 	// Fetched counts the list ids read from the database (each once per
 	// fetch), for tests and logs.
 	Fetched int
+}
+
+// labels are the place and network names a list cache holds, shared by its
+// rows, and the labels the current read created, not read yet: place ids >= 0,
+// network ids as -1-id (readLabels).
+type labels struct {
+	places   map[int32]*Place
+	networks map[int32]*Network
+	missing  []int32
 }
 
 // NewLists is an empty cache.
@@ -175,10 +182,6 @@ func (c *Lists) readAll(ctx context.Context, tx pgx.Tx, k2 bool, build int64, by
 // read fetches the codes' rows of ids into fresh (in position order, as the
 // query returns them), with an empty list for each code an id has no row of.
 func (c *Lists) read(ctx context.Context, tx pgx.Tx, k2 bool, build int64, ids []int64, codes string, fresh map[int64]*List) error {
-	args := []any{ids, strings.Split(codes, "")}
-	if !k2 {
-		args = append(args, build)
-	}
 	for _, id := range ids {
 		if fresh[id] == nil {
 			fresh[id] = &List{rows: map[byte][]ListRow{}}
@@ -187,29 +190,51 @@ func (c *Lists) read(ctx context.Context, tx pgx.Tx, k2 bool, build int64, ids [
 			fresh[id].rows[codes[i]] = []ListRow{}
 		}
 	}
-	var id int64
+	return scanList(ctx, tx, k2, build, ids, codes, func(s *scannedRow) error {
+		r := s.ListRow
+		if s.place >= 0 {
+			r.Place = c.place(s.place)
+		}
+		if s.network >= 0 {
+			r.Network = c.network(s.network)
+		}
+		l := fresh[s.id]
+		l.rows[s.code] = append(l.rows[s.code], r)
+		return nil
+	})
+}
+
+// scannedRow is one row as listQuery returns it: its list (or result) id, its
+// dimension code, its place and network label ids (-1 when NULL) and its
+// counters (Place and Network nil).
+type scannedRow struct {
+	id             int64
+	code           byte
+	place, network int32
+	ListRow
+}
+
+// scanList runs listQuery for the codes' rows of ids and calls each with every
+// row, in the query's order. The row is reused: each copies what it keeps.
+func scanList(ctx context.Context, tx pgx.Tx, k2 bool, build int64, ids []int64, codes string, each func(*scannedRow) error) error {
+	args := []any{ids, strings.Split(codes, "")}
+	if !k2 {
+		args = append(args, build)
+	}
+	var s scannedRow
 	var code string
-	var r ListRow
 	var place, network, p50, p90, p99 pgtype.Int4
 	var completed, successes, challenges, blocks pgtype.Int8
 	rows, err := tx.Query(ctx, listQuery(k2), args...)
 	if err != nil {
 		return fmt.Errorf("list rows: %w", err)
 	}
-	_, err = pgx.ForEachRow(rows, []any{&id, &code, &place, &network, &r.Ips, &r.Observations,
+	_, err = pgx.ForEachRow(rows, []any{&s.id, &code, &place, &network, &s.Ips, &s.Observations,
 		&completed, &successes, &challenges, &blocks, &p50, &p90, &p99}, func() error {
-		r.Completed, r.Successes, r.Challenges, r.Blocks = orNull8(completed), orNull8(successes), orNull8(challenges), orNull8(blocks)
-		r.P50, r.P90, r.P99 = int32(orNull4(p50)), int32(orNull4(p90)), int32(orNull4(p99))
-		r.Place, r.Network = nil, nil
-		if place.Valid {
-			r.Place = c.place(place.Int32)
-		}
-		if network.Valid {
-			r.Network = c.network(network.Int32)
-		}
-		l := fresh[id]
-		l.rows[code[0]] = append(l.rows[code[0]], r)
-		return nil
+		s.Completed, s.Successes, s.Challenges, s.Blocks = orNull8(completed), orNull8(successes), orNull8(challenges), orNull8(blocks)
+		s.P50, s.P90, s.P99 = int32(orNull4(p50)), int32(orNull4(p90)), int32(orNull4(p99))
+		s.code, s.place, s.network = code[0], int32(orNull4(place)), int32(orNull4(network))
+		return each(&s)
 	})
 	if err != nil {
 		return fmt.Errorf("list rows: %w", err)
@@ -232,7 +257,7 @@ func orNull4(v pgtype.Int4) int64 {
 }
 
 // place is the shared Place of id, empty until readLabels fills it.
-func (c *Lists) place(id int32) *Place {
+func (c *labels) place(id int32) *Place {
 	if c.places[id] == nil {
 		c.places[id] = &Place{}
 		c.missing = append(c.missing, id)
@@ -240,7 +265,7 @@ func (c *Lists) place(id int32) *Place {
 	return c.places[id]
 }
 
-func (c *Lists) network(id int32) *Network {
+func (c *labels) network(id int32) *Network {
 	if c.networks[id] == nil {
 		c.networks[id] = &Network{}
 		c.missing = append(c.missing, -1-id)
@@ -249,7 +274,7 @@ func (c *Lists) network(id int32) *Network {
 }
 
 // readLabels fills the places and networks the last reads created.
-func (c *Lists) readLabels(ctx context.Context, tx pgx.Tx) error {
+func (c *labels) readLabels(ctx context.Context, tx pgx.Tx) error {
 	var places, networks []int32
 	for _, id := range c.missing {
 		if id >= 0 {

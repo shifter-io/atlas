@@ -223,6 +223,11 @@ editorial ones.
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version (a new event starts a new one).
+- **Network lists** (contracts K10, K11; not read by any answer yet). `store.NetLists`
+  holds each network window's whole list as 24-byte rows (IPs, completed, successes,
+  p50 and indexes into place and ASN names shared by every list), at most 40 MB per
+  million rows (`TestNetListsMemory`), reads only list ids it does not hold, and
+  answers most-IPs-first order, every-word search and totals from memory.
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
   published build's `created_at`, the site tables' newest `updated_at`,
