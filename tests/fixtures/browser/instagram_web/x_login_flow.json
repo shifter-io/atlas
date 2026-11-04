@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://x.com/i/flow/login",
+    "status": 200,
+    "title": "Log in to X / X",
+    "text_head": "Sign in to X.",
+    "found": {
+      "[data-testid=\"UserName\"]": 0,
+      "article[data-testid=\"tweet\"]": 0,
+      "[data-testid=\"sheetDialog\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "login_wall",
+    "reason": "login_redirect"
+  }
+}

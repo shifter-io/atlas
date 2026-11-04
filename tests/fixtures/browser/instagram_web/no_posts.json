@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.instagram.com/example_person/",
+    "status": 200,
+    "title": "Example Person (@example_person) - Instagram photos and videos",
+    "text_head": "example_person. Example Person. 0 posts.",
+    "found": {
+      "header h2": 1,
+      "main a[href*=\"/p/\"]": 0,
+      "div[role=\"dialog\"] input[name=\"username\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_posts"
+  }
+}
