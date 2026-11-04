@@ -10,6 +10,9 @@ in position order). So no jsonb value nears PostgreSQL's limits (a container's e
 exceed 268,435,455 bytes, any value 1 GB): a part is one group and the head stays under
 HEAD_BYTES. Builds stored before calculated v8 keep their single payload row (it has no "parts"
 key); every reader here accepts both.
+
+A payload v3 window references its list (slim.refer()); read(), export() and store.read_parts()
+fill it back from calculated_list_rows (fill()), so every reader gets the v2 window.
 """
 
 from __future__ import annotations
@@ -20,7 +23,9 @@ from datetime import datetime, timedelta
 
 from psycopg.rows import tuple_row
 
-from .aggregate import iso, series
+from ..names import NETWORK, PLACE
+from .aggregate import BREAKDOWNS, iso, pool_lists, series
+from .slim import POOL_LISTS
 
 KINDS = {"products": "product", "runs": "runs"}
 RUNS_PER_PART = 2000
@@ -59,6 +64,43 @@ SCORES = (
 )
 
 
+# The rows a v3 window keeps, from calculated_list_rows with their labels (%s: list ids,
+# dimension codes, the rows kept by position and the pool list's rows kept, one entry per list
+# and dimension). A pool list (POOL_DIMENSIONS) is picked by IPs from all of its dimension's
+# rows; rank() keeps every row tied with its last, and aggregate.pool_lists() orders them.
+ROW = (
+    "{0}.list_id,{0}.dimension,{0}.position,{0}.place_id,{0}.asn_label_id,{0}.ips,"
+    "{0}.observations,{0}.completed,{0}.successes,{0}.challenges,{0}.blocks,{0}.p50,{0}.p90,{0}.p99"
+)
+LIST_ROWS = (
+    'WITH w(list_id,dimension,kept,top) AS (SELECT * FROM unnest(%s::bigint[],%s::"char"[],'
+    "%s::integer[],%s::integer[])) SELECT r.list_id,r.dimension,r.position,p.country_code,"
+    "p.country,p.region_code,p.region,p.city,a.asn,a.name,a.usage_type,r.ips,r.observations,"
+    "r.completed,r.successes,r.challenges,r.blocks,r.p50,r.p90,r.p99 FROM (SELECT "
+    + ROW.format("r")
+    + " FROM w JOIN calculated_list_rows r USING(list_id,dimension) WHERE r.position<w.kept "
+    "UNION SELECT "
+    + ROW.format("q")
+    + " FROM w CROSS JOIN LATERAL (SELECT q.*,rank() OVER (ORDER BY q.ips DESC) AS k "
+    "FROM calculated_list_rows q WHERE (q.list_id,q.dimension)=(w.list_id,w.dimension) "
+    "AND q.ips>0) q WHERE w.top>0 AND q.k<=w.top) r LEFT JOIN place_names p USING(place_id) "
+    "LEFT JOIN asn_label_names a USING(asn_label_id) ORDER BY r.list_id,r.dimension,r.position"
+)
+# Each pool list's breakdown, as aggregate.pool_lists() picks it.
+POOL_DIMENSIONS = {"geo": "city", "countries_breakdown": "country", "asns_breakdown": "asn"}
+# A breakdown row's label fields (lists.FIELDS) and counters, as aggregate.breakdowns() writes it.
+LABELS = {
+    "country": PLACE[:2],
+    "region": PLACE[:4],
+    "city": PLACE,
+    "asn": NETWORK,
+    "country_asn": PLACE[:2] + NETWORK,
+    "city_asn": PLACE + NETWORK,
+}
+COUNTERS = ("ips", "observations", "completed", "successes", "challenges", "blocks")
+NAMES = {code: name for name, code in BREAKDOWNS.items()}
+
+
 def jsonb_order(value):
     """value with its keys in jsonb's order (shorter first, then bytewise), as jsonb reads back."""
     return {k: value[k] for k in sorted(value, key=lambda k: (len(k.encode()), k.encode()))}
@@ -86,6 +128,70 @@ def assemble(head, products, runs):
     """The payload of a head (with "parts") and its parts, as one jsonb payload row reads back."""
     body = {k: v for k, v in head.items() if k != "parts"}
     return jsonb_order(body | {"products": products, "runs": runs})
+
+
+def _row(name, found):
+    """A breakdown row of list row found (LIST_ROWS columns from country_code), in jsonb order."""
+    named = dict(zip((*PLACE, *NETWORK), found[:8], strict=True))
+    counters = dict(zip((*COUNTERS, "p50", "p90", "p99"), found[8:], strict=True))
+    rate = counters["successes"] / counters["completed"] if counters["completed"] else None
+    return jsonb_order({k: named[k] for k in LABELS[name]} | counters | {"success_rate": rate})
+
+
+def fill(conn, groups):
+    """groups with every v3 window (it has "lists") back in its v2 form: its breakdowns and pool
+    lists are the rows it keeps of its list, taken from calculated_list_rows in one query, in
+    jsonb order as the v2 window read back. Raises ValueError when a list has fewer rows."""
+    want = {}  # (list_id, dimension): [rows kept by position, rows of its pool list kept]
+    for group in groups:
+        for window in group.get("windows", {}).values():
+            found = window.get("lists")
+            if found is None:
+                continue
+            for name, code in BREAKDOWNS.items():
+                entry = want.setdefault((found["id"], code), [0, 0])
+                entry[0] = max(entry[0], found["entries"].get(name, 0))
+            for pool, name in POOL_DIMENSIONS.items():
+                entry = want[found["id"], BREAKDOWNS[name]]
+                entry[1] = max(entry[1], found["entries"].get(pool, 0))
+    if not want:
+        return groups
+    rows = {key: [] for key in want}
+    columns = [list(column) for column in zip(*[(*k, *v) for k, v in want.items()], strict=True)]
+    for found in conn.cursor(row_factory=tuple_row).execute(LIST_ROWS, columns):
+        rows[found[0], found[1]].append(found[2:])
+    return [_filled(group, rows) for group in groups]
+
+
+def _filled(group, rows):
+    windows = {}
+    for label, window in group["windows"].items():
+        if "lists" not in window:
+            windows[label] = window
+            continue
+        list_id, kept = window["lists"]["id"], window["lists"]["entries"]
+        full = {name: rows[list_id, code] for name, code in BREAKDOWNS.items()}
+        breakdowns = {
+            name: [_row(name, r[1:]) for r in full[name] if r[0] < kept.get(name, 0)]
+            for name in BREAKDOWNS
+        }
+        picked = pool_lists(
+            {name: [_row(name, r[1:]) for r in full[name]] for name in POOL_DIMENSIONS.values()}
+        )
+        lists = {
+            name: [jsonb_order(r) for r in picked[name][: kept[name]]]
+            for name in kept
+            if name in POOL_LISTS
+        }
+        if any(
+            len(found) != kept[name] for name, found in (breakdowns | lists).items() if name in kept
+        ):
+            raise ValueError(f"List {list_id} has fewer rows than its window keeps")
+        window = {k: v for k, v in window.items() if k != "lists"}
+        window["breakdowns"] = jsonb_order(breakdowns)
+        window["pool"] = jsonb_order(window["pool"] | lists)
+        windows[label] = jsonb_order(window)
+    return group | {"windows": windows}
 
 
 def _rows(conn, build_id, kind, value="r.value", named=False, **filters):
@@ -141,7 +247,8 @@ def read(conn, build_id):
     found = head(conn, build_id)
     if found is None or "parts" not in found:
         return found
-    return assemble(found, rows(conn, build_id, "products"), rows(conn, build_id, "runs"))
+    groups = fill(conn, rows(conn, build_id, "products"))
+    return assemble(found, groups, rows(conn, build_id, "runs"))
 
 
 def previous(conn):
@@ -174,6 +281,7 @@ def export(conn, build_id, out):
             continue
         empty = True
         for value in stream(conn, build_id, key):
+            value = fill(conn, [value])[0] if key == "products" else value
             text = json.dumps(value, indent=2, allow_nan=False).replace("\n", "\n    ")
             out.write(("[" if empty else ",") + "\n    " + text)
             empty = False

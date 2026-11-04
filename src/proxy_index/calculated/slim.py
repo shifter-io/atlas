@@ -6,6 +6,10 @@ breakdown row) and stores and serves this capped copy. Every total stays exact: 
 full data before capping and are not touched here, and each capped list records how many rows it
 had, so a reader can say "showing 50 of 61,497". Window targets are kept whole, including each
 browser target's browser object (calculated/browser.py).
+
+Payload v3 stores the capped lists by reference (refer()): a window names its list and how many
+rows of each list it keeps, and readers take those rows from calculated_list_rows (parts.fill()),
+so a list shared by builds is written and read once.
 """
 
 from __future__ import annotations
@@ -47,3 +51,22 @@ def _window(window, limits):
         | {name: rows[: limits[name]] for name, rows in lists.items()}
         | {"list_entries": {name: len(rows) for name, rows in lists.items()}}
     }
+
+
+def refer(product, lists):
+    """product (a slim() group) in payload v3: each window carries "lists": {"id": its list_id,
+    "entries": {name: rows kept}} for its breakdowns and pool lists instead of their rows.
+
+    lists maps each window label to its list_id (lists.persist()). breakdown_entries and the pool's
+    list_entries (the full row counts) stay. parts.fill() turns the window back into this form.
+    """
+    windows = {}
+    for label, window in product["windows"].items():
+        kept = window["breakdowns"] | {
+            k: window["pool"][k] for k in POOL_LISTS if k in window["pool"]
+        }
+        window = {k: v for k, v in window.items() if k != "breakdowns"}
+        pool = {k: v for k, v in window["pool"].items() if k not in POOL_LISTS}
+        entries = {name: len(rows) for name, rows in kept.items()}
+        windows[label] = window | {"pool": pool, "lists": {"id": lists[label], "entries": entries}}
+    return product | {"windows": windows}

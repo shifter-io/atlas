@@ -890,7 +890,7 @@ def payload_mismatches(database, build_id):
                     missing.append(("pool lists", windows[key]))
             for dimension, rows in expected:
                 typed = breakdowns.get((windows[key], dimension), [])
-                if payload["schema_version"] == 2:
+                if payload["schema_version"] >= 2:
                     typed = typed[: len(rows)]
                 if canon(typed) != canon(rows):
                     missing.append((dimension, windows[key]))

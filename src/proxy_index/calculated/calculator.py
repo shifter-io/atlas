@@ -63,7 +63,7 @@ from .policy import (
 from .releases import enriched_observations, snapshot_fields
 from .store import discard, expire, jsonable, prune, write
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()

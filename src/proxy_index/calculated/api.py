@@ -5,7 +5,9 @@ product groups, and every list resource is paged so no answer passes answers.MAX
 A request does no database work: the current build id is looked up at most every HEAD_SECONDS,
 a build's head is read once, each answer reads only the parts it needs (parts.py: the groups of
 its product or cohort, the group index, the runs) and each rendered answer is kept for its build.
-A 24-hour series stored sparse is served with every bucket (parts.dense()), as before.
+A 24-hour series stored sparse is served with every bucket (parts.dense()), as before, and a
+payload v3 window with its breakdowns and pool lists, read from calculated_list_rows in the same
+snapshot as its group (store.read_parts(), parts.fill()), so every answer is the v2 one.
 """
 
 from __future__ import annotations

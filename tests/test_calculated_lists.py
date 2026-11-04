@@ -125,11 +125,17 @@ def downgrade_to_v8(database, empty):
 
 
 @pytest.mark.asyncio
-async def test_v8_breakdowns_migrate_into_lists_unchanged(databases, database, tmp_path):
+async def test_v8_breakdowns_migrate_into_lists_unchanged(
+    databases, database, tmp_path, monkeypatch
+):
+    # A v8 release stored payload v2: each part holds its rows, not a list id (SNAP-LISTREF-1).
+    monkeypatch.setattr(calculator, "SCHEMA_VERSION", 2)
+    monkeypatch.setattr(store, "refer", lambda product, lists: product)
     _, _, first = await benchmark_scenario(database, tmp_path)
     cutoff = datetime.fromisoformat(first["as_of"]) + timedelta(hours=1)
     # A draft: publishing it would expire the first build (one build per UTC day is kept).
     second = calculate(database, lenient_policy(tmp_path), as_of=cutoff)
+    monkeypatch.undo()
     builds = sorted(int(b["snapshot_id"]) for b in (first, second))
     with connect(database) as conn:
         empty = conn.execute(
