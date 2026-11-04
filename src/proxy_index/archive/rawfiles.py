@@ -34,7 +34,9 @@ from . import ArchiveError
 from .export import file_digests
 from .spaces import Spaces
 
-FILE = re.compile(r"(?P<kind>census|pulse|load|browser|daily)(?:-b(?P<batch>\d+))?-[0-9a-f-]{36}\.tar\.gz")
+FILE = re.compile(
+    r"(?P<kind>census|pulse|load|browser|daily)(?:-b(?P<batch>\d+))?-[0-9a-f-]{36}\.tar\.gz"
+)
 UPLOADED = "uploaded.json"
 SETTLE = timedelta(minutes=5)  # an hour is packed this long after it ended
 KEEP_DAYS = 30
