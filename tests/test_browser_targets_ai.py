@@ -150,7 +150,7 @@ def test_every_source_has_its_cases():
     assert names == {
         c.AI_OVERVIEW: {
             *("ok", "late", "absent", "short", "sorry", "recaptcha", "block_page", "no_results"),
-            *("consent", "consent_form", "answer_names_markers"),
+            *("consent", "consent_form", "answer_names_markers", "empty_overview"),
         },
         c.AI_CHATGPT: {
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
