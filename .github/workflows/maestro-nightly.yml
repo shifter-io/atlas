@@ -1,0 +1,19 @@
+# Maestro nightly: known-vulnerable dependencies. A failure becomes an issue; it never blocks PRs.
+# The full test suite runs nightly through the project's own CI workflow (`schedule:` trigger).
+name: maestro-nightly
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: [self-hosted, ci-2cpu]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Dependency audit
+        run: python3 -m pip install -q pip-audit==2.9.0 && python3 -m pip_audit .
