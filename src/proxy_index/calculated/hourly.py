@@ -177,10 +177,11 @@ def slice_figures(conn, group_runs, slices):
         for n, (since, until, *only) in enumerate(slices.get(key, ())):
             kind = "first_seen" if only == ["first_seen"] else "pool"
             clips = _clips(runs, sorted(asked), since, until)
-            if clips:
-                items.append(Item((key, n), since, until, clips, kind, product, asked))
-            elif kind == "first_seen":
-                result[key][n] = {"first_seen": {}}
+            items.append(Item((key, n), since, until, clips, kind, product, asked))
+    for item in items:  # without an observation: None, or no first-seen bin
+        if not item.clips and item.kind == "first_seen":
+            result[item.key[0]][item.key[1]] = {"first_seen": {}}
+    items = [item for item in items if item.clips]
     for item, stored in _values(conn, runs, items, "m.figures").items():
         result[item.key[0]][item.key[1]] = _restored(stored, item)
     return result
