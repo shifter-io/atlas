@@ -235,13 +235,14 @@ def _cohorts(conn, as_of, cohort_members):
 def _digests(conn, as_of, sets):
     """Each set's memo key: its members' providers and runs, each run with its first and last
     bucket in the window (which fix the run's observations in it)."""
-    params, owner = [[], [], []], {}
-    for i, (since, members) in sets.items():
-        for m, (_, keys) in enumerate(members):
-            for run_key in sorted(set(keys)):
-                owner[i, run_key] = m
-                for column, value in zip(params, (i, run_key, since), strict=True):
-                    column.append(value)
+    runs = [
+        (i, run_key, since, m)
+        for i, (since, members) in sets.items()
+        for m, (_, keys) in enumerate(members)
+        for run_key in sorted(set(keys))
+    ]
+    owner = {(i, run_key): m for i, run_key, _, m in runs}
+    params = [[run[n] for run in runs] for n in range(3)]
     ranges = {i: [[] for _ in members] for i, (_, members) in sets.items()}
     if params[0]:
         for r in conn.cursor(row_factory=dict_row).execute(RANGES, (*params, as_of)):

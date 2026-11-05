@@ -45,17 +45,22 @@ def together(members, label):
     return rows, seen, members[0][0]["windows"][label]["period"]["hours"]
 
 
-def fleet_entry(cohort, label, members, minimum, slot_minutes, joined=None):
+def fleet_entry(cohort, label, members, minimum, slot_minutes):
     """members together in one window: requests and successes added, success time-weighted and
     light-load latency merged by timed(), and every exit IP counted once however many of them
-    saw it. joined: together(members, label), when the caller has it."""
-    rows, seen, hours = joined or together(members, label)
+    saw it."""
+    return _entry(cohort, label, members, together(members, label), (minimum, slot_minutes))
+
+
+def _entry(cohort, label, members, joined, timing):
+    """fleet_entry() of members whose together() is joined; timing: (minimum, slot_minutes)."""
+    rows, seen, hours = joined
     return {
         "cohort": cohort,
         "window": label,
         "products": len(members),
         "providers": len({p["provider"] for p, *_ in members}),
-        "metrics": timed(rows, hours, minimum, slot_minutes=slot_minutes),
+        "metrics": timed(rows, hours, timing[0], slot_minutes=timing[1]),
         "unique_ips": len({o["ip_id"] for o in seen}),
     }
 
@@ -68,7 +73,7 @@ def fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target):
     for label in dict.fromkeys(label for _, label in fleet_groups):
         members = [m for (_, w), ms in fleet_groups.items() if w == label for m in ms]
         rows, seen, hours = joined = together(members, label)
-        entry = fleet_entry("*", label, members, minimum, slot_minutes, joined)
+        entry = _entry("*", label, members, joined, (minimum, slot_minutes))
         since = as_of - timedelta(hours=hours)
         entry["series"] = series(
             rows, seen, since, as_of, hours, latency_target=timed_target, minimum=minimum
