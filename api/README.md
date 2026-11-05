@@ -8,7 +8,7 @@ process revalidates it every few seconds with `If-None-Match`), and its pages re
 `/v1/version`, `/v1/events`, `/v1/search-index` and the per-page
 answers (`/v1/rankings`, `/v1/networks…`, `/v1/countries…`) through a same-origin
 passthrough. Open pages poll `/v1/version` to update in place when the data changes.
-`fixtures/` holds test input only.
+`api/fixtures/` holds test input only.
 
 - Its main output is the website's `Dataset` type (`src/lib/types.ts` in the website
   repository); `internal/model` is that contract in Go.
@@ -358,7 +358,7 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` job runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema pinned in `fixtures/framework/` (`PG_TEST_FRAMEWORK_DIR`; `PIN` names its framework commit and checksums), on every ready pull request; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
+CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema pinned in `api/fixtures/framework/` (`PG_TEST_FRAMEWORK_DIR`; `PIN` names its framework commit and checksums), on every ready pull request; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema from `proxy-index/src/proxy_index/` (or
@@ -391,7 +391,7 @@ v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), 
     body, for an offline `SITE_API_DATASET_FILE` build of every page over it.
   - **snapshot mapping**: the committed v1 fixture as v2 with outages and
     time-based uptime lands in incidents, bands and downtime as expected, and
-    `fixtures/measured/snapshot-every-request.json` (the framework's every-request
+    `api/fixtures/measured/snapshot-every-request.json` (the framework's every-request
     shape: latency under load, list prices, per-IP shares) maps its latency
     target, pricing, copy and value ranks. Until the website moved out, these
     also compared the Go port with the site's TypeScript; that parity test went
@@ -443,5 +443,6 @@ From least to most drastic:
    this work, the same way.
 3. **Code:** `git tag pre-site-api` (commit `0084db6`) marks the website before
    the API, when pages imported `src/data/design-demo.json` and `src/data/dataset.json`.
-   The Astro website was removed from this repository afterwards; its last
-   version here is the parent of the commit that removed it.
+   The tag and the Astro website are in the old `proxy-index-api` repository, which
+   removed the website afterwards; its last version there is the parent of the
+   commit that removed it.

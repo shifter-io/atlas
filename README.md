@@ -543,3 +543,13 @@ site database. Census rule v2, shared with Test #1, counts every completed reque
 (including failures) in its 1,000-request minimum sample and unique-IP ratio.
 The hourly droplet campaign (`proxy-index campaign …`: plan, manager deploy, enable,
 teardown) is described in [the campaign operating guide](docs/campaign.html).
+
+## The data API (`api/`)
+
+[`api/`](api/) holds `siteapi`, the Go service behind the Proxy Index website. It reads the
+framework's PostgreSQL database (the measurements plus the site's catalog rows in the `site`
+schema) and serves every answer the website shows as precomputed, precompressed JSON. It has
+its own Go module, tests and CI workflow (`.github/workflows/api.yml`) and is not part of the
+Python package. [Its README](api/README.md) covers building, running, deploying and testing it;
+[`api/FIELDS.md`](api/FIELDS.md) maps every dataset field to its source. It moved here from the
+`proxy-index-api` repository with its history. Rules for both parts: [`AGENTS.md`](AGENTS.md).

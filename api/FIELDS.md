@@ -72,7 +72,7 @@ General rules:
 ### totals (FleetTotals)
 
 Computed at build time with the formulas of `scripts/prepare-design-demo.mjs` (a website
-script, removed from this repository with the website; it is in this repository's history,
+script, removed with the website; it is in the old `proxy-index-api` repository's history,
 in the parent of the commit that removed the website). They
 run over the **fleet basis**: every provider (all are measured or catalog rows;
 the demo fixtures that once formed a separate basis are gone, so
@@ -120,7 +120,7 @@ With no providers, everything except the record counts is null (`na`).
 | `score.grade` | `w.scores.balanced.grade` | data (TS used `"—"`, now `"N/A"`) | |
 | `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target) | data | ✱ |
 | `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement | as below | |
-| `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in this repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
+| `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in the old `proxy-index-api` repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
 | `coverageEvidence` *(added)* | the coverage evidence table's rows, see "Every-request snapshots" | a row's own fields are null when unknown, not listed in `na` | |
 | `framework` *(added)* | `{provider: public.providers.id, products: [public.products.name]}` | | |
 | `na` *(added)* | | | |
@@ -260,8 +260,8 @@ snapshot publishes list prices, else "Pricing and billed usage not collected".
 The network page shows such a score as "#1 of 1 in its kind" with the note
 (`every-request.ts kindStanding`); the framework itself leaves it unranked. Products' `priceLabel`
 is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
-`$0.75–$1.00/GB`. Test input: `fixtures/measured/snapshot-every-request.json`
-(`scripts/every-request-fixture.mjs`).
+`$0.75–$1.00/GB`. Test input: `api/fixtures/measured/snapshot-every-request.json`
+(`api/scripts/every-request-fixture.mjs`).
 
 ### Window statistics of a measured provider
 
@@ -342,7 +342,7 @@ target never counts as another target in the window-latency rule
 
 The Go port differs from the website's `presentation.ts`, `window.ts`,
 `overview.ts` and `tape.ts` only in these ways. A parity test enforced them while
-the website lived in this repository; it went with the website.
+the website lived in the old `proxy-index-api` repository; it went with the website.
 
 1. **Placeholders become null.** For measured providers, `hq`, `claim`,
    `pricing.model`/`trial`/`costBasis`, `trust.stickinessAdvertised`/`kycVerified`/`consentDisclosed`,
