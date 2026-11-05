@@ -285,11 +285,14 @@ async def send_one(tmp_path, agent_for, replies, clock=None):
     return ingest, agent, bundle, outbox
 
 
-async def test_a_confirmed_bundle_is_deleted_and_the_headers_are_k_bp7(tmp_path, agent_for):
+async def test_a_confirmed_bundle_is_deleted_and_the_headers_are_k_bp7(tmp_path, agent_for, caplog):
+    caplog.set_level(logging.INFO)
     ingest, agent, bundle, outbox = await send_one(tmp_path, agent_for, ["ok"])
     local = hashlib.sha256(bundle.archive.read_bytes()).hexdigest()
     assert await outbox.send(bundle, agent) == "confirmed"
     assert not bundle.archive.exists() and not bundle.sidecar.exists()
+    # BP-VERIFY-1: the log names the SHA-256 the manager archived.
+    assert f"bundle {RUN_ID} of batch 41 confirmed (sha256 {local}) and deleted" in caplog.text
     [post] = ingest.posts
     assert post["batch_id"] == "41" and post["sha256"] == local
     assert post["headers"][bc.HEADER_SHA256] == local

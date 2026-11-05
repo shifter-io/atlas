@@ -353,6 +353,10 @@ class BrowserHost:
         identity = getattr(handle, "identity", None)
         if isinstance(identity, dict) and set(CAMOUFOX) <= set(identity):
             self.identity = {key: identity[key] for key in CAMOUFOX}
+            log.info(
+                "browser launched: Camoufox %s, engine %s, user agent %s",
+                *(self.identity[key] for key in CAMOUFOX),
+            )
         return handle
 
     def _full_line(self, line: dict[str, Any]) -> None:

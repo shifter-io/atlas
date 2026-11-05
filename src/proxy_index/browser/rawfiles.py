@@ -346,6 +346,13 @@ class Outbox:
         if bc.confirmed((status, body), sha256):
             await asyncio.to_thread(self.delete, bundle)
             self.confirmed += 1
+            # The SHA-256 the manager archived, which a check compares with the archive's object.
+            log.info(
+                "bundle %s of batch %s confirmed (sha256 %s) and deleted",
+                bundle.run_id,
+                bundle.batch_id,
+                sha256,
+            )
             return "confirmed"
         if status in bc.RETRY_STATUSES or status >= 500:
             return self._later(bundle, f"answered {status}", retry_after)
@@ -359,7 +366,6 @@ class Outbox:
         bundle.archive.unlink(missing_ok=True)
         bundle.sidecar.unlink(missing_ok=True)
         self._retry.pop(bundle.run_id, None)
-        log.info("bundle %s of batch %s confirmed and deleted", bundle.run_id, bundle.batch_id)
 
     def _later(self, bundle: Bundle, reason: str, retry_after: float) -> str:
         failures = self._retry.get(bundle.run_id, (0, 0.0))[0] + 1
