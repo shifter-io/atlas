@@ -178,8 +178,12 @@ and the two newest unpublished drafts; older draft payloads are pruned on calcul
 Calculated schema v10 (`calculated/migrate_v9_v10.sql`, contract K6) adds the incremental
 calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `proxy-index
 calculate --incremental` (`calculated/incremental.py`) reads run metadata, buckets and list
-signatures first, reuses a stored list for every window whose signature matches (no observation
-row comes back to Python for it), and reads observations only for the other windows; the values
+signatures first, reuses a stored list for every window whose signature matches, and counts
+every other window in the database (`calculated/sqlwindow.py`): its label combinations and geo
+rows give its list, written with one COPY as soon as it is counted, so no observation row comes
+back to Python for any window and a missed window keeps only its counts in memory. Such a list
+also stores its window's IPs per 5-minute bin of their product's first sighting
+(`figures.first_seen`, outside the content hash, for CALC-INC-2). The values
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
 CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the

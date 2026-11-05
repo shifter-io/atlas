@@ -9,12 +9,14 @@ outside a batch, whose payload rows list them; batch runs started since a day be
 with a slot or a bucket in it, and each product's first, so every group exists in payload order;
 census and pulse summaries are not read), the window's buckets and each daily window's list
 signature. A window whose signature names a stored list (a hit) takes its list id, entry counts
-and figures from calculated_lists and returns no observation row to Python; the other windows
-(misses, and every
-census-pulse window until CALC-PULSE-1) read their runs' observations, aggregated in Python as
-full mode does (CALC-INC-1b counts them in SQL). What moves with the cutoff comes from the frozen
-extension modules (hourly.py, fleetsql.py, rollups.py), whose bodies count in the database. The
-fingerprint hashes run metadata and signatures instead of observations: a stored run's
+and figures from calculated_lists. The other windows (misses, and every census-pulse window until
+CALC-PULSE-1) are counted in the database (sqlwindow.window_inputs(), each run labelled with its
+own release as full mode reads them): breakdowns() over the label combinations, weighted by their
+IPs, and the window's geo rows give its list, written (lists.write_list(), one COPY) as soon as it
+is counted, so a missed window keeps only its counts in memory, as a hit does, and both name
+their list. No observation row comes back to Python. What moves with the cutoff comes from the
+frozen extension modules (hourly.py, fleetsql.py, rollups.py), whose bodies count in the database.
+The fingerprint hashes run metadata and signatures instead of observations: a stored run's
 observations never change.
 """
 
@@ -30,10 +32,13 @@ from psycopg.rows import dict_row
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
 from . import calculator, fleetsql, hourly, lists, parts, rollups
-from .aggregate import breakdowns, daily_pools, pool, pool_lists
+from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
 from .inputs import light_load
 from .policy import digest, effective, latency_target, payload_limits
-from .releases import RUN_OBSERVATIONS, enriched_observations, used_releases
+from .poolfig import pool_figures
+from .releases import enriched_observations, used_releases
+from .slim import POOL_LISTS
+from .sqlwindow import WindowSpec, window_inputs
 from .store import jsonable, write
 
 MODES = ("full", "incremental")
@@ -118,7 +123,7 @@ class Full:
     def seen(self, key, since, as_of):
         return [o for o in self.groups[key] if since <= o["bucket_start"] < as_of]
 
-    def window(self, key, seen, since, hours, hosting, geo):
+    def window(self, key, seen, since, hours, hosting, geo, build_id=None):
         """The window's pool counts, its IPs (pool() entries), pool lists and breakdowns."""
         ps, ips = pool(seen, since, hours, hosting)
         dimensions = breakdowns(ips, geo)
@@ -199,12 +204,13 @@ def group_runs(runs, config, overlaps):
 
 
 class Incremental(Full):
-    """build()'s source in the incremental mode: stored lists for the hit windows, the
-    observations of the missed windows' runs, and the extension modules for the rest."""
+    """build()'s source in the incremental mode: stored lists for the hit windows, the missed
+    windows counted in the database, and the extension modules for the rest."""
 
     def __init__(self, conn, config, as_of, runs, buckets, signed):
         active = {b["run_key"] for b in buckets}
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
+        self.signed, self.counted = signed, {}
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         for r in runs:
             if r["run_key"] in active:
@@ -217,7 +223,10 @@ class Incremental(Full):
         stale = hourly.stale_lists(conn, sorted({k for g, _ in missed for k in self.runs[g]}))
         missed |= {k for k, hit in self.hits.items() if hit["list_id"] in stale}
         self.hits = {k: hit for k, hit in self.hits.items() if k not in missed}
-        super().__init__(self._observations(missed))
+        self.missed = defaultdict(list)  # group -> hours of its missed windows
+        for g, h in sorted(missed):
+            self.missed[g].append(h)
+        super().__init__(())  # no observation row: missed windows are counted in the database
         self._count(groups, windows, max(windows) // 24)
 
     def _hits(self, signed, windows):
@@ -228,20 +237,6 @@ class Incremental(Full):
         params = [list(column) for column in zip(*keys, strict=True)]
         rows = self.conn.cursor(row_factory=dict_row).execute(STORED, params)
         return {((r["product_id"], r["cohort"]), r["window_hours"]): r for r in rows}
-
-    def _observations(self, missed):
-        """The observations of the missed windows' runs, each group's from its widest missed
-        window's start (at most one query per window length)."""
-        widest = {}
-        for group, hours in missed:
-            widest[group] = max(widest.get(group, 0), hours)
-        observations = []
-        for hours in sorted(set(widest.values())):
-            keys = sorted({k for g, h in widest.items() if h == hours for k in self.runs[g]})
-            if keys:
-                since = self.as_of - timedelta(hours=hours)
-                observations += self.conn.execute(RUN_OBSERVATIONS, (keys, since, self.as_of))
-        return sorted(observations, key=lambda o: (o["run_key"], o["bucket_start"], o["ip_id"]))
 
     def _count(self, groups, windows, days):
         """Count in the database the daily pools and series IPs of every group window, and the
@@ -269,28 +264,65 @@ class Incremental(Full):
     def seen(self, key, since, as_of):
         return ()  # series() and the fleet count IPs in the database (ips(), cohorts())
 
-    def window(self, key, seen, since, hours, hosting, geo):
+    def window(self, key, seen, since, hours, hosting, geo, build_id=None):
         hit = self.hits.get((key, hours))
         if hit is None:
-            return super().window(
-                key, super().seen(key, since, self.as_of), since, hours, hosting, geo
-            )
+            return self._missed(key, since, hours, hosting, geo, build_id)
         figures, n = hit["figures"], self.ranges.get(key)
         found = None if n is None else self.figures[key][n]  # None: no run in the window
         new, size = hourly.new_ips(found, since), figures["unique_ips"]
         ps = {"unique_ips": size, "new_ips": new, "churn_rate": new / size if size else None}
         ps |= {k: figures[k] for k in POOL} | {"shares_basis": SHARES_BASIS}
-        entries, pooled = hit["entries"], figures["list_entries"]
+        return self._named(ps, hit["list_id"], hit["entries"], figures["list_entries"])
+
+    def _named(self, ps, list_id, entries, pooled):
+        """window()'s result for a window that names its list: entries and pooled count the
+        rows of its breakdowns and pool lists, the payload keeps the first ones (parts.fill())."""
         kept = {n: min(c, self.limits[n]) for n, c in (entries | pooled).items()}
-        reference = {"lists": {"id": hit["list_id"], "entries": kept}, "breakdown_entries": entries}
+        reference = {"lists": {"id": list_id, "entries": kept}, "breakdown_entries": entries}
         return ps, {}, {"list_entries": pooled}, reference  # no IPs: cohorts() counts them
+
+    def _missed(self, key, since, hours, hosting, geo, build_id):
+        """A missed window counted in the database: its pool figures, and its list written now
+        (the breakdowns of its weighted label combinations and geo rows, in one COPY)."""
+        inputs = self._inputs(key, hours)
+        ps = pool_figures(inputs, since, hours, hosting)
+        weighted = {
+            n: {"row": c.row(), "count": c.observations, "ips": c.ips}
+            for n, c in enumerate(inputs.combos)
+        }
+        dimensions = breakdowns(weighted, geo)
+        if any(not 0 <= r["successes"] <= r["completed"] for rs in dimensions.values() for r in rs):
+            raise ValueError("Breakdown counters do not reconcile")  # as store.validate_payload()
+        pooled = pool_lists(dimensions)
+        window = {"breakdowns": dimensions, "pool": ps | pooled, "period": {"hours": hours}}
+        bins = sorted((at, n) for at, n in inputs.first_seen.items() if at >= since)
+        window["first_seen"] = {iso(at): n for at, n in bins}  # lists.UNHASHED
+        rows, group = [], {"product_id": key[0], "cohort": key[1]}
+        signature = self.signed.get((*key, hours))
+        list_id = lists.write_list(self.conn, build_id, group, window, rows, signature)
+        lists.copy_rows(self.conn, rows)
+        entries = {name: len(found) for name, found in dimensions.items()}
+        return self._named(ps, list_id, entries, {n: len(pooled[n]) for n in POOL_LISTS})
+
+    def _inputs(self, key, hours):
+        """The window's sqlwindow inputs: on its group's first miss, every missed window of the
+        group is counted in one statement, and each is dropped once used."""
+        if (key, hours) not in self.counted:
+            asked, end = self.runs[key], self.as_of
+            specs = [
+                WindowSpec((key, h), key[0], tuple(asked), end - timedelta(hours=h), end, asked)
+                for h in self.missed[key]
+            ]
+            self.counted |= window_inputs(self.conn, specs, release_mode="per_run", release_id=None)
+        return self.counted.pop((key, hours))
 
     def ips(self, key, hours, points):
         return fleetsql.fill(points, self.points.get((key, hours), {}))
 
     def cohorts(self, fleets, overlaps, fleet_groups, as_of):
         """build()'s fleet entries and overlaps with every IP count across groups from the
-        database (fleetsql.py): its IP sets hold only the missed windows' IPs."""
+        database (fleetsql.py): its IP sets are empty."""
         members = {
             key: (entry, [(p, list(self.runs[p["product_id"], p["cohort"]])) for p, *_ in ms])
             for (key, ms), entry in zip(

@@ -125,8 +125,11 @@ def split_reasons(score, product):
 
 # A list's figures: the window's pool figures that do not depend on its start (new_ips and
 # churn_rate do; the daily averages depend on the cutoff), plus its pool lists' entry counts.
-# CALC-INC-1b adds the 5-minute first-seen histogram when it counts a window in SQL; lists.py is
-# part of IMPLEMENTATION_ID, so a change to FIGURES or content_hash changes every signature.
+# lists.py is part of IMPLEMENTATION_ID, so a change to FIGURES or content_hash changes every
+# signature. A list the incremental calculation counted in SQL also stores "first_seen", its IPs
+# per 5-minute bin of their product's first sighting from the window's start on (CALC-INC-2's
+# new IPs), outside content_hash: a late run moves product_ips.first_seen, which no signature
+# names (UNHASHED).
 FIGURES = (
     "unique_ips",
     "observations",
@@ -140,6 +143,7 @@ FIGURES = (
     "geo_accuracy",
     "enrichment_coverage",
 )
+UNHASHED = ("first_seen",)
 WINDOW_COLUMNS = (
     "build_id,product_id,cohort,target,window_hours,completed,successes,errors,body_bytes,"
     "success_rate,timeout_rate,p50,p90,p95,p99,unique_ips,new_ips,recurring_share,countries,"
@@ -279,7 +283,8 @@ def figures(pool):
 def write_list(conn, build_id, product, window, rows, signature=None):
     """Return the list_id of the window's list: the stored list with its signature (verified),
     else a new list, inserted with its rows appended to rows for copy_rows(). content_hash is the
-    digest of the full breakdowns and the figures."""
+    digest of the full breakdowns and the figures; window["first_seen"], when present, is stored
+    with the figures (see FIGURES)."""
     breakdowns, numbers = window["breakdowns"], figures(window["pool"])
     key = (product["product_id"], product["cohort"], window["period"]["hours"], signature)
     content_hash = digest({"breakdowns": breakdowns, "figures": numbers})
@@ -295,7 +300,7 @@ def write_list(conn, build_id, product, window, rows, signature=None):
             *key,
             content_hash,
             Jsonb({name: len(breakdowns[name]) for name in BREAKDOWNS}),
-            Jsonb(numbers),
+            Jsonb(numbers | {k: window[k] for k in UNHASHED if k in window}),
             build_id,
         ),
     ).fetchone()[0]
