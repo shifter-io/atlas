@@ -193,6 +193,15 @@ incremental one is `calculate --incremental`. Measured on scale-generator data (
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
+The incremental calculation counts across groups (`calculated/fleetsql.py`, CALC-FLEET-1)
+from memos: each 5-minute bucket's runs digest and distinct IPs (`calculated_bucket_ips`, the
+`*` 24h series) and each IP's newest bucket (`calculated_ip_last_seen`), folded per bucket
+whose runs changed, so a late run is counted too. The `*` window totals are the IPs last seen
+in the window when no folded bucket is at or after the cutoff (the hourly build); an older
+cutoff counts its window directly and changes no memo. The 7d/30d `*` series points are one
+distinct count per daily slice (at most 4 at a time, in the calculation's snapshot). A one-group
+cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
+in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
 (`calculated_run_ranges`, counted when the run is first used), the figures of a slice or point

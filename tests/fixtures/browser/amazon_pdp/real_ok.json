@@ -1,0 +1,22 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/dp/0000000000",
+    "status": 200,
+    "title": "Example Book: Example Author: 0000000000000: Amazon.com: Books",
+    "text_head": "Skip to\nMain content\nBuying options\nVideos\nReviews\nKeyboard shortcuts\nSearch",
+    "found": {
+      "#productTitle": 1,
+      "#corePrice_feature_div .a-price": 2,
+      "#corePriceDisplay_desktop_feature_div .a-price": 3,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 0,
+      "a[href*=\"/dogsofamazon\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}

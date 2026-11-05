@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://2captcha.com/demo/cloudflare-turnstile-challenge",
+    "status": 403,
+    "title": "Attention Required! | Cloudflare",
+    "text_head": "Sorry, you have been blocked\nYou are unable to access 2captcha.com\nWhy have I been blocked?\n\nThis website is using a security service to protect itself from online attacks.",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 1
+    }
+  },
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "cf_block"
+  }
+}

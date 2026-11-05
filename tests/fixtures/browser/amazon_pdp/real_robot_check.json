@@ -1,0 +1,22 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/dp/0000000000",
+    "status": 200,
+    "title": "Amazon.com",
+    "text_head": "Click the button below to continue shopping\nContinue shopping\nConditions of Use     Privacy Policy\n© 1996-2025, Amazon.com, Inc. or its affiliates",
+    "found": {
+      "#productTitle": 0,
+      "#corePrice_feature_div .a-price": 0,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 1,
+      "a[href*=\"/dogsofamazon\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "captcha_page"
+  }
+}

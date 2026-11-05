@@ -9,7 +9,13 @@
     },
     "texts": {}
   },
-  "timeline": [],
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "url": "https://gemini.google.com/app/0000000000000000"
+    }
+  ],
   "expect": {
     "verdict": "error",
     "error": "no_answer",

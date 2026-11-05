@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -14,7 +15,8 @@ from . import PageTarget
 
 @dataclass(frozen=True, slots=True)
 class AmazonPdp(PageTarget):
-    """Marketplace product page: ok when the product title and a price are visible."""
+    """Marketplace product page: ok when the product title and a price (a used-only offer's
+    included) are visible."""
 
     id: str = AMAZON_PDP
     url: str = "https://www.amazon.com/dp/"
@@ -26,6 +28,9 @@ class AmazonPdp(PageTarget):
         "#price_inside_buybox",
         "#price",
     )
+    # A product sold only used shows no Buy New box, and none of PRICES: its "Buy Used: $x"
+    # box is its price, read by that label in the visible text.
+    USED_PRICE = re.compile(r"buy used\s*:\s*\$\s*\d")
     CAPTCHA_FORM = 'form[action*="validateCaptcha"]'
     # Amazon's 503 and 404 error pages link to the "dogs of Amazon" gallery. Waiting for the
     # link ends the wait on them; it marks nothing, since the 404 page has it too.
@@ -64,7 +69,8 @@ class AmazonPdp(PageTarget):
         if view.status == self.NOT_FOUND_STATUS:
             # An ASIN Amazon does not know (or no longer sells): a stale input, not a refusal.
             return failed("no_content", "not_found")
-        title, price = count(view, self.TITLE), count(view, *self.PRICES)
+        title = count(view, self.TITLE)
+        price = count(view, *self.PRICES) or self.USED_PRICE.search(view.text_head.lower())
         if title and price:
             return OK
         if title:

@@ -16,6 +16,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
+from urllib.parse import urlsplit
 
 from ...models import RequestContext
 from ...targets import PageDriver, PageSpec, PageView
@@ -265,7 +266,9 @@ class ChatGpt(ChatSource):
 
 @dataclass(frozen=True, slots=True)
 class Gemini(ChatSource):
-    """Gemini logged out: ok when the response has at least MIN_CHARS characters."""
+    """Gemini logged out: ok when the response has at least MIN_CHARS characters. No reply
+    while the page is still the new chat (NEW_CHAT) is a question never sent: Gemini moves a
+    sent one to its conversation's address, /app/<id>. That is our failure, not Gemini's."""
 
     id: str = AI_GEMINI
     url: str = "https://gemini.google.com/app"
@@ -276,6 +279,7 @@ class Gemini(ChatSource):
     LOGIN_DIALOGS = ('div[role="dialog"]:has-text("Sign in")',)
     STOPS = (text_selector("unusual traffic"), "form#captcha-form")
     DISMISS = ('button:has-text("Reject all")', 'button:has-text("Accept all")')
+    NEW_CHAT = "/app"
     # Google's "unusual traffic" page is a shared block marker; here it is the challenge.
     MARKS = (
         Mark(
@@ -286,6 +290,13 @@ class Gemini(ChatSource):
             found=("form#captcha-form",),
         ),
     )
+
+    def rules(self, view: PageView) -> PageAssessment:
+        result = ChatSource.rules(self, view)
+        new_chat = urlsplit(view.final_url).path.rstrip("/") == self.NEW_CHAT
+        if result.reason == "no_reply" and new_chat:
+            return failed("browser_error", "send_failed")
+        return result
 
 
 AI_TARGET_TYPES = (AiOverview, ChatGpt, Gemini)

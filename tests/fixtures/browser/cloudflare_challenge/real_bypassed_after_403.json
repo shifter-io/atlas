@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.scrapingcourse.com/cloudflare-challenge",
+    "status": 403,
+    "title": "Cloudflare Challenge - ScrapingCourse.com",
+    "text_head": "Scraping\nCourse\nCloudflare Challenge\nYou bypassed the Cloudflare challenge! :D",
+    "found": {
+      "body:has-text(\"Example Domain\")": 1,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}
