@@ -71,6 +71,9 @@ class CloudflareChallenge(PageTarget):
             ),
             found=CHALLENGE,
         ),
+        # A site's own captcha interstitial (DataDome's, on G2): a 403 whose only text is its
+        # noscript line. It is a challenge, not the page a cleared challenge loaded.
+        Mark("challenge", "captcha_page", text=("please enable js and disable any ad blocker",)),
     )
 
     def address(self, value: Any) -> str:

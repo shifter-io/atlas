@@ -43,6 +43,7 @@ def test_cloudflare_challenge_has_its_cases():
         "real_challenge_page",
         "real_no_expect",
         "real_cleared_403_no_expect",
+        "real_g2_captcha",
     }
 
 
@@ -110,3 +111,5 @@ def test_the_challenge_status_counts_only_on_a_blank_page():
     assert judged(403, "") == ("block", "blocked", "block_status")
     assert judged(429, "Another page") == ("block", "blocked", "block_status")
     assert judged(403, "Access denied") == ("block", "blocked", "block_marker")
+    captcha = judged(403, "Please enable JS and disable any ad blocker")
+    assert captcha == ("challenge", "challenge", "captcha_page")

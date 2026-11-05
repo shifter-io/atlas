@@ -17,8 +17,9 @@ class LinkedinPublic(PageTarget):
     """Public profile: ok when the name (h1) and the headline are present.
 
     LinkedIn's own failure pages: its security check (challenge), status 999 (block), the
-    authwall, login or sign-up page, by redirect or served at the profile URL (login_wall), and
-    the profile-unavailable page, an empty page or a page without the profile (no_content)."""
+    authwall, login or sign-up page, by redirect or served at the profile URL (login_wall, also
+    when answered with 999), and the profile-unavailable page, an empty page or a page without
+    the profile (no_content)."""
 
     id: str = LINKEDIN_PUBLIC
     url: str = "https://www.linkedin.com/in/"

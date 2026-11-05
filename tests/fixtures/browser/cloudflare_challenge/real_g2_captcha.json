@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.g2.com/",
+    "status": 403,
+    "title": "g2.com",
+    "text_head": "Please enable JS and disable any ad blocker",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "captcha_page"
+  }
+}
