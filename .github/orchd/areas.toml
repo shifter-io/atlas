@@ -2,11 +2,12 @@
 # area table, so this map is derived from the tree: one area per group of subpackages of
 # src/proxy_index that change together, each with its tests (tests/ is flat, so by file prefix and,
 # for the rest, by the package a test mainly imports), its test fixtures, scripts, configs and
-# documentation page. The package root's entry points (cli.py, models.py, errors.py), the project
-# manifest and lockfile, CI and its gate scripts, the shared test helpers, the README and the
-# developer guide are `shared`. The globs are pairwise disjoint and cover every tracked file. A path
-# that matches no glob (a new provider config, a new top-level test) counts as area:shared, which
-# conflicts with every area.
+# documentation page. The package root (__init__.py) and its entry points (cli.py, models.py,
+# errors.py), the project manifest and lockfile, CI with its gate scripts (scripts/ci/) and
+# scripts/postgres_local.py, which starts the CI jobs' database, the shared test helpers, the
+# README and the developer guide are `shared`. The globs are pairwise disjoint and cover every
+# tracked file. A path that matches no glob (a new provider config, a new top-level test) counts as
+# area:shared, which conflicts with every area.
 # Generators checked: formula/ writes formulas/<network>.json and formulas/SUMMARY.md (same area);
 # no CI step compares a committed output with its generator.
 v = 1
@@ -26,8 +27,9 @@ browser = [
     "configs/launchd/**",
     "configs/systemd/**",
 ]
-# the calculated website data: the calculated package, its schema and migrations, the snapshots of
-# its schema versions and the tests of the figures it computes
+# the calculated website data: the calculated package, its schema and migrations, the methodology
+# files its policy loads, the snapshots of its schema versions and the tests of the figures it
+# computes
 calculated = [
     "src/proxy_index/calculated/**",
     "tests/test_calculated*.py",
@@ -38,6 +40,8 @@ calculated = [
     "tests/test_scoring.py",
     "tests/test_sqlwindow.py",
     "tests/fixtures/calculated_v*.sql",
+    "configs/methodology.toml",
+    "configs/staging-methodology.toml",
 ]
 # the measurement campaign: the campaign package, its fakes, data fixtures, tests and
 # docs/campaign.html
@@ -63,7 +67,7 @@ onboarding = [
     "docs/onboarding.html",
 ]
 # the manager: the orchestrator package (admin API, nodes, staging, events), the node process and
-# its TLS, the staging configs and their tests
+# its TLS, the staging config, the local overnight collection that drives them, and their tests
 orchestrator = [
     "src/proxy_index/orchestrator/**",
     "src/proxy_index/node.py",
@@ -78,7 +82,7 @@ orchestrator = [
     "tests/test_tape_events.py",
     "tests/test_outage_scenario.py",
     "configs/staging.toml",
-    "configs/staging-methodology.toml",
+    "scripts/shifter_local_overnight.py",
 ]
 # the daily test and its inputs: the daily, DB-IP, enrichment, hour-estimate and hour-formula
 # packages, the formulas they publish, db-ip/ and their tests
@@ -155,7 +159,6 @@ storage = [
     "scripts/rebuild_verification.py",
     "scripts/audit_storage.py",
     "scripts/report_storage_*.py",
-    "scripts/postgres_local.py",
 ]
 # the measurement core: runner, transports, targets, outcomes, detection, statistics, sinks,
 # regions and reports, their configs, local run scripts and tests
@@ -183,14 +186,12 @@ runner = [
     "tests/test_census_retry.py",
     "tests/test_names.py",
     "configs/targets.toml",
-    "configs/methodology.toml",
     "configs/regions.yaml",
     "configs/countries.json",
     "configs/evidence.json.example",
     "scripts/report_live.py",
     "scripts/report_validation.py",
     "scripts/measurements_local.py",
-    "scripts/shifter_local_overnight.py",
     "scripts/check-multicore.py",
 ]
 # the scale benchmark: its generator and harness, scripts/benchmark.py and their tests
@@ -199,9 +200,10 @@ scale = [
     "scripts/benchmark.py",
     "tests/test_scale_*.py",
 ]
-# the package root's entry points, the project manifest and lockfile, CI and its gate scripts and
-# their tests, the shared test helpers, the remote run scripts, the private config examples, the
-# README and the developer guide; a change here merges alone
+# the package root and its entry points, the project manifest and lockfile, CI, its gate scripts,
+# the database starter its jobs use and the CI tests, the shared test helpers, the remote run
+# scripts, the private config examples, the README and the developer guide; a change here merges
+# alone
 shared = [
     "src/proxy_index/__init__.py",
     "src/proxy_index/cli.py",
@@ -213,6 +215,7 @@ shared = [
     ".gitignore",
     ".git-blame-ignore-revs",
     "scripts/ci/**",
+    "scripts/postgres_local.py",
     "scripts/remote-check.sh",
     "scripts/test-remote.sh",
     "tests/helpers.py",
