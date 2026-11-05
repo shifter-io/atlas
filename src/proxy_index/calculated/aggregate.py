@@ -20,6 +20,7 @@ from .policy import (
     ratio,
     uptime_settings,
 )
+from .poolfig import entry_inputs, pool_figures
 
 # Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
 # pulse batches, so they are no longer listed here; a None metric means nothing measured them.
@@ -167,45 +168,7 @@ def pool(observations, since, hours, hosting=HOSTING_USAGE_TYPES):
         entry["last"] = max(entry["last"], o["last_seen"])
         if o.get("requested_country"):
             entry["asked"].add(o["requested_country"].lower())
-    located = [e for e in ips.values() if e["row"].get("country_code") and e["asked"]]
-    matched = sum(e["asked"] == {e["row"]["country_code"].lower()} for e in located)
-    countries, regions, cities, asns = set(), set(), set(), set()
-    for entry in ips.values():
-        o = entry["row"]
-        cc = o.get("country_code")
-        region = o.get("region_code") or o.get("region")
-        if cc:
-            countries.add(cc)
-            if region:
-                regions.add((cc, region))
-            if o.get("city"):
-                cities.add((cc, region, o["city"]))
-        if o.get("asn") is not None:
-            asns.add(o["asn"])
-    size = len(ips)
-    known = sum(bool(e["row"].get("usage_type")) for e in ips.values())
-    host = sum(e["row"].get("usage_type") in hosting for e in ips.values())
-    new = sum(e["row"]["product_first_seen"] >= since for e in ips.values())
-    return {
-        "unique_ips": size,
-        "new_ips": new,
-        "churn_rate": new / size if size else None,
-        "recurring_share": sum(len(e["days"]) >= 2 for e in ips.values()) / size
-        if size and hours > 24
-        else None,
-        "countries": len(countries),
-        "regions": len(regions),
-        "cities": len(cities),
-        "asns": len(asns),
-        "datacenter_asn_share": host / known if known else None,
-        "classification_coverage": known / size if size else None,
-        "geo_accuracy": matched / len(located) if located else None,
-        "enrichment_coverage": sum(bool(e["row"].get("matched")) for e in ips.values()) / size
-        if size
-        else None,
-        "observations": sum(e["count"] for e in ips.values()),
-        "shares_basis": "unique exit IPs with the DB-IP field (unknowns excluded)",
-    }, ips
+    return pool_figures(entry_inputs(ips), since, hours, hosting), ips
 
 
 def daily_pools(observations, as_of, days=30):
@@ -286,7 +249,8 @@ def _memberships(place, network):
 def breakdowns(ips, geo):
     """Success, outcome, latency and IP counts per place, ASN and their intersections.
 
-    ips are pool() entries (each IP once, labelled by its DB-IP enrichment); geo rows carry
+    ips are pool() entries (each IP once, labelled by its DB-IP enrichment), or weighted entries
+    standing for "ips" IPs of one label combination (sqlwindow combinations); geo rows carry
     run_geo_buckets counters per exit location and network. Requests without an exit address
     have no location: they count only towards the country the run requested (fallback), so a
     country's success rate includes its failures. Country rows are keyed by the country code;
@@ -319,7 +283,7 @@ def breakdowns(ips, geo):
         network = (o.get("asn"), o.get("asn_organization"), o.get("usage_type"))
         for name, key, label in _memberships(place, network):
             row = entry(name, key, label)
-            row["ips"] += 1
+            row["ips"] += e.get("ips", 1)  # a weighted entry stands for its IPs
             row["observations"] += e["count"]
 
     def add(row, g):

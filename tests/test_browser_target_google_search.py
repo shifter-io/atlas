@@ -20,6 +20,8 @@ def test_google_search_has_its_cases():
         "login_redirect",
         "empty_page",
         "no_results",
+        "real_ok",
+        "real_sorry_page",
     }
 
 

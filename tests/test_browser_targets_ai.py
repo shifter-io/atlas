@@ -151,6 +151,7 @@ def test_every_source_has_its_cases():
         c.AI_OVERVIEW: {
             *("ok", "late", "absent", "short", "sorry", "recaptcha", "block_page", "no_results"),
             *("consent", "consent_form", "answer_names_markers", "empty_overview"),
+            *("real_sorry_page", "real_google_403"),
         },
         c.AI_CHATGPT: {
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
@@ -161,6 +162,7 @@ def test_every_source_has_its_cases():
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),
             *("unusual_traffic", "no_reply", "answer_names_markers", "stream_names_traffic"),
+            *("real_ok", "real_unsent_question"),
         },
     }
 

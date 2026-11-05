@@ -9,6 +9,7 @@ from typing import Any
 from ...targets import PageDriver, PageSpec, PageView
 from ..contracts import CLOUDFLARE_CHALLENGE
 from ..judge import (
+    BLOCK_STATUS,
     OK,
     TEXT_SELECTOR,
     Mark,
@@ -33,6 +34,8 @@ class CloudflareChallenge(PageTarget):
     challenge_wait_s: int = 30
 
     SHOWN_OK = True
+    # A managed challenge's first response; the page it clears to loads with no status of its own.
+    CHALLENGE_STATUS = 403
 
     # The challenge page: its form and stage until 2023; since then a page that the challenge
     # platform's orchestrate script builds. A normal page of a protected site may load the
@@ -68,6 +71,9 @@ class CloudflareChallenge(PageTarget):
             ),
             found=CHALLENGE,
         ),
+        # A site's own captcha interstitial (DataDome's, on G2): a 403 whose only text is its
+        # noscript line. It is a challenge, not the page a cleared challenge loaded.
+        Mark("challenge", "captcha_page", text=("please enable js and disable any ad blocker",)),
     )
 
     def address(self, value: Any) -> str:
@@ -83,6 +89,19 @@ class CloudflareChallenge(PageTarget):
         if not await driver.count(expect):
             either = selector_list(expect, self.ERROR_DETAILS)
             await driver.wait_for(either, self.challenge_wait_s * 1000)
+
+    def judge(self, view: PageView) -> PageAssessment:
+        """PageTarget.judge, except that a 403 page with visible text and no Cloudflare sign or
+        shared marker is the page a cleared challenge loaded, judged by the rules (no_expect
+        when it lacks `expect`), not a refusal. A blank 403 stays a block."""
+        result = PageTarget.judge(self, view)
+        if (
+            result.reason == BLOCK_STATUS
+            and view.status == self.CHALLENGE_STATUS
+            and view.text_head.strip()
+        ):
+            return self.rules(view)
+        return result
 
     def shown(self, view: PageView) -> bool:
         """The page shows `expect` with no Cloudflare sign: ok right after the 407 step

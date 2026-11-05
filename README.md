@@ -178,8 +178,12 @@ and the two newest unpublished drafts; older draft payloads are pruned on calcul
 Calculated schema v10 (`calculated/migrate_v9_v10.sql`, contract K6) adds the incremental
 calculation's memo tables, empty until CALC-INC-2 and CALC-FLEET-1 fill them. `proxy-index
 calculate --incremental` (`calculated/incremental.py`) reads run metadata, buckets and list
-signatures first, reuses a stored list for every window whose signature matches (no observation
-row comes back to Python for it), and reads observations only for the other windows; the values
+signatures first, reuses a stored list for every window whose signature matches, and counts
+every other window in the database (`calculated/sqlwindow.py`): its label combinations and geo
+rows give its list, written with one COPY as soon as it is counted, so no observation row comes
+back to Python for any window and a missed window keeps only its counts in memory. Such a list
+also stores its window's IPs per 5-minute bin of their product's first sighting
+(`figures.first_seen`, outside the content hash, for CALC-INC-2). The values
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
 CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the
@@ -189,6 +193,29 @@ incremental one is `calculate --incremental`. Measured on scale-generator data (
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
+The incremental calculation counts across groups (`calculated/fleetsql.py`, CALC-FLEET-1)
+from memos: each 5-minute bucket's runs digest and distinct IPs (`calculated_bucket_ips`, the
+`*` 24h series) and each IP's newest bucket (`calculated_ip_last_seen`), folded per bucket
+whose runs changed, so a late run is counted too. The `*` window totals are the IPs last seen
+in the window when no folded bucket is at or after the cutoff (the hourly build); an older
+cutoff counts its window directly and changes no memo. The 7d/30d `*` series points are one
+distinct count per daily slice (at most 4 at a time, in the calculation's snapshot). A one-group
+cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
+in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
+Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
+from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
+(`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
+24-hour edge's prefix or suffix the first time a slice needs it), the figures of a slice or point
+holding two or more runs (`calculated_slot_figures`) and the distinct IPs of each estimate run set
+(`calculated_distinct`), so an hour without a new test reads no observation for them. Every build
+mode records runs the same way (full mode through `network.attach()`), and each run recorded for
+the first time is checked by the late-run rule: when it saw an IP first that runs already
+counted saw too, it lowered that IP's first sighting, so the ranges of its product's runs with a
+bucket since then are counted again. Runs ingested after the newest recorded one are checked
+whatever their window, so a run backfilled more than 30 days back is too; a run whose ingest
+commits after a build that already recorded a newer run, and that no window holds, is not.
+This module's memos unused for 2 days and the ranges of runs started over 31 days ago are deleted
+once per build transaction.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
