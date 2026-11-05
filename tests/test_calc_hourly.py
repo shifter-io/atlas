@@ -239,14 +239,16 @@ async def test_a_late_run_lowering_first_seen_fires_the_rule_and_an_in_order_run
     calculate(database, policy, as_of=end, mode="incremental")  # its lists and memos
     with connect(database) as conn:
         product = product_of(conn, later)
-        with_bins = conn.execute(  # a list that stores a first-seen histogram (CALC-INC-1b)
-            "UPDATE calculated_lists SET figures=figures||'{\"first_seen\":{}}' WHERE list_id IN "
-            "((SELECT min(list_id) FROM calculated_lists WHERE product_id=%s),"
-            "(SELECT min(list_id) FROM calculated_lists WHERE product_id<>%s)) RETURNING "
-            "list_id,product_id",
-            (product, product),
-        ).fetchall()
-        mine = {list_id for list_id, p in with_bins if p == product}
+        # A list of each product stores a first-seen histogram (lists.UNHASHED; the incremental
+        # build's own misses store one too).
+        conn.execute(
+            "UPDATE calculated_lists SET figures=figures||'{\"first_seen\":{}}' WHERE NOT "
+            "figures ? 'first_seen' AND list_id IN (SELECT min(list_id) FROM calculated_lists "
+            "GROUP BY product_id)"
+        )
+        binned = "SELECT list_id FROM calculated_lists WHERE figures ? 'first_seen' AND product_id"
+        mine = {k for (k,) in conn.execute(binned + "=%s", (product,))}
+        assert mine and conn.execute(binned + "<>%s", (product,)).fetchall()
         before = {k: ranges_of(conn, k) for k in (old, later)}
     # An in-order run that sees an IP of an earlier one: first seen before it, so no rule.
     in_order = await h.daily("beta", "us", 3 * HOUR)
@@ -257,7 +259,7 @@ async def test_a_late_run_lowering_first_seen_fires_the_rule_and_an_in_order_run
         asked = dict.fromkeys((old, later, in_order), "us")
         check(conn, product, asked, end)
     # A late run, 60 hours back, sees an IP of the 26-hour run first: its first sighting moves
-    # from that run to before the slice [end-48h, end-24h), which loses one new IP.
+    # from that run to before the slice [end-48h, end-24h), which loses new IPs.
     late = await h.daily("beta", "us", 60 * HOUR)
     with connect(database) as conn:
         share_ip(conn, later, late)
