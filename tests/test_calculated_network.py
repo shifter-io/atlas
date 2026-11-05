@@ -44,6 +44,7 @@ WINDOW_KEYS = {
     "lists",
     "breakdown_entries",
 }
+OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}
 # Distinct IPs of a provider's runs (all of one kind here) in a window.
 DISTINCT = (
     "SELECT count(DISTINCT o.ip_id) FROM ip_observations o JOIN test_runs r USING(run_key) "
@@ -79,8 +80,8 @@ def capture_inputs(monkeypatch):
 
 def assert_one_group(net, group):
     """A network of one group equals it on every K9 key; cohort, id and lists are the
-    network's, the pool's place counts are its K10 list's, and readiness, scores and overlap
-    wait for NET-SUM-2."""
+    network's, the pool's place counts are its K10 list's, and readiness, scores and overlap are
+    against the networks of its kind (test_calculated_network_scores.py)."""
     assert net["criteria"]["groups"] == 1 and net["product_id"] == group["product_id"]
     assert (net["pricing"], net["evidence"]) == (
         group["pricing"],
@@ -91,8 +92,15 @@ def assert_one_group(net, group):
         assert set(w) - {"estimated"} == WINDOW_KEYS
         for key in ("period", "metrics", "uptime", "tests", "success_delta", "series"):
             assert w[key] == g[key], (label, key)
-        assert w["readiness"] == ("partial" if g["metrics"]["completed"] else "unavailable")
-        assert (w["scores"], w["overlap"]) == ({}, None)
+        score = w["scores"]["balanced"]
+        assert set(w["scores"]) == {"balanced"} and set(w["overlap"]) == OVERLAP
+        assert w["readiness"] == (
+            "ready"
+            if score["state"] == "ready"
+            else "partial"
+            if g["metrics"]["completed"]
+            else "unavailable"
+        )
         assert w["targets"] == {
             t: {"metrics": v["metrics"], "readiness": v["readiness"]}
             | ({"browser": v["browser"]} if "browser" in v else {})
@@ -252,6 +260,7 @@ def test_a_network_window_is_validated():
         {"pool": {"unique_ips": None, "observations": 1}},
         {"lists": {"id": "7", "entries": {}}},
         {"_runs": [1]},
+        {"_lead": {}},
     ):
         bad = {
             "schema_version": 4,
