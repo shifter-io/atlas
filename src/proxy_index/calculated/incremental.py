@@ -273,9 +273,9 @@ class Incremental(Full):
         new, size = hourly.new_ips(found, since), figures["unique_ips"]
         ps = {"unique_ips": size, "new_ips": new, "churn_rate": new / size if size else None}
         ps |= {k: figures[k] for k in POOL} | {"shares_basis": SHARES_BASIS}
-        return self._named(ps, hit["list_id"], hit["entries"], figures["list_entries"])
+        return self._referenced(ps, hit["list_id"], hit["entries"], figures["list_entries"])
 
-    def _named(self, ps, list_id, entries, pooled):
+    def _referenced(self, ps, list_id, entries, pooled):
         """window()'s result for a window that names its list: entries and pooled count the
         rows of its breakdowns and pool lists, the payload keeps the first ones (parts.fill())."""
         kept = {n: min(c, self.limits[n]) for n, c in (entries | pooled).items()}
@@ -303,7 +303,7 @@ class Incremental(Full):
         list_id = lists.write_list(self.conn, build_id, group, window, rows, signature)
         lists.copy_rows(self.conn, rows)
         entries = {name: len(found) for name, found in dimensions.items()}
-        return self._named(ps, list_id, entries, {n: len(pooled[n]) for n in POOL_LISTS})
+        return self._referenced(ps, list_id, entries, {n: len(pooled[n]) for n in POOL_LISTS})
 
     def _inputs(self, key, hours):
         """The window's sqlwindow inputs: on its group's first miss, every missed window of the
