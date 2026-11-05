@@ -325,6 +325,7 @@ def pulse_window(product_id):
 
 
 async def test_week_unique_ips_are_distinct_measured_ips_not_a_sum_of_days(tmp_path, database, db):
+    store.initialize(database)  # distinct() keeps its counts in calculated_distinct
     seed(database)
     for at in (T1, T2):
         compute.estimate_run(database, await imported(tmp_path, database, at), "DE", formula(DE={}))
@@ -371,6 +372,7 @@ async def test_the_snapshot_carries_released_estimates_with_their_flags(tmp_path
 async def test_distinct_ips_count_only_each_windows_own_tests(tmp_path, database, db):
     # One product's tests in two cohorts; the second test also saw a second IP. Each cohort's
     # window counts its own test's IPs, never the union of both.
+    store.initialize(database)  # distinct() keeps its counts in calculated_distinct
     seed(database)
     runs = [await imported(tmp_path, database, at) for at in (T1, T2)]
     for run_id in runs:
