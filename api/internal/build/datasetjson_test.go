@@ -2,6 +2,8 @@ package build_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -84,12 +86,15 @@ func datasetFile(t *testing.T, shape testscale.Shape) ([]byte, *build.Result) {
 // file the earlier code wrote for goldenShape, with those two provider
 // fields and the N/A paths under placeRanks taken out. The new `pages` and
 // `coverageEvidence` are left out of the comparison; their own tests check
-// them.
+// them. goldenShape is a build before v4, so its `lists` is {}.
 func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 	file, _ := datasetFile(t, goldenShape)
 	top := []pair{}
 	for _, kv := range pairs(t, file) {
-		if kv.key == "pages" {
+		if kv.key == "lists" && string(kv.raw) != "{}" {
+			t.Errorf("a build before v4 has lists %.200s", kv.raw)
+		}
+		if kv.key == "pages" || kv.key == "lists" {
 			continue
 		}
 		if kv.key == "providers" {
@@ -122,5 +127,23 @@ func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 		}
 		t.Fatalf("kept fields differ from the golden at byte %d: got ...%s..., want ...%s...", at,
 			got[max(0, at-80):min(len(got), at+80)], want[max(0, at-80):min(len(want), at+80)])
+	}
+}
+
+// preV4File is the SHA-256 of goldenShape's dataset file as the base of
+// API-DATASET-2 writes it (computed there).
+const preV4File = "557cf8117404a621f49101125b055769e293f90bf08480f74accbb5e8b032d9e"
+
+// A build before v4 writes the file it wrote before the lists, plus
+// "lists":{} (regression case 3 of API-DATASET-2).
+func TestAPreV4FileIsTheEarlierFileWithEmptyLists(t *testing.T) {
+	file, _ := datasetFile(t, goldenShape)
+	i := bytes.Index(file, []byte(`,"lists":{},"snapshot":`))
+	if i < 0 {
+		t.Fatal(`no "lists":{} before the snapshot`)
+	}
+	earlier := append(append([]byte{}, file[:i]...), file[i+len(`,"lists":{}`):]...)
+	if sum := sha256.Sum256(earlier); hex.EncodeToString(sum[:]) != preV4File {
+		t.Errorf("the pre-v4 file without its empty lists has SHA-256 %x, the earlier file %s", sum, preV4File)
 	}
 }

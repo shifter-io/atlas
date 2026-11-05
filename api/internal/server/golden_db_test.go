@@ -147,9 +147,10 @@ func TestWithoutBrowserEntriesEveryAnswerIsAsBefore(t *testing.T) {
 
 // droppedKeys are the members DATASET-SIZE-1 took out of the dataset and its
 // providers (measurement, placeRanks) or added to them (pages,
-// coverageEvidence). They are removed from the dataset and details before
-// hashing, so every other byte of them still has to match main.
-var droppedKeys = map[string]bool{"measurement": true, "placeRanks": true, "pages": true, "coverageEvidence": true}
+// coverageEvidence), and the lists API-DATASET-2 added. They are removed from
+// the dataset and details before hashing, so every other byte of them still
+// has to match main.
+var droppedKeys = map[string]bool{"measurement": true, "placeRanks": true, "pages": true, "coverageEvidence": true, "lists": true}
 
 // withoutDroppedKeys is the compact JSON b without droppedKeys members, at any
 // depth, every other byte as written (encoding/json writes what it reads back).

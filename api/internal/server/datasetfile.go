@@ -42,11 +42,15 @@ const datasetGrace = 10 * time.Minute
 // datasetMetaName is the meta file in the files directory.
 const datasetMetaName = "dataset.meta.json"
 
-// datasetBrotli is the dataset file's brotli setting: quality 10 with a 4 MB
+// datasetBrotli is the dataset file's brotli setting: quality 5 with a 4 MB
 // window. Its encoder state is about 110 MB whatever the file's size; the
 // 16 MB window the in-memory dataset used needs about 330 MB and gave no
-// smaller file on the QA-1 dataset.
-var datasetBrotli = brotli.WriterOptions{Quality: 10, LGWin: 22}
+// smaller file on the QA-1 dataset. Quality 10 would take minutes of CPU
+// every hour at the 0.5 GB a v4 file reaches (contract K11).
+var datasetBrotli = brotli.WriterOptions{Quality: 5, LGWin: 22}
+
+// datasetGzipLevel is the dataset file's gzip level, for the same reason.
+const datasetGzipLevel = 6
 
 // ownFile is every name the files directory may hold that this code wrote:
 // dataset files, their codings and unfinished .tmp files.
@@ -305,7 +309,7 @@ func (d *datasetFiles) write(ds *model.Dataset) (*DatasetFile, error) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		gz, f.Gzip, gzErr = d.compress(tmp, func(w io.Writer) io.WriteCloser {
-			zw, _ := gzip.NewWriterLevel(w, gzip.BestCompression)
+			zw, _ := gzip.NewWriterLevel(w, datasetGzipLevel)
 			return zw
 		})
 	})

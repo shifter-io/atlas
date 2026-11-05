@@ -238,6 +238,7 @@ func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 			t.Fatal(err)
 		}
 	}
+	out["dataset"], out["details"] = withoutV4Dataset(t, out["dataset"]), withoutV4Dataset(t, out["details"])
 	scopes := map[string][]string{build.AllNetworks + "/" + build.AllNetworks: {"country", "region", "city", "asn"}}
 	for _, p := range netProviders {
 		scopes[p+"/residential"] = scopes[build.AllNetworks+"/"+build.AllNetworks]
@@ -302,6 +303,7 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 	}
 	want, got := netAnswers(t, fromV3, true), netAnswers(t, fromV4, false)
 	compareAnswers(t, "v4", want, got)
+	checkCoverageRows(t, fromV3, fromV4)
 	db.PublishParts(t, v3, groups, nil)
 	same()
 	again, log := loadLogged(t, db, cache)
@@ -345,4 +347,88 @@ func subset(ids []int64, lists map[string]map[string]int64) bool {
 		}
 	}
 	return len(ids) > 0
+}
+
+// withoutV4Dataset is a dataset (or the details) without what a v4 build's
+// dataset file holds differently by design (API-DATASET-2): its lists, its
+// country pages and the providers' coverage evidence. checkCoverageRows and
+// the dataset file tests check those.
+func withoutV4Dataset(t *testing.T, b []byte) []byte {
+	t.Helper()
+	g, ok := generic(t, b).(map[string]any)
+	if !ok {
+		t.Fatalf("not an object: %.80s", b)
+	}
+	delete(g, "lists")
+	if pages, ok := g["pages"].(map[string]any); ok {
+		for k := range pages {
+			if strings.HasPrefix(k, "/v1/countries") {
+				delete(pages, k)
+			}
+		}
+	}
+	providers, _ := g["providers"].([]any)
+	for _, d := range g {
+		if detail, ok := d.(map[string]any); ok && detail["provider"] != nil {
+			providers = append(providers, detail["provider"])
+		}
+	}
+	for _, p := range providers {
+		delete(p.(map[string]any), "coverageEvidence")
+	}
+	out, err := json.Marshal(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// checkCoverageRows: the v4 file's City x ASN rows of each network, kind and
+// range are the v3 build's coverage evidence rows with IPs, as the evidence
+// writes them (the v4 rows add the country latency rank and peers, and are
+// most IPs first).
+func checkCoverageRows(t *testing.T, v3, v4 *build.Result) {
+	t.Helper()
+	var doc struct {
+		Lists map[string]map[string]map[string]map[string][][]json.RawMessage `json:"lists"`
+	}
+	b, err := server.Marshal(v4.Dataset)
+	if err == nil {
+		err = json.Unmarshal(b, &doc)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, p := range v3.Dataset.Providers {
+		for kind, byRange := range p.CoverageEvidence {
+			for rangeID, rows := range byRange {
+				var want, got []string
+				for _, r := range rows {
+					if r.Ips.OK() && r.Ips > 0 {
+						want = append(want, string(must(json.Marshal(r))))
+					}
+				}
+				for _, r := range doc.Lists[p.Slug][kind][rangeID]["city_asn"] {
+					got = append(got, string(must(json.Marshal(r[:9]))))
+				}
+				sort.Strings(want)
+				sort.Strings(got)
+				if !slices.Equal(got, want) {
+					t.Errorf("%s %s %s: v4 City x ASN rows %v, v3 evidence %v", p.Slug, kind, rangeID, got, want)
+				}
+				n += len(got)
+			}
+		}
+	}
+	if n == 0 {
+		t.Error("no City x ASN rows compared")
+	}
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

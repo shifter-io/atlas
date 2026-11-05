@@ -79,7 +79,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
-| `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), each provider's `coverageEvidence` (the network page's City × ASN rows, whole) and `pages`, the body of every page answer the site draws by its request (FIELDS.md, "Page answers in the dataset file"). The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
+| `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), each provider's `coverageEvidence` (the network page's City × ASN rows, whole; builds before payload v4 only) and `pages`, the body of every page answer the site draws by its request (FIELDS.md, "Page answers in the dataset file"). A v4 build's file also has the country answers in `pages` and `lists`, every row of every network list as compact arrays (country, region, city, ASN and City × ASN), from which every list answer and place page is regenerated (FIELDS.md, "The dataset file of a v4 build"); it is about 27 MB per network, so about 0.5 GB at 18 networks × 249 countries (contract K11, derived), gzip and brotli far smaller. A build before v4 writes `"lists":{}`. The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
 | `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex` without its articles: networks, pages, targets, actions, plus a new `Countries` group) and the palette's constants (`groupBonus` has no `Guides` group). Guides and network reviews are not searched, and the pages only the old website had (`/guides`, `/contribute`, `/disclosure`) are not listed, nor its "Download the raw dataset" action (`/data/design-preview.json`, the old site's demo file). |
@@ -258,9 +258,10 @@ editorial ones.
   rebuild for anything else (a new event) keeps the file, and so the `/v1/version`
   revision. The marker is part of the fingerprint, so it is checked every poll. The
   file is never held whole in memory: its JSON is written one provider at a time
-  (`build.WriteDataset`, byte for byte what encoding the whole `Dataset` gives), then
-  compressed from disk (gzip level 9, brotli quality 10 with a 4 MB window, in
-  parallel). Each file is written as a `.tmp` (mode 0644), fsynced and renamed. A
+  (`build.WriteDataset`, byte for byte what encoding the whole `Dataset` gives; a v4
+  build's `lists` one dimension and 1,000 rows at a time), then compressed from disk
+  (gzip level 6, brotli quality 5 with a 4 MB window, in parallel: at a v4 file's
+  0.5 GB, gzip 9 and brotli 10 would take minutes of CPU every hour). Each file is written as a `.tmp` (mode 0644), fsynced and renamed. A
   replaced file is still served for 10 minutes after its replacement, then deleted
   (checked every poll). `dataset.meta.json` records the marker, the code that wrote
   the file (the binary's git revision) and the files, so a restart reuses a file whose
@@ -276,6 +277,9 @@ editorial ones.
   249 countries, which the synthetic generator cannot build within a test machine's
   memory: encoding its JSON adds at most 32 MB of heap (holding the file would take
   all of it), and the whole write adds at most 160 MB (most of it brotli's state).
+  `TestWritingAV4DatasetFileHasBoundedMemory` does the same for a v4 file: QA-1's v4
+  build with its lists repeated (as more networks) to at least 90 MB of rows, within
+  the same two bounds; it logs the seconds per MB of the JSON write and of each coding.
 - **Measured (Apple Silicon, localhost).** `BenchmarkCachedDataset` measures serving
   the dataset file through the handler (not measured since the file moved to disk).
   Over loopback HTTP with

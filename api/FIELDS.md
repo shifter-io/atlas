@@ -666,3 +666,75 @@ New answers (contract K11), of a v4 build only (404 before v4):
 | `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `rows`. A row is `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]`: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), and the rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none). `q` keeps rows where every word occurs, case-insensitive, in the country code, country, region, city, `AS<n>` (or the bare ASN number) or ASN name; with `q` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
 | `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, `CC\|region_code\|region` or `CC\|region_code\|region\|city`, URL-escaped), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range. |
+
+## The dataset file of a v4 build (API-DATASET-2)
+
+A v4 build's dataset file holds what the pages use (contract K11, the owner's
+rule on DATASET-SIZE-1), so a download alone regenerates every page answer and
+every list answer. A build before v4 writes the file as before, plus
+`"lists":{}`.
+
+- **`providers`:** as before, from the network summaries, without
+  `coverageEvidence`: its City × ASN rows are `lists.*.city_asn`.
+- **`pages`:** as before (see "Page answers in the dataset file"), plus
+  `/v1/countries` and every `/v1/countries/<CC>`, byte for byte.
+- **`lists`:** new, between `pages` and `snapshot`:
+  `lists[slug][kind][range][dimension]`, ranges `24h`, `7d` and `30d`, dimensions
+  `country`, `region`, `city`, `asn` and `city_asn` in that order. Each dimension is
+  an array of rows, each row an array:
+
+| Dimension | Row | Rows |
+|---|---|---|
+| `country` | `[countryCode, country, ipsSum, requests, successes, latencyP50]` | Every row of the network's lists of that range, list by list, each in stored position order |
+| `region` | `[countryCode, country, regionCode, region, ipsSum, requests, successes, latencyP50]` | The same |
+| `city` | `[countryCode, country, regionCode, region, city, ipsSum, requests, successes, latencyP50]` | The same |
+| `asn` | `[asn, asnName, ipsSum, requests, successes, latencyP50]` | The same |
+| `city_asn` | `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]` | The Coverage rows: every City × ASN row with IPs of the network's headline list, most IPs first (ties in list order), as `/v1/networks/{slug}/coverage` writes them |
+
+The place fields are those the place rows of `/places` show, in that answer's
+key order, without the derived `key` and `successRate` and without the fields a
+dimension never has. IPs are the served values (K8: × the window's
+`breakdown_scale`, rounded half up); `requests` is the row's completed requests;
+a missing number or name is `null`. Country codes are as stored (a reader upper-cases
+and trims them, as the key does). Networks (by slug) and their kinds are in the
+order the all-networks list merges them, the snapshot's; a published group of a
+provider kept off the site (`listed = false`) has no network and so no rows here,
+although the all-networks list counts it.
+
+How a reader regenerates the list answers (`TestTheDatasetFileRegeneratesEveryListAnswer`
+does exactly this, from the file alone):
+
+- **Place key:** `country`: the country code; `region`: `CC|regionCode|region`;
+  `city`: `CC|regionCode|region|city`; `asn`: the number. Rows without a country
+  code (an ASN row without a number) are dropped.
+- **Merging** a list's rows (in order) by key: `ipsSum`, `requests` and `successes`
+  add up (a null adds nothing; null only when every row's is); `latencyP50` is the
+  first row's with the most successes among rows with a latency of at least 0 and
+  successes above 0, else null; the other fields are the first row's, with the
+  upper-case code as `countryCode` (or the number as `asn`). `successRate` is
+  `successes ÷ requests` when both are known and requests are above 0.
+- **Order:** most `ipsSum` first (null counts as -1), then key, then network and
+  kind.
+- **`/v1/networks/{slug}/places?kind=&dimension=&range=`:** the network kind's rows
+  of that dimension and range merged. **`/v1/networks/all/places`:** every
+  network's rows merged together, in file order.
+- **`/v1/countries/{cc}/cities` and `/regions`:** each network kind's city (or
+  region) rows of that country merged apart and tagged with `network` (the slug),
+  `networkName` (the provider's `name`) and `kind`, then all of them ordered.
+- **`q` and pages:** `q` keeps rows whose key, country, region, city, ASN name,
+  network name, network or `as<n>` hold every word (lower case); pages hold 50
+  rows; `total` and `pages` count the kept rows.
+- **Coverage:** the `city_asn` rows are the answer's rows; `q` matches the country
+  code, country, region, city, `as<n>` (so the bare number too) and ASN name;
+  `totals` sums their `ips` and
+  counts distinct country codes, cities and ASN numbers.
+- **`/v1/places/region/{key}` and `/city/{key}`:** the rows with that key in the
+  country's tagged list, ranked among the rows of the same kind: `ipsSumRank` is 1
+  plus the rows with more IPs, among rows with IPs above 0 (`peers`); `latencyRank`
+  1 plus the rows with a lower latency, among rows with a latency.
+
+The file is written one dimension at a time, 1,000 rows at a time
+(`build.DatasetLists`, read in place from the compact lists), and compressed at
+gzip level 6 and brotli quality 5 (4 MB window): at the 0.5 GB a v4 file reaches
+at 18 × 249 (K11, derived), quality 10 and gzip 9 would take minutes of CPU every
+hour.

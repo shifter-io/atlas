@@ -593,6 +593,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	res.Pages = buildPages(ds.GeneratedAt, entries, stats, res.Details, s, in.Snapshot)
 	res.Pages.Published = publishedProducts(s, entries, in.Providers)
 	ds.Pages = datasetPages(res.Pages)
+	ds.Lists = datasetLists(res.Pages, s, entries, in.Snapshot)
 	res.Search = buildSearchIndex(leader, ds.Targets, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, records)
 	return res, nil
