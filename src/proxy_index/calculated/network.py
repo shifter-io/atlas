@@ -18,10 +18,10 @@ attach() completes the windows in store.write(), once the network lists are writ
   Python, so the incremental calculation reads no observation for them;
 - the K10 list id and entry counts (lists, breakdown_entries, pool.list_entries) and the place
   counts they give (pool countries, regions, cities and asns, also in pool.daily);
-- the groups' estimates (estimates/window.py) summed, scaled by the network's distinct IPs.
-
-Scores, ranks and overlap come with NET-SUM-2. Until then a window has scores {} and overlap
-null, and its readiness is partial with completed requests, else unavailable.
+- the groups' estimates (estimates/window.py) summed, scaled by the network's distinct IPs;
+- the ownership overlap, counted in the database over the same window-bounded IPs, and the
+  balanced score, rank and readiness, against the networks of the same kind and window
+  (network_scores.py).
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 
-from . import browser, fleetsql, hourly, netlists
+from . import browser, fleetsql, hourly, netlists, network_scores, parts
 from .aggregate import (
     LATENCY,
     NOT_LATENCY_TARGET,
@@ -159,7 +159,8 @@ class Network:
         }
 
     def window(self, groups, label, cfg):
-        """One window over the union, waiting for attach(): "_runs" lists its runs."""
+        """One window over the union, waiting for attach(): "_runs" lists its runs, "_lead"
+        is the headline group's window (its evidence, network_scores.member())."""
         period = groups[0]["windows"][label]["period"]
         since, end, hours = period["start"], period["end"], period["hours"]
         rows = self.inside(self.rows, since, end)
@@ -196,6 +197,7 @@ class Network:
             "scores": {},
             "overlap": None,
             "_runs": sorted({r["run_key"] for r in rows}),
+            "_lead": self.lead["windows"].get(label, {}),
         }
 
     def targets(self, cfg, rows, span, latency):
@@ -284,6 +286,7 @@ def attach(conn, payload, written):
                 runs[entry["id"], label, part] = w["_runs"]
                 buckets[entry["id"], label, part] = (since, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
+    shared = network_scores.overlap(conn, payload["networks"])
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():
@@ -298,7 +301,9 @@ def attach(conn, payload, written):
             points = fleetsql.fill(w["series"], counted[(*key, "series")])
             found = written.get(key)
             windows[label] = complete(w, ips, points, found, estimated.get(key))
+            windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
+    network_scores.score(networks, payload, parts.previous(conn, groups=False))
     return {"networks": networks}  # store.write() validates them (validate())
 
 
@@ -354,7 +359,8 @@ def validate(payload):
 def check(window):
     """One network window's invariants, as store.validate_payload() checks a group's."""
     m, found, ps = window["metrics"], window.get("lists"), window["pool"]
-    if "_runs" in window or not all(_fraction(m[k]) for k in ("challenge_rate", "block_rate")):
+    rates = all(_fraction(m[k]) for k in ("challenge_rate", "block_rate"))
+    if {"_runs", "_lead"} & set(window) or not rates:
         raise ValueError(INVALID)
     if not _fraction(m["uptime"]) or not all(_fraction(p.get("uptime")) for p in window["series"]):
         raise ValueError("Availability series must contain fractions or null")
