@@ -204,12 +204,18 @@ cohort takes its group's pool count; larger cohorts are counted again only when 
 in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
 Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
 from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
-(`calculated_run_ranges`, counted when the run is first used), the figures of a slice or point
+(`calculated_run_ranges`: every single bucket when the run is first recorded, the whole run or a
+24-hour edge's prefix or suffix the first time a slice needs it), the figures of a slice or point
 holding two or more runs (`calculated_slot_figures`) and the distinct IPs of each estimate run set
-(`calculated_distinct`), so an hour without a new test reads no observation for them. A late run
-(one that saw an IP first, before runs already counted) lowers that IP's first sighting; the
-memos of its product's runs finished since then are counted again (`hourly.stale_lists()`).
-Memos unused for 2 days and the ranges of runs started over 31 days ago are deleted every build.
+(`calculated_distinct`), so an hour without a new test reads no observation for them. Every build
+mode records runs the same way (full mode through `network.attach()`), and each run recorded for
+the first time is checked by the late-run rule: when it saw an IP first that runs already
+counted saw too, it lowered that IP's first sighting, so the ranges of its product's runs with a
+bucket since then are counted again. Runs ingested after the newest recorded one are checked
+whatever their window, so a run backfilled more than 30 days back is too; a run whose ingest
+commits after a build that already recorded a newer run, and that no window holds, is not.
+This module's memos unused for 2 days and the ranges of runs started over 31 days ago are deleted
+once per build transaction.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and

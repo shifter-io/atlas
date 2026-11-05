@@ -172,8 +172,10 @@ async def test_memos_equal_a_fresh_count_at_every_five_minute_cutoff(
         ranges = conn.execute(
             "SELECT run_key,count(*) FROM calculated_run_ranges GROUP BY 1 ORDER BY 1"
         ).fetchall()
-    # Two buckets: both singles and the whole run; one bucket: one range; 14 buckets: singles.
-    assert dict(ranges) == {runs[0]: 3, runs[1]: 1, runs[2]: 1, runs[3]: 14, runs[4]: 1}
+    # Single buckets, recorded first; a run's other ranges only when a slice holds it alone.
+    # The split run never has a daily slice of its own here (other runs share each one).
+    expected = {runs[0]: 2, runs[1]: 1, runs[2]: 1, runs[3]: 14, runs[4]: 1}
+    assert {k: n for k, n in ranges if k in expected} == expected
 
 
 @pytest.mark.asyncio
@@ -203,7 +205,8 @@ async def test_an_hour_without_new_tests_counts_none_of_them_again(database, tmp
     assert [q for q, _ in log if any(c in q for c in counting)] == []
 
 
-def ranges_of(conn, run_key):
+def stamps(conn, run_key):
+    """When each of the run's recorded ranges was counted: [(first, last, created_at)]."""
     return conn.execute(
         "SELECT first_bucket,last_bucket,created_at FROM calculated_run_ranges WHERE run_key=%s "
         "ORDER BY 1,2",
@@ -229,7 +232,7 @@ def share_ip(conn, source, target):
 
 @pytest.mark.asyncio
 async def test_a_late_run_lowering_first_seen_fires_the_rule_and_an_in_order_run_does_not(
-    database, tmp_path
+    database, tmp_path, monkeypatch
 ):
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = History(database, tmp_path, end, seed_value=5)
@@ -239,23 +242,15 @@ async def test_a_late_run_lowering_first_seen_fires_the_rule_and_an_in_order_run
     calculate(database, policy, as_of=end, mode="incremental")  # its lists and memos
     with connect(database) as conn:
         product = product_of(conn, later)
-        # A list of each product stores a first-seen histogram (lists.UNHASHED; the incremental
-        # build's own misses store one too).
-        conn.execute(
-            "UPDATE calculated_lists SET figures=figures||'{\"first_seen\":{}}' WHERE NOT "
-            "figures ? 'first_seen' AND list_id IN (SELECT min(list_id) FROM calculated_lists "
-            "GROUP BY product_id)"
-        )
-        binned = "SELECT list_id FROM calculated_lists WHERE figures ? 'first_seen' AND product_id"
-        mine = {k for (k,) in conn.execute(binned + "=%s", (product,))}
-        assert mine and conn.execute(binned + "<>%s", (product,)).fetchall()
-        before = {k: ranges_of(conn, k) for k in (old, later)}
+        before = {k: stamps(conn, k) for k in (old, later)}
+        binned = "SELECT count(*) FROM calculated_lists WHERE figures ? 'first_seen'"
+        assert conn.execute(binned).fetchone()[0]  # CALC-INC-1b's histograms: none is returned
     # An in-order run that sees an IP of an earlier one: first seen before it, so no rule.
     in_order = await h.daily("beta", "us", 3 * HOUR)
     with connect(database) as conn:
         share_ip(conn, later, in_order)
         assert hourly.stale_lists(conn, [old, later, in_order]) == frozenset()
-        assert {k: ranges_of(conn, k) for k in (old, later)} == before
+        assert {k: stamps(conn, k) for k in (old, later)} == before and stamps(conn, in_order)
         asked = dict.fromkeys((old, later, in_order), "us")
         check(conn, product, asked, end)
     # A late run, 60 hours back, sees an IP of the 26-hour run first: its first sighting moves
@@ -264,18 +259,70 @@ async def test_a_late_run_lowering_first_seen_fires_the_rule_and_an_in_order_run
     with connect(database) as conn:
         share_ip(conn, later, late)
         asked = dict.fromkeys((old, later, in_order, late), "us")
-        with conn.transaction(force_rollback=True):  # without the rule: the stale memo
+        with conn.transaction(force_rollback=True), monkeypatch.context() as patch:
+            never = "SELECT 0 AS product_id,now() AS since WHERE cardinality(%s::bigint[])<0"
+            patch.setattr(hourly, "LATE", never + " AND cardinality(%s::int[])<0")
             stale = hourly.slice_figures(conn, {"g": (product, asked)}, {"g": slices_at(end)})
             fresh = reference_slices(conn, product, asked, slices_at(end))
-            since = end - 2 * DAY
+            since = end - 2 * DAY  # without the rule the memo overcounts
             assert hourly.new_ips(stale["g"][1], since) > hourly.new_ips(fresh[1], since)
-        assert hourly.stale_lists(conn, sorted(asked)) == frozenset(mine)
-        # Every counted run of the product finished since the late run started is counted again.
-        assert [ranges_of(conn, k) for k in (old, later, in_order)] == [[], [], []]
+        assert hourly.stale_lists(conn, sorted(asked)) == frozenset()
+        # Every recorded run of the product with a bucket since the late run's is counted again.
+        after = {k: stamps(conn, k) for k in (old, later)}
+        assert all(after[k] and after[k] != before[k] for k in (old, later)), (before, after)
+        assert stamps(conn, late)
         check(conn, product, asked, end)
-        assert ranges_of(conn, later) and ranges_of(conn, later) != before[later]
-        assert hourly.stale_lists(conn, sorted(asked)) == frozenset()  # once: counted now
+        conn.commit()
+        again = {k: stamps(conn, k) for k in (old, later, in_order, late)}
+        assert hourly.stale_lists(conn, sorted(asked)) == frozenset()  # once: recorded now
+        assert {k: stamps(conn, k) for k in again} == again
     assert_equal(database, policy, end)
+
+
+@pytest.mark.asyncio
+async def test_a_late_run_a_full_build_records_first_is_still_checked(database, tmp_path):
+    """The S1 regression: a full build records the late run's ranges (store.write() ->
+    network.attach() -> bucket_ips()); the late-run rule must still run, so the next incremental
+    build, whose 24h window is its widest hit, equals full mode."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = History(database, tmp_path, end, seed_value=5)
+    recent = await h.daily("beta", "us", 5 * HOUR)
+    await h.daily("beta", "us", 50 * HOUR)
+    await h.daily("alpha", "us", 26 * HOUR)
+    policy = lenient_policy(tmp_path)
+    calculate(database, policy, as_of=end, mode="incremental")
+    late = await h.daily("beta", "us", 60 * HOUR)
+    with connect(database) as conn:
+        share_ip(conn, recent, late)  # the late run sees an IP the 5-hour run saw first
+    calculate(database, policy, as_of=end, mode="full")  # records the late run's ranges
+    extra = await h.daily("beta", "us", 72 * HOUR)  # changes the 7d and 30d windows only
+    with connect(database) as conn:  # it sees no IP another run saw: no rule of its own
+        conn.execute(
+            "DELETE FROM ip_observations WHERE run_key=%s AND ip_id IN "
+            "(SELECT ip_id FROM ip_observations WHERE run_key<>%s)",
+            (extra, extra),
+        )
+        conn.execute(PRODUCT_IPS)
+    assert_equal(database, policy, end)
+
+
+@pytest.mark.asyncio
+async def test_a_run_backfilled_outside_every_window_is_checked_too(database, tmp_path):
+    """A run 40 days back (no window holds it) that saw an IP of a recent run first lowers its
+    first sighting: the next incremental build, every window a hit, equals full mode."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = History(database, tmp_path, end, seed_value=5)
+    recent = await h.daily("beta", "us", 5 * HOUR)
+    await h.daily("beta", "us", 50 * HOUR)
+    policy = lenient_policy(tmp_path)
+    calculate(database, policy, as_of=end - HOUR, mode="incremental")
+    calculate(database, policy, as_of=end, mode="incremental")  # every window's first-seen bins
+    old = await h.daily("beta", "us", 40 * DAY)
+    with connect(database) as conn:
+        share_ip(conn, recent, old)
+    assert_equal(database, policy, end)
+    with connect(database) as conn:
+        assert stamps(conn, old)  # recorded once, so not checked again
 
 
 @pytest.mark.asyncio
@@ -330,10 +377,15 @@ async def test_memos_unused_for_two_days_and_ranges_of_old_runs_are_collected(da
         for table, column in memos:
             conn.execute(
                 f"INSERT INTO {table}(digest,{column},last_used) VALUES "
-                "('stale','{}',now()-interval '3 days'),('kept','{}',now()-interval '1 day')"
+                "('hourly-v1-stale','{}',now()-interval '3 days'),"
+                "('hourly-v1-kept','{}',now()-interval '1 day'),"
+                "('other','{}',now()-interval '3 days')"
             )
-        hourly.slice_figures(conn, {}, {})
+        hourly.slice_figures(conn, {}, {})  # collected once per transaction: not again yet
+        assert {k for (k,) in conn.execute(ranged)} == {old, recent}
+        conn.commit()
+        hourly.bucket_ips(conn, {}, {})  # every caller collects, full mode's network.attach() too
         for table, _ in memos:
             found = {d for (d,) in conn.execute(f"SELECT digest FROM {table}")}
-            assert "kept" in found and "stale" not in found, table
+            assert {"hourly-v1-kept", "other"} <= found and "hourly-v1-stale" not in found, table
         assert {k for (k,) in conn.execute(ranged)} == {recent}

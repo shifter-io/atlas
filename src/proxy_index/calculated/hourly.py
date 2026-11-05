@@ -8,22 +8,28 @@ window's range), distinct IPs per series point (bucket_ips()), the estimates' di
 They are counted once and kept in the K6 memo tables, so an hour without a new test reads no
 observation:
 
-- calculated_run_ranges: when a run is first used, the pool figures of each range of its
-  observation buckets that a slice or a series point can cut out of it: every single bucket and,
-  for a run of at most MAX_RANGE_BUCKETS buckets, every prefix and suffix (a 24-hour slice edge
-  cuts such a run once). Keyed by the run, its labels' release (0: unenriched) and the bounds.
+- calculated_run_ranges: the pool figures of a range of one run's observation buckets, keyed by
+  the run, its labels' release (0: unenriched) and the bounds. Every single bucket is counted
+  when the run is first recorded (they also list its buckets); a slice of at most a day holding
+  one range of a run of at most MAX_RANGE_BUCKETS buckets (the whole run, or the prefix or suffix
+  a 24-hour edge cuts) is counted the first time a slice needs it.
 - calculated_slot_figures: the figures of a slice or point that holds two or more runs (or a
-  range no run-range row has), keyed by the digest of its runs, their release, bounds and
-  requested countries and the run-range rows' creation (see the late-run rule); SQL on a miss.
+  longer run's range, or a series point no run range has), keyed by the digest of its runs, their
+  release, bounds and requested countries and the run-range rows' creation; SQL on a miss.
 - calculated_distinct: the estimates' distinct counts, keyed by the digest of the run set.
 
 A slice or point is fully determined by the observation buckets of its runs that it holds, so
 equal digests count equal observations. First-seen histograms come from product_ips, which a
-late run (one that saw an IP before runs already counted) lowers: stale_lists() applies the
-late-run rule, deleting the run ranges it makes stale, so they and every slot memo holding them
-(whose digest names their creation) are counted again. A stored histogram keeps only the bins a
-slice of its length can count as new (from the earliest such slice start). Entries unused for 2
-days and the ranges of runs started over 31 days ago are deleted (every slice_figures() call).
+late run (one that saw an IP first, before runs already counted) lowers. So every caller
+records runs through one step (_register()) that applies the late-run rule to each run recorded
+for the first time, whichever build mode or module asked: the ranges of the product's runs with
+a bucket since it are deleted and counted again, which changes every slot digest holding them.
+Runs ingested after the newest recorded run are checked too, whatever their window (a run
+backfilled more than 30 days back, which no window holds). Not covered: a run whose ingest
+committed after a build that recorded a newer run (concurrent ingests), when no window holds it.
+A stored histogram keeps only the bins a slice of its length can count as new (from the earliest
+such slice start). Memos unused for 2 days and the ranges of runs started over 31 days ago are
+deleted, once per transaction by the first call that records runs.
 """
 
 from __future__ import annotations
@@ -42,7 +48,7 @@ from .sqlwindow import MAX_RANGE_BUCKETS, RUN_BUCKETS, WindowSpec, distinct_ips,
 
 HOUR, DAY = timedelta(hours=1), timedelta(days=1)
 _LAST_BUCKET = timedelta(microseconds=1)  # an inclusive last bucket as a half-open bound
-RECORD_RUNS = 100  # runs whose ranges one statement counts
+RECORD_RUNS = 100  # runs whose single buckets one statement counts
 # Distinct IPs per series point: the runs' observations in [start, until), each point the
 # step-wide bin from start that holds them (series()'s slot()).
 BUCKET_IPS = """SELECT k.slot,date_bin(k.step,o.bucket_start,k.start) AS at,
@@ -88,20 +94,33 @@ SAVE = (
     "INSERT INTO {table}(digest,{column}) SELECT * FROM unnest(%s::text[],%s::jsonb[]) "
     "ON CONFLICT (digest) DO NOTHING"
 )
+# Prefix of this module's slot and distinct memo digests: collection deletes only those
+# (fleetsql.py keeps its own entries in calculated_distinct).
+MEMO_PREFIX = "hourly-v1-"
+COLLECTED = "SELECT current_setting('proxy_index.memos_collected',true) AS done"
 COLLECT = (
-    "DELETE FROM calculated_slot_figures WHERE last_used<now()-interval '2 days'",
-    "DELETE FROM calculated_distinct WHERE last_used<now()-interval '2 days'",
+    "DELETE FROM calculated_slot_figures WHERE starts_with(digest,'hourly-v1-') "
+    "AND last_used<now()-interval '2 days'",
+    "DELETE FROM calculated_distinct WHERE starts_with(digest,'hourly-v1-') "
+    "AND last_used<now()-interval '2 days'",
     # Run keys follow ingestion, so every key below the oldest recorded run started in the last
     # 31 days belongs to an older run (all of them when none is that recent).
     "DELETE FROM calculated_run_ranges WHERE run_key<coalesce((SELECT m.run_key "
     "FROM calculated_run_ranges m WHERE (SELECT t.started_at FROM test_runs t "
     "WHERE t.run_key=m.run_key)>=now()-interval '31 days' ORDER BY m.run_key LIMIT 1),"
     "(SELECT max(run_key)+1 FROM calculated_run_ranges))",
+    "SELECT set_config('proxy_index.memos_collected','1',true)",  # until the transaction ends
 )
-# The runs among %s not yet counted (no run-range row), with their product.
-NEW = """SELECT k.run_key,s.product_id FROM unnest(%s::bigint[]) AS k(run_key)
+# The runs to check with the late-run rule, with their product: the ones among %s never recorded
+# (no run-range row at any release) and started in the last 31 days (an older one was collected,
+# not late), and every unrecorded run ingested after the newest recorded run, whatever its age.
+# A run without an observation is never recorded, so it stays here (one index lookup each).
+NEW = """SELECT DISTINCT k.run_key,s.product_id FROM (SELECT unnest(%s::bigint[]) AS run_key,
+ false AS later UNION ALL SELECT run_key,true FROM test_runs
+ WHERE run_key>(SELECT max(run_key) FROM calculated_run_ranges)) k
 JOIN test_runs t USING(run_key) JOIN scope_stats s USING(scope_id)
-WHERE NOT EXISTS (SELECT FROM calculated_run_ranges m WHERE m.run_key=k.run_key)"""
+WHERE NOT EXISTS (SELECT FROM calculated_run_ranges m WHERE m.run_key=k.run_key)
+ AND (k.later OR t.started_at>=now()-interval '31 days') ORDER BY 1"""
 # The late-run rule: per product, the earliest bucket of a new run holding an IP's first
 # sighting (product_ips.first_seen) when runs other than the new ones saw that IP too.
 LATE = """WITH ip AS (
@@ -113,10 +132,10 @@ LATE = """WITH ip AS (
 SELECT ip.product_id,min(ip.bucket) AS since FROM ip
 JOIN product_ips m ON m.product_id=ip.product_id AND m.ip_id=ip.ip_id
 WHERE m.first_seen=ip.first AND m.run_count>ip.runs GROUP BY 1 ORDER BY 1"""
-# The product's counted runs that may hold such an IP: every one finished since that bucket.
-INVALIDATE = """DELETE FROM calculated_run_ranges WHERE run_key IN (SELECT t.run_key
- FROM test_runs t JOIN scope_stats s USING(scope_id) WHERE s.product_id=%s AND t.finished_at>=%s)"""
-STALE = "SELECT list_id FROM calculated_lists WHERE product_id=ANY(%s) AND figures ? 'first_seen'"
+# The product's recorded runs that may hold such an IP: every one with a bucket since then.
+INVALIDATE = """DELETE FROM calculated_run_ranges WHERE run_key IN (SELECT b.run_key
+ FROM run_buckets b JOIN test_runs t USING(run_key) JOIN scope_stats s USING(scope_id)
+ WHERE s.product_id=%s AND b.bucket_start>=%s) RETURNING run_key"""
 
 
 @dataclass(frozen=True)
@@ -128,13 +147,9 @@ class Run:
     stamp: str = ""
 
     def ranged(self, first, last):
-        """Whether calculated_run_ranges holds the run's range [first, last]."""
-        n, i, j = (
-            len(self.buckets),
-            bisect_left(self.buckets, first),
-            bisect_left(self.buckets, last),
-        )
-        return i == j or (n <= MAX_RANGE_BUCKETS and (i == 0 or j == n - 1))
+        """Whether calculated_run_ranges keeps the run's range [first, last]: a single bucket, or
+        any range of a run of at most MAX_RANGE_BUCKETS buckets."""
+        return first == last or len(self.buckets) <= MAX_RANGE_BUCKETS
 
 
 @dataclass(eq=False)
@@ -167,9 +182,8 @@ def slice_figures(conn, group_runs, slices):
     shares with the default hosting usage types) plus "first_seen", the IPs per 5-minute bin of
     the product's first sighting from since on; a slice without observations is None, as
     daily_pools() has it. A slice (since, until, "first_seen") gets only {"first_seen": bins}.
-    Each comes from the memos (module docstring); this call also collects old memo entries.
+    Each comes from the memos (module docstring).
     """
-    _collect(conn)
     runs = _runs(conn, [k for _, asked in group_runs.values() for k in asked])
     result, items = {}, []
     for key, (product, asked) in group_runs.items():
@@ -217,7 +231,7 @@ def window_distinct(conn, run_sets, by_country=True):
     """For each run set of (run_key, country_code) pairs, its distinct IPs by country and in all
     (key None), as estimates.window.distinct() counts them; kept in calculated_distinct."""
     run_sets = [sorted(set(pairs), key=lambda p: (p[0], p[1] or "")) for pairs in run_sets]
-    keys = [digest(["distinct", by_country, pairs]) for pairs in run_sets]
+    keys = [MEMO_PREFIX + digest(["distinct", by_country, pairs]) for pairs in run_sets]
     wanted = {key: pairs for key, pairs in zip(keys, run_sets, strict=True) if pairs}
 
     def count(sets):
@@ -232,71 +246,78 @@ def window_distinct(conn, run_sets, by_country=True):
 
 def stale_lists(conn, new_runs):
     """List ids whose stored figures the newly processed runs (new_runs) make stale, so their
-    windows are counted again: the late-run rule.
+    windows are counted again: none.
 
-    A run first processed here (no run-range row yet) that holds the first sighting of an IP
-    other runs saw too lowered that IP's product_ips.first_seen, which the memos and the lists
-    counted before. Then the run ranges of the product's runs finished since its first such
-    bucket are deleted (they, and the slot memos holding them, are counted again), and the
-    product's lists that store a first-seen histogram ("first_seen" in figures) are stale."""
-    found = _rows(conn, NEW, (sorted(set(new_runs)),))
-    if not found:
-        return frozenset()
-    keys, products = [r["run_key"] for r in found], [r["product_id"] for r in found]
-    late = _rows(conn, LATE, (keys, products))
-    for row in late:
-        conn.execute(INVALIDATE, (row["product_id"], row["since"]))
-    if not late:
-        return frozenset()
-    rows = _rows(conn, STALE, ([row["product_id"] for row in late],))
-    return frozenset(row["list_id"] for row in rows)
+    The runs are recorded here (_register()), so the late-run rule runs before any window is
+    counted: a late run's IPs move product_ips.first_seen, and the ranges of the runs it
+    affects are counted again. A list stores nothing a hit window reads that moves with the
+    cutoff: its figures.first_seen histogram (CALC-INC-1b) is kept but not read, since a hit's
+    new IPs come from slice_figures(), which reads the memos the rule renews. Marking such lists
+    stale would recount their windows without rewriting the histogram (lists.write_list() keeps
+    a stored list as it is), so none is returned."""
+    _runs(conn, new_runs)
+    return frozenset()
 
 
 def _collect(conn):
-    """Delete slot and distinct memos unused for 2 days and the ranges of runs over 31 days old."""
+    """Delete slot and distinct memos unused for 2 days and the ranges of runs over 31 days old,
+    once per transaction."""
+    if _rows(conn, COLLECTED, ())[0]["done"] == "1":
+        return
     for statement in COLLECT:
         conn.execute(statement)
 
 
 def _runs(conn, run_keys):
     """{run_key: Run} of every run, recording first the ones without ranges at their release."""
+    _collect(conn)
     keys = sorted(set(run_keys))
     rows = {r["run_key"]: r for r in _rows(conn, RUNS, (keys,))}
-    missing = [k for k, r in rows.items() if not r["ranges"]]
-    for n in range(0, len(missing), RECORD_RUNS):
-        if _record(conn, missing[n : n + RECORD_RUNS]):
-            rows |= {r["run_key"]: r for r in _rows(conn, RUNS, (missing[n : n + RECORD_RUNS],))}
+    changed = _register(conn, [k for k, r in rows.items() if not r["ranges"]]) & set(keys)
+    if changed:
+        rows |= {r["run_key"]: r for r in _rows(conn, RUNS, (sorted(changed),))}
     return {k: Run(r["release_id"], tuple(r["buckets"]), str(r["stamp"])) for k, r in rows.items()}
 
 
-def _record(conn, keys):
-    """Count and store the ranges of runs (Run.ranged()) at their release; whether any was."""
-    bounds = {"keys": keys, "per_run": True, "release": None}
+def _register(conn, missing):
+    """Record the single buckets of the runs without ranges at their release (missing), after
+    the late-run rule for the runs never recorded; the run keys recorded again or anew."""
+    fresh = _rows(conn, NEW, (missing,))
+    again = set()
+    if fresh:
+        keys, products = [r["run_key"] for r in fresh], [r["product_id"] for r in fresh]
+        for row in _rows(conn, LATE, (keys, products)):
+            deleted = _rows(conn, INVALIDATE, (row["product_id"], row["since"]))
+            again |= {r["run_key"] for r in deleted}
+    todo = sorted(set(missing) | {r["run_key"] for r in fresh} | again)
+    for n in range(0, len(todo), RECORD_RUNS):
+        bounds = {"keys": todo[n : n + RECORD_RUNS], "per_run": True, "release": None}
+        ranges = {}
+        for row in _rows(conn, RUN_BUCKETS, bounds):
+            release, run = row["release_id"] or 0, row["run_key"]
+            for at in row["buckets"]:
+                ranges[run, release, at, at] = (row["product_id"], {run: row["asked"]})
+        _store_ranges(conn, ranges)
+    return set(todo)
+
+
+def _store_ranges(conn, ranges):
+    """Count and store run ranges ({(run_key, release, first, last): (product_id, asked)}), each
+    with the run's labels at that release; their stored figures by key."""
     specs = defaultdict(list)
-    for row in _rows(conn, RUN_BUCKETS, bounds):
-        held, release, run = row["buckets"], row["release_id"] or 0, row["run_key"]
-        if len(held) <= MAX_RANGE_BUCKETS:
-            pairs = {(0, j) for j in range(len(held))} | {
-                (i, len(held) - 1) for i in range(len(held))
-            }
-        else:
-            pairs = set()
-        for i, j in sorted(pairs | {(i, i) for i in range(len(held))}):
-            key = (run, release, held[i], held[j])
-            since, until = held[i], held[j] + _LAST_BUCKET
-            specs[release].append(
-                WindowSpec(key, row["product_id"], (run,), since, until, {run: row["asked"]})
-            )
-    columns = [[] for _ in range(5)]
+    for key, (product, asked) in ranges.items():
+        run, release, first, last = key
+        specs[release].append(WindowSpec(key, product, (run,), first, last + _LAST_BUCKET, asked))
+    columns, stored = [[] for _ in range(5)], {}
     for release, group in specs.items():
         found = window_inputs(conn, group, release_mode="newest", release_id=release or None)
         for spec in group:
-            stored = _stored(found[spec.key], spec.since, 24, spec.since - DAY)
-            for column, value in zip(columns, (*spec.key, Jsonb(stored)), strict=True):
+            stored[spec.key] = _stored(found[spec.key], spec.since, 24, spec.since - DAY)
+            for column, value in zip(columns, (*spec.key, Jsonb(stored[spec.key])), strict=True):
                 column.append(value)
     if columns[0]:
         conn.execute(RECORD, columns)
-    return bool(columns[0])
+    return stored
 
 
 def _clips(runs, run_keys, since, until):
@@ -312,7 +333,8 @@ def _clips(runs, run_keys, since, until):
 
 def _values(conn, runs, items, value):
     """{item: stored value}: a run range's (value, an expression of its row m) for a slice of at
-    most a day or a point holding one recorded range, else the slot memo's (counted on a miss)."""
+    most a day or a point holding one range the run keeps (Run.ranged(); a slice counts and
+    stores a missing one), else the slot memo's (counted on a miss)."""
     ranged = [
         item
         for item in items
@@ -329,6 +351,7 @@ def _values(conn, runs, items, value):
     if columns[0]:
         for row in _rows(conn, RANGES.format(value=value), columns):
             found[ranged[row["slot"]]] = row["value"]
+    found |= _new_ranges(conn, runs, [i for i in ranged if i not in found and i.kind != "ips"])
     slots = defaultdict(list)
     for item in items:
         if item not in found:
@@ -346,11 +369,23 @@ def _values(conn, runs, items, value):
     return found
 
 
+def _new_ranges(conn, runs, items):
+    """{item: stored figures} of slices whose one run range is not stored yet, stored now (a
+    series point has no product, so it uses the slot memo instead)."""
+    keys, ranges = {}, {}
+    for item in items:
+        run, first, last = item.clips[0]
+        keys[item] = (run, runs[run].release, first, last)
+        ranges[keys[item]] = (item.product, {run: item.asked.get(run)})
+    stored = _store_ranges(conn, ranges)
+    return {item: stored[key] for item, key in keys.items()}
+
+
 def _digest(runs, item):
     """The slot memo key of an item: what its observations and first-seen bins depend on."""
     if item.kind == "ips":
         clips = [[run, first.isoformat(), last.isoformat()] for run, first, last in item.clips]
-        return digest(["ips", clips])
+        return MEMO_PREFIX + digest(["ips", clips])
     clips = []
     for run, first, last in item.clips:
         asked = item.asked.get(run)
@@ -366,7 +401,7 @@ def _digest(runs, item):
             ]
         )
     hours = (item.until - item.since) / HOUR
-    return digest([item.kind, hours, item.product, clips])
+    return MEMO_PREFIX + digest([item.kind, hours, item.product, clips])
 
 
 def _count(conn, items):
