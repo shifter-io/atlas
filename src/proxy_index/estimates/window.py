@@ -22,6 +22,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 
+from ..calculated.hourly import window_distinct
+
 WINDOWS = {"24h": 24, "7d": 168, "30d": 720}
 METHODS = ("distinct", "sum")
 HOUR_START = "(day + make_interval(hours => hour::int)) AT TIME ZONE 'UTC'"
@@ -34,13 +36,6 @@ FROM estimated_hours WHERE day>=(%(start)s AT TIME ZONE 'UTC')::date
  AND {HOUR_START}>=%(start)s AND {HOUR_START}<%(as_of)s
 ORDER BY hour_start,product_id,country_code"""
 
-# Distinct measured IPs of each window's own tests (slot: the window, run_key and country: its
-# tests), per country and in all (country_code NULL).
-DISTINCT = """SELECT k.slot,k.country_code,count(DISTINCT o.ip_id) AS ips
-FROM unnest(%(slots)s::int[],%(keys)s::bigint[],%(countries)s::text[])
- AS k(slot,run_key,country_code) JOIN ip_observations o USING(run_key)
-GROUP BY GROUPING SETS ((k.slot,k.country_code),(k.slot)) ORDER BY 1,2"""
-
 
 def fetch(conn, as_of) -> list[dict]:
     """The released hours of the longest window."""
@@ -50,19 +45,9 @@ def fetch(conn, as_of) -> list[dict]:
 
 def distinct(conn, found: list[tuple[dict, list[dict]]]) -> list[dict]:
     """For each (window, hours) of found, the distinct measured IPs of those hours' tests by
-    country (None: all of them)."""
-    slots, keys, countries = [], [], []
-    for slot, (_, rows) in enumerate(found):
-        for run_key, country in sorted({(r["run_key"], r["country_code"]) for r in rows}):
-            slots.append(slot)
-            keys.append(run_key)
-            countries.append(country)
-    counts = [{} for _ in found]
-    if slots:
-        bounds = {"slots": slots, "keys": keys, "countries": countries}
-        for row in conn.execute(DISTINCT, bounds).fetchall():
-            counts[row["slot"]][row["country_code"]] = row["ips"]
-    return counts
+    country (None: all of them), counted once per set of tests (hourly.window_distinct())."""
+    run_sets = [{(r["run_key"], r["country_code"]) for r in rows} for _, rows in found]
+    return window_distinct(conn, run_sets, True)
 
 
 def window_unique(method: str, rows: list[dict], distinct_ips: int) -> float:

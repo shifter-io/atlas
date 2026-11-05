@@ -189,6 +189,14 @@ incremental one is `calculate --incremental`. Measured on scale-generator data (
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
+Since CALC-INC-2 the daily pools, new IPs, series IP counts and the estimates' distinct IPs come
+from the memos (`calculated/hourly.py`): a run's figures per range of its buckets
+(`calculated_run_ranges`, counted when the run is first used), the figures of a slice or point
+holding two or more runs (`calculated_slot_figures`) and the distinct IPs of each estimate run set
+(`calculated_distinct`), so an hour without a new test reads no observation for them. A late run
+(one that saw an IP first, before runs already counted) lowers that IP's first sighting; the
+memos of its product's runs finished since then are counted again (`hourly.stale_lists()`).
+Memos unused for 2 days and the ranges of runs started over 31 days ago are deleted every build.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
