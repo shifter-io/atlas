@@ -147,6 +147,25 @@ def test_hand_computed_scores_and_ranks():
     assert all(c["inputs"]["peers"] == 1 for c in alone["components"].values())
 
 
+def test_a_window_without_place_counts_has_no_diversity():
+    """The regression (CI tier1 at be7c5e2): a window with IPs but no K10 list (null place
+    counts) crashed peer_scores(); its diversity is unavailable and its score incomplete, and
+    its peers are scored without it."""
+    config, method_id = load(POLICY)
+    networks = unit_networks()
+    daily = networks[1]["windows"]["30d"]["pool"]["daily"]
+    daily |= dict.fromkeys(DIMENSIONS)
+    payload = {"as_of": AS_OF, "methodology": {"id": method_id, "settings": config}}
+    network_scores.score(networks, payload, None)
+    s = networks[1]["windows"]["30d"]["scores"]["balanced"]
+    assert s["components"]["diversity"]["state"] == "unavailable"
+    assert (s["score"], s["state"]) == (None, "incomplete")
+    assert network_scores.UNPLACED in s["reasons"]
+    others = [networks[n]["windows"]["30d"]["scores"]["balanced"] for n in (0, 2)]
+    assert [o["rank"] for o in others] == [1, 2]
+    assert others[0]["components"]["diversity"]["inputs"]["peers"] == 2
+
+
 def test_previous_rank_comes_from_the_previous_head():
     """A second build carries the first one's rank; a network the previous head lacks gets
     previous_rank null."""

@@ -36,12 +36,13 @@ from datetime import UTC, datetime
 
 from psycopg.rows import dict_row
 
-from .aggregate import product_inputs, target_score
+from .aggregate import component, product_inputs, target_score
 from .inputs import previous_products
-from .policy import effective
+from .policy import DIMENSIONS, effective
 
 # The windows whose overlap is counted once a UTC day and carried in between.
 DAILY = ("7d", "30d")
+UNPLACED = "No network place counts in this window"
 
 # Each network's distinct IPs in its window (slot: its position; kind: its kind's position),
 # then per network its IPs and those another network of its kind also has, and per pair of
@@ -192,14 +193,18 @@ def member(entry, window, old, config, as_of):
             "valid_hours": tc["score_valid_hours"],
         }
     values = lead.get("evidence", {})
+    inputs = product_inputs(
+        window["pool"], entry["pricing"], cfg, entry["kind"], window["uptime"], values
+    )
+    counts = inputs["diversity"]["inputs"]
+    if any(counts[k] is None for k in DIMENSIONS):  # no K10 list: diversity unavailable
+        inputs["diversity"] = component(None, reason=UNPLACED, inputs=counts)
     return {
         "config": cfg,
         "fresh": fresh(m["last_observed"], as_of, cfg["score_valid_hours"]),
         "targets": targets,
         "old": old,
         "evidence": lead.get("evidence_sources", []),
-        "inputs": product_inputs(
-            window["pool"], entry["pricing"], cfg, entry["kind"], window["uptime"], values
-        ),
+        "inputs": inputs,
         "observed": m["last_observed"],
     }
