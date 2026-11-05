@@ -259,6 +259,9 @@ def test_a_network_window_is_validated():
         }
         with pytest.raises(ValueError):
             network.validate(bad)
+    for entry in ({"cohort": "group", "windows": {}}, {"cohort": "network", "windows": {"1h": {}}}):
+        with pytest.raises(ValueError, match="Invalid network summary"):
+            network.validate({"schema_version": 4, "networks": [entry]})
     network.validate({"schema_version": 3, "networks": [{"cohort": "group"}]})
 
 
