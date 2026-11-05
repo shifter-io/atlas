@@ -28,7 +28,7 @@ type freshSource struct {
 func newFreshSource(t *testing.T, catalog ...store.ProviderRow) *freshSource {
 	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "fixtures", "measured", "snapshot-every-request.json"))
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

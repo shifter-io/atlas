@@ -303,7 +303,7 @@ var tailLists sync.Map
 // fixture is the every-request fixture's payload.
 func fixture() ([]byte, error) {
 	_, file, _, _ := runtime.Caller(0)
-	return os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "fixtures", "measured", "snapshot-every-request.json"))
+	return os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "fixtures", "measured", "snapshot-every-request.json"))
 }
 
 // EveryRequest is the every-request fixture's payload as Current writes it,
