@@ -84,6 +84,8 @@ type Lists struct {
 	// Fetched counts the list ids read from the database (each once per
 	// fetch), for tests and logs.
 	Fetched int
+	// net holds the network lists of a v4 build (network.go).
+	net *NetLists
 }
 
 // labels are the place and network names a list cache holds, shared by its

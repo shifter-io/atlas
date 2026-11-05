@@ -25,11 +25,15 @@ import (
 //
 // snapshotSQL reads the current build's payload, or its head without the
 // "parts" key and the head's product part count (-1 when it has none; NULL
-// for a single payload).
+// for a single payload), and whether it is a v4 head (contract K9). A v4
+// head is read without its parts count and its per-cohort overlap and fleet
+// rows (networkHeadSQL, network.go).
 const snapshotSQL = `SELECT s.build_id, s.content_hash,
- CASE WHEN s.payload ? 'parts' THEN (s.payload - 'parts')::text ELSE s.payload::text END,
- CASE WHEN s.payload ? 'parts' THEN coalesce((s.payload->'parts'->>'products')::int, -1) END
- FROM public.calculated_snapshots s JOIN public.current_calculation c ON c.build_id = s.build_id WHERE c.singleton`
+ CASE WHEN n.v4 THEN ` + networkHeadSQL + `
+  WHEN s.payload ? 'parts' THEN (s.payload - 'parts')::text ELSE s.payload::text END,
+ CASE WHEN s.payload ? 'parts' AND NOT n.v4 THEN coalesce((s.payload->'parts'->>'products')::int, -1) END, n.v4
+ FROM public.calculated_snapshots s JOIN public.current_calculation c ON c.build_id = s.build_id
+ CROSS JOIN LATERAL (SELECT s.payload ? 'networks' AND s.payload->>'schema_version' IS NOT DISTINCT FROM '4' AS v4) n WHERE c.singleton`
 
 const productPartsSQL = `SELECT part::text FROM public.calculated_snapshot_parts
  WHERE build_id = $1 AND kind = 'product' ORDER BY position`

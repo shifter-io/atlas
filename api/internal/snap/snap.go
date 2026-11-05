@@ -1,4 +1,4 @@
-// Package snap reads the framework's published calculated snapshot (v1 or v2,
+// Package snap reads the framework's published calculated snapshot (v1 to v4,
 // see src/lib/measured-types.ts and proxy-index calculated/calculator.py build()).
 //
 // Only the fields the website maps are typed. Num fields decode missing keys
@@ -9,7 +9,10 @@
 // A build stored since calculated v8 is a head and its parts (proxy-index
 // calculated/parts.py, contract K1), with its daily groups' 24-hour series
 // sparse; store reads it back as the single payload of an older build,
-// every bucket included, so it decodes here the same way.
+// every bucket included, so it decodes here the same way. A v4 build
+// (contract K9) publishes one network summary per (provider, kind) in the
+// head; store gives each as one product group, so it decodes here as a
+// payload whose every network has one group.
 package snap
 
 import (
@@ -314,6 +317,24 @@ type WindowOverlap struct {
 	ExclusiveShare   Num `json:"exclusive_share"`
 	SharedShare      Num `json:"shared_share"`
 	ComparedProducts Num `json:"compared_products"`
+	// Peers is a v4 network window's overlap with each network of its kind
+	// it shares IPs with (nil in a group window: its pairs are the
+	// snapshot's overlap rows).
+	Peers []OverlapPeer `json:"peers"`
+}
+
+// OverlapPeer is one row of a network window's overlap.peers (payload v4).
+type OverlapPeer struct {
+	Provider  string `json:"provider"`
+	ProductID Num    `json:"product_id"`
+	SharedIps Num    `json:"shared_ips"`
+	IpsOurs   Num    `json:"ips_ours"`
+	IpsTheirs Num    `json:"ips_theirs"`
+}
+
+func (v *OverlapPeer) UnmarshalJSON(d []byte) error {
+	type plain OverlapPeer
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 func (v *WindowOverlap) UnmarshalJSON(d []byte) error {
@@ -467,9 +488,18 @@ func (v *Product) UnmarshalJSON(d []byte) error {
 }
 
 // Criteria is what makes a product group's cohort; Country is the requested
-// country of a daily test's cohort (nil for census/pulse cohorts).
+// country of a daily test's cohort (nil for census/pulse cohorts). A v4
+// network entry has a null Country, its groups' requested countries
+// (sorted, upper case) and how many groups it summarizes.
 type Criteria struct {
-	Country *string `json:"country"`
+	Country            *string  `json:"country"`
+	RequestedCountries []string `json:"requested_countries"`
+	Groups             Num      `json:"groups"`
+}
+
+func (v *Criteria) UnmarshalJSON(d []byte) error {
+	type plain Criteria
+	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
 // ProxyKind is a product's proxy category: its kind, residential when the

@@ -562,7 +562,8 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 		func() error {
 			var s SnapshotRow
 			var parts *int
-			err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &parts)
+			var v4 bool
+			err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &parts, &v4)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
 			}
@@ -578,6 +579,10 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 			if afterSnapshot != nil {
 				afterSnapshot()
 			}
+			if v4 {
+				return s.readNetworks(ctx, tx, lists)
+			}
+			lists.dropNetworks()
 			return s.readLists(ctx, tx, lists)
 		},
 		func() error { return in.loadEvents(ctx, tx) },

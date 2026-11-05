@@ -597,3 +597,39 @@ an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update
 released" when the hour is missing) with that hour's IPs as its value: no
 answer text names the estimate (owner decision on the API-ESTIMATES-1 review).
 The `/v1/events` rows keep the framework's event kind name.
+
+## Payload v4 (network summaries) (API-SUM-1)
+
+A build whose head has `schema_version` 4 and `networks` (proxy-index calculated
+contract K9) is read from its head and its network lists (contract K10) only: no
+product part and no group list. The head is read without its `parts` count, its
+`overlap` rows (a network's are its windows' `overlap.peers`) and its per-cohort
+`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. A build before v4
+is read as before.
+
+Each network entry is served as one product group of the payload, so every answer
+keeps its fields and rules. Per network and proxy kind there is exactly one group:
+
+| Field the build reads | From the network entry |
+|---|---|
+| `id`, `cohort` | As published: `<provider>:<kind>:network`, `network` (incident ids `outage:<id>:…` carry it) |
+| `product_id`, `provider`, `name`, `kind`, `product`, `census`, `pricing`, `outages` | As published (the headline product's) |
+| `criteria.country` | The one requested country when `requested_countries` has exactly one, else null |
+| A window's scalars, `metrics`, `uptime`, `pool` figures, `targets`, `series`, `scores.balanced`, `success_delta`, `estimated`, `overlap` shares | As published |
+| `breakdowns.country`, `pool.countries_breakdown` | Every country row of the window's network list |
+| `breakdowns.city_asn` (`coverageEvidence`) | Every City × ASN row of the list |
+| `pool.asns_breakdown` | The 50 ASN rows with most IPs (most IPs first, then Python's `str()` order) |
+| Region, city and ASN place rows (`/places`, place ranks, country pages) | Every row of the list, read whole |
+| `breakdown_entries` | The list's row counts |
+| The snapshot's 30d `overlap` rows (`overlaps` of the ownership card) | One row per pair of networks of a kind and window, from `overlap.peers`, with cohort `network`; peers with equal shared IPs keep the networks' order, then their `overlap.peers` order |
+
+A list row keeps IPs, requests, successes and p50 only: `observations`,
+`challenges`, `blocks`, `p90` and `p99` of these rows are null (no answer reads
+them). A network of one product group answers byte for byte as that group does in
+a v3 build, except for the `id` and `cohort` strings, the schema version and, for a
+group with more than 50 ASNs with IPs, the provider's `asns` (a v3 build reads that
+group's ASN pool list whole). Until
+API-COVERAGE-1 reads the summaries directly, a network answer's `productGroups` is 1
+and its `requestedCountries` holds a country only for a network of one requested
+country; the summaries' `criteria.groups` and `criteria.requested_countries` are
+read (`snap.Criteria`) but not served yet.
