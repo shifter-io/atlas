@@ -1,0 +1,228 @@
+# Work areas of proxy-index for orchd: one open task per area (GLOBAL 3.1). The repository keeps no
+# area table, so this map is derived from the tree: one area per group of subpackages of
+# src/proxy_index that change together, each with its tests (tests/ is flat, so by file prefix and,
+# for the rest, by the package a test mainly imports), its test fixtures, scripts, configs and
+# documentation page. The package root (__init__.py) and its entry points (cli.py, models.py,
+# errors.py), the project manifest and lockfile, CI with its gate scripts (scripts/ci/) and
+# scripts/postgres_local.py, which starts the CI jobs' database, the shared test helpers, the
+# README and the developer guide are `shared`. The globs are pairwise disjoint and cover every
+# tracked file. A path that matches no glob (a new provider config, a new top-level test) counts as
+# area:shared, which conflicts with every area.
+# Generators checked: formula/ writes formulas/<network>.json and formulas/SUMMARY.md (same area);
+# no CI step compares a committed output with its generator.
+v = 1
+
+[areas]
+# the browser pulse: the browser package, its host (launchd and systemd examples), capture script,
+# settings example, tests, fixtures and docs/browser.html
+browser = [
+    "src/proxy_index/browser/**",
+    "tests/test_browser_*.py",
+    "tests/browser_site.py",
+    "tests/browser_targets_cases.py",
+    "tests/fixtures/browser/**",
+    "docs/browser.html",
+    "scripts/browser_capture.py",
+    "configs/browser-pulse.example.toml",
+    "configs/launchd/**",
+    "configs/systemd/**",
+]
+# the calculated website data: the calculated package, its schema and migrations, the methodology
+# files its policy loads, the snapshots of its schema versions and the tests of the figures it
+# computes
+calculated = [
+    "src/proxy_index/calculated/**",
+    "tests/test_calculated*.py",
+    "tests/test_calc_*.py",
+    "tests/test_census_pulse.py",
+    "tests/test_latency_history.py",
+    "tests/test_retention.py",
+    "tests/test_scoring.py",
+    "tests/test_sqlwindow.py",
+    "tests/fixtures/calculated_v*.sql",
+    "configs/methodology.toml",
+    "configs/staging-methodology.toml",
+]
+# the measurement campaign: the campaign package, its fakes, data fixtures, tests and
+# docs/campaign.html
+campaign = [
+    "src/proxy_index/campaign/**",
+    "tests/test_campaign_*.py",
+    "tests/test_pulse_fleet.py",
+    "tests/campaign_fakes.py",
+    "tests/campaign_deploy_fakes.py",
+    "tests/fixtures/campaign-data/**",
+    "docs/campaign.html",
+]
+# private network onboarding: the onboarding package, its scripts, configs, tests and
+# docs/onboarding.html (which tests/test_onboarding_round.py reads)
+onboarding = [
+    "src/proxy_index/onboarding/**",
+    "tests/test_onboarding*.py",
+    "tests/test_geonode.py",
+    "scripts/onboarding-*.py",
+    "scripts/geonode-local-check.py",
+    "configs/*-onboarding.toml",
+    "configs/onboarding.env.example",
+    "docs/onboarding.html",
+]
+# the manager: the orchestrator package (admin API, nodes, staging, events), the node process and
+# its TLS, the staging config, the local overnight collection that drives them, and their tests
+orchestrator = [
+    "src/proxy_index/orchestrator/**",
+    "src/proxy_index/node.py",
+    "src/proxy_index/node_tls.py",
+    "tests/test_orchestrator*.py",
+    "tests/test_admin.py",
+    "tests/test_manager_*.py",
+    "tests/test_node.py",
+    "tests/test_node_tls.py",
+    "tests/test_db_drain.py",
+    "tests/test_staging_reports.py",
+    "tests/test_tape_events.py",
+    "tests/test_outage_scenario.py",
+    "configs/staging.toml",
+    "scripts/shifter_local_overnight.py",
+]
+# the daily test and its inputs: the daily, DB-IP, enrichment, hour-estimate and hour-formula
+# packages, the formulas they publish, db-ip/ and their tests
+daily = [
+    "src/proxy_index/daily/**",
+    "src/proxy_index/dbip/**",
+    "src/proxy_index/estimates/**",
+    "src/proxy_index/formula/**",
+    "src/proxy_index/enrichment.py",
+    "formulas/**",
+    "db-ip/**",
+    "tests/test_daily*.py",
+    "tests/test_dbip*.py",
+    "tests/dbip_fakes.py",
+    "tests/test_estimates.py",
+    "tests/test_formula.py",
+    "tests/test_enrichment_cli.py",
+    "tests/test_pulse.py",
+    "scripts/migrate_enrichment.py",
+]
+# the providers: the providers package (grammars), answer classes, each provider's config and
+# pricing, their tests and the provider pages
+providers = [
+    "src/proxy_index/providers/**",
+    "src/proxy_index/answers.py",
+    "tests/test_providers.py",
+    "tests/test_grammars.py",
+    "tests/test_answer_classes.py",
+    "tests/test_network_protocol.py",
+    "tests/test_private_config.py",
+    "configs/byteful.toml",
+    "configs/dataimpulse.toml",
+    "configs/decodo.toml",
+    "configs/evomi.toml",
+    "configs/fleetproxy.toml",
+    "configs/geonode.toml",
+    "configs/infatica.toml",
+    "configs/iproyal.toml",
+    "configs/massive.toml",
+    "configs/nodemaven.toml",
+    "configs/oxylabs.toml",
+    "configs/proxy-cheap.toml",
+    "configs/proxy-seller.toml",
+    "configs/proxyempire.toml",
+    "configs/rayobyte.toml",
+    "configs/shifter.toml",
+    "configs/soax.toml",
+    "configs/webshare.toml",
+    "configs/pricing/**",
+    "docs/providers.html",
+    "docs/shifter-parameters.html",
+]
+# raw-data archive and the database server: the archive and dbserver packages and their tests
+archive = [
+    "src/proxy_index/archive/**",
+    "src/proxy_index/dbserver/**",
+    "tests/test_archive*.py",
+    "tests/test_dbserver.py",
+]
+# the measurement database: storage, the schema and its migrations, partitions, the schema
+# snapshots, the migration and rebuild scripts and their tests
+storage = [
+    "src/proxy_index/storage.py",
+    "src/proxy_index/partitions.py",
+    "src/proxy_index/schema.sql",
+    "src/proxy_index/migrate_*.sql",
+    "tests/test_storage*.py",
+    "tests/test_migration*.py",
+    "tests/test_breakdown_view.py",
+    "tests/fixtures/schema_v*.sql",
+    "tests/fixtures/database_v*.sql.gz",
+    "scripts/migrate_database.py",
+    "scripts/rebuild_database.py",
+    "scripts/rebuild_verification.py",
+    "scripts/audit_storage.py",
+    "scripts/report_storage_*.py",
+]
+# the measurement core: runner, transports, targets, outcomes, detection, statistics, sinks,
+# regions and reports, their configs, local run scripts and tests
+runner = [
+    "src/proxy_index/runner.py",
+    "src/proxy_index/transport.py",
+    "src/proxy_index/process_transport.py",
+    "src/proxy_index/targets.py",
+    "src/proxy_index/outcome.py",
+    "src/proxy_index/detect.py",
+    "src/proxy_index/stats.py",
+    "src/proxy_index/sinks.py",
+    "src/proxy_index/traffic.py",
+    "src/proxy_index/bytes_io.py",
+    "src/proxy_index/names.py",
+    "src/proxy_index/regions.py",
+    "src/proxy_index/report_html.py",
+    "tests/test_runner.py",
+    "tests/test_transport.py",
+    "tests/test_process_transport.py",
+    "tests/test_outcome.py",
+    "tests/test_targets_stats.py",
+    "tests/test_regions.py",
+    "tests/test_pulse_detect.py",
+    "tests/test_census_retry.py",
+    "tests/test_names.py",
+    "configs/targets.toml",
+    "configs/regions.yaml",
+    "configs/countries.json",
+    "configs/evidence.json.example",
+    "scripts/report_live.py",
+    "scripts/report_validation.py",
+    "scripts/measurements_local.py",
+    "scripts/check-multicore.py",
+]
+# the scale benchmark: its generator and harness, scripts/benchmark.py and their tests
+scale = [
+    "scripts/scale/**",
+    "scripts/benchmark.py",
+    "tests/test_scale_*.py",
+]
+# the package root and its entry points, the project manifest and lockfile, CI, its gate scripts,
+# the database starter its jobs use and the CI tests, the shared test helpers, the remote run
+# scripts, the private config examples, the README and the developer guide; a change here merges
+# alone
+shared = [
+    "src/proxy_index/__init__.py",
+    "src/proxy_index/cli.py",
+    "src/proxy_index/models.py",
+    "src/proxy_index/errors.py",
+    "pyproject.toml",
+    "uv.lock",
+    ".github/**",
+    ".gitignore",
+    ".git-blame-ignore-revs",
+    "scripts/ci/**",
+    "scripts/postgres_local.py",
+    "scripts/remote-check.sh",
+    "scripts/test-remote.sh",
+    "tests/helpers.py",
+    "tests/test_ci_*.py",
+    "credentials.toml.example",
+    "database.toml.example",
+    "README.md",
+    "LICENSE",
+    "docs/index.html",
+]
