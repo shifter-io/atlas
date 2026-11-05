@@ -274,7 +274,8 @@ async def test_one_failing_send_does_not_end_the_pass(tmp_path, caplog):
     host.log.close()
 
 
-async def test_a_launched_browser_identity_goes_into_the_manifest(tmp_path):
+async def test_a_launched_browser_identity_goes_into_the_manifest(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
     state = make_state(tmp_path)
     fleet = Fleet()
 
@@ -287,6 +288,12 @@ async def test_a_launched_browser_identity_goes_into_the_manifest(tmp_path):
     assert host.identity["release"] == host_module.release.RELEASE
     await host._launch_one()
     assert host.identity == CAMOUFOX
+    # BP-VERIFY-1: each launch logs the identity, so the UA can be checked from the log.
+    line = (
+        f"browser launched: Camoufox {CAMOUFOX['release']}, engine {CAMOUFOX['engine_version']},"
+        f" user agent {CAMOUFOX['user_agent']}"
+    )
+    assert caplog.text.count(line) == 1
     host.log.close()
 
 
