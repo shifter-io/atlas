@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.glassdoor.com/index.htm",
+    "status": 403,
+    "title": "Glassdoor | Relevant Job Matches and Company Research",
+    "text_head": "Your job matches\nResearch companies\nFor employers\nSign in\nYes, the job\nsearch sucks.\n\nSo we built a better way.\n\nSkip the junk.\n\nWe only deliver jobs that fit.\n\nGet Started",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_expect"
+  }
+}

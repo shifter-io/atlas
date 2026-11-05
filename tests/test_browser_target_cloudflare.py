@@ -38,6 +38,11 @@ def test_cloudflare_challenge_has_its_cases():
         "block_1015_rate_limit",
         "origin_522",
         "empty_page",
+        "real_bypassed_after_403",
+        "real_cf_block",
+        "real_challenge_page",
+        "real_no_expect",
+        "real_cleared_403_no_expect",
     }
 
 
@@ -97,6 +102,11 @@ def test_a_cloudflare_sign_or_a_407_wins_over_the_expected_text():
     assert proxy == ("proxy_error", "proxy_auth", "proxy_auth_status")
 
 
-def test_the_challenge_status_counts_only_until_the_expected_text_shows():
-    assert judged(403, "Example Domain") == ("block", "blocked", "block_status")
+def test_the_challenge_status_counts_only_on_a_blank_page():
+    """A 403 is the challenge's first response: the page it cleared to is judged by the rules,
+    with or without `expect`; a 403 with no text is a refusal."""
     assert judged(403, "Example Domain", **SHOWN) == ("ok", None, None)
+    assert judged(403, "Another page") == ("error", "no_content", "no_expect")
+    assert judged(403, "") == ("block", "blocked", "block_status")
+    assert judged(429, "Another page") == ("block", "blocked", "block_status")
+    assert judged(403, "Access denied") == ("block", "blocked", "block_marker")

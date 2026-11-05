@@ -1,0 +1,39 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Google Gemini",
+    "text_head": "Gemini\nNew chat\nSign in\nHi, I'm Gemini. Where should we start?",
+    "counts": {
+      "body:has-text(\"unusual traffic\")": 0,
+      "div[role=\"dialog\"]:has-text(\"Sign in\")": 0,
+      "form#captcha-form": 0,
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "url": "https://gemini.google.com/app/0000000000000000"
+    },
+    {
+      "t": 5.0,
+      "after_submit": true,
+      "counts": {
+        "model-response message-content": 1
+      },
+      "texts": {
+        "model-response message-content": "PRIVATE-ANSWER-MARKER placeholder text standing in for the recorded answer, which the capture keeps only as its length. It is two sentences and exactly as long as the captured answer, so the judge reads the very same numbers it read live in that same try."
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "asked": true,
+    "answer_chars": 255
+  }
+}

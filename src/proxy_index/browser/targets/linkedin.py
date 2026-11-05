@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from ...targets import PageView
 from ..contracts import LINKEDIN_PUBLIC
-from ..judge import OK, Mark, PageAssessment, count, failed, path_has
+from ..judge import BLOCK_STATUS, OK, Mark, PageAssessment, count, failed, path_has
 from . import PageTarget
 
 
@@ -56,16 +56,31 @@ class LinkedinPublic(PageTarget):
         PageTarget.judge). Statuses (407, 999, 403, ...) still count."""
         return bool(count(view, self.NAME) and count(view, self.HEADLINE))
 
+    def judge(self, view: PageView) -> PageAssessment:
+        """PageTarget.judge, except that a 999 on the authwall, login or sign-up page is that
+        page (login_wall): LinkedIn serves its logged-out redirect with 999 as well. A 999
+        without such a page stays a block, and the challenge marks still come first."""
+        result = PageTarget.judge(self, view)
+        if result.reason == BLOCK_STATUS and view.status in self.BLOCK_STATUSES:
+            return self._login_wall(view) or result
+        return result
+
     def rules(self, view: PageView) -> PageAssessment:
-        if path_has(view, self.LOGIN_PATHS):
-            return failed("login_wall", "authwall_redirect")
+        if wall := self._login_wall(view):
+            return wall
         if not count(view, self.NAME):
             return self._no_profile(view)
         return OK if count(view, self.HEADLINE) else failed("no_content", "no_headline")
 
-    def _no_profile(self, view: PageView) -> PageAssessment:
-        if view.title.strip().lower() in self.LOGIN_TITLES:
+    def _login_wall(self, view: PageView) -> PageAssessment | None:
+        """A redirect to a login path, or a login page (by its title) where no profile is."""
+        if path_has(view, self.LOGIN_PATHS):
+            return failed("login_wall", "authwall_redirect")
+        if not count(view, self.NAME) and view.title.strip().lower() in self.LOGIN_TITLES:
             return failed("login_wall", "authwall_page")
+        return None
+
+    def _no_profile(self, view: PageView) -> PageAssessment:
         if path_has(view, self.UNAVAILABLE_PATHS):
             return failed("no_content", "profile_unavailable")
         if not (view.title.strip() or view.text_head.strip()):

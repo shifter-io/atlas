@@ -1,0 +1,23 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 403,
+    "title": "Error 403 (Forbidden)!!1",
+    "text_head": "403. That’s an error.\n\nYour client does not have permission to get URL /search?q=example&hl=en&gl=us from this server. That’s all we know.",
+    "counts": {
+      "#search a h3": 0,
+      "div[aria-label=\"AI Overview\"]": 0,
+      "div[data-attrid=\"AI Overview\"]": 0,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 0
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "block",
+    "error": "blocked",
+    "reason": "block_marker",
+    "asked": false
+  }
+}

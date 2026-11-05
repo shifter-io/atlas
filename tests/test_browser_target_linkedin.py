@@ -34,6 +34,9 @@ def test_linkedin_public_has_its_cases():
         "unavailable",
         "empty_page",
         "no_name",
+        "real_authwall_999",
+        "real_ok_sign_in_modal",
+        "real_no_headline",
     }
 
 
@@ -85,6 +88,15 @@ def test_a_shown_profile_still_counts_its_status():
     assert judged("ok_marker_words", status=999) == ("block", "blocked", "block_status")
     assert judged("ok_marker_words", status=429) == ("block", "blocked", "block_status")
     assert judged("ok_marker_words", status=407)[1:] == ("proxy_auth", "proxy_auth_status")
+
+
+def test_a_999_on_the_login_page_is_the_login_wall_and_a_bare_999_a_block():
+    """LinkedIn also serves its authwall and sign-up page with 999: the page decides."""
+    assert judged("authwall", status=999) == ("error", "login_wall", "authwall_redirect")
+    assert judged("signup_in_place", status=999) == ("error", "login_wall", "authwall_page")
+    assert judged("status_999") == ("block", "blocked", "block_status")
+    assert judged("checkpoint", status=999) == ("challenge", "challenge", "checkpoint_page")
+    assert judged("ok", status=999, title="Sign Up | LinkedIn")[2] == "block_status"
 
 
 def test_marker_words_without_the_whole_profile_still_count():
