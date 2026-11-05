@@ -1,0 +1,17 @@
+{
+  "view": {
+    "final_url": "https://www.linkedin.com/in/example-person",
+    "status": 200,
+    "title": "Example Person - Example Company | LinkedIn",
+    "text_head": "Skip to main content\nLinkedIn\nTop Content\nPeople\nLearning\nJobs\nGames\nSign in\nJoin now\nExample Person\n \nExample City Area  Contact Info\n100K followers  500+ connections\n  \nSee your mutual connections\nJoin to view profile\nMessage\nExample Company",
+    "found": {
+      "h1.top-card-layout__title": 1,
+      ".top-card-layout__headline": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_headline"
+  }
+}

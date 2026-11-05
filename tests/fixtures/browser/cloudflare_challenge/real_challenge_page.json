@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.scrapingcourse.com/cloudflare-challenge",
+    "status": 403,
+    "title": "Just a moment...",
+    "text_head": "www.scrapingcourse.com\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\nPerformance and Security by Cloudflare\nPrivacy",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 1,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "challenge_page"
+  }
+}

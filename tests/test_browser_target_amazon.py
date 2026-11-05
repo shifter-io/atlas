@@ -31,6 +31,9 @@ def test_amazon_pdp_has_its_cases():
         "no_title",
         "signin_redirect",
         "empty_page",
+        "real_ok",
+        "real_robot_check",
+        "real_used_only_buy_box",
     }
 
 

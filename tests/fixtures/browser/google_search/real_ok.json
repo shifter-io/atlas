@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.google.com/search",
+    "status": 200,
+    "title": "example - Google Search",
+    "text_head": "Skip to main content\nAccessibility help\nSign in\nAI Mode\nAll\nShopping\nImages\nVideos\nShort videos\nForums\nMore\nTools\nSearch Results",
+    "found": {
+      "#search a h3": 9,
+      "form#captcha-form": 0,
+      "form[action*=\"consent.google\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}

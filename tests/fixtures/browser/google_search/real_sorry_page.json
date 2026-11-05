@@ -1,0 +1,18 @@
+{
+  "view": {
+    "final_url": "https://www.google.com/sorry/index",
+    "status": 200,
+    "title": "https://www.google.com/search?q=example&hl=en&gl=us",
+    "text_head": "\n\nAbout this page\n\nOur systems have detected unusual traffic from your computer network. This page checks to see if it's really you sending the requests, and not a robot. Why did this happen?\n",
+    "found": {
+      "#search a h3": 0,
+      "form#captcha-form": 1,
+      "form[action*=\"consent.google\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "challenge",
+    "error": "challenge",
+    "reason": "sorry_page"
+  }
+}

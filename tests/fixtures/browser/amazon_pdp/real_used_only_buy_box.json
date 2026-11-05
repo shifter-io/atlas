@@ -1,0 +1,22 @@
+{
+  "view": {
+    "final_url": "https://www.amazon.com/dp/0000000000",
+    "status": 200,
+    "title": "Amazon.com: Example Book (Example Series, Book 1): 0000000000000: Example Author: Books",
+    "text_head": "Skip to\nMain content\nBuying options\nVideos\nReviews\nKindle\n\n\n$0.00 \nor $11.99 to buy\n Audiobook\n\n\n$0.99\nwith membership \nHardcover\n\n\n$11.08\nPaperback\n\n\n$1.36\nOther Used, New, Collectible from $0.98 \nBuy Used :\n$1.36\n$1\n.\n36 \nUsed: Very Good | Details\nOnly 1 left in stock - order soon.",
+    "found": {
+      "#productTitle": 1,
+      "#corePrice_feature_div .a-price": 0,
+      "#corePriceDisplay_desktop_feature_div .a-price": 0,
+      "#price_inside_buybox": 0,
+      "#price": 0,
+      "form[action*=\"validateCaptcha\"]": 0,
+      "a[href*=\"/dogsofamazon\"]": 0
+    }
+  },
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null
+  }
+}

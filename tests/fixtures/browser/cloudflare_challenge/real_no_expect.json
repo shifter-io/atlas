@@ -1,0 +1,20 @@
+{
+  "view": {
+    "final_url": "https://www.crunchbase.com/",
+    "status": 200,
+    "title": "Crunchbase | Private Company Data & Predictive Intelligence",
+    "text_head": "Solutions\nProducts\nResources\nAdvanced Search\nPricing\nSearch Crunchbase\nSearch\nLog In\nStart Free Trial\nBefore It's News, It's In Crunchbase",
+    "found": {
+      "body:has-text(\"Example Domain\")": 0,
+      "#challenge-form": 0,
+      "#challenge-stage": 0,
+      "script[src*=\"/cdn-cgi/challenge-platform/\"][src*=\"/orchestrate/\"]": 0,
+      "#cf-error-details": 0
+    }
+  },
+  "expect": {
+    "verdict": "error",
+    "error": "no_content",
+    "reason": "no_expect"
+  }
+}

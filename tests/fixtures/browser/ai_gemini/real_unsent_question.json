@@ -1,0 +1,24 @@
+{
+  "page": {
+    "url": "https://gemini.google.com/app",
+    "status": 200,
+    "title": "Google Gemini",
+    "text_head": "Gemini\nNew chat\nImages\nSign in to save activity\nSettings\nSign in\nGet App\nHi, I'm Gemini. Where should we start?\nWhat can you do?",
+    "counts": {
+      "body:has-text(\"unusual traffic\")": 0,
+      "div[role=\"dialog\"]:has-text(\"Sign in\")": 0,
+      "form#captcha-form": 0,
+      "rich-textarea .ql-editor": 1
+    },
+    "texts": {}
+  },
+  "timeline": [],
+  "expect": {
+    "verdict": "error",
+    "error": "browser_error",
+    "reason": "send_failed",
+    "answer_chars": 0,
+    "asked": true,
+    "waited_s": 30
+  }
+}
