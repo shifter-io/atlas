@@ -278,7 +278,7 @@ editorial ones.
   Over loopback HTTP with
   keep-alive and brotli bodies, p50 is about 0.15-0.2 ms and p99 about 0.5-0.7 ms
   for the dataset, rankings, a network, search and events (`TestServeFromDatabase`
-  asserts p99 < 2 ms). A full rebuild with the measured snapshot published took
+  asserts p99 < 2 ms; CI runs it alone, see `AGENTS.md`). A full rebuild with the measured snapshot published took
   about 1 s, mostly brotli on the 1.9 MB dataset, before the dataset became a file
   written only on a new marker.
 
