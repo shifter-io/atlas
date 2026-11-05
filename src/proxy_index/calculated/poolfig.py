@@ -1,17 +1,18 @@
-"""`aggregate.pool()`'s window counts and shares from database-counted inputs.
+"""A window's pool counts and shares from its inputs: the one formula of `aggregate.pool()`.
 
 `pool_figures(sqlwindow.window_inputs(...)[key], since, hours, hosting)` equals
-`aggregate.pool(observations, since, hours, hosting)[0]` for the same window's observations. For
-now this duplicates the formula part of `pool()`; once the incremental calculation counts its
-missed windows in the database, `pool()` calls this and the copy goes.
+`aggregate.pool(observations, since, hours, hosting)[0]` for the same window's observations:
+`pool()` turns its per-IP entries into the same inputs (`entry_inputs()`) and calls it, so the
+full and the incremental calculation share the formula.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from .policy import HOSTING_USAGE_TYPES
-from .sqlwindow import WindowInputs
+from .sqlwindow import LABELS, Combo, WindowInputs
 
 BIN = timedelta(minutes=5)
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
@@ -59,3 +60,36 @@ def pool_figures(
         "observations": inputs.observations,
         "shares_basis": "unique exit IPs with the DB-IP field (unknowns excluded)",
     }
+
+
+def entry_inputs(ips) -> WindowInputs:
+    """The inputs of `aggregate.pool()`'s per-IP entries: one combination per IP (its first row's
+    labels), first_seen keyed by the exact product_first_seen, which equals the 5-minute bins for
+    a cutoff on the grid."""
+    combos, recurring, matched, first_seen = [], 0, 0, Counter()
+    for e in ips.values():
+        o, asked = e["row"], e["asked"]
+        cc = o.get("country_code")
+        located = bool(cc and asked)
+        combos.append(
+            Combo(
+                place=tuple(o.get(f) for f in LABELS[:5]),
+                network=(o.get("asn"), o.get("asn_organization")),
+                usage_type=o.get("usage_type"),
+                ips=1,
+                observations=e["count"],
+                located=int(located),
+                geo_matched=int(located and asked == {cc.lower()}),
+            )
+        )
+        recurring += len(e["days"]) >= 2
+        matched += bool(o.get("matched"))
+        first_seen[o["product_first_seen"]] += 1
+    return WindowInputs(
+        combos=tuple(combos),
+        unique_ips=len(ips),
+        recurring_ips=recurring,
+        observations=sum(e["count"] for e in ips.values()),
+        enrichment_matched=matched,
+        first_seen=dict(first_seen),
+    )

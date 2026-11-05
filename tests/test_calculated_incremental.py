@@ -1,5 +1,6 @@
-"""CALC-INC-1a: the incremental calculation (calculated/incremental.py) equals the full one, and a
-window whose runs did not change returns no observation row to Python.
+"""CALC-INC-1a and 1b: the incremental calculation (calculated/incremental.py) equals the full one,
+a window whose runs did not change returns no observation row to Python, and neither does a
+missed window: it is counted in the database and its list written as it is counted.
 
 The 3-day fixture holds measured runs moved back in time in the database, each with seeded random
 observations of documentation IPs labelled in two DB-IP releases (test_sqlwindow's labels:
@@ -9,7 +10,8 @@ split by an hour (so by a window and a slice edge), a run older than the window 
 empty windows), census and pulse batches (census-pulse groups), a browser batch, and a late run
 added halfway through. At every hourly cutoff of the 3 days the incremental build, made first so
 it counts its own misses, and the full build (the oracle) read back byte-identical, and the full
-build's verify-on-hit recounts every list the incremental build wrote.
+build's verify-on-hit recounts every list the incremental build wrote. No incremental build reads
+an observation row, and each list it wrote stores its window's first-seen histogram.
 """
 
 import json
@@ -100,9 +102,15 @@ def first_difference(a, b, path="$"):
     return path, a, b
 
 
-def assert_equal(database, policy, as_of):
-    """The incremental build at as_of, then the full one: equal as returned and as read back."""
+def assert_equal(database, policy, as_of, log=None):
+    """The incremental build at as_of, then the full one: equal as returned and as read back.
+    With log (statements()), the incremental build returns no observation row to Python."""
+    start = len(log or ())
     new = calculate(database, policy, as_of=as_of, mode="incremental")
+    if log is not None:
+        assert observation_rows(log[start:]) == 0, as_of
+        assert all(releases.RUN_OBSERVATIONS not in query for query, _ in log[start:])
+        assert_histograms(database, int(new["snapshot_id"]))
     full = calculate(database, policy, as_of=as_of, mode="full")
     assert new["snapshot_id"] != full["snapshot_id"]
     a, b = (without(store.read(database, p["snapshot_id"])) for p in (new, full))
@@ -112,6 +120,20 @@ def assert_equal(database, policy, as_of):
     ), as_of
     assert payload_mismatches(database, int(new["snapshot_id"])) == []
     return a
+
+
+def assert_histograms(database, build_id):
+    """Every group list the build wrote stores its window's IPs per first-seen bin from the
+    window's start on: they sum to the window's new IPs."""
+    query = (
+        "SELECT w.new_ips,l.figures->'first_seen' FROM calculated_windows w "
+        "JOIN calculated_lists l USING(list_id) WHERE w.build_id=%s AND w.target='' "
+        "AND l.created_build=%s"
+    )
+    with connect(database) as conn:
+        for new_ips, bins in conn.execute(query, (build_id, build_id)):
+            assert bins is not None and sum(bins.values()) == new_ips, build_id
+            assert all(datetime.fromisoformat(at).tzinfo == UTC for at in bins)
 
 
 def lists_count(database):
@@ -127,19 +149,24 @@ async def test_incremental_equals_full_at_every_hourly_cutoff(day, database, tmp
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
-    counted, original = {"hit": 0, "miss": 0}, incremental.Incremental.window
+    counted = {"hit": 0, "miss": 0}
+    window, missed = incremental.Incremental.window, incremental.Incremental._missed
 
-    def window(self, *args):
-        found = original(self, *args)
-        counted["miss" if "breakdowns" in found[3] else "hit"] += 1
-        return found
+    def counted_window(self, *args):
+        counted["hit"] += 1
+        return window(self, *args)
 
-    monkeypatch.setattr(incremental.Incremental, "window", window)
-    seen = set()
+    def counted_miss(self, *args):
+        counted["hit"], counted["miss"] = counted["hit"] - 1, counted["miss"] + 1
+        return missed(self, *args)
+
+    monkeypatch.setattr(incremental.Incremental, "window", counted_window)
+    monkeypatch.setattr(incremental.Incremental, "_missed", counted_miss)
+    log, seen = statements(monkeypatch), set()
     for hours in range(72 - 24 * day, 48 - 24 * day, -1):
         if hours == min(36, 72 - 24 * day):  # a late run: earlier than runs counted before
             await h.daily("beta", "us", 60 * HOUR)
-        payload = assert_equal(database, policy, end - hours * HOUR)
+        payload = assert_equal(database, policy, end - hours * HOUR, log)
         for p in payload["products"]:
             for w in p["windows"].values():
                 seen.add(("data", bool(w["metrics"]["completed"])))
@@ -168,7 +195,7 @@ async def test_a_hit_window_returns_no_observation_row(database, tmp_path, monke
     monkeypatch.undo()
     # Every window reused its list (none written) and no observation row came back.
     assert lists_count(database) == lists and observation_rows(log) == 0
-    assert all(incremental.RUN_OBSERVATIONS not in query for query, _ in log)
+    assert all(releases.RUN_OBSERVATIONS not in query for query, _ in log)
     assert payload["products"][0]["windows"]["30d"]["breakdowns"]["country"]
     assert payload_mismatches(database, int(payload["snapshot_id"])) == []
     # The windows equal the full calculation's.
