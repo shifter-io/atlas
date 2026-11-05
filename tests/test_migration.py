@@ -745,9 +745,10 @@ async def test_calculated_v2_on_v6_migrates_in_place(databases, tmp_path):
     reference = databases()
     store.initialize(reference)
     assert catalog(database) == catalog(reference)
-    # The migrated layer calculates v3 payloads (SNAP-LISTREF-1) whose typed rows rebuild them.
+    # The migrated layer calculates v4 payloads (SNAP-LISTREF-1's lists, NET-SUM-1's networks)
+    # whose typed rows rebuild them.
     fresh = calculate(database, POLICY, as_of=store.read(database)["as_of"])
-    assert fresh["schema_version"] == 3
+    assert fresh["schema_version"] == 4
     assert payload_mismatches(database, int(fresh["snapshot_id"])) == []
 
 

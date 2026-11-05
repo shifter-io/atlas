@@ -34,7 +34,8 @@ from proxy_index.storage import connect, ingest
 
 pytest_plugins = ["test_storage"]
 
-VOLATILE = {"snapshot_id", "generated_at", "implementation_id", "schema_version"}
+# networks: a v4 head key, none in a v2 build (NET-SUM-1).
+VOLATILE = {"snapshot_id", "generated_at", "implementation_id", "schema_version", "networks"}
 
 
 def capped(tmp_path, policy=POLICY):
@@ -53,7 +54,7 @@ def both(database, policy, as_of, monkeypatch):
         old.setattr(calculator, "IMPLEMENTATION_ID", "payload-v2")
         old.setattr(store, "refer", lambda product, lists: product)
         legacy = calculate(database, policy, as_of=as_of)
-    assert new["schema_version"] == 3 and legacy["schema_version"] == 2
+    assert new["schema_version"] == 4 and legacy["schema_version"] == 2
     return new["snapshot_id"], legacy["snapshot_id"]
 
 

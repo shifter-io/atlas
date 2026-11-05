@@ -230,7 +230,9 @@ async def test_sparse_daily_series_serve_the_full_series_of_the_same_inputs(
             k: without(w, {"series"}) for k, w in f["windows"].items()
         }
     assert dropped > 0
-    assert without(sparse, VOLATILE | {"products"}) == without(full, VOLATILE | {"products"})
+    # networks (NET-SUM-1) name each build's own network lists.
+    head = VOLATILE | {"products", "networks"}
+    assert without(sparse, head) == without(full, head)
     # A scheduled group's 24h series keeps every bucket (and here availability without requests).
     scheduled = next(p for p in sparse["products"] if p["criteria"].get("schedule"))
     assert len(scheduled["windows"]["24h"]["series"]) == 288

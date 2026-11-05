@@ -13,7 +13,7 @@ from psycopg.rows import tuple_row
 
 from ..storage import connect
 from ..storage import initialize as initialize_history
-from . import netlists, parts
+from . import netlists, network, parts
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 from .slim import refer, slim
@@ -561,8 +561,8 @@ def _rows(window, version):
 
 
 def validate_payload(payload, products=None):
-    """Check the reconciling invariants of a v1, v2 or v3 snapshot before it is stored or
-    published.
+    """Check the reconciling invariants of a v1 to v4 snapshot (a v4 head's networks:
+    network.validate()) before it is stored or published.
 
     products, an iterable of product groups, replaces payload["products"]: a stored head and its
     groups are checked one group at a time (already JSON-ready: json.dumps is not repeated). A v3
@@ -570,7 +570,7 @@ def validate_payload(payload, products=None):
     before persisting its lists; a stored v3 window names its list ("lists") instead.
     """
     version = payload["schema_version"]
-    if version not in (1, 2, 3) or not payload["methodology"]["id"]:
+    if version not in (1, 2, 3, 4) or not payload["methodology"]["id"]:
         raise ValueError("Invalid snapshot contract")
     if version >= 2 and (
         not isinstance(payload["events"], list)
@@ -606,6 +606,7 @@ def validate_payload(payload, products=None):
             for score in window["scores"].values():
                 if score["state"] == "ready" and score["score"] is None:
                     raise ValueError("Ready score is missing")
+    network.validate(payload)
     if products is None:
         json.dumps(payload, allow_nan=False)
 
@@ -645,11 +646,11 @@ def write(conn, build_id, payload, config, persist):
     inserted), persisted (persist(conn, payload) writes its typed rows and returns its windows'
     list ids) and slimmed (slim.py) on its own, and so is each part of the runs, so the whole
     payload is never copied or serialized at once. A part is the payload v3 group: each window
-    names its list (slim.refer()). Then each network window gets its list, merged from the
-    groups' lists (netlists.py, contract K10). payload is not changed. Returns the slimmed payload
-    as read() assembles it (v2 windows).
+    names its list (slim.refer()). Then each network window gets its list (netlists.py, K10) and
+    the head its completed networks (network.attach(), K9). payload is not changed. Returns the
+    slimmed payload as read() assembles it (v2 windows).
     """
-    head = jsonable({k: v for k, v in payload.items() if k not in parts.KINDS})
+    head = jsonable({k: v for k, v in payload.items() if k not in (*parts.KINDS, "networks")})
     validate_payload(head, ())
     groups, rows, members = [], [], {}
     for position, group in enumerate(payload["products"]):
@@ -660,7 +661,9 @@ def write(conn, build_id, payload, config, persist):
         part = refer(kept, {label: lists[group["id"], label] for label in group["windows"]})
         rows.append(("product", position, group["id"], group["product_id"], group["cohort"], part))
     persist(conn, head | {"products": []})
-    netlists.write_network_lists(conn, build_id, payload, members)
+    written = netlists.write_network_lists(conn, build_id, payload, members)
+    head |= jsonable(network.attach(conn, payload, written))  # payload v4 (contract K9)
+    validate_payload(head, ())
     runs = [jsonable(chunk) for chunk in parts.chunks(payload["runs"])]
     rows += [("runs", n, f"runs:{n}", None, None, chunk) for n, chunk in enumerate(runs)]
     head["parts"] = {"products": len(groups), "runs": len(runs)}
