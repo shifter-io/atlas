@@ -189,6 +189,15 @@ incremental one is `calculate --incremental`. Measured on scale-generator data (
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
+The incremental calculation counts across groups (`calculated/fleetsql.py`, CALC-FLEET-1)
+from memos: each 5-minute bucket's runs digest and distinct IPs (`calculated_bucket_ips`, the
+`*` 24h series) and each IP's newest bucket (`calculated_ip_last_seen`), folded per bucket
+whose runs changed, so a late run is counted too. The `*` window totals are the IPs last seen
+in the window when no folded bucket is at or after the cutoff (the hourly build); an older
+cutoff counts its window directly and changes no memo. The 7d/30d `*` series points are one
+distinct count per daily slice (at most 4 at a time, in the calculation's snapshot). A one-group
+cohort takes its group's pool count; larger cohorts are counted again only when a member's runs
+in the window changed (`calculated_distinct`). IPs and buckets older than 31 days are collected.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
