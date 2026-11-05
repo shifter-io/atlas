@@ -200,6 +200,35 @@ def test_overlap_shares_without_ips():
     assert network_scores.shares(1, members, {1: (5, 0)}, {})["exclusive_share"] == 1.0
 
 
+def test_daily_overlaps_are_carried_within_a_utc_day():
+    """7d and 30d overlaps counted the same UTC day for the same networks are carried; the 24h
+    one, one of another day or after the cutoff, or a changed set of networks is counted."""
+    counted = {"shared_share": 0.5, "as_of": "2026-11-05T00:00:00+00:00"}
+
+    def previous(*ids, at=counted["as_of"]):
+        overlap = counted | {"as_of": at}
+        windows = {label: {"overlap": overlap} for label in ("24h", "7d", "30d")}
+        return {"networks": [{"id": i, "windows": windows} for i in ids]}
+
+    nets = [{"id": "a"}, {"id": "b"}]
+    noon = datetime(2026, 11, 5, 12, tzinfo=UTC)
+    assert network_scores.carried(nets, previous("a", "b"), noon, "30d") == {
+        "a": counted,
+        "b": counted,
+    }
+    assert network_scores.carried(nets, previous("a", "b"), noon, "7d") is not None
+    assert network_scores.carried(nets, previous("a", "b"), noon, "24h") is None
+    assert network_scores.carried(nets, None, noon, "30d") is None
+    assert network_scores.carried(nets, previous("a"), noon, "30d") is None
+    assert network_scores.carried(nets, previous("a", "b", "c"), noon, "30d") is None
+    before = previous("a", "b", at="2026-11-04T23:55:00+00:00")
+    assert network_scores.carried(nets, before, noon, "30d") is None
+    after = previous("a", "b", at="2026-11-05T12:05:00+00:00")
+    assert network_scores.carried(nets, after, noon, "30d") is None
+    unset = {"networks": [{"id": i, "windows": {"30d": {"overlap": None}}} for i in "ab"]}
+    assert network_scores.carried(nets, unset, noon, "30d") is None
+
+
 async def run(h, provider, back, requests, *, split=False):
     """A daily US run of `requests` successes, settled `back` before end (History.settle())."""
     directory = await measurement(
@@ -220,15 +249,15 @@ def place(conn, run_key, observed):
             )
 
 
-def expected_overlap(sets, products):
+def expected_overlap(sets, products, as_of):
     """The full-mode set rule (calculator.build()'s, per network): shares against the union of
-    the other networks with IPs, and one row per network sharing an IP."""
+    the other networks with IPs, and one row per network sharing an IP, counted at as_of."""
     found = {}
     for name, own in sets.items():
         peers = sorted(q for q in sets if q != name and sets[q])
         if not own:
             found[name] = {"exclusive_share": None, "shared_share": None}
-            found[name] |= {"compared_products": 0, "peers": []}
+            found[name] |= {"compared_products": 0, "peers": [], "as_of": as_of}
             continue
         shared = set().union(*(sets[q] for q in peers)) & own
         rows = [
@@ -242,15 +271,40 @@ def expected_overlap(sets, products):
             "shared_share": len(shared) / len(own),
             "compared_products": len(peers),
             "peers": rows,
+            "as_of": as_of,
         }
     return found
+
+
+def assert_set_rule(database, nets, labels, as_of):
+    """Each labelled window's overlap equals the set rule over the database's IPs, counted at
+    as_of, and ips_ours (and ips_theirs) the window's pool.unique_ips."""
+    products = {p: n["product_id"] for p, n in nets.items()}
+    with connect(database) as conn:
+        for label in labels:
+            period = nets["alpha"]["windows"][label]["period"]
+            bounds = [datetime.fromisoformat(period[k]) for k in ("start", "end")]
+            sets = {p: set() for p in nets}
+            for provider, ip_id in conn.execute(IPS, bounds).fetchall():
+                sets[provider].add(ip_id)
+            expected = expected_overlap(sets, products, as_of)
+            for provider, n in nets.items():
+                w = n["windows"][label]
+                assert w["overlap"] == expected[provider], (label, provider)
+                assert w["pool"]["unique_ips"] == len(sets[provider])
+                for peer in w["overlap"]["peers"]:
+                    assert peer["ips_ours"] == w["pool"]["unique_ips"]
+                    theirs = nets[peer["provider"]]["windows"][label]["pool"]["unique_ips"]
+                    assert peer["ips_theirs"] == theirs
 
 
 @pytest.mark.asyncio
 async def test_overlap_counts_the_ips_of_the_pool(database, tmp_path):
     """alpha and beta share 10 of their 100 IPs, gamma none; alpha's run crosses the 24h
     window's start, so its IPs before it count in 7d and 30d only. ips_ours equals the
-    window's pool.unique_ips, and every overlap equals the set rule over the database's IPs."""
+    window's pool.unique_ips, and every overlap equals the set rule over the database's IPs.
+    A later build of the same UTC day, after a gamma run saw one of beta's IPs, counts the 24h
+    overlap again and carries the published 7d and 30d ones with their own as_of."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = History(database, tmp_path, end)
     alpha = await run(h, "alpha", DAY + BUCKET, 120, split=True)
@@ -292,29 +346,26 @@ async def test_overlap_counts_the_ips_of_the_pool(database, tmp_path):
                 "ips_theirs": 100,
             }
         ],
+        "as_of": payload["as_of"],
     }
     gamma_day = nets["gamma"]["windows"]["24h"]["overlap"]
     assert (gamma_day["shared_share"], gamma_day["compared_products"]) == (0, 2)
     assert gamma_day["peers"] == []
     assert nets["alpha"]["windows"]["7d"]["overlap"]["peers"][0]["ips_ours"] == 110
+    assert_set_rule(database, nets, ("24h", "7d", "30d"), payload["as_of"])
+    store.publish(database, full["snapshot_id"])
+    seen = await run(h, "gamma", 2 * HOUR, 40)  # a new run: stored runs never change
     with connect(database) as conn:
-        for label in ("24h", "7d", "30d"):
-            period = nets["alpha"]["windows"][label]["period"]
-            bounds = [datetime.fromisoformat(period[k]) for k in ("start", "end")]
-            sets = {p: set() for p in nets}
-            for provider, ip_id in conn.execute(IPS, bounds).fetchall():
-                sets[provider].add(ip_id)
-            expected = expected_overlap(sets, products)
-            for provider, n in nets.items():
-                w = n["windows"][label]
-                assert w["overlap"] == expected[provider], (label, provider)
-                assert w["pool"]["unique_ips"] == len(sets[provider])
-                for peer in w["overlap"]["peers"]:
-                    assert peer["ips_ours"] == w["pool"]["unique_ips"]
-                    assert (
-                        peer["ips_theirs"]
-                        == nets[peer["provider"]]["windows"][label]["pool"]["unique_ips"]
-                    )
+        place(conn, seen, {end - 2 * HOUR: ips[150:151]})
+        conn.execute(PRODUCT_IPS)
+    later = store.read(database, calculate(database, policy, as_of=end + BUCKET)["snapshot_id"])
+    again = {n["provider"]: n for n in later["networks"]}
+    assert_set_rule(database, again, ("24h",), later["as_of"])
+    assert again["gamma"]["windows"]["24h"]["overlap"]["shared_share"] == pytest.approx(1 / 51)
+    for label in ("7d", "30d"):
+        for provider, n in again.items():
+            assert n["windows"][label]["overlap"] == nets[provider]["windows"][label]["overlap"]
+        assert again["gamma"]["windows"][label]["pool"]["unique_ips"] == 51
 
 
 def swapped(score, group):

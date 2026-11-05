@@ -19,9 +19,9 @@ attach() completes the windows in store.write(), once the network lists are writ
 - the K10 list id and entry counts (lists, breakdown_entries, pool.list_entries) and the place
   counts they give (pool countries, regions, cities and asns, also in pool.daily);
 - the groups' estimates (estimates/window.py) summed, scaled by the network's distinct IPs;
-- the ownership overlap, counted in the database over the same window-bounded IPs, and the
-  balanced score, rank and readiness, against the networks of the same kind and window
-  (network_scores.py).
+- the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
+  once a UTC day, carried from the previous head in between), and the balanced score, rank
+  and readiness, against the networks of the same kind and window (network_scores.py).
 """
 
 from __future__ import annotations
@@ -286,7 +286,8 @@ def attach(conn, payload, written):
                 runs[entry["id"], label, part] = w["_runs"]
                 buckets[entry["id"], label, part] = (since, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
-    shared = network_scores.overlap(conn, payload["networks"])
+    previous = parts.previous(conn, groups=False)
+    shared = network_scores.overlap(conn, payload["networks"], previous, payload["as_of"])
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():
@@ -303,7 +304,7 @@ def attach(conn, payload, written):
             windows[label] = complete(w, ips, points, found, estimated.get(key))
             windows[label]["overlap"] = shared[key]
         networks.append(entry | {"windows": windows})
-    network_scores.score(networks, payload, parts.previous(conn, groups=False))
+    network_scores.score(networks, payload, previous)
     return {"networks": networks}  # store.write() validates them (validate())
 
 

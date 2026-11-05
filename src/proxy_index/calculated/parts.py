@@ -62,10 +62,12 @@ SCORES = (
     "t.key,jsonb_build_object('score',t.value->'score')),'{}') FROM jsonb_each(w.value->'targets') "
     "t))),'{}') FROM jsonb_each(r.value->'windows') w))"
 )
-# And of its head networks (contract K9): id and each window's scores (they have no target score).
+# And of its head networks (contract K9): id and each window's scores (they have no target
+# score) and overlap (network_scores.carried()).
 NETWORK_SCORES = (
     "(SELECT coalesce(jsonb_agg(jsonb_build_object('id',n->'id','windows',(SELECT coalesce("
-    "jsonb_object_agg(w.key,jsonb_build_object('scores',w.value->'scores','targets','{}'::jsonb)),"
+    "jsonb_object_agg(w.key,jsonb_build_object('scores',w.value->'scores','targets','{}'::jsonb,"
+    "'overlap',w.value->'overlap')),"
     "'{}') FROM jsonb_each(n->'windows') w))),'[]') FROM jsonb_array_elements(coalesce("
     "payload->'networks','[]')) n)"
 )
@@ -261,7 +263,8 @@ def read(conn, build_id):
 def previous(conn, groups=True):
     """The current build's as_of, methodology id, groups and head networks with only their id
     and scores (what inputs.previous_products() reads), projected in SQL; None without a
-    current build. Without groups, its products are [] (network.attach() reads the networks)."""
+    current build. Without groups, its products are [] (network.attach() reads the networks and
+    their overlaps)."""
     found = conn.cursor(row_factory=tuple_row).execute(
         "SELECT build_id,payload->'as_of',payload->'methodology'->'id',"
         + NETWORK_SCORES

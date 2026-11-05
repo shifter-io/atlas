@@ -44,7 +44,7 @@ WINDOW_KEYS = {
     "lists",
     "breakdown_entries",
 }
-OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers"}
+OVERLAP = {"exclusive_share", "shared_share", "compared_products", "peers", "as_of"}
 # Distinct IPs of a provider's runs (all of one kind here) in a window.
 DISTINCT = (
     "SELECT count(DISTINCT o.ip_id) FROM ip_observations o JOIN test_runs r USING(run_key) "

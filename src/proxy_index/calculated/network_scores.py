@@ -21,19 +21,27 @@ balanced score is, else partial with completed requests, else unavailable.
 
 overlap() counts, in one statement per window, each network's distinct IPs against the other
 networks of its kind. The IPs are the window's observations of the network's runs in the window
-(the set its pool.unique_ips counts, hourly.bucket_ips() with the window as one point), so
-ips_ours equals pool.unique_ips. No IP set is held in Python.
+(the set its pool.unique_ips counts, hourly.bucket_ips() with the window as one point), so a
+freshly counted ips_ours equals pool.unique_ips. No IP set is held in Python. Each overlap's
+"as_of" is the cutoff it was counted at. The 24h overlap is counted every build; the 7d and 30d
+overlaps once a UTC day (owner decision, NET-SUM-2 question 1): a build whose previous head has
+them for the same networks, counted the same UTC day, carries them (carried()), so they can be
+up to a day old and their ips_ours is the pool of their own "as_of".
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import UTC, datetime
 
 from psycopg.rows import dict_row
 
 from .aggregate import product_inputs, target_score
 from .inputs import previous_products
 from .policy import effective
+
+# The windows whose overlap is counted once a UTC day and carried in between.
+DAILY = ("7d", "30d")
 
 # Each network's distinct IPs in its window (slot: its position; kind: its kind's position),
 # then per network its IPs and those another network of its kind also has, and per pair of
@@ -51,17 +59,22 @@ SELECT a.slot,b.slot,count(*),NULL FROM m a JOIN m b ON b.kind=a.kind AND b.ip_i
  AND b.slot<>a.slot GROUP BY 1,2"""
 
 
-def overlap(conn, networks):
+def overlap(conn, networks, previous, as_of):
     """{(network id, window label): overlap} of networks still holding their "_runs"
     (network.window()): exclusive and shared share of the network's IPs against the union of
-    the other networks of its kind with IPs (compared_products), and one peer row per such
-    network sharing at least one IP. A network without IPs has null shares and no peers."""
+    the other networks of its kind with IPs (compared_products), one peer row per such network
+    sharing at least one IP, and "as_of" (when counted). A network without IPs has null shares
+    and no peers. previous is parts.previous(): a daily window it carries is not counted."""
     labels = defaultdict(list)
     for entry in networks:
         for label, w in entry["windows"].items():
             labels[label].append((entry, w))
     found = {}
     for label, members in labels.items():
+        kept = carried([e for e, _ in members], previous, as_of, label)
+        if kept is not None:
+            found |= {(e["id"], label): kept[e["id"]] for e, _ in members}
+            continue
         kinds = {kind: n for n, kind in enumerate(sorted({e["kind"] for e, _ in members}))}
         columns = [[] for _ in range(5)]
         for slot, (entry, w) in enumerate(members):
@@ -78,8 +91,25 @@ def overlap(conn, networks):
                 else:
                     pairs[row["slot"]][row["peer"]] = row["ips"]
         for slot, (entry, _) in enumerate(members):
-            found[entry["id"], label] = shares(slot, members, own, pairs[slot])
+            found[entry["id"], label] = shares(slot, members, own, pairs[slot]) | {"as_of": as_of}
     return found
+
+
+def carried(networks, previous, as_of, label):
+    """{network id: overlap} of a daily window from the previous head (parts.previous()) when
+    it has one for exactly these networks, counted the same UTC day as as_of and not after it;
+    else None (the window is counted)."""
+    if label not in DAILY or not previous:
+        return None
+    old = {n["id"]: n["windows"].get(label, {}).get("overlap") for n in previous["networks"]}
+    if set(old) != {n["id"] for n in networks}:
+        return None
+    day = as_of.astimezone(UTC).date()
+    for found in old.values():
+        counted = found and found.get("as_of") and datetime.fromisoformat(found["as_of"])
+        if not counted or counted > as_of or counted.astimezone(UTC).date() != day:
+            return None
+    return old
 
 
 def shares(slot, members, own, pairs):
