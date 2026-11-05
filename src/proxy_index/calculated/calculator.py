@@ -574,8 +574,8 @@ def build(
             factors, reference, excluded = load_factors(timed_rows, minimum)
             with_under_load(m, rows, factors, minimum, excluded)
             located = [g for g in geo_groups[key] if g["hours"] <= hours]
-            hosting = hosting_usage_types(cfg)
-            ps, ips, lists, kept = source.window(key, seen, since, hours, hosting, located)
+            host = hosting_usage_types(cfg)
+            ps, ips, lists, kept = source.window(key, seen, since, hours, host, located, build_id)
             ps["daily"] = daily_average(days, hours)
             # Pulse-slot counts stay for reference; the published value is outage time.
             up = uptime(batches, since, as_of, threshold)
