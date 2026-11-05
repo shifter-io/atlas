@@ -17,55 +17,103 @@ type listKey struct{ scope, rangeID, dimension string }
 type placeList struct{ rangeID, dimension string }
 
 // networkAnswer sums a network's product groups of one category: its 30-day
-// days, and per range its totals and every place list (the top countries go
-// into the answer, every list into the pages).
-func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*snap.Product, row *store.SnapshotRow) (*NetworkAnswer, map[placeList][]PlaceRow) {
-	ans := &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: len(groups),
-		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
+// days, and per range its totals and every place list in order (the top
+// countries go into the answer, every list into the pages). In a v4 build the
+// lists are merged from the groups' network lists, which it also gives per
+// range (srcs); the groups are network summaries.
+func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*snap.Product,
+	row *store.SnapshotRow) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
+	v4 := row != nil && row.Networks != nil
+	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups, v4),
+		RequestedCountries: requestedCountries(groups, v4), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
 		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []model.ChangeEvent{}, Tape: []model.TapeEvent{}}
-	lists := map[placeList][]PlaceRow{}
+	lists, srcs = map[placeList][]PlaceRow{}, map[string][]placeSource{}
 	for _, r := range Ranges {
-		t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
-			Lists: map[string]int{}}
-		merged := map[string]map[string]*PlaceRow{}
-		for _, d := range placeDimensions {
-			merged[d] = map[string]*PlaceRow{}
+		t, rows, s := rangeAnswer(head, kind, groups, row, v4, r.ID)
+		for d, l := range rows {
+			lists[placeList{r.ID, d}] = l
 		}
-		for _, p := range groups {
-			w := p.Window(r.ID)
-			t.Requests, t.Successes = addNum(t.Requests, w.Metrics.Completed), addNum(t.Successes, w.Metrics.Successes)
-			t.IpsSum = addNum(t.IpsSum, ipsOf(w))
-			mergeWindow(merged, row, p, w)
-		}
-		if len(groups) == 0 {
-			t.Requests, t.Successes = nan, nan
-		}
-		t.SuccessRate = ratio(t.Successes, t.Requests)
-		if len(groups) == 1 {
-			// One group: its own distinct IPs and latency are the network's.
-			w := groups[0].Window(r.ID)
-			t.UniqueIps, t.LatencyP50, t.LatencyP90, t.LatencyP99 = ipsOf(w), w.Metrics.LatencyMs.P50, w.Metrics.LatencyMs.P90, w.Metrics.LatencyMs.P99
-		}
-		for _, d := range placeDimensions {
-			rows := sortedRows(merged[d])
-			lists[placeList{r.ID, d}] = rows
-			t.Lists[d] = len(rows)
-		}
-		countries := lists[placeList{r.ID, "country"}]
-		t.ExitCountries = len(countries)
-		t.Countries = countries[:min(len(countries), TopCountries)]
-		ans.Ranges[r.ID] = t
+		ans.Ranges[r.ID], srcs[r.ID] = t, s
 	}
-	return ans, lists
+	return ans, lists, srcs
 }
 
-func requestedCountries(groups []*snap.Product) []string {
+// rangeAnswer is a network's totals of one range, its place lists by
+// dimension and, in a v4 build, the network lists they are merged from.
+func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, row *store.SnapshotRow, v4 bool,
+	rangeID string) (*RangeTotals, map[string][]PlaceRow, []placeSource) {
+	t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
+		Lists: map[string]int{}}
+	merged := map[string]map[string]*PlaceRow{}
+	for _, d := range placeDimensions {
+		merged[d] = map[string]*PlaceRow{}
+	}
+	var srcs []placeSource
+	for _, p := range groups {
+		w := p.Window(rangeID)
+		t.Requests, t.Successes = addNum(t.Requests, w.Metrics.Completed), addNum(t.Successes, w.Metrics.Successes)
+		t.IpsSum = addNum(t.IpsSum, ipsOf(w))
+		if l := netListOf(row, p, w); l != nil {
+			srcs = append(srcs, placeSource{list: l, scale: breakdownScale(w), network: head.Slug, name: head.Name, kind: kind})
+		} else if !v4 {
+			mergeWindow(merged, row, p, w)
+		}
+	}
+	if len(groups) == 0 {
+		t.Requests, t.Successes = nan, nan
+	}
+	t.SuccessRate = ratio(t.Successes, t.Requests)
+	if len(groups) == 1 {
+		// One group: its own distinct IPs and latency are the network's.
+		w := groups[0].Window(rangeID)
+		t.UniqueIps, t.LatencyP50, t.LatencyP90, t.LatencyP99 = ipsOf(w), w.Metrics.LatencyMs.P50, w.Metrics.LatencyMs.P90, w.Metrics.LatencyMs.P99
+	}
+	rows := map[string][]PlaceRow{}
+	for _, d := range placeDimensions {
+		if v4 {
+			rows[d] = mergeSources(srcs, d, "", false)
+		} else {
+			rows[d] = sortedRows(merged[d])
+		}
+		t.Lists[d] = len(rows[d])
+	}
+	countries := rows["country"]
+	t.ExitCountries = len(countries)
+	t.Countries = countries[:min(len(countries), TopCountries)]
+	return t, rows, srcs
+}
+
+// productGroups is how many product groups the groups stand for: a v4
+// network summary for its criteria.groups (one when it names none).
+func productGroups(groups []*snap.Product, v4 bool) int {
+	if !v4 {
+		return len(groups)
+	}
+	n := 0
+	for _, p := range groups {
+		n++
+		if g := p.Criteria.Groups; g.OK() && g > 1 {
+			n += int(g) - 1
+		}
+	}
+	return n
+}
+
+// requestedCountries is the groups' requested countries, upper case and
+// sorted: a v4 network summary's own list, else each group's country.
+func requestedCountries(groups []*snap.Product, v4 bool) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, p := range groups {
-		if cc := strings.ToUpper(model.SV(p.Criteria.Country)); cc != "" && !seen[cc] {
-			seen[cc] = true
-			out = append(out, cc)
+		ccs := []string{model.SV(p.Criteria.Country)}
+		if v4 {
+			ccs = p.Criteria.RequestedCountries
+		}
+		for _, cc := range ccs {
+			if cc = strings.ToUpper(cc); cc != "" && !seen[cc] {
+				seen[cc] = true
+				out = append(out, cc)
+			}
 		}
 	}
 	sort.Strings(out)
@@ -223,7 +271,10 @@ func addCountryRows(by map[string]map[string][]PlaceRow, rangeID string, rows []
 func (pg *Pages) addCityRows(rangeID string, rows []PlaceRow, head NetworkRow, kind string) {
 	for _, r := range tagged(rows, head, kind) {
 		k := listKey{scope: "country/" + model.SV(r.CountryCode), rangeID: rangeID, dimension: "city"}
-		pg.lists[k] = append(pg.lists[k], r)
+		if pg.lists[k] == nil {
+			pg.lists[k] = &placeIndex{}
+		}
+		pg.lists[k].all = append(pg.lists[k].all, r)
 	}
 }
 
@@ -241,7 +292,10 @@ func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]P
 				rows = []PlaceRow{}
 			}
 			ans.Ranges[r.ID] = rows
-			ans.Cities[r.ID] = len(pg.lists[listKey{"country/" + cc, r.ID, "city"}])
+			ans.Cities[r.ID] = 0
+			if l := pg.lists[listKey{"country/" + cc, r.ID, "city"}]; l != nil {
+				ans.Cities[r.ID] = l.count()
+			}
 			for _, row := range rows {
 				if ans.Country == nil {
 					ans.Country = row.Country
@@ -258,8 +312,8 @@ func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]P
 		}
 		pg.Countries.Countries = append(pg.Countries.Countries, idx)
 	}
-	for k, rows := range pg.lists {
-		if strings.HasPrefix(k.scope, "country/") {
+	for k, l := range pg.lists {
+		if rows := l.all; strings.HasPrefix(k.scope, "country/") {
 			sort.Slice(rows, func(i, j int) bool { return placeLess(rows[i], rows[j]) })
 		}
 	}
@@ -308,35 +362,38 @@ type PlacePage struct {
 	Rows        []PlaceRow `json:"rows"`
 }
 
-// List is a page of a precomputed list; ok is false for an unknown list.
-// The query keeps rows whose code, names or ASN contain every token
-// (case-insensitive); pages count from 1.
+// List is a page of a list; ok is false for an unknown list. The query
+// keeps rows whose code, names or ASN contain every token (case-insensitive);
+// pages count from 1. A v4 build's first page without a query is the one it
+// computed; another page merges the list's rows (placeIndex).
 func (pg *Pages) List(generatedAt, scope, rangeID, dimension, query string, page int) (*PlacePage, bool) {
 	if !pg.known(scope, dimension) {
 		return nil, false
 	}
-	rows := pg.lists[listKey{scope, rangeID, dimension}]
 	tokens := Tokens(query)
-	if len(tokens) > 0 {
-		kept := []PlaceRow{}
-		for _, r := range rows {
-			if matchesAll(r, tokens) {
-				kept = append(kept, r)
-			}
-		}
-		rows = kept
-	}
 	out := &PlacePage{GeneratedAt: generatedAt, Scope: scope, Range: rangeID, Dimension: dimension, Query: strings.Join(tokens, " "),
-		Page: page, PageSize: PageSize, Total: len(rows), Pages: (len(rows) + PageSize - 1) / PageSize, Rows: []PlaceRow{}}
-	if start := (page - 1) * PageSize; start < len(rows) {
-		out.Rows = rows[start:min(len(rows), start+PageSize)]
+		Page: page, PageSize: PageSize, Rows: []PlaceRow{}}
+	l := pg.lists[listKey{scope, rangeID, dimension}]
+	if l == nil {
+		return out, true
 	}
+	rows := l.first
+	if l.srcs == nil || page > 1 || len(tokens) > 0 {
+		rows = l.rows(tokens)
+		if start := (page - 1) * PageSize; start < len(rows) {
+			out.Rows = rows[start:min(len(rows), start+PageSize)]
+		}
+		out.Total = len(rows)
+	} else {
+		out.Rows, out.Total = append(out.Rows, rows...), l.total
+	}
+	out.Pages = (out.Total + PageSize - 1) / PageSize
 	return out, true
 }
 
 func (pg *Pages) known(scope, dimension string) bool {
 	if cc, ok := strings.CutPrefix(scope, "country/"); ok {
-		return dimension == "city" && pg.Country[cc] != nil
+		return (dimension == "city" || dimension == "region" && pg.v4) && pg.Country[cc] != nil
 	}
 	return pg.Network[scope] != nil && validDimension(dimension)
 }

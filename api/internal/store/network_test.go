@@ -86,7 +86,7 @@ func TestSetNetworksGivesEachNetworkAsOneGroup(t *testing.T) {
 		t.Errorf("criteria %+v, %+v", a.Criteria, b.Criteria)
 	}
 	w := a.Windows["30d"]
-	if bd := w.Breakdowns; len(bd["country"]) != 2 || len(bd["city_asn"]) != 2 || bd["region"] != nil || bd["country"][0].SuccessRate != 0.9 ||
+	if bd := w.Breakdowns; len(bd["country"]) != 2 || bd["city_asn"] != nil || bd["region"] != nil || bd["country"][0].SuccessRate != 0.9 ||
 		!math.IsNaN(bd["country"][1].Completed.F()) || bd["country"][0].P90.OK() {
 		t.Errorf("breakdowns %+v", bd)
 	}
@@ -94,7 +94,7 @@ func TestSetNetworksGivesEachNetworkAsOneGroup(t *testing.T) {
 		t.Errorf("breakdown_entries %v", e)
 	}
 	asns := w.Pool.AsnsBreakdown
-	if len(asns) != asnsBreakdownRows || asns[0].Ips != 60 || asns[49].Ips != 11 || w.Pool.UniqueIps != 9 {
+	if len(asns) != 60 || asns[0].Ips != 60 || asns[59].Ips != 1 || w.Pool.UniqueIps != 9 {
 		t.Errorf("pool ASNs %d rows (first %+v), unique IPs %v", len(asns), asns[0], w.Pool.UniqueIps)
 	}
 	if c := w.Pool.CountriesBreakdown; len(c) != 2 || c[0].CountryCode != "US" || c[1].Ips != 5 {
@@ -112,24 +112,21 @@ func TestSetNetworksGivesEachNetworkAsOneGroup(t *testing.T) {
 	}
 }
 
-// The typed rows of a network window are its list's, with NULL for the
-// counters a compact row does not keep; names are shared.
-func TestSetNetworksGivesTheTypedRows(t *testing.T) {
+// A network window's list is the snapshot's compact list, as loaded; a
+// window naming a list not loaded has none.
+func TestSetNetworksKeepsTheCompactLists(t *testing.T) {
 	s, _ := netSnapshot(t)
-	if len(s.Places) != 2 || s.Places[PlaceWindow{1, NetworkCohort, 24}] != nil {
-		t.Fatalf("places %v", s.Places)
+	if len(s.Networks) != 2 || s.Networks[PlaceWindow{1, NetworkCohort, 24}] != nil || s.Places != nil {
+		t.Fatalf("networks %v, places %v", s.Networks, s.Places)
 	}
-	l := s.Places[PlaceWindow{1, NetworkCohort, 720}]
-	r := l.Rows("city_asn")
-	if len(r) != 2 || r[0].Place != r[1].Place || r[0].Place != l.Rows("city")[0].Place || r[1].position != 1 {
-		t.Errorf("city x ASN rows %+v", r)
+	l := s.Networks[PlaceWindow{1, NetworkCohort, 720}]
+	if l.Len("city_asn") != 2 || l.Row("city_asn", 0).Place != l.Row("city", 0).Place || s.Networks[PlaceWindow{2, NetworkCohort, 720}].Len("asn") != 0 {
+		t.Errorf("list 11 %+v", l)
 	}
-	c := l.Rows("country")[1]
-	if c.Ips != 8 || c.Completed != -1 || c.Observations != -1 || c.P90 != -1 || c.P99 != -1 || c.Challenges != -1 || c.Blocks != -1 {
-		t.Errorf("country row %+v", c)
-	}
-	if l.Rows("country_asn") != nil || len(s.Places[PlaceWindow{2, NetworkCohort, 720}].Rows("asn")) != 0 {
-		t.Error("a network list has country x ASN rows, or list 12 has ASN rows")
+	head := l.headRows()
+	if c := head.Rows("country")[1]; c.Ips != 8 || c.Completed != -1 || c.Observations != -1 || c.P90 != -1 || c.P99 != -1 || c.Challenges != -1 ||
+		c.Blocks != -1 || head.Rows("city") != nil || len(head.Rows("asn")) != 61 {
+		t.Errorf("head rows: country %+v, %d ASN rows", c, len(head.Rows("asn")))
 	}
 }
 

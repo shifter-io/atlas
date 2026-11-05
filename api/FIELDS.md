@@ -633,3 +633,36 @@ API-COVERAGE-1 reads the summaries directly, a network answer's `productGroups` 
 and its `requestedCountries` holds a country only for a network of one requested
 country; the summaries' `criteria.groups` and `criteria.requested_countries` are
 read (`snap.Criteria`) but not served yet.
+
+## Payload v4 list answers (API-COVERAGE-1)
+
+The gaps recorded above are closed for a v4 build:
+
+- a network answer's `productGroups` is its summary's `criteria.groups` (a summary
+  without it counts as one), and `requestedCountries` its
+  `criteria.requested_countries`, upper case and sorted; the all-networks answer
+  sums the groups and joins the countries;
+- a network's provider `asns` is every ASN row of its 30d network list with IPs,
+  most IPs first (then Python's `str()` order), as a v3 build reads a group's ASN
+  pool list whole.
+
+A v4 build reads every list answer from the compact network lists in place: it
+keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
+and `/regions`, `/v1/networks/all/places`) is its networks' compact lists, merged
+and ordered as before (rows of one place key add up; most IPs first, then key,
+then network and kind) only when a page is asked for. The build keeps each list's
+row count and its first page without `q` as rows (at most 50 a list, about 6 MB
+at QA-1; a Coverage list's first page likewise). Every page, the first included,
+is rendered when first asked, at fast compression, and kept in the version's page
+cache (1,024 pages) until the next build; a first page the cache drops is rendered
+again from the rows the build keeps, without merging the list. The City × ASN rows (`coverageEvidence` of the dataset) are no
+longer put into the payload the build reads: the coverage evidence reads them from
+the list, in list order. A build before v4 keeps its lists as before.
+
+New answers (contract K11), of a v4 build only (404 before v4):
+
+| Path | Answer |
+|---|---|
+| `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `rows`. A row is `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]`: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), and the rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none). `q` keeps rows where every word occurs, case-insensitive, in the country code, country, region, city, `AS<n>` (or the bare ASN number) or ASN name; with `q` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
+| `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
+| `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, `CC\|region_code\|region` or `CC\|region_code\|region\|city`, URL-escaped), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range. |

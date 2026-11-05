@@ -35,7 +35,12 @@ type Pages struct {
 	// network that should serve it. It is not an answer: the server checks
 	// after each build that each one has its network pages.
 	Published []PublishedProduct
-	lists     map[listKey][]PlaceRow
+	lists     map[listKey]*placeIndex
+	// v4 is a build of payload v4: its lists are read from the network
+	// lists (placelists.go), and it has the coverage, region and place answers.
+	v4       bool
+	coverage map[listKey]*coverageList
+	sources  map[placeList][]placeSource // every network's list of a range and region or city dimension
 }
 
 // PublishedProduct is one product group of the published snapshot.
@@ -212,42 +217,57 @@ type CountryAnswer struct {
 func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
 	s *snap.Snapshot, row *store.SnapshotRow) *Pages {
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
-		Charts: map[string]*ChartAnswer{}, lists: map[listKey][]PlaceRow{}}
+		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, v4: row != nil && row.Networks != nil, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
 	groups := groupsByProvider(s)
 	byCountry := map[string]map[string][]PlaceRow{} // cc -> range -> one row per network and kind
+	country := countryLists{map[placeList][]placeSource{}, map[listKey]int{}, map[listKey][]PlaceRow{}}
 	for _, e := range entries {
 		head := networkRow(e)
 		pg.Networks.Networks = append(pg.Networks.Networks, head)
 		pg.Primary[e.P.Slug] = e.P.PrimaryKind
 		for _, kind := range head.Kinds {
 			mine := groupsOfKind(e, groups, kind)
-			ans, places := networkAnswer(generatedAt, head, kind, mine, row)
+			ans, places, srcs := networkAnswer(generatedAt, head, kind, mine, row)
 			pg.Network[e.P.Slug+"/"+kind] = ans
+			pg.addCoverage(e, kind, row)
 			for key, rows := range places {
-				pg.lists[listKey{scope: e.P.Slug + "/" + kind, rangeID: key.rangeID, dimension: key.dimension}] = rows
-				if key.dimension == "country" {
+				pg.lists[listKey{scope: e.P.Slug + "/" + kind, rangeID: key.rangeID, dimension: key.dimension}] = pg.index(rows, srcs[key.rangeID], key.dimension)
+				switch {
+				case key.dimension == "country":
 					addCountryRows(byCountry, key.rangeID, rows, head, kind)
-				}
-				if key.dimension == "city" {
+				case pg.v4 && key.dimension != "asn" && len(srcs[key.rangeID]) > 0:
+					country.add(key, srcs[key.rangeID], rows)
+				case key.dimension == "city":
 					pg.addCityRows(key.rangeID, rows, head, kind)
 				}
 			}
 		}
 	}
+	country.indexes(pg.lists)
+	pg.sources = country.srcs
 	sort.SliceStable(pg.Networks.Networks, func(i, j int) bool { return rankLess(pg.Networks.Networks[i], pg.Networks.Networks[j]) })
 	pg.countryAnswers(generatedAt, byCountry)
 	pg.Rankings = rankings(generatedAt, entries, stats)
 	if pg.Primary[AllNetworks] == "" {
-		ans, places := allAnswer(generatedAt, s, row)
+		ans, places, srcs := allAnswer(generatedAt, s, row)
 		pg.Network[AllNetworks+"/"+AllNetworks], pg.Primary[AllNetworks] = ans, AllNetworks
 		for key, rows := range places {
-			pg.lists[listKey{scope: AllNetworks + "/" + AllNetworks, rangeID: key.rangeID, dimension: key.dimension}] = rows
+			pg.lists[listKey{scope: AllNetworks + "/" + AllNetworks, rangeID: key.rangeID, dimension: key.dimension}] = pg.index(rows, srcs[key.rangeID], key.dimension)
 		}
 		pg.allCharts(generatedAt, s)
 	}
 	pg.addDetails(generatedAt, details)
 	return pg
+}
+
+// index is a list of rows in order: in a v4 build its count and first page
+// and the sources it is merged from, else every row.
+func (pg *Pages) index(rows []PlaceRow, srcs []placeSource, dimension string) *placeIndex {
+	if !pg.v4 {
+		return &placeIndex{all: rows}
+	}
+	return &placeIndex{srcs: append([]placeSource{}, srcs...), dimension: dimension, total: len(rows), first: firstPage(rows)}
 }
 
 func networkRow(e *entry) NetworkRow {

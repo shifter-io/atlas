@@ -227,6 +227,9 @@ type SnapshotRow struct {
 	// Places is each target-free window's typed list (lists.go) of a slimmed
 	// snapshot; nil when nothing was slimmed.
 	Places map[PlaceWindow]*List
+	// Networks is each network window's compact list (network.go) of a v4
+	// build; nil before v4.
+	Networks map[PlaceWindow]*NetList
 }
 
 // Event is one public.test_events row in the framework's /v1/events shape.

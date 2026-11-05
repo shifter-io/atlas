@@ -21,21 +21,21 @@ import (
 // is read as the head and those lists only: no product part, no group list,
 // and the head without its per-cohort overlap and fleet rows.
 //
-// So that the existing build serves it unchanged, the reader gives each
-// network as one product group of the payload the build decodes (Full),
-// and every one of its windows:
+// So that the existing build serves it, the reader gives each network as one
+// product group of the payload the build decodes (Full), and every one of its
+// windows:
 //   - breakdowns.country and pool.countries_breakdown: every country row of
-//     its list; breakdowns.city_asn: every City x ASN row (the coverage
-//     evidence); pool.asns_breakdown: the 50 ASN rows with most IPs;
-//   - breakdown_entries: its list's row counts, so the build reads the
-//     region, city and ASN rows whole from Places, which holds each window's
-//     list as typed rows;
+//     its list; pool.asns_breakdown: every ASN row with IPs, most first (as a
+//     v3 window restores it whole);
+//   - breakdown_entries: its list's row counts;
 //   - the snapshot's overlap rows the build reads, made from overlap.peers,
 //     with the network's cohort.
 // A network with exactly one requested country gets it as criteria.country,
-// as the group it summarizes has it. The typed rows and the restored arrays
-// are a bridge, held while a build is made: the API's own state is the head
-// and the compact lists (NetLists).
+// as the group it summarizes has it. Every window's compact list is
+// SnapshotRow.Networks: the build reads the region, city, ASN and City x ASN
+// rows there, in place. The country and ASN arrays are the only rows the
+// reader writes out, and Full is held only while a build is made: the API's
+// own state is the head and the compact lists (NetLists).
 
 // networkHeadSQL is a v4 head (s.payload) as text, without "parts", without
 // "overlap" (its rows are per cohort; a network's are its overlap.peers) and
@@ -46,9 +46,6 @@ const networkHeadSQL = `((s.payload - 'parts' - 'overlap' - 'fleet') || CASE WHE
 
 // NetworkCohort is the cohort of a v4 network entry.
 const NetworkCohort = "network"
-
-// asnsBreakdownRows is how many ASN rows a network window's pool lists.
-const asnsBreakdownRows = 50
 
 // networkEntry is what the reader reads of a network entry.
 type networkEntry struct {
@@ -96,7 +93,7 @@ func (s *SnapshotRow) networks() (field, []field, []networkEntry, error) {
 }
 
 // readNetworks reads a v4 build's network lists into cache (nil: a fresh
-// one), drops the group lists it held, and sets Full and Places.
+// one), drops the group lists it held, and sets Full and Networks.
 func (s *SnapshotRow) readNetworks(ctx context.Context, tx pgx.Tx, cache *Lists) error {
 	if cache == nil {
 		cache = NewLists()
@@ -127,7 +124,7 @@ func (c *Lists) dropNetworks() {
 	}
 }
 
-// SetNetworks sets Full and Places of a v4 snapshot whose Payload is its head,
+// SetNetworks sets Full and Networks of a v4 snapshot whose Payload is its head,
 // from the network lists by id: each network becomes one product group (see
 // above). A window naming a list not in lists keeps only what the head has.
 func (s *SnapshotRow) SetNetworks(lists map[int64]*NetList) error {
@@ -153,7 +150,7 @@ func (s *SnapshotRow) setNetworks(load func(ids []int64) (map[int64]*NetList, er
 	if err != nil {
 		return fmt.Errorf("snapshot %d network lists: %w", s.BuildID, err)
 	}
-	s.Places = map[PlaceWindow]*List{}
+	s.Networks = map[PlaceWindow]*NetList{}
 	networks := s.Payload[nf.Start:nf.End]
 	groups := make([][]byte, len(items))
 	overlap := overlapRows{seen: map[overlapPair]bool{}}
@@ -211,9 +208,9 @@ func (s *SnapshotRow) networkGroup(raw []byte, e *networkEntry, lists map[int64]
 		if w.Lists == nil || lists[w.Lists.ID] == nil {
 			continue
 		}
-		typed := lists[w.Lists.ID].typed()
-		s.Places[PlaceWindow{e.ProductID, e.Cohort, w.Period.Hours}] = typed
-		if windows[j], err = listWindow(raw[wf.Start+f.Start:wf.Start+f.End], typed); err != nil {
+		l := lists[w.Lists.ID]
+		s.Networks[PlaceWindow{e.ProductID, e.Cohort, w.Period.Hours}] = l
+		if windows[j], err = listWindow(raw[wf.Start+f.Start:wf.Start+f.End], l); err != nil {
 			return nil, fmt.Errorf("window %s: %w", f.Key, err)
 		}
 	}
@@ -224,9 +221,9 @@ func (s *SnapshotRow) networkGroup(raw []byte, e *networkEntry, lists map[int64]
 }
 
 // listWindow is a network window (an object: the entry decoded it) with the
-// arrays the build reads from its list l: breakdowns (country and City x
-// ASN), breakdown_entries and the pool's country and ASN lists.
-func listWindow(raw []byte, l *List) ([]byte, error) {
+// arrays the build reads from its list l: breakdowns.country,
+// breakdown_entries and the pool's country and ASN lists.
+func listWindow(raw []byte, l *NetList) ([]byte, error) {
 	fields, err := objectFields(raw)
 	pool := []byte(valueOf(raw, fields, "pool"))
 	if pool == nil {
@@ -239,27 +236,27 @@ func listWindow(raw []byte, l *List) ([]byte, error) {
 		}
 	}
 	for _, name := range breakdownNames {
-		if rows := l.Rows(name); rows != nil {
-			set(&entries, name, strconv.AppendInt(nil, int64(len(rows)), 10))
+		if strings.IndexByte(netCodes, dimensionCodes[name]) >= 0 {
+			set(&entries, name, strconv.AppendInt(nil, int64(l.Len(name)), 10))
 		}
 	}
-	asns := poolRows("asns_breakdown", l)
-	set(&breakdowns, "country", rowsJSON(rowColumns['c'], pointers(l.Rows("country"))))
-	set(&breakdowns, "city_asn", rowsJSON(rowColumns['y'], pointers(l.Rows("city_asn"))))
-	set(&pool, "countries_breakdown", rowsJSON(poolColumns["countries_breakdown"], poolRows("countries_breakdown", l)))
-	set(&pool, "asns_breakdown", rowsJSON(poolColumns["asns_breakdown"], asns[:min(len(asns), asnsBreakdownRows)]))
+	head := l.headRows()
+	set(&breakdowns, "country", rowsJSON(rowColumns['c'], pointers(head.Rows("country"))))
+	set(&pool, "countries_breakdown", rowsJSON(poolColumns["countries_breakdown"], poolRows("countries_breakdown", head)))
+	set(&pool, "asns_breakdown", rowsJSON(poolColumns["asns_breakdown"], poolRows("asns_breakdown", head)))
 	set(&raw, "breakdowns", breakdowns)
 	set(&raw, "breakdown_entries", entries)
 	set(&raw, "pool", pool)
 	return raw, err
 }
 
-// typed is l as a typed list (one ListRow per row): the bridge the build's
-// place, rank and coverage readers read. Counters a compact row does not
-// keep (observations, challenges, blocks, p90, p99) are NULL.
-func (l *NetList) typed() *List {
+// headRows is l's country and ASN rows as a typed list, for the arrays
+// listWindow writes; observations, challenges, blocks, p90 and p99 are NULL:
+// a compact row does not keep them, and no answer shows them.
+func (l *NetList) headRows() *List {
 	out := &List{rows: map[byte][]ListRow{}}
-	for d := range len(netCodes) {
+	for _, code := range []byte{'c', 'a'} {
+		d := strings.IndexByte(netCodes, code)
 		rows := make([]ListRow, len(l.rows[d]))
 		for i, r := range l.rows[d] {
 			rows[i] = ListRow{Ips: wide(r.ips), Observations: -1, Completed: wide(r.completed), Successes: wide(r.successes),
@@ -271,7 +268,7 @@ func (l *NetList) typed() *List {
 				rows[i].Network = l.names.networks[r.network]
 			}
 		}
-		out.rows[netCodes[d]] = rows
+		out.rows[code] = rows
 	}
 	return out
 }

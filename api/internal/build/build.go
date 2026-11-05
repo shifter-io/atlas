@@ -469,7 +469,7 @@ func Build(in *store.Inputs) (*Result, error) {
 	}
 	// After the N/A manifests: a coverage row's nulls are the row's own
 	// unknown fields, not gaps of the provider (FIELDS.md).
-	addCoverageEvidence(entries)
+	addCoverageEvidence(entries, in.Snapshot)
 	for i := range ds.Targets {
 		if ds.Targets[i].NA, err = naOf(ds.Targets[i], nil, false); err != nil {
 			return nil, err

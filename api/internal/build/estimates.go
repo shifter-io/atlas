@@ -38,9 +38,20 @@ func ipsOf(w snap.Window) Num {
 
 // scaledIps is the IPs of a place-list or breakdown row of window w whose
 // measured IPs are ips.
-func scaledIps(w snap.Window, ips Num) Num {
-	if e := w.Estimated; e != nil && e.BreakdownScale.OK() && ips.OK() {
-		return Num(jsnum.Round(ips.F() * e.BreakdownScale.F()))
+func scaledIps(w snap.Window, ips Num) Num { return scaleBy(breakdownScale(w), ips) }
+
+// breakdownScale is window w's breakdown scale, NaN when it has none.
+func breakdownScale(w snap.Window) Num {
+	if e := w.Estimated; e != nil {
+		return e.BreakdownScale
+	}
+	return nan
+}
+
+// scaleBy is a row's IPs ips under a window's breakdown scale (NaN: none).
+func scaleBy(scale, ips Num) Num {
+	if scale.OK() && ips.OK() {
+		return Num(jsnum.Round(ips.F() * scale.F()))
 	}
 	return ips
 }

@@ -70,6 +70,7 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /v1/networks/{slug}", s.serveNetwork)
 	mux.HandleFunc("GET /v1/networks/{slug}/places", s.serveNetworkPlaces)
+	mux.HandleFunc("GET /v1/networks/{slug}/coverage", s.serveNetworkPlaces)
 	mux.HandleFunc("GET /v1/networks/{slug}/chart", s.serveNetworkChart)
 	mux.HandleFunc("GET /v1/countries/{cc}", func(w http.ResponseWriter, r *http.Request) {
 		cc := r.PathValue("cc")
@@ -82,6 +83,8 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 		}
 	})
 	mux.HandleFunc("GET /v1/countries/{cc}/cities", s.serveCountryCities)
+	mux.HandleFunc("GET /v1/countries/{cc}/regions", s.serveCountryCities)
+	mux.HandleFunc("GET /v1/places/{dimension}/{key}", s.servePlace)
 }
 
 // onlyParams answers 400 and returns false when the query has a parameter
@@ -177,9 +180,16 @@ func listParams(w http.ResponseWriter, q url.Values, extra ...string) (rangeID, 
 	return rangeID, query, page, true
 }
 
+// serveNetworkPlaces serves a network's place lists and, for .../coverage,
+// its Coverage answer.
 func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	rangeID, query, page, ok := listParams(w, q, "kind", "dimension")
+	coverage := strings.HasSuffix(r.URL.Path, "/coverage")
+	extra := []string{"kind", "dimension"}
+	if coverage {
+		extra = extra[:1]
+	}
+	rangeID, query, page, ok := listParams(w, q, extra...)
 	if !ok {
 		return
 	}
@@ -189,7 +199,13 @@ func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dimension := q.Get("dimension")
-	if dimension == "" {
+	switch {
+	case coverage:
+		dimension = "coverage"
+	case dimension == "coverage":
+		writeError(w, http.StatusNotFound, "not found") // the Coverage answer is .../coverage, not a place list
+		return
+	case dimension == "":
 		dimension = "country"
 	}
 	v := s.current.Load()
@@ -219,16 +235,58 @@ func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
 		return
 	}
-	s.servePage(w, r, v, "country/"+strings.ToUpper(cc), rangeID, "city", query, page)
+	dimension := "city"
+	if strings.HasSuffix(r.URL.Path, "/regions") {
+		dimension = "region"
+	}
+	s.servePage(w, r, v, "country/"+strings.ToUpper(cc), rangeID, dimension, query, page)
 }
 
-// servePage cuts one page from a precomputed list and keeps the rendered body
-// in the version's LRU.
+// servePlace serves a v4 build's region or city page (range defaults to
+// 30d), keeping the rendered body in the version's page LRU.
+func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if !onlyParams(w, q, "range") {
+		return
+	}
+	dimension, key, rangeID := r.PathValue("dimension"), r.PathValue("key"), q.Get("range")
+	if rangeID == "" {
+		rangeID = "30d"
+	}
+	if dimension != "region" && dimension != "city" || !rangeIDs[rangeID] || len(key) > 400 {
+		writeError(w, http.StatusBadRequest, "invalid place (region or city, a key, range 24h, 7d or 30d)")
+		return
+	}
+	v := s.current.Load()
+	if v == nil {
+		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		return
+	}
+	s.serveCut(w, r, v, strings.Join([]string{"place", dimension, key, rangeID}, "\x00"), func() (any, bool) {
+		return v.Result.Pages.Place(v.Result.Dataset.GeneratedAt, dimension, key, rangeID)
+	})
+}
+
+// servePage cuts one page from a list (a v4 build's first page without a
+// query is held by the build) and keeps the rendered body in the version's
+// LRU.
 func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, scope, rangeID, dimension, query string, page int) {
 	key := strings.Join([]string{scope, rangeID, dimension, strconv.Itoa(page), strings.Join(build.Tokens(query), " ")}, "\x00")
+	s.serveCut(w, r, v, key, func() (any, bool) {
+		at, pg := v.Result.Dataset.GeneratedAt, v.Result.Pages
+		if dimension == "coverage" {
+			return pg.Coverage(at, scope, rangeID, query, page)
+		}
+		return pg.List(at, scope, rangeID, dimension, query, page)
+	})
+}
+
+// serveCut serves the body under key in the version's LRU, rendering and
+// adding the answer cut gives when absent (404 when it has none).
+func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, key string, cut func() (any, bool)) {
 	body, ok := v.pages.Get(key)
 	if !ok {
-		res, found := v.Result.Pages.List(v.Result.Dataset.GeneratedAt, scope, rangeID, dimension, query, page)
+		res, found := cut()
 		if !found {
 			writeError(w, http.StatusNotFound, "not found")
 			return

@@ -96,7 +96,7 @@ func TestCoverageEvidenceFollowsTheMapping(t *testing.T) {
 "7d":{"breakdowns":{"city_asn":[{"city":"Austin","ips":4,"p50":null}]}}}}`)
 	e := &entry{P: &model.Provider{}, Snap: map[string]*snap.Product{"residential": p}}
 	unmeasured := &entry{P: &model.Provider{}}
-	addCoverageEvidence([]*entry{e, unmeasured})
+	addCoverageEvidence([]*entry{e, unmeasured}, nil)
 	got, err := json.Marshal(e.P.CoverageEvidence)
 	want := `{"residential":{"24h":[["US","United States","California","Los Angeles",7922,"Comcast","isp",8,420],` +
 		`[null,null,null,null,null,null,null,3,null]],"30d":[],"7d":[[null,null,null,"Austin",null,null,null,4,null]]}}`

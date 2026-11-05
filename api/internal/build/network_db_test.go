@@ -215,9 +215,10 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [
 }
 
 // netAnswers is every answer of a build as the server renders them, and
-// every place page of its networks; the v3 build's with the documented
-// differences of a v4 build applied: each group's id and cohort are its
-// network's, and the snapshot's schema version is 4.
+// pages and searches of every place list of its networks, of all networks
+// and of its countries; the v3 build's with the documented differences of a
+// v4 build applied: each group's id and cohort are its network's, and the
+// snapshot's schema version is 4.
 func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 	t.Helper()
 	res.BuiltAt = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
@@ -237,12 +238,24 @@ func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 			t.Fatal(err)
 		}
 	}
+	scopes := map[string][]string{build.AllNetworks + "/" + build.AllNetworks: {"country", "region", "city", "asn"}}
 	for _, p := range netProviders {
+		scopes[p+"/residential"] = scopes[build.AllNetworks+"/"+build.AllNetworks]
+	}
+	for cc := range res.Pages.Country {
+		scopes["country/"+cc] = []string{"city"}
+	}
+	for scope, dims := range scopes {
 		for _, r := range netLabels {
-			for _, d := range []string{"country", "region", "city", "asn"} {
-				page, _ := res.Pages.List("", p+"/residential", r, d, "", 1)
-				if out[fmt.Sprintf("places %s %s %s", p, r, d)], err = json.Marshal(page); err != nil {
-					t.Fatal(err)
+			for _, d := range dims {
+				for _, q := range []struct {
+					page  int
+					query string
+				}{{1, ""}, {2, ""}, {1, "de"}, {1, "be Berlin"}, {1, "telekom"}, {1, "as3209"}, {1, "zz"}} {
+					page, _ := res.Pages.List("", scope, r, d, q.query, q.page)
+					if out[fmt.Sprintf("places %s %s %s %d %q", scope, r, d, q.page, q.query)], err = json.Marshal(page); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 		}

@@ -20,7 +20,7 @@ const AllNetworks = "all"
 // percentiles) are the snapshot's every-group fleet ("*"), where each exit IP
 // counts once however many networks saw it; a snapshot without that entry
 // leaves them null, never a sum. The summed ipsSum totals are null here.
-func allAnswer(generatedAt string, s *snap.Snapshot, row *store.SnapshotRow) (*NetworkAnswer, map[placeList][]PlaceRow) {
+func allAnswer(generatedAt string, s *snap.Snapshot, row *store.SnapshotRow) (*NetworkAnswer, map[placeList][]PlaceRow, map[string][]placeSource) {
 	groups := []*snap.Product{}
 	providers, kinds := map[string]bool{}, map[string]bool{}
 	if s != nil {
@@ -36,7 +36,7 @@ func allAnswer(generatedAt string, s *snap.Snapshot, row *store.SnapshotRow) (*N
 		head.Kinds = append(head.Kinds, k)
 	}
 	sort.Strings(head.Kinds)
-	ans, lists := networkAnswer(generatedAt, head, AllNetworks, groups, row)
+	ans, lists, srcs := networkAnswer(generatedAt, head, AllNetworks, groups, row)
 	ans.Networks = len(providers)
 	for _, r := range Ranges {
 		t := ans.Ranges[r.ID]
@@ -64,7 +64,7 @@ func allAnswer(generatedAt string, s *snap.Snapshot, row *store.SnapshotRow) (*N
 	if len(groups) > 0 {
 		ans.Network.Countries = Num(month.ExitCountries)
 	}
-	return ans, lists
+	return ans, lists, srcs
 }
 
 func fleetAll(s *snap.Snapshot, window string) *snap.FleetRow {
