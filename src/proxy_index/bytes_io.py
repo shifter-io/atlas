@@ -99,19 +99,23 @@ TLS_RESUMED_UP_BYTES = 320
 TLS_RESUMED_DOWN_BYTES = 700
 
 
-def estimate(
-    *,
-    request_line: int,
-    request_headers: int,
-    request_body: int,
-    response_headers: int,
-    response_body: int,
-    tls: bool = False,
-    tls_resumed: bool = False,
-    connect: bool | None = None,
-    extra_up: int = 0,
-    extra_down: int = 0,
-) -> ByteCount:
+@dataclass(frozen=True, slots=True)
+class Exchange:
+    """Sizes of one request/response exchange and how it crossed the gateway."""
+
+    request_line: int
+    request_headers: int
+    request_body: int
+    response_headers: int
+    response_body: int
+    tls: bool = False
+    tls_resumed: bool = False
+    connect: bool | None = None
+    extra_up: int = 0
+    extra_down: int = 0
+
+
+def estimate(exchange: Exchange) -> ByteCount:
     """Application-layer estimate, for platforms without `TCP_INFO`.
 
     Sizes come from the bytes actually sent and received, so the only estimated
@@ -119,13 +123,14 @@ def estimate(
     `tls` (an HTTP gateway tunnels TLS through CONNECT); pass False for SOCKS5,
     whose negotiation goes in `extra_up`/`extra_down` (see `socks5_handshake`).
     """
-    up = request_line + request_headers + request_body + extra_up
-    down = response_headers + response_body + extra_down
-    if connect if connect is not None else tls:
+    e = exchange
+    up = e.request_line + e.request_headers + e.request_body + e.extra_up
+    down = e.response_headers + e.response_body + e.extra_down
+    if e.connect if e.connect is not None else e.tls:
         up += CONNECT_REQUEST_BYTES
         down += CONNECT_RESPONSE_BYTES
-    if tls:
-        if tls_resumed:
+    if e.tls:
+        if e.tls_resumed:
             up += TLS_RESUMED_UP_BYTES
             down += TLS_RESUMED_DOWN_BYTES
         else:
