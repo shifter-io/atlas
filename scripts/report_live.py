@@ -189,6 +189,7 @@ def report(directory: Path) -> Path:
     destination.write_text(page(summary, config, provider, geo_html))
     return destination
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
