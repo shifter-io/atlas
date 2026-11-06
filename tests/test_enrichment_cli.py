@@ -106,7 +106,7 @@ async def test_enrichment_rejects_a_mismatched_ip_artifact(tmp_path, fake_databa
     await run(
         RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
         sink,
-        transport_factory=FakeTransport,
+        RunOptions(transport_factory=FakeTransport),
     )
     source = sink.directory / "ips.jsonl.gz"
     with gzip.open(source, "wt", encoding="utf-8") as stream:
