@@ -8,6 +8,7 @@ from census_pulse_cases import HOSTING, MUNICH
 from test_storage_v6 import BERLIN, NETWORK
 
 from proxy_index.calculated.aggregate import (
+    SeriesSpec,
     breakdowns,
     downtime,
     outage_list,
@@ -31,7 +32,7 @@ def test_availability_history_clips_and_unions_outages_without_inventing_healthy
         {"country": "DE", "started_at": h(35), "ended_at": h(37)},
         {"country": "DE", "started_at": h(48), "ended_at": None},
     ]
-    points = series([], [], start, start + 3 * day, 72, tested=tested, outages=outages)
+    points = series([], [], SeriesSpec(start, start + 3 * day, 72, tested=tested, outages=outages))
     assert [p["at"] for p in points] == [start + i * day for i in range(3)]
     assert [p["uptime"] for p in points] == [None, 1 - 3 / 48, 0]
     # Availability remains measurable even when request-history buckets are missing.
@@ -44,15 +45,14 @@ def test_availability_history_uses_half_open_five_minute_buckets():
     def m(minutes):
         return start + timedelta(minutes=minutes)
 
-    points = series(
-        [],
-        [],
+    spec = SeriesSpec(
         start,
         m(15),
         24,
         tested=[{"country": "DE", "started_at": start, "last": m(5)}],
         outages=[{"country": "DE", "started_at": m(5), "ended_at": m(10)}],
     )
+    points = series([], [], spec)
     assert [p["uptime"] for p in points] == [1, 0, None]
 
 

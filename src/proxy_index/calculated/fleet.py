@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import timedelta
 
-from .aggregate import OUTCOMES, series, timed
+from .aggregate import OUTCOMES, SeriesSpec, series, timed
 
 SUMMED = ("completed", "successes", "response_body_bytes", *OUTCOMES)
 
@@ -75,8 +75,7 @@ def fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target):
         rows, seen, hours = joined = together(members, label)
         entry = _entry("*", label, members, joined, (minimum, slot_minutes))
         since = as_of - timedelta(hours=hours)
-        entry["series"] = series(
-            rows, seen, since, as_of, hours, latency_target=timed_target, minimum=minimum
-        )
+        spec = SeriesSpec(since, as_of, hours, latency_target=timed_target, minimum=minimum)
+        entry["series"] = series(rows, seen, spec)
         out.append(entry)
     return out

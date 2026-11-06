@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from psycopg.rows import tuple_row
 
 from ..names import NETWORK, PLACE
-from .aggregate import BREAKDOWNS, iso, pool_lists, series
+from .aggregate import BREAKDOWNS, SeriesSpec, iso, pool_lists, series
 from .slim import POOL_LISTS
 
 KINDS = {"products": "product", "runs": "runs"}
@@ -320,7 +320,7 @@ def dense(window):
     step = timedelta(minutes=5)
     timed = (window.get("latency") or {}).get("target")
     # The one empty point series() writes for a bucket without data; only "at" differs.
-    empty = series([], [], start, start + step, 24, latency_target=timed)[0]
+    empty = series([], [], SeriesSpec(start, start + step, 24, latency_target=timed))[0]
     empty = json.loads(json.dumps(empty, default=iso))
     empty = jsonb_order({k: jsonb_order(v) if isinstance(v, dict) else v for k, v in empty.items()})
     kept = {point["at"]: point for point in window["series"]}

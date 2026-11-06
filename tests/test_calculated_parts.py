@@ -21,7 +21,7 @@ from psycopg.types.json import Jsonb
 from test_storage import measurement
 
 from proxy_index.calculated import calculator, parts, product_windows, store
-from proxy_index.calculated.aggregate import series
+from proxy_index.calculated.aggregate import SeriesSpec, series
 from proxy_index.calculated.api import CACHE, RESOURCES, app
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.policy import digest
@@ -224,7 +224,7 @@ def test_sparse_keeps_buckets_with_requests_or_availability():
         "tested": [{"country": "DE", "started_at": start, "last": m(5)}],
         "outages": [{"country": "DE", "started_at": m(5), "ended_at": m(10)}],
     }
-    full = series([request], [], start, m(20), 24, **history)
+    full = series([request], [], SeriesSpec(start, m(20), 24, **history))
     points = parts.sparse(full)
     # Availability alone (0:00, 0:05) or requests alone (0:10, no IP seen: unique_ips 0) keep a
     # bucket; 0:15 has neither.
