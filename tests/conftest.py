@@ -2,10 +2,12 @@
 
 Order: each xdist worker reorders its collection the same way, so that worksteal's (CI's
 `--dist`) first even split (`spread`) hands every worker its share of the slow tests in
-`tests/durations.json` (seconds per node id, from `scripts/ci/timeline.py --durations`),
-each worker's longest first. The tests themselves do not change; a test missing from the
-file counts as fast. Without the file (today: added once the slowest tests are split, so
-starting them together cannot push one over CI-TIME-1's 90 s) the collection order stays.
+`tests/durations.json` (seconds per node id), each worker's longest first. The tests
+themselves do not change; a test missing from the file counts as fast and a stale entry is
+ignored. Without the file the collection order stays. Refresh the file after splitting a
+slow test or adding one, from the merge queue's latest green tier1 run (its `ci-timing`
+artifact keeps the junit), and commit it:
+    python3 scripts/ci/durations.py --from-run <run id>
 
 Timeline: each xdist worker (or a run without xdist) appends to
 `$EV/timeline-<worker>.jsonl` (the current directory without EV): the setup, call and
