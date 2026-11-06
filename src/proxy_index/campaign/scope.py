@@ -22,6 +22,7 @@ from typing import Literal
 
 from ..onboarding.files import private_dir
 from .contracts import (
+    ALL_ROLE_TAGS,
     PROJECT_NAME,
     PULSE_PREFIX,
     PULSE_PROJECT_NAME,
@@ -31,6 +32,8 @@ from .contracts import (
     Droplet,
     DropletRecord,
     Scope,
+    environment_of,
+    roles,
     short_id,
 )
 from .do_api import DigitalOcean, ScopeError, parse_droplet
@@ -144,6 +147,7 @@ def scope_for(spec: CampaignSpec) -> Scope:
         spec.project_id,
         str(spec.manager_droplet_id),
         datetime.fromisoformat(spec.created_at),
+        spec.environment,
     )
 
 
@@ -159,15 +163,16 @@ def _same_kind(scope: Scope, role: Role) -> None:
 
 
 def role_checks(droplet: Droplet, scope: Scope, role: Role) -> dict[str, bool]:
-    """Section 2 checks 2, 3, 5 and 6 on one droplet, by the role the caller intends."""
-    tags, (role_tag, pattern) = set(droplet.tags), ROLES[role]
+    """Section 2 checks 2, 3, 5 and 6 on one droplet, by the role the caller intends in the
+    scope's environment. A droplet with any other role tag, of any environment, fails."""
+    tags, (role_tag, pattern) = set(droplet.tags), roles(scope.environment)[role]
     if role == "pulse":  # its own rule: the pulse tag, only pi-pulse- tags, its name pattern
         only_pulse = all(tag.startswith(PULSE_PREFIX) for tag in tags)
         named = re.fullmatch(pattern, droplet.name) is not None
         return {"tags": role_tag in tags and only_pulse, "name": named}
     worker, is_manager = role == "worker", droplet.id == scope.manager_droplet_id
     required = {role_tag, f"{RESOURCE_PREFIX}{scope.sid}"} if worker else {role_tag}
-    others = {tag for tag, _ in ROLES.values()} - {role_tag}
+    others = ALL_ROLE_TAGS - {role_tag}
     named = re.fullmatch(pattern, droplet.name) is not None
     return {
         "tags": required <= tags and not tags & others,
@@ -226,12 +231,18 @@ async def _droplet_checks(
     return checks | {"project": False}
 
 
-def _other_checks(kind: str, raw: dict, ledger: Ledger) -> dict[str, bool]:
-    checks = {"name": str(raw.get("name", "")).startswith(RESOURCE_PREFIX)}
+def _other_checks(kind: str, raw: dict, ledger: Ledger, environment: str) -> dict[str, bool]:
+    """A key, firewall or snapshot named, and a firewall targeting only tags, of the scope's
+    environment (a staging scope never removes production's, nor production staging's)."""
+
+    def ours(name: object) -> bool:
+        return environment_of(str(name)) == environment
+
+    checks = {"name": ours(raw.get("name", ""))}
     if kind == "firewall":
-        checks["targets"] = all(
-            str(tag).startswith(RESOURCE_PREFIX) for tag in raw.get("tags", [])
-        ) and all(ledger.has("droplet", str(i)) for i in raw.get("droplet_ids", []))
+        checks["targets"] = all(ours(tag) for tag in raw.get("tags", [])) and all(
+            ledger.has("droplet", str(i)) for i in raw.get("droplet_ids", [])
+        )
     return checks
 
 
@@ -287,7 +298,7 @@ async def guarded_delete(
         checks = {"recorded": ledger.has(kind, rid)} | (
             await _droplet_checks(cloud, parse_droplet(raw), scope, ledger, role, entry)
             if kind == "droplet"
-            else _other_checks(kind, raw, ledger)
+            else _other_checks(kind, raw, ledger, scope.environment)
         )
         entry["checks"] = checks
         failed = _failed(checks)
