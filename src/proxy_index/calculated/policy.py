@@ -105,35 +105,6 @@ def merge(base, overrides):
     return result
 
 
-KNOWN = {
-    "name",
-    "status",
-    "windows",
-    "refresh_seconds",
-    "required_targets",
-    "minimum_requests",
-    "minimum_coverage",
-    "score_valid_hours",
-    "sample_limit",
-    "weights",
-    "target_weights",
-    "benchmark_weights",
-    "peer",
-    "grades",
-    "profiles",
-    "products",
-    "targets",
-    "kind",
-    "display_name",
-    "uptime",
-    "slots",
-    "hosting_usage_types",
-    "latency_target",
-    "payload",
-    "target_groups",
-}
-
-
 def _weights(values, keys):
     if (
         set(values) != set(keys)
@@ -145,20 +116,35 @@ def _weights(values, keys):
         raise ValueError("Weights must cover known components and have a positive total")
 
 
-def _grades(grades):
-    if set(grades) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
-        raise ValueError("Invalid grade labels")
-    thresholds = [grades[g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
-    if (
-        not 100 >= thresholds[0]
-        or thresholds[-1] != 0
-        or any(a <= b for a, b in zip(thresholds, thresholds[1:], strict=False))
-    ):
-        raise ValueError("Invalid grade thresholds")
-
-
 def validate(config):
-    if set(config) - KNOWN:
+    known = {
+        "name",
+        "status",
+        "windows",
+        "refresh_seconds",
+        "required_targets",
+        "minimum_requests",
+        "minimum_coverage",
+        "score_valid_hours",
+        "sample_limit",
+        "weights",
+        "target_weights",
+        "benchmark_weights",
+        "peer",
+        "grades",
+        "profiles",
+        "products",
+        "targets",
+        "kind",
+        "display_name",
+        "uptime",
+        "slots",
+        "hosting_usage_types",
+        "latency_target",
+        "payload",
+        "target_groups",
+    }
+    if set(config) - known:
         raise ValueError("Unknown methodology setting")
     if "balanced" not in config.get("profiles", {}):
         raise ValueError("The balanced profile is required")
@@ -181,7 +167,15 @@ def validate(config):
     _weights(config["peer"]["diversity"], DIMENSIONS)
     if abs(sum(config["peer"]["diversity"].values()) - 1) > 1e-9:
         raise ValueError("Diversity weights must sum to one")
-    _grades(config["grades"])
+    if set(config["grades"]) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
+        raise ValueError("Invalid grade labels")
+    grades = [config["grades"][g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
+    if (
+        not 100 >= grades[0]
+        or grades[-1] != 0
+        or any(a <= b for a, b in zip(grades, grades[1:], strict=False))
+    ):
+        raise ValueError("Invalid grade thresholds")
     for values in config.get("profiles", {}).values():
         _weights(values, KEYS)
     uptime = config.get("uptime", {})
