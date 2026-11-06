@@ -122,42 +122,52 @@ class Scheduler:
             try:
                 stats = await task.job()
             except Exception as exc:  # noqa: BLE001 - one job must not stop the clock
-                log.exception("job %s failed", task.name)
-                error = f"{type(exc).__name__}: {exc}"[:500]
-                await self._record(
-                    "UPDATE job_runs SET finished_at=now(),status='failed',error=%s,"
-                    "duration_ms=%s WHERE id=%s RETURNING id",
-                    (error, _ms(began), job_run_id),
-                )
-                async with self.db.transaction() as conn:
-                    await raise_alert(
-                        conn,
-                        "job_failed",
-                        f"{task.name} failed: {type(exc).__name__}",
-                        severity="major",
-                        dedupe_key=f"job_failed:{task.name}",
-                        data={"job": task.name, "error": error[:300]},
-                    )
-                task.last = {"status": "failed", "error": error}
+                await self._record_failure(task, exc, began, job_run_id)
                 return None
-            # Only a reason string marks a skip: census_plan also reports a count of skipped
-            # batches under the same key, and a tick that skipped one overlap still ran.
-            reason = stats.get("skipped") if isinstance(stats, dict) else None
-            skipped = reason if isinstance(reason, str) and reason else None
-            await self._record(
-                "UPDATE job_runs SET finished_at=now(),status=%s,error=%s,duration_ms=%s "
-                "WHERE id=%s RETURNING id",
-                (
-                    "skipped" if skipped else "ok",
-                    str(skipped)[:500] if skipped else None,
-                    _ms(began),
-                    job_run_id,
-                ),
-            )
-            task.last = {"status": "skipped" if skipped else "ok", **(stats or {})}
+            await self._record_finish(task, stats, began, job_run_id)
             return stats
         finally:
             task.running = False
+
+    async def _record_failure(
+        self, task: Task, exc: Exception, began: float, job_run_id: Any
+    ) -> None:
+        log.exception("job %s failed", task.name)
+        error = f"{type(exc).__name__}: {exc}"[:500]
+        await self._record(
+            "UPDATE job_runs SET finished_at=now(),status='failed',error=%s,"
+            "duration_ms=%s WHERE id=%s RETURNING id",
+            (error, _ms(began), job_run_id),
+        )
+        async with self.db.transaction() as conn:
+            await raise_alert(
+                conn,
+                "job_failed",
+                f"{task.name} failed: {type(exc).__name__}",
+                severity="major",
+                dedupe_key=f"job_failed:{task.name}",
+                data={"job": task.name, "error": error[:300]},
+            )
+        task.last = {"status": "failed", "error": error}
+
+    async def _record_finish(
+        self, task: Task, stats: dict[str, Any] | None, began: float, job_run_id: Any
+    ) -> None:
+        # Only a reason string marks a skip: census_plan also reports a count of skipped
+        # batches under the same key, and a tick that skipped one overlap still ran.
+        reason = stats.get("skipped") if isinstance(stats, dict) else None
+        skipped = reason if isinstance(reason, str) and reason else None
+        await self._record(
+            "UPDATE job_runs SET finished_at=now(),status=%s,error=%s,duration_ms=%s "
+            "WHERE id=%s RETURNING id",
+            (
+                "skipped" if skipped else "ok",
+                str(skipped)[:500] if skipped else None,
+                _ms(began),
+                job_run_id,
+            ),
+        )
+        task.last = {"status": "skipped" if skipped else "ok", **(stats or {})}
 
     async def _fire(self, task: Task) -> None:
         try:

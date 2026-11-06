@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"sort"
 	"strings"
 
@@ -10,9 +11,9 @@ import (
 )
 
 // A v4 build (payload v4, contract K11) answers its long place lists from the
-// network lists the store holds as compact rows (store.NetList), in place:
-// such a list is the lists it is merged from, and its rows are merged, ordered
-// and cut only when a page is asked for. The build keeps each list's row
+// network lists the store reads as compact rows (store.NetList) when asked:
+// such a list is the lists it is merged from, and its rows are read, merged,
+// ordered and cut only when a page is asked for. The build keeps each list's row
 // count and first page (rows, not rendered: QA-1 has about 1,700 lists); the
 // server renders a page when first asked and keeps it in its page cache
 // (server.PagesLRU). A build before v4 keeps every row of every list as
@@ -60,13 +61,16 @@ func (x *placeIndex) count() int {
 // rows is every row of the list that holds every token, in list order: in a
 // v4 build merged from the sources as a build before v4 merges a network's
 // product groups (mergePlace, placeLess).
-func (x *placeIndex) rows(tokens []string) []PlaceRow {
+func (x *placeIndex) rows(ctx context.Context, tokens []string) ([]PlaceRow, error) {
 	all := x.all
 	if x.srcs != nil {
-		all = mergeSources(x.srcs, x.dimension, x.cc, x.tagged)
+		var err error
+		if all, err = mergeSources(ctx, x.srcs, x.dimension, x.cc, x.tagged); err != nil {
+			return nil, err
+		}
 	}
 	if len(tokens) == 0 {
-		return all
+		return all, nil
 	}
 	kept := []PlaceRow{}
 	for _, r := range all {
@@ -74,19 +78,23 @@ func (x *placeIndex) rows(tokens []string) []PlaceRow {
 			kept = append(kept, r)
 		}
 	}
-	return kept
+	return kept, nil
 }
 
 // mergeSources merges the sources' rows of dimension (only those in country
 // cc when set) by place key: across sources, or, when apart, within each
 // network's run of sources, its rows tagged with its network. Rows are
 // ordered by placeLess.
-func mergeSources(srcs []placeSource, dimension, cc string, apart bool) []PlaceRow {
+func mergeSources(ctx context.Context, srcs []placeSource, dimension, cc string, apart bool) ([]PlaceRow, error) {
 	var out []PlaceRow
 	merged := map[string]*PlaceRow{}
 	for i, s := range srcs {
-		for j := range s.list.Len(dimension) {
-			r := s.list.Row(dimension, j)
+		rows, err := s.list.Rows(ctx, dimension)
+		if err != nil {
+			return nil, err
+		}
+		for j := range rows.Len() {
+			r := rows.Row(j)
 			if cc != "" && (r.Place == nil || strings.ToUpper(strings.TrimSpace(model.SV(r.Place.CountryCode))) != cc) {
 				continue
 			}
@@ -99,10 +107,33 @@ func mergeSources(srcs []placeSource, dimension, cc string, apart bool) []PlaceR
 		}
 	}
 	if !apart {
-		return sortedRows(merged)
+		return sortedRows(merged), nil
 	}
 	sort.Slice(out, func(i, j int) bool { return placeLess(out[i], out[j]) })
-	return out
+	return out, nil
+}
+
+// netRead is what a build reads its network lists' rows with (a build has
+// no deadline: each read is bounded by the pool's statement timeout), and the
+// first read that failed: the build fails with it.
+type netRead struct {
+	ctx context.Context
+	row *store.SnapshotRow
+	err error
+}
+
+// v4 is whether the build is of payload v4.
+func (nr *netRead) v4() bool { return nr.row != nil && nr.row.Networks != nil }
+
+// merge is the merged rows of dimension of a network's sources (none once a
+// read has failed).
+func (nr *netRead) merge(srcs []placeSource, dimension string) []PlaceRow {
+	if nr.err != nil {
+		return nil
+	}
+	rows, err := mergeSources(nr.ctx, srcs, dimension, "", false)
+	nr.err = err
+	return rows
 }
 
 // netPlaceRow is a compact row as a place row and its ASN, as mergeWindow

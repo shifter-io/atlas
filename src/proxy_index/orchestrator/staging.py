@@ -49,50 +49,14 @@ def load_profile(path: str | Path) -> dict[str, Any]:
     """Validate configs/staging.toml into a flat profile."""
     with open(path, "rb") as stream:
         data = tomllib.load(stream)
-    name = data.get("database", {}).get("name")
-    if not isinstance(name, str) or not NAME.match(name):
-        raise ValueError("[database] name must be a lower-case PostgreSQL identifier")
-    countries = data.get("scope", {}).get("countries")
-    if (
-        not isinstance(countries, list)
-        or not countries
-        or not all(isinstance(c, str) and re.fullmatch(r"[A-Za-z]{2}", c) for c in countries)
-    ):
-        raise ValueError("[scope] countries must list two-letter country codes")
+    name = _profile_name(data)
+    countries = _profile_countries(data)
     census, pulse = data.get("census", {}), data.get("pulse", {})
-    defaults = data.get("load", {}).get("reference_defaults", {})
-    scope = {c.upper() for c in countries}
-    if not isinstance(defaults, dict) or not all(
-        isinstance(region, str) and isinstance(code, str) and code.upper() in scope
-        for region, code in defaults.items()
-    ):
-        raise ValueError("[load] reference_defaults must map regions to [scope] countries")
-    for region in defaults:
-        resolve_region(region)
-    methodology = data.get("calculate", {}).get("methodology")
-    if methodology is not None:
-        if not isinstance(methodology, str) or not methodology:
-            raise ValueError("[calculate] methodology must be a path")
-        from ..calculated.policy import load as load_methodology
-
-        load_methodology(Path(methodology).expanduser())
-    switches = data.get("scheduler", {})
-    for key in ("census", "pulse"):
-        if type(switches.get(key, True)) is not bool:
-            raise ValueError(f"[scheduler] {key} must be true or false")
-    reports = data.get("reports", {}).get("dir")
-    if reports is not None and (not isinstance(reports, str) or not reports):
-        raise ValueError("[reports] dir must be a path")
-    nodes = data.get("nodes", [])
-    if not isinstance(nodes, list):
-        raise ValueError("[[nodes]] must be an array of tables")
-    for node in nodes:
-        if not isinstance(node, dict) or not all(
-            isinstance(node.get(key), str) and SLUG.match(node[key])
-            for key in ("provider", "product", "region")
-        ):
-            raise ValueError("Every [[nodes]] entry needs provider, product and region")
-        resolve_region(node["region"])
+    defaults = _profile_defaults(data, countries)
+    methodology = _profile_methodology(data)
+    switches = _profile_switches(data)
+    reports = _profile_reports(data)
+    nodes = _profile_nodes(data)
     return {
         "name": name,
         "countries": sorted({c.upper() for c in countries}),
@@ -107,6 +71,77 @@ def load_profile(path: str | Path) -> dict[str, Any]:
         "reports_dir": reports,
         "nodes": [{key: node[key] for key in ("provider", "product", "region")} for node in nodes],
     }
+
+
+def _profile_name(data: dict[str, Any]) -> str:
+    name = data.get("database", {}).get("name")
+    if not isinstance(name, str) or not NAME.match(name):
+        raise ValueError("[database] name must be a lower-case PostgreSQL identifier")
+    return name
+
+
+def _profile_countries(data: dict[str, Any]) -> list[str]:
+    countries = data.get("scope", {}).get("countries")
+    if (
+        not isinstance(countries, list)
+        or not countries
+        or not all(isinstance(c, str) and re.fullmatch(r"[A-Za-z]{2}", c) for c in countries)
+    ):
+        raise ValueError("[scope] countries must list two-letter country codes")
+    return countries
+
+
+def _profile_defaults(data: dict[str, Any], countries: list[str]) -> dict[str, str]:
+    defaults = data.get("load", {}).get("reference_defaults", {})
+    scope = {c.upper() for c in countries}
+    if not isinstance(defaults, dict) or not all(
+        isinstance(region, str) and isinstance(code, str) and code.upper() in scope
+        for region, code in defaults.items()
+    ):
+        raise ValueError("[load] reference_defaults must map regions to [scope] countries")
+    for region in defaults:
+        resolve_region(region)
+    return defaults
+
+
+def _profile_methodology(data: dict[str, Any]) -> str | None:
+    methodology = data.get("calculate", {}).get("methodology")
+    if methodology is not None:
+        if not isinstance(methodology, str) or not methodology:
+            raise ValueError("[calculate] methodology must be a path")
+        from ..calculated.policy import load as load_methodology
+
+        load_methodology(Path(methodology).expanduser())
+    return methodology
+
+
+def _profile_switches(data: dict[str, Any]) -> dict[str, Any]:
+    switches = data.get("scheduler", {})
+    for key in ("census", "pulse"):
+        if type(switches.get(key, True)) is not bool:
+            raise ValueError(f"[scheduler] {key} must be true or false")
+    return switches
+
+
+def _profile_reports(data: dict[str, Any]) -> str | None:
+    reports = data.get("reports", {}).get("dir")
+    if reports is not None and (not isinstance(reports, str) or not reports):
+        raise ValueError("[reports] dir must be a path")
+    return reports
+
+
+def _profile_nodes(data: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes = data.get("nodes", [])
+    if not isinstance(nodes, list):
+        raise ValueError("[[nodes]] must be an array of tables")
+    for node in nodes:
+        if not isinstance(node, dict) or not all(
+            isinstance(node.get(key), str) and SLUG.match(node[key])
+            for key in ("provider", "product", "region")
+        ):
+            raise ValueError("Every [[nodes]] entry needs provider, product and region")
+        resolve_region(node["region"])
+    return nodes
 
 
 def _write_private(path: Path, text: str) -> None:

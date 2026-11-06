@@ -4,8 +4,8 @@ Standalone, without the pulse evaluator, so it also runs on a tree without it.""
 
 from datetime import UTC, datetime
 
-from test_census_pulse import product
-from test_orchestrator import prepare, query
+from census_pulse_cases import product
+from orchestrator_cases import prepare, query
 
 from proxy_index import detect
 from proxy_index.storage import connect

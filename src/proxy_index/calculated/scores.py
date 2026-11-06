@@ -68,34 +68,45 @@ def target_score(m, config, target=None):
     }
 
 
-def product_inputs(p, prices, config, kind, measured_uptime=None, evidence=None):
+def product_inputs(p, prices, config, kind, uptime=(None, None)):
     """Raw values and readiness of a product's components besides reliability and speed, which
     peer_scores() derives from the target scores.
 
     p is the window's pool() counts with "daily" (daily_average()): coverage and diversity use
     the daily averages. prices is the product's effective pricing (price_per_gb_lowest scores
-    value); evidence is the window's metric evidence (uptime_pct is the uptime fallback). A raw
+    value); uptime is the window's (measured uptime, metric evidence), both optional (the
+    evidence's uptime_pct is the uptime fallback). A raw
     component's value is what is compared with peers; diversity's is the four daily dimension
     counts (also kept in its inputs). IPs without a DB-IP field never block a component: shares
     leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
     100 on dcAsns).
     """
-    evidence = evidence or {}
-    daily = p["daily"]
-    inputs = {}
-    # Measured uptime (outage time over the countries tested) wins once enough pulse batches
-    # finished; evidence is the fallback.
+    measured_uptime, evidence = uptime
+    inputs = {"uptime": _uptime(config, measured_uptime, evidence or {})}
+    inputs |= _pool_inputs(p, kind)
+    lowest = (prices or {}).get("lowest_per_gb")
+    inputs["value"] = component(lowest, reason=None if lowest is not None else PRICE_MISSING)
+    return inputs
+
+
+def _uptime(config, measured_uptime, evidence):
+    """The uptime component: measured uptime (outage time over the countries tested) wins once
+    enough pulse batches finished; evidence is the fallback."""
     batches = (measured_uptime or {}).get("batches", 0)
     value = (measured_uptime or {}).get("value")
     pct = 100 * value if batches and value is not None else None
     if pct is not None and batches >= uptime_settings(config)["min_batches"]:
-        inputs["uptime"] = component(pct)
-    elif "uptime_pct" in evidence:
-        inputs["uptime"] = component(evidence["uptime_pct"])
-    else:
-        inputs["uptime"] = component(
-            pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE
-        )
+        return component(pct)
+    if "uptime_pct" in evidence:
+        return component(evidence["uptime_pct"])
+    return component(pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE)
+
+
+def _pool_inputs(p, kind):
+    """The coverage, diversity, dcAsns and authenticity components of the pool counts p (see
+    product_inputs())."""
+    daily = p["daily"]
+    inputs = {}
     seen = p["unique_ips"] > 0
     inputs["coverage"] = component(daily["unique_ips"] if seen else None)
     counts = {k: daily[k] for k in DIMENSIONS}
@@ -124,8 +135,6 @@ def product_inputs(p, prices, config, kind, measured_uptime=None, evidence=None)
         if accuracy is not None
         else "No exit IP with a DB-IP country for a requested country",
     )
-    lowest = (prices or {}).get("lowest_per_gb")
-    inputs["value"] = component(lowest, reason=None if lowest is not None else PRICE_MISSING)
     return inputs
 
 
@@ -152,7 +161,9 @@ def versus(raw, best, peers, higher):
     )
 
 
-def score_entry(value, state, components, weights, reasons, config):
+def score_entry(value, state, weighted, reasons, config):
+    """A score of value (None: incomplete); weighted is its (components, weights)."""
+    components, weights = weighted
     return {
         "score": value,
         "grade": grade(value, config) if value is not None else None,
@@ -224,8 +235,7 @@ def _target_scores(target, members, results, config):
         r["targets"][target] = score_entry(
             composite(components, t["weights"]),
             t["state"],
-            components,
-            t["weights"],
+            (components, t["weights"]),
             t["reasons"],
             config,
         )
@@ -304,8 +314,7 @@ def _profile_scores(m, r, inputs, config):
         r["scores"][name] = score_entry(
             value,
             "ready",
-            components,
-            weights,
+            (components, weights),
             [f"Required benchmark incomplete: {t}" for t in r["missing"]]
             + [
                 c["reason"] or f"{k} not ready"

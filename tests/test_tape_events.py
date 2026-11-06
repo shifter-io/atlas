@@ -5,7 +5,7 @@ SQL the events API filters with)."""
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
-from test_census_pulse import product
+from census_pulse_cases import product
 
 from proxy_index.detect import category, list_events
 from proxy_index.orchestrator import events

@@ -228,36 +228,38 @@ def persist(conn, payload, signed=None):
                 if "lists" in w
                 else write_list(conn, build_id, p, w, rows, signature)
             )
-            for target, m, scores in [
-                ("", w["metrics"], w["scores"]),
-                *[(t, v["metrics"], {"balanced": v["score"]}) for t, v in w["targets"].items()],
-            ]:
-                ids = (build_id, None if target else list_id)
-                result = _window(conn, ids, p, w, target, m)
-                for profile, s in scores.items():
-                    _score(conn, result, profile, s, not target, reason_ids)
-                if not target:
-                    _series(conn, result, w["series"])
+            _results(conn, (build_id, list_id), p, w, reason_ids)
     copy_rows(conn, rows)
     for o in payload["overlap"]:
-        a, b = o["product_a"], o["product_b"]
-        na, nb = o["ips_a"], o["ips_b"]
-        if a > b:
-            a, b, na, nb = b, a, nb, na
-        conn.execute(
-            "INSERT INTO calculated_overlaps VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (
-                build_id,
-                o["cohort"],
-                payload["periods"][o["window"]]["hours"],
-                a,
-                b,
-                o["shared_ips"],
-                na,
-                nb,
-            ),
-        )
+        _overlap(conn, build_id, payload["periods"], o)
     return lists
+
+
+def _results(conn, ids, p, w, reason_ids):
+    """Store window w's result rows: its own on its list (ids: build id, list id) with its scores
+    and series, then one per target (no list) with its balanced score."""
+    build_id, list_id = ids
+    for target, scores in [
+        ("", w["scores"]),
+        *[(t, {"balanced": v["score"]}) for t, v in w["targets"].items()],
+    ]:
+        result = _window(conn, (build_id, None if target else list_id), p, w, target)
+        for profile, s in scores.items():
+            _score(conn, (result, profile), s, not target, reason_ids)
+        if not target:
+            _series(conn, result, w["series"])
+
+
+def _overlap(conn, build_id, periods, o):
+    """Store one overlap row, its products in id order."""
+    a, b = o["product_a"], o["product_b"]
+    na, nb = o["ips_a"], o["ips_b"]
+    if a > b:
+        a, b, na, nb = b, a, nb, na
+    conn.execute(
+        "INSERT INTO calculated_overlaps VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (build_id, o["cohort"], periods[o["window"]]["hours"], a, b, o["shared_ips"], na, nb),
+    )
 
 
 def _reasons(conn, products):
@@ -334,8 +336,9 @@ def copy_rows(conn, rows):
             )
 
 
-def _window(conn, ids, p, w, target, m):
+def _window(conn, ids, p, w, target):
     """Insert one window row (ids: its build and list) and return its result_id."""
+    m = w["targets"][target]["metrics"] if target else w["metrics"]
     ps = w["pool"] if not target else {}
     pool = ("unique_ips", "new_ips", "recurring_share", "countries", "regions", "cities", "asns")
     return (
@@ -376,7 +379,9 @@ def _window(conn, ids, p, w, target, m):
     )
 
 
-def _score(conn, result, profile, s, product, reason_ids):
+def _score(conn, key, s, product, reason_ids):
+    """Insert score s with its components and reasons (key: its result_id and profile)."""
+    result, profile = key
     explicit = split_reasons(s, product)
     conn.execute(
         "INSERT INTO calculated_scores(result_id,profile,score,grade,rank,"

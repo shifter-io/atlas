@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from test_orchestrator import bearer, prepare, product_id, query
+from orchestrator_cases import bearer, prepare, product_id, query
 
 from proxy_index import report_html
 from proxy_index.browser import settings as browser_settings

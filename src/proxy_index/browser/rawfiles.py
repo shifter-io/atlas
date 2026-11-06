@@ -456,12 +456,7 @@ def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
     tried again at the next start. A finished run it cannot read or seal is kept as it is, with
     its sidecar. One bad file never stops the start. Logs one line with the counts."""
     if outbox.is_dir():
-        for sidecar in [*outbox.glob("*.json.partial"), *outbox.glob("*.json")]:
-            try:
-                if sidecar.suffix == ".partial" or not sidecar.with_suffix(".tar.gz").exists():
-                    sidecar.unlink()
-            except OSError as exc:
-                log.warning("sidecar %s kept (%s)", sidecar.name, type(exc).__name__)
+        _drop_sidecars(outbox)
     found = {"sealed": 0, "discarded": 0, "kept": 0, "discard_failed": 0}
     for run_dir in sorted(p for p in runs.glob("*/*") if p.is_dir() and not p.is_symlink()):
         if not re.fullmatch(bc.RUN_ID, run_dir.name):
@@ -474,6 +469,16 @@ def recover(runs: Path, outbox: Path, seal_run: SealRun) -> Recovered:
         found[outcome] += 1
     log.info("browser_recover: %s", " ".join(f"{key}={value}" for key, value in found.items()))
     return Recovered(found["discarded"], found["kept"], found["discard_failed"])
+
+
+def _drop_sidecars(outbox: Path) -> None:
+    """Drop the half-written sidecars and those whose bundle is gone (already confirmed)."""
+    for sidecar in [*outbox.glob("*.json.partial"), *outbox.glob("*.json")]:
+        try:
+            if sidecar.suffix == ".partial" or not sidecar.with_suffix(".tar.gz").exists():
+                sidecar.unlink()
+        except OSError as exc:
+            log.warning("sidecar %s kept (%s)", sidecar.name, type(exc).__name__)
 
 
 def _recover_run(run_dir: Path, outbox: Path, seal_run: SealRun) -> str:

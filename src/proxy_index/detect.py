@@ -171,10 +171,15 @@ def run_p50(cur, run_keys):
 
 
 class _Emitter:
-    def __init__(self, cur, now):
-        self.cur, self.now, self.count = cur, now, 0
+    """Writes events stamped now; counts them and keeps the (product, ASN) pairs it reported as
+    new_hosting_asn in this call."""
 
-    def __call__(self, kind, batch, product_id, signal, severity, data):
+    def __init__(self, cur, now):
+        self.cur, self.now, self.count, self.hosting = cur, now, 0, set()
+
+    def __call__(self, kind, batch, product_id, verdict, data):
+        """Write one event of batch; verdict is its (signal, severity)."""
+        signal, severity = verdict
         self.cur.execute(
             "INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,"
             "region_id,signal,severity,data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -231,6 +236,11 @@ class _PulseRun:
         incident = self.incident
         self.open_kind = incident["kind"] if incident and incident["kind"] in INCIDENTS else None
         self.previous = history[0] if history else None
+
+    def enough(self, cfg):
+        """Whether the baseline and the pulse are large enough to judge success and blocks."""
+        history, requests = len(self.history), self.requests
+        return history >= cfg["min_baseline_batches"] and requests >= cfg["min_requests"]
 
 
 def _pulse(cur, cfg, batch, runs, emit):
@@ -296,8 +306,7 @@ def _pulse_incident(cur, batch, product, now):
 def _judge_pulse(cur, cfg, batch, emit, p):
     """Write the events of one product's pulse, in a fixed order."""
     before = emit.count
-    enough = len(p.history) >= cfg["min_baseline_batches"] and p.requests >= cfg["min_requests"]
-    handled = enough and _judge_success(cur, cfg, batch, emit, p)
+    handled = p.enough(cfg) and _judge_success(cur, cfg, batch, emit, p)
     recovered = (
         not handled
         and p.open_kind
@@ -314,8 +323,7 @@ def _judge_pulse(cur, cfg, batch, emit, p):
             "recovered",
             batch,
             p.product,
-            1,
-            "info",
+            (1, "info"),
             p.data
             | {
                 "baseline": p.incident["data"].get("baseline"),
@@ -323,7 +331,7 @@ def _judge_pulse(cur, cfg, batch, emit, p):
                 "incident": p.open_kind,
             },
         )
-    _judge_spikes(cur, cfg, batch, emit, p, enough)
+    _judge_spikes(cur, cfg, batch, emit, p)
     if handled or emit.count > before or p.previous is None:
         return
     _pulse_changed(cfg, batch, emit, p)
@@ -340,8 +348,7 @@ def _judge_success(cur, cfg, batch, emit, p):
                 "down",
                 batch,
                 p.product,
-                -1,
-                "critical",
+                (-1, "critical"),
                 p.data
                 | {
                     "baseline": p.base_rate,
@@ -358,8 +365,7 @@ def _judge_success(cur, cfg, batch, emit, p):
                 "success_drop",
                 batch,
                 p.product,
-                -1,
-                "major" if severe else "minor",
+                (-1, "major" if severe else "minor"),
                 p.data | {"baseline": p.base_rate, "value": p.rate},
             )
         return True
@@ -373,8 +379,7 @@ def _census_recovered(cur, batch, emit, p):
             "recovered",
             batch,
             p.product,
-            1,
-            "info",
+            (1, "info"),
             p.data
             | {
                 "source": "census",
@@ -394,10 +399,10 @@ def _repeated(cur, p, kind):
     )
 
 
-def _judge_spikes(cur, cfg, batch, emit, p, enough):
+def _judge_spikes(cur, cfg, batch, emit, p):
     """A 'block_spike' or 'latency_spike' against the baseline, once per spike."""
     if (
-        enough
+        p.enough(cfg)
         and p.base_blocked is not None
         and p.block_share > p.base_blocked + cfg["block_spike_pp"]
         and not _repeated(cur, p, "block_spike")
@@ -407,8 +412,7 @@ def _judge_spikes(cur, cfg, batch, emit, p, enough):
             "block_spike",
             batch,
             p.product,
-            -1,
-            "major" if severe else "minor",
+            (-1, "major" if severe else "minor"),
             p.data | {"baseline": p.base_blocked, "value": p.block_share},
         )
     if (
@@ -423,8 +427,7 @@ def _judge_spikes(cur, cfg, batch, emit, p, enough):
             "latency_spike",
             batch,
             p.product,
-            -1,
-            "minor",
+            (-1, "minor"),
             p.data | {"baseline": p.base_p50, "value": p.latency},
         )
 
@@ -452,8 +455,7 @@ def _pulse_changed(cfg, batch, emit, p):
         "pulse_finished",
         batch,
         p.product,
-        signal,
-        "info",
+        (signal, "info"),
         p.data
         | {
             "value": rate,
@@ -467,7 +469,7 @@ def _pulse_changed(cfg, batch, emit, p):
     )
 
 
-def _hosting(cur, cfg, batch, runs, emit, seen):
+def _hosting(cur, cfg, batch, runs, emit):
     """First datacenter or hosting ASN a product's exit addresses land in (events as memory)."""
     for run in runs:
         if not run["run_key"]:
@@ -486,20 +488,19 @@ def _hosting(cur, cfg, batch, runs, emit, seen):
         ).fetchall()
         for network in networks:
             key = (run["product_id"], network["asn"])
-            if key in seen or _exists(
+            if key in emit.hosting or _exists(
                 cur,
                 "SELECT 1 FROM test_events WHERE product_id=%s AND kind='new_hosting_asn' "
                 "AND data->>'asn'=%s",
                 (run["product_id"], str(network["asn"])),
             ):
                 continue
-            seen.add(key)
+            emit.hosting.add(key)
             emit(
                 "new_hosting_asn",
                 batch,
                 run["product_id"],
-                -1,
-                "minor",
+                (-1, "minor"),
                 {
                     "region": batch["region"],
                     "asn": network["asn"],
@@ -544,8 +545,7 @@ def _overlap(cur, batch, runs, emit):
             "ip_overlap",
             batch,
             product,
-            0,
-            "info",
+            (0, "info"),
             {
                 "region": batch["region"],
                 "value": row["shared"] / row["unique_ips"],
@@ -585,7 +585,6 @@ def detect(conn, now, *, config=None):
     ).fetchall()
     partition(conn, "test_events", now)
     emit = _Emitter(cur, now)
-    seen = set()
     for batch in batches:
         runs = cur.execute(
             "SELECT br.*,r.started_at AS run_started,r.finished_at AS run_finished "
@@ -598,7 +597,7 @@ def detect(conn, now, *, config=None):
         elif batch["kind"] == "census":
             _overlap(cur, batch, runs, emit)
         # Load runs (latency under load) only feed the hosting-ASN audit.
-        _hosting(cur, cfg, batch, runs, emit, seen)
+        _hosting(cur, cfg, batch, runs, emit)
     cur.execute(
         "INSERT INTO settings(key,value,updated_at) VALUES (%s,%s,%s) ON CONFLICT(key) "
         "DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at",

@@ -3,6 +3,7 @@
 import asyncio
 import os
 import pickle
+import socket
 import ssl
 import time
 
@@ -12,7 +13,13 @@ from aiohttp import web
 from helpers import Gateway, server
 
 from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
-from proxy_index.process_transport import ProcessTransport, process_count
+from proxy_index.process_transport import (
+    ProcessTransport,
+    _serve,
+    process_count,
+    receive,
+    send,
+)
 from proxy_index.providers import GrammarProxy
 from proxy_index.runner import RunOptions, run
 from proxy_index.sinks import JsonSink
@@ -225,6 +232,106 @@ async def test_independent_interpreters_execute_cpu_work_and_worker_crash_is_fat
                 transport.execute(target, context=RequestContext("cpu", 4, 0)), 5
             )
     gone(pids)
+
+
+class ScriptedTransport(HangingTransport):
+    """Answers by run id: an outcome, a credential-bearing error, or a hang."""
+
+    async def execute(self, target, *, context):
+        if context.run_id == "fail":
+            raise ValueError("secret")
+        if context.run_id == "hang":
+            await asyncio.sleep(3600)
+        return Outcome(latency_ms=1.0, ip="2001:db8::2")
+
+
+async def serve_in_process(deadline):
+    """Run a worker's serve loop in this process; return it and its coordinator end."""
+    parent, child = socket.socketpair()
+    config = RunConfig(
+        "generic_http", ProxyConfig("http", "localhost", 1), concurrency=3, processes=1
+    )
+    target = registry.get("generic_http")
+    serving = asyncio.create_task(_serve(child, config, target, ScriptedTransport, deadline))
+    reader, writer = await asyncio.open_connection(sock=parent)
+    assert (await asyncio.wait_for(receive(reader), 5))[0] == "ready"
+    return serving, reader, writer
+
+
+async def test_worker_answers_results_errors_and_expiry():
+    deadline = time.perf_counter() + 0.5
+    serving, reader, writer = await serve_in_process(deadline)
+    for index, kind in enumerate(("ok", "fail", "hang")):
+        send(writer, RequestContext(kind, index, 0))
+    await writer.drain()
+    answers = {}
+    for _ in range(3):
+        message = await asyncio.wait_for(receive(reader), 5)
+        answers[message[1]] = message
+    assert answers[0][0] == "result" and answers[0][2].ip == "2001:db8::2"
+    assert answers[1] == ("error", 1)
+    assert answers[2] == ("expired", 2)
+    await asyncio.sleep(max(0, deadline - time.perf_counter()) + 0.05)
+    send(writer, RequestContext("ok", 3, 0))
+    await writer.drain()
+    assert await asyncio.wait_for(receive(reader), 5) == ("expired", 3)
+    send(writer, None)
+    await writer.drain()
+    await asyncio.wait_for(serving, 5)
+    assert await reader.read() == b""
+    writer.close()
+
+
+async def test_worker_stops_when_the_coordinator_leaves():
+    serving, reader, writer = await serve_in_process(None)
+    send(writer, RequestContext("ok", 0, 0))
+    send(writer, RequestContext("hang", 1, 0))
+    await writer.drain()
+    message = await asyncio.wait_for(receive(reader), 5)
+    assert message[:2] == ("result", 0)
+    writer.close()
+    await asyncio.wait_for(serving, 5)
+
+
+class FailingTransport(HangingTransport):
+    async def execute(self, target, *, context):
+        raise ValueError("secret")
+
+
+async def test_worker_errors_reach_the_coordinator_without_their_message():
+    config = RunConfig(
+        "generic_http", ProxyConfig("http", "localhost", 1), concurrency=1, processes=1
+    )
+    target = registry.get("generic_http")
+    async with ProcessTransport(config, target, factory=FailingTransport) as transport:
+        pids = list(transport.pids)
+        with pytest.raises(RuntimeError, match="^HTTP worker request failed$"):
+            await transport.execute(target, context=RequestContext("fail", 0, 0))
+    gone(pids)
+
+
+async def test_failed_worker_start_cleans_up():
+    config = RunConfig(
+        "generic_http", ProxyConfig("http", "localhost", 1), concurrency=2, processes=2
+    )
+    target = registry.get("generic_http")
+    # A spawned worker needs a picklable factory; a lambda fails before any child runs.
+    transport = ProcessTransport(config, target, factory=lambda config: None)
+    with pytest.raises((pickle.PicklingError, AttributeError)):
+        async with transport:
+            pass
+    assert transport.children == [] and transport.pids == []
+
+
+async def test_answers_without_a_pending_request_are_ignored():
+    config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1), processes=1)
+    transport = ProcessTransport(config, registry.get("generic_http"))
+    done = asyncio.get_running_loop().create_future()
+    done.cancel()
+    transport.pending[1] = done
+    transport._settle(("result", 0, Outcome(latency_ms=1.0), 0.0))
+    transport._settle(("error", 1))
+    assert transport.pending == {}
 
 
 def test_process_configuration_is_bounded_and_validated():

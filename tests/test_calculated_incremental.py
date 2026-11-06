@@ -20,7 +20,7 @@ from functools import partial
 
 import psycopg
 import pytest
-from test_calculated import lenient_policy, payload_mismatches
+from calculated_cases import lenient_policy, payload_mismatches
 from test_calculated_hourly_reads import (
     BUCKET,
     DAY,

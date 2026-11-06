@@ -22,6 +22,7 @@ import asyncio
 import json
 import shutil
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,22 @@ MEMBERS = bc.bundle_members()
 FOLDERS = ("browser", MEMBERS.screenshots)
 LOCK = "SELECT pg_try_advisory_lock(hashtextextended(%s, 0)) AS locked"
 _active = [0]  # bundles this process is processing now
+
+
+@dataclass(frozen=True)
+class _Upload:
+    """One bundle being ingested: its request and node, the settings, the temporary directory
+    it was received into and the digests of the bytes received."""
+
+    request: web.Request
+    node: dict
+    config: dict
+    work: Path
+    digests: dict
+
+    @property
+    def bundle(self) -> Path:
+        return self.work / "bundle.tar.gz"
 
 
 class LocalArchive:
@@ -153,23 +170,21 @@ async def ingest_bundle(request: web.Request, run: dict, node: dict) -> web.Resp
             raise _busy(30, "the manager is ingesting its limit of bundles; retry")
         _active[0] += 1
         try:
-            return await _locked(request, run, node, config, work, digests)
+            return await _locked(_Upload(request, node, config, work, digests), run)
         except psycopg.OperationalError:
             raise _unavailable("database unavailable; retry") from None
         finally:
             _active[0] -= 1
 
 
-async def _locked(
-    request: web.Request, run: dict, node: dict, config: dict, work: Path, digests: dict
-) -> web.Response:
+async def _locked(upload: _Upload, run: dict) -> web.Response:
     """One upload per (batch, product) across processes: a session lock on a connection of its
     own, held for the ingest and released when that connection closes."""
     lock = f"browser-ingest:{run['batch_id']}:{run['product_id']}"
-    async with session(request.app[DB_KEY]) as conn:
+    async with session(upload.request.app[DB_KEY]) as conn:
         if not (await (await conn.execute(LOCK, (lock,))).fetchone())["locked"]:
             raise _busy(10, "this run's bundle is already being ingested; retry")
-        return await _process(request, conn, run["batch_id"], node, config, work, digests)
+        return await _process(upload, conn, run["batch_id"])
 
 
 async def _state(conn: psycopg.AsyncConnection, batch_id: int, node: dict) -> dict:
@@ -183,15 +198,8 @@ async def _state(conn: psycopg.AsyncConnection, batch_id: int, node: dict) -> di
     ).fetchone()
 
 
-async def _process(
-    request: web.Request,
-    conn: psycopg.AsyncConnection,
-    batch_id: int,
-    node: dict,
-    config: dict,
-    work: Path,
-    digests: dict,
-) -> web.Response:
+async def _process(upload: _Upload, conn: psycopg.AsyncConnection, batch_id: int) -> web.Response:
+    request, node, config, digests = upload.request, upload.node, upload.config, upload.digests
     state = await _state(conn, batch_id, node)  # read again under the lock
     status = state["status"]
     if status in ("killed", "skipped"):  # an operator stopped it: the mini discards
@@ -202,7 +210,7 @@ async def _process(
         raise _error(web.HTTPConflict, f"run is {status}")
     try:
         summary, manifest = await asyncio.to_thread(
-            _open_bundle, work, int(config["results.max_extracted_bytes"])
+            _open_bundle, upload.work, int(config["results.max_extracted_bytes"])
         )
         _check(summary, manifest, request.headers.get(bc.HEADER_BUNDLE_ID), state, node)
     except ValueError as exc:
@@ -213,12 +221,12 @@ async def _process(
         raise _error(web.HTTPForbidden, "token belongs to another host")
     key = _key(config, node, summary, manifest)
     meta = {"run-id": summary["run_id"], "batch-id": str(batch_id)}
-    await _archive(request, config, key, work / "bundle.tar.gz", digests, meta, replay)
+    await _archive(upload, key, meta, replay)
     archived = {bc.REPLY_ARCHIVED_KEY: key, bc.REPLY_ARCHIVED_SHA256: digests["sha256"]}
     if replay:
         run_key = state["run_key"]
     else:
-        imported = await _ingest(request, batch_id, work / "run", ip_rows=False)
+        imported = await _ingest(request, batch_id, upload.work / "run", ip_rows=False)
         run_key = imported["run_key"]
         if late:
             await _reopen(request.app[DB_KEY], batch_id, node)
@@ -302,13 +310,16 @@ def _key(config: dict, node: dict, summary: dict, manifest: dict) -> str:
         raise _unavailable(f"archive_not_configured: {exc}") from None
 
 
-def _store(config: dict, key: str, bundle: Path, digests: dict, meta: dict, replay: bool):
+def _store(upload: _Upload, key: str, meta: dict, replay: bool):
     """The verified put; for a replay only the check that the object holds the same bytes.
     Returns False when a replay's object is missing."""
+    config, digests = upload.config, upload.digests
     target = config["browser.archive_dir"]
     archive = LocalArchive(target) if target else Spaces.from_file(config["archive.spaces_file"])
     if not replay:
-        archive.put_verified(key, bundle, digests, meta, existing=("sha256",), what="the bundle")
+        archive.put_verified(
+            key, upload.bundle, digests, meta, existing=("sha256",), what="the bundle"
+        )
         return True
     found = archive.head(key)
     if found is not None and found.get("sha256") != digests["sha256"]:
@@ -316,15 +327,13 @@ def _store(config: dict, key: str, bundle: Path, digests: dict, meta: dict, repl
     return found is not None
 
 
-async def _archive(
-    request: web.Request, config: dict, key: str, bundle: Path, digests: dict, meta: dict, replay
-) -> None:
+async def _archive(upload: _Upload, key: str, meta: dict, replay: bool) -> None:
     """409 bundle_changed (and the alert) for an object with other bytes, never overwritten;
     503 when the archive cannot be reached."""
     try:
-        stored = await asyncio.to_thread(_store, config, key, bundle, digests, meta, replay)
+        stored = await asyncio.to_thread(_store, upload, key, meta, replay)
     except ArchiveChanged:
-        await _changed(request, key, digests["sha256"])
+        await _changed(upload.request, key, upload.digests["sha256"])
         raise _error(web.HTTPConflict, bc.ERROR_BUNDLE_CHANGED) from None
     except (StoreError, OSError) as exc:
         raise _unavailable(f"archive unavailable ({type(exc).__name__}); retry") from None

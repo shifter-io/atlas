@@ -4,6 +4,7 @@ each release's database; test_migration.py migrates the base schema).
 """
 
 import pytest
+from calculated_cases import payload_mismatches
 from migration_cases import (
     POLICY,
     V6_NAMES,
@@ -16,7 +17,6 @@ from migration_cases import (
     load_v6_calculated_v2,
     v5_state,
 )
-from test_calculated import payload_mismatches
 
 from proxy_index import names
 from proxy_index.calculated import store

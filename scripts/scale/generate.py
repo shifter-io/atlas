@@ -183,9 +183,9 @@ def resolve(args, previous, formulas, names) -> tuple[Settings, dict]:
     return settings, done
 
 
-def one_day(conn, writer: Writer, args, progress: dict, day: int, expected: str) -> dict:
+def one_day(writer: Writer, args, progress: dict, day: int, expected: str) -> dict:
     """Prepare the day once, write its networks not yet done, then close it; the new progress."""
-    settings = writer.settings
+    conn, settings = writer.conn, writer.settings
     if progress["prepared"] != day:
         with conn.transaction():
             guard(conn, expected)
@@ -231,7 +231,7 @@ def generate(args, expected: str = DATABASE) -> dict:
         writer = Writer(conn, Model(settings, formulas, names), regions)
         generated = []
         for day in range(max(first, done + 1), last + 1):
-            progress = one_day(conn, writer, args, progress, day, expected)
+            progress = one_day(writer, args, progress, day, expected)
             generated.append(day)
     return {"settings": settings.to_json(), "generated": generated, "days_done": max(done, last)}
 

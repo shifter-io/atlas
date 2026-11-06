@@ -1,6 +1,7 @@
 package build_test
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"strconv"
@@ -66,11 +67,11 @@ func checkList(t *testing.T, pg *build.Pages, at, scope, rangeID, dim, q string,
 	t.Helper()
 	n := 0
 	for _, p := range pagesOf(len(rows)) {
-		served, ok := pg.List(at, scope, rangeID, dim, "", p)
+		served, ok, _ := pg.List(context.Background(), at, scope, rangeID, dim, "", p)
 		sameBody(t, scope+" "+rangeID+" "+dim+" page "+strconv.Itoa(p), served, ok, page(at, scope, rangeID, dim, "", p, rows))
 		n++
 	}
-	served, ok := pg.List(at, scope, rangeID, dim, q, 1)
+	served, ok, _ := pg.List(context.Background(), at, scope, rangeID, dim, q, 1)
 	sameBody(t, scope+" "+rangeID+" "+dim+" q="+q, served, ok, page(at, scope, rangeID, dim, q, 1, rows))
 	return n + 1
 }
@@ -89,17 +90,17 @@ func checkCoverage(t *testing.T, pg *build.Pages, at string, byScope map[string]
 		nw := byScope[scope]
 		nw.slug, nw.kind = slug, kind
 		for _, r := range build.Ranges {
-			first, ok := pg.Coverage(at, scope, r.ID, "", 1)
+			first, ok, _ := pg.Coverage(context.Background(), at, scope, r.ID, "", 1)
 			if !ok {
 				continue
 			}
 			for p := 1; p <= max(first.Pages, 1); p++ {
-				served, ok := pg.Coverage(at, scope, r.ID, "", p)
+				served, ok, _ := pg.Coverage(context.Background(), at, scope, r.ID, "", p)
 				sameBody(t, scope+" "+r.ID+" coverage page "+strconv.Itoa(p), served, ok, coveragePage(at, nw, r.ID, "", p))
 				n++
 			}
 			for _, q := range coverageQueries {
-				served, ok := pg.Coverage(at, scope, r.ID, q, 1)
+				served, ok, _ := pg.Coverage(context.Background(), at, scope, r.ID, q, 1)
 				sameBody(t, scope+" "+r.ID+" coverage q="+q, served, ok, coveragePage(at, nw, r.ID, q, 1))
 				n++
 			}
@@ -172,7 +173,7 @@ func checkPlacePages(t *testing.T, pg *build.Pages, at string, lists []fileNetwo
 					}
 				}
 				ranked(want.Rows)
-				served, ok := pg.Place(at, dim, key, r.ID)
+				served, ok, _ := pg.Place(context.Background(), at, dim, key, r.ID)
 				sameBody(t, dim+" page "+key+" "+r.ID, served, ok, want)
 				n++
 			}
@@ -189,7 +190,7 @@ func checkPlacePages(t *testing.T, pg *build.Pages, at string, lists []fileNetwo
 func placeKeys(pg *build.Pages, at, rangeID, dim string) map[string]bool {
 	keys := map[string]bool{}
 	for p := 1; ; p++ {
-		list, ok := pg.List(at, build.AllNetworks+"/"+build.AllNetworks, rangeID, dim, "", p)
+		list, ok, _ := pg.List(context.Background(), at, build.AllNetworks+"/"+build.AllNetworks, rangeID, dim, "", p)
 		if !ok || len(list.Rows) == 0 {
 			return keys
 		}

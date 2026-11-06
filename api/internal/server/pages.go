@@ -262,8 +262,8 @@ func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
 		return
 	}
-	s.serveCut(w, r, v, strings.Join([]string{"place", dimension, key, rangeID}, "\x00"), func() (any, bool) {
-		return v.Result.Pages.Place(v.Result.Dataset.GeneratedAt, dimension, key, rangeID)
+	s.serveCut(w, r, v, strings.Join([]string{"place", dimension, key, rangeID}, "\x00"), func() (any, bool, error) {
+		return v.Result.Pages.Place(r.Context(), v.Result.Dataset.GeneratedAt, dimension, key, rangeID)
 	})
 }
 
@@ -272,26 +272,31 @@ func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
 // LRU.
 func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, scope, rangeID, dimension, query string, page int) {
 	key := strings.Join([]string{scope, rangeID, dimension, strconv.Itoa(page), strings.Join(build.Tokens(query), " ")}, "\x00")
-	s.serveCut(w, r, v, key, func() (any, bool) {
+	s.serveCut(w, r, v, key, func() (any, bool, error) {
 		at, pg := v.Result.Dataset.GeneratedAt, v.Result.Pages
 		if dimension == "coverage" {
-			return pg.Coverage(at, scope, rangeID, query, page)
+			return pg.Coverage(r.Context(), at, scope, rangeID, query, page)
 		}
-		return pg.List(at, scope, rangeID, dimension, query, page)
+		return pg.List(r.Context(), at, scope, rangeID, dimension, query, page)
 	})
 }
 
 // serveCut serves the body under key in the version's LRU, rendering and
-// adding the answer cut gives when absent (404 when it has none).
-func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, key string, cut func() (any, bool)) {
+// adding the answer cut gives when absent (404 when it has none, 500 when its
+// rows could not be read).
+func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, key string, cut func() (any, bool, error)) {
 	body, ok := v.pages.Get(key)
 	if !ok {
-		res, found := cut()
+		res, found, err := cut()
+		if err != nil {
+			s.log.Error("list rows", "path", r.URL.Path, "error", err)
+			writeError(w, http.StatusInternalServerError, "list rows unavailable")
+			return
+		}
 		if !found {
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
-		var err error
 		if body, err = Render(http.StatusOK, res, CacheData, LevelFast); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

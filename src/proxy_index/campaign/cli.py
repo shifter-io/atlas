@@ -275,6 +275,13 @@ def _deploy_parser(steps, accounts):
         help="a new manager's droplet size slug, offered in lon1 "
         "(default: the recorded manager's, else s-8vcpu-16gb)",
     )
+    deploy.add_argument(
+        "--environment",
+        choices=["production", "staging"],
+        default="production",
+        help="staging: a manager beside production with its own pi-camp-stg- tags, firewalls "
+        "and keys; give it its own --inventory and --mac-key (CAMP-STAGING-1)",
+    )
     deploy.add_argument("--networks", default="all16")
     deploy.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
     deploy.add_argument(
@@ -393,6 +400,7 @@ async def _manager_step(args) -> dict:
             address,
             keychain_token(ACCOUNTS[args.account]),  # read only when streamed
             args.size,
+            args.environment,
         )
         spaces = manager_settings(args.spaces_file) if args.spaces_file else None
         result = await deploy.deploy(cloud, job)
@@ -403,10 +411,11 @@ async def _manager_step(args) -> dict:
 
 def _manager(args) -> int:
     from .deploy import DeployError
+    from .ops_api import OpsError
 
     try:
         result = asyncio.run(_manager_step(args))
-    except DeployError as exc:
+    except (DeployError, OpsError) as exc:
         print(f"Manager {args.manager_action} refused or failed: {exc}", file=sys.stderr)
         return 3
     print(json.dumps(result, indent=2, sort_keys=True))

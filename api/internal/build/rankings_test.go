@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -127,7 +128,7 @@ func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
 			t.Fatalf("day %d %+v", i, d)
 		}
 	}
-	page, ok := pg.List("", AllNetworks+"/"+AllNetworks, "30d", "city", "", 2)
+	page, ok, _ := pg.List(context.Background(), "", AllNetworks+"/"+AllNetworks, "30d", "city", "", 2)
 	if !ok || page.Total != 61 || len(page.Rows) != 11 {
 		t.Fatalf("all-networks city page %+v", page)
 	}
@@ -167,7 +168,10 @@ func TestANetworkNamedAllHidesTheAggregate(t *testing.T) {
 	for _, r := range Ranges {
 		stats[r.ID] = &WindowStats{}
 	}
-	pg = buildPages("", []*entry{e}, map[string]map[string]*WindowStats{AllNetworks: stats}, nil, nil, nil)
+	pg, err := buildPages("", []*entry{e}, map[string]map[string]*WindowStats{AllNetworks: stats}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if pg.Network["all/all"] != nil || pg.Network["all/residential"] == nil {
 		t.Fatalf("networks %v", pg.Network)
 	}

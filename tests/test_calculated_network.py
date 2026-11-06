@@ -10,7 +10,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_calculated import lenient_policy, payload_mismatches
+from calculated_cases import lenient_policy, payload_mismatches
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import history, without
 from test_calculated_listref import served

@@ -13,8 +13,8 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from census_pulse_cases import product
 from psycopg.rows import dict_row
-from test_census_pulse import product
 from test_daily import daily_root
 from test_onboarding import START
 from test_storage import measurement

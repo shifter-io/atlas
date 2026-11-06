@@ -13,7 +13,7 @@ import json
 import os
 import subprocess
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -198,9 +198,17 @@ def _due_slots(
     ]
 
 
-async def _launch(
-    root: Path, spec: CampaignSpec, slot: int, launcher: HourLauncher, clock: Clock, now_mode: bool
-) -> None:
+@dataclass(frozen=True)
+class _Tick:
+    """How this tick launches its slots: the hour launcher, its clock and whether it is `--now`."""
+
+    launcher: HourLauncher
+    clock: Clock
+    now_mode: bool
+
+
+async def _launch(root: Path, spec: CampaignSpec, slot: int, tick: _Tick) -> None:
+    launcher, clock, now_mode = tick.launcher, tick.clock, tick.now_mode
     record = load_hour(root, spec, slot)
     paused = paused_networks(root)
     if record.state == "planned":
@@ -264,8 +272,9 @@ async def run_tick(
         await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
         spec = load_spec(root)
         slots = _due_slots(root, spec, clock(), slot, now_mode)
+        tick = _Tick(launcher, clock, now_mode)
         results = await asyncio.gather(
-            *(_launch(root, spec, k, launcher, clock, now_mode) for k in slots),
+            *(_launch(root, spec, k, tick) for k in slots),
             return_exceptions=True,
         )
         if not now_mode:

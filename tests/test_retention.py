@@ -6,8 +6,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from calculated_cases import POLICY, benchmark_scenario
 from psycopg import sql
-from test_calculated import POLICY, benchmark_scenario
 from test_storage import measurement
 
 from proxy_index.calculated import store

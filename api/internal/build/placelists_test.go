@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
 	"math/rand/v2"
 	"strconv"
@@ -57,7 +58,7 @@ func TestAV4NetworkAnswerIsItsSummary(t *testing.T) {
 	l := netListOf(in.Snapshot, g, w)
 	withIps := 0
 	for i := range l.Len("asn") {
-		if l.Row("asn", i).Ips > 0 {
+		if dim(t, l, "asn").Row(i).Ips > 0 {
 			withIps++
 		}
 	}
@@ -92,19 +93,19 @@ func TestTheCoverageAnswer(t *testing.T) {
 	pg, scope := res.Pages, "net01/residential"
 	c := pg.coverage[listKey{scope, "30d", "coverage"}]
 	var order []int32
-	for _, i := range c.list.ByIps("city_asn") {
-		if c.list.Row("city_asn", int(i)).Ips > 0 {
+	for _, i := range dim(t, c.list, "city_asn").ByIps() {
+		if dim(t, c.list, "city_asn").Row(int(i)).Ips > 0 {
 			order = append(order, i)
 		}
 	}
-	first, ok := pg.Coverage("", scope, "30d", "", 1)
-	second, _ := pg.Coverage("", scope, "30d", "", 2)
+	first, ok, _ := pg.Coverage(context.Background(), "", scope, "30d", "", 1)
+	second, _, _ := pg.Coverage(context.Background(), "", scope, "30d", "", 2)
 	if !ok || first.Total != len(order) || len(order) <= PageSize || first.Totals != nil || len(first.Rows) != PageSize ||
 		first.Network != "net01" || len(second.Rows) == 0 {
 		t.Fatalf("total %d of %d rows (%+v)", first.Total, len(order), first)
 	}
-	if !same(second.Rows[0], c.row(order[PageSize])) {
-		t.Errorf("page 2 starts %+v, want row 51 %+v", second.Rows[0], c.row(order[PageSize]))
+	if !same(second.Rows[0], c.row(dim(t, c.list, "city_asn"), order[PageSize])) {
+		t.Errorf("page 2 starts %+v, want row 51 %+v", second.Rows[0], c.row(dim(t, c.list, "city_asn"), order[PageSize]))
 	}
 	var ranks map[string]model.CountryLatencyRank
 	for _, p := range res.Dataset.Providers {
@@ -127,21 +128,21 @@ func TestTheCoverageAnswer(t *testing.T) {
 	seed := uint64(20261105)
 	rng := rand.New(rand.NewPCG(seed, 1))
 	for range 200 {
-		words := strings.Fields(coverageText(c.list.Row("city_asn", int(order[rng.IntN(len(order))]))))
+		words := strings.Fields(coverageText(dim(t, c.list, "city_asn").Row(int(order[rng.IntN(len(order))]))))
 		q := strings.Join([]string{words[rng.IntN(len(words))], words[rng.IntN(len(words))]}, " ")
 		want, ips, countries, cities, asns := 0, Num(0), map[string]bool{}, map[*store.Place]bool{}, map[int64]bool{}
 		var firstRow *CoverageRow
 		for _, i := range order {
-			r := c.list.Row("city_asn", int(i))
+			r := dim(t, c.list, "city_asn").Row(int(i))
 			text := coverageText(r)
 			if !strings.Contains(text, strings.Fields(q)[0]) || !strings.Contains(text, strings.Fields(q)[1]) {
 				continue
 			}
 			if want++; firstRow == nil {
-				row := c.row(i)
+				row := c.row(dim(t, c.list, "city_asn"), i)
 				firstRow = &row
 			}
-			ips += c.row(i).Ips
+			ips += c.row(dim(t, c.list, "city_asn"), i).Ips
 			if r.Place != nil && r.Place.CountryCode != nil {
 				countries[*r.Place.CountryCode] = true
 			}
@@ -152,14 +153,14 @@ func TestTheCoverageAnswer(t *testing.T) {
 				asns[*r.Network.Asn] = true
 			}
 		}
-		got, _ := pg.Coverage("", scope, "30d", q, 1)
+		got, _, _ := pg.Coverage(context.Background(), "", scope, "30d", q, 1)
 		if got.Total != want || got.Totals == nil || got.Totals.Ips != ips || got.Totals.Countries != len(countries) ||
 			got.Totals.Cities != len(cities) || got.Totals.Asns != len(asns) || want > 0 && !same(got.Rows[0], *firstRow) {
 			t.Fatalf("seed %d, q %q: total %d (want %d), totals %+v (want %v IPs, %d countries, %d cities, %d ASNs)",
 				seed, q, got.Total, want, got.Totals, ips, len(countries), len(cities), len(asns))
 		}
 	}
-	if _, ok := pg.Coverage("", "nobody/residential", "30d", "", 1); ok {
+	if _, ok, _ := pg.Coverage(context.Background(), "", "nobody/residential", "30d", "", 1); ok {
 		t.Error("an unknown network has a Coverage answer")
 	}
 }
@@ -184,7 +185,7 @@ func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
 	}
 	pg := &Pages{coverage: map[listKey]*coverageList{{"n/residential", "24h", "coverage"}: {list: l, scale: 1.5,
 		ranks: map[string]model.CountryLatencyRank{"DE": {P50: 120, Rank: 2, Peers: 4}}}}}
-	page, ok := pg.Coverage("at", "n/residential", "24h", "", 1)
+	page, ok, _ := pg.Coverage(context.Background(), "at", "n/residential", "24h", "", 1)
 	if !ok || page.Total != 1 || len(page.Rows) != 1 {
 		t.Fatalf("page %+v", page)
 	}
@@ -219,7 +220,7 @@ func TestACityPageRanksTheNetworksInIt(t *testing.T) {
 		netSource(t, "a", map[string][2]int64{"Berlin": {10, 300}, "Potsdam": {99, 10}}),
 		netSource(t, "b", map[string][2]int64{"Berlin": {30, 100}}),
 		netSource(t, "c", map[string][2]int64{"Berlin": {20, 200}})}}}
-	page, ok := pg.Place("at", "city", "DE|BE|Berlin|Berlin", "30d")
+	page, ok, _ := pg.Place(context.Background(), "at", "city", "DE|BE|Berlin|Berlin", "30d")
 	if !ok || len(page.Rows) != 3 {
 		t.Fatalf("page %+v", page)
 	}
@@ -233,11 +234,11 @@ func TestACityPageRanksTheNetworksInIt(t *testing.T) {
 		}
 	}
 	for _, key := range []string{"DE|BE|Berlin|Hamburg", "|BE|Berlin|Berlin", "DE|BE|Berlin"} {
-		if _, ok := pg.Place("at", "city", key, "30d"); ok {
+		if _, ok, _ := pg.Place(context.Background(), "at", "city", key, "30d"); ok {
 			t.Errorf("%q has a city page", key)
 		}
 	}
-	if _, ok := pg.Place("at", "street", "DE|BE|Berlin|Berlin", "30d"); ok {
+	if _, ok, _ := pg.Place(context.Background(), "at", "street", "DE|BE|Berlin|Berlin", "30d"); ok {
 		t.Error("a street page")
 	}
 }
@@ -250,9 +251,9 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 	for _, d := range []string{"region", "city"} {
 		want := 0
 		for _, n := range []string{"net00", "net01", "net02"} {
-			l, _ := pg.List("", n+"/residential", "7d", d, "", 1)
+			l, _, _ := pg.List(context.Background(), "", n+"/residential", "7d", d, "", 1)
 			for p := 1; p <= l.Pages; p++ {
-				page, _ := pg.List("", n+"/residential", "7d", d, "", p)
+				page, _, _ := pg.List(context.Background(), "", n+"/residential", "7d", d, "", p)
 				for _, r := range page.Rows {
 					if model.SV(r.CountryCode) == "AA" {
 						want++
@@ -260,25 +261,28 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 				}
 			}
 		}
-		list, ok := pg.List("", "country/AA", "7d", d, "", 1)
+		list, ok, _ := pg.List(context.Background(), "", "country/AA", "7d", d, "", 1)
 		if !ok || list.Total != want || want == 0 || len(list.Rows) != min(want, PageSize) {
 			t.Fatalf("%s: %d rows of %d", d, list.Total, want)
 		}
-		rows := pg.lists[listKey{"country/AA", "7d", d}].rows(nil)
+		rows, err := pg.lists[listKey{"country/AA", "7d", d}].rows(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for i, r := range list.Rows {
 			if r.Network == "" || r.Key != rows[i].Key || r.Network != rows[i].Network || i > 0 && placeLess(list.Rows[i], list.Rows[i-1]) {
 				t.Fatalf("%s row %d: %+v", d, i, r)
 			}
 		}
-		if second, _ := pg.List("", "country/AA", "7d", d, "", 2); want > PageSize && second.Rows[0].Key != rows[PageSize].Key {
+		if second, _, _ := pg.List(context.Background(), "", "country/AA", "7d", d, "", 2); want > PageSize && second.Rows[0].Key != rows[PageSize].Key {
 			t.Errorf("%s page 2 starts %+v", d, second.Rows[0])
 		}
 	}
 	key := pg.lists[listKey{"country/AA", "30d", "city"}].first[0].Key
-	if page, ok := pg.Place("", "city", key, "30d"); !ok || len(page.Rows) == 0 || page.Rows[0].Key != key {
+	if page, ok, _ := pg.Place(context.Background(), "", "city", key, "30d"); !ok || len(page.Rows) == 0 || page.Rows[0].Key != key {
 		t.Errorf("city page %s: %+v", key, page)
 	}
-	if _, ok := pg.List("", "country/ZZ", "7d", "region", "", 1); ok {
+	if _, ok, _ := pg.List(context.Background(), "", "country/ZZ", "7d", "region", "", 1); ok {
 		t.Error("a country without networks has a region list")
 	}
 }
@@ -297,4 +301,14 @@ func TestAV4BuildKeepsOnlyItsFirstPages(t *testing.T) {
 	if n == 0 || cap(res.Pages.lists[listKey{"net00/residential", "30d", "city"}].first) != PageSize {
 		t.Errorf("%d lists", n)
 	}
+}
+
+// dim is l's rows of a dimension, failing t when they cannot be read.
+func dim(t testing.TB, l *store.NetList, dimension string) *store.NetRows {
+	t.Helper()
+	v, err := l.Rows(context.Background(), dimension)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }

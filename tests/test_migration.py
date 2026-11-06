@@ -7,6 +7,7 @@ start at v10, v11.
 """
 
 import pytest
+from calculated_cases import payload_mismatches
 from migration_cases import (
     POLICY,
     V6_NAMES,
@@ -22,7 +23,6 @@ from migration_cases import (
     load_v9,
     v5_state,
 )
-from test_calculated import payload_mismatches
 from test_storage import measurement
 
 from proxy_index import names
