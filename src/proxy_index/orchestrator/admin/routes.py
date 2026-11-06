@@ -1,8 +1,8 @@
 """Admin JSON API under /admin/api, for the Astro operator UI (src/pages/admin).
 
 Data and actions only: no templates and no formatting. Every reader is a thin wrapper over
-`views` and every action over `writers` (or `views.set_scheduler`), which own every query, so
-the UI cannot see a shape the tests do not.
+`views` or `views_dashboard` and every action over `writers` (or `views.set_scheduler`),
+which own every query, so the UI cannot see a shape the tests do not.
 
 Authentication is HTTP Basic against ADMIN_USER / ADMIN_PASSWORD (the Astro server sends the
 same pair). With no password the admin answers only over loopback, and only in --dev;
@@ -32,7 +32,7 @@ from aiohttp import web
 
 from ... import __version__
 from ..api import DB_KEY
-from . import views, writers
+from . import views, views_dashboard, writers
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -186,7 +186,7 @@ async def health(request: web.Request) -> web.Response:
 
 async def dashboard(request: web.Request) -> web.Response:
     async with request.app[DB_KEY].connection() as conn:
-        return _json(await views.dashboard(conn))
+        return _json(await views_dashboard.dashboard(conn))
 
 
 async def batches(request: web.Request) -> web.Response:
@@ -222,7 +222,7 @@ async def schedule(request: web.Request) -> web.Response:
 
 async def nodes(request: web.Request) -> web.Response:
     async with request.app[DB_KEY].connection() as conn:
-        return _json(await views.node_grid(conn))
+        return _json(await views_dashboard.node_grid(conn))
 
 
 async def traffic(request: web.Request) -> web.Response:
@@ -243,8 +243,8 @@ async def traffic(request: web.Request) -> web.Response:
 async def jobs(request: web.Request) -> web.Response:
     scheduler = request.app.get(SCHEDULER_KEY)
     async with request.app[DB_KEY].connection() as conn:
-        latest = await views.job_health(conn)
-        recent = await views.recent_jobs(conn, 50)
+        latest = await views_dashboard.job_health(conn)
+        recent = await views_dashboard.recent_jobs(conn, 50)
     return _json(
         {
             "jobs": latest,
