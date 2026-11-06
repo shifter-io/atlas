@@ -169,24 +169,31 @@ def _check_target(conn, manifest: dict) -> None:
         )
 
 
+def _load_tables(conn, archive: tarfile.TarFile, members, entries: list) -> dict:
+    """Load the manifest's table files, which must come next in its order; the rows inserted
+    per table (a table the database lacks is skipped when the archive has no rows for it)."""
+    inserted = {}
+    for entry in entries:
+        member = next(members, None)
+        if member is None or member.name != entry["file"] or not member.isreg():
+            raise ArchiveError(f"{entry['file']} is missing or out of order")
+        table = BY_NAME[entry["name"]]
+        if conn.execute("SELECT to_regclass(%s)", (table.name,)).fetchone()[0] is None:
+            if entry["rows"]:
+                raise ArchiveError(f"the database has no table {table.name}")
+            continue
+        inserted[table.name] = _load(conn, table, entry, archive.extractfile(member))
+    return inserted
+
+
 def restore_file(path: Path, database) -> dict:
     """Load one day file; returns the day and the rows inserted per table."""
-    inserted = {}
     with tarfile.open(path, "r:gz") as archive, connect(database) as conn:
         members = iter(archive)
         manifest = _manifest(archive, next(members, None))
         _check_target(conn, manifest)
         conn.execute("SET LOCAL TimeZone='UTC'")
-        for entry in manifest["tables"]:
-            member = next(members, None)
-            if member is None or member.name != entry["file"] or not member.isreg():
-                raise ArchiveError(f"{entry['file']} is missing or out of order")
-            table = BY_NAME[entry["name"]]
-            if conn.execute("SELECT to_regclass(%s)", (table.name,)).fetchone()[0] is None:
-                if entry["rows"]:
-                    raise ArchiveError(f"the database has no table {table.name}")
-                continue
-            inserted[table.name] = _load(conn, table, entry, archive.extractfile(member))
+        inserted = _load_tables(conn, archive, members, manifest["tables"])
         if next(members, None) is not None:
             raise ArchiveError("the archive holds files its manifest does not list")
         for name, rows in inserted.items():
