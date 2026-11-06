@@ -82,6 +82,15 @@ def test_monitor_distinguishes_live_dead_stale_and_unreachable():
     )
 
 
+def test_monitor_flags_a_probe_running_past_an_hour_unless_it_finished():
+    now = time.time()
+    data = {"server_time": now, "service": {"ActiveState": "active"}}
+    late = probe_state(now, started_at=timestamp(now - 3700))
+    assert classify(data | {"state": late}, now)["health"] == "over_hour"
+    late["status"] = "stopped"
+    assert classify(data | {"state": late}, now)["health"] == "stopped"
+
+
 def test_monitor_detects_older_round_backlog():
     now = time.time()
     state = probe_state(
