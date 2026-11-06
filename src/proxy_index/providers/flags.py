@@ -14,6 +14,7 @@ from typing import Any
 
 from ..models import NETWORK_PROTOCOLS
 
+KINDS = ("country", "name", "integer", "boolean", "choice", "token", "session")
 MAX_CONCURRENCY = 5000  # the campaign spec's own concurrency bound
 
 
@@ -107,6 +108,44 @@ class Flag:
         if self.kind == "integer":
             value *= self.scale
         return self.format.replace("{}", str(value))
+
+
+def _flags(provider: str, specs: Mapping[str, Any]) -> dict[str, Flag]:
+    """The grammar's [flags] table as checked Flags, keyed by name."""
+    flags = {}
+    for name, spec in specs.items():
+        spec = dict(spec)
+        kind = spec.pop("kind")
+        if kind not in KINDS:
+            raise ValueError(f"Unknown grammar flag kind for {provider} {name}")
+        for key in ("requires", "conflicts", "choices", "countries"):
+            if key in spec:
+                spec[key] = tuple(spec[key])
+        if "min" in spec:
+            spec["minimum"] = spec.pop("min")
+        if "max" in spec:
+            spec["maximum"] = spec.pop("max")
+        if spec.get("preset"):
+            spec.setdefault("format", "")
+        flags[name] = Flag(name=name, kind=kind, **spec)
+    names = set(flags)
+    for flag in flags.values():
+        if set(flag.requires + flag.conflicts) - names:
+            raise ValueError(f"Grammar {provider} {flag.name} references an unknown flag")
+        if flag.kind != "session" and "session" in flag.requires + flag.conflicts:
+            raise ValueError("Use requires_session for flags that need a session")
+        if flag.countries and (
+            flag.kind != "country"
+            or not all(re.fullmatch(r"[A-Z]{2}", code) for code in flag.countries)
+        ):
+            raise ValueError(f"Grammar {provider} {flag.name} countries must be ISO codes")
+        if flag.case not in (None, "lower", "upper") or type(flag.scale) is not int:
+            raise ValueError(f"Grammar {provider} {flag.name} has an invalid rendering")
+        if flag.preset and (
+            flag.format or flag.kind in ("session", "boolean") or flag.requires or flag.conflicts
+        ):
+            raise ValueError(f"Grammar {provider} {flag.name} cannot be a preset")
+    return flags
 
 
 def _statuses(testing: Mapping[str, Any], key: str) -> tuple[int, ...]:
