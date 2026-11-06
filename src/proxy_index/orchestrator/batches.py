@@ -253,6 +253,46 @@ async def _close_unmanned(conn: psycopg.AsyncConnection, created: list[int], now
         await close_batch(conn, row["batch_id"], now)
 
 
+async def _open_pulses(
+    conn: psycopg.AsyncConnection,
+    targets: list[dict],
+    now: datetime,
+    lead: timedelta,
+    load_delay: timedelta | None,
+) -> tuple[list[int], list[int], int]:
+    """Open each due target's pulse slot, and its loads unless load_delay is None (load off).
+
+    The batches created, the targets opened and how many of those batches are loads.
+    """
+    created: list[int] = []
+    opened = []
+    loads = 0
+    references: list[dict] | None = None
+    for index, target in enumerate(targets):
+        every = target["pulse_interval_minutes"] * 60
+        slot = datetime.fromtimestamp(now.timestamp() // every * every, UTC)
+        if await _row(
+            conn,
+            "SELECT 1 FROM test_batches WHERE kind='pulse' AND target_id=%s "
+            "AND scheduled_for=%s LIMIT 1",
+            (target["target_id"], slot),
+        ):
+            continue
+        span, start = timedelta(seconds=every), max(slot, now) + lead
+        offset = index / len(targets)
+        created.extend(await open_slot(conn, target["target_id"], slot, span, now, offset))
+        opened.append(target["target_id"])
+        if target["census"] and load_delay is not None:
+            if references is None:
+                references = await load_references(conn, now)
+            load = await _open_loads(
+                conn, references, target["target_id"], slot, start + load_delay
+            )
+            created.extend(load)
+            loads += len(load)
+    return created, opened, loads
+
+
 async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
     """Open the current slot of every pulse-enabled target that has no batch for it yet.
 
@@ -280,30 +320,9 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
             "SELECT target_id,pulse_interval_minutes,census FROM targets WHERE pulse_enabled "
             "ORDER BY sort_order,target_id",
         )
-        created: list[int] = []
-        opened = []
-        loads = 0
-        references: list[dict] | None = None
-        for index, target in enumerate(targets):
-            every = target["pulse_interval_minutes"] * 60
-            slot = datetime.fromtimestamp(now.timestamp() // every * every, UTC)
-            if await _row(
-                conn,
-                "SELECT 1 FROM test_batches WHERE kind='pulse' AND target_id=%s "
-                "AND scheduled_for=%s LIMIT 1",
-                (target["target_id"], slot),
-            ):
-                continue
-            span, start = timedelta(seconds=every), max(slot, now) + lead
-            offset = index / len(targets)
-            created.extend(await open_slot(conn, target["target_id"], slot, span, now, offset))
-            opened.append(target["target_id"])
-            if target["census"] and loading:
-                if references is None:
-                    references = await load_references(conn, now)
-                load = await _open_loads(conn, references, target["target_id"], slot, start + delay)
-                created.extend(load)
-                loads += len(load)
+        created, opened, loads = await _open_pulses(
+            conn, targets, now, lead, delay if loading else None
+        )
         gaps = await _create_runs(conn, created, now)
         await _report_no_node(conn, gaps, now)
         await _close_unmanned(conn, created, now)
@@ -465,6 +484,28 @@ async def census_recovered(
     return len(closed)
 
 
+async def _open_census_outage(
+    conn: psycopg.AsyncConnection, run: dict, batch_id: int, product_id: int, since: datetime
+) -> bool:
+    """Open the stalled census's outage unless the product has one open in the country."""
+    opened = await _row(
+        conn,
+        "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
+        "SELECT %(product)s,%(country)s,%(region)s,'census',%(batch)s,%(since)s "
+        "WHERE NOT EXISTS (SELECT 1 FROM outages WHERE product_id=%(product)s "
+        "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s)) "
+        "RETURNING outage_id",
+        {
+            "product": product_id,
+            "country": run["country_code"],
+            "region": run["region_id"],
+            "batch": batch_id,
+            "since": since,
+        },
+    )
+    return opened is not None
+
+
 async def census_down(
     conn: psycopg.AsyncConnection,
     batch_id: int,
@@ -482,22 +523,7 @@ async def census_down(
     since = _moment(summary.get("outage_started_at"))
     if run is None or run["kind"] != "census" or run["stop_reason"] != "stalled" or since is None:
         return False
-    opened = await _row(
-        conn,
-        "INSERT INTO outages(product_id,country_code,region_id,source,batch_id,started_at) "
-        "SELECT %(product)s,%(country)s,%(region)s,'census',%(batch)s,%(since)s "
-        "WHERE NOT EXISTS (SELECT 1 FROM outages WHERE product_id=%(product)s "
-        "AND country_code=%(country)s AND (ended_at IS NULL OR batch_id=%(batch)s)) "
-        "RETURNING outage_id",
-        {
-            "product": product_id,
-            "country": run["country_code"],
-            "region": run["region_id"],
-            "batch": batch_id,
-            "since": since,
-        },
-    )
-    if opened is None:
+    if not await _open_census_outage(conn, run, batch_id, product_id, since):
         return False
     await emit(
         conn,
