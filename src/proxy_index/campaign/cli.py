@@ -445,7 +445,8 @@ def _probe(args) -> int:
     from .do_api import DigitalOcean, file_token
     from .fanout import OpenSSHRemote
     from .planspec import PlanError, parse_networks
-    from .probe import ProbeError, ProbeInputs, probe, recover
+    from .probe import ProbeError, ProbeInputs, probe
+    from .recover import recover
 
     secrets = MANAGER_ROOT / ".secrets"
     output = args.output or MANAGER_ROOT / "probes"
