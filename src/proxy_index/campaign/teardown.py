@@ -153,7 +153,7 @@ async def _release(
         error is audited by the guard and returned, so the other resources still go."""
         try:
             return await guarded_delete(cloud, kind, rid, scope, ledger, audit, "manager")
-        except Exception as error:
+        except Exception as error:  # boundary: audited by the guard; the others still go
             return f"failed: {type(error).__name__}"
 
     released, manager_gone = [], False
