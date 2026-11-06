@@ -15,7 +15,7 @@ from helpers import server
 from node_cases import RotatingGateway
 
 from proxy_index.models import ProxyConfig
-from proxy_index.node import NodeAgent, Rejected, provider_factory, read_token
+from proxy_index.node import NodeAgent, NodeSettings, Rejected, provider_factory, read_token
 
 SHIFTER = Path(__file__).resolve().parents[1] / "configs" / "shifter.toml"
 
@@ -62,13 +62,15 @@ def test_config_targets_the_country_with_rotating_sessions(tmp_path, monkeypatch
     monkeypatch.setenv("SHIFTER_PASSWORD", "secret")
     factory = provider_factory(SHIFTER)
     agent = NodeAgent(
-        "http://orchestrator",
-        "t",
-        provider="shifter",
-        product="residential",
-        region="fra1",
-        proxy_factory=factory,
-        work_dir=tmp_path,
+        NodeSettings(
+            "http://orchestrator",
+            "t",
+            provider="shifter",
+            product="residential",
+            region="fra1",
+            proxy_factory=factory,
+            work_dir=tmp_path,
+        )
     )
     config = agent.config(assignment())
     assert config.requested_country == "de" and config.runner_location == "fra1"
@@ -95,17 +97,21 @@ def test_config_targets_the_country_with_rotating_sessions(tmp_path, monkeypatch
     assert census.target_url == "http://127.0.0.1:9/ip"
     with pytest.raises(ValueError, match="label conflicts"):
         NodeAgent(
-            "http://o",
-            "t",
-            provider="shifter",
-            product="datacenter",
-            region="fra1",
-            proxy_factory=factory,
-            work_dir=tmp_path,
+            NodeSettings(
+                "http://o",
+                "t",
+                provider="shifter",
+                product="datacenter",
+                region="fra1",
+                proxy_factory=factory,
+                work_dir=tmp_path,
+            )
         ).config(assignment())
     with pytest.raises(ValueError, match="--region or --host-name"):
         NodeAgent(
-            "http://o", "t", provider="x", product="y", proxy_factory=factory, work_dir=tmp_path
+            NodeSettings(
+                "http://o", "t", provider="x", product="y", proxy_factory=factory, work_dir=tmp_path
+            )
         )
 
 
@@ -136,14 +142,16 @@ async def test_upload_retries_transient_failures_and_cleans_up(tmp_path, monkeyp
 
     test_server, calls = await stub_orchestrator({"/v1/results": results})
     agent = NodeAgent(
-        str(test_server.make_url("")),
-        "tok",
-        provider="p",
-        product="q",
-        region="fra1",
-        proxy_factory=None,
-        work_dir=tmp_path,
-        upload_backoff=0.01,
+        NodeSettings(
+            str(test_server.make_url("")),
+            "tok",
+            provider="p",
+            product="q",
+            region="fra1",
+            proxy_factory=None,
+            work_dir=tmp_path,
+            upload_backoff=0.01,
+        )
     )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -178,14 +186,16 @@ async def test_rejections_are_final_and_shutdown_reports_failure(tmp_path):
 
     test_server, calls = await stub_orchestrator({"/v1/results": results, "/v1/failed": failed})
     agent = NodeAgent(
-        str(test_server.make_url("")),
-        "tok",
-        provider="p",
-        product="q",
-        region="fra1",
-        proxy_factory=None,
-        work_dir=tmp_path,
-        upload_backoff=0.01,
+        NodeSettings(
+            str(test_server.make_url("")),
+            "tok",
+            provider="p",
+            product="q",
+            region="fra1",
+            proxy_factory=None,
+            work_dir=tmp_path,
+            upload_backoff=0.01,
+        )
     )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -230,15 +240,17 @@ async def test_a_target_known_only_to_the_database_runs_as_an_echo_target(tmp_pa
     gateway = RotatingGateway(lambda n: f"10.0.1.{n % 4 + 1}")
     async with server(gateway) as port:
         agent = NodeAgent(
-            str(test_server.make_url("")),
-            "tok",
-            provider="fixture",
-            product="alpha",
-            region="fra1",
-            proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
-            work_dir=tmp_path,
-            progress_interval=0.05,
-            upload_backoff=0.01,
+            NodeSettings(
+                str(test_server.make_url("")),
+                "tok",
+                provider="fixture",
+                product="alpha",
+                region="fra1",
+                proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
+                work_dir=tmp_path,
+                progress_interval=0.05,
+                upload_backoff=0.01,
+            )
         )
         work = assignment(
             target_id="generic_http_b",

@@ -29,7 +29,7 @@ import tempfile
 import time
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import KW_ONLY, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -184,6 +184,29 @@ class Active:
     requests: int = 0
 
 
+@dataclass(frozen=True)
+class NodeSettings:
+    """What a NodeAgent is built from: the orchestrator URL and bearer token, then the node's
+    provider product, region or host, and its intervals (seconds)."""
+
+    orchestrator: str
+    token: str
+    _: KW_ONLY
+    provider: str
+    product: str
+    proxy_factory: ProxyFactory
+    work_dir: str | Path
+    region: str | None = None
+    host: str | None = None
+    enricher: Enricher | None = None
+    mmdb: str | Path | None = None
+    poll_interval: float = 5.0
+    heartbeat_interval: float = 10.0
+    progress_interval: float = 30.0
+    transport_factory: Callable[[RunConfig], Any] = HttpTransport
+    upload_backoff: float = 2.0
+
+
 class NodeAgent:
     # The targets a node runs; a subclass (the browser host, browser/node.py) replaces them.
     registry: TargetRegistry = registry
@@ -191,39 +214,21 @@ class NodeAgent:
     # pinning the manager's certificate; set before run().
     tls: ssl.SSLContext | bool = True
 
-    def __init__(
-        self,
-        orchestrator: str,
-        token: str,
-        *,
-        provider: str,
-        product: str,
-        proxy_factory: ProxyFactory,
-        work_dir: str | Path,
-        region: str | None = None,
-        host: str | None = None,
-        enricher: Enricher | None = None,
-        mmdb: str | Path | None = None,
-        poll_interval: float = 5.0,
-        heartbeat_interval: float = 10.0,
-        progress_interval: float = 30.0,
-        transport_factory: Callable[[RunConfig], Any] = HttpTransport,
-        upload_backoff: float = 2.0,
-    ) -> None:
-        if not region and not host:
+    def __init__(self, settings: NodeSettings) -> None:
+        if not settings.region and not settings.host:
             raise ValueError("A node needs --region or --host-name")
-        self.base = orchestrator.rstrip("/")
-        self._headers = {"Authorization": f"Bearer {token}"}
-        self.provider, self.product = provider, product
-        self.region, self.host = region, host
-        self.proxy_factory = proxy_factory
-        self.work_dir = Path(work_dir)
-        self.enricher, self.mmdb = enricher, mmdb
-        self.poll_interval = poll_interval
-        self.heartbeat_interval = heartbeat_interval
-        self.progress_interval = progress_interval
-        self.transport_factory = transport_factory
-        self.upload_backoff = upload_backoff
+        self.base = settings.orchestrator.rstrip("/")
+        self._headers = {"Authorization": f"Bearer {settings.token}"}
+        self.provider, self.product = settings.provider, settings.product
+        self.region, self.host = settings.region, settings.host
+        self.proxy_factory = settings.proxy_factory
+        self.work_dir = Path(settings.work_dir)
+        self.enricher, self.mmdb = settings.enricher, settings.mmdb
+        self.poll_interval = settings.poll_interval
+        self.heartbeat_interval = settings.heartbeat_interval
+        self.progress_interval = settings.progress_interval
+        self.transport_factory = settings.transport_factory
+        self.upload_backoff = settings.upload_backoff
         self.active: dict[int, Active] = {}
         self.tasks: set[asyncio.Task[None]] = set()
         self.node_id: int | None = None

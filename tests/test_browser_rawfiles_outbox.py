@@ -18,7 +18,7 @@ from browser_rawfiles_cases import RUN_ID, make_run, seal_dir
 from proxy_index.browser import contracts as bc
 from proxy_index.browser import rawfiles
 from proxy_index.browser.rawfiles import Outbox
-from proxy_index.node import NodeAgent
+from proxy_index.node import NodeAgent, NodeSettings
 
 # --- outbox: confirmation, markers, retries -----------------------------------------------
 
@@ -60,13 +60,15 @@ async def agent_for(tmp_path):
         await server.start_server()
         servers.append(server)
         agent = NodeAgent(
-            str(server.make_url("")),
-            "token-shifter",
-            provider="shifter",
-            product="residential",
-            proxy_factory=lambda country: None,
-            work_dir=tmp_path / "work",
-            region="browser",
+            NodeSettings(
+                str(server.make_url("")),
+                "token-shifter",
+                provider="shifter",
+                product="residential",
+                proxy_factory=lambda country: None,
+                work_dir=tmp_path / "work",
+                region="browser",
+            )
         )
         agent.session = aiohttp.ClientSession()
         sessions.append(agent.session)

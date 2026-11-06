@@ -15,7 +15,7 @@ from dbip_fakes import DE, US, FakeCdn, tiny_mmdb
 
 from proxy_index import dbip
 from proxy_index.enrichment import LocalEnricher, find_database, find_source
-from proxy_index.node import NodeAgent
+from proxy_index.node import NodeAgent, NodeSettings
 from proxy_index.orchestrator.db import Database, put_setting
 from proxy_index.orchestrator.jobs import dbip_update, register_jobs
 from proxy_index.orchestrator.scheduler import Scheduler
@@ -99,15 +99,17 @@ def test_a_file_replaced_while_it_is_opened_is_opened_again(tmp_path, monkeypatc
 
 def agent(tmp_path, enricher) -> NodeAgent:
     return NodeAgent(
-        "http://orchestrator.invalid",
-        "t",
-        provider="fixture",
-        product="alpha",
-        region="fra1",
-        proxy_factory=lambda country: None,
-        work_dir=tmp_path / "runs",
-        enricher=enricher,
-        mmdb=getattr(enricher, "source", None),
+        NodeSettings(
+            "http://orchestrator.invalid",
+            "t",
+            provider="fixture",
+            product="alpha",
+            region="fra1",
+            proxy_factory=lambda country: None,
+            work_dir=tmp_path / "runs",
+            enricher=enricher,
+            mmdb=getattr(enricher, "source", None),
+        )
     )
 
 

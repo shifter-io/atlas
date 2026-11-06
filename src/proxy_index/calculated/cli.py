@@ -151,8 +151,7 @@ def _report_traffic(args):
 
     with connect(args.database_file) as conn:
         conn.execute("SET TRANSACTION READ ONLY")
-        report = traffic.summary(
-            conn,
+        inputs = traffic.TrafficInputs(
             test=args.test,
             provider=args.provider,
             country=args.country,
@@ -160,6 +159,7 @@ def _report_traffic(args):
             start=traffic.parse_time(args.start),
             end=traffic.parse_time(args.end),
         )
+        report = traffic.summary(conn, inputs)
     print(json.dumps(report, indent=2, default=iso) if args.json else traffic.table(report))
     return 0
 

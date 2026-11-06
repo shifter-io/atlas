@@ -12,7 +12,7 @@ from orchestrator_cases import prepare, query
 
 from proxy_index import __version__
 from proxy_index.models import ProxyConfig
-from proxy_index.node import NodeAgent
+from proxy_index.node import NodeAgent, NodeSettings
 from proxy_index.orchestrator import batches
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.db import Database, put_setting
@@ -73,19 +73,21 @@ async def orchestrator(database):
 def agents_for(base, tokens, port, tmp_path, **options):
     return [
         NodeAgent(
-            base,
-            token["token"],
-            provider="fixture",
-            product=token["product"],
-            region="fra1",
-            proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
-            work_dir=tmp_path / token["product"],
-            enricher=GeoEnricher(),
-            poll_interval=0.1,
-            heartbeat_interval=0.2,
-            progress_interval=0.05,
-            upload_backoff=0.05,
-            **options,
+            NodeSettings(
+                base,
+                token["token"],
+                provider="fixture",
+                product=token["product"],
+                region="fra1",
+                proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
+                work_dir=tmp_path / token["product"],
+                enricher=GeoEnricher(),
+                poll_interval=0.1,
+                heartbeat_interval=0.2,
+                progress_interval=0.05,
+                upload_backoff=0.05,
+                **options,
+            )
         )
         for token in tokens
     ]

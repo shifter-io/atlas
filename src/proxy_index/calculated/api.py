@@ -303,17 +303,17 @@ async def traffic_report(request):
         test = query.get("test") or None
         if test is not None and test not in traffic.TESTS:
             raise ValueError("test must be census, pulse or load")
-        filters = {
-            "test": test,
-            "provider": query.get("provider") or None,
-            "country": query.get("country") or None,
-            "region": query.get("region") or None,
-            "start": traffic.parse_time(query.get("from")),
-            "end": traffic.parse_time(query.get("to")),
-        }
+        inputs = traffic.TrafficInputs(
+            test=test,
+            provider=query.get("provider") or None,
+            country=query.get("country") or None,
+            region=query.get("region") or None,
+            start=traffic.parse_time(query.get("from")),
+            end=traffic.parse_time(query.get("to")),
+        )
     except ValueError as exc:
         raise web.HTTPBadRequest(text=str(exc)) from exc
-    report = await asyncio.to_thread(_live, request.app[DATABASE], traffic.summary, **filters)
+    report = await asyncio.to_thread(_live, request.app[DATABASE], traffic.summary, inputs)
     return _json(report)
 
 

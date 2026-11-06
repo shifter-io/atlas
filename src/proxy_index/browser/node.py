@@ -34,6 +34,7 @@ from ..errors import UserError
 from ..models import RunConfig
 from ..node import (
     NodeAgent,
+    NodeSettings,
     ProxyFactory,
     provider_factory,
     read_token,
@@ -148,15 +149,17 @@ class BrowserAgent(NodeAgent):
 
     def __init__(self, host: BrowserHost, network: Network, orchestrator: str, **options):
         super().__init__(
-            orchestrator,
-            network.token,
-            provider=network.provider,
-            product=network.product,
-            proxy_factory=network.proxy_factory,
-            work_dir=host.state / "runs" / network.directory.name,
-            region=BROWSER_REGION,
-            host=host.name,
-            **options,
+            NodeSettings(
+                orchestrator,
+                network.token,
+                provider=network.provider,
+                product=network.product,
+                proxy_factory=network.proxy_factory,
+                work_dir=host.state / "runs" / network.directory.name,
+                region=BROWSER_REGION,
+                host=host.name,
+                **options,
+            )
         )
         self.browser_host, self.network = host, network
         self.registry = host.registry
