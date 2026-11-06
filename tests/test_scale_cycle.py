@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"
 generate = importlib.import_module("generate")
 synthetic = importlib.import_module("synthetic")
 cycle = importlib.import_module("cycle")
+cycle_steps = importlib.import_module("cycle_steps")
 measure = importlib.import_module("measure")
 
 pytest_plugins = ["test_storage"]
@@ -290,7 +291,7 @@ def test_siteapi_waits_reads_health_and_the_node_api_can_be_external(monkeypatch
     assert done and part == {"build_id": 99, "reached": False, "status": None} | {
         key: None for key in ("buildMs", "loadMs", "assembleMs", "renderMs")
     } | {"unserved": 0}
-    assert cycle.healthz("http://127.0.0.1:9") == {}
+    assert cycle_steps.healthz("http://127.0.0.1:9") == {}
 
     async def base():
         async with found.node_api(None) as url:

@@ -7,7 +7,7 @@ import threading
 import pytest
 from campaign_fakes import CAMPAIGN_PROJECT, CID, FakeDigitalOcean, running
 from campaign_hour_cases import PRE_CREATE, FakeClock, make_root, make_spec
-from test_daily import NOW, hanging_run, hours, in_flight, inputs, removed, template
+from daily_cases import NOW, hanging_run, hours, in_flight, inputs, removed, template
 from test_onboarding import START
 from test_onboarding_monitor import shifter
 

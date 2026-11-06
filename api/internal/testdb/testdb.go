@@ -4,9 +4,10 @@
 // PG_TEST_ADMIN_FILE names a credentials TOML (e.g. .secrets/postgres-admin.toml)
 // for a role allowed to CREATE DATABASE; with PG_TEST_REQUIRED set (CI) a
 // missing PG_TEST_ADMIN_FILE fails the test instead. Each test gets its own database named
-// siteapi_test_<random>, loaded with the framework schema read from the
-// repository's own framework tree (src/proxy_index), and dropped afterwards. The real
-// proxy_reviews database is never touched.
+// siteapi_test_<random>, with the framework schema read from the repository's own
+// framework tree (src/proxy_index), and dropped afterwards: a copy of a template
+// database each test process loads once (template.go). The real proxy_reviews
+// database is never touched.
 package testdb
 
 import (
@@ -21,7 +22,6 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -39,30 +39,22 @@ func FrameworkDir() string {
 }
 
 // New creates a scratch database with the framework schema and the site
-// schema migrated. Skips when PG_TEST_ADMIN_FILE is unset.
+// schema migrated, a copy of this process's site template database (template.go).
+// Skips when PG_TEST_ADMIN_FILE is unset.
 func New(t testing.TB) *DB {
 	t.Helper()
-	db := NewFramework(t)
-	w := db.Conn(t)
-	defer w.Close(context.Background())
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	if _, err := store.Migrate(ctx, w); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	return db
+	admin := adminConfig(t)
+	return create(t, admin, siteTemplate(t, admin))
 }
 
 // NewFramework creates a scratch database with the framework schema and its
 // reference rows only: no site schema, as a database looks before `siteapi
-// migrate` first runs. Skips when PG_TEST_ADMIN_FILE is unset.
+// migrate` first runs. It is a copy of this process's framework template
+// database (template.go). Skips when PG_TEST_ADMIN_FILE is unset.
 func NewFramework(t testing.TB) *DB {
 	t.Helper()
-	db := create(t, adminConfig(t))
-	db.loadFramework(t, "schema.sql")
-	db.loadCalculated(t)
-	db.loadReference(t)
-	return db
+	admin := adminConfig(t)
+	return create(t, admin, frameworkTemplate(t, admin))
 }
 
 // adminConfig is the admin role PG_TEST_ADMIN_FILE names. It skips the test
@@ -87,24 +79,17 @@ func adminConfig(t testing.TB) config.Postgres {
 	return admin
 }
 
-// create makes an empty database with a random name and drops it when the
-// test ends.
-func create(t testing.TB, admin config.Postgres) *DB {
+// create makes a copy of the template database with a random name and drops
+// it when the test ends.
+func create(t testing.TB, admin config.Postgres, template string) *DB {
 	t.Helper()
-	buf := make([]byte, 6)
-	rand.Read(buf) //nolint:errcheck
-	name := "siteapi_test_" + hex.EncodeToString(buf)
+	name := "siteapi_test_" + hex.EncodeToString(randomBytes()[:6])
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	conn, err := pgx.Connect(ctx, admin.DSN())
-	if err != nil {
-		t.Fatalf("connect as admin: %v", err)
-	}
-	if _, err := conn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
-		conn.Close(ctx)
+	sql := "CREATE DATABASE " + pgx.Identifier{name}.Sanitize() + " TEMPLATE " + pgx.Identifier{template}.Sanitize()
+	if err := adminExec(ctx, admin, sql); err != nil {
 		t.Fatalf("create scratch database: %v", err)
 	}
-	conn.Close(ctx)
 	db := &DB{Name: name, DSN: admin.WithDB(name).DSN(), Admin: admin}
 	t.Cleanup(func() { db.drop(t) })
 	return db
@@ -114,56 +99,46 @@ func create(t testing.TB, admin config.Postgres) *DB {
 func (d *DB) drop(t testing.TB) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c, err := pgx.Connect(ctx, d.Admin.DSN())
-	if err != nil {
-		t.Logf("drop %s: %v", d.Name, err)
-		return
-	}
-	defer c.Close(ctx)
-	if _, err := c.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{d.Name}.Sanitize()+" WITH (FORCE)"); err != nil {
+	if err := adminExec(ctx, d.Admin, dropSQL(d.Name)); err != nil {
 		t.Logf("drop %s: %v", d.Name, err)
 	}
 }
 
-// loadReference creates the scratch partitions (the framework creates
-// monthly ones on demand) and the reference rows the real database has.
-func (d *DB) loadReference(t testing.TB) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	w := d.Conn(t)
-	defer w.Close(context.Background())
-	if _, err := w.Exec(ctx, `CREATE TABLE test_events_default PARTITION OF test_events DEFAULT;
+// referenceRows are the scratch partitions (the framework creates monthly
+// ones on demand) and the reference rows the real database has.
+const referenceRows = `CREATE TABLE test_events_default PARTITION OF test_events DEFAULT;
 INSERT INTO targets(target_id,label,url,pass_condition,sort_order) VALUES
  ('generic_http','Generic HTTP','http://checkip.amazonaws.com/','Response body is the exit address the target saw, and it parses as an IP.',10),
  ('generic_https','Generic HTTPS','https://checkip.amazonaws.com/','CONNECT tunnel established, certificate validates, and the body parses as an IP.',20);
 INSERT INTO runner_regions(region_id,slug,pattern) VALUES (1,'fra1','fra1-*');
-INSERT INTO countries(country_code,name,region_id,census_time) VALUES ('US','United States',1,'06:00'),('DE','Germany',1,'07:00');`); err != nil {
-		t.Fatalf("scratch reference rows: %v", err)
-	}
-}
+INSERT INTO countries(country_code,name,region_id,census_time) VALUES ('US','United States',1,'06:00'),('DE','Germany',1,'07:00');`
 
 // loadFramework runs one of the framework's schema files (relative to
-// FrameworkDir) on the database.
-func (d *DB) loadFramework(t testing.TB, file string) {
-	t.Helper()
+// FrameworkDir) on c.
+func loadFramework(ctx context.Context, c *pgx.Conn, file string) error {
 	sql, err := os.ReadFile(filepath.Join(FrameworkDir(), file))
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
+	if _, err := c.Exec(ctx, string(sql)); err != nil {
+		return fmt.Errorf("framework %s: %w", file, err)
+	}
+	return nil
+}
+
+// calculatedSchema is the framework's calculated schema, which is idempotent.
+var calculatedSchema = filepath.Join("calculated", "schema.sql")
+
+// loadCalculated runs the framework's calculated schema on the database.
+func (d *DB) loadCalculated(t testing.TB) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	c := d.Conn(t)
 	defer c.Close(context.Background())
-	if _, err := c.Exec(ctx, string(sql)); err != nil {
-		t.Fatalf("framework %s: %v", file, err)
+	if err := loadFramework(ctx, c, calculatedSchema); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// loadCalculated runs the framework's calculated schema, which is idempotent.
-func (d *DB) loadCalculated(t testing.TB) {
-	t.Helper()
-	d.loadFramework(t, filepath.Join("calculated", "schema.sql"))
 }
 
 // Conn opens a read-write connection.

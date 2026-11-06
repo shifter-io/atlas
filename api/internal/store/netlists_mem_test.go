@@ -15,6 +15,7 @@ const netListBound = 40 << 20
 // A million compact rows over 50,000 places and 5,000 ASN labels, as Load
 // holds them, take at most netListBound once collected. The race detector
 // (excluded by the build tag) multiplies heap use.
+// Serial: it measures the process's heap, which parallel tests would share.
 func TestNetListsMemory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("holds a million rows")

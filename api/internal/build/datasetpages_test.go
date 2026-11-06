@@ -18,6 +18,7 @@ import (
 // build before v4 keeps DATASET-SIZE-1's pages. The expected paths are built
 // here from the build's answers, not by the code under test.
 func TestTheDatasetFileRegeneratesEveryPageAnswer(t *testing.T) {
+	t.Parallel()
 	file, res := datasetFile(t, goldenShape)
 	checkPages(t, file, res, false)
 	file, res = v4File(t)

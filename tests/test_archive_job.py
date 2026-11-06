@@ -2,9 +2,12 @@
 
 import hashlib
 import json
+import socket
 import subprocess
 from datetime import UTC, datetime, timedelta
+from http.server import ThreadingHTTPServer
 
+import archive_job_cases
 import pytest
 from archive_job_cases import KEY_ID, census_day, fake_bucket, spaces_settings
 from test_archive import DAY, SLOT, day_of_data, empty_database, fact_rows
@@ -26,6 +29,22 @@ pytest_plugins = ["test_storage"]
 # When DAY (and the day before) are due: their rows end on DAY, 30 days earlier. The daily-test
 # run of the fixture starts at the real time, later, so its day is still waiting then.
 LATER = datetime(2026, 11, 5, tzinfo=UTC)
+
+
+def test_fake_bucket_refuses_connections_once_it_is_gone(tmp_path, monkeypatch):
+    servers = []
+
+    class Kept(ThreadingHTTPServer):
+        def server_activate(self):
+            super().server_activate()
+            servers.append(self)
+
+    # The test holds the server, so only an explicit close can free its port.
+    monkeypatch.setattr(archive_job_cases, "ThreadingHTTPServer", Kept)
+    with fake_bucket(tmp_path):
+        pass
+    with pytest.raises(ConnectionRefusedError):
+        socket.create_connection(("127.0.0.1", servers[0].server_port), timeout=5).close()
 
 
 def test_signature_matches_the_aws_get_object_example():

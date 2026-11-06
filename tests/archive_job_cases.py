@@ -104,6 +104,9 @@ def fake_bucket(tmp_path):
         yield handler, settings
     finally:
         server.shutdown()
+        # Close the listening socket now, not when the server is collected: until then its
+        # port still accepts, so a request to it is reset instead of refused (FLAKE-1).
+        server.server_close()
 
 
 def shift(conn, run_key, to):

@@ -26,6 +26,7 @@ import (
 // process, so the generator's memory is not counted: two rebuilds, the second
 // from the held lists, as serve does. The API server allows siteapi 3 GB
 // (MemoryMax) and the plan 2.5 GB at 18 x 249.
+// Serial: a measurement, so nothing else in the package runs beside it.
 func TestPeakRSS(t *testing.T) {
 	if dsn := os.Getenv("SITEAPI_RSS_DSN"); dsn != "" {
 		rssChild(t, dsn)

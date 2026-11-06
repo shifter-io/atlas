@@ -1,84 +1,32 @@
 """Answer classes (census rule 4): rate limits are replaced, no-IP and other-country answers
-count like duplicates, and a run with only rate limits stops after two minutes."""
+count like duplicates, and a run with only rate limits stops after two minutes (the CLI
+flags: test_answer_classes_cli.py)."""
 
 import asyncio
 import gzip
 import json
-from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from aiohttp import web
-from helpers import FakeTransport, server
+from answer_classes_cases import (
+    GEONODE,
+    PLAIN,
+    Countries,
+    census,
+    config,
+    dropping_gateway,
+    limited,
+    ok,
+    refused,
+    scripted,
+    timeout,
+)
+from helpers import server
 
 from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
-from proxy_index import cli as cli_module
 from proxy_index.answers import Answers
-from proxy_index.cli import main
 from proxy_index.models import AnswerClasses, Outcome
 from proxy_index.providers.grammar import answer_classes
-
-ROOT = Path(__file__).parents[1]
-GEONODE = AnswerClasses(("429", "469"), ("465",))
-CONNECT = AnswerClasses(("429", "proxy_connect"), ())
-PLAIN = AnswerClasses(("429",), ())
-
-
-def config(**overrides):
-    return RunConfig(
-        "generic_http",
-        ProxyConfig("http", "127.0.0.1", 8080),
-        **({"concurrency": 1, "answer_classes": PLAIN} | overrides),
-    )
-
-
-def census(**overrides):
-    return config(**({"requests": None, "stop_rule": "unique_ratio", "min_sample": 10} | overrides))
-
-
-def scripted(outcomes):
-    """A transport answering `outcomes` in order (a callable gets the 1-based request number)."""
-
-    class Scripted(FakeTransport):
-        async def execute(self, target, *, context=None):
-            self.count += 1
-            if callable(outcomes):
-                return outcomes(self.count)
-            return outcomes[self.count - 1]
-
-    return Scripted
-
-
-class Countries:
-    """A fake MMDB: 192.0.2.x is in the US, 198.51.100.x in DE, anything else unmatched."""
-
-    release = {"sha256": "0" * 64}
-
-    def lookup(self, address):
-        code = (
-            "US"
-            if address.startswith("192.0.2.")
-            else "DE"
-            if address.startswith("198.51.100.")
-            else None
-        )
-        return {"matched": code is not None, "country_code": code}
-
-
-def ok(ip, at=None):
-    return Outcome(1, ip=ip, status=200, completed_at=at)
-
-
-def limited(status=429, at=None):
-    return Outcome(1, error="http_status", status=status, bytes_up=5, completed_at=at)
-
-
-def refused(at):
-    return Outcome(1, error="proxy_connect", completed_at=at)
-
-
-def timeout(at=None):
-    return Outcome(1, error="timeout", completed_at=at)
 
 
 async def test_rl1_429s_do_not_consume_the_request_goal(tmp_path):
@@ -314,61 +262,6 @@ async def test_rl1_configs_without_answer_classes_are_unchanged(tmp_path):
     assert plain.add(ok("198.51.100.1"), 0.0) == "answer" and plain.halt(500.0) is None
 
 
-def test_cli_answer_classes_needs_a_provider_config(capsys, monkeypatch, tmp_path):
-    monkeypatch.setenv("PROXY_URL", "http://127.0.0.1:9")
-    assert main(["run", "--target", "generic_http", "--answer-classes"]) == 2
-    assert capsys.readouterr().err == "Run refused: --answer-classes needs --provider-config.\n"
-
-
-def test_cli_answer_classes_and_mmdb_build_the_config_and_enricher(capsys, monkeypatch, tmp_path):
-    monkeypatch.setenv("GEONODE_ACCOUNT", "example")
-    monkeypatch.setenv("GEONODE_PASSWORD", "example-password")
-    seen = {}
-
-    class Enricher(Countries):
-        def __init__(self, path):
-            seen["mmdb"] = path
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            seen["closed"] = True
-
-    async def fake_run(config, sink, options):
-        seen.update(classes=config.answer_classes, enricher=options.enricher)
-        factory = scripted(lambda n: ok("192.0.2.1"))
-        return await run(config, sink, replace(options, transport_factory=factory))
-
-    monkeypatch.setattr("proxy_index.enrichment.LocalEnricher", Enricher)
-    monkeypatch.setattr(cli_module, "run", fake_run)
-    assert (
-        main(
-            [
-                "run",
-                "--target",
-                "generic_http",
-                "--requests",
-                "2",
-                "--answer-classes",
-                "--provider-config",
-                str(ROOT / "configs/geonode.toml"),
-                "--param",
-                "country=us",
-                "--mmdb",
-                "db.mmdb",
-                "--output",
-                str(tmp_path),
-            ]
-        )
-        == 0
-    )
-    assert seen["classes"] == GEONODE and isinstance(seen["enricher"], Enricher)
-    assert seen["mmdb"] == "db.mmdb" and seen["closed"]
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["other_country"] == 0 and printed["rate_limited"] == {"429": 0, "469": 0}
-
-
 async def test_rl1_two_processes_share_one_answered_goal(tmp_path):
     counts = {"429": 0, "200": 0}
 
@@ -404,22 +297,6 @@ async def test_rl1_two_processes_share_one_answered_goal(tmp_path):
     assert result.stop_reason == "requests" and result.status_codes == counts
     assert result.successes == 30 and result.rate_limited == {"429": counts["429"]}
     assert result.completed == 30 + counts["429"] and counts["429"] > 0
-
-
-def dropping_gateway(served, *, after=0):
-    """A loopback HTTP gateway that drops every third connection after the first `after`, as
-    DataImpulse's gateway does under its account connection limit (plain HTTP has no CONNECT)."""
-
-    async def gateway(reader, writer):
-        served["connections"] += 1
-        if served["connections"] > after and served["connections"] % 3 == 0:
-            return  # accepted, then closed before any answer
-        await reader.readuntil(b"\r\n\r\n")
-        body = f"192.0.2.{served['connections'] % 250 + 1}\n".encode()
-        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s" % (len(body), body))
-        await writer.drain()
-
-    return gateway
 
 
 @pytest.mark.parametrize("processes", [1, 2])

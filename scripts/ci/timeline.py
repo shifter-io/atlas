@@ -3,10 +3,12 @@
 
 Usage: timeline.py <dir with timeline-*.jsonl> [--top N] [--durations FILE [--min S]]
 Prints the run's wall time (first test start to last test end), then per worker its busy
-time (setup + call + teardown), idle time (the rest of the wall) and test count, the
-totals spent creating scratch databases and initialising schemas, and the N longest tests
-with their share of the wall time. --durations writes each test of at least S seconds
-(default 1) as {node id: seconds}, the input of tests/conftest.py's longest-first order.
+time (setup + call + teardown), idle time (the rest of the wall) and test count, when each
+worker ended (its last test's end, from the first test's start), the totals spent creating
+scratch databases and initialising schemas, and the N longest tests with their share of the
+wall time. --durations writes each test of at least S seconds (default 1) as {node id:
+seconds}, the format of tests/durations.json (scripts/ci/durations.py builds that one from a
+tier1 run's junit).
 """
 
 import argparse
@@ -29,14 +31,24 @@ def load(directory):
 def summarize(records, top=10):
     phases = [r for r in records if r["kind"] in PHASES]
     if not phases:
-        return {"wall": 0.0, "workers": {}, "spans": {}, "phases": {}, "longest": [], "tests": {}}
+        return {
+            "wall": 0.0,
+            "workers": {},
+            "ends": {},
+            "spans": {},
+            "phases": {},
+            "longest": [],
+            "tests": {},
+        }
     begin = min(r["start"] for r in phases)
     wall = max(r["stop"] for r in phases) - begin
     workers = defaultdict(lambda: {"busy": 0.0, "tests": 0})
     tests = defaultdict(float)
     totals = defaultdict(float)
+    ends = defaultdict(float)
     for r in phases:
         span = r["stop"] - r["start"]
+        ends[r["worker"]] = max(ends[r["worker"]], r["stop"] - begin)
         workers[r["worker"]]["busy"] += span
         workers[r["worker"]]["tests"] += r["kind"] == "call"
         tests[r["nodeid"]] += span
@@ -51,6 +63,7 @@ def summarize(records, top=10):
     return {
         "wall": wall,
         "workers": dict(sorted(workers.items())),
+        "ends": dict(sorted(ends.items())),
         "spans": spans,
         "phases": dict(totals),
         "longest": [(nodeid, seconds, seconds / wall) for nodeid, seconds in longest[:top]],
@@ -68,6 +81,10 @@ def report(summary):
             f"{worker['tests']} tests"
         )
     lines.append(f"busy total {busy:.1f} s over {len(summary['workers'])} workers")
+    if summary["ends"]:
+        ends = summary["ends"].values()
+        each = ", ".join(f"{name} {end:.1f}" for name, end in summary["ends"].items())
+        lines.append(f"workers end {min(ends):.1f}-{max(ends):.1f} s: {each}")
     for kind, seconds in {**summary["phases"], **summary["spans"]}.items():
         lines.append(f"{kind} {seconds:.1f} s ({seconds / busy:.1%} of busy)" if busy else kind)
     for nodeid, seconds, share in summary["longest"]:

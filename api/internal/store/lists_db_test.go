@@ -81,6 +81,7 @@ func emptyBuild(t *testing.T, db *testdb.DB) int64 {
 // city x ASN and ASN rows (here three windows of 3,000 + 646). The old query
 // estimated 202 of them; the stored-code query is within 2x.
 func TestBreakdownQueryEstimatesTheStoredCode(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	build := emptyBuild(t, db)
 	db.CalculatedV8(t)
@@ -120,6 +121,7 @@ func TestBreakdownQueryEstimatesTheStoredCode(t *testing.T) {
 // On 100k list rows the list query reads the asked ids by the primary key,
 // estimated within 2x.
 func TestListQueryUsesThePrimaryKey(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	emptyBuild(t, db)
 	db.Exec(t, `INSERT INTO calculated_lists(`+testdb.ListColumns+`) SELECT 1,'c'||i,1,`+testdb.ListFill+` FROM generate_series(1,100) i;
@@ -212,6 +214,8 @@ func exec(db *testdb.DB, sql string) error {
 // WEB-LONGTAIL-RACE-1: a publication that drops the old build's partition
 // while the API reads that build. Without the lock the read finds no typed
 // rows and keeps the capped list; with it the drop waits.
+// Serial, as TestConcurrentListDeleteKeepsTheRead: store.Pause sets
+// LoadLists' process-wide hooks, which a parallel test's load would run.
 func TestConcurrentPartitionDropWaitsForTheRead(t *testing.T) {
 	drop := func(db *testdb.DB, build int64) error {
 		return exec(db, fmt.Sprintf("DROP TABLE calculated_breakdowns_b%d", build))
@@ -228,6 +232,7 @@ func TestConcurrentPartitionDropWaitsForTheRead(t *testing.T) {
 
 // K2 lists are deleted, not dropped: a REPEATABLE READ load keeps seeing the
 // rows of the build it read while a GC deletes them.
+// Serial: store.Pause sets process-wide hooks (above).
 func TestConcurrentListDeleteKeepsTheRead(t *testing.T) {
 	rows, err := concurrentDrop(t, true, true, func(db *testdb.DB, build int64) error {
 		return exec(db, `UPDATE calculated_windows SET list_id = NULL; DELETE FROM calculated_list_rows; DELETE FROM calculated_lists`)
@@ -241,6 +246,7 @@ func TestConcurrentListDeleteKeepsTheRead(t *testing.T) {
 // pending; the next load must not fill the names of a place it no longer
 // holds (it dereferenced nil and crashed siteapi).
 func TestALoadAfterAFailedReadDoesNotCrash(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	emptyBuild(t, db)
 	db.Exec(t, `INSERT INTO place_names(country_code,country,city) VALUES ('FR','France','Paris')`)
