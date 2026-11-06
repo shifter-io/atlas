@@ -194,7 +194,11 @@ async def test_a_teardown_release_error_of_any_type_never_stops_the_others(
     monkeypatch.setattr(teardown, "guarded_delete", key_fails)
     async with running(fake) as cloud:
         done = await teardown.teardown(
-            cloud, job.inventory, [clean_report(tmp_path)], shell=Shell(), remove_agent=lambda: False
+            cloud,
+            job.inventory,
+            [clean_report(tmp_path)],
+            shell=Shell(),
+            remove_agent=lambda: False,
         )
     results = {(r["kind"], r["id"]): r["result"] for r in done["released"]}
     assert results[("ssh_key", saved["worker_key_id"])] == "failed: Unexpected"
