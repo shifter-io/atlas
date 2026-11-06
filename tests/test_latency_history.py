@@ -2,9 +2,11 @@
 
 from copy import deepcopy
 
+import pytest
 from test_calculated import ready_inputs
 
 from proxy_index.calculated.calculator import build
+from proxy_index.calculated.latency import LATENCY, without_mean
 from proxy_index.calculated.policy import digest
 
 
@@ -18,7 +20,14 @@ def test_history_uses_only_http_pulses_and_measured_load_factors():
     measured = [p for p in window["series"] if p["latency_ms"]["p50"] is not None]
     assert len(measured) == 1
     assert measured[0]["latency_under_load_ms"] == measured[0]["latency_ms"]
-    assert measured[0]["latency_ms"] == window["targets"]["generic_http"]["metrics"]["latency_ms"]
+    http = window["targets"]["generic_http"]["metrics"]
+    # Series points carry the percentiles alone; the window's latency objects also the mean.
+    assert measured[0]["latency_ms"] == without_mean(http["latency_ms"])
+    assert set(measured[0]["latency_under_load_ms"]) == set(LATENCY)
+    assert http["latency_ms"]["mean"] is not None
+    assert http["latency_under_load_ms"]["mean"] == pytest.approx(
+        http["latency_ms"]["mean"], abs=0.1
+    )
     assert all(
         p["latency_under_load_ms"]["p50"] is None for p in window["series"] if p not in measured
     )
@@ -42,3 +51,5 @@ def test_history_uses_only_http_pulses_and_measured_load_factors():
     points = result["products"][0]["windows"]["24h"]["series"]
     assert any(p["latency_ms"]["p50"] is not None for p in points)
     assert all(p["latency_under_load_ms"]["p50"] is None for p in points)
+    http = result["products"][0]["windows"]["24h"]["targets"]["generic_http"]["metrics"]
+    assert http["latency_ms"]["mean"] is not None and http["latency_under_load_ms"]["mean"] is None
