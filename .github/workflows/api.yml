@@ -19,9 +19,9 @@
 # test run writes go test -json; then scripts/ci/timing.py writes the 20 slowest tests
 # and subtests and the test steps' time to the job summary and the api-timing artifact
 # (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
-# (CI-TIME-1). Nightly and on dispatches only, after the tests, the Go dependency audit
-# (GO-AUDIT-1): govulncheck at a pinned version and a go mod tidy that must leave
-# go.mod and go.sum unchanged. Go, the Go build cache and the module cache live under
+# (CI-TIME-1). Nightly and on dispatches only, after the tests (passed or not), the Go
+# dependency audit (GO-AUDIT-1): govulncheck at a pinned version and a go mod tidy that
+# must leave go.mod and go.sum unchanged. Go, the Go build cache and the module cache live under
 # $CI_CACHE_DIR/<repository name>/, beside tier1's tools (both fill the same
 # PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A job-started hook on the servers refuses
 # every job except the owner's pull requests from this repository's own branches,
@@ -253,7 +253,8 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
       - name: Go dependency audit (nightly and dispatches)
-        if: steps.diff.outputs.code == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        # Also after a failed test step, so a failing night still reports the audit.
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         run: |
           go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
           go mod tidy && git diff --exit-code go.mod go.sum
