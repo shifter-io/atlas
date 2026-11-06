@@ -6,8 +6,7 @@
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
 # pytest-xdist on every CPU, each worker with its own databases (copies of its template)
-# in one throwaway PostgreSQL without crash safety, and its share of the slow tests
-# longest first (CI-SPEED-1, CI-FAST-2). Then scripts/ci/timing.py writes the 20 slowest tests and the test
+# in one throwaway PostgreSQL without crash safety (CI-SPEED-1, CI-FAST-2). Then scripts/ci/timing.py writes the 20 slowest tests and the test
 # step's time to the job summary and the ci-timing artifact (90 days), and fails the
 # job when a test takes 90 s or more or the step over 240 s (CI-TIME-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
@@ -213,8 +212,8 @@ jobs:
           collecting=$!
 
           # Every test, database tests included, with branch coverage: one xdist worker per
-          # CPU, each taking its share of the slow tests longest first (tests/conftest.py,
-          # tests/durations.json), then the `serial` set alone, appending to the same coverage.
+          # CPU (longest first once tests/durations.json exists, tests/conftest.py), then the
+          # `serial` set alone, appending to the same coverage.
           report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
           uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
