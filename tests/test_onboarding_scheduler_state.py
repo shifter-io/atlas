@@ -42,6 +42,7 @@ def test_recover_running_restores_a_saved_summary_and_interrupts_the_rest(tmp_pa
     assert "counters_partial" not in saved_job
     assert partial_job["status"] == "interrupted"
     assert partial_job["finished_at"] == campaign.timestamp(START.timestamp())
-    assert (partial_job["observations"], partial_job["requests"], partial_job["errors"]) == (3, 5, 1)
+    counts = (partial_job["observations"], partial_job["requests"], partial_job["errors"])
+    assert counts == (3, 5, 1)
     assert partial_job["counters_partial"] is True
     assert all(job["status"] == "pending" for job in state["jobs"][2:])
