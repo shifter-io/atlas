@@ -18,7 +18,9 @@ attach() completes the windows in store.write(), once the network lists are writ
   Python, so the incremental calculation reads no observation for them;
 - the K10 list id and entry counts (lists, breakdown_entries, pool.list_entries) and the place
   counts they give (pool countries, regions, cities and asns, also in pool.daily);
-- the groups' estimates (estimates/window.py) summed, scaled by the network's distinct IPs;
+- the groups' estimates (estimates/window.py) summed, scaled by the network's distinct IPs,
+  per released hour in the 24h window and per UTC day in the 7d and 30d windows (their charts
+  show daily points, and an hourly series would grow the head by about 2.4 kB a day);
 - the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
   once a UTC day, carried from the previous head in between), and the balanced score, rank
   and readiness, against the networks of the same kind and window (network_scores.py).
@@ -58,6 +60,7 @@ PLACES = {"countries": "country", "regions": "region", "cities": "city", "asns":
 TESTS = ("census", "pulse", "load", "unscheduled")
 SHARES_BASIS = "unique exit IPs with the DB-IP field (unknowns excluded)"
 OUTAGE_HOURS = 720
+DAY = 86400  # seconds: a 7d or 30d window's estimate points are UTC days
 INVALID = "Invalid network summary"
 
 
@@ -318,23 +321,25 @@ def complete(window, ips, points, found, blocks):
     ps |= counts | {"daily": ps["daily"] | counts, "list_entries": entries}
     done = {k: v for k, v in window.items() if k != "_runs"} | {"pool": ps, "series": points}
     if blocks:
-        done["estimated"] = estimates(blocks, ps)
+        done["estimated"] = estimates(blocks, ps, daily=window["period"]["hours"] > 24)
     done["lists"] = {"id": found[0], "entries": entries} if found else None
     done["breakdown_entries"] = entries
     return done
 
 
-def estimates(blocks, ps):
+def estimates(blocks, ps, daily=False):
     """The groups' estimated blocks of one window summed (estimates/window.py): unique IPs and
-    requests, and per released hour, scaled by the network's distinct IPs. A network window
-    carries no per-country estimate and no overlap (NET-SUM-2)."""
+    requests, and per released hour (daily: per UTC day, each the sum of its released hours),
+    scaled by the network's distinct IPs. A network window carries no per-country estimate and
+    no overlap (NET-SUM-2)."""
     versions = sorted({v for b in blocks for v in b["formula_versions"]})
     value = sum(b["unique_ips"]["value"] for b in blocks)
     figure = {"estimated": True, "formula_version": max(versions)}
     hours = defaultdict(lambda: {"unique_ips": 0, "requests": 0})
     for point in (s for b in blocks for s in b["series"]):
+        start = floor_time(point["start"], DAY) if daily else point["start"]
         for key in ("unique_ips", "requests"):
-            hours[point["start"]][key] += point[key]
+            hours[start][key] += point[key]
     return {
         "estimated": True,
         "formula_versions": versions,
