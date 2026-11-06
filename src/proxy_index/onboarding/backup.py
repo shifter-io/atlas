@@ -119,14 +119,8 @@ print(json.dumps(tree_inventory(root)))
 """
 
 
-def collect_region(manifest_path: Path, inventory_path: Path, region: str) -> dict:
-    manifest = load(manifest_path)
-    if region not in manifest["regions"]:
-        raise ValueError("Unknown campaign region")
-    server = read_json(inventory_path)["servers"][region]
-    root = manifest_path.parent
-    backup = root / "backup"
-    private_dir(backup)
+def _connection(server: dict, manifest: dict, region: str) -> tuple[list, str, Path]:
+    """SSH options, login target and remote regional directory of one campaign server."""
     options = [
         "-o",
         "BatchMode=yes",
@@ -147,51 +141,77 @@ def collect_region(manifest_path: Path, inventory_path: Path, region: str) -> di
         / "regions"
         / region
     )
+    return options, target, remote
+
+
+def _remote_tree(backup: Path, region: str, server: dict, connection: tuple) -> dict:
+    options, target, remote = connection
+    command = shlex.join([server["root"] + "/venv/bin/python", "-c", REMOTE_TREE, str(remote)])
+    with (backup / (region + "-remote.log")).open("w") as log:
+        tree = subprocess.run(
+            ["ssh", *options, target, command], capture_output=True, text=True, timeout=1800
+        )
+        log.write(tree.stderr)
+    if tree.returncode:
+        raise RuntimeError("Remote tree check failed; inspect private backup log")
+    return json.loads(tree.stdout)
+
+
+def _wait_transfer(transfer: subprocess.Popen) -> None:
+    # A timeout must not leave an SSH child writing to staging.
+    try:
+        transfer.wait(timeout=6 * 3600)
+    except subprocess.TimeoutExpired:
+        os.killpg(transfer.pid, signal.SIGTERM)
+        try:
+            transfer.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(transfer.pid, signal.SIGKILL)
+            transfer.wait()
+        raise RuntimeError("Transfer timed out; staging preserved") from None
+
+
+def _transfer(backup: Path, region: str, connection: tuple, staging: Path) -> None:
+    options, target, remote = connection
+    private_dir(staging)
+    with (backup / (region + "-transfer.log")).open("a") as log:
+        command = [
+            "rsync",
+            "-rlt",
+            "--checksum",
+            "--partial",
+            "--partial-dir=.rsync-partial",
+            "--bwlimit=1024",
+            "--timeout=180",
+            "-e",
+            shlex.join(["ssh", *options]),
+            target + ":" + shlex.quote(str(remote) + "/"),
+            str(staging) + "/",
+        ]
+        with subprocess.Popen(
+            command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+        ) as transfer:
+            _wait_transfer(transfer)
+    if transfer.returncode:
+        raise RuntimeError("Transfer incomplete; staging preserved for resumable retry")
+
+
+def collect_region(manifest_path: Path, inventory_path: Path, region: str) -> dict:
+    manifest = load(manifest_path)
+    if region not in manifest["regions"]:
+        raise ValueError("Unknown campaign region")
+    server = read_json(inventory_path)["servers"][region]
+    root = manifest_path.parent
+    backup = root / "backup"
+    private_dir(backup)
+    connection = _connection(server, manifest, region)
     with lock(backup / (region + ".lock")):
-        command = shlex.join([server["root"] + "/venv/bin/python", "-c", REMOTE_TREE, str(remote)])
-        with (backup / (region + "-remote.log")).open("w") as log:
-            tree = subprocess.run(
-                ["ssh", *options, target, command], capture_output=True, text=True, timeout=1800
-            )
-            log.write(tree.stderr)
-        if tree.returncode:
-            raise RuntimeError("Remote tree check failed; inspect private backup log")
-        expected = json.loads(tree.stdout)
+        expected = _remote_tree(backup, region, server, connection)
         atomic_json(backup / (region + "-remote-tree.json"), expected)
         destination = root / "regions" / region
         staging = backup / (region + ".staging")
         if not destination.exists():
-            private_dir(staging)
-            with (backup / (region + "-transfer.log")).open("a") as log:
-                command = [
-                    "rsync",
-                    "-rlt",
-                    "--checksum",
-                    "--partial",
-                    "--partial-dir=.rsync-partial",
-                    "--bwlimit=1024",
-                    "--timeout=180",
-                    "-e",
-                    shlex.join(["ssh", *options]),
-                    target + ":" + shlex.quote(str(remote) + "/"),
-                    str(staging) + "/",
-                ]
-                # A timeout must not leave an SSH child writing to staging.
-                with subprocess.Popen(
-                    command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
-                ) as transfer:
-                    try:
-                        transfer.wait(timeout=6 * 3600)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(transfer.pid, signal.SIGTERM)
-                        try:
-                            transfer.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            os.killpg(transfer.pid, signal.SIGKILL)
-                            transfer.wait()
-                        raise RuntimeError("Transfer timed out; staging preserved") from None
-            if transfer.returncode:
-                raise RuntimeError("Transfer incomplete; staging preserved for resumable retry")
+            _transfer(backup, region, connection, staging)
             receipt = verify_region(manifest, region, staging, expected)
             private_dir(destination.parent)
             staging.rename(destination)
