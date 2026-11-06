@@ -15,16 +15,16 @@ import subprocess
 from pathlib import Path
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("inventory", "wheel", "requirements", "provider-config", "credentials-file"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--region", required=True)
-    args = parser.parse_args()
-    server = json.loads(args.inventory.read_text())["servers"][args.region]
-    root = server["root"]
-    target = f"{server.get('user', 'root')}@{server['host']}"
-    options = [
+    return parser.parse_args()
+
+
+def ssh_options(server):
+    return [
         "-o",
         "BatchMode=yes",
         "-o",
@@ -37,11 +37,13 @@ def main():
         os.path.expanduser(server["identity_file"]),
     ]
 
-    def remote(script):
-        subprocess.run(["ssh", *options, target, "sh -s"], input=script, text=True, check=True)
 
-    quoted = shlex.quote(root)
-    remote(f"""set -eu
+def remote(options, target, script):
+    subprocess.run(["ssh", *options, target, "sh -s"], input=script, text=True, check=True)
+
+
+def prepare_script(quoted):
+    return f"""set -eu
 umask 077
 mkdir -p {quoted}/releases {quoted}/.secrets {quoted}/configs {quoted}/tools
 chmod 700 {quoted} {quoted}/.secrets
@@ -49,7 +51,10 @@ if [ ! -x {quoted}/tools/uv ]; then
  curl -LsSf https://astral.sh/uv/install.sh -o {quoted}/tools/install-uv.sh
  UV_UNMANAGED_INSTALL={quoted}/tools sh {quoted}/tools/install-uv.sh
 fi
-""")
+"""
+
+
+def upload(args, options, target, root):
     for source, destination in (
         (args.wheel, root + "/releases/" + args.wheel.name),
         (args.requirements, root + "/releases/requirements.txt"),
@@ -59,9 +64,10 @@ fi
         subprocess.run(
             ["scp", *options, str(source), target + ":" + shlex.quote(destination)], check=True
         )
-    checksum = hashlib.sha256(args.wheel.read_bytes()).hexdigest()
-    wheel = shlex.quote(root + "/releases/" + args.wheel.name)
-    remote(f"""set -eu
+
+
+def install_script(quoted, checksum, wheel):
+    return f"""set -eu
 umask 077
 chmod 600 {quoted}/.secrets/credentials.toml
 export UV_CACHE_DIR={quoted}/.cache
@@ -74,7 +80,21 @@ fi
  -r {quoted}/releases/requirements.txt
 {quoted}/tools/uv pip install --python {quoted}/venv/bin/python --no-deps --reinstall {wheel}
 {quoted}/venv/bin/proxy-index onboarding probe --help
-""")
+"""
+
+
+def main():
+    args = parse_args()
+    server = json.loads(args.inventory.read_text())["servers"][args.region]
+    root = server["root"]
+    target = f"{server.get('user', 'root')}@{server['host']}"
+    options = ssh_options(server)
+    quoted = shlex.quote(root)
+    remote(options, target, prepare_script(quoted))
+    upload(args, options, target, root)
+    checksum = hashlib.sha256(args.wheel.read_bytes()).hexdigest()
+    wheel = shlex.quote(root + "/releases/" + args.wheel.name)
+    remote(options, target, install_script(quoted, checksum, wheel))
     print(json.dumps({"region": args.region, "wheel_sha256": checksum, "deployed": True}))
 
 

@@ -13,28 +13,26 @@ from proxy_index.onboarding.files import private_dir
 from proxy_index.onboarding.manifest import load
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--region", required=True)
-    args = parser.parse_args()
-    manifest = load(args.manifest)
-    if args.region not in manifest["regions"]:
-        raise ValueError("Unknown region")
-    server = json.loads(args.inventory.read_text())["servers"][args.region]
-    root = (
+    return parser.parse_args()
+
+
+def remote_root(server, manifest):
+    return (
         Path(server["root"])
         / "onboarding-networks"
         / manifest["provider"]
         / (manifest["product"])
         / manifest["campaign_id"]
     )
-    prefix = Path("regions") / args.region
-    destination = args.manifest.parent
-    if (destination / prefix).exists():
-        raise ValueError("Local region already exists")
-    options = [
+
+
+def ssh_options(server):
+    return [
         "-o",
         "BatchMode=yes",
         "-o",
@@ -42,22 +40,22 @@ def main():
         "-i",
         os.path.expanduser(server["identity_file"]),
     ]
-    target = server.get("user", "root") + "@" + server["host"]
+
+
+def remote_command(root, prefix):
     check = (
         "import json,sys;from pathlib import Path;"
         "s=json.loads(Path(sys.argv[1]).read_text());"
         "assert s['status'] in ('completed','closed','stopped','failed')"
     )
-    command = (
+    return (
         shlex.join(["python3", "-c", check, str(root / prefix / "state.json")])
         + " && "
         + shlex.join(["tar", "-C", str(root), "-cf", "-", str(prefix)])
     )
-    private_dir(destination)
-    archive = destination / f"{args.region}.tar.partial"
-    with archive.open("xb") as stream:
-        os.chmod(archive, 0o600)
-        subprocess.run(["ssh", *options, target, command], stdout=stream, check=True)
+
+
+def extract(archive, destination, prefix):
     with tarfile.open(archive) as source:
         for entry in source.getmembers():
             path = Path(entry.name)
@@ -68,6 +66,28 @@ def main():
             ):
                 raise ValueError("Unexpected archive entry")
         source.extractall(destination, filter="data")
+
+
+def main():
+    args = parse_args()
+    manifest = load(args.manifest)
+    if args.region not in manifest["regions"]:
+        raise ValueError("Unknown region")
+    server = json.loads(args.inventory.read_text())["servers"][args.region]
+    root = remote_root(server, manifest)
+    prefix = Path("regions") / args.region
+    destination = args.manifest.parent
+    if (destination / prefix).exists():
+        raise ValueError("Local region already exists")
+    options = ssh_options(server)
+    target = server.get("user", "root") + "@" + server["host"]
+    command = remote_command(root, prefix)
+    private_dir(destination)
+    archive = destination / f"{args.region}.tar.partial"
+    with archive.open("xb") as stream:
+        os.chmod(archive, 0o600)
+        subprocess.run(["ssh", *options, target, command], stdout=stream, check=True)
+    extract(archive, destination, prefix)
     archive.unlink()
     print(destination / prefix)
 
