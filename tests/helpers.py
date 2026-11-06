@@ -3,13 +3,21 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import os
 import socket
 import ssl
 import struct
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+
+def scratch_database_name() -> str:
+    """A unique test database, `proxy_test_<xdist worker>_<uuid hex>` (`main` without xdist)."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"proxy_test_{worker}_{uuid.uuid4().hex}"
 
 
 @asynccontextmanager

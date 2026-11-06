@@ -333,6 +333,7 @@ def test_estimates_are_summed_per_hour():
     assert network.estimates([block(1.0, [])], {"unique_ips": 0})["breakdown_scale"] is None
 
 
+@pytest.mark.slow
 def test_the_scale_fixture_head_stays_small(databases):
     """The scripts/scale fixture at --scale 0.0625 (two networks, five countries, two days):
     at most 0.2 MB of head per network."""

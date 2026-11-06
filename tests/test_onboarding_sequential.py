@@ -35,6 +35,7 @@ def test_parallel_remains_legacy_and_same_window(tmp_path):
     assert windows[0]["ends_at"] == m["ends_at"]
 
 
+@pytest.mark.slow
 async def test_all_eight_days_hourly_no_overlap_retry_and_complete_export(tmp_path):
     path = make(
         tmp_path,

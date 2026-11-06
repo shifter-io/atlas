@@ -117,6 +117,7 @@ def memo_rows(database):
         return {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in MEMOS}
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_fleet_counts_from_memos_equal_full_at_every_hourly_cutoff(
     database, tmp_path, monkeypatch
