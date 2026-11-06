@@ -7,11 +7,12 @@ step with a run summary; no request or SSH connection leaves the machine.
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from datetime import datetime
 from pathlib import Path
 
-from campaign_fakes import no_sleep, running
+from campaign_fakes import FakeDigitalOcean, no_sleep, running
 from campaign_hour_cases import make_root, make_spec
 
 from proxy_index.campaign import probe as probing
@@ -21,6 +22,7 @@ from proxy_index.campaign.probe import ProbeInputs
 
 ROOT = Path(__file__).resolve().parents[1]
 NOW = datetime.fromisoformat("2027-01-01T22:00:00+00:00")
+IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
 def summary(completed=25_000, successes=None, statuses=None, errors=None, rps=900.0):
@@ -43,6 +45,37 @@ def summary(completed=25_000, successes=None, statuses=None, errors=None, rps=90
 
 
 GOOD = summary()
+
+
+def classified(**fields):
+    """A run summary with RL-1's answer classes: 1,000 completed, 30 429s and 20 CONNECT
+    refusals rate-limited, 5 no-IP 465s, 10 other-country exits among 800 successes."""
+    return {
+        "completed": 1000,
+        "successes": 800,
+        "total_errors": 200,
+        "unique_ips": 700,
+        "status_codes": {"200": 800, "429": 30, "465": 5, "503": 10},
+        "errors": {"http_status": 45, "proxy_connect": 45, "timeout": 20, "tls": 90},
+        "requests_per_second": 50.0,
+        "latency_ms": {"p50": 700, "p95": 1900},
+        "stop_reason": "requests",
+        "rate_limited": {"429": 30, "proxy_connect": 20},
+        "no_inventory": 5,
+        "other_country": 10,
+    } | fields
+
+
+class Recording(FakeDigitalOcean):
+    """Also keeps every create body."""
+
+    def __init__(self):
+        super().__init__()
+        self.creates = []
+
+    async def _create(self, request):
+        self.creates.append(await request.json())
+        return await super()._create(request)
 
 
 class FakeProbeRemote:

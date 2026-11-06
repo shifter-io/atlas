@@ -7,7 +7,6 @@ step with a run summary; no request or SSH connection leaves the machine.
 from __future__ import annotations
 
 import json
-import re
 import tomllib
 from dataclasses import replace
 from pathlib import Path
@@ -15,7 +14,16 @@ from pathlib import Path
 import pytest
 from campaign_fakes import FakeDigitalOcean
 from campaign_hour_cases import NETWORKS, REGIONS, launched, make_root, make_spec
-from campaign_probe_cases import PROBED, FakeProbeRemote, probed, summary, world
+from campaign_probe_cases import (
+    IP,
+    PROBED,
+    FakeProbeRemote,
+    Recording,
+    classified,
+    probed,
+    summary,
+    world,
+)
 
 from proxy_index import cli as main_cli
 from proxy_index.campaign import cli as campaign_cli
@@ -24,20 +32,6 @@ from proxy_index.campaign.contracts import WORKER_TAG, audit_path
 from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError, ProbeInputs, reasons, step_result
 from proxy_index.providers.grammar import Grammar, load_grammar
-
-IP = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-
-
-class Recording(FakeDigitalOcean):
-    """Also keeps every create body."""
-
-    def __init__(self):
-        super().__init__()
-        self.creates = []
-
-    async def _create(self, request):
-        self.creates.append(await request.json())
-        return await super()._create(request)
 
 
 def test_step_result_classifies_every_failure_as_a_share_of_completed_requests():
@@ -75,25 +69,6 @@ def test_step_result_classifies_every_failure_as_a_share_of_completed_requests()
     assert not IP.search(json.dumps(found))
     empty = step_result(500, 25_000, summary(0, successes=0) | {"latency_ms": None})
     assert empty["success_pct"] == 0.0 and empty["latency_p50_ms"] is None
-
-
-def classified(**fields):
-    """A run summary with RL-1's answer classes: 1,000 completed, 30 429s and 20 CONNECT
-    refusals rate-limited, 5 no-IP 465s, 10 other-country exits among 800 successes."""
-    return {
-        "completed": 1000,
-        "successes": 800,
-        "total_errors": 200,
-        "unique_ips": 700,
-        "status_codes": {"200": 800, "429": 30, "465": 5, "503": 10},
-        "errors": {"http_status": 45, "proxy_connect": 45, "timeout": 20, "tls": 90},
-        "requests_per_second": 50.0,
-        "latency_ms": {"p50": 700, "p95": 1900},
-        "stop_reason": "requests",
-        "rate_limited": {"429": 30, "proxy_connect": 20},
-        "no_inventory": 5,
-        "other_country": 10,
-    } | fields
 
 
 def test_step_result_answer_classes():
