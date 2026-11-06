@@ -3,30 +3,26 @@ package build
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"strconv"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
-
-// listChunk is how many rows the dataset's lists encode at once.
-const listChunk = 1000
 
 // datasetDimensions are the dimensions of a network window in the dataset's
 // lists, in the order they are written.
 var datasetDimensions = [...]string{"country", "region", "city", "asn", "city_asn"}
 
-// DatasetLists is the dataset file's `lists` (contract K11): in a v4 build,
-// lists[slug][kind][range][dimension] holds every row of the network
-// window's lists as an array (FIELDS.md gives each dimension's field order),
-// so the file alone regenerates every list answer. It holds only the build's
-// compact lists (store.NetList), never their rows: WriteDataset streams it
-// one list dimension at a time, read from the database unless cached, and
-// listChunk rows at a time, and MarshalJSON gives the same bytes. Networks and kinds are in the order the all-networks list
-// merges them (the snapshot's), so a reader that merges them in file order
-// gets that list's latency choices. Before v4 it is empty ({}).
+// DatasetLists is the dataset file's `lists` (contract K11, DATASET-SIZE-2):
+// in a v4 build, lists[slug][kind][range][dimension] is that network kind's
+// list answer without a query as {"total", "pages", "rows"}: its row count,
+// its page count and its first page (at most PageSize rows, as compact arrays
+// in the order FIELDS.md gives each dimension), byte for byte the values the
+// first page of /v1/networks/{slug}/places (or /coverage) serves. Every
+// further page is read from the API. It holds the build's lists (placeIndex,
+// coverageList), whose first pages the build keeps, so writing it reads
+// nothing from the database. Networks and kinds are in snapshot order, the
+// order the all-networks list merges them. Before v4 it is empty ({}).
 type DatasetLists struct {
 	networks []*datasetNetwork
 }
@@ -36,18 +32,18 @@ type datasetNetwork struct {
 	kinds []*datasetKind
 }
 
-// datasetKind is one network's lists of one kind per range: the lists its
-// place answers merge (srcs) and its Coverage list.
+// datasetKind is one network's lists of one kind per range: its place lists
+// by dimension (nil when the build has none) and its Coverage list.
 type datasetKind struct {
 	kind     string
-	srcs     [3][]placeSource
+	places   [3][4]*placeIndex
 	coverage [3]*coverageList
 }
 
 // datasetLists is the lists of build pg: every published group of s that a
 // network shows (a group of a provider kept off the site has none), by its
 // network, in snapshot order.
-func datasetLists(pg *Pages, s *snap.Snapshot, entries []*entry, row *store.SnapshotRow) *DatasetLists {
+func datasetLists(pg *Pages, s *snap.Snapshot, entries []*entry) *DatasetLists {
 	out := &DatasetLists{}
 	if !pg.v4 || s == nil {
 		return out
@@ -58,11 +54,11 @@ func datasetLists(pg *Pages, s *snap.Snapshot, entries []*entry, row *store.Snap
 			slugOf[e.P.Framework.Provider] = e.P.Slug
 		}
 	}
-	networks, kinds := map[string]*datasetNetwork{}, map[string]*datasetKind{}
+	networks, kinds := map[string]*datasetNetwork{}, map[string]bool{}
 	for i := range s.Products {
 		p := &s.Products[i]
 		slug, kind := slugOf[p.Provider], proxyKind(p.Kind)
-		if slug == "" {
+		if slug == "" || kinds[slug+"/"+kind] {
 			continue
 		}
 		n := networks[slug]
@@ -71,23 +67,22 @@ func datasetLists(pg *Pages, s *snap.Snapshot, entries []*entry, row *store.Snap
 			networks[slug] = n
 			out.networks = append(out.networks, n)
 		}
-		k := kinds[slug+"/"+kind]
-		if k == nil {
-			k = &datasetKind{kind: kind}
-			kinds[slug+"/"+kind] = k
-			n.kinds = append(n.kinds, k)
-			for r, rng := range Ranges {
-				k.coverage[r] = pg.coverage[listKey{slug + "/" + kind, rng.ID, "coverage"}]
-			}
-		}
-		for r, rng := range Ranges {
-			w := p.Window(rng.ID)
-			if l := netListOf(row, p, w); l != nil {
-				k.srcs[r] = append(k.srcs[r], placeSource{list: l, scale: breakdownScale(w)})
-			}
-		}
+		kinds[slug+"/"+kind] = true
+		n.kinds = append(n.kinds, pg.datasetKind(slug, kind))
 	}
 	return out
+}
+
+// datasetKind is a network kind's lists of every range.
+func (pg *Pages) datasetKind(slug, kind string) *datasetKind {
+	k := &datasetKind{kind: kind}
+	for r, rng := range Ranges {
+		for d, dimension := range placeDimensions {
+			k.places[r][d] = pg.lists[listKey{slug + "/" + kind, rng.ID, dimension}]
+		}
+		k.coverage[r] = pg.coverage[listKey{slug + "/" + kind, rng.ID, "coverage"}]
+	}
+	return k
 }
 
 // Repeated is d with its networks n times over, each copy after the first
@@ -110,22 +105,22 @@ func (d *DatasetLists) Repeated(n int) *DatasetLists {
 func (d *DatasetLists) MarshalJSON() ([]byte, error) {
 	var b bytes.Buffer
 	w := bufio.NewWriter(&b)
-	if err := d.write(context.Background(), w); err != nil {
+	if err := d.write(w); err != nil {
 		return nil, err
 	}
 	err := w.Flush()
 	return b.Bytes(), err
 }
 
-// write streams d as JSON.
-func (d *DatasetLists) write(ctx context.Context, w *bufio.Writer) error {
+// write streams d as JSON, one list at a time.
+func (d *DatasetLists) write(w *bufio.Writer) error {
 	w.WriteByte('{') //nolint:errcheck // bufio reports the first error at Flush
 	for i, n := range d.networks {
 		writeKey(w, i, n.slug)
 		w.WriteByte('{') //nolint:errcheck
 		for j, k := range n.kinds {
 			writeKey(w, j, k.kind)
-			if err := k.write(ctx, w); err != nil {
+			if err := k.write(w); err != nil {
 				return err
 			}
 		}
@@ -145,25 +140,29 @@ func writeKey(w *bufio.Writer, i int, key string) {
 	w.WriteByte(':')          //nolint:errcheck
 }
 
+// datasetList is one list of the file: its row and page counts and its first
+// page.
+type datasetList struct {
+	Total int   `json:"total"`
+	Pages int   `json:"pages"`
+	Rows  []any `json:"rows"`
+}
+
 // write writes one network kind's ranges, each with its dimensions.
-func (k *datasetKind) write(ctx context.Context, w *bufio.Writer) error {
+func (k *datasetKind) write(w *bufio.Writer) error {
 	w.WriteByte('{') //nolint:errcheck
 	for r, rng := range Ranges {
 		writeKey(w, r, rng.ID)
 		w.WriteByte('{') //nolint:errcheck
 		for i, dimension := range datasetDimensions {
 			writeKey(w, i, dimension)
-			out := &rowWriter{w: w}
-			var err error
+			var l datasetList
 			if dimension == "city_asn" {
-				err = k.coverageRows(ctx, r, out)
+				l = coverageFirst(k.coverage[r])
 			} else {
-				err = k.placeRows(ctx, r, dimension, out)
+				l = placeFirst(k.places[r][i], dimension)
 			}
-			if err != nil {
-				return err
-			}
-			if err := out.close(); err != nil {
+			if err := writeValue(w, l); err != nil {
 				return err
 			}
 		}
@@ -172,44 +171,38 @@ func (k *datasetKind) write(ctx context.Context, w *bufio.Writer) error {
 	return w.WriteByte('}')
 }
 
-// placeRows adds range r's rows of a place dimension, each source's in turn.
-func (k *datasetKind) placeRows(ctx context.Context, r int, dimension string, out *rowWriter) error {
-	for _, s := range k.srcs[r] {
-		rows, err := s.list.Rows(ctx, dimension)
-		if err != nil {
-			return err
-		}
-		for j := range rows.Len() {
-			out.add(placeArray(dimension, rows.Row(j), s.scale))
-		}
+// placeFirst is a place list's counts and first page (the rows List serves
+// for page 1 without a query); none when the build has no such list.
+func placeFirst(x *placeIndex, dimension string) datasetList {
+	out := datasetList{Rows: []any{}}
+	if x == nil {
+		return out
 	}
-	return nil
+	out.Total, out.Pages = x.count(), (x.count()+PageSize-1)/PageSize
+	for _, r := range x.first {
+		out.Rows = append(out.Rows, placeArray(dimension, r))
+	}
+	return out
 }
 
-// coverageRows adds range r's Coverage rows: those with IPs, most IPs first,
-// as the Coverage answer writes them (with its country latency rank).
-func (k *datasetKind) coverageRows(ctx context.Context, r int, out *rowWriter) error {
-	c := k.coverage[r]
-	if c == nil {
-		return nil
+// coverageFirst is a Coverage list's counts and first page; none when the
+// build has no such list.
+func coverageFirst(c *coverageList) datasetList {
+	out := datasetList{Rows: []any{}}
+	if c == nil || c.first == nil {
+		return out
 	}
-	rows, err := c.list.Rows(ctx, "city_asn")
-	if err != nil {
-		return err
+	out.Total, out.Pages = c.first.Total, c.first.Pages
+	for _, r := range c.first.Rows {
+		out.Rows = append(out.Rows, r)
 	}
-	for _, i := range rows.ByIps() {
-		if rows.Row(int(i)).Ips > 0 {
-			out.add(c.row(rows, i))
-		}
-	}
-	return nil
+	return out
 }
 
 // placeArray is a compact place row as the dataset writes it: the fields its
 // dimension's place rows show, in their order, without the derived key and
 // success rate and the fields the dimension never has.
-func placeArray(dimension string, r store.NetRow, scale Num) any {
-	p, asn := netPlaceRow(r, scale)
+func placeArray(dimension string, p PlaceRow) any {
 	switch dimension {
 	case "country":
 		return [...]any{p.CountryCode, p.Country, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
@@ -218,48 +211,5 @@ func placeArray(dimension string, r store.NetRow, scale Num) any {
 	case "city":
 		return [...]any{p.CountryCode, p.Country, p.RegionCode, p.Region, p.City, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 	}
-	return [...]any{asn, p.AsnName, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
-}
-
-// rowWriter writes one JSON array of rows, encoding listChunk rows at a time.
-type rowWriter struct {
-	w     *bufio.Writer
-	chunk []any
-	n     int
-	err   error
-}
-
-func (rw *rowWriter) add(row any) {
-	if rw.chunk = append(rw.chunk, row); len(rw.chunk) == listChunk {
-		rw.flush()
-	}
-}
-
-// flush writes the chunk's rows after those already written.
-func (rw *rowWriter) flush() {
-	if len(rw.chunk) == 0 || rw.err != nil {
-		return
-	}
-	b, err := json.Marshal(rw.chunk)
-	if err != nil {
-		rw.err = err
-		return
-	}
-	rw.w.WriteByte("[,"[min(rw.n, 1)]) //nolint:errcheck // "[" first, then ","
-	rw.w.Write(b[1 : len(b)-1])        //nolint:errcheck
-	rw.n += len(rw.chunk)
-	clear(rw.chunk)
-	rw.chunk = rw.chunk[:0]
-}
-
-// close writes the last rows and ends the array.
-func (rw *rowWriter) close() error {
-	rw.flush()
-	if rw.err != nil {
-		return rw.err
-	}
-	if rw.n == 0 {
-		rw.w.WriteByte('[') //nolint:errcheck
-	}
-	return rw.w.WriteByte(']')
+	return [...]any{p.Asn, p.AsnName, p.IpsSum, p.Requests, p.Successes, p.LatencyP50}
 }

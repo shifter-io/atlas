@@ -10,8 +10,8 @@ import (
 // proxy type and range, every city x ASN row of the type's headline group in
 // the published order (the store reads that list whole from the build's typed
 // rows, store/longtail.go), each row's IPs mapped like any breakdown row's
-// (estimates.go). A v4 build has none: its rows are the dataset's
-// lists.*.city_asn (DatasetLists) and its Coverage answers.
+// (estimates.go). A v4 build has none: its rows are its Coverage answers
+// (the dataset's lists.*.city_asn holds their first pages, DatasetLists).
 func addCoverageEvidence(entries []*entry, row *store.SnapshotRow) {
 	if row != nil && row.Networks != nil {
 		return
