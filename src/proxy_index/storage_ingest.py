@@ -3,48 +3,17 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
 import ipaddress
 import json
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from psycopg.types.json import Jsonb
 
 from . import names
 from .partitions import partition
-
-# Request outcomes and wire bytes (v6 artifacts), per run, bucket and geography bucket.
-OUTCOME_KEYS = ("challenges", "blocks", "timeouts", "proxy_errors", "bytes_up", "bytes_down")
-ENRICHMENT_FIELDS = {
-    "matched": "boolean",
-    "country_code": "text",
-    "country": "text",
-    "region_code": "text",
-    "region": "text",
-    "city": "text",
-    "latitude": "double precision",
-    "longitude": "double precision",
-    "isp": "text",
-    "organization": "text",
-    "asn": "bigint",
-    "asn_organization": "text",
-    "connection_type": "text",
-    "usage_type": "text",
-}
-
-
-def _digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def _time(value):
-    result = datetime.fromisoformat(value)
-    if result.tzinfo is None:
-        raise ValueError("Artifact timestamps require a timezone")
-    return result.astimezone(UTC)
+from .storage_read import ENRICHMENT_FIELDS, OUTCOME_KEYS, _digest, _time
 
 
 def _canonical(value):
