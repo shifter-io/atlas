@@ -11,10 +11,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 from ..onboarding.manifest import SLOT_MINUTES
 from ..regions import REGION_IDS
+from .cloud_types import PRODUCTION, Cloud, Droplet, Remote, Scope  # noqa: F401 (re-exported)
 
 WORKER_TAG = "pi-camp-worker"
 MANAGER_TAG = "pi-camp-manager"
@@ -40,7 +41,7 @@ ROLES = {**CAMPAIGN_ROLES, "pulse": PULSE_ROLE}
 # CAMP-STAGING-1: a staging manager runs beside production on the same account. Its droplets,
 # firewalls and keys carry the pi-camp-stg- prefix; worker names and campaign tags stay the
 # campaign's (its short id), and the worker image is production's, read only.
-PRODUCTION, STAGING = "production", "staging"
+STAGING = "staging"  # PRODUCTION lives in cloud_types, the default of Scope
 STAGING_PREFIX = "pi-camp-stg-"
 STAGING_MANAGER_NAME_RE = r"^pi-camp-stg-manager-[0-9]{8}-[0-9a-f]{4}$"
 STAGING_ROLES = {
@@ -354,64 +355,6 @@ class HourRecord:
         values = dict(raw)
         values["droplets"] = [DropletRecord(**item) for item in raw.get("droplets", [])]
         return cls(**values)
-
-
-@dataclass(frozen=True)
-class Droplet:
-    """A droplet as the API reports it; `public_ipv4` stays in memory and `.runtime` only."""
-
-    id: str
-    name: str
-    region: str
-    size: str
-    status: str
-    created_at: datetime
-    tags: tuple[str, ...]
-    public_ipv4: str | None = field(default=None, repr=False)
-
-
-@dataclass(frozen=True)
-class Scope:
-    """What one campaign owns: its short id, project, recorded manager and environment."""
-
-    campaign_id: str
-    sid: str
-    project_id: str
-    manager_droplet_id: str
-    created_at: datetime
-    environment: str = PRODUCTION
-
-
-class Cloud(Protocol):
-    """Read and create operations only. Deletes exist solely in `scope.guarded_delete`."""
-
-    async def create(
-        self,
-        names: list[str],
-        *,
-        region: str,
-        size: str,
-        image: str,
-        tags: list[str],
-        ssh_keys: list[str],
-        **flags: bool,
-    ) -> list[Droplet]: ...
-    async def assign_project(
-        self, project_id: str, droplet_ids: list[str], *, guard: object
-    ) -> None: ...
-    async def get(self, droplet_id: str) -> Droplet | None: ...
-    async def list_tag(self, tag: str) -> list[Droplet]: ...
-    async def project_droplet_ids(self, project_id: str) -> frozenset[str]: ...
-    async def account(self) -> dict[str, Any]: ...
-
-
-class Remote(Protocol):
-    async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool: ...
-    async def push_start(self, droplet: Droplet, payload: bytes, command: list[str]) -> None: ...
-    async def inspect(self, droplet: Droplet) -> dict[str, Any]: ...
-    async def stop(self, droplet: Droplet) -> None: ...
-    async def pull(self, droplet: Droplet, remote: str, local: Path) -> None: ...
-    async def journal(self, droplet: Droplet, local: Path) -> None: ...
 
 
 HourLauncher = Callable[[CampaignSpec, HourRecord, Path], Awaitable[HourRecord]]
