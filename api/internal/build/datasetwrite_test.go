@@ -55,10 +55,10 @@ func TestWriteDatasetReportsErrors(t *testing.T) {
 	}
 }
 
-// A v4 dataset's lists are written a chunk of rows at a time and give the
-// bytes of encoding the dataset whole; a dimension of exactly two chunks of
-// rows is one compact array of all its rows.
-func TestWriteDatasetStreamsTheListsInChunks(t *testing.T) {
+// A v4 dataset's lists give the bytes of encoding the dataset whole, and a
+// list of 2,000 City x ASN rows holds its total, its 40 pages and only its
+// first page (DATASET-SIZE-2).
+func TestWriteDatasetWritesEachListsFirstPage(t *testing.T) {
 	in, err := testscale.NetworkInputs(testscale.NetworkShape{Shape: testscale.Shape{Networks: 1, Countries: 1, Exits: 3, Tail: 5,
 		CityAsn: 2000}, Requested: 2})
 	if err != nil {
@@ -77,21 +77,19 @@ func TestWriteDatasetStreamsTheListsInChunks(t *testing.T) {
 		t.Fatalf("WriteDataset differs from Marshal (%v)", err)
 	}
 	var doc struct {
-		Lists map[string]map[string]map[string]map[string]json.RawMessage `json:"lists"`
+		Lists map[string]map[string]map[string]map[string]struct {
+			Total int               `json:"total"`
+			Pages int               `json:"pages"`
+			Rows  []json.RawMessage `json:"rows"`
+		} `json:"lists"`
 	}
 	if err := json.Unmarshal(got.Bytes(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	for slug, kinds := range doc.Lists {
 		for kind, ranges := range kinds {
-			raw := ranges["30d"]["city_asn"]
-			var rows []json.RawMessage
-			if err := json.Unmarshal(raw, &rows); err != nil {
-				t.Fatal(err)
-			}
-			again, _ := json.Marshal(rows)
-			if len(rows) != 2000 || !bytes.Equal(again, raw) {
-				t.Errorf("%s %s: %d City x ASN rows, compact %v", slug, kind, len(rows), bytes.Equal(again, raw))
+			if l := ranges["30d"]["city_asn"]; l.Total != 2000 || l.Pages != 40 || len(l.Rows) != build.PageSize {
+				t.Errorf("%s %s: City x ASN total %d, %d pages, %d rows", slug, kind, l.Total, l.Pages, len(l.Rows))
 			}
 		}
 	}
