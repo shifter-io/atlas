@@ -6,87 +6,26 @@ each step with a run summary; no request or SSH connection leaves the machine.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import tomllib
 from dataclasses import replace
 from importlib import resources
 
 import pytest
-from aiohttp import web
-from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault, running
+from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault
 from campaign_hour_cases import FakeClock
-from campaign_probe_cases import (
-    IP,
-    NOW,
-    PROBED,
-    FakeProbeRemote,
-    Recording,
-    classified,
-    summary,
-    world,
-)
+from campaign_probe_cases import IP, NOW, PROBED, Recording, summary, world
+from campaign_shot_cases import START, ShotRemote, fired, shot_world
 
 from proxy_index import cli as main_cli
-from proxy_index.campaign import probe as probing
 from proxy_index.campaign import shot as shooting
+from proxy_index.campaign import shot_steps
 from proxy_index.campaign.contracts import WORKER_TAG, audit_path, spec_path
-from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError
 from proxy_index.campaign.shot import ShotInputs
 from proxy_index.providers.grammar import Grammar
 
 GRAMMARS = resources.files("proxy_index.providers").joinpath("grammars")
-
-START = NOW.timestamp() + shooting.LEAD_SECONDS
-SIZES = [{"slug": slug, "available": True, "regions": ["lon1", "nyc3"]} for slug in ("c-2", "c-4")]
-
-
-def cell_of(droplet):
-    """(network, region) from a worker name `pic-<sid>-h00-<region>-<network>`."""
-    region, network = droplet.name.split("-h00-")[1].split("-", 1)
-    return network, region
-
-
-class ShotRemote(FakeProbeRemote):
-    """Also records the clock at each step and answers per (network, region)."""
-
-    def __init__(self, clock, answers=None, unready=(), setup_fails=()):
-        super().__init__({})
-        self.clock, self.by_cell = clock, answers or {}
-        self.unready, self.setup_fails, self.started = unready, setup_fails, {}
-
-    async def wait_ready(self, droplet, limit_seconds):
-        await asyncio.sleep(0)  # SSH yields: every worker gets ready before the first sleeps
-        return cell_of(droplet) not in self.unready
-
-    async def run(self, droplet, command, what, *, stdin=None, seconds=120):
-        await asyncio.sleep(0)
-        cell = cell_of(droplet)
-        if command[0] == "python3" and cell in self.setup_fails:
-            raise RemoteError("probe setup failed (exit 1)")
-        if command[0] != "python3":
-            self.started[cell] = self.clock.now()
-            answer = self.by_cell.get(cell)
-            if answer is not None:
-                self.calls.append((command, stdin, what))
-                return answer if isinstance(answer, bytes) else (json.dumps(answer) + "\n").encode()
-        return await super().run(droplet, command, what, stdin=stdin, seconds=seconds)
-
-
-def shot_world(tmp_path, **changes):
-    probe_inputs, spec = world(tmp_path)
-    inputs = ShotInputs(
-        probe_inputs.root, tmp_path / "manager" / "shots", size_by_network={"soax": "c-2"}
-    )
-    return replace(inputs, **changes), spec
-
-
-async def fired(fake, remote, inputs, clock):
-    if fake.sizes[0]["regions"] != ["lon1", "nyc3"] and not getattr(fake, "keep_sizes", False):
-        fake.sizes = SIZES
-    async with running(fake) as cloud:
-        return await shooting.shot(cloud, remote.factory, inputs, clock=clock)
 
 
 async def test_every_cell_starts_at_the_recorded_time_and_every_worker_is_removed(tmp_path):
@@ -288,46 +227,6 @@ async def test_a_size_not_offered_stops_before_any_create(tmp_path):
     assert fake.creates == [] and result["workers_left"] == 0
 
 
-async def test_a_signal_still_removes_every_worker(tmp_path):
-    class Cancelled(ShotRemote):
-        async def run(self, droplet, command, what, *, stdin=None, seconds=120):
-            if what == "shot webshare":
-                asyncio.current_task().cancel()
-                await asyncio.sleep(0)
-            return await super().run(droplet, command, what, stdin=stdin, seconds=seconds)
-
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, regions=("lon1",))
-    result = await fired(fake, Cancelled(clock), inputs, clock)
-    assert result["error"] == "cancelled by a signal" and len(fake.deleted) == 2
-    assert result["workers_left"] == 0
-
-
-async def test_remove_finishes_what_a_stopped_shot_left(tmp_path, monkeypatch):
-    async def kept(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(shooting, "release", kept)
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, regions=("lon1",))
-    result = await fired(fake, ShotRemote(clock), inputs, clock)
-    folder = inputs.output / result["shot_id"]
-    assert result["workers_left"] == 2 and result["recover"].endswith(str(folder))
-    monkeypatch.undo()
-    async with running(fake) as cloud:
-        assert await shooting.recover(cloud, folder) == {
-            "shot_id": result["shot_id"],
-            "workers_left": 0,
-        }
-        record = json.loads((folder / "shot-result.json").read_text())
-        assert "recover" not in record and len(fake.deleted) == 2
-        assert {w["status"] for w in record["workers"]} == {"destroyed"}
-        assert (await shooting.recover(cloud, folder))["workers_left"] == 0
-    with pytest.raises(ProbeError, match="no shot record"):
-        async with running(fake) as cloud:
-            await shooting.recover(cloud, tmp_path)
-
-
 def test_the_shot_command_is_wired(tmp_path, monkeypatch, capsys):
     seen = {}
 
@@ -411,115 +310,17 @@ async def test_s1_a_repeated_region_or_network_is_refused_before_any_call(tmp_pa
     )
 
 
-async def test_s1_a_second_droplet_with_a_workers_name_is_recorded_and_removed(tmp_path):
-    class Doubled(Recording):
-        async def _create(self, request):  # DigitalOcean made one droplet too many
-            answer = await super()._create(request)
-            body = json.loads(answer.body)
-            [extra] = [
-                self.droplets[
-                    self.add(body["droplets"][0]["name"], self.creates[-1]["tags"], project=None)
-                ]
-            ]
-            body["droplets"].append(extra)
-            return web.json_response(body, status=202)
-
-    fake, clock = Doubled(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, networks=("webshare",), regions=("lon1",), size_by_network={})
-    result = await fired(fake, ShotRemote(clock), inputs, clock)
-    [worker], [extra] = result["workers"], result["unrecorded"]
-    assert extra["name"] == worker["name"] and extra["droplet_id"] != worker["droplet_id"]
-    assert extra["status"] == "destroyed" and len(fake.deleted) == 2
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
-    assert result["workers_left"] == 0
-
-
-async def test_s2_a_killed_shot_still_names_its_recovery(tmp_path, monkeypatch):
-    async def killed(self):  # SIGKILL after the stop timeout, or an OOM: no removal runs
-        raise RuntimeError("killed")
-
-    monkeypatch.setattr(shooting.Shot, "cleanup", killed)
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, regions=("lon1",))
-    with pytest.raises(RuntimeError, match="killed"):
-        await fired(fake, ShotRemote(clock), inputs, clock)
-    [folder] = inputs.output.iterdir()
-    record = json.loads((folder / "shot-result.json").read_text())
-    assert record["recover"] == f"campaign shot --remove {folder}"
-    assert all(w["droplet_id"] for w in record["workers"])
-    monkeypatch.undo()
-    async with running(fake) as cloud:
-        assert (await shooting.recover(cloud, folder))["workers_left"] == 0
-    assert "recover" not in json.loads((folder / "shot-result.json").read_text())
-
-
 async def test_m3_a_list_country_network_needs_its_country(tmp_path, monkeypatch):
     # A network whose country is a preset (one dashboard list's country) loads only that one.
     data = tomllib.loads(GRAMMARS.joinpath("proxy-seller.toml").read_text())
     data["flags"]["country"] = {"kind": "country", "preset": True}
     preset = Grammar.parse(data)
-    monkeypatch.setattr(shooting, "load_grammar", lambda network: preset)
+    monkeypatch.setattr(shot_steps, "load_grammar", lambda network: preset)
     probe_inputs, _ = world(tmp_path, ("proxy-seller",))
     inputs = ShotInputs(probe_inputs.root, tmp_path / "shots", regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
     with pytest.raises(ProbeError, match="proxy-seller only loads its list's country"):
         await fired(FakeDigitalOcean(), ShotRemote(clock), inputs, clock)
-
-
-async def test_m4_a_signal_during_the_creates_still_removes_every_worker(tmp_path):
-    class Stopped(Recording):
-        async def _create(self, request):  # created, then SIGTERM before the answer is read
-            answer = await super()._create(request)
-            outer.cancel()
-            return answer
-
-    fake, clock = Stopped(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, networks=("webshare",), size_by_network={})
-    outer = asyncio.current_task()
-    result = await fired(fake, ShotRemote(clock), inputs, clock)
-    assert result["error"] == "cancelled by a signal"
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
-    assert {c["outcome"] for c in result["cells"].values()} == {"cancelled"}
-    # A create stopped around its POST may still land: counted until a listing settles it.
-    uncertain = [w for w in result["workers"] if w["error_class"] == "create_uncertain"]
-    assert result["workers_left"] == len(uncertain) and ("recover" in result) == bool(uncertain)
-    async with running(fake) as cloud:
-        folder = inputs.output / result["shot_id"]
-        assert (await shooting.recover(cloud, folder))["workers_left"] == 0
-
-
-async def test_m4_a_signal_mid_step_removes_every_worker_and_marks_them_cancelled(tmp_path):
-    class Stopped(ShotRemote):
-        async def run(self, droplet, command, what, *, stdin=None, seconds=120):
-            if what.startswith("shot "):
-                outer.cancel()
-                await asyncio.sleep(0)
-            return await super().run(droplet, command, what, stdin=stdin, seconds=seconds)
-
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, regions=("lon1",))
-    outer = asyncio.current_task()
-    result = await fired(fake, Stopped(clock), inputs, clock)
-    assert result["error"] == "cancelled by a signal" and len(fake.deleted) == 2
-    assert {c["outcome"] for c in result["cells"].values()} == {"cancelled"}
-    assert result["workers_left"] == 0 and "recover" not in result
-
-
-async def test_m1_an_unexpected_error_stays_with_its_worker(tmp_path):
-    class Broken(ShotRemote):
-        async def run(self, droplet, command, what, *, stdin=None, seconds=120):
-            if command[0] == "python3" and cell_of(droplet) == ("soax", "lon1"):
-                raise OSError("too many open files")
-            return await super().run(droplet, command, what, stdin=stdin, seconds=seconds)
-
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, regions=("lon1",))
-    result = await fired(fake, Broken(clock), inputs, clock)
-    assert {k: c["outcome"] for k, c in result["cells"].items()} == {
-        "soax/lon1": "setup_failed",
-        "webshare/lon1": "measured",
-    }
-    assert "error" not in result and result["workers_left"] == 0
 
 
 async def test_m4_workers_still_booting_are_polled_again(tmp_path):
@@ -540,116 +341,9 @@ async def test_m4_workers_still_booting_are_polled_again(tmp_path):
     assert result["cells"]["soax/lon1"]["outcome"] == "measured"
 
 
-async def test_m4_remove_settles_a_create_that_never_landed(tmp_path):
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    fake.faults.append(Fault("POST", "/v2/droplets", 500, times=10))  # answer lost, none made
-    inputs, _ = shot_world(tmp_path, networks=("soax",), regions=("lon1",))
-    result = await fired(fake, ShotRemote(clock), inputs, clock)
-    [worker] = result["workers"]
-    assert worker["error_class"] == "create_uncertain" and worker["droplet_id"] is None
-    assert result["workers_left"] == 1 and "recover" in result
-    assert result["cells"]["soax/lon1"]["outcome"] == "create_failed"
-    async with running(fake) as cloud:
-        folder = inputs.output / result["shot_id"]
-        assert (await shooting.recover(cloud, folder))["workers_left"] == 0
-    assert json.loads((folder / "shot-result.json").read_text())["workers"][0]["status"] == "absent"
-
-
 async def test_s1_worker_names_must_be_unique(tmp_path, monkeypatch):
-    monkeypatch.setattr(shooting, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
+    monkeypatch.setattr(shot_steps, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
     inputs, _ = shot_world(tmp_path, regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
     with pytest.raises(ProbeError, match="worker names repeated"):
         await fired(FakeDigitalOcean(), ShotRemote(clock), inputs, clock)
-
-
-async def test_s1r_remove_releases_every_droplet_with_the_name_when_no_id_is_recorded(
-    tmp_path, monkeypatch
-):
-    async def killed(self):  # killed during the create POST: no id was ever recorded
-        raise RuntimeError("killed")
-
-    monkeypatch.setattr(shooting.Shot, "cleanup", killed)
-    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
-    inputs, _ = shot_world(tmp_path, networks=("webshare",), regions=("lon1",), size_by_network={})
-    with pytest.raises(RuntimeError, match="killed"):
-        await fired(fake, ShotRemote(clock), inputs, clock)
-    [folder] = inputs.output.iterdir()
-    path = folder / "shot-result.json"
-    record = json.loads(path.read_text())
-    [worker] = record["workers"]
-    worker.update(
-        droplet_id=None, status="requested", error_class="create_uncertain", assigned_at=None
-    )
-    path.write_text(json.dumps(record))
-    first = fake.droplets[next(i for i, d in fake.droplets.items() if d["name"] == worker["name"])]
-    fake.add(first["name"], first["tags"], project=None)  # DigitalOcean made one too many
-    monkeypatch.undo()
-    async with running(fake) as cloud:
-        assert (await shooting.recover(cloud, folder))["workers_left"] == 0
-    assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
-    record = json.loads(path.read_text())
-    assert [w["status"] for w in record["workers"] + record["unrecorded"]] == [
-        "destroyed",
-        "destroyed",
-    ] and "recover" not in record
-
-
-def test_markdown_answer_class_columns():
-    """CTRY-1: the shot and probe tables show rate limits in their own column and the answer
-    classes beside them; a result written before them renders "-"."""
-    new = probing.step_result(500, 1000, classified())
-    old = {
-        k: v
-        for k, v in new.items()
-        if not k.endswith(
-            ("no_inventory_pct", "other_country_pct", "duplicates_pct", "real_error_pct")
-        )
-    }
-    cell = {
-        "country": "US",
-        "size": "c-4",
-        "concurrency": 500,
-        "outcome": "measured",
-        "start_lag_seconds": 1.5,
-        "step_down": [],
-    }
-    shot = shooting.markdown(
-        {
-            "shot_id": "s",
-            "requests": 1000,
-            "start_at": "t",
-            "cells": {"geonode/nyc3": cell | {"step": new}, "soax/lon1": cell | {"step": old}},
-        }
-    )
-    header, rule, *rows = shot.splitlines()[4:]
-    columns = [c.strip() for c in header.strip("|").split("|")]
-    assert columns[8] == "Rate-limited %" and "429 %" not in shot
-    assert columns[17:21] == [
-        "No-IP %",
-        "Other-country %",
-        "Duplicates %",
-        "Real errors % (answered)",
-    ]
-    assert rule.count("---") == len(columns) == 23
-    cells = [[c.strip() for c in row.strip("|").split("|")] for row in rows]
-    assert cells[0][8] == "5.0" and cells[0][17:21] == ["0.5", "1.0", "9.0", "15.263"]
-    assert cells[1][17:21] == ["-"] * 4 and all(len(c) == 23 for c in cells)
-    probe = probing.markdown(
-        {
-            "probe_id": "p",
-            "requests": 1000,
-            "country": "US",
-            "size": "c-4",
-            "region": "nyc3",
-            "networks": {"geonode": {"max_concurrency": 500, "steps": [new, old]}},
-        }
-    )
-    header, rule, *rows = probe.split("\n\n")[-1].splitlines()
-    columns = [c.strip() for c in header.strip("|").split("|")]
-    assert columns[4] == "Rate-limited %" and (
-        columns[12:16] == ["No-IP %", "Other-country %", "Duplicates %", "Real errors % (answered)"]
-    )
-    assert rule.count("---") == len(columns) == 17
-    cells = [[c.strip() for c in row.strip("|").split("|")] for row in rows]
-    assert cells[0][12:16] == ["0.5", "1.0", "9.0", "15.263"] and cells[1][12:16] == ["-"] * 4

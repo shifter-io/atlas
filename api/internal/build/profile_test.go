@@ -11,6 +11,7 @@ import (
 )
 
 func TestANetworkAnswerCarriesItsProfileWithoutTheLongLists(t *testing.T) {
+	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60})
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +51,7 @@ func TestANetworkAnswerCarriesItsProfileWithoutTheLongLists(t *testing.T) {
 }
 
 func TestTheAllNetworksChartIsTheEveryGroupFleetSeries(t *testing.T) {
+	t.Parallel()
 	pg := shapePages(t, testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 5}, nil)
 	for _, r := range Ranges {
 		chart := pg.Charts["all/all/"+r.ID]
@@ -74,6 +76,7 @@ func TestTheAllNetworksChartIsTheEveryGroupFleetSeries(t *testing.T) {
 // A network with a long history: 400 records of 2 KB in each of three lists would
 // break the cap (2.4 MB); the answer keeps the newest RecordCap and the full counts.
 func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
+	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 1, Countries: 40, Exits: 240, Tail: 200})
 	if err != nil {
 		t.Fatal(err)

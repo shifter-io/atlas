@@ -15,6 +15,7 @@ import (
 // The committed fixture is a v1 snapshot without outages; this publishes it
 // turned into v2 with outages and time-based uptime and checks the mapping.
 func TestOutagesMapToIncidentsAndBands(t *testing.T) {
+	t.Parallel()
 	res := publishedBuild(t, withOutages(t))
 	p := res.Details["shifter"].Provider
 	if len(p.Incidents) != len(fixtureOutages) {
@@ -51,6 +52,7 @@ func TestOutagesMapToIncidentsAndBands(t *testing.T) {
 // snapshot-every-request.json, scripts/every-request-fixture.mjs): latency
 // under load, time-weighted success, per-IP shares and list prices.
 func TestEveryRequestSnapshotsMapLatencyPricingAndCopy(t *testing.T) {
+	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +173,7 @@ func withOutages(t *testing.T) []byte {
 // The committed v1 fixture published over the test catalog (with its
 // leftover is_demo network): the insight totals count only the measured network.
 func TestMeasuredTotalsCountOnlyTheMeasuredNetwork(t *testing.T) {
+	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
 	if err != nil {
 		t.Fatal(err)

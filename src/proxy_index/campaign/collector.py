@@ -29,6 +29,7 @@ from .contracts import (
     runtime_dir,
     status_path,
 )
+from .fanout import RemoteError
 from .reports import latest_summary, write_traffic_report
 from .scope import (
     OWN_UNASSIGNED_SECONDS,
@@ -144,7 +145,7 @@ class Collector:
     async def _harvest(self, spec: CampaignSpec, record: HourRecord) -> HourRecord:
         try:
             record = await self.harvester(spec, record, self.root)
-        except Exception as error:  # one hour's failure never stops the others
+        except Exception as error:  # boundary: one hour's failure never stops the others
             self.log.add(
                 self.clock(),
                 "harvest_error",
@@ -173,7 +174,7 @@ class Collector:
         self.reconciled_at = now
         try:
             await self.reconcile(spec, hours)
-        except Exception as error:
+        except Exception as error:  # boundary: a failed reconcile is alerted; the loop goes on
             self.reconcile_failures += 1
             if self.reconcile_failures == 1:  # r1: keyed by the streak, so every outage alerts
                 self.failing_since = now.strftime("%Y%m%dT%H%M")
@@ -261,7 +262,7 @@ class Collector:
         _, _, _, region, network = droplet.name.split("-", 4)
         try:
             inspected = await self.remote_factory(record.hour).inspect(droplet)
-        except Exception:
+        except (RemoteError, OSError, ValueError):  # ssh, its process, or a reply not JSON
             inspected = {"error": "inspect failed"}
         active = "assignment" in inspected
         if "error" in inspected or (active and not self._host(record.hour, droplet)):
@@ -334,7 +335,7 @@ class Collector:
                 droplet_id=drop.droplet_id,
                 name=drop.name,
             )
-        except Exception as error:  # audited by the guard; retried at the next reconcile
+        except Exception as error:  # boundary: audited by the guard; the next reconcile retries
             drop.status = "destroy_failed"
             self.log.add(
                 self.clock(),

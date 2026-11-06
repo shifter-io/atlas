@@ -97,6 +97,7 @@ func half(v float64) Num { return Num(math.Floor(v + 0.5)) }
 // follows K8: the window figure, measured rows times the breakdown scale and
 // the released hours as the chart.
 func TestTheHourFormulaGivesTheIPNumbers(t *testing.T) {
+	t.Parallel()
 	res := estimatedBuild(t)
 	want := half(estimateValue)
 	d := res.Details["shifter"]
@@ -236,6 +237,7 @@ func sameNum(a, b Num) bool { return a == b || (!a.OK() && !b.OK()) }
 // The tape keeps an hour's release row, worded as an hourly update (owner
 // decision on review question 2), with no exception to the check.
 func TestNoAnswerNamesTheEstimate(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	db.Publish(t, estimatedSnapshot(t))
 	db.Exec(t, `INSERT INTO test_events(at,kind,product_id,country_code,signal,severity,data) VALUES

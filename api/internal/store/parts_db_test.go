@@ -39,6 +39,7 @@ func tryLoad(t *testing.T, db *testdb.DB) (*store.Inputs, error) {
 // the same payload stored whole, byte for byte, without its runs; the whole
 // payload still reads as it is.
 func TestPartsReadAsTheSinglePayload(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	payload, err := testscale.EveryRequest()
 	if err != nil {
@@ -80,6 +81,7 @@ func TestPartsReadAsTheSinglePayload(t *testing.T) {
 
 // The head's product part count must match the stored parts.
 func TestPartsMustMatchTheirHead(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	payload, err := testscale.EveryRequest()
 	if err != nil {

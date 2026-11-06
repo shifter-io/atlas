@@ -52,6 +52,8 @@ MMDB provides optional offline enrichment; PostgreSQL persists history and cache
 
 PostgreSQL: this project uses a dedicated local cluster on `127.0.0.1:55432`.
 Run `uv run --no-editable python scripts/postgres_local.py start` after reboot.
+CI creates a throwaway cluster with `init --ephemeral` (fsync, synchronous commit and full
+page writes off); never use it for a cluster whose data must survive a crash.
 Private database credentials are in `.secrets/database.toml`; the public template is
 `database.toml.example`. Add `--database-file .secrets/database.toml` to `run` or
 `enrich` for automatic ingestion, or use `proxy-index ingest results/RUN_ID`
@@ -84,7 +86,7 @@ See `docs/index.html#database` for keys, readable views and rebuild/backup detai
 All 14 known enrichment fields use shared typed location/network records, including
 connection/usage type, coordinates and organizations. `ip_enrichment_details` exposes them.
 Only unknown future fields use `extra_attributes`. Numeric internal run keys reduce history
-storage; external UUIDs and portable artifacts stay unchanged. `storage.read_summary()`
+storage; external UUIDs and portable artifacts stay unchanged. `storage_read.read_summary()`
 reconstructs full summaries without repeated bucket/histogram/configuration JSON.
 
 Schema v6 adds the census/pulse tables: `runner_regions`, `countries` (daily UTC

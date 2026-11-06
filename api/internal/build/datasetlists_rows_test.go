@@ -1,7 +1,6 @@
 package build
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -10,60 +9,48 @@ import (
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
-// rowsOf is n rows written by a rowWriter, and its error.
-func rowsOf(n int, row func(int) any) (string, error) {
-	var b bytes.Buffer
-	w := bufio.NewWriter(&b)
-	rw := &rowWriter{w: w}
-	for i := range n {
-		rw.add(row(i))
-	}
-	err := rw.close()
-	w.Flush() //nolint:errcheck // a bytes.Buffer
-	return b.String(), err
-}
-
-// A rowWriter's array is the array encoding gives the rows whole: none, one
-// row, exactly one chunk, a chunk and one row; and a row encoding refuses is
-// an error.
-func TestTheRowWriterWritesOneArrayInChunks(t *testing.T) {
-	for _, n := range []int{0, 1, listChunk, listChunk + 1, 2*listChunk + 7} {
-		rows := make([]any, n)
-		for i := range rows {
-			rows[i] = [...]any{"a<b", i, model.Num(nan)}
-		}
-		want, _ := json.Marshal(rows)
-		if got, err := rowsOf(n, func(i int) any { return rows[i] }); err != nil || got != string(want) {
-			t.Errorf("%d rows: %v, got %.120s", n, err, got)
-		}
-	}
-	if _, err := rowsOf(3, func(i int) any { return json.RawMessage("{") }); err == nil {
-		t.Error("a row encoding refuses is not an error")
-	}
-}
-
 // A network kind without lists or a Coverage list writes every range and
-// dimension as an empty array; a published group whose provider has no
-// network has no rows; a build before v4 has none at all.
+// dimension as an empty list; a published group whose provider has no
+// network has no lists; a build before v4 has none at all.
 func TestDatasetListsOfNetworksWithoutRows(t *testing.T) {
+	t.Parallel()
 	d := &DatasetLists{networks: []*datasetNetwork{{slug: "net", kinds: []*datasetKind{{kind: "residential"}}}}}
 	b, err := json.Marshal(d)
-	empty := `{"country":[],"region":[],"city":[],"asn":[],"city_asn":[]}`
+	none := `{"total":0,"pages":0,"rows":[]}`
+	empty := `{"country":` + none + `,"region":` + none + `,"city":` + none + `,"asn":` + none + `,"city_asn":` + none + `}`
 	if want := `{"net":{"residential":{"24h":` + empty + `,"7d":` + empty + `,"30d":` + empty + `}}}`; err != nil || string(b) != want {
 		t.Errorf("%v: %s", err, b)
 	}
 	s := &snap.Snapshot{Products: []snap.Product{{Provider: "unlisted", Kind: "residential"}}}
-	row := &store.SnapshotRow{Networks: map[store.PlaceWindow]*store.NetList{}}
 	for _, pg := range []*Pages{{v4: true}, {v4: false}} {
-		if l := datasetLists(pg, s, nil, row); len(l.networks) != 0 {
+		if l := datasetLists(pg, s, nil); len(l.networks) != 0 {
 			t.Errorf("v4 %v: networks %v", pg.v4, l.networks)
 		}
 	}
-	if b, _ := json.Marshal(datasetLists(&Pages{}, nil, nil, nil)); string(b) != "{}" {
+	if b, _ := json.Marshal(datasetLists(&Pages{}, nil, nil)); string(b) != "{}" {
 		t.Errorf("a build before v4: %s", b)
+	}
+}
+
+// A list's counts are its whole list's and its rows only the first page: a
+// list of 51 rows is two pages, of which the file holds the 50 the build
+// keeps.
+func TestADatasetListHoldsItsFirstPage(t *testing.T) {
+	t.Parallel()
+	first := make([]PlaceRow, PageSize)
+	for i := range first {
+		first[i] = PlaceRow{CountryCode: model.S("AA"), Country: model.S("Aa"), IpsSum: Num(100 - i), Requests: nan, Successes: 1, LatencyP50: nan}
+	}
+	l := placeFirst(&placeIndex{srcs: []placeSource{}, total: PageSize + 1, first: first}, "country")
+	b, err := json.Marshal(l)
+	if err != nil || l.Total != PageSize+1 || l.Pages != 2 || len(l.Rows) != PageSize ||
+		!strings.HasPrefix(string(b), `{"total":51,"pages":2,"rows":[["AA","Aa",100,null,1,null],["AA"`) {
+		t.Errorf("%v: %.120s", err, b)
+	}
+	if c := coverageFirst(&coverageList{}); c.Total != 0 || c.Rows == nil {
+		t.Errorf("a Coverage list without its first page: %+v", c)
 	}
 }
 
@@ -81,11 +68,12 @@ var errDiskFull = errors.New("disk full")
 
 // A write that fails while the lists are written is an error naming them.
 func TestWriteDatasetReportsAListsWriteError(t *testing.T) {
+	t.Parallel()
 	d := &model.Dataset{Lists: &DatasetLists{}}
 	for range 40 {
 		k := &datasetKind{kind: "residential"}
 		big := strings.Repeat("x", 4096)
-		k.srcs[0] = []placeSource{{list: oneRowList(t, big), scale: nan}}
+		k.places[0][0] = &placeIndex{srcs: []placeSource{}, total: 1, first: []PlaceRow{{CountryCode: model.S("AA"), Country: &big}}}
 		d.Lists.(*DatasetLists).networks = append(d.Lists.(*DatasetLists).networks, &datasetNetwork{slug: big[:8], kinds: []*datasetKind{k}})
 	}
 	var whole bytes.Buffer
@@ -95,15 +83,4 @@ func TestWriteDatasetReportsAListsWriteError(t *testing.T) {
 	if err := WriteDataset(&failAfter{n: whole.Len()}, d); err == nil || !strings.HasPrefix(err.Error(), "dataset lists: ") {
 		t.Errorf("write error: %v", err)
 	}
-}
-
-// oneRowList is a network list of one country row named name.
-func oneRowList(t *testing.T, name string) *store.NetList {
-	t.Helper()
-	l, err := store.NewNetList(map[string][]store.NetRow{"country": {{Place: &store.Place{CountryCode: model.S("AA"), Country: &name}, Ips: 1,
-		Completed: 1, Successes: 1, P50: 1}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return l
 }

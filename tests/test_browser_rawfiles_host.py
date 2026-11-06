@@ -18,6 +18,7 @@ from datetime import timedelta
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from browser_rawfiles_cases import CAMOUFOX, MEMBERS, RUN_ID, SLOT, make_run, seal_dir
 from test_browser_node import (
     CHEAP,
     SHIFTER,
@@ -29,11 +30,10 @@ from test_browser_node import (
     make_state,
     serve_until,
 )
-from test_browser_rawfiles import CAMOUFOX, MEMBERS, RUN_ID, SLOT, make_run, seal_dir
 
 from proxy_index.browser import contracts as bc
 from proxy_index.browser import node as host_module
-from proxy_index.browser import rawfiles
+from proxy_index.browser import rawfiles, rawfiles_seal
 from proxy_index.browser import run as run_module
 from proxy_index.browser.node import BrowserHost
 from proxy_index.errors import UserError
@@ -182,7 +182,7 @@ async def test_a_run_that_cannot_be_sealed_is_kept_and_not_failed(tmp_path, monk
     def refuse(*args, **kwargs):
         raise OSError("disk")
 
-    monkeypatch.setattr(rawfiles, "pack", refuse)
+    monkeypatch.setattr(rawfiles_seal, "pack", refuse)
     state = make_state(tmp_path)
     fake = Kbp7({TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")]})
     host, server = await host_with(state, fake)

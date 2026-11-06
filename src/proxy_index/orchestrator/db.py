@@ -208,7 +208,7 @@ class Database:
     async def _run_hook(name: str, hook: CloseHook, batch_ids: list[int]) -> None:
         try:
             await hook(batch_ids)
-        except Exception:  # noqa: BLE001 - a report must never fail the barrier
+        except Exception:  # boundary: a report must never fail the barrier
             log.exception("batch close hook %s failed for batches %s", name, batch_ids)
 
     async def drain(self) -> None:

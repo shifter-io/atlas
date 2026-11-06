@@ -9,6 +9,7 @@ import (
 )
 
 func TestShifterPricingCatalog(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	db.Exec(t, `INSERT INTO site.providers(slug,name,kinds,primary_kind) VALUES ('shifter','Shifter','{residential}','residential')`)
 	sql, err := os.ReadFile(repoFile(t, "api", "scripts", "pricing-shifter.sql"))
