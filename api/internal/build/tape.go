@@ -139,145 +139,202 @@ func describeOutage(e *store.EventJSON, d map[string]any, inWhere string) (tapeT
 	return tapeText{}, false
 }
 
+// tapeFacts holds what describe reads for more than one event kind.
+type tapeFacts struct {
+	e                                             *store.EventJSON
+	d                                             map[string]any
+	where, inWhere, baselineText                  string
+	requests, seconds, rate, baseline             float64
+	hasRequests, hasSeconds, hasRate, hasBaseline bool
+}
+
+func newTapeFacts(e *store.EventJSON, d map[string]any) *tapeFacts {
+	f := &tapeFacts{e: e, d: d, where: place(e, d)}
+	if f.where != "" {
+		f.inWhere = " in " + f.where
+	}
+	f.requests, f.hasRequests = numOf(d["requests"])
+	f.seconds, f.hasSeconds = numOf(d["duration_s"])
+	f.rate, f.hasRate = numOf(d["success_rate"])
+	if !f.hasRate {
+		f.rate, f.hasRate = numOf(d["value"])
+	}
+	f.baseline, f.hasBaseline = numOf(d["baseline"])
+	if f.hasBaseline {
+		f.baselineText = "baseline " + jsnum.Pct(f.baseline, 0)
+	}
+	return f
+}
+
+// describers holds one function per event kind; describeDaily and
+// describeOutage cover the kinds missing here.
+var describers = map[string]func(f *tapeFacts) tapeText{
+	"census_started":  describeCensusStarted,
+	"census_finished": describeCensusFinished,
+	"census_retry":    describeCensusRetry,
+	"census_skipped":  describeCensusSkipped,
+	"pulse_finished":  describePulseFinished,
+	"success_drop":    describeSuccessDrop,
+	"latency_spike":   describeLatencySpike,
+	"block_spike":     describeBlockSpike,
+	"down":            describeDown,
+	"recovered":       describeRecovered,
+	"new_hosting_asn": describeNewHostingASN,
+	"ip_overlap":      describeIPOverlap,
+	"node_offline": func(f *tapeFacts) tapeText {
+		return tapeText{"Node offline" + f.inWhere, "", "Offline"}
+	},
+	"no_node": func(f *tapeFacts) tapeText {
+		return tapeText{"No node available" + f.inWhere, "", "No node"}
+	},
+}
+
 func describe(e *store.EventJSON, d map[string]any) tapeText {
-	where := place(e, d)
-	inWhere := ""
-	if where != "" {
-		inWhere = " in " + where
-	}
-	requests, hasRequests := numOf(d["requests"])
-	seconds, hasSeconds := numOf(d["duration_s"])
-	rate, hasRate := numOf(d["success_rate"])
-	if !hasRate {
-		rate, hasRate = numOf(d["value"])
-	}
-	baseline, hasBaseline := numOf(d["baseline"])
-	baselineText := ""
-	if hasBaseline {
-		baselineText = "baseline " + jsnum.Pct(baseline, 0)
-	}
-	if t, ok := describeDaily(e, d, inWhere); ok {
+	f := newTapeFacts(e, d)
+	if t, ok := describeDaily(e, d, f.inWhere); ok {
 		return t
 	}
-	if t, ok := describeOutage(e, d, inWhere); ok {
+	if t, ok := describeOutage(e, d, f.inWhere); ok {
 		return t
 	}
-	join := joinParts
-	switch e.Kind {
-	case "census_started":
-		extra := ""
-		if e.Country != nil && *e.Country != "" && e.Region != nil && *e.Region != "" {
-			extra = " (" + *e.Region + ")"
-		}
-		target := ""
-		if e.Target != nil {
-			target = *e.Target
-		}
-		return tapeText{"Census started" + inWhere + extra, target, "Started"}
-	case "census_finished":
-		parts := []string{}
-		if hasRequests {
-			parts = append(parts, jsnum.Count(requests)+" requests")
-		}
-		if hasSeconds {
-			parts = append(parts, runTime(seconds))
-		}
-		if s, _ := strOf(d["stop_reason"]); s == "stalled" {
-			return tapeText{"Census stopped" + inWhere + ": network down", join(parts...), "Down"}
-		}
-		value := jsnum.NA
-		if ips, ok := numOf(d["unique_ips"]); ok {
-			value = jsnum.Count(ips) + " IPs"
-		}
-		return tapeText{"Census done" + inWhere, join(parts...), value}
-	case "census_retry":
-		// A census the provider spoiled (no success, stalled), run again once a pulse got through.
-		detail := ""
-		if reason, _ := strOf(d["reason"]); reason != "" {
-			detail = "after " + strings.ReplaceAll(reason, "_", " ")
-		}
-		return tapeText{"Census rerun" + inWhere, detail, "Rerun"}
-	case "census_skipped":
-		reason, _ := strOf(d["reason"])
-		return tapeText{"Census skipped" + inWhere, reason, "Skipped"}
-	case "pulse_finished":
-		challenges, hasCh := numOf(d["challenges"])
-		blocks, hasBl := numOf(d["blocks"])
-		p50, hasP50 := numOf(d["p50"])
-		pl := func(n float64, word string) string {
-			if n == 1 {
-				return jsnum.Count(n) + " " + word
-			}
-			return jsnum.Count(n) + " " + word + "s"
-		}
-		parts := []string{}
-		if hasRequests {
-			parts = append(parts, jsnum.Count(requests)+" requests")
-		}
-		if hasP50 {
-			parts = append(parts, "p50 "+jsnum.Ms(p50))
-		}
-		if hasCh && challenges != 0 {
-			parts = append(parts, pl(challenges, "challenge"))
-		}
-		if hasBl && blocks != 0 {
-			parts = append(parts, pl(blocks, "block"))
-		}
-		value := jsnum.NA
-		if hasRate {
-			value = jsnum.Pct(rate, 0)
-		}
-		return tapeText{"Pulse" + inWhere, join(parts...), value}
-	case "success_drop":
-		if !hasRate {
-			return tapeText{"Success dropped" + inWhere, baselineText, jsnum.NA}
-		}
-		return tapeText{"Success dropped to " + jsnum.Pct(rate, 0) + inWhere, baselineText, jsnum.Pct(rate, 0)}
-	case "latency_spike":
-		p50, ok := numOf(d["p50"])
-		if !ok {
-			p50, ok = numOf(d["value"])
-		}
-		detail := ""
-		if hasBaseline {
-			detail = "baseline " + jsnum.Ms(baseline)
-		}
-		if !ok {
-			return tapeText{"Latency spiked" + inWhere, detail, jsnum.NA}
-		}
-		return tapeText{"Latency spiked to " + jsnum.Ms(p50) + inWhere, detail, jsnum.Ms(p50)}
-	case "block_spike":
-		value := jsnum.NA
-		if blocks, ok := numOf(d["blocks"]); ok {
-			value = jsnum.Count(blocks) + " blocks"
-		}
-		return tapeText{"Blocks spiked" + inWhere, baselineText, value}
-	case "down":
-		suffix := ""
-		if s, _ := strOf(d["source"]); s == "census" {
-			suffix = " (during census)"
-		}
-		return tapeText{"Down" + inWhere + suffix, "", "Down"}
-	case "recovered":
-		if where != "" {
-			return tapeText{"Recovered" + inWhere, "", "Recovered"}
-		}
-		return tapeText{"Recovered", "", "Recovered"}
-	case "new_hosting_asn":
-		name, _ := strOf(d["name"])
-		return tapeText{"DC ASN seen" + inWhere, name, "New"}
-	case "ip_overlap":
-		value := jsnum.NA
-		if shared, ok := numOf(d["value"]); ok {
-			value = jsnum.Pct(shared, 0)
-		}
-		return tapeText{"IP overlap seen" + inWhere, "", value}
-	case "node_offline":
-		return tapeText{"Node offline" + inWhere, "", "Offline"}
-	case "no_node":
-		return tapeText{"No node available" + inWhere, "", "No node"}
+	if fn, ok := describers[e.Kind]; ok {
+		return fn(f)
 	}
 	return tapeText{strings.ReplaceAll(e.Kind, "_", " "), "", jsnum.NA}
+}
+
+func describeCensusStarted(f *tapeFacts) tapeText {
+	e := f.e
+	extra := ""
+	if e.Country != nil && *e.Country != "" && e.Region != nil && *e.Region != "" {
+		extra = " (" + *e.Region + ")"
+	}
+	target := ""
+	if e.Target != nil {
+		target = *e.Target
+	}
+	return tapeText{"Census started" + f.inWhere + extra, target, "Started"}
+}
+
+func describeCensusFinished(f *tapeFacts) tapeText {
+	parts := []string{}
+	if f.hasRequests {
+		parts = append(parts, jsnum.Count(f.requests)+" requests")
+	}
+	if f.hasSeconds {
+		parts = append(parts, runTime(f.seconds))
+	}
+	if s, _ := strOf(f.d["stop_reason"]); s == "stalled" {
+		return tapeText{"Census stopped" + f.inWhere + ": network down", joinParts(parts...), "Down"}
+	}
+	value := jsnum.NA
+	if ips, ok := numOf(f.d["unique_ips"]); ok {
+		value = jsnum.Count(ips) + " IPs"
+	}
+	return tapeText{"Census done" + f.inWhere, joinParts(parts...), value}
+}
+
+// describeCensusRetry: a census the provider spoiled (no success, stalled),
+// run again once a pulse got through.
+func describeCensusRetry(f *tapeFacts) tapeText {
+	detail := ""
+	if reason, _ := strOf(f.d["reason"]); reason != "" {
+		detail = "after " + strings.ReplaceAll(reason, "_", " ")
+	}
+	return tapeText{"Census rerun" + f.inWhere, detail, "Rerun"}
+}
+
+func describeCensusSkipped(f *tapeFacts) tapeText {
+	reason, _ := strOf(f.d["reason"])
+	return tapeText{"Census skipped" + f.inWhere, reason, "Skipped"}
+}
+
+func describePulseFinished(f *tapeFacts) tapeText {
+	challenges, hasCh := numOf(f.d["challenges"])
+	blocks, hasBl := numOf(f.d["blocks"])
+	p50, hasP50 := numOf(f.d["p50"])
+	pl := func(n float64, word string) string {
+		if n == 1 {
+			return jsnum.Count(n) + " " + word
+		}
+		return jsnum.Count(n) + " " + word + "s"
+	}
+	parts := []string{}
+	if f.hasRequests {
+		parts = append(parts, jsnum.Count(f.requests)+" requests")
+	}
+	if hasP50 {
+		parts = append(parts, "p50 "+jsnum.Ms(p50))
+	}
+	if hasCh && challenges != 0 {
+		parts = append(parts, pl(challenges, "challenge"))
+	}
+	if hasBl && blocks != 0 {
+		parts = append(parts, pl(blocks, "block"))
+	}
+	value := jsnum.NA
+	if f.hasRate {
+		value = jsnum.Pct(f.rate, 0)
+	}
+	return tapeText{"Pulse" + f.inWhere, joinParts(parts...), value}
+}
+
+func describeSuccessDrop(f *tapeFacts) tapeText {
+	if !f.hasRate {
+		return tapeText{"Success dropped" + f.inWhere, f.baselineText, jsnum.NA}
+	}
+	return tapeText{"Success dropped to " + jsnum.Pct(f.rate, 0) + f.inWhere, f.baselineText, jsnum.Pct(f.rate, 0)}
+}
+
+func describeLatencySpike(f *tapeFacts) tapeText {
+	p50, ok := numOf(f.d["p50"])
+	if !ok {
+		p50, ok = numOf(f.d["value"])
+	}
+	detail := ""
+	if f.hasBaseline {
+		detail = "baseline " + jsnum.Ms(f.baseline)
+	}
+	if !ok {
+		return tapeText{"Latency spiked" + f.inWhere, detail, jsnum.NA}
+	}
+	return tapeText{"Latency spiked to " + jsnum.Ms(p50) + f.inWhere, detail, jsnum.Ms(p50)}
+}
+
+func describeBlockSpike(f *tapeFacts) tapeText {
+	value := jsnum.NA
+	if blocks, ok := numOf(f.d["blocks"]); ok {
+		value = jsnum.Count(blocks) + " blocks"
+	}
+	return tapeText{"Blocks spiked" + f.inWhere, f.baselineText, value}
+}
+
+func describeDown(f *tapeFacts) tapeText {
+	suffix := ""
+	if s, _ := strOf(f.d["source"]); s == "census" {
+		suffix = " (during census)"
+	}
+	return tapeText{"Down" + f.inWhere + suffix, "", "Down"}
+}
+
+func describeRecovered(f *tapeFacts) tapeText {
+	if f.where != "" {
+		return tapeText{"Recovered" + f.inWhere, "", "Recovered"}
+	}
+	return tapeText{"Recovered", "", "Recovered"}
+}
+
+func describeNewHostingASN(f *tapeFacts) tapeText {
+	name, _ := strOf(f.d["name"])
+	return tapeText{"DC ASN seen" + f.inWhere, name, "New"}
+}
+
+func describeIPOverlap(f *tapeFacts) tapeText {
+	value := jsnum.NA
+	if shared, ok := numOf(f.d["value"]); ok {
+		value = jsnum.Pct(shared, 0)
+	}
+	return tapeText{"IP overlap seen" + f.inWhere, "", value}
 }
 
 var tapeCategory = map[string]string{"census": "census", "pulse": "pulse", "incident": "incident", "audit": "audit"}

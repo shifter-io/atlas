@@ -1,4 +1,5 @@
-"""NIGHTLY-1: the nightly dependency audit uses ci.yml's pinned uv, never the server's Python."""
+"""NIGHTLY-1/2: the nightly dependency audit uses ci.yml's pinned uv, never the server's Python,
+and runs on a ci-32cpu server."""
 
 from pathlib import Path
 
@@ -29,3 +30,7 @@ def test_nightly_audits_the_locked_set_with_uv_only():
     assert "--require-hashes --no-deps --disable-pip" in runs
     assert "sha256sum -c --quiet -" in runs
     assert "python3" not in runs
+
+
+def test_nightly_audit_runs_on_ci_32cpu():
+    assert _load("maestro-nightly.yml")["jobs"]["audit"]["runs-on"] == ["self-hosted", "ci-32cpu"]
