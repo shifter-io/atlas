@@ -3,13 +3,14 @@ and the memo tables' reads and writes.
 
 _count() counts the slices and series points (hourly.Item) no memo holds: their pool figures,
 first-seen bins (FIRST_SEEN) or distinct IPs per point (BUCKET_IPS). window_distinct() keeps the
-estimates' distinct IPs in calculated_distinct. _cached() reads a memo table and stores what it
-misses. This module never imports hourly.py; hourly.py imports these names back.
+estimates' distinct IPs in calculated_distinct. _stored() is the figures a memo keeps and
+_restored() a slice's figures from them; _cached() reads a memo table and stores what it misses.
+This module never imports hourly.py; hourly.py imports these names back.
 """
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
