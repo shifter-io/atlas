@@ -3,21 +3,68 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
 import os
 import socket
 import ssl
 import struct
+import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import psycopg
+from psycopg import sql
+
+WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main")
+# The opt-in test timeline (tests/conftest.py).
+TIMELINE = os.environ.get("CI_TIMELINE") == "1"
+
+
+def timeline_record(record: dict) -> None:
+    """Append one record to this worker's `$EV/timeline-<worker>.jsonl` (CI_TIMELINE=1 only)."""
+    if not TIMELINE:
+        return
+    path = Path(os.environ.get("EV", ".")) / f"timeline-{WORKER}.jsonl"
+    with path.open("a") as stream:
+        stream.write(json.dumps({"worker": WORKER} | record) + "\n")
+
+
+@contextlib.contextmanager
+def timed(kind: str) -> Iterator[None]:
+    """Record the enclosed span as `kind` in the test timeline."""
+    start = time.time()
+    try:
+        yield
+    finally:
+        timeline_record({"kind": kind, "start": start, "stop": time.time()})
+
 
 def scratch_database_name() -> str:
     """A unique test database, `proxy_test_<xdist worker>_<uuid hex>` (`main` without xdist)."""
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    return f"proxy_test_{worker}_{uuid.uuid4().hex}"
+    return f"proxy_test_{WORKER}_{uuid.uuid4().hex}"
+
+
+def scratch_database(admin: dict, *, template: str | None = None) -> str:
+    """Create a scratch database as `admin`, a copy of `template` when given; return its name.
+
+    A template copy is the same fresh database its template was, without rerunning its DDL.
+    """
+    name = scratch_database_name()
+    statement = sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name))
+    if template:
+        statement += sql.SQL(" TEMPLATE {}").format(sql.Identifier(template))
+    with timed("create_database"), psycopg.connect(**admin, autocommit=True) as conn:
+        conn.execute(statement)
+    return name
+
+
+def drop_databases(admin: dict, names: list[str]) -> None:
+    with psycopg.connect(**admin, autocommit=True) as conn:
+        for name in names:
+            conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
 @asynccontextmanager
