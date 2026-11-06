@@ -618,6 +618,7 @@ def series(rows, observations, spec: SeriesSpec):
     """
     start, end, outages, tested = spec.start, spec.end, spec.outages, spec.tested
     latency_target, minimum = spec.latency_target, spec.minimum
+    factors, excluded = spec.factors or {}, spec.excluded
     step = timedelta(minutes=5) if spec.hours == 24 else timedelta(days=1)
     buckets = defaultdict(list)
     seen = defaultdict(set)
@@ -635,6 +636,7 @@ def series(rows, observations, spec: SeriesSpec):
         m = metrics(buckets[t], step.total_seconds() / 3600)
         latency_rows = [r for r in buckets[t] if r["target"] == latency_target]
         timing = timed(latency_rows, step.total_seconds() / 3600, minimum) if latency_target else m
+        loaded = under_load(latency_rows, factors, minimum, excluded) if latency_target else None
         stop = min(t + step, end)
         countries = {r["country"] for r in tested if r["started_at"] < stop and r["last"] > t} | {
             o["country"] for o in outages if o["started_at"] < stop and (o["ended_at"] or end) > t
@@ -647,15 +649,7 @@ def series(rows, observations, spec: SeriesSpec):
                 "successes": m["successes"],
                 "success_rate": m["success_rate"],
                 "latency_ms": without_mean(timing["latency_ms"]),
-                **(
-                    {
-                        "latency_under_load_ms": without_mean(
-                            under_load(latency_rows, spec.factors or {}, minimum, spec.excluded)["ms"]
-                        )
-                    }
-                    if latency_target
-                    else {}
-                ),
+                **({"latency_under_load_ms": without_mean(loaded["ms"])} if loaded else {}),
                 "unique_ips": len(seen[t]) if buckets[t] else None,
                 "uptime": availability["value"],
             }
