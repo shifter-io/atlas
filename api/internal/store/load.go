@@ -457,18 +457,44 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 		}
 	}
 	in := &Inputs{}
+	l, err := in.loadHead(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	steps := in.catalogSteps(ctx, tx, l)
+	steps = append(steps, in.providerSteps(ctx, tx, l)...)
+	steps = append(steps, in.communitySteps(ctx, tx, l)...)
+	steps = append(steps, in.frameworkSteps(ctx, tx)...)
+	steps = append(steps,
+		func() error { return in.loadSnapshot(ctx, tx, lists) },
+		func() error { return in.loadEvents(ctx, tx) },
+	)
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return nil, err
+		}
+	}
+	return in, nil
+}
+
+// loadHead reads the site layout, the fingerprint and the read time, the
+// first reads of LoadLists.
+func (in *Inputs) loadHead(ctx context.Context, tx pgx.Tx) (SiteLayout, error) {
 	l, err := ReadSiteLayout(ctx, tx)
 	if err != nil {
-		return nil, fmt.Errorf("site layout: %w", err)
+		return l, fmt.Errorf("site layout: %w", err)
 	}
 	in.SiteGaps = siteGaps(l, siteReads)
 	if in.Fingerprint, err = readFingerprint(ctx, tx, l); err != nil {
-		return nil, fmt.Errorf("fingerprint: %w", err)
+		return l, fmt.Errorf("fingerprint: %w", err)
 	}
-	if err := tx.QueryRow(ctx, "SELECT now()").Scan(&in.ReadAt); err != nil {
-		return nil, err
-	}
-	steps := []func() error{
+	return l, tx.QueryRow(ctx, "SELECT now()").Scan(&in.ReadAt)
+}
+
+// catalogSteps reads the targets (site and framework), scopes, weights and
+// ranking profiles.
+func (in *Inputs) catalogSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []func() error {
+	return []func() error{
 		func() (err error) {
 			in.Targets, err = readSite(ctx, tx, l, readTargets, func(r pgx.Rows, v *TargetRow) error {
 				return r.Scan(&v.ID, &v.Label, &v.Category, &v.PassCondition, &v.Difficulty, &v.SortOrder)
@@ -498,6 +524,13 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 			})
 			return
 		},
+	}
+}
+
+// providerSteps reads the providers with their products, pricing, plans and
+// trust signals.
+func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []func() error {
+	return []func() error{
 		func() (err error) {
 			in.Providers, err = readSite(ctx, tx, l, readProviders, func(r pgx.Rows, v *ProviderRow) error {
 				return r.Scan(&v.Slug, &v.Name, &v.Tagline, &v.Kinds, &v.PrimaryKind, &v.MeasuredProduct, &v.HQ, &v.Founded, &v.Claim, &v.Verdict, &v.Strengths, &v.Weaknesses, &v.BestFor, &v.Website, &v.FrameworkProvider, &v.Listed)
@@ -528,6 +561,12 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 			})
 			return
 		},
+	}
+}
+
+// communitySteps reads the reviews, community runs, changelog and tape.
+func (in *Inputs) communitySteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []func() error {
+	return []func() error{
 		func() (err error) {
 			in.Reviews, err = readSite(ctx, tx, l, readReviews, func(r pgx.Rows, v *ReviewRow) error {
 				return r.Scan(&v.ID, &v.ProviderSlug, &v.Author, &v.Role, &v.Rating, &v.Title, &v.Body, &v.ProductKind, &v.UseCase, &v.Spend, &v.MonthsUsed, &v.Verification, &v.InvoiceMonth, &v.LinkedRunID, &v.HelpfulCount, &v.ProviderReply, &v.PostedAt)
@@ -552,6 +591,12 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 			})
 			return
 		},
+	}
+}
+
+// frameworkSteps reads the framework's providers and products.
+func (in *Inputs) frameworkSteps(ctx context.Context, tx pgx.Tx) []func() error {
+	return []func() error{
 		func() (err error) {
 			in.FrameworkProviders, err = collect(ctx, tx, `SELECT id FROM public.providers ORDER BY id`,
 				func(r pgx.Rows, v *string) error { return r.Scan(v) })
@@ -562,40 +607,36 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 				func(r pgx.Rows, v *FrameworkProduct) error { return r.Scan(&v.ID, &v.Provider, &v.Name) })
 			return
 		},
-		func() error {
-			var s SnapshotRow
-			var parts *int
-			var v4 bool
-			err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &parts, &v4)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			if parts != nil {
-				if err := s.readParts(ctx, tx, *parts); err != nil {
-					return err
-				}
-			}
-			in.Snapshot = &s
-			if afterSnapshot != nil {
-				afterSnapshot()
-			}
-			if v4 {
-				return s.readNetworks(ctx, tx, lists)
-			}
-			lists.dropNetworks()
-			return s.readLists(ctx, tx, lists)
-		},
-		func() error { return in.loadEvents(ctx, tx) },
 	}
-	for _, step := range steps {
-		if err := step(); err != nil {
-			return nil, err
+}
+
+// loadSnapshot reads the current snapshot row, if any, and its parts,
+// networks or typed lists.
+func (in *Inputs) loadSnapshot(ctx context.Context, tx pgx.Tx, lists *Lists) error {
+	var s SnapshotRow
+	var parts *int
+	var v4 bool
+	err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &parts, &v4)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if parts != nil {
+		if err := s.readParts(ctx, tx, *parts); err != nil {
+			return err
 		}
 	}
-	return in, nil
+	in.Snapshot = &s
+	if afterSnapshot != nil {
+		afterSnapshot()
+	}
+	if v4 {
+		return s.readNetworks(ctx, tx, lists)
+	}
+	lists.dropNetworks()
+	return s.readLists(ctx, tx, lists)
 }
 
 // hasBreakdowns reports whether the database keeps typed rows in
