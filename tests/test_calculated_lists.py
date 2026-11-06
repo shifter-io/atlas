@@ -346,6 +346,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("poolfig.py", "network.py", "network_scores.py")  # networks (NET-SUM-1, -2)
     hashed += ("scheduled.py",)  # the census/pulse inputs, split out of calculator.py (LIMITS-1)
     hashed += ("scores.py",)  # moved out of aggregate.py (LIMITS-6)
+    hashed += ("hourly_windows.py",)  # moved out of hourly.py (FILE-3)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)
