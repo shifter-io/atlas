@@ -8,7 +8,7 @@ import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from test_browser_contracts import try_fields
+from browser_contracts_cases import try_fields
 
 from proxy_index.browser import contracts as bc
 from proxy_index.browser import rawfiles

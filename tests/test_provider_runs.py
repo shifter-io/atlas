@@ -15,6 +15,7 @@ from proxy_index import JsonSink, RequestContext, RunConfig, RunOptions, run
 from proxy_index.targets import EchoIpTarget, TargetRegistry
 from proxy_index.transport import HttpTransport
 
+
 class LoopbackProvider:
     """Replace only the endpoint; production Shifter credentials still get resolved."""
 

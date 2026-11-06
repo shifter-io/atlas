@@ -19,6 +19,7 @@ from proxy_index.providers.grammar import grammar_ids, load_grammar
 from proxy_index.regions import load_countries
 from proxy_index.storage import ADAPTER
 
+
 def test_every_grammar_has_a_golden_case_config_and_registry_entry():
     assert set(GOLDEN) == set(grammar_ids()) == set(registry.all())
     for provider in grammar_ids():
@@ -80,6 +81,7 @@ def test_rotation_never_sends_a_session(provider):
         rendered = key.format.split("{}")[0]
         assert rendered not in f"{first.username} {first.password}"
 
+
 @pytest.mark.parametrize("provider", sorted(GOLDEN))
 def test_every_country_code_loads_even_when_it_equals_a_flag_key(provider):
     # Oxylabs' cc/st and DataImpulse's cr are also ISO codes (Cocos Islands, Sao Tome, Costa
@@ -101,6 +103,7 @@ def test_country_codes_equal_to_a_flag_key_render_in_the_country_slot():
     )
     with pytest.raises(ValueError, match="ambiguous flag delimiter"):  # Other kinds still refuse.
         proxy("oxylabs", parameters={"country": "us", "city": "st"})
+
 
 @pytest.mark.parametrize("provider", sorted(GOLDEN))
 def test_run_configs_load_with_private_credentials(provider, tmp_path):
@@ -132,6 +135,7 @@ def test_run_configs_load_with_private_credentials(provider, tmp_path):
             )
         else:
             load_provider(config, credentials_file=path, parameters=params)
+
 
 def test_requested_country_is_canonical_lowercase():
     for provider in ("massive", "oxylabs", "evomi", "infatica", "rayobyte", "proxy-cheap"):

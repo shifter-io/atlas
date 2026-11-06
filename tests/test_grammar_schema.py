@@ -8,6 +8,7 @@ from grammars_cases import ROOT
 
 from proxy_index.providers.grammar import Grammar, load_grammar
 
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -46,6 +47,7 @@ def test_served_countries_are_upper_case_iso_codes_of_a_country_flag(flag, count
     data["flags"][flag]["countries"] = countries
     with pytest.raises(ValueError, match="countries must be ISO codes"):
         Grammar.parse(data)
+
 
 def test_answer_classes_from_testing_table():
     from proxy_index.models import AnswerClasses

@@ -24,6 +24,7 @@ from proxy_index.targets import Assessment, BrowserTarget, PageSpec, PageView, r
 
 pytest_plugins = ["test_storage"]
 
+
 def test_browser_error_codes_are_errors():
     codes = typing.get_args(ErrorCode)
     for code in ("login_wall", "no_content", "no_answer", "browser_error"):
@@ -155,6 +156,7 @@ def test_outbox_paths_and_bundle_members(tmp_path):
         with pytest.raises(ValueError, match="i:"):
             members.screenshot(bad)
 
+
 @pytest.mark.parametrize(
     "status, body, confirmed",
     [
@@ -200,6 +202,7 @@ def test_ingest_names():
         "archived",
     )
     assert (c.REPLY_ARCHIVED_KEY, c.REPLY_ARCHIVED_SHA256) == ("key", "sha256")
+
 
 def test_user_agent():
     assert c.user_agent("135.0.1", "macos") == (

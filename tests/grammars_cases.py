@@ -8,8 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTEXT = RequestContext("run-one", 0, 0)
 SECRET = "private-password"
 
+
 def proxy(provider, account="fixture1", **kwargs):
     return GrammarProxy(provider, None if provider == "soax" else account, SECRET, **kwargs)
+
 
 # Formats verified against provider documentation and live probes (2026-10-22).
 GOLDEN = {

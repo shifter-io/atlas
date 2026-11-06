@@ -21,6 +21,7 @@ from proxy_index import (
 from proxy_index.cli import main
 from proxy_index.providers import load_grammar
 
+
 def test_all_flags_and_omissions():
     proxy = shifter(
         parameters={

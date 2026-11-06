@@ -5,25 +5,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from browser_contracts_cases import RUN_ID, SHA, SLOT
+from browser_contracts_cases import RUN_ID, SHA, SLOT, try_fields
 
 from proxy_index.browser import contracts as c
 from proxy_index.browser.settings import load_settings
-
-def try_fields(**changes):
-    return {
-        "i": 3,
-        "input": "0306406152",
-        "source": None,
-        "verdict": "ok",
-        "error": None,
-        "status": 200,
-        "final_url": "https://user:secret@www.example.invalid:8443/dp/0306406152?tag=x#reviews",
-        "timings_ms": {"queue": 1, "context": 40, "navigate": 900, "settle": 500, "total": 1441},
-        "bytes_down_est": 512_000,
-        "reason": "content",
-        "screenshot": None,
-    } | changes
 
 
 def test_try_record():

@@ -10,6 +10,7 @@ from grammars_cases import CONTEXT, ROOT, SECRET, proxy
 from proxy_index import GrammarProxy, RequestContext, RunConfig, load_provider
 from proxy_index.providers import NoCountryList
 
+
 def test_proxy_cheap_renders_the_dashboard_credential_shape():
     # The dashboard generator emits {password}_country-US_session-<8 digits>_ttl-<n>.
     rotating = proxy("proxy-cheap", parameters={"country": "us"})
@@ -118,6 +119,7 @@ def test_invalid_configuration_fails_before_traffic(provider, options):
         proxy(provider, **options)
     assert SECRET not in str(exc.value)
 
+
 def test_provider_specific_mechanics():
     webshare = proxy("webshare", parameters={"country": "us"})
     assert webshare.resolve(CONTEXT).username == "fixture1-us-rotate"
@@ -143,6 +145,7 @@ def test_provider_specific_mechanics():
     assert rotating.resolve(CONTEXT).username == "geonode_fixture1-type-residential"
     assert proxy("shifter", gateway="fra").resolve(CONTEXT).host == "fra.p.shifter.io"
     assert proxy("rayobyte", gateway="la").resolve(CONTEXT).host == "la.residential.rayobyte.com"
+
 
 def test_migrated_providers_keep_session_ids_ports_and_ttl_metadata():
     import hashlib
