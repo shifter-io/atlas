@@ -127,7 +127,7 @@ class Shot(ShotSteps):
             )
         except asyncio.CancelledError:
             self.result["error"] = "cancelled by a signal"
-        except Exception as error:
+        except Exception as error:  # boundary: the shot always reports; the cleanup still runs
             message = scope.SECRETS.sub("[removed]", str(error))
             self.result["error"] = f"{type(error).__name__}: {message}"[: scope.MESSAGE_LIMIT]
         finally:
@@ -239,7 +239,8 @@ class Shot(ShotSteps):
     async def adopted(self, names: list[str]) -> list[Droplet]:
         try:
             return await self.cloud.adopt_uncertain(names, self.tag)
-        except Exception:
+        except Exception as error:  # boundary: also the cleanup's last look, which must go on
+            self.result["adopt_error"] = type(error).__name__
             return []
 
     async def active(self) -> dict[str, Droplet]:
@@ -263,7 +264,7 @@ class Shot(ShotSteps):
         cell = self.result["cells"][cell_key(worker.network, worker.region)]
         try:
             await self.shoot(worker, droplet, cell)
-        except Exception as error:  # never a sibling's problem; a cancel still propagates
+        except Exception as error:  # boundary: never a sibling's problem; a cancel propagates
             worker.error_class = type(error).__name__
             cell["outcome"] = "failed" if worker.started_at else "setup_failed"
 
