@@ -15,11 +15,14 @@ from .aggregate import PLACE, census_overlaps
 EVENTS_IN_SNAPSHOT = 200
 # A geo row's group: product group, smallest window (hours), location, network and fallback.
 GEO_KEY = ("scope_id", "product_id", "hours", "location_id", "network_id", "fallback")
+# The country of a request without an exit location: the batch's, else the requested one.
+FALLBACK = (
+    "CASE WHEN l.country_code IS NULL THEN coalesce(b.country_code,upper(ps.requested_country)) END"
+)
 GEO_KEYS = (
     "CASE WHEN r.batch_id IS NULL THEN r.scope_id END AS scope_id,s.product_id,"
     "CASE WHEN g.bucket_start>=%(d1)s THEN 24 WHEN g.bucket_start>=%(d7)s THEN 168 "
-    "ELSE 720 END AS hours,g.location_id,g.network_id,CASE WHEN l.country_code IS NULL "
-    "THEN coalesce(b.country_code,upper(ps.requested_country)) END AS fallback"
+    f"ELSE 720 END AS hours,g.location_id,g.network_id,{FALLBACK} AS fallback"
 )
 GEO_SOURCE = (
     "FROM run_geo_buckets g JOIN test_runs r USING(run_key) "
@@ -46,7 +49,7 @@ RUN_TIMES = (
 )
 
 
-def scheduled_inputs(conn, as_of, timed_target="generic_http"):
+def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None):
     """The census/pulse history a v2 payload adds, read in the calculation's snapshot.
 
     geo: run_geo_buckets of the 30-day window summed per product group (scope_id for runs
@@ -62,6 +65,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
     while a census of the same product was running (census_overlaps()), from stored run start
     and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
     the breakdowns' (light-load) latency, which is the latency target's (timed_target) only.
+    geo, if given, replaces geo_rows() (same arguments and rows: rollups.geo_rows()).
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -72,7 +76,7 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http"):
         "margin": start - timedelta(days=1),
     }
     overlaps = overlap_runs(conn, bounds)
-    geo = geo_rows(conn, bounds, overlaps, timed_target)
+    geo = (geo or geo_rows)(conn, bounds, overlaps, timed_target)
     pulses = pulse_runs(conn, start, as_of)
     census = latest_census(conn, as_of)
     outages = window_outages(conn, start, as_of)
@@ -120,7 +124,11 @@ def geo_rows(conn, bounds, overlaps, timed_target):
         "GROUP BY 1,2,3,4,5,6 ORDER BY 1,2,3,4,5,6",
         bounds,
     ).fetchall()
-    histograms = geo_histograms(conn, bounds)
+    return labelled(conn, totals, geo_histograms(conn, bounds))
+
+
+def labelled(conn, totals, histograms):
+    """The geo rows of the totals (per GEO_KEY, in order) and histograms ({GEO_KEY: [[ms, n]]})."""
     locations, networks, names = geo_labels(conn, totals)
     geo = []
     for t in totals:
