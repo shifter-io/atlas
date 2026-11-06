@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"math/rand/v2"
 	"reflect"
 	"slices"
@@ -22,14 +23,16 @@ type fake struct {
 // and networks standing for place_names and asn_label_names.
 func fakeList(t testing.TB, places map[int32]Place, networks map[int32]Network, rows []fake) (*NetLists, *NetList) {
 	t.Helper()
-	n, l := NewNetLists(), &NetList{}
-	n.reset()
+	n, l := NewNetLists(nil), &NetList{}
 	for _, r := range rows {
 		s := &scannedRow{id: 1, code: r.code, place: r.place, network: r.network}
 		s.Ips, s.Completed, s.Successes, s.P50 = r.ips, r.completed, r.successes, r.p50
-		if err := n.add(l, s); err != nil {
+		c, err := n.compact(s)
+		if err != nil {
 			t.Fatal(err)
 		}
+		d := strings.IndexByte(netCodes, r.code)
+		l.rows[d], l.count[d] = append(l.rows[d], c), l.count[d]+1
 	}
 	for id, p := range n.places {
 		*p = places[id]
@@ -39,8 +42,18 @@ func fakeList(t testing.TB, places map[int32]Place, networks map[int32]Network, 
 	}
 	n.missing = nil
 	n.fillTexts([2]int{})
-	l.finish(n.names)
+	l.names = n.names
 	return n, l
+}
+
+// dim is l's rows of a dimension, failing t when they cannot be read.
+func dim(t testing.TB, l *NetList, dimension string) *NetRows {
+	t.Helper()
+	v, err := l.Rows(context.Background(), dimension)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
 
 func num(v int64) *int64 { return &v }
@@ -70,19 +83,19 @@ func TestNetListRowsAndOrder(t *testing.T) {
 	if l.Len("city_asn") != 4 || l.Len("asn") != 1 || l.Len("country") != 0 || l.Len("country_asn") != 0 || l.Len("nope") != 0 {
 		t.Fatalf("lengths %d %d %d", l.Len("city_asn"), l.Len("asn"), l.Len("country"))
 	}
-	r := l.Row("city_asn", 1)
+	r := dim(t, l, "city_asn").Row(1)
 	if *r.Place.City != "London" || *r.Network.Asn != 64496 || r.Ips != 9 || r.Completed != -1 || r.Successes != -1 || r.P50 != -1 {
 		t.Errorf("row 1 %+v", r)
 	}
-	if a := l.Row("asn", 0); a.Place != nil || *a.Network.Name != "Unknown" || a.Network.Asn != nil {
+	if a := dim(t, l, "asn").Row(0); a.Place != nil || *a.Network.Name != "Unknown" || a.Network.Asn != nil {
 		t.Errorf("ASN row %+v", a)
 	}
 	// Ties keep their stored position: 1 before 3, 0 before 2.
-	if got := l.ByIps("city_asn"); !slices.Equal(got, []int32{1, 3, 0, 2}) {
+	if got := dim(t, l, "city_asn").ByIps(); !slices.Equal(got, []int32{1, 3, 0, 2}) {
 		t.Errorf("most IPs first %v", got)
 	}
 	var none *NetList
-	if none.Len("city") != 0 || len(none.ByIps("city")) != 0 {
+	if none.Len("city") != 0 || len(dim(t, none, "city").ByIps()) != 0 {
 		t.Error("a nil list has rows")
 	}
 }
@@ -90,7 +103,7 @@ func TestNetListRowsAndOrder(t *testing.T) {
 // Rows naming the same place or ASN share one name entry.
 func TestNetListSharesNames(t *testing.T) {
 	n, l := fakeList(t, testPlaces, testNetworks, []fake{{'y', 2, 7, 1, 1, 1, 1}, {'g', 2, -1, 1, 1, 1, 1}, {'a', -1, 7, 1, 1, 1, 1}})
-	if len(n.names.places) != 1 || len(n.names.networks) != 1 || l.Row("city", 0).Place != l.Row("city_asn", 0).Place {
+	if len(n.names.places) != 1 || len(n.names.networks) != 1 || dim(t, l, "city").Row(0).Place != dim(t, l, "city_asn").Row(0).Place {
 		t.Errorf("names %d places, %d networks", len(n.names.places), len(n.names.networks))
 	}
 }
@@ -117,33 +130,32 @@ func TestNetListSearch(t *testing.T) {
 		{"paris", []int32{}},
 		{"", []int32{0, 1, 2, 3}},
 	} {
-		if got := l.Match("city_asn", c.q, nil); !slices.Equal(got, c.want) {
+		if got := dim(t, l, "city_asn").Match(c.q, nil); !slices.Equal(got, c.want) {
 			t.Errorf("%q: %v, want %v", c.q, got, c.want)
 		}
 	}
-	if got := l.Match("city_asn", "united", l.ByIps("city_asn")); !slices.Equal(got, []int32{1, 0, 3}) {
+	if got := dim(t, l, "city_asn").Match("united", dim(t, l, "city_asn").ByIps()); !slices.Equal(got, []int32{1, 0, 3}) {
 		t.Errorf("in IPs order %v", got)
 	}
 	want := NetTotals{Ips: 16, Countries: 2, Cities: 2, Asns: 2}
-	if got := l.Totals("city_asn", l.Match("city_asn", "united", nil)); got != want {
+	if got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", nil)); got != want {
 		t.Errorf("totals %+v, want %+v", got, want)
 	}
 }
 
 func TestNetListCounterRange(t *testing.T) {
-	n, l := NewNetLists(), &NetList{}
-	n.reset()
+	n := NewNetLists(nil)
 	s := &scannedRow{id: 5, code: 'c', place: -1, network: -1}
 	s.Ips, s.Completed = 1, null32-1
-	if err := n.add(l, s); err != nil {
+	c, err := n.compact(s)
+	if err != nil {
 		t.Fatal(err)
 	}
 	s.Completed = null32
-	if err := n.add(l, s); err == nil || !strings.Contains(err.Error(), "list 5: counter 4294967295") {
+	if _, err := n.compact(s); err == nil || !strings.Contains(err.Error(), "counter 4294967295 does not fit") {
 		t.Errorf("a counter past the row: %v", err)
 	}
-	l.finish(n.names)
-	if r := l.Row("country", 0); r.Completed != null32-1 {
+	if r := (&NetRows{rows: []netRow{c}}).Row(0); r.Completed != null32-1 {
 		t.Errorf("largest counter %d", r.Completed)
 	}
 }
@@ -191,7 +203,7 @@ func TestNetListSearchAndTotalsProperty(t *testing.T) {
 		brute := NetTotals{}
 		countries, cities, asns := map[string]bool{}, map[*Place]bool{}, map[int64]bool{}
 		for i := range l.Len("city_asn") {
-			r := l.Row("city_asn", i)
+			r := dim(t, l, "city_asn").Row(i)
 			text := strings.ToLower(strings.Join([]string{*r.Place.CountryCode, *r.Place.Country, deref(r.Place.Region), deref(r.Place.City), deref(r.Network.Name)}, " "))
 			if r.Network.Asn != nil {
 				text += " as" + strconv.FormatInt(*r.Network.Asn, 10)
@@ -210,9 +222,9 @@ func TestNetListSearchAndTotalsProperty(t *testing.T) {
 			}
 		}
 		brute.Countries, brute.Cities, brute.Asns = len(countries), len(cities), len(asns)
-		got := l.Match("city_asn", q, nil)
-		if !reflect.DeepEqual(got, append([]int32{}, want...)) || l.Totals("city_asn", got) != brute {
-			t.Fatalf("%q: %v %+v, want %v %+v", q, got, l.Totals("city_asn", got), want, brute)
+		got := dim(t, l, "city_asn").Match(q, nil)
+		if !reflect.DeepEqual(got, append([]int32{}, want...)) || dim(t, l, "city_asn").Totals(got) != brute {
+			t.Fatalf("%q: %v %+v, want %v %+v", q, got, dim(t, l, "city_asn").Totals(got), want, brute)
 		}
 	}
 }
@@ -241,15 +253,15 @@ func TestNetListReadersBesideALoad(t *testing.T) {
 	if cap(l.names.places) == len(l.names.places) {
 		t.Fatal("the fixture leaves no spare capacity: a later load would not share the tables")
 	}
-	want := l.Totals("city_asn", l.Match("city_asn", "united", nil))
+	want := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", nil))
 	var wg sync.WaitGroup
 	for range 4 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for range 200 {
-				got := l.Totals("city_asn", l.Match("city_asn", "united", l.ByIps("city_asn")))
-				if r := l.Row("city_asn", 1); got != want || *r.Place.City != "London" {
+				got := dim(t, l, "city_asn").Totals(dim(t, l, "city_asn").Match("united", dim(t, l, "city_asn").ByIps()))
+				if r := dim(t, l, "city_asn").Row(1); got != want || *r.Place.City != "London" {
 					t.Errorf("totals %+v, row %+v", got, r)
 					return
 				}
@@ -257,18 +269,45 @@ func TestNetListReadersBesideALoad(t *testing.T) {
 		}()
 	}
 	for i := range int32(200) {
-		n.mu.Lock()
-		from, fresh := [2]int{len(n.names.places), len(n.names.networks)}, &NetList{}
+		n.reading.Lock()
+		from := [2]int{len(n.names.places), len(n.names.networks)}
 		s := &scannedRow{id: 2, code: 'y', place: 100 + i, network: 100 + i}
 		s.Ips = 1
-		if err := n.add(fresh, s); err != nil {
+		if _, err := n.compact(s); err != nil {
 			t.Error(err)
 		}
 		*n.places[100+i] = Place{CountryCode: str("US"), Country: str("United States"), City: str("New")}
 		*n.networks[100+i] = Network{Asn: num(int64(i)), Name: str("New Net")}
 		n.fillTexts(from)
-		fresh.finish(n.names)
-		n.mu.Unlock()
+		n.reading.Unlock()
 	}
 	wg.Wait()
+}
+
+// The row cache keeps the rows asked for last within its limit, and never
+// rows larger than the limit.
+func TestRowCacheKeepsTheRecentRowsWithinItsLimit(t *testing.T) {
+	rows := func(n int) *NetRows { return &NetRows{rows: make([]netRow, n)} }
+	c := rowCache{limit: 10 * netRowBytes}
+	a, b, d := rows(4), rows(4), rows(4)
+	c.add(rowKey{1, 0}, a)
+	c.add(rowKey{2, 0}, b)
+	if c.get(rowKey{1, 0}) != a {
+		t.Fatal("list 1 was not cached")
+	}
+	c.add(rowKey{3, 0}, d) // 12 rows: list 2, the least recently used, goes
+	if c.get(rowKey{2, 0}) != nil || c.get(rowKey{1, 0}) != a || c.get(rowKey{3, 0}) != d || c.bytes != 8*netRowBytes {
+		t.Errorf("after a third list: %d bytes held", c.bytes)
+	}
+	c.add(rowKey{4, 0}, rows(11))
+	if c.get(rowKey{4, 0}) != nil || c.bytes != 8*netRowBytes {
+		t.Errorf("rows past the limit were cached: %d bytes held", c.bytes)
+	}
+	c.add(rowKey{1, 0}, rows(4))
+	if c.get(rowKey{1, 0}) != a {
+		t.Error("a second add replaced the cached rows")
+	}
+	if netRowBytes != 24 {
+		t.Errorf("a compact row takes %d bytes, want 24 (contract K11)", netRowBytes)
+	}
 }

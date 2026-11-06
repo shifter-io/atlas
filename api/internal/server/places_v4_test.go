@@ -1,8 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -15,7 +20,7 @@ import (
 // is served before the first build.
 func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 	h, res := smallV4(t)
-	cities, _ := res.Pages.List("", "net00/residential", "30d", "city", "", 1)
+	cities, _, _ := res.Pages.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
 	city := cities.Rows[0].Key
 	region := city[:strings.LastIndexByte(city, '|')]
 	for path, code := range map[string]int{
@@ -42,5 +47,20 @@ func TestPlacePagesAnswerAndRefuse(t *testing.T) {
 	}
 	if rec := get(New(&fakeSource{}, Options{}).Handler(), "/v1/places/city/"+url.PathEscape(city)); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("before the first build: %d", rec.Code)
+	}
+}
+
+// A page whose list rows cannot be read (the database is gone, or the list
+// was deleted) answers 500 and is logged, and nothing is kept for it.
+func TestAPageWhoseRowsCannotBeReadIs500(t *testing.T) {
+	var log bytes.Buffer
+	s := &Server{log: slog.New(slog.NewTextHandler(&log, nil))}
+	v := &Version{pages: NewLRU(4)}
+	rec := httptest.NewRecorder()
+	s.serveCut(rec, httptest.NewRequest(http.MethodGet, "/v1/networks/net00/places?page=2", nil), v, "key", func() (any, bool, error) {
+		return nil, false, errors.New("network list 7: closed pool")
+	})
+	if _, kept := v.pages.Get("key"); rec.Code != http.StatusInternalServerError || kept || !strings.Contains(log.String(), "network list 7: closed pool") {
+		t.Errorf("%d %s, kept %v, log %q", rec.Code, rec.Body, kept, log.String())
 	}
 }

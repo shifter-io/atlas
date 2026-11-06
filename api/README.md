@@ -150,8 +150,8 @@ summary per provider and proxy kind over all its product groups) is read from tw
 things only (`internal/store/network.go`): its head, through a SQL projection that
 leaves out the `parts` count, every `overlap` row and the per-cohort `fleet` rows (it
 keeps the every-group `*` entries), and the network lists its windows name (contract
-K10, `store.NetLists`, held between rebuilds like the group lists, which a v4 read
-drops). No product part and no group list is read. Each network is then given to the
+K10, `store.NetLists`: each list's row counts, held between rebuilds like the group
+lists, which a v4 read drops; the rows stay in the database). No product part and no group list is read. Each network is then given to the
 build as one product group (`cohort` `network`, `id` `<provider>:<kind>:network`),
 so every answer is made by the code that serves a v3 build: a network of one product
 group answers byte for byte as that group did, but for those two strings (and the
@@ -246,11 +246,19 @@ editorial ones.
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version (a new event starts a new one).
-- **Network lists** (contracts K10, K11; read for a payload v4 build). `store.NetLists`
-  holds each network window's whole list as 24-byte rows (IPs, completed, successes,
-  p50 and indexes into place and ASN names shared by every list), at most 40 MB per
-  million rows (`TestNetListsMemory`), reads only list ids it does not hold, and
-  answers most-IPs-first order, every-word search and totals from memory.
+- **Network lists** (contracts K10, K11; read for a payload v4 build; API-MEM-1).
+  `store.NetLists` holds only each network window's list id and row count per
+  dimension, reading the counts only of list ids it does not hold. A dimension's rows
+  are read from `calculated_list_rows` (by list id, in position order, in a read-only
+  transaction of their own) when the build, a page, a search or the dataset file
+  needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
+  and ASN names shared by every list; at most 40 MB per million rows,
+  `TestNetListsMemory`), and the rows read last stay in a 64 MB cache (least recently
+  used first out). Most-IPs-first order, every-word search and totals run over those
+  rows, so answers are as before. A list keeps its rows while its build is retained
+  (contract K2 deletes lists, never changes them), so a page of the build being served
+  during a rebuild reads its own rows; a read that finds fewer rows than the list had
+  at its load fails, and the page answers 500.
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
   published build's `created_at`, the site tables' newest `updated_at`,

@@ -263,7 +263,9 @@ func Build(in *store.Inputs) (*Result, error) {
 		}
 	}
 	b.details()
-	b.assemble()
+	if err := b.assemble(); err != nil {
+		return nil, err
+	}
 	return b.res, nil
 }
 
