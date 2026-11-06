@@ -4,29 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from collections import Counter
-from decimal import Decimal
 from itertools import accumulate
 from pathlib import Path
 
 import psycopg as psycopg  # re-exported: scripts catch storage.psycopg errors
 from psycopg.types.json import Jsonb
 
-from . import names, storage_ingest, storage_migrate
+from . import storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
-from .partitions import partition
+from .partitions import partition as partition
 from .stats import Histogram
+from .storage_ingest import ADAPTER as ADAPTER
+from .storage_ingest import _profile, column
 from .storage_migrate import MIGRATION_CHECKS as MIGRATION_CHECKS
 from .storage_migrate import V6_CHECKS as V6_CHECKS
 from .storage_read import ENRICHMENT_FIELDS as ENRICHMENT_FIELDS
 from .storage_read import GEO_COUNTERS as GEO_COUNTERS
-from .storage_read import LOCATION_FIELDS, NETWORK_FIELDS, _read_run, _steps
 from .storage_read import OUTCOME_KEYS as OUTCOME_KEYS
 from .storage_read import _bucket as _bucket
+from .storage_read import _read_run, _steps
 from .storage_read import connect as connect
 from .storage_read import read_summary as read_summary
-from .storage_read import status as status
+from .storage_seed import seed as seed
+from .storage_status import status as status
 
 SCHEMA_VERSION = 12
 # Only an unmodified v4 to v11 schema (these checksums) is migrated in place; migrate().
@@ -44,15 +45,6 @@ MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7,
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
-ADAPTER = {
-    "adapter": ("adapter", "text"),
-    "version": ("adapter_version", "text"),
-    "pool": ("account_pool", "text"),
-    "parameters": ("parameters", "json"),
-    "session_policy": ("session_policy", "text"),
-    "effective_ttl_seconds": ("ttl_seconds", "integer"),
-    "extra_flags": ("extra_flags", "json"),
-}
 
 
 def _schema():
@@ -76,63 +68,6 @@ def initialize(credentials_file):
             (SCHEMA_VERSION, checksum),
         )
     return {"schema_version": SCHEMA_VERSION}
-
-
-def column(kind, value):
-    """Return a column value that rebuilds exactly this JSON value, or raise TypeError."""
-    if kind == "json" or value is None:
-        return None if value is None else Jsonb(value)
-    if kind == "text" and type(value) is str:
-        return value
-    if kind == "integer" and type(value) is int and -(2**31) <= value < 2**31:
-        return value
-    # numeric keeps 15 and 15.0 apart; floats printed with a positive exponent would not survive.
-    if kind == "number" and type(value) in (int, float) and math.isfinite(value):
-        if type(value) is int or "e+" not in repr(value):
-            return value if type(value) is int else Decimal(repr(value))
-    raise TypeError(kind)
-
-
-def _take(source, key, kind, row, name):
-    try:
-        row[name] = column(kind, source[key])
-        del source[key]
-    except (KeyError, TypeError):
-        row[name] = None
-
-
-def _profile(definition, provider, product):
-    """Typed pool columns; anything they cannot reproduce stays verbatim in extra."""
-    target, config = dict(definition["target"]), dict(definition["config"])
-    row = {"target_id": target.pop("id")}
-    for key in ("url", "engine", "version"):
-        _take(target, key, "text", row, "target_" + key)
-    for key, value in (("provider", provider), ("product", product), ("target", row["target_id"])):
-        if key in config and config[key] == value:
-            del config[key]
-    for key in ("requested_country", "runner_location"):
-        _take(config, key, "text", row, key)
-    # NULL means absent here; an explicit null stays in extra.
-    row["proxy_protocol"] = (
-        config.pop("proxy_protocol") if type(config.get("proxy_protocol")) is str else None
-    )
-    adapter = config.get("provider_config")
-    typed = {}
-    try:
-        if set(adapter) != {*ADAPTER, "gateway"} or type(adapter["adapter"]) is not str:
-            raise TypeError
-        gateway = adapter["gateway"]
-        if set(gateway) != {"host", "port"}:
-            raise TypeError
-        typed["gateway_host"] = column("text", gateway["host"])
-        typed["gateway_port"] = column("integer", gateway["port"])
-        for key, (name, kind) in ADAPTER.items():
-            typed[name] = column(kind, adapter[key])
-        del config["provider_config"]
-    except (TypeError, AttributeError):
-        typed = dict.fromkeys(["gateway_host", "gateway_port", *(n for n, _ in ADAPTER.values())])
-    extra = {key: value for key, value in (("config", config), ("target", target)) if value}
-    return row | typed | {"extra": Jsonb(extra) if extra else None}
 
 
 def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
@@ -162,36 +97,6 @@ def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     metrics["latency_mean_ms"] = histogram.mean()
     metrics["success_rate"] = (
         metrics["successes"] / metrics["completed"] if metrics["completed"] else None
-    )
-
-
-def _store_geo(conn, run_key, rows):
-    """Resolve each location and network to its enrichment id and add the geo buckets."""
-    if not rows:
-        return
-    types = ",".join(
-        f"{field} {ENRICHMENT_FIELDS[field]}" for field in (*LOCATION_FIELDS, *NETWORK_FIELDS)
-    )
-    conn.execute(
-        f"CREATE TEMP TABLE incoming_geo_buckets (bucket timestamptz, {types}, "
-        "completed bigint, successes bigint, challenges bigint, blocks bigint, timeouts bigint, "
-        "bytes_up bigint, bytes_down bigint, histogram_steps integer[], "
-        "histogram_counts integer[]) ON COMMIT DROP"
-    )
-    with conn.cursor().copy("COPY incoming_geo_buckets FROM STDIN") as copy:
-        for row in rows:
-            copy.write_row(row)
-    for bucket in {row[0] for row in rows}:
-        partition(conn, "run_geo_buckets", bucket)
-    # The same lists as _enrich: the all-NULL rows are the unknown member.
-    joins = names.resolve(conn, "incoming_geo_buckets g", lambda field: f"g.{field}")
-    conn.execute(
-        "INSERT INTO run_geo_buckets(bucket_start,run_key,location_id,network_id,completed,"
-        "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
-        "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
-        "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
-        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + joins,
-        (run_key,),
     )
 
 
@@ -306,7 +211,7 @@ def _store_run(conn, run, performance, batch_id):
     scope_id, metrics, histogram_steps, histogram_counts = scope_row
     run_key = storage_ingest.insert_run(conn, run, scope_id, batch_id)
     storage_ingest.insert_buckets(conn, run, run_key)
-    _store_geo(conn, run_key, run.geo_rows)
+    storage_ingest.store_geo(conn, run_key, run.geo_rows)
     storage_ingest.check_stored(conn, run, run_key)
     new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
     storage_ingest.add_observations(conn, run_key, pool_id)
@@ -463,86 +368,4 @@ def migrate(credentials_file):
         "from_calculated_schema_version": layers[0][0] if layered else None,
         "migrated": True,
         "verified": verified,
-    }
-
-
-def _seed_regions(cursor, regions, times, reset_times):
-    """Upsert the runner regions and their countries; reset_times resets each census_time."""
-    cursor.executemany(
-        "INSERT INTO runner_regions(region_id,slug,cloud,pattern) VALUES (%s,%s,%s,%s) "
-        "ON CONFLICT(region_id) DO UPDATE SET slug=excluded.slug,cloud=excluded.cloud,"
-        "pattern=excluded.pattern",
-        [(r.region_id, r.slug, "digitalocean", r.pattern) for r in regions.regions],
-    )
-    cursor.executemany(
-        "INSERT INTO countries(country_code,name,region_id,census_time) "
-        "VALUES (%s,%s,%s,%s) ON CONFLICT(country_code) DO UPDATE SET "
-        "name=excluded.name,region_id=excluded.region_id,census_time=CASE WHEN %s "
-        "THEN excluded.census_time ELSE countries.census_time END",
-        [
-            (code, regions.names[code], region.region_id, times[code], reset_times)
-            for region in regions.regions
-            for code in region.countries
-        ],
-    )
-
-
-def _seed_targets(cursor, targets):
-    """Upsert the target definitions; a seeded target keeps the schedule operators left."""
-    definition = ("label", "url", "engine", "pass_condition", "timeout_ms", "sort_order")
-    schedule = (
-        "census",
-        "census_concurrency",
-        "pulse_enabled",
-        "pulse_interval_minutes",
-        "pulse_requests",
-        "pulse_concurrency",
-    )
-    columns = ("target_id", *definition, *schedule)
-    # Ingest-added targets have no label; their schedule comes from the seed once.
-    cursor.executemany(
-        "INSERT INTO targets("
-        + ",".join(columns)
-        + ") VALUES ("
-        + ",".join(["%s"] * len(columns))
-        + ") ON CONFLICT(target_id) DO UPDATE SET "
-        + ",".join(f"{c}=excluded.{c}" for c in definition)
-        + ","
-        + ",".join(
-            f"{c}=CASE WHEN targets.label IS NULL THEN excluded.{c} ELSE targets.{c} END"
-            for c in schedule
-        ),
-        [tuple(row[c] for c in columns) for row in targets],
-    )
-
-
-def seed(
-    credentials_file,
-    regions_path=None,
-    targets_path=None,
-    *,
-    countries_path=None,
-    reset_times=False,
-):
-    """Upsert runner_regions, countries and targets from configs/ (proxy-index db-seed).
-
-    Re-seeding moves countries between regions and refreshes names, patterns and target
-    definitions, but keeps each country's census_time and enabled flag and each target's schedule
-    as operators left them. reset_times puts every census_time back on the staggered default.
-    """
-    from .regions import load_regions, load_targets
-
-    regions = load_regions(regions_path, countries_path)
-    targets = load_targets(targets_path)
-    times = regions.census_times()
-    with connect(credentials_file) as conn:
-        _lock(conn, "seeding")
-        with conn.cursor() as cursor:
-            _seed_regions(cursor, regions, times, reset_times)
-            _seed_targets(cursor, targets)
-    return {
-        "regions": len(regions.regions),
-        "countries": len(times),
-        "targets": [row["target_id"] for row in targets],
-        "census_times_reset": reset_times,
     }
