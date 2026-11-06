@@ -155,7 +155,11 @@ BATCH_RUNS = (
     "AND b.scheduled_for>=%(start)s AND b.scheduled_for<%(end)s AND br.finished_at<%(end)s "
     "AND br.status='done') ORDER BY b.target_id,br.product_id,br.batch_id"
 )
-PULSE = ("target_id", "scheduled_for", "status", "requests", "successes", "run_key")
+PULSE = ("product_id", "batch_id", "target_id", "scheduled_for", "status", "requests", "successes")
+PULSE += ("run_key",)
+# A pulse or load run's census_overlaps() keys, and the rows a batch-run read fetches at a time.
+TESTED = ("product_id", "batch_id", "run_key", "started_at", "finished_at")
+STREAM = 20000
 
 
 def scheduled_inputs(conn, as_of, timed_target):
@@ -208,31 +212,40 @@ def refresh_buckets(conn, hours):
 
 
 def batch_inputs(conn, bounds):
-    """scheduled.batch_inputs() from one read of the batch runs (BATCH_RUNS): the census
+    """scheduled.batch_inputs() from one read of the batch runs (BATCH_RUNS), streamed: the census
     overlaps, the done pulse runs and the tested spans, each in the order its query returns."""
     start, end, margin = bounds["start"], bounds["end"], bounds["margin"]
-    census, tested, pulses, monitored = [], [], [], []
-    for r in conn.cursor(row_factory=dict_row).execute(BATCH_RUNS, bounds):
-        key = {"product_id": r["product_id"], "batch_id": r["batch_id"]}
-        last = min(r["finished_at"] or end, end)
-        started = r["started_at"] is not None and r["started_at"] < end and last >= margin
-        run = r["run_started"] or r["started_at"]
-        times = {"started_at": run, "finished_at": min(r["run_finished"] or last, end)}
-        if started and r["kind"] == "census":
-            census.append(key | times)
-        elif started and r["kind"] in ("pulse", "load"):
-            tested.append(key | {"run_key": r["run_key"]} | times)
-        if started and r["kind"] != "load" and last >= start:
-            monitored.append(
-                {"product_id": r["product_id"], "country": r["country_code"]}
-                | {"started_at": r["started_at"], "last": last}
-            )
-        if _slot(r, start, end):
-            pulses.append(key | {k: r[k] for k in PULSE} | {"country": r["country_code"].strip()})
+    census, candidates, pulses, monitored = [], [], [], []
+    with conn.cursor("batch_runs", row_factory=dict_row) as cur:
+        cur.itersize = STREAM
+        for r in cur.execute(BATCH_RUNS, bounds):
+            last = min(r["finished_at"] or end, end)
+            if r["started_at"] is not None and r["started_at"] < end and last >= margin:
+                _started(r, last, (start, end), (census, candidates, monitored))
+            if _slot(r, start, end):
+                pulses.append({k: r[k] for k in PULSE} | {"country": r["country_code"].strip()})
+    # Only a product with a census run has overlaps (census_overlaps()).
+    products = {c["product_id"] for c in census}
+    tested = [dict(zip(TESTED, t, strict=True)) for t in candidates if t[0] in products]
     census.sort(key=lambda c: (c["product_id"], c["batch_id"]))
     tested.sort(key=lambda t: (t["product_id"], t["batch_id"]))
     monitored.sort(key=lambda s: (s["product_id"], s["country"], s["started_at"]))
     return census_overlaps(census, tested), pulses, monitored
+
+
+def _started(r, last, window, into):
+    """File a started batch run (last: its end, clipped to the window's end) as a census run, a
+    pulse or load run that may overlap one (a TESTED tuple), and a tested span."""
+    (start, end), (census, candidates, monitored) = window, into
+    run = (r["run_started"] or r["started_at"], min(r["run_finished"] or last, end))
+    if r["kind"] == "census":
+        key = {"product_id": r["product_id"], "batch_id": r["batch_id"]}
+        census.append(key | {"started_at": run[0], "finished_at": run[1]})
+    elif r["kind"] in ("pulse", "load"):
+        candidates.append((r["product_id"], r["batch_id"], r["run_key"], *run))
+    if r["kind"] != "load" and last >= start:
+        span = {"started_at": r["started_at"], "last": last}
+        monitored.append({"product_id": r["product_id"], "country": r["country_code"]} | span)
 
 
 def _slot(r, start, end):
