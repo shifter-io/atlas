@@ -570,7 +570,7 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
             storage_ingest.insert_buckets(conn, run, run_key)
             _store_geo(conn, run_key, run.geo_rows)
             storage_ingest.check_stored(conn, run, run_key)
-            new_ips = add_addresses(conn, run.provider, product_id, scope_id)
+            new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
             storage_ingest.add_observations(conn, run_key, pool_id)
             lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
             histogram.merge(Histogram(Counter(dict(lifetime))))
@@ -592,7 +592,7 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
     }
 
 
-def add_addresses(conn, provider, product_id, scope_id):
+def _add_addresses(conn, provider, product_id, scope_id):
     """Add the new addresses and product memberships; return the IPs new to this scope."""
     conn.execute(
         "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips "
