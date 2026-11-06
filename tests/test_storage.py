@@ -8,7 +8,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from helpers import FakeTransport
+from helpers import FakeTransport, scratch_database_name
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
@@ -41,7 +41,7 @@ def databases(tmp_path):
     names = []
 
     def create():
-        name = "proxy_test_" + uuid.uuid4().hex
+        name = scratch_database_name()
         with psycopg.connect(**admin, autocommit=True) as conn:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
         names.append(name)

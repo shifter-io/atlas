@@ -4,12 +4,12 @@ import json
 import os
 import shlex
 import stat
-import uuid
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 import psycopg
 import pytest
+from helpers import scratch_database_name
 from psycopg import sql
 from test_census_pulse import scenario
 from test_orchestrator import prepare, query
@@ -329,7 +329,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
     admin = read_credentials(admin_file, "postgres")
     secrets = tmp_path / "secrets"
     secrets.mkdir(mode=0o700)
-    name = "proxy_test_" + uuid.uuid4().hex + "_staging"
+    name = scratch_database_name()
     # The "production" dbname is another scratch name; the app user is the test admin.
     private(secrets / "database.toml", toml(admin | {"dbname": "proxy_test_never_created"}))
     private(secrets / "postgres-admin.toml", toml(admin))

@@ -216,8 +216,6 @@ shared = [
     ".git-blame-ignore-revs",
     "scripts/ci/**",
     "scripts/postgres_local.py",
-    "scripts/remote-check.sh",
-    "scripts/test-remote.sh",
     "tests/helpers.py",
     "tests/test_ci_*.py",
     "credentials.toml.example",
