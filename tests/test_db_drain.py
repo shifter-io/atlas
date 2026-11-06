@@ -1,4 +1,5 @@
-"""Database.drain: waits for the batch-close hooks and never spins (no database needed)."""
+"""Database.drain and the batch-close hooks: waits, never spins, isolates failures (no database
+needed)."""
 
 import asyncio
 
@@ -66,3 +67,22 @@ async def test_drain_waits_for_slow_hooks_and_the_hooks_they_start(pool, spin_gu
     await pool.drain()
     assert seen == [("first", [1]), ("second", [2])]
     assert not pool._hooks
+
+
+async def test_a_failing_hook_is_logged_and_does_not_stop_the_others(pool, caplog):
+    seen = []
+
+    async def broken(batch_ids):
+        raise RuntimeError("report failed")
+
+    async def report(batch_ids):
+        seen.append(batch_ids)
+
+    pool.on_close["broken"] = broken
+    pool.on_close["report"] = report
+    pool._notify([3])
+    await pool.drain()
+    assert seen == [[3]] and not pool._hooks
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert record.getMessage() == "batch close hook broken failed for batches [3]"
+    assert record.exc_info[0] is RuntimeError

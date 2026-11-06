@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
         # Written for the user with public values only (errors.py).
         print(f"Command failed: {exc}", file=sys.stderr)
         return 2
-    except Exception as exc:
+    except Exception as exc:  # boundary: the CLI's last handler turns any error into exit 2
         # Libraries can put proxy URLs into exception messages; expose only types.
         print(
             f"Command failed ({type(exc).__name__}). Check configuration and file paths.",
