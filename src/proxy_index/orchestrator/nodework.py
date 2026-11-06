@@ -12,9 +12,6 @@ import psycopg
 
 from .batches import (
     OPEN_BATCHES,
-    _now,
-    _row,
-    _rows,
     _start,
     census_down,
     census_recovered,
@@ -24,6 +21,7 @@ from .batches import (
 )
 from .db import Database, setting
 from .events import emit, raise_alert
+from .sqlrows import _now, _row, _rows
 
 COUNTERS = (
     "requests",
