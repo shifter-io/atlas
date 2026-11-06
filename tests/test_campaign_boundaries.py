@@ -18,7 +18,7 @@ from campaign_hour_cases import make_spec as make_hour_spec
 from campaign_tick_cases import OURS, START, Clock, FakeRemote, make_root, make_spec, pacing
 
 from proxy_index.campaign import collector as collector_module
-from proxy_index.campaign import launch, tick
+from proxy_index.campaign import collector_reconcile, launch, tick
 from proxy_index.campaign.contracts import (
     DropletRecord,
     HourRecord,
@@ -115,11 +115,11 @@ async def test_a_failed_retire_of_any_type_is_recorded_and_retried(tmp_path, mon
     async def broken(*_args, **_kwargs):
         raise Unexpected(SECRET)
 
-    monkeypatch.setattr(collector_module, "guarded_delete", broken)
+    monkeypatch.setattr(collector_reconcile, "guarded_delete", broken)
     hours = tick.load_hours(root, make_spec())
     [drop] = hours[3].droplets
     collector = collector_module.Collector(root, None, None, None, clock, pacing(clock))
-    await collector._retire(collector_module.scope_for(make_spec()), hours[3], drop, hours)
+    await collector._retire(collector_reconcile.scope_for(make_spec()), hours[3], drop, hours)
     assert drop.status == "destroy_failed" and collector._retry(hours[3], drop)
     assert tick.load_hours(root, make_spec())[3].droplets[0].status == "destroy_failed"
     assert [a["key"] for a in alerts(root, "destroy_failed")] == ["1-Unexpected"]

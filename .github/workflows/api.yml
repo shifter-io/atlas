@@ -8,10 +8,9 @@
 # and privacy checks run for every change in ci.yml's tier1.
 #
 # One job on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with
-# all its work in parallel there (CI-SPEED-2): gofmt, go vet and, nightly and on
-# dispatches, go test -race without the database in the background, while the Go tests
-# run every package at once (-p = the CPU count) against a throwaway PostgreSQL 17
-# (the framework CI's pinned build, kept in the server cache) loaded with the
+# all its work in parallel there (CI-SPEED-2): gofmt and go vet in the background, while
+# the Go tests run every package at once (-p = the CPU count) against a throwaway
+# PostgreSQL 17 (the framework CI's pinned build, kept in the server cache) loaded with the
 # framework schema from the same checkout (src/proxy_index). The slowest test runs in
 # its own process beside them, so the rest of its package does not wait for it. When
 # all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
@@ -19,7 +18,11 @@
 # test run writes go test -json; then scripts/ci/timing.py writes the 20 slowest tests
 # and subtests and the test steps' time to the job summary and the api-timing artifact
 # (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
-# (CI-TIME-1). Go, the Go build cache and the module cache live under
+# (CI-TIME-1). Nightly and on dispatches only, after the tests (passed or not), go test
+# -race without the database runs in its own step (RACE-1; it reports its time, without
+# the per-test limit, as it gates no merge), then the Go dependency audit (GO-AUDIT-1):
+# govulncheck at a pinned version and a go mod tidy that must leave go.mod and go.sum
+# unchanged. Go, the Go build cache and the module cache live under
 # $CI_CACHE_DIR/<repository name>/, beside tier1's tools (both fill the same
 # PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A job-started hook on the servers refuses
 # every job except the owner's pull requests from this repository's own branches,
@@ -35,7 +38,7 @@ on:
   merge_group:
     types: [checks_requested]
   schedule:
-    # The race run (not a merge gate).
+    # The race run and the Go dependency audit (not merge gates).
     - cron: '30 1 * * *'
   workflow_dispatch:
 
@@ -49,8 +52,8 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: 1.27.1
-  GO_SHA256: 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+  GO_VERSION: 1.27.3
+  GO_SHA256: 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
   # The framework CI's PostgreSQL (theseus-rs/postgresql-binaries).
   PG_VERSION: 17.11.1
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
@@ -97,8 +100,8 @@ jobs:
             esac
           done <<< "$files"
           [ -n "$files" ] || code=true
-          # The nightly race run tests main whatever its last commit changed.
-          [ "$GITHUB_EVENT_NAME" != schedule ] || code=true
+          # The nightly run and a dispatch test whatever the last commit changed.
+          case "$GITHUB_EVENT_NAME" in schedule|workflow_dispatch) code=true ;; esac
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
       - name: Docs-only change
         if: steps.diff.outputs.code != 'true'
@@ -165,9 +168,6 @@ jobs:
       - name: Checks in the background, tests in parallel (database)
         id: tests
         if: steps.diff.outputs.code == 'true'
-        env:
-          # The race run, without the database: nightly and on dispatches, not a merge gate.
-          RACE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           EV=$RUNNER_TEMP/ev
           mkdir -p "$EV"
@@ -197,9 +197,6 @@ jobs:
           }
           background gofmt gofmt_check
           background vet go vet ./...
-          if [ "$RACE" = true ]; then
-            background race env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go test -count=1 -race ./...
-          fi
           background slow gotest slow -count=1 -run "$SLOW_TEST" ./internal/server/
           background tests gotest tests -count=1 -p "$(nproc)" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
           wait
@@ -250,6 +247,32 @@ jobs:
           path: ${{ runner.temp }}/ev/timing.json
           retention-days: 90
           if-no-files-found: ignore
+      - name: go test -race without the database (nightly and dispatches)
+        # After the timed test steps, so they measure only the normal tests; also
+        # after a failed one. Not a merge gate: its time is reported, without limits.
+        if: >-
+          !cancelled() && steps.diff.outputs.code == 'true' && steps.tests.outcome != 'skipped'
+          && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          log=$EV/race.log
+          start=$(date +%s)
+          status=0
+          env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go test -count=1 -race ./... > "$log" 2>&1 || status=$?
+          seconds=$(( $(date +%s) - start ))
+          echo "go test -race took $seconds s (exit $status)" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$status" -ne 0 ]; then cat "$log"; exit 1; fi
+          grep -E '^(ok|FAIL)' "$log"
+          # Never an empty pass: the server package's tests ran.
+          grep -qE '^ok\s+\S+/internal/server\s' "$log"
+      - name: Go dependency audit (nightly and dispatches)
+        # Also after a failed test step, so a failing night still reports the audit.
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        run: |
+          # Both run; either failing fails the step. v1.1.4 panics on Go 1.27 code.
+          rc=0
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... || rc=$?
+          go mod tidy && git diff --exit-code go.mod go.sum || rc=1
+          exit "$rc"
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''
         working-directory: .

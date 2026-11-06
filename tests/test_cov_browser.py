@@ -122,6 +122,23 @@ async def test_the_outbox_loop_survives_a_failed_pass_and_wakes_early(host, capl
     assert "outbox pass failed (RuntimeError)" in caplog.text
 
 
+async def test_the_outbox_loop_logs_only_the_type_and_lets_a_cancel_through(host, caplog):
+    """ERR-5: the loop is a boundary for any error type, never for a cancellation."""
+    host._wake = asyncio.Event()
+    host.outbox_interval = 0.01
+    failures = [LookupError("token=hunter2"), asyncio.CancelledError()]
+
+    async def flush():
+        raise failures.pop(0)
+
+    host.flush = flush
+    with caplog.at_level(logging.WARNING, logger=host_module.__name__):
+        with pytest.raises(asyncio.CancelledError):
+            await host._outbox_loop(asyncio.Event())
+    assert failures == []
+    assert "outbox pass failed (LookupError)" in caplog.text and "hunter2" not in caplog.text
+
+
 async def test_serve_runs_the_host_until_sigterm():
     class Host:
         stopped = False

@@ -34,6 +34,7 @@ from campaign_tick_cases import (
 )
 
 from proxy_index.campaign import collector as collector_module
+from proxy_index.campaign import collector_reconcile
 from proxy_index.campaign import tick as tick_module
 from proxy_index.campaign.contracts import (
     WORKER_TAG,
@@ -146,9 +147,9 @@ async def test_a_refused_or_failed_retire_is_recorded_and_alerted(tmp_path, monk
         async def broken(*_args, **_kwargs):
             raise ConnectionError("lost")
 
-        monkeypatch.setattr(collector_module, "guarded_delete", broken)
+        monkeypatch.setattr(collector_reconcile, "guarded_delete", broken)
         drop = worker("shifter", "nyc3", 3, droplet_id=second, status="destroyed")
-        await collector._retire(collector_module.scope_for(spec), hours[3], drop, hours)
+        await collector._retire(collector_reconcile.scope_for(spec), hours[3], drop, hours)
         assert drop.status == "destroy_failed"
     assert fake.deleted == []
     assert {a["code"] for a in read_alerts(root)} == {"destroy_refused", "destroy_failed"}

@@ -29,6 +29,8 @@ from proxy_index.storage import initialize
 pytest_plugins = ["test_storage"]
 
 PARENTS = {"ip_observations", "run_buckets", "run_geo_buckets", "test_events"}
+FUNCTIONS = {"artifact_time", "histogram", "histogram_bins", "run_bucket_counters"}
+FUNCTIONS |= {"stored_run_summary"}
 JAN, FEB = datetime(2026, 1, 15, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
 
 
@@ -109,6 +111,9 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
         in (gaps["partition_owner"]["statements"])
     )
     assert f"GRANT SELECT ON public.run_buckets TO {api};" in gaps["api_select"]["statements"]
+    # PostgreSQL's built-in default: PUBLIC runs every function, now and new ones.
+    assert report["functions"] == []
+    assert report["default_privileges_missing"]["FUNCTIONS"] == {"api": [], "runtime": []}
 
     # Before the fix: the run-time role can neither partition nor ANALYZE.
     with dbserver.connect(files[roles.runtime]) as conn:
@@ -138,6 +143,49 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     with dbserver.connect(files[roles.api]) as conn:
         assert conn.execute("SELECT count(*) FROM run_buckets").fetchone() == (0,)
         assert conn.execute("SELECT x FROM dbcheck_new").fetchall() == [(1,)]
+
+
+def test_check_reports_missing_function_rights_and_its_statements_close_them(server):
+    """The production state: EXECUTE revoked from PUBLIC on the functions and on new ones."""
+    roles, files = server.roles, server.files
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:
+        conn.execute("REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC")
+        conn.execute(
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC"
+            ).format(sql.Identifier(roles.admin))
+        )
+    report = check(files["superuser"], roles)
+    lacking = {f["name"]: f["missing"] for f in report["functions"]}
+    assert lacking == {f"public.{name}": [roles.runtime, roles.api] for name in FUNCTIONS}
+    kinds = [g["kind"] for g in report["gaps"]]
+    assert kinds.index("schema") < kinds.index("execute") < kinds.index("default_privileges")
+    gaps = {g["kind"]: g for g in report["gaps"]}
+    runtime, api = f'"{roles.runtime}"', f'"{roles.api}"'
+    histogram = "public.histogram(steps integer[], counts bigint[])"
+    execute = gaps["execute"]["statements"]
+    assert len(execute) == 5 and gaps["execute"]["run_as"] == "admin"
+    assert f"GRANT EXECUTE ON FUNCTION {histogram} TO {runtime}, {api};" in execute
+    defaults = f'ALTER DEFAULT PRIVILEGES FOR ROLE "{roles.admin}" IN SCHEMA "public" '
+    assert [s for s in gaps["default_privileges"]["statements"] if "FUNCTIONS" in s] == [
+        f"{defaults}GRANT EXECUTE ON FUNCTIONS TO {who};" for who in (api, runtime)
+    ]
+    with dbserver.connect(files[roles.runtime]) as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege, match="function histogram"):
+            conn.execute("SELECT * FROM histogram(ARRAY[1], ARRAY[1]::bigint[])")
+
+    apply(server, report["gaps"])
+    assert check(files["superuser"], roles)["gaps"] == []
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:
+        conn.execute("CREATE FUNCTION dbcheck_new() RETURNS integer LANGUAGE SQL AS 'SELECT 7'")
+    with dbserver.connect(files[roles.runtime]) as conn:
+        bins = conn.execute("SELECT ms, n FROM histogram(ARRAY[2, 3], ARRAY[5, 6]::bigint[])")
+        assert bins.fetchall() == [(2, 5), (5, 6)]
+        assert conn.execute("SELECT dbcheck_new()").fetchone() == (7,)
+    with dbserver.connect(files[roles.api]) as conn:
+        assert conn.execute("SELECT summary FROM test_run_details").fetchall() == []
+        assert conn.execute("SELECT metrics FROM scope_details").fetchall() == []
+        assert conn.execute("SELECT dbcheck_new()").fetchone() == (7,)
 
 
 def test_analyze_reports_a_lock_timeout_and_a_database_without_the_tables(server, databases):

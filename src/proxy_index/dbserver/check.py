@@ -7,9 +7,12 @@ not judged (the server's owner tunes it). Gaps are judged against `Roles`:
   partitions, so it needs CREATE on the schema and ownership of every partitioned table and of
   its partitions (CREATE TABLE ... PARTITION OF needs the parent's owner);
 - the API role reads every framework table and view;
-- the admin role runs migrations, so new tables get default privileges for both roles, it
-  keeps acting on the tables the run-time role owns through membership in that role, and it
-  needs CREATEDB for scratch databases.
+- both run every function in the schema (EXECUTE): calculations and ingest call them, and a
+  view's functions are checked against the role reading the view;
+- the admin role runs migrations, so new tables and functions get default privileges for both
+  roles (with no global entry for its functions, PostgreSQL's built-in default gives EXECUTE
+  to PUBLIC), it keeps acting on the tables the run-time role owns through membership in that
+  role, and it needs CREATEDB for scratch databases.
 
 Each gap carries its statements in the order they must run and who runs them: `admin` (the
 admin config) or `superuser` (role attributes and memberships the admin role cannot grant
@@ -112,15 +115,40 @@ SELECT pg_get_userbyid(d.defaclrole) AS creator, coalesce(n.nspname, '*') AS sch
        a.privilege_type AS privilege
 FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace
 CROSS JOIN LATERAL aclexplode(d.defaclacl) a ORDER BY 1, 2, 3, 4, 5"""
-# Privileges on the admin role's new tables that `grantee` would not get (directly or by role).
+# Functions of an extension are the extension's; their signatures are ready for the statements.
+FUNCTIONS = """
+SELECT quote_ident(n.nspname) || '.' || quote_ident(p.proname) AS name,
+       pg_get_function_identity_arguments(p.oid) AS arguments,
+       ARRAY(SELECT g FROM unnest(ARRAY[%(runtime)s, %(api)s]::text[]) g
+             WHERE NOT has_function_privilege(g::name, p.oid, 'EXECUTE')) AS missing
+FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = %(schema)s::name AND p.prokind = 'f' AND NOT EXISTS (
+  SELECT 1 FROM pg_depend e
+  WHERE e.classid = 'pg_proc'::regclass AND e.objid = p.oid AND e.deptype = 'e')
+ORDER BY p.proname, 2"""
+# Privileges on the admin role's new objects of `type` that `grantee` would not get (directly or
+# by role). A global entry replaces the built-in default (`acldefault`: PUBLIC runs functions);
+# a schema entry adds to whichever of the two applies.
 DEFAULTS_MISSING = """
+WITH admin AS (SELECT oid FROM pg_roles WHERE rolname = %(admin)s::name),
+acl AS (
+  SELECT coalesce((SELECT d.defaclacl FROM pg_default_acl d
+                   WHERE d.defaclrole = admin.oid AND d.defaclobjtype = %(type)s::"char"
+                     AND d.defaclnamespace = 0),
+                  acldefault(%(type)s::"char", admin.oid)) AS acl FROM admin
+  UNION ALL
+  SELECT d.defaclacl FROM pg_default_acl d JOIN admin ON d.defaclrole = admin.oid
+  WHERE d.defaclobjtype = %(type)s::"char"
+    AND d.defaclnamespace = (SELECT oid FROM pg_namespace WHERE nspname = %(schema)s::name))
 SELECT w AS privilege FROM unnest(%(privileges)s::text[]) w WHERE NOT EXISTS (
-  SELECT 1 FROM pg_default_acl d CROSS JOIN LATERAL aclexplode(d.defaclacl) a
-  WHERE d.defaclrole = (SELECT oid FROM pg_roles WHERE rolname = %(admin)s::name)
-    AND d.defaclobjtype = 'r' AND a.privilege_type = w
-    AND (d.defaclnamespace = 0
-         OR d.defaclnamespace = (SELECT oid FROM pg_namespace WHERE nspname = %(schema)s::name))
+  SELECT 1 FROM acl CROSS JOIN LATERAL aclexplode(acl.acl) a
+  WHERE a.privilege_type = w
     AND (a.grantee = 0 OR pg_has_role(%(grantee)s::name, a.grantee, 'USAGE')))"""
+# What each role needs on the admin role's new objects: (type in pg_default_acl, privileges).
+DEFAULTS_WANTED = {
+    "TABLES": ("r", {"api": ["SELECT"], "runtime": WRITE}),
+    "FUNCTIONS": ("f", {"api": ["EXECUTE"], "runtime": ["EXECUTE"]}),
+}
 
 
 def check(credentials_file, roles: Roles = DEFAULT_ROLES) -> dict:
@@ -157,19 +185,26 @@ def _collect(cur, roles: Roles) -> dict:
         "access": cur.execute(ACCESS, names).fetchone(),
         "partitioned": cur.execute(PARTITIONED, names).fetchall(),
         "objects": [r for r in cur.execute(OBJECTS, names).fetchall() if _lacks(r)],
+        "functions": [r for r in cur.execute(FUNCTIONS, names).fetchall() if r["missing"]],
         "default_privileges": cur.execute(DEFAULTS).fetchall(),
-        "default_privileges_missing": {
+        "default_privileges_missing": _defaults_missing(cur, names),
+    }
+
+
+def _defaults_missing(cur, names: dict) -> dict:
+    """Per kind of object (TABLES, FUNCTIONS) and role, what the admin role's new ones lack."""
+    return {
+        objects: {
             role: [
                 r["privilege"]
                 for r in cur.execute(
-                    DEFAULTS_MISSING, names | {"grantee": grantee, "privileges": privileges}
+                    DEFAULTS_MISSING,
+                    names | {"type": kind, "grantee": names[role], "privileges": privileges},
                 ).fetchall()
             ]
-            for role, grantee, privileges in (
-                ("api", roles.api, ["SELECT"]),
-                ("runtime", roles.runtime, WRITE),
-            )
-        },
+            for role, privileges in wanted.items()
+        }
+        for objects, (kind, wanted) in DEFAULTS_WANTED.items()
     }
 
 
@@ -183,7 +218,8 @@ def _gaps(conn, report: dict, roles: Roles) -> list[dict]:
     admin_role = {r["name"]: r for r in report["roles"]}[roles.admin]
     found = [
         *_role_gaps(report, admin_role, runtime, api, admin),
-        *_grant_gaps(report, runtime, api, admin),
+        *_grant_gaps(report, runtime, api),
+        *_default_gaps(report, runtime, api, admin),
         *_partition_gaps(report, admin_role["superuser"], runtime, admin),
     ]
     return [
@@ -216,7 +252,7 @@ def _role_gaps(report, admin_role, runtime, api, admin):
     )
 
 
-def _grant_gaps(report, runtime, api, admin):
+def _grant_gaps(report, runtime, api):
     objects = report["objects"]
     yield (
         "api_select",
@@ -240,15 +276,34 @@ def _grant_gaps(report, runtime, api, admin):
             if o["runtime_missing"]
         ],
     )
-    defaults = sql.SQL("ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} GRANT {} ON TABLES TO {}")
+    yield (
+        "execute",
+        "framework functions the run-time or API role cannot run",
+        "admin",
+        [
+            sql.SQL("GRANT EXECUTE ON FUNCTION {}({}) TO {}").format(
+                sql.SQL(f["name"]),
+                sql.SQL(f["arguments"]),
+                sql.SQL(", ").join(map(sql.Identifier, f["missing"])),
+            )
+            for f in report["functions"]
+        ],
+    )
+
+
+def _default_gaps(report, runtime, api, admin):
+    defaults = sql.SQL("ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA {} GRANT {} ON {} TO {}")
     grantees = {"api": api, "runtime": runtime}
     yield (
         "default_privileges",
-        "privileges the admin role's new tables would not give",
+        "privileges the admin role's new tables and functions would not give",
         "admin",
         [
-            defaults.format(admin, sql.Identifier(SCHEMA), _list(missing), grantees[role])
-            for role, missing in report["default_privileges_missing"].items()
+            defaults.format(
+                admin, sql.Identifier(SCHEMA), _list(missing), sql.SQL(objects), grantees[role]
+            )
+            for objects, by_role in report["default_privileges_missing"].items()
+            for role, missing in by_role.items()
             if missing
         ],
     )

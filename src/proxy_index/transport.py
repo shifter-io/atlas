@@ -21,7 +21,7 @@ from aiohttp_socks import (
 )
 
 from . import bytes_io
-from .bytes_io import ByteCount
+from .bytes_io import ByteCount, Exchange
 from .models import Outcome, ProxyConfig, RequestContext, RunConfig, protocol_of
 from .outcome import BODY_CODES, Verdict, failed_response, sniff_body
 from .targets import RequestSpec, Target
@@ -358,13 +358,15 @@ def _estimate(
         auth = aiohttp.encode_basic_auth(proxy.username, proxy.password)
         extra_up = len("Proxy-Authorization: ") + len(auth) + 2
     return bytes_io.estimate(
-        request_line=request_line,
-        request_headers=bytes_io.header_bytes(info.headers),
-        request_body=len(spec.body or b""),
-        response_headers=status_line + bytes_io.header_bytes(response.raw_headers),
-        response_body=body,
-        tls=tls,
-        connect=tls and proxy.scheme == "http",
-        extra_up=extra_up,
-        extra_down=extra_down,
+        Exchange(
+            request_line=request_line,
+            request_headers=bytes_io.header_bytes(info.headers),
+            request_body=len(spec.body or b""),
+            response_headers=status_line + bytes_io.header_bytes(response.raw_headers),
+            response_body=body,
+            tls=tls,
+            connect=tls and proxy.scheme == "http",
+            extra_up=extra_up,
+            extra_down=extra_down,
+        )
     )

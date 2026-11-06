@@ -54,6 +54,10 @@ IMPLEMENTATION_ID = hashlib.sha256(
 # A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
+# build()'s scheduled inputs (scheduled_inputs()) and the value of each one an Inputs lacks.
+SCHEDULED = dict.fromkeys(("pulse_minutes", "traffic")) | dict.fromkeys(
+    "overlaps references geo pulses census outages tested events".split(), ()
+)
 
 
 @dataclass(frozen=True)
@@ -142,19 +146,7 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
                 "VALUES (%s,%s,%s) RETURNING build_id",
                 (method_id, as_of, fingerprint),
             ).fetchone()["build_id"]
-            payload = build(
-                inputs.runs,
-                inputs.buckets,
-                inputs.source,
-                inputs.evidence,
-                config,
-                method_id,
-                as_of,
-                build_id,
-                inputs.release,
-                previous,
-                **inputs.scheduled,
-            )
+            payload = build(inputs, config, method_id, build_id, previous)
             payload = inputs.store(conn, build_id, payload, config)
         if publish:
             if previous and datetime.fromisoformat(previous["as_of"]) > as_of:
@@ -174,47 +166,30 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
         return payload
 
 
-def build(
-    runs,
-    buckets,
-    observations,
-    evidence_rows,
-    config,
-    method_id,
-    as_of,
-    build_id,
-    release,
-    previous,
-    *,
-    pulse_minutes=None,
-    overlaps=(),
-    references=(),
-    geo=(),
-    pulses=(),
-    census=(),
-    outages=(),
-    tested=(),
-    events=(),
-    traffic=None,
-):
-    """The payload of build build_id at as_of: the runs grouped by product and cohort
-    (_group_inputs()), each group's windows measured (product_windows.py) and scored with its
-    peers (_fleet_rows()), the previous payload's scores kept as each window's "old"."""
+def build(inputs, config, method_id, build_id, previous):
+    """The payload of build build_id at inputs.as_of (incremental.read()'s Inputs: its runs,
+    buckets, source, evidence, release and scheduled inputs, SCHEDULED where one is missing): the
+    runs grouped by product and cohort (_group_inputs()), each group's windows measured
+    (product_windows.py) and scored with its peers (_fleet_rows()), the previous payload's scores
+    kept as each window's "old"."""
+    runs, as_of, scheduled = inputs.runs, inputs.as_of, SCHEDULED | inputs.scheduled
+    pulse_minutes, overlaps = scheduled["pulse_minutes"], scheduled["overlaps"]
     slot_minutes = slot_length(pulse_minutes)
     flagged_batches = {(o["batch_id"], o["product_id"]): o["census"] for o in overlaps}
     minimum = slot_settings(config)["min_latency_successes"]
     # Every latency figure comes from this one target.
     timed_target = latency_target(config)
-    grouped = _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes)
+    grouped = _group_inputs(runs, inputs.buckets, scheduled["geo"], config, overlaps, pulse_minutes)
     groups, bucket_groups, scheduled_groups = grouped.groups, grouped.buckets, grouped.scheduled
     # What build() derives from IPs comes from its source (incremental.py): the observations, all
     # aggregated here (the full calculation), or the incremental calculation's.
-    source = observations
+    source = inputs.source
     if not isinstance(source, incremental.Full):
-        source = incremental.Full(observations)
+        source = incremental.Full(source)
     source.group(grouped.run_map)
-    pulse_groups, outage_groups = group_by_product(pulses), group_by_product(outages)
-    tested_groups, monitored_groups = tested_by_product(tested)
+    pulse_groups = group_by_product(scheduled["pulses"])
+    outage_groups = group_by_product(scheduled["outages"])
+    tested_groups, monitored_groups = tested_by_product(scheduled["tested"])
     sets = {}
     fleet_groups = defaultdict(list)
     step = _Build(
@@ -223,9 +198,9 @@ def build(
         method_id=method_id,
         as_of=as_of,
         build_id=build_id,
-        release=release,
-        events=events,
-        traffic=traffic,
+        release=inputs.release,
+        events=scheduled["events"],
+        traffic=scheduled["traffic"],
         minimum=minimum,
         slot_minutes=slot_minutes,
         timed_target=timed_target,
@@ -235,9 +210,9 @@ def build(
         by_product=(scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
         flagged_batches=flagged_batches,
         source=source,
-        evidence=evidence_rows,
-        references=references,
-        census_groups=group_by_product(census, drop_id=True),
+        evidence=inputs.evidence,
+        references=scheduled["references"],
+        census_groups=group_by_product(scheduled["census"], drop_id=True),
         geo_groups=grouped.geo,
         threshold=uptime_settings(config)["min_successes"],
         prev_products=previous_products(previous, as_of),

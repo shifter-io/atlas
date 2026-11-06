@@ -121,9 +121,19 @@ def assert_one_group(net, group):
             assert (
                 e["unique_ips"] == f["unique_ips"] and e["breakdown_scale"] == f["breakdown_scale"]
             )
-            assert e["series"] == [
-                {k: p[k] for k in ("start", "unique_ips", "requests")} for p in f["series"]
-            ]
+            hours = [{k: p[k] for k in ("start", "unique_ips", "requests")} for p in f["series"]]
+            assert e["series"] == (hours if label == "24h" else per_day(hours))
+
+
+def per_day(hours):
+    """JSON hourly estimate points summed per UTC day, as a 7d or 30d network window has them."""
+    days = {}
+    for point in hours:
+        at = datetime.fromisoformat(point["start"]).astimezone(UTC)
+        day = days.setdefault(at.replace(hour=0).isoformat(), {"unique_ips": 0, "requests": 0})
+        for key in day:
+            day[key] += point[key]
+    return [{"start": start} | days[start] for start in sorted(days)]
 
 
 def assert_three_groups(database, net, groups, seen):
@@ -334,6 +344,38 @@ def test_estimates_are_summed_per_hour():
         {"start": hour + HOUR, "unique_ips": 8, "requests": 10},
     ]
     assert network.estimates([block(1.0, [])], {"unique_ips": 0})["breakdown_scale"] is None
+
+
+def test_week_and_month_estimates_are_summed_per_utc_day():
+    """LISTS-SIZE-1: 48 released hours give two daily points in a 7d or 30d window, each the
+    sum of its UTC day's hours; the 24h window keeps one point per hour."""
+    day = datetime(2026, 11, 1, tzinfo=UTC)
+    points = [
+        {"start": day + timedelta(hours=h), "unique_ips": h, "requests": 2 * h} for h in range(48)
+    ]
+    block = {
+        "formula_versions": [2],
+        "hours": 48,
+        "unique_ips": {"value": 9.0, "estimated": True, "formula_version": 2, "method": "sum"},
+        "requests": {"value": 4.0, "estimated": True, "formula_version": 2},
+        "series": points,
+    }
+    week = network.estimates([block], {"unique_ips": 3}, daily=True)
+    assert week["series"] == [
+        {"start": day, "unique_ips": 276, "requests": 552},
+        {"start": day + timedelta(days=1), "unique_ips": 852, "requests": 1704},
+    ]
+    assert week["hours"] == 48 and week["formula_versions"] == [2]
+    assert week["unique_ips"] == {"value": 9.0, "estimated": True, "formula_version": 2} | {
+        "method": "sum"
+    }
+    assert week["requests"]["estimated"] and week["breakdown_scale"] == 3.0
+    hourly = network.estimates([block], {"unique_ips": 3})
+    keys = ("start", "unique_ips", "requests")
+    assert hourly["series"] == [{k: p[k] for k in keys} for p in points]
+    assert {k: v for k, v in hourly.items() if k != "series"} == {
+        k: v for k, v in week.items() if k != "series"
+    }
 
 
 # Not split per network or window (SPLIT-7): a network's head holds peer rows and scores of

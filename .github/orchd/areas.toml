@@ -54,6 +54,7 @@ campaign = [
     "tests/campaign_fakes.py",
     "tests/campaign_deploy_fakes.py",
     "tests/campaign_tick_cases.py",
+    "tests/campaign_hour_worker_cases.py",
     "tests/fixtures/campaign-data/**",
     "docs/campaign.html",
 ]
@@ -108,6 +109,8 @@ daily = [
     "tests/formula_cases.py",
     "tests/test_enrichment_cli.py",
     "tests/test_pulse.py",
+    "tests/test_pulse_latency.py",
+    "tests/pulse_cases.py",
     "scripts/migrate_enrichment.py",
 ]
 # the providers: the providers package (grammars), answer classes, each provider's config and
@@ -170,8 +173,6 @@ storage = [
     "scripts/migrate_database.py",
     "scripts/rebuild_database.py",
     "scripts/rebuild_verification.py",
-    "scripts/audit_storage.py",
-    "scripts/report_storage_*.py",
 ]
 # the measurement core: runner, transports, targets, outcomes, detection, statistics, sinks,
 # regions and reports, their configs, local run scripts and tests

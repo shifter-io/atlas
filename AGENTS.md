@@ -37,6 +37,47 @@ workstation.
 - API migrations are checksummed: never edit an applied migration, even a comment;
   add a new one.
 
+## Live tests without touching production
+
+A live test runs on temporary servers made for it and removed after it; production
+keeps running untouched. Details: "Deploy and operating guide" in
+`docs/campaign.html` (the staging manager is its `#staging` paragraph, teardown its
+section 6).
+
+- Test servers: Maestro's `maestro-run "<cmd>"` creates a disposable server, syncs the
+  checkout, runs the command and destroys the server. A server lives for one job:
+  chain every step (the PostgreSQL below, then the tests) in that one command.
+  `do_test_server.py` (Maestro's tools) is what it runs: `exec` is the same job with
+  more options (`--fetch`, `--timeout-minutes`), `destroy` removes a server left by
+  `--keep-on-fail`, and `list --project proxy-index` shows what is still up.
+- A staging manager: `proxy-index campaign manager deploy --environment staging
+  --inventory .secrets/campaign-manager-staging.json --mac-key
+  ~/.ssh/proxy-index-campaign-staging …`. Staging has its own inventory, its own Mac
+  key, and only `pi-camp-stg-` resources: the tags `pi-camp-stg-manager` and
+  `pi-camp-stg-worker`, the firewalls `pi-camp-stg-manager-fw` and
+  `pi-camp-stg-worker-fw`, and its dated keys. The worker image is production's and
+  only read: plan with production's `--images` inventory. Pass the staging
+  `--inventory` to every later `campaign` and `campaign manager` step.
+- A throwaway PostgreSQL on the test server, never the local one:
+  `python scripts/postgres_local.py init --bin-dir <pg bin> --port <free port>
+  --ephemeral` (as `ci.yml` does), then point `PG_TEST_ADMIN_FILE` at its
+  `.secrets/postgres-admin.toml`. It goes with the server.
+- Teardown: `proxy-index campaign manager teardown --inventory
+  .secrets/campaign-manager-staging.json [--after-collect <report> …]`. Add
+  `--keep-worker-assets` only to replace the staging manager between runs: it removes
+  the manager and its firewall and keeps `pi-camp-stg-worker-fw` and the staging keys,
+  which only the next full teardown removes. End with a full teardown, then check that
+  nothing is left: its proof counts all 0 for every `pi-camp-stg-` tag and the
+  campaigns' tags, `unassigned_managers` is empty, and `do_test_server.py list
+  --project proxy-index` shows none of your servers. A failed removal is rerun, never
+  done by hand.
+- Never touch production: its inventory (`.secrets/campaign-manager.json`) and its
+  manager (`pi-camp-manager-…`), the worker images and `.secrets/campaign-images.json`
+  beyond reading them, its database (the local cluster under `.state/postgres` and
+  `.secrets/database.toml`), and its firewalls (`pi-camp-manager-fw`,
+  `pi-camp-worker-fw`). Every `campaign manager` step of a test names the staging
+  `--inventory`, and its `deploy` also `--environment staging`.
+
 ## How a change reaches main
 
 Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
