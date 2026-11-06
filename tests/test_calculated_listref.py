@@ -6,7 +6,7 @@ the two are byte-identical after removing the build's ids, clock and implementat
 schema version. The fixtures are the seeded random observations of test_sqlwindow (three DB-IP
 releases, unenriched IPs, runs split by window edges, two runs in one slice, an IP in two
 countries, empty-string and NULL labels), the census-pulse scenario (scheduled groups), the
-browser scenario of test_calculated_browser (browser batches), and a late run with an empty
+browser scenario of calculated_browser_cases (browser batches), and a late run with an empty
 window.
 """
 
@@ -16,10 +16,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from calculated_browser_cases import add_browser_runs, ai_sources, generic  # noqa: F401 (fixture)
 from calculated_cases import POLICY, lenient_policy, payload_mismatches, spread
 from census_pulse_cases import outage
 from census_pulse_cases import scenario as census_scenario
-from test_calculated_browser import add_browser_runs, ai_sources, generic  # noqa: F401 (fixture)
 from test_calculated_slim import TINY
 from test_sqlwindow import scenario  # noqa: F401 (fixture)
 

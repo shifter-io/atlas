@@ -28,6 +28,9 @@ from pathlib import Path
 import helpers
 import pytest
 
+# Shared test modules whose assertions report like the tests' own (pytest's introspection).
+pytest.register_assert_rewrite("admin_cases", "calculated_browser_cases")
+
 DURATIONS = Path(__file__).with_name("durations.json")
 # The estimate for a test missing from DURATIONS.
 FAST = 0.1
