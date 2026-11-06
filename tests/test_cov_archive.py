@@ -6,8 +6,9 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from archive_job_cases import census_day, fake_bucket
 from test_archive import DAY, SLOT, day_of_data, empty_database
-from test_archive_job import LATER, census_day, fake_bucket
+from test_archive_job import LATER
 
 from proxy_index.archive import ArchiveError, job
 from proxy_index.archive.export import export_day

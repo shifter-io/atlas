@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 
 import dbip_fakes
 import pytest
+from archive_job_cases import shift
 from calculated_cases import POLICY, OtherIP
-from test_archive_job import shift
 from test_storage import enrichment, measurement
 
 from proxy_index.calculated.calculator import calculate

@@ -10,84 +10,21 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from campaign_deploy_fakes import (
-    CID,
-    IMAGE,
-    NOW,
-    PLAN_CREDENTIALS,
-    ROOT,
-    WORKER_PUBLIC,
-    other_team,
-    parse,
-)
-from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, running
+from campaign_deploy_fakes import CID, IMAGE, ROOT, other_team, parse
+from campaign_fakes import CAMPAIGN_PROJECT
+from campaign_plan_cases import run_plan, with_geonode
 
 from proxy_index.campaign import cli as campaign_cli
 from proxy_index.campaign import deploy, planspec
 from proxy_index.campaign.contracts import CampaignSpec, spec_path
-from proxy_index.campaign.planspec import PlanError, PlanInputs
+from proxy_index.campaign.planspec import PlanError
 from proxy_index.models import RequestContext
 from proxy_index.onboarding import manifest
 from proxy_index.onboarding.files import digest
 from proxy_index.providers import load_provider
 from proxy_index.regions import REGION_IDS
 
-
-@pytest.fixture
-def plan_world(tmp_path):
-    credentials = tmp_path / "credentials.toml"
-    credentials.write_text(deploy.toml_table("shifter", PLAN_CREDENTIALS).decode())
-    credentials.chmod(0o600)
-    manager_inventory = tmp_path / "campaign-manager.json"
-    manager_inventory.write_text(
-        json.dumps(
-            {
-                "manager_id": "500001",
-                "wheel_sha256": "ab" * 32,
-                "framework_version": "0.9.5",
-                "worker_key_name": "pi-camp-worker-20270101",
-                "account": "leftclick",
-                "project_id": CAMPAIGN_PROJECT,
-                "credentials": ["shifter"],
-            }
-        )
-    )
-    images = tmp_path / "campaign-images.json"
-    images.write_text(
-        json.dumps(
-            {
-                "builds": [
-                    {
-                        "snapshot_id": "9001",
-                        "snapshot_name": IMAGE,
-                        "mmdb_file": "dbip-full.mmdb",
-                        "mmdb_sha256": "cd" * 32,
-                    }
-                ]
-            }
-        )
-    )
-    fake = FakeDigitalOcean()
-    fake.sizes = [{"slug": "c-2", "available": True, "regions": list(REGION_IDS)}]
-    fake.images["9001"] = {"id": 9001, "name": IMAGE, "regions": list(REGION_IDS)}
-    fake.add_resource("ssh_key", 77, name="pi-camp-worker-20270101", public_key=WORKER_PUBLIC)
-    inputs = PlanInputs(
-        "leftclick",
-        "2027-01-01T23:00:00+00:00",
-        ("shifter",),
-        IMAGE,
-        tmp_path / "plans",
-        credentials,
-        manager_inventory,
-        images,
-        configs=ROOT / "configs",
-    )
-    return fake, inputs
-
-
-async def run_plan(fake, inputs):
-    async with running(fake) as cloud:
-        return await planspec.plan(cloud, inputs, now=NOW)
+pytest_plugins = ["campaign_plan_cases"]
 
 
 def test_plan_writes_v3_manifests_and_a_valid_spec(plan_world):
@@ -113,17 +50,6 @@ def test_plan_writes_v3_manifests_and_a_valid_spec(plan_world):
     ).read_bytes()
     assert "acct_9" not in "".join(p.read_text() for p in root.rglob("*") if p.is_file())
     assert not [m for m, *_ in fake.requests if m != "GET"]
-
-
-def with_geonode(inputs):
-    """The plan world with Geonode's credentials beside Shifter's, planned together."""
-    from dataclasses import replace
-
-    with inputs.credentials.open("a") as stream:
-        stream.write(deploy.toml_table("geonode", {"account": "acct_9", "password": "p"}).decode())
-    data = json.loads(inputs.inventory.read_text())
-    inputs.inventory.write_text(json.dumps(data | {"credentials": ["shifter", "geonode"]}))
-    return replace(inputs, networks=("shifter", "geonode"))
 
 
 def test_plan_binds_the_non_strict_census_config(plan_world):
