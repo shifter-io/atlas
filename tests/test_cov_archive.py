@@ -15,6 +15,7 @@ from proxy_index.archive.export import export_day
 from proxy_index.archive.purge import purge_day
 from proxy_index.archive.restore import restore_file
 from proxy_index.archive.spaces import Spaces, manager_settings
+from proxy_index.calculated import store
 from proxy_index.partitions import children, partition
 from proxy_index.storage import connect
 
@@ -97,6 +98,7 @@ async def test_a_partition_with_another_runs_rows_stays_and_empty_ones_go(databa
 async def test_a_table_the_target_lacks_is_skipped_when_the_file_has_no_rows_for_it(
     database, databases, tmp_path
 ):
+    store.initialize(database)
     await day_of_data(database, tmp_path)
     # The day before DAY holds only the batch DAY's batch retries: no run, no calculation role.
     path, manifest = export_day(database, DAY - timedelta(days=1), tmp_path / "out")

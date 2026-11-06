@@ -23,7 +23,7 @@ from proxy_index.orchestrator.db import Database
 from proxy_index.partitions import children, partition
 from proxy_index.storage import SCHEMA_VERSION, connect, ingest, initialize, seed
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
 
 DAY = date(2026, 10, 1)
 SLOT = datetime(2026, 10, 1, 10, tzinfo=UTC)
@@ -58,11 +58,17 @@ def event(conn, at, batch_id):
     )
 
 
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
+
+
 async def day_of_data(database, tmp_path):
     """A census batch on DAY with its run (geo, enrichment, node, estimate, role, tape), a batch
-    of the day before that it retries, and a daily-test run of today (not part of DAY)."""
+    of the day before that it retries, and a daily-test run of today (not part of DAY).
+    `database` has the calculated schema (calculated_database, or store.initialize)."""
     seed(database)
-    store.initialize(database)
     with connect(database) as conn:
         before = batch(conn, SLOT - timedelta(days=1))
         own = batch(conn, SLOT, retry_of=before)
@@ -98,6 +104,8 @@ async def day_of_data(database, tmp_path):
 
 
 def empty_database(databases, *, calculated=True):
+    """An empty database of the current schemas, initialised here (for the modules that import
+    it); the tests in this module copy the templates instead."""
     target = databases()
     initialize(target)
     if calculated:
@@ -136,7 +144,7 @@ def rewrite(path, change):
 
 
 async def test_a_day_exports_deterministically_and_restores_into_an_empty_database(
-    database, databases, tmp_path
+    database, databases, calculated_template, tmp_path
 ):
     key = await day_of_data(database, tmp_path)
     path, manifest = export_day(database, DAY, tmp_path / "out")
@@ -160,7 +168,7 @@ async def test_a_day_exports_deterministically_and_restores_into_an_empty_databa
     assert first["bytes"] == path.stat().st_size
     assert file_digests(export_day(database, DAY, tmp_path / "again")[0]) == first
 
-    target = empty_database(databases)
+    target = databases(template=calculated_template)
     report = restore_file(path, target)
     assert report["day"] == "2026-10-01"
     assert {name: report["inserted"][name] for name in FACTS} == {
@@ -197,7 +205,9 @@ async def test_a_day_exports_deterministically_and_restores_into_an_empty_databa
     assert fact_rows(database, key) == source
 
 
-async def test_restore_refuses_files_and_databases_that_do_not_fit(database, databases, tmp_path):
+async def test_restore_refuses_files_and_databases_that_do_not_fit(
+    database, databases, database_template, calculated_template, tmp_path
+):
     await day_of_data(database, tmp_path)
     path, _ = export_day(database, DAY, tmp_path / "out")
     original = path.read_bytes()
@@ -207,12 +217,12 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(database, dat
             restore_file(file, target)
 
     refused(databases(), "no proxy-index schema")
-    refused(empty_database(databases, calculated=False), "no table calculation_roles")
-    stale = empty_database(databases)
+    refused(databases(template=database_template), "no table calculation_roles")
+    stale = databases(template=calculated_template)
     with connect(stale) as conn:
         conn.execute("UPDATE schema_versions SET version=%s", (SCHEMA_VERSION - 1,))
     refused(stale, f"storage schema v{SCHEMA_VERSION}, the database v{SCHEMA_VERSION - 1}")
-    other = empty_database(databases)
+    other = databases(template=calculated_template)
     with connect(other) as conn:
         conn.execute("INSERT INTO providers VALUES ('other')")
         conn.execute("INSERT INTO products(provider,name) VALUES ('other','first')")
@@ -220,7 +230,7 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(database, dat
     with connect(other) as conn:
         assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 0
 
-    target = empty_database(databases)
+    target = databases(template=calculated_template)
     rewrite(
         path, lambda f: f | {"test_runs.csv": f["test_runs.csv"].replace(b"completed", b"failed")}
     )
@@ -257,7 +267,9 @@ async def test_restore_refuses_files_and_databases_that_do_not_fit(database, dat
         assert conn.execute("SELECT count(*) FROM providers").fetchone()[0] == 0
 
 
-async def test_archive_cli_exports_and_restores(database, databases, tmp_path, capsys):
+async def test_archive_cli_exports_and_restores(
+    database, databases, calculated_template, tmp_path, capsys
+):
     await day_of_data(database, tmp_path)
     out = tmp_path / "out"
     assert (
@@ -278,7 +290,7 @@ async def test_archive_cli_exports_and_restores(database, databases, tmp_path, c
     printed = json.loads(capsys.readouterr().out)
     assert printed["file"] == str(out / "2026-10-01.tar.gz")
     assert printed["rows"]["test_runs"] == 1 and len(printed["sha256"]) == 64
-    target = empty_database(databases)
+    target = databases(template=calculated_template)
     args = ["archive", "restore", "--file", printed["file"], "--database-file", str(target)]
     assert main(args) == 0
     assert json.loads(capsys.readouterr().out)["inserted"]["test_runs"] == 1

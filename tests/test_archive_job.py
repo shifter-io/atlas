@@ -18,6 +18,7 @@ from proxy_index.archive.export import export_day
 from proxy_index.archive.job import facts_digest, object_key, run_due, store
 from proxy_index.archive.purge import purge_day
 from proxy_index.archive.spaces import Spaces, manager_settings, sign
+from proxy_index.calculated import store as calculated
 from proxy_index.cli import main
 from proxy_index.orchestrator.db import Database, put_setting
 from proxy_index.orchestrator.jobs import archive, retention
@@ -250,6 +251,7 @@ async def test_purge_refuses_a_day_that_is_not_due_or_changed(database, tmp_path
 
 
 async def test_the_orchestrator_job_and_the_cli(database, tmp_path, capsys):
+    calculated.initialize(database)
     await day_of_data(database, tmp_path)
     db = Database(database)
     try:
