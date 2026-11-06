@@ -309,8 +309,9 @@ async def test_a_shown_droplet_is_read_once_and_a_lagging_one_until_shown():
         assert await scope._fresh_owned(claim, lagging.id, more) == ["exists"]
 
 
-async def test_an_unassigned_builder_is_removed_as_a_builder(tmp_path):
+async def test_an_unassigned_builder_is_removed_as_a_builder(tmp_path, monkeypatch):
     fake, name = FakeDigitalOcean(), "pi-camp-builder-20270101-cd34"
+    monkeypatch.setattr(scope, "utcnow", lambda: datetime.fromisoformat(CREATE_TIME))  # fresh
     async with running(fake) as cloud:
         [builder] = await cloud.create(
             [name], region="lon1", size="c-2", image="1", tags=[BUILDER_TAG], ssh_keys=["9"]
