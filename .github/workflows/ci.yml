@@ -10,8 +10,8 @@
 # and the Go tests run in the background beside pytest, each Go database test in its
 # own scratch database in the same PostgreSQL, and the latency test
 # (TestServeFromDatabase, p99 within 2 ms) runs alone once everything else has
-# finished; `go test -race` without the database runs on every event but pull
-# requests. Pinned tools (uv, CPython, PostgreSQL, Go), the uv and Go caches and the
+# finished; `go test -race` without the database runs on pushes to main only.
+# Pinned tools (uv, CPython, PostgreSQL, Go), the uv and Go caches and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
 # run. A job-started hook on the servers refuses every job except the owner's pull
 # requests from this repository's own branches, pushes to main and owner dispatches.
@@ -51,7 +51,8 @@ env:
   GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
   GO_VERSION: 1.27.1
   GO_SHA256: 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
-  # The API's slowest test, run alone in the background beside the rest.
+  # The API's slowest test (over 60 s alone), run in its own process beside the rest;
+  # pull requests skip it, as they skip pytest's `slow` tests.
   SLOW_TEST: ^TestEveryAnswerIsTheSameFromParts$
   # The API's latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
@@ -212,12 +213,18 @@ jobs:
           # Pull requests skip the tests marked slow.
           SKIP: ${{ github.event_name == 'pull_request' && 'not slow and ' || '' }}
         run: |
-          # Each background check writes $EV/<name>.log and $EV/<name>.rc; after the tests,
-          # every check with a non-zero status prints its log and fails the step.
+          # Each background check writes $EV/<name>.log and $EV/<name>.rc and prints when it
+          # finished; after the tests, every check with a non-zero status prints its log
+          # and fails the step.
           background() {
             local name=$1
             shift
-            ( rc=0; "$@" > "$EV/$name.log" 2>&1 || rc=$?; echo "$rc" > "$EV/$name.rc" ) &
+            (
+              rc=0
+              "$@" > "$EV/$name.log" 2>&1 || rc=$?
+              echo "$rc" > "$EV/$name.rc"
+              echo "$name: exit $rc, ${SECONDS}s into the step"
+            ) &
           }
           complexity() {
             git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
@@ -254,8 +261,8 @@ jobs:
             background gofmt gofmt_check
             background go-vet go -C api vet ./...
             background go-test go -C api test -count=1 "${packages[@]}" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
-            background go-slow go_slow
-            if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            [ -n "$SKIP" ] || background go-slow go_slow
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
               background go-race env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go -C api test -count=1 -race ./...
             fi
           fi
@@ -289,7 +296,7 @@ jobs:
           done
           [ "$tests" -eq 0 ] || { echo "pytest failed (exit $tests)"; failed=1; }
           [ "$serial" -eq 0 ] || { echo "the serial set failed (exit $serial)"; failed=1; }
-          if [ "$API" = true ]; then
+          if [ -f "$EV/go-slow.log" ]; then
             grep -E '^(--- |ok)' "$EV/go-slow.log" || true
           fi
           [ "$CODE" = true ] || exit "$failed"

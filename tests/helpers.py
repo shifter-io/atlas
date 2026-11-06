@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-
 # How GitHub Actions runs a `shell: bash` step.
 BASH = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
 CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
