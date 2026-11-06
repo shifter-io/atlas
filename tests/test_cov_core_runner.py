@@ -1,6 +1,6 @@
 """runner.py, sinks.py, stats.py and node_tls.py paths their own tests do not reach (COV-7):
 the run refusals, a geo artifact of more than one 1,000-row chunk, a sink asked to serve two
-runs, an error without a typed counter and an unreadable CA file."""
+runs, an error without a typed counter, an unreadable CA file and plain http to a named host."""
 
 import gzip
 import json
@@ -13,7 +13,7 @@ from runner_cases import config
 from proxy_index import JsonSink, RunConfig, RunOptions, run
 from proxy_index.errors import UserError
 from proxy_index.models import Outcome
-from proxy_index.node_tls import pinned_context
+from proxy_index.node_tls import client_tls, pinned_context
 from proxy_index.stats import Counters
 from proxy_index.targets import RequestSpec, TargetRegistry
 
@@ -123,3 +123,8 @@ def test_an_unreadable_ca_file_is_refused_without_its_path(tmp_path):
     missing = tmp_path / "orchestrator.crt"
     with pytest.raises(UserError, match="^the orchestrator CA file cannot be read$"):
         pinned_context(missing)
+
+
+def test_plain_http_to_a_named_remote_host_is_refused():
+    with pytest.raises(UserError, match="plain http:// is refused"):
+        client_tls("http://orchestrator.example.test:8443")

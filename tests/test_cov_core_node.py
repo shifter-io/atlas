@@ -133,6 +133,18 @@ async def test_failed_polls_and_heartbeats_are_logged_and_survived(tmp_path, cap
     assert body["open_conns"] == 5 and 0 < body["req_per_s"] <= 5
 
 
+async def test_a_kill_stops_only_the_active_batch_it_names(tmp_path):
+    work = {"kill": [7, 99], "assignments": [assignment()]}
+    agent = make_agent(tmp_path, {"/v1/work": [work]})
+    active = Active(assignment())
+    agent.active[7] = active
+    await agent.poll()
+    # Batch 7 is stopped as the orchestrator's kill; 99 is unknown here and the
+    # repeated assignment of 7 does not start a second run.
+    assert active.killed and active.stop.is_set()
+    assert agent.active == {7: active} and agent.tasks == set()
+
+
 def test_an_unknown_target_without_a_usable_url_is_refused(tmp_path):
     agent = make_agent(tmp_path)
     with pytest.raises(ValueError):
