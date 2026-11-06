@@ -22,6 +22,7 @@ later healthy pulse in the country closes it here, with a 'recovered' event of s
 from __future__ import annotations
 
 import statistics
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from psycopg.rows import dict_row
@@ -281,6 +282,45 @@ def _rate(numerator, requests):
     return numerator / requests if requests else None
 
 
+@dataclass
+class _PulseRun:
+    """One product's pulse in a batch, with its series' trailing baseline and open incident."""
+
+    run: dict
+    latency: int | None
+    data: dict
+    history: list
+    past: dict
+    incident: dict | None
+    product: object = field(init=False)
+    requests: int = field(init=False)
+    successes: int = field(init=False)
+    blocked: int = field(init=False)
+    rate: float = field(init=False)
+    block_share: float = field(init=False)
+    base_rate: float | None = field(init=False)
+    base_blocked: float | None = field(init=False)
+    base_p50: int | None = field(init=False)
+    open_kind: str | None = field(init=False)
+    previous: dict | None = field(init=False)
+
+    def __post_init__(self):
+        run, history, past = self.run, self.history, self.past
+        self.product, self.requests = run["product_id"], run["requests"]
+        self.successes, self.blocked = run["successes"], run["challenges"] + run["blocks"]
+        self.rate, self.block_share = self.successes / self.requests, self.blocked / self.requests
+        base_requests = sum(h["requests"] for h in history)
+        self.base_rate = _rate(sum(h["successes"] for h in history), base_requests)
+        self.base_blocked = _rate(
+            sum(h["challenges"] + h["blocks"] for h in history), base_requests
+        )
+        latencies = [past[h["run_key"]] for h in history if past.get(h["run_key"]) is not None]
+        self.base_p50 = statistics.median_low(latencies) if latencies else None
+        incident = self.incident
+        self.open_kind = incident["kind"] if incident and incident["kind"] in INCIDENTS else None
+        self.previous = history[0] if history else None
+
+
 def _pulse(cur, cfg, batch, runs, emit):
     p50 = run_p50(cur, [r["run_key"] for r in runs if r["run_key"]])
     common = {"region": batch["region"], "batch_finished_at": timestamp(batch["finished_at"])}
@@ -288,206 +328,231 @@ def _pulse(cur, cfg, batch, runs, emit):
         product, requests = run["product_id"], run["requests"]
         if not requests or _had(cur, batch["batch_id"], product, PULSE_KINDS, batch["finished_at"]):
             continue
-        successes, blocked = run["successes"], run["challenges"] + run["blocks"]
-        rate, block_share = successes / requests, blocked / requests
-        history = cur.execute(
-            "SELECT br.batch_id,b.finished_at,br.requests,br.successes,br.challenges,br.blocks,"
-            "br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
-            "WHERE b.kind='pulse' AND b.country_code=%s AND b.target_id=%s AND br.product_id=%s "
-            "AND br.status='done' AND br.requests>0 AND b.scheduled_for<%s "
-            "ORDER BY b.scheduled_for DESC LIMIT %s",
-            (
-                batch["country_code"],
-                batch["target_id"],
-                product,
-                batch["scheduled_for"],
-                cfg["baseline_batches"],
-            ),
-        ).fetchall()
+        history = _pulse_history(cur, cfg, batch, product)
         past = run_p50(cur, [h["run_key"] for h in history if h["run_key"]])
-        base_requests = sum(h["requests"] for h in history)
-        base_rate = _rate(sum(h["successes"] for h in history), base_requests)
-        base_blocked = _rate(sum(h["challenges"] + h["blocks"] for h in history), base_requests)
-        latencies = [past[h["run_key"]] for h in history if past.get(h["run_key"]) is not None]
-        base_p50 = statistics.median_low(latencies) if latencies else None
-        enough = len(history) >= cfg["min_baseline_batches"] and requests >= cfg["min_requests"]
         latency = p50.get(run["run_key"])
         data = common | {
             "requests": requests,
-            "successes": successes,
-            "success_rate": rate,
+            "successes": run["successes"],
+            "success_rate": run["successes"] / requests,
             "p50": latency,
             "challenges": run["challenges"],
             "blocks": run["blocks"],
         }
-        # The series state as of this batch: events of earlier batches only, so judging a batch
-        # again (after a watermark reset) reaches the same verdict.
-        incident = cur.execute(
-            "SELECT e.kind,e.data FROM test_events e JOIN test_batches b USING(batch_id) "
-            "WHERE e.product_id=%s AND e.at>=%s AND e.country_code=%s AND e.target_id=%s "
-            "AND b.kind='pulse' AND e.kind=ANY(%s) AND b.scheduled_for<%s "
-            "ORDER BY b.scheduled_for DESC,e.event_id DESC LIMIT 1",
-            (
-                product,
-                emit.now - INCIDENT_TTL,
-                batch["country_code"],
-                batch["target_id"],
-                [*INCIDENTS, "recovered"],
-                batch["scheduled_for"],
-            ),
-        ).fetchone()
-        open_kind = incident["kind"] if incident and incident["kind"] in INCIDENTS else None
-        previous = history[0] if history else None
+        incident = _pulse_incident(cur, batch, product, emit.now)
+        _judge_pulse(cur, cfg, batch, emit, _PulseRun(run, latency, data, history, past, incident))
 
-        def repeated(kind, previous=previous, product=product):
-            # A spike that the previous pulse already reported stays silent while it lasts.
-            return previous is not None and _had(
-                cur, previous["batch_id"], product, (kind,), previous["finished_at"]
-            )
 
-        before = emit.count
-        handled = False
-        if enough and base_rate is not None:
-            if successes == 0 and base_rate > cfg["down_baseline"]:
-                handled = True
-                if open_kind != "down":
-                    since = _open_outage(cur, batch, product)
-                    emit(
-                        "down",
-                        batch,
-                        product,
-                        -1,
-                        "critical",
-                        data
-                        | {
-                            "baseline": base_rate,
-                            "value": rate,
-                            "since": timestamp(since),
-                            "source": "pulse",
-                        },
-                    )
-            elif rate < base_rate - cfg["success_drop_pp"]:
-                handled = True
-                if open_kind is None:
-                    severe = rate < base_rate - 2 * cfg["success_drop_pp"]
-                    emit(
-                        "success_drop",
-                        batch,
-                        product,
-                        -1,
-                        "major" if severe else "minor",
-                        data | {"baseline": base_rate, "value": rate},
-                    )
-        recovered = (
-            not handled
-            and open_kind
-            and requests >= cfg["min_requests"]
-            and successes > 0
-            and rate >= incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
-        )
-        if recovered and not _still_down(cur, batch, product, emit.now):
-            _close_outages(cur, batch, product)
-        if successes > 0:
-            # A census outage ends with any later pulse that got through.
-            for outage in _close_outages(cur, batch, product, source="census"):
-                emit(
-                    "recovered",
-                    batch,
-                    product,
-                    1,
-                    "info",
-                    data
-                    | {
-                        "source": "census",
-                        "incident": "down",
-                        "since": timestamp(outage["started_at"]),
-                        "duration_s": round(
-                            (outage["ended_at"] - outage["started_at"]).total_seconds(), 3
-                        ),
-                        "outage_batch_id": outage["batch_id"],
-                    },
-                )
-        if recovered:
-            emit(
-                "recovered",
-                batch,
-                product,
-                1,
-                "info",
-                data
-                | {
-                    "baseline": incident["data"].get("baseline"),
-                    "value": rate,
-                    "incident": open_kind,
-                },
-            )
-        if (
-            enough
-            and base_blocked is not None
-            and block_share > base_blocked + cfg["block_spike_pp"]
-            and not repeated("block_spike")
-        ):
-            severe = block_share > base_blocked + 2 * cfg["block_spike_pp"]
-            emit(
-                "block_spike",
-                batch,
-                product,
-                -1,
-                "major" if severe else "minor",
-                data | {"baseline": base_blocked, "value": block_share},
-            )
-        if (
-            len(history) >= cfg["min_baseline_batches"]
-            and latency
-            and base_p50
-            and successes >= cfg["min_latency_samples"]
-            and latency > cfg["latency_spike_ratio"] * base_p50
-            and not repeated("latency_spike")
-        ):
-            emit(
-                "latency_spike",
-                batch,
-                product,
-                -1,
-                "minor",
-                data | {"baseline": base_p50, "value": latency},
-            )
-        if handled or emit.count > before or previous is None:
-            continue
-        # Otherwise the pulse is silent unless it differs from the previous one.
-        prior_rate = previous["successes"] / previous["requests"]
-        prior_p50 = past.get(previous["run_key"])
-        prior_blocked = previous["challenges"] + previous["blocks"]
-        rate_moved = abs(rate - prior_rate) >= cfg["pulse_change_pp"]
-        latency_moved = bool(latency and prior_p50) and (
-            max(latency / prior_p50, prior_p50 / latency) >= cfg["pulse_latency_ratio"]
-        )
-        blocks_moved = (blocked > 0) != (prior_blocked > 0)
-        if not (rate_moved or latency_moved or blocks_moved):
-            continue
-        if rate_moved:
-            signal = 1 if rate > prior_rate else -1
-        elif latency_moved:
-            signal = 1 if latency < prior_p50 else -1
-        else:
-            signal = -1 if blocked else 1
-        emit(
-            "pulse_finished",
-            batch,
+def _pulse_history(cur, cfg, batch, product):
+    """The series' trailing baseline: its last done pulses with requests before this batch."""
+    return cur.execute(
+        "SELECT br.batch_id,b.finished_at,br.requests,br.successes,br.challenges,br.blocks,"
+        "br.run_key FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "WHERE b.kind='pulse' AND b.country_code=%s AND b.target_id=%s AND br.product_id=%s "
+        "AND br.status='done' AND br.requests>0 AND b.scheduled_for<%s "
+        "ORDER BY b.scheduled_for DESC LIMIT %s",
+        (
+            batch["country_code"],
+            batch["target_id"],
             product,
-            signal,
+            batch["scheduled_for"],
+            cfg["baseline_batches"],
+        ),
+    ).fetchall()
+
+
+def _pulse_incident(cur, batch, product, now):
+    """The series' latest incident or recovery event, if any."""
+    # The series state as of this batch: events of earlier batches only, so judging a batch
+    # again (after a watermark reset) reaches the same verdict.
+    return cur.execute(
+        "SELECT e.kind,e.data FROM test_events e JOIN test_batches b USING(batch_id) "
+        "WHERE e.product_id=%s AND e.at>=%s AND e.country_code=%s AND e.target_id=%s "
+        "AND b.kind='pulse' AND e.kind=ANY(%s) AND b.scheduled_for<%s "
+        "ORDER BY b.scheduled_for DESC,e.event_id DESC LIMIT 1",
+        (
+            product,
+            now - INCIDENT_TTL,
+            batch["country_code"],
+            batch["target_id"],
+            [*INCIDENTS, "recovered"],
+            batch["scheduled_for"],
+        ),
+    ).fetchone()
+
+
+def _judge_pulse(cur, cfg, batch, emit, p):
+    """Write the events of one product's pulse, in a fixed order."""
+    before = emit.count
+    enough = len(p.history) >= cfg["min_baseline_batches"] and p.requests >= cfg["min_requests"]
+    handled = enough and _judge_success(cur, cfg, batch, emit, p)
+    recovered = (
+        not handled
+        and p.open_kind
+        and p.requests >= cfg["min_requests"]
+        and p.successes > 0
+        and p.rate >= p.incident["data"].get("baseline", 0) - cfg["success_drop_pp"]
+    )
+    if recovered and not _still_down(cur, batch, p.product, emit.now):
+        _close_outages(cur, batch, p.product)
+    if p.successes > 0:
+        _census_recovered(cur, batch, emit, p)
+    if recovered:
+        emit(
+            "recovered",
+            batch,
+            p.product,
+            1,
             "info",
-            data
+            p.data
             | {
-                "value": rate,
-                "previous": {
-                    "success_rate": prior_rate,
-                    "p50": prior_p50,
-                    "challenges": previous["challenges"],
-                    "blocks": previous["blocks"],
-                },
+                "baseline": p.incident["data"].get("baseline"),
+                "value": p.rate,
+                "incident": p.open_kind,
             },
         )
+    _judge_spikes(cur, cfg, batch, emit, p, enough)
+    if handled or emit.count > before or p.previous is None:
+        return
+    _pulse_changed(cfg, batch, emit, p)
+
+
+def _judge_success(cur, cfg, batch, emit, p):
+    """A 'down' or 'success_drop' against the baseline; whether the pulse was one of them."""
+    if p.base_rate is None:
+        return False
+    if p.successes == 0 and p.base_rate > cfg["down_baseline"]:
+        if p.open_kind != "down":
+            since = _open_outage(cur, batch, p.product)
+            emit(
+                "down",
+                batch,
+                p.product,
+                -1,
+                "critical",
+                p.data
+                | {
+                    "baseline": p.base_rate,
+                    "value": p.rate,
+                    "since": timestamp(since),
+                    "source": "pulse",
+                },
+            )
+        return True
+    if p.rate < p.base_rate - cfg["success_drop_pp"]:
+        if p.open_kind is None:
+            severe = p.rate < p.base_rate - 2 * cfg["success_drop_pp"]
+            emit(
+                "success_drop",
+                batch,
+                p.product,
+                -1,
+                "major" if severe else "minor",
+                p.data | {"baseline": p.base_rate, "value": p.rate},
+            )
+        return True
+    return False
+
+
+def _census_recovered(cur, batch, emit, p):
+    """A census outage ends with any later pulse that got through."""
+    for outage in _close_outages(cur, batch, p.product, source="census"):
+        emit(
+            "recovered",
+            batch,
+            p.product,
+            1,
+            "info",
+            p.data
+            | {
+                "source": "census",
+                "incident": "down",
+                "since": timestamp(outage["started_at"]),
+                "duration_s": round((outage["ended_at"] - outage["started_at"]).total_seconds(), 3),
+                "outage_batch_id": outage["batch_id"],
+            },
+        )
+
+
+def _repeated(cur, p, kind):
+    """A spike that the previous pulse already reported stays silent while it lasts."""
+    previous = p.previous
+    return previous is not None and _had(
+        cur, previous["batch_id"], p.product, (kind,), previous["finished_at"]
+    )
+
+
+def _judge_spikes(cur, cfg, batch, emit, p, enough):
+    """A 'block_spike' or 'latency_spike' against the baseline, once per spike."""
+    if (
+        enough
+        and p.base_blocked is not None
+        and p.block_share > p.base_blocked + cfg["block_spike_pp"]
+        and not _repeated(cur, p, "block_spike")
+    ):
+        severe = p.block_share > p.base_blocked + 2 * cfg["block_spike_pp"]
+        emit(
+            "block_spike",
+            batch,
+            p.product,
+            -1,
+            "major" if severe else "minor",
+            p.data | {"baseline": p.base_blocked, "value": p.block_share},
+        )
+    if (
+        len(p.history) >= cfg["min_baseline_batches"]
+        and p.latency
+        and p.base_p50
+        and p.successes >= cfg["min_latency_samples"]
+        and p.latency > cfg["latency_spike_ratio"] * p.base_p50
+        and not _repeated(cur, p, "latency_spike")
+    ):
+        emit(
+            "latency_spike",
+            batch,
+            p.product,
+            -1,
+            "minor",
+            p.data | {"baseline": p.base_p50, "value": p.latency},
+        )
+
+
+def _pulse_changed(cfg, batch, emit, p):
+    """Otherwise the pulse is silent unless it differs from the previous one."""
+    previous, rate, latency = p.previous, p.rate, p.latency
+    prior_rate = previous["successes"] / previous["requests"]
+    prior_p50 = p.past.get(previous["run_key"])
+    prior_blocked = previous["challenges"] + previous["blocks"]
+    rate_moved = abs(rate - prior_rate) >= cfg["pulse_change_pp"]
+    latency_moved = bool(latency and prior_p50) and (
+        max(latency / prior_p50, prior_p50 / latency) >= cfg["pulse_latency_ratio"]
+    )
+    blocks_moved = (p.blocked > 0) != (prior_blocked > 0)
+    if not (rate_moved or latency_moved or blocks_moved):
+        return
+    if rate_moved:
+        signal = 1 if rate > prior_rate else -1
+    elif latency_moved:
+        signal = 1 if latency < prior_p50 else -1
+    else:
+        signal = -1 if p.blocked else 1
+    emit(
+        "pulse_finished",
+        batch,
+        p.product,
+        signal,
+        "info",
+        p.data
+        | {
+            "value": rate,
+            "previous": {
+                "success_rate": prior_rate,
+                "p50": prior_p50,
+                "challenges": previous["challenges"],
+                "blocks": previous["blocks"],
+            },
+        },
+    )
 
 
 def _hosting(cur, cfg, batch, runs, emit, seen):
