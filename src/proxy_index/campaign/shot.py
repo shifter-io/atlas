@@ -174,16 +174,7 @@ class Shot:
         clock: Clock,
     ):
         self.cloud, self.inputs, self.clock = cloud, inputs, clock
-        try:
-            self.spec = CampaignSpec.from_json(spec_path(inputs.root).read_text())
-            self.files = WorkerInputs.for_root(inputs.root, self.spec.wheel_sha256)
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            raise ProbeError(
-                f"no planned campaign with its wheel at --root ({type(error).__name__})"
-            ) from None
-        self.networks = inputs.networks or self.spec.networks
-        self.regions = inputs.regions or self.spec.regions
-        self.check()
+        self.load()
         now = datetime.fromtimestamp(clock.now(), UTC)
         self.shot_id = f"{now:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
         self.scope = Scope(
@@ -196,25 +187,48 @@ class Shot:
         self.tag, self.start_at = hour_tag(self.shot_id, 0), clock.now() + inputs.lead_seconds
         self.folder = inputs.output / self.shot_id
         self.remote = remotes(self.folder)  # its known-hosts file lives in this shot's folder
-        self.workers = [
+        self.workers = self.worker_records()
+        if len({w.name for w in self.workers}) != len(self.workers):  # one record per name
+            raise ProbeError("refused: worker names repeated")
+        # A droplet a create or adopt returned that no worker record holds (a second one with
+        # a worker's name): recorded, removed through the guard and counted in workers_left.
+        self.unrecorded: list[DropletRecord] = []
+        self.result: dict[str, Any] = self.start_result()
+
+    def load(self) -> None:
+        """The planned spec and its worker files, and the networks and regions, all checked."""
+        inputs = self.inputs
+        try:
+            self.spec = CampaignSpec.from_json(spec_path(inputs.root).read_text())
+            self.files = WorkerInputs.for_root(inputs.root, self.spec.wheel_sha256)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise ProbeError(
+                f"no planned campaign with its wheel at --root ({type(error).__name__})"
+            ) from None
+        self.networks = inputs.networks or self.spec.networks
+        self.regions = inputs.regions or self.spec.regions
+        self.check()
+
+    def worker_records(self) -> list[DropletRecord]:
+        """One worker per region and network, at its network's size and concurrency."""
+        return [
             DropletRecord(
                 network,
                 region,
                 0,
                 droplet_name(self.shot_id, 0, region, network),
-                size=inputs.size_for(network),
+                size=self.inputs.size_for(network),
                 image_id=self.spec.image_by_region[region],
                 concurrency=network_concurrency(network, self.spec.concurrency),
             )
             for region in self.regions
             for network in self.networks
         ]
-        if len({w.name for w in self.workers}) != len(self.workers):  # one record per name
-            raise ProbeError("refused: worker names repeated")
-        # A droplet a create or adopt returned that no worker record holds (a second one with
-        # a worker's name): recorded, removed through the guard and counted in workers_left.
-        self.unrecorded: list[DropletRecord] = []
-        self.result: dict[str, Any] = {
+
+    def start_result(self) -> dict[str, Any]:
+        """The result before any worker is created: every cell `pending`."""
+        inputs = self.inputs
+        return {
             "shot_id": self.shot_id,
             "campaign_id": self.spec.campaign_id,
             # What `campaign shot --remove` needs to rebuild this scope in a later process.
