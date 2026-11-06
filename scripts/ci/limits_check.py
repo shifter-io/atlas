@@ -89,6 +89,24 @@ def metrics(source):
     return found
 
 
+def check_function(path, name, values, old, report):
+    """Report each limit one function exceeds; `values` is its metrics() tuple."""
+    first, _, length, params, nest = values
+    for index, (value, warn, hard, label, slack) in enumerate(
+        ((length, 50, 80, "lines", 5), (params, 5, 7, "params", 0), (nest, 3, 4, "nesting", 0))
+    ):
+        if value > hard:
+            # A pre-existing over-limit function may be touched if it does not grow.
+            legacy = old is not None and old[2 + index] > hard and value <= old[2 + index] + slack
+            report(
+                "LEGACY" if legacy else "HARD",
+                f"{path}:{first} {name}: {value} {label} "
+                f"(> {hard}; base {old[2 + index] if old else 'new'})",
+            )
+        elif value > warn:
+            report("WARN", f"{path}:{first} {name}: {value} {label} (> {warn})")
+
+
 def check_file(path, source, base_source, lines, report):
     total = source.count("\n") + 1
     base_total = base_source.count("\n") + 1 if base_source else 0
@@ -100,25 +118,10 @@ def check_file(path, source, base_source, lines, report):
     elif total > 400:
         report("WARN", f"{path}: {total} lines (> 400)")
     before = metrics(base_source) if base_source else {}
-    for name, (first, last, length, params, nest) in metrics(source).items():
-        if not set(range(first, last + 1)) & lines:
-            continue
-        old = before.get(name)
-        for index, (value, warn, hard, label, slack) in enumerate(
-            ((length, 50, 80, "lines", 5), (params, 5, 7, "params", 0), (nest, 3, 4, "nesting", 0))
-        ):
-            if value > hard:
-                # A pre-existing over-limit function may be touched if it does not grow.
-                legacy = (
-                    old is not None and old[2 + index] > hard and value <= old[2 + index] + slack
-                )
-                report(
-                    "LEGACY" if legacy else "HARD",
-                    f"{path}:{first} {name}: {value} {label} "
-                    f"(> {hard}; base {old[2 + index] if old else 'new'})",
-                )
-            elif value > warn:
-                report("WARN", f"{path}:{first} {name}: {value} {label} (> {warn})")
+    for name, values in metrics(source).items():
+        first, last = values[0], values[1]
+        if set(range(first, last + 1)) & lines:
+            check_function(path, name, values, before.get(name), report)
 
 
 def main():

@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from test_migration import SOURCE, catalog
+from migration_cases import SOURCE, catalog
 from test_migration_v11 import load_v10
 from test_storage import measurement
 

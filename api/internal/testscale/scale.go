@@ -81,22 +81,45 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		return nil, err
 	}
 	template := doc["products"].([]any)[0].(map[string]any)
+	products, places, err := productGroups(template, shape)
+	if err != nil {
+		return nil, err
+	}
+	doc["products"] = products
+	payload, err := snapshotPayload(doc, template, shape)
+	if err != nil {
+		return nil, err
+	}
+	in := &store.Inputs{Snapshot: &store.SnapshotRow{BuildID: 1, ContentHash: "scale", Payload: payload, Places: places},
+		Events: events(shape), EventsComplete: true, NotableComplete: true}
+	frameworkRows(in, doc, shape)
+	return in, nil
+}
+
+// productGroups is every product group of the shape, built in parallel, and
+// the typed tails of all their windows.
+func productGroups(template map[string]any, shape Shape) ([]any, map[store.PlaceWindow]*store.List, error) {
 	// Network n's group for requested country c is products[n*Countries+c].
 	products := make([]any, shape.Networks*shape.Countries)
 	windows := make([]map[store.PlaceWindow]*store.List, len(products))
-	err = each(len(products), func(i int) error {
+	err := each(len(products), func(i int) error {
 		var err error
 		products[i], windows[i], err = group(template, shape, i/shape.Countries, i%shape.Countries)
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	places := map[store.PlaceWindow]*store.List{}
 	for _, w := range windows {
 		maps.Copy(places, w)
 	}
-	doc["products"] = products
+	return products, places, nil
+}
+
+// snapshotPayload adds the shape's browser targets and every-group fleet
+// entries to doc and marshals it as the framework publishes it.
+func snapshotPayload(doc, template map[string]any, shape Shape) ([]byte, error) {
 	if shape.Browser {
 		if err := AddBrowser(doc); err != nil {
 			return nil, err
@@ -112,12 +135,11 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 	if err := marshalGroups(doc); err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(doc)
-	if err != nil {
-		return nil, err
-	}
-	in := &store.Inputs{Snapshot: &store.SnapshotRow{BuildID: 1, ContentHash: "scale", Payload: payload, Places: places},
-		Events: events(shape), EventsComplete: true, NotableComplete: true}
+	return json.Marshal(doc)
+}
+
+// frameworkRows gives in the framework providers, products and targets.
+func frameworkRows(in *store.Inputs, doc map[string]any, shape Shape) {
 	for n := range shape.Networks + shape.Unmeasured {
 		id := fmt.Sprintf("net%02d", n)
 		in.FrameworkProviders = append(in.FrameworkProviders, id)
@@ -128,7 +150,6 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		engine, _ := t.(map[string]any)["engine"].(string)
 		in.FrameworkTargets = append(in.FrameworkTargets, store.FrameworkTarget{ID: t.(map[string]any)["id"].(string), Label: &label, SortOrder: int32(i), Engine: engine})
 	}
-	return in, nil
 }
 
 // group is network n's product group for requested country c, a copy of
@@ -154,7 +175,7 @@ func group(template map[string]any, shape Shape, n, c int) (map[string]any, map[
 		for _, k := range []string{"uptime", "benchmark", "census_overlap", "evidence", "evidence_sources", "ip_samples"} {
 			delete(w.(map[string]any), k)
 		}
-		fill(w.(map[string]any), shape, n, c)
+		fill(w.(map[string]any), shape, c)
 		places[store.PlaceWindow{Product: int64(id), Cohort: cohort, Hours: hours}] = tails(shape, n)
 	}
 	return p, places, nil
@@ -235,10 +256,17 @@ func network(i int) map[string]any {
 }
 
 // fill gives a window the capped lists of the shape.
-func fill(w map[string]any, shape Shape, n, c int) {
+func fill(w map[string]any, shape Shape, c int) {
+	whole := shape.CityAsn > 0 && c == 0
+	w["breakdowns"], w["breakdown_entries"] = breakdowns(shape, c, whole)
+	fillPool(w["pool"].(map[string]any), shape, whole)
+}
+
+// breakdowns is a window's breakdown lists, capped like the framework's
+// unless whole, and each list's full row count.
+func breakdowns(shape Shape, c int, whole bool) (map[string][]any, map[string]any) {
 	lists := map[string][]any{}
 	entries := map[string]any{}
-	whole := shape.CityAsn > 0 && c == 0
 	cityAsn := shape.Tail
 	if whole {
 		cityAsn = shape.CityAsn
@@ -250,30 +278,36 @@ func fill(w map[string]any, shape Shape, n, c int) {
 			n = limit
 		}
 		for i := range n {
-			label := place(i + c)
-			switch name {
-			case "country":
-				label = map[string]any{"country_code": countryCode((i + c) % 250), "country": "Country"}
-			case "region":
-				delete(label, "city")
-			case "asn":
-				label = network(i + c)
-			case "country_asn":
-				label = map[string]any{"country_code": label["country_code"], "country": label["country"]}
-				for k, v := range network(i) {
-					label[k] = v
-				}
-			case "city_asn":
-				for k, v := range network(i) {
-					label[k] = v
-				}
-			}
-			rows = append(rows, row(i, max(1000-i, 1), label))
+			rows = append(rows, row(i, max(1000-i, 1), breakdownLabel(name, i, c)))
 		}
 		lists[name], entries[name] = rows, keep
 	}
-	w["breakdowns"], w["breakdown_entries"] = lists, entries
-	pool := w["pool"].(map[string]any)
+	return lists, entries
+}
+
+// breakdownLabel is the label columns of row i of breakdown name in the
+// group for requested country c.
+func breakdownLabel(name string, i, c int) map[string]any {
+	label := place(i + c)
+	switch name {
+	case "country":
+		label = map[string]any{"country_code": countryCode((i + c) % 250), "country": "Country"}
+	case "region":
+		delete(label, "city")
+	case "asn":
+		label = network(i + c)
+	case "country_asn":
+		label = map[string]any{"country_code": label["country_code"], "country": label["country"]}
+		maps.Copy(label, network(i))
+	case "city_asn":
+		maps.Copy(label, network(i))
+	}
+	return label
+}
+
+// fillPool gives a window's pool its geo, country and ASN lists: the ASN
+// list whole (Tail rows) when whole, else 50 rows.
+func fillPool(pool map[string]any, shape Shape, whole bool) {
 	geo, countries, asns := []any{}, []any{}, []any{}
 	for i := range 50 {
 		geo = append(geo, map[string]any{"country_code": countryCode(i), "country": "Country", "region": "Region", "region_code": "R", "city": fmt.Sprintf("City %d", i), "ips": 50 - i, "observations": 50})

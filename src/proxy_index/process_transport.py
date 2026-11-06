@@ -43,9 +43,37 @@ def send(writer, message):
     writer.write(struct.pack("!I", len(data)) + data)
 
 
+async def _respond(transport, target, context, deadline):
+    """The worker's answer to one request: its result, or "expired" past the deadline."""
+    if deadline is not None and time.perf_counter() >= deadline:
+        return ("expired", context.request_index)
+    remaining = max(0, deadline - time.perf_counter()) if deadline is not None else None
+    async with asyncio.timeout(remaining):
+        result = await transport.execute(target, context=context)
+    return ("result", context.request_index, result, time.perf_counter())
+
+
+async def _dispatch(reader, execute):
+    """Run `execute` for each received request until the coordinator stops or leaves."""
+    tasks = set()
+    try:
+        while True:
+            context = await receive(reader)
+            if context is None:
+                break
+            task = asyncio.create_task(execute(context))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+    except (EOFError, ConnectionError, asyncio.IncompleteReadError):
+        pass
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def _serve(sock, config, target, factory, deadline):
     reader, writer = await asyncio.open_connection(sock=sock)
-    tasks = set()
     slots = asyncio.Semaphore(config.concurrency)
     async with factory(config) as transport:
         send(writer, ("ready", os.getpid()))
@@ -54,15 +82,7 @@ async def _serve(sock, config, target, factory, deadline):
         async def execute(context):
             try:
                 async with slots:
-                    if deadline is not None and time.perf_counter() >= deadline:
-                        send(writer, ("expired", context.request_index))
-                    else:
-                        remaining = (
-                            max(0, deadline - time.perf_counter()) if deadline is not None else None
-                        )
-                        async with asyncio.timeout(remaining):
-                            result = await transport.execute(target, context=context)
-                        send(writer, ("result", context.request_index, result, time.perf_counter()))
+                    send(writer, await _respond(transport, target, context, deadline))
                 await writer.drain()
             except TimeoutError:
                 send(writer, ("expired", context.request_index))
@@ -72,20 +92,7 @@ async def _serve(sock, config, target, factory, deadline):
                 send(writer, ("error", context.request_index))
                 await writer.drain()
 
-        try:
-            while True:
-                context = await receive(reader)
-                if context is None:
-                    break
-                task = asyncio.create_task(execute(context))
-                tasks.add(task)
-                task.add_done_callback(tasks.discard)
-        except (EOFError, ConnectionError, asyncio.IncompleteReadError):
-            pass
-        finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+        await _dispatch(reader, execute)
     writer.close()
     await writer.wait_closed()
 
@@ -130,67 +137,78 @@ class ProcessTransport:
             # Launch all children before waiting for their ready messages.
             connections = []
             for index in range(self.count):
-                parent, child = socket.socketpair()
-                parent.setblocking(False)
-                child.setblocking(False)
-                slots = (self.config.concurrency + self.count - 1 - index) // self.count
-                process = context.Process(
-                    target=_entry,
-                    name=f"http-worker-{index}",
-                    daemon=True,
-                    args=(
-                        child,
-                        replace(self.config, concurrency=slots, processes=1),
-                        self.target,
-                        self.factory,
-                        self.deadline,
-                    ),
-                )
-                try:
-                    process.start()
-                except BaseException:
-                    parent.close()
-                    raise
-                finally:
-                    child.close()
-                self.children.append(process)
-                try:
-                    reader, writer = await asyncio.open_connection(sock=parent)
-                except BaseException:
-                    parent.close()
-                    raise
-                self.writers.append(writer)
-                connections.append(reader)
-            async with asyncio.timeout(30):
-                for reader in connections:
-                    message = await receive(reader)
-                    if message[0] != "ready":
-                        raise RuntimeError("Worker startup failed")
-                    self.pids.append(message[1])
-                    self.readers.append(asyncio.create_task(self._read(reader)))
+                connections.append(await self._spawn(context, index))
+            await self._ready(connections)
             return self
         except BaseException:
             await self.__aexit__()
             raise
 
+    async def _spawn(self, context, index):
+        """Start worker `index`; return the reader of its private socket."""
+        parent, child = socket.socketpair()
+        parent.setblocking(False)
+        child.setblocking(False)
+        slots = (self.config.concurrency + self.count - 1 - index) // self.count
+        process = context.Process(
+            target=_entry,
+            name=f"http-worker-{index}",
+            daemon=True,
+            args=(
+                child,
+                replace(self.config, concurrency=slots, processes=1),
+                self.target,
+                self.factory,
+                self.deadline,
+            ),
+        )
+        try:
+            process.start()
+        except BaseException:
+            parent.close()
+            raise
+        finally:
+            child.close()
+        self.children.append(process)
+        try:
+            reader, writer = await asyncio.open_connection(sock=parent)
+        except BaseException:
+            parent.close()
+            raise
+        self.writers.append(writer)
+        return reader
+
+    async def _ready(self, connections):
+        """Wait for every worker's ready message, then start reading its answers."""
+        async with asyncio.timeout(30):
+            for reader in connections:
+                message = await receive(reader)
+                if message[0] != "ready":
+                    raise RuntimeError("Worker startup failed")
+                self.pids.append(message[1])
+                self.readers.append(asyncio.create_task(self._read(reader)))
+
     async def _read(self, reader):
         try:
             while True:
-                message = await receive(reader)
-                future = self.pending.pop(message[1], None)
-                if future is None or future.done():
-                    continue
-                if message[0] == "result":
-                    future.set_result((message[2], message[3]))
-                elif message[0] == "expired":
-                    future.cancel()
-                else:
-                    future.set_exception(RuntimeError("HTTP worker request failed"))
+                self._settle(await receive(reader))
         except (EOFError, ConnectionError, asyncio.IncompleteReadError):
             self.failure = True
             for future in self.pending.values():
                 if not future.done():
                     future.set_exception(RuntimeError("HTTP worker exited unexpectedly"))
+
+    def _settle(self, message):
+        """Resolve the pending request a worker message answers."""
+        future = self.pending.pop(message[1], None)
+        if future is None or future.done():
+            return
+        if message[0] == "result":
+            future.set_result((message[2], message[3]))
+        elif message[0] == "expired":
+            future.cancel()
+        else:
+            future.set_exception(RuntimeError("HTTP worker request failed"))
 
     async def execute(self, target, *, context):
         if self.failure:

@@ -40,6 +40,59 @@ ALPHABETS = {
     "digits": string.digits,
 }
 HOST = re.compile(r"[A-Za-z0-9.-]+")
+# The keys each grammar table may hold; Grammar._schema rejects any other.
+TABLE_KEYS = {
+    "credential": {
+        "flags_in",
+        "username",
+        "password",
+        "flagged",
+        "first_separator",
+        "separator",
+        "rotation_suffix",
+        "reserved",
+    },
+    "account": {"required", "pattern", "strip_prefixes"},
+    "gateway": {
+        "host",
+        "hosts",
+        "default",
+        "host_override",
+        "ports",
+        "port_override",
+        "rotating_ports",
+    },
+    "session": {
+        "flag",
+        "mode",
+        "ports",
+        "generate",
+        "length",
+        "no_session_policy",
+        "slot_flag",
+        "ttl_flag",
+        "default_ttl_seconds",
+    },
+    "testing": {
+        "protocol",
+        "max_concurrency",
+        "rate_limit_statuses",
+        "rate_limit_connect",
+        "no_inventory_statuses",
+    },
+}
+# The top-level keys of a grammar: its tables and these.
+GRAMMAR_KEYS = {
+    *TABLE_KEYS,
+    "schema_version",
+    "id",
+    "product",
+    "version",
+    "docs",
+    "flags",
+    "pools",
+    "extra_flags",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,12 +179,7 @@ class Grammar:
             host_override=gateway.get("host_override", False),
             ports=MappingProxyType(ports),
             port_override=gateway.get("port_override", False),
-            rotating_ports=MappingProxyType(
-                {
-                    scheme: _range(value, "rotating_ports")
-                    for scheme, value in gateway.get("rotating_ports", {}).items()
-                }
-            ),
+            rotating_ports=cls._rotating_ports(gateway),
             flags=MappingProxyType(flags),
             session=session_flag,
             session_mode=mode,
@@ -143,12 +191,7 @@ class Grammar:
             ttl=session.get("ttl_flag"),
             ttl_seconds=60,  # Canonical ttl is in minutes.
             default_ttl_seconds=session.get("default_ttl_seconds"),
-            pools=MappingProxyType(
-                {
-                    name: frozenset(rule.get("forbid", ()))
-                    for name, rule in data.get("pools", {}).items()
-                }
-            ),
+            pools=cls._pools(data),
             extra_flags=data.get("extra_flags", False),
             reserved=frozenset(cred.get("reserved", ()))
             | {flag.key for flag in flags.values() if not flag.preset},
@@ -156,67 +199,24 @@ class Grammar:
         )
 
     @staticmethod
+    def _rotating_ports(gateway: Mapping[str, Any]) -> Mapping[str, tuple[int, int]]:
+        ranges = gateway.get("rotating_ports", {}).items()
+        return MappingProxyType(
+            {scheme: _range(value, "rotating_ports") for scheme, value in ranges}
+        )
+
+    @staticmethod
+    def _pools(data: Mapping[str, Any]) -> Mapping[str, frozenset[str]]:
+        pools = data.get("pools", {}).items()
+        return MappingProxyType({name: frozenset(rule.get("forbid", ())) for name, rule in pools})
+
+    @staticmethod
     def _schema(data: Mapping[str, Any]) -> str:
         """Reject unknown tables, keys and schema versions; return the provider id."""
-        tables = {
-            "credential": {
-                "flags_in",
-                "username",
-                "password",
-                "flagged",
-                "first_separator",
-                "separator",
-                "rotation_suffix",
-                "reserved",
-            },
-            "account": {"required", "pattern", "strip_prefixes"},
-            "gateway": {
-                "host",
-                "hosts",
-                "default",
-                "host_override",
-                "ports",
-                "port_override",
-                "rotating_ports",
-            },
-            "session": {
-                "flag",
-                "mode",
-                "ports",
-                "generate",
-                "length",
-                "no_session_policy",
-                "slot_flag",
-                "ttl_flag",
-                "default_ttl_seconds",
-            },
-            "testing": {
-                "protocol",
-                "max_concurrency",
-                "rate_limit_statuses",
-                "rate_limit_connect",
-                "no_inventory_statuses",
-            },
-        }
-        for table, keys in tables.items():
+        for table, keys in TABLE_KEYS.items():
             if set(data.get(table, {})) - keys:
                 raise ValueError(f"Unknown keys in grammar table {table}")
-        allowed = {
-            "schema_version",
-            "id",
-            "product",
-            "version",
-            "docs",
-            "credential",
-            "account",
-            "gateway",
-            "flags",
-            "session",
-            "pools",
-            "extra_flags",
-            "testing",
-        }
-        if set(data) - allowed or data.get("schema_version") != 1:
+        if set(data) - GRAMMAR_KEYS or data.get("schema_version") != 1:
             raise ValueError("Unsupported provider grammar schema")
         provider = data["id"]
         if not isinstance(provider, str) or not re.fullmatch(r"[a-z0-9-]+", provider):

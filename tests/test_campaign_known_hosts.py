@@ -92,7 +92,7 @@ async def test_enable_and_disable_use_the_record_beside_the_inventory(checkout, 
 
 
 async def test_upload_spec_uses_the_record_beside_the_inventory(checkout, recorded):
-    from test_campaign_deploy import planned_root
+    from campaign_deploy_cases import planned_root
 
     deploy.save(
         recorded,

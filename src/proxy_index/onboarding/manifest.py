@@ -13,7 +13,7 @@ from pathlib import Path
 from .. import __version__
 from ..models import census_rule
 from ..providers import registry
-from ..regions import REGION_IDS, load_countries, load_regions
+from ..regions import REGION_IDS, RegionMap, load_countries, load_regions
 from ..targets import registry as targets
 from .files import atomic_json, digest, private_dir, read_json
 
@@ -126,6 +126,57 @@ def _run_settings(plan: PlanOptions) -> dict:
     return settings(effective | ({"answer_classes": True} if classes else {}))
 
 
+def _provider(provider_config: Path) -> str:
+    with provider_config.open("rb") as stream:
+        config = tomllib.load(stream)
+    provider = slug(config["provider"])
+    if config.get("schema_version") != 1 or provider not in registry.all():
+        raise ValueError("A registered provider adapter and version 1 configuration are required")
+    return provider
+
+
+def _region_order(plan: PlanOptions, mapping: RegionMap) -> list[str]:
+    order = (
+        plan.region_order if plan.region_order is not None else [r.slug for r in mapping.regions]
+    )
+    if (
+        not isinstance(order, list)
+        or len(order) != len(REGION_IDS)
+        or set(order) != set(REGION_IDS)
+    ):
+        raise ValueError("Region order must contain each region exactly once")
+    return order
+
+
+def _schedule(manifest: dict, plan: PlanOptions, begins: datetime, order: list[str]) -> None:
+    """Turn a version 1 (parallel) manifest into a sequential or ephemeral one."""
+    if plan.execution_mode == "sequential":
+        manifest.update(
+            schema_version=2,
+            execution_mode="sequential",
+            region_order=order,
+            ends_at=timestamp(begins + timedelta(days=len(order))),
+        )
+    elif plan.execution_mode == "ephemeral":
+        manifest.update(schema_version=3, execution_mode="ephemeral", grace_hours=plan.grace_hours)
+        if plan.slot_minutes != 60:
+            manifest["slot_minutes"] = plan.slot_minutes
+        slot = timedelta(minutes=slot_minutes(manifest))
+        manifest["rounds"] = [timestamp(begins + i * slot) for i in range(24)]
+        manifest["ends_at"] = timestamp(
+            begins + 24 * slot + timedelta(hours=ephemeral_grace(manifest))
+        )
+
+
+def _save(manifest: dict, output: Path) -> Path:
+    directory = output / manifest["provider"] / manifest["product"] / manifest["campaign_id"]
+    private_dir(directory.parent)
+    directory.mkdir(mode=0o700, exist_ok=False)
+    path = directory / "campaign.json"
+    atomic_json(path, manifest)
+    return path
+
+
 def create(
     provider_config: Path,
     product: str,
@@ -147,22 +198,10 @@ def create(
     begins = _start(start, now, plan)
     if plan.slot_minutes != 60 and plan.execution_mode != "ephemeral":
         raise ValueError("Only ephemeral campaigns may use another slot interval")
-    with provider_config.open("rb") as stream:
-        config = tomllib.load(stream)
-    provider = slug(config["provider"])
-    if config.get("schema_version") != 1 or provider not in registry.all():
-        raise ValueError("A registered provider adapter and version 1 configuration are required")
+    provider = _provider(provider_config)
     campaign_id = f"{begins.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}".lower()
     mapping = load_regions()
-    order = (
-        plan.region_order if plan.region_order is not None else [r.slug for r in mapping.regions]
-    )
-    if (
-        not isinstance(order, list)
-        or len(order) != len(REGION_IDS)
-        or set(order) != set(REGION_IDS)
-    ):
-        raise ValueError("Region order must contain each region exactly once")
+    order = _region_order(plan, mapping)
     effective = _run_settings(plan)
     version, basis = census_rule(plan.retry_http_469, effective.get("answer_classes", False))
     manifest = {
@@ -182,30 +221,10 @@ def create(
         "census_rule_version": version,
         "census_ratio_basis": basis,
     }
-    if plan.execution_mode == "sequential":
-        manifest.update(
-            schema_version=2,
-            execution_mode="sequential",
-            region_order=order,
-            ends_at=timestamp(begins + timedelta(days=len(order))),
-        )
-    elif plan.execution_mode == "ephemeral":
-        manifest.update(schema_version=3, execution_mode="ephemeral", grace_hours=plan.grace_hours)
-        if plan.slot_minutes != 60:
-            manifest["slot_minutes"] = plan.slot_minutes
-        slot = timedelta(minutes=slot_minutes(manifest))
-        manifest["rounds"] = [timestamp(begins + i * slot) for i in range(24)]
-        manifest["ends_at"] = timestamp(
-            begins + 24 * slot + timedelta(hours=ephemeral_grace(manifest))
-        )
+    _schedule(manifest, plan, begins, order)
     _set_due_countries(manifest, plan.due_countries)
     validate(manifest)
-    directory = output / provider / product / campaign_id
-    private_dir(directory.parent)
-    directory.mkdir(mode=0o700, exist_ok=False)
-    path = directory / "campaign.json"
-    atomic_json(path, manifest)
-    return path
+    return _save(manifest, output)
 
 
 def load(path: Path) -> dict:

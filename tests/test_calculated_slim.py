@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from census_pulse_cases import scenario
 from test_calculated import POLICY, lenient_policy, payload_mismatches
-from test_census_pulse import scenario
 
 from proxy_index.calculated import store
 from proxy_index.calculated.aggregate import BREAKDOWNS

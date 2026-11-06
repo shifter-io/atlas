@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_census_pulse import batch, batch_run, product
+from census_pulse_cases import batch, batch_run, product
 from test_daily import chunk, observation
 from test_orchestrator import prepare, query
 from test_storage import measurement

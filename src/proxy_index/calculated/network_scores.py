@@ -76,24 +76,31 @@ def overlap(conn, networks, previous, as_of):
         if kept is not None:
             found |= {(e["id"], label): kept[e["id"]] for e, _ in members}
             continue
-        kinds = {kind: n for n, kind in enumerate(sorted({e["kind"] for e, _ in members}))}
-        columns = [[] for _ in range(5)]
-        for slot, (entry, w) in enumerate(members):
-            since, until = w["period"]["start"], w["period"]["end"]
-            for run_key in w["_runs"]:
-                values = (slot, kinds[entry["kind"]], run_key, since, until)
-                for column, value in zip(columns, values, strict=True):
-                    column.append(value)
-        own, pairs = {}, defaultdict(dict)
-        if columns[0]:
-            for row in conn.cursor(row_factory=dict_row).execute(OVERLAP, columns):
-                if row["peer"] is None:
-                    own[row["slot"]] = (row["ips"], row["shared"])
-                else:
-                    pairs[row["slot"]][row["peer"]] = row["ips"]
+        own, pairs = _counted(conn, members)
         for slot, (entry, _) in enumerate(members):
             found[entry["id"], label] = shares(slot, members, own, pairs[slot]) | {"as_of": as_of}
     return found
+
+
+def _counted(conn, members):
+    """OVERLAP's counts of one window's members ((network, window) pairs, by slot): {slot: (IPs,
+    shared)} and {slot: {peer slot: shared IPs}}."""
+    kinds = {kind: n for n, kind in enumerate(sorted({e["kind"] for e, _ in members}))}
+    rows = [
+        (slot, kinds[entry["kind"]], run_key, w["period"]["start"], w["period"]["end"])
+        for slot, (entry, w) in enumerate(members)
+        for run_key in w["_runs"]
+    ]
+    own, pairs = {}, defaultdict(dict)
+    if not rows:
+        return own, pairs
+    columns = [[row[n] for row in rows] for n in range(5)]
+    for row in conn.cursor(row_factory=dict_row).execute(OVERLAP, columns):
+        if row["peer"] is None:
+            own[row["slot"]] = (row["ips"], row["shared"])
+        else:
+            pairs[row["slot"]][row["peer"]] = row["ips"]
+    return own, pairs
 
 
 def carried(networks, previous, as_of, label):

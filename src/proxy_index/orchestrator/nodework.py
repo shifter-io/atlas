@@ -267,9 +267,21 @@ async def reap(db: Database, now: datetime | None = None) -> dict[str, Any]:
     """Fail runs that never started or went silent, then close what that completes."""
     now = _now(now)
     await db.ensure_partition("test_events", now)
+    candidates, cutoffs = await _reap_candidates(db, now)
+    failed: Counter[str] = Counter()
+    closed = 0
+    for candidate in candidates:
+        if await _reap_batch(db, candidate["batch_id"], now, cutoffs, failed):
+            closed += 1
+    return {"failed": dict(failed), "closed": closed}
+
+
+async def _reap_candidates(db: Database, now: datetime) -> tuple[list[dict], dict[str, datetime]]:
+    """Open batches with a run to reap or none left to wait for, and the reaper's cutoffs."""
     async with db.connection() as conn:
         grace = timedelta(seconds=float(await setting(conn, "batch.start_grace_seconds")))
         stale = timedelta(seconds=float(await setting(conn, "batch.stale_seconds")))
+        cutoffs = {"late": now - grace, "stale": now - stale, "ingest": now - UPLOAD_STALE * stale}
         candidates = await _rows(
             conn,
             "SELECT DISTINCT b.batch_id FROM test_batches b LEFT JOIN batch_runs br "
@@ -279,54 +291,60 @@ async def reap(db: Database, now: datetime | None = None) -> dict[str, Any]:
             " OR (br.started_at IS NOT NULL AND br.status='running'"
             "  AND coalesce(br.last_progress_at,br.started_at)<%(stale)s)"
             " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s)) ORDER BY b.batch_id",
-            {"late": now - grace, "stale": now - stale, "ingest": now - UPLOAD_STALE * stale},
+            cutoffs,
         )
-    failed: Counter[str] = Counter()
-    closed = 0
-    for candidate in candidates:
-        batch_id = candidate["batch_id"]
-        async with db.transaction() as conn:
-            batch = await _row(
-                conn,
-                "SELECT status FROM test_batches WHERE batch_id=%s FOR UPDATE",
-                (batch_id,),
-            )
-            if batch["status"] not in OPEN_BATCHES:
-                continue
-            reaped = await _rows(
-                conn,
-                "UPDATE batch_runs br SET status='failed',finished_at=%(now)s,"
-                "stop_reason=coalesce(stop_reason,'error'),"
-                "error=CASE WHEN br.started_at IS NULL THEN 'not_started' ELSE 'stale' END "
-                "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.batch_id=%(batch)s AND ("
-                " (br.started_at IS NULL AND br.status IN ('queued','running')"
-                "  AND b.start_at<%(late)s)"
-                " OR (br.started_at IS NOT NULL AND br.status='running'"
-                "  AND coalesce(br.last_progress_at,br.started_at)<%(stale)s)"
-                " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s)) "
-                "RETURNING br.product_id,br.node_id,br.error",
-                {
-                    "now": now,
-                    "batch": batch_id,
-                    "late": now - grace,
-                    "stale": now - stale,
-                    "ingest": now - UPLOAD_STALE * stale,
-                },
-            )
-            for run in reaped:
-                failed[run["error"]] += 1
-                await run_finished(conn, batch_id, run["product_id"], now)
-                await raise_alert(
-                    conn,
-                    "run_" + run["error"],
-                    f"node {run['node_id']} left a run {run['error'].replace('_', ' ')}",
-                    severity="minor",
-                    dedupe_key=f"run_{run['error']}:{run['node_id']}",
-                    data={"batch_id": batch_id, "node_id": run["node_id"]},
-                )
-            if await close_batch(conn, batch_id, now) not in OPEN_BATCHES:
-                closed += 1
-    return {"failed": dict(failed), "closed": closed}
+    return candidates, cutoffs
+
+
+async def _reap_batch(
+    db: Database,
+    batch_id: int,
+    now: datetime,
+    cutoffs: dict[str, datetime],
+    failed: Counter[str],
+) -> bool:
+    """Fail one batch's late and silent runs under its lock; whether the batch closed."""
+    async with db.transaction() as conn:
+        batch = await _row(
+            conn,
+            "SELECT status FROM test_batches WHERE batch_id=%s FOR UPDATE",
+            (batch_id,),
+        )
+        if batch["status"] not in OPEN_BATCHES:
+            return False
+        reaped = await _rows(
+            conn,
+            "UPDATE batch_runs br SET status='failed',finished_at=%(now)s,"
+            "stop_reason=coalesce(stop_reason,'error'),"
+            "error=CASE WHEN br.started_at IS NULL THEN 'not_started' ELSE 'stale' END "
+            "FROM test_batches b WHERE b.batch_id=br.batch_id AND br.batch_id=%(batch)s AND ("
+            " (br.started_at IS NULL AND br.status IN ('queued','running')"
+            "  AND b.start_at<%(late)s)"
+            " OR (br.started_at IS NOT NULL AND br.status='running'"
+            "  AND coalesce(br.last_progress_at,br.started_at)<%(stale)s)"
+            " OR (br.status='uploading' AND br.last_progress_at<%(ingest)s)) "
+            "RETURNING br.product_id,br.node_id,br.error",
+            {"now": now, "batch": batch_id, **cutoffs},
+        )
+        for run in reaped:
+            failed[run["error"]] += 1
+            await _reaped_run(conn, batch_id, run, now)
+        return await close_batch(conn, batch_id, now) not in OPEN_BATCHES
+
+
+async def _reaped_run(
+    conn: psycopg.AsyncConnection, batch_id: int, run: dict, now: datetime
+) -> None:
+    """census_finished and a minor alert for a run the reaper failed."""
+    await run_finished(conn, batch_id, run["product_id"], now)
+    await raise_alert(
+        conn,
+        "run_" + run["error"],
+        f"node {run['node_id']} left a run {run['error'].replace('_', ' ')}",
+        severity="minor",
+        dedupe_key=f"run_{run['error']}:{run['node_id']}",
+        data={"batch_id": batch_id, "node_id": run["node_id"]},
+    )
 
 
 async def mark_offline(db: Database, now: datetime | None = None) -> dict[str, Any]:
