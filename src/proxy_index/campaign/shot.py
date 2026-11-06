@@ -28,6 +28,7 @@ from ..onboarding.scheduler import Clock
 from ..providers.grammar import load_grammar
 from . import ops_api, scope
 from .contracts import (
+    PRODUCTION,
     SIZE_RE,
     WORKER_TAG,
     CampaignSpec,
@@ -263,6 +264,7 @@ class Shot:
         problems = [
             (repeated, "regions or networks repeated"),
             (bool(unknown), "regions not planned"),
+            (self.spec.environment != PRODUCTION, "a shot runs on production's workers only"),
             (not set(self.networks) <= set(self.spec.networks), "networks not planned"),
             (any(r not in REGION_COUNTRY for r in self.regions), "region without a country"),
             (

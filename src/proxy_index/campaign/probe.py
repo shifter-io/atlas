@@ -29,6 +29,7 @@ from ..providers import load_provider
 from ..providers.grammar import MAX_CONCURRENCY, load_grammar
 from . import ops_api, scope
 from .contracts import (
+    PRODUCTION,
     WORKER_ROOT,
     WORKER_SECRETS,
     WORKER_TAG,
@@ -451,6 +452,7 @@ class Probe:
             (not planned, "networks not planned"),
             (not 1 <= i.floor <= i.start <= MAX_CONCURRENCY, "start or floor"),
             (i.step < 1 or i.requests < 1, "step or requests"),
+            (self.spec.environment != PRODUCTION, "a probe runs on production's workers only"),
         ]
         bad = [text for failed, text in problems if failed]
         for network in self.networks if planned else ():
