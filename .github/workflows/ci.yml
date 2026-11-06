@@ -252,7 +252,8 @@ jobs:
           uv run --no-editable python - "$EV/diff-cover.json" <<'EOF'
           import json, sys
           critical = tuple(f"campaign/{name}.py" for name in (
-              "scope", "do_api", "launch", "harvest", "tick", "collector", "deploy", "ops_api"))
+              "scope", "do_api", "launch", "harvest", "tick", "collector", "deploy", "ops_api",
+              "teardown"))
           stats = json.load(open(sys.argv[1]))["src_stats"]
           low = [f for f in stats if f.endswith(critical) and stats[f]["percent_covered"] < 90]
           print("critical files under 90%:", low)

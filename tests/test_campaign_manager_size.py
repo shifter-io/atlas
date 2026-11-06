@@ -156,7 +156,7 @@ def test_the_teardown_cli_passes_the_keep_flag(monkeypatch, tmp_path, flags, kee
         async def __aexit__(self, *exc):
             return None
 
-    monkeypatch.setattr(deploy, "teardown", teardown)
+    monkeypatch.setattr("proxy_index.campaign.teardown.teardown", teardown)
     monkeypatch.setattr(campaign_cli, "_cloud", NoCloud)
     args = parse(
         [

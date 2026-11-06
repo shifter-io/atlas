@@ -327,7 +327,7 @@ def _plan(args) -> int:
 
 
 async def _manager_step(args) -> dict:
-    from . import browser_hosts, deploy, manager_orch
+    from . import browser_hosts, deploy, manager_orch, teardown
 
     if args.manager_action in manager_orch.ACTIONS:  # MANAGER-ORCH-1
         return await manager_orch.run(args, _cloud)
@@ -349,7 +349,7 @@ async def _manager_step(args) -> dict:
         raise deploy.DeployError("no manager is recorded")
     async with _cloud(account) as cloud:
         if args.manager_action == "teardown":
-            return await deploy.teardown(
+            return await teardown.teardown(
                 cloud,
                 args.inventory,
                 args.after_collect,
