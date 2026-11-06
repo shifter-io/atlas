@@ -270,4 +270,3 @@ def timeline(buckets: list[dict[str, Any]]) -> str:
         f'<text x="{width}" y="{height - 4}" text-anchor="end">{last:%H:%M} UTC · peak '
         f"{top:,} requests</text></svg>"
     )
-
