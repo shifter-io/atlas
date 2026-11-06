@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 
 from . import deploy, manager_daily, ops_api
-from .contracts import PULSE_TAG
 from .do_api import ApiError, DigitalOcean
 from .image import Shell, run_shell
 from .manager_rules import BROWSER_PORT, NODE_API_PORT, manager_rules
@@ -167,9 +166,7 @@ async def _firewall(cloud: DigitalOcean, inventory: dict[str, Any], rules: dict)
         )
     except ApiError as error:
         if error.status == 422:
-            raise deploy.DeployError(
-                f"DigitalOcean refused the firewall rules (does the tag {PULSE_TAG} exist?)"
-            ) from None
+            raise deploy.DeployError(f"DigitalOcean refused the firewall rules: {error}") from None
         raise
 
 

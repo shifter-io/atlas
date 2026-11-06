@@ -170,8 +170,6 @@ storage = [
     "scripts/migrate_database.py",
     "scripts/rebuild_database.py",
     "scripts/rebuild_verification.py",
-    "scripts/audit_storage.py",
-    "scripts/report_storage_*.py",
 ]
 # the measurement core: runner, transports, targets, outcomes, detection, statistics, sinks,
 # regions and reports, their configs, local run scripts and tests

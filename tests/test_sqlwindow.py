@@ -328,9 +328,9 @@ async def test_window_inputs_match_a_whole_calculation(scenario, database, monke
     seen = {}
     original = calculator.build
 
-    def build(runs, *args, **kwargs):
-        seen["runs"] = runs
-        seen["payload"] = original(runs, *args, **kwargs)
+    def build(inputs, *args, **kwargs):
+        seen["runs"] = inputs.runs
+        seen["payload"] = original(inputs, *args, **kwargs)
         return seen["payload"]
 
     monkeypatch.setattr(calculator, "build", build)
