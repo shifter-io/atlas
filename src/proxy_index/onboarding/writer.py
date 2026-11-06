@@ -92,36 +92,7 @@ class ObservationWriter:
         self.check()
 
     def _write(self) -> None:
-        raw = zipped = None
-        partial = None
-        count = 0
-        opened = 0.0
-
-        def commit() -> None:
-            nonlocal raw, zipped, partial, count
-            if raw is None:
-                return
-            zipped.close()
-            raw.flush()
-            os.fsync(raw.fileno())
-            raw.close()
-            destination = partial.with_suffix("")
-            partial.replace(destination)
-            sync_dir(self.directory)
-            atomic_json(
-                destination.with_suffix(".meta.json"),
-                {
-                    "schema_version": 1,
-                    "file": destination.name,
-                    "rows": count,
-                    "sha256": digest(destination),
-                },
-            )
-            self.chunks += 1
-            self.rows += count
-            raw = zipped = partial = None
-            count = 0
-
+        chunk = _Chunk()
         try:
             while True:
                 if self._closing.is_set() and self.queue.empty():
@@ -131,41 +102,88 @@ class ObservationWriter:
                 except queue.Empty:
                     item = None
                 if item is not None:
-                    if raw is None:
-                        partial = self.directory / (
-                            f"observations-{self.chunks + 1:06d}.jsonl.gz.partial"
-                        )
-                        fd = os.open(partial, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                        raw = os.fdopen(fd, "wb")
-                        zipped = gzip.GzipFile(
-                            filename="", fileobj=raw, mode="wb", mtime=0, compresslevel=1
-                        )
-                        opened = time.monotonic()
-                    ip, observed = item
-                    row = {"ip": ip, **self.context, "observed_at": timestamp(observed)}
-                    zipped.write((json.dumps(row, separators=(",", ":")) + "\n").encode())
-                    count += 1
-                if raw is not None and (
-                    count >= self.chunk_rows or time.monotonic() - opened >= self.chunk_seconds
-                ):
-                    commit()
-            commit()
+                    self._record(chunk, item)
+                if chunk.due(self.chunk_rows, self.chunk_seconds):
+                    self._commit(chunk)
+            self._commit(chunk)
         except BaseException as exc:
             self.error = exc
         finally:
             # Failed/uncommitted chunks intentionally remain visibly partial.
-            if zipped is not None:
+            if chunk.zipped is not None:
                 try:
-                    zipped.close()
+                    chunk.zipped.close()
                 except OSError:
                     pass
             try:
-                if raw is not None:
-                    raw.close()
+                if chunk.raw is not None:
+                    chunk.raw.close()
             except OSError:
                 pass
             finally:
                 self._done.set()
+
+    def _record(self, chunk: _Chunk, item: tuple[str, float]) -> None:
+        if chunk.raw is None:
+            chunk.open(self.directory / f"observations-{self.chunks + 1:06d}.jsonl.gz.partial")
+        ip, observed = item
+        chunk.write({"ip": ip, **self.context, "observed_at": timestamp(observed)})
+
+    def _commit(self, chunk: _Chunk) -> None:
+        if chunk.raw is None:
+            return
+        self.rows += chunk.commit(self.directory)
+        self.chunks += 1
+
+
+class _Chunk:
+    """The writer's open ``.partial`` gzip chunk, renamed and given its sidecar on commit."""
+
+    def __init__(self) -> None:
+        self.raw = self.zipped = self.partial = None
+        self.count = 0
+        self.opened = 0.0
+
+    def open(self, partial: Path) -> None:
+        self.partial = partial
+        fd = os.open(partial, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        self.raw = os.fdopen(fd, "wb")
+        self.zipped = gzip.GzipFile(
+            filename="", fileobj=self.raw, mode="wb", mtime=0, compresslevel=1
+        )
+        self.opened = time.monotonic()
+
+    def write(self, row: dict) -> None:
+        self.zipped.write((json.dumps(row, separators=(",", ":")) + "\n").encode())
+        self.count += 1
+
+    def due(self, rows: int, seconds: float) -> bool:
+        return self.raw is not None and (
+            self.count >= rows or time.monotonic() - self.opened >= seconds
+        )
+
+    def commit(self, directory: Path) -> int:
+        """Finalize the open chunk and its ``.meta.json`` sidecar; return its row count."""
+        self.zipped.close()
+        self.raw.flush()
+        os.fsync(self.raw.fileno())
+        self.raw.close()
+        destination = self.partial.with_suffix("")
+        self.partial.replace(destination)
+        sync_dir(directory)
+        atomic_json(
+            destination.with_suffix(".meta.json"),
+            {
+                "schema_version": 1,
+                "file": destination.name,
+                "rows": self.count,
+                "sha256": digest(destination),
+            },
+        )
+        count = self.count
+        self.raw = self.zipped = self.partial = None
+        self.count = 0
+        return count
 
 
 class SummarySink:
