@@ -4,7 +4,8 @@ Order: each xdist worker reorders its collection the same way, so that worksteal
 `--dist`) first even split (`spread`) hands every worker its share of the slow tests in
 `tests/durations.json` (seconds per node id, from `scripts/ci/timeline.py --durations`),
 each worker's longest first. The tests themselves do not change; a test missing from the
-file counts as fast.
+file counts as fast. Without the file (today: added once the slowest tests are split, so
+starting them together cannot push one over CI-TIME-1's 90 s) the collection order stays.
 
 Timeline: each xdist worker (or a run without xdist) appends to
 `$EV/timeline-<worker>.jsonl` (the current directory without EV): the setup, call and
