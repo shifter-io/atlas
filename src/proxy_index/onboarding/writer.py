@@ -106,8 +106,10 @@ class ObservationWriter:
                 if chunk.due(self.chunk_rows, self.chunk_seconds):
                     self._commit(chunk)
             self._commit(chunk)
-        except BaseException as exc:
+        except BaseException as exc:  # boundary: the thread's failure reaches the loop by check()
             self.error = exc
+            if not isinstance(exc, Exception):
+                raise  # an interrupt or an exit still ends the thread
         finally:
             # Failed/uncommitted chunks intentionally remain visibly partial.
             if chunk.zipped is not None:
