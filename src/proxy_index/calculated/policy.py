@@ -105,51 +105,65 @@ def merge(base, overrides):
     return result
 
 
-def validate(config):
-    def weights(values, keys):
-        if (
-            set(values) != set(keys)
-            or any(
-                type(v) not in (int, float) or not math.isfinite(v) or v < 0
-                for v in values.values()
-            )
-            or sum(values.values()) <= 0
-        ):
-            raise ValueError("Weights must cover known components and have a positive total")
+KNOWN = {
+    "name",
+    "status",
+    "windows",
+    "refresh_seconds",
+    "required_targets",
+    "minimum_requests",
+    "minimum_coverage",
+    "score_valid_hours",
+    "sample_limit",
+    "weights",
+    "target_weights",
+    "benchmark_weights",
+    "peer",
+    "grades",
+    "profiles",
+    "products",
+    "targets",
+    "kind",
+    "display_name",
+    "uptime",
+    "slots",
+    "hosting_usage_types",
+    "latency_target",
+    "payload",
+    "target_groups",
+}
 
-    known = {
-        "name",
-        "status",
-        "windows",
-        "refresh_seconds",
-        "required_targets",
-        "minimum_requests",
-        "minimum_coverage",
-        "score_valid_hours",
-        "sample_limit",
-        "weights",
-        "target_weights",
-        "benchmark_weights",
-        "peer",
-        "grades",
-        "profiles",
-        "products",
-        "targets",
-        "kind",
-        "display_name",
-        "uptime",
-        "slots",
-        "hosting_usage_types",
-        "latency_target",
-        "payload",
-        "target_groups",
-    }
-    if set(config) - known:
+
+def _weights(values, keys):
+    if (
+        set(values) != set(keys)
+        or any(
+            type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in values.values()
+        )
+        or sum(values.values()) <= 0
+    ):
+        raise ValueError("Weights must cover known components and have a positive total")
+
+
+def _grades(grades):
+    if set(grades) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
+        raise ValueError("Invalid grade labels")
+    thresholds = [grades[g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
+    if (
+        not 100 >= thresholds[0]
+        or thresholds[-1] != 0
+        or any(a <= b for a, b in zip(thresholds, thresholds[1:], strict=False))
+    ):
+        raise ValueError("Invalid grade thresholds")
+
+
+def validate(config):
+    if set(config) - KNOWN:
         raise ValueError("Unknown methodology setting")
     if "balanced" not in config.get("profiles", {}):
         raise ValueError("The balanced profile is required")
-    weights(config["weights"], KEYS)
-    weights(config["target_weights"], ("reliability", "speed"))
+    _weights(config["weights"], KEYS)
+    _weights(config["target_weights"], ("reliability", "speed"))
     for name in ("minimum_requests", "score_valid_hours", "refresh_seconds", "sample_limit"):
         if type(config[name]) is not int or config[name] <= 0:
             raise ValueError(f"Invalid {name}")
@@ -161,23 +175,15 @@ def validate(config):
         config["required_targets"]
     ):
         raise ValueError("Required targets must be distinct and nonempty")
-    weights(config["benchmark_weights"], config["required_targets"])
+    _weights(config["benchmark_weights"], config["required_targets"])
     if set(config["peer"]) != {"diversity"}:
         raise ValueError("Unknown peer setting")
-    weights(config["peer"]["diversity"], DIMENSIONS)
+    _weights(config["peer"]["diversity"], DIMENSIONS)
     if abs(sum(config["peer"]["diversity"].values()) - 1) > 1e-9:
         raise ValueError("Diversity weights must sum to one")
-    if set(config["grades"]) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
-        raise ValueError("Invalid grade labels")
-    grades = [config["grades"][g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
-    if (
-        not 100 >= grades[0]
-        or grades[-1] != 0
-        or any(a <= b for a, b in zip(grades, grades[1:], strict=False))
-    ):
-        raise ValueError("Invalid grade thresholds")
+    _grades(config["grades"])
     for values in config.get("profiles", {}).values():
-        weights(values, KEYS)
+        _weights(values, KEYS)
     uptime = config.get("uptime", {})
     if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
         raise ValueError("Invalid uptime settings")
