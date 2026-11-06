@@ -13,6 +13,71 @@ from .manifest import load, moment, regional_window, timestamp
 from .scheduler import validate_state
 
 
+def _server_alerts(region: str, server: dict, state: dict, now: float, end: float) -> list:
+    alerts = []
+    if state["status"] in ("failed", "stopped"):
+        alerts.append({"region": region, "issue": "scheduler_" + state["status"]})
+    if now < end and now - moment(state["updated_at"]).timestamp() > 30:
+        alerts.append({"region": region, "issue": "stale_heartbeat"})
+    if now < end and server.get("service", {}).get("MainPID", "0") == "0":
+        alerts.append({"region": region, "issue": "scheduler_not_running"})
+    if abs(server.get("server_time", now) - now) > 10:
+        alerts.append({"region": region, "issue": "clock_offset"})
+    if server.get("disk_free_gb", 100) < 5:
+        alerts.append({"region": region, "issue": "low_disk"})
+    if server.get("memory_used_pct", 0) > 90:
+        alerts.append({"region": region, "issue": "high_memory"})
+    return alerts
+
+
+def _job_alerts(region: str, state: dict, complete: int, now: float, end: float) -> list:
+    alerts = []
+    jobs = state["jobs"]
+    bad = [
+        j
+        for j in jobs
+        if j["status"] in ("failed", "interrupted", "deadline", "not_started_deadline")
+    ]
+    if bad:
+        alerts.append({"region": region, "issue": "incomplete_jobs", "count": len(bad)})
+    late = [
+        j
+        for j in jobs
+        if j["status"] == "pending" and moment(j["scheduled_at"]).timestamp() + 3600 < now < end
+    ]
+    if late:
+        alerts.append({"region": region, "issue": "round_backlog", "count": len(late)})
+    if now > end + 30 and (state["status"] not in ("closed", "completed") or complete != len(jobs)):
+        alerts.append({"region": region, "issue": "region_not_complete_at_deadline"})
+    return alerts
+
+
+def _traffic_alerts(region: str, progress: dict, active) -> list:
+    alerts = []
+    attempts = progress.get("requests", 0)
+    rate = progress.get("http_469_responses", 0)
+    if active and rate:
+        alerts.append(
+            {
+                "region": region,
+                "issue": "http_469_observed",
+                "count": rate,
+                "completed_attempts": attempts,
+            }
+        )
+    other = attempts - rate - progress.get("successes", 0)
+    if active and attempts - rate >= 1000 and other / (attempts - rate) > 0.10:
+        alerts.append(
+            {
+                "region": region,
+                "issue": "high_other_error_rate",
+                "other_errors": other,
+                "non_469_attempts": attempts - rate,
+            }
+        )
+    return alerts
+
+
 def audit(manifest: dict, snapshot: dict, now: float) -> dict:
     alerts = []
     regions = []
@@ -31,18 +96,7 @@ def audit(manifest: dict, snapshot: dict, now: float) -> dict:
         except (ValueError, KeyError):
             alerts.append({"region": region, "issue": "campaign_checkpoint_mismatch"})
             continue
-        if state["status"] in ("failed", "stopped"):
-            alerts.append({"region": region, "issue": "scheduler_" + state["status"]})
-        if now < end and now - moment(state["updated_at"]).timestamp() > 30:
-            alerts.append({"region": region, "issue": "stale_heartbeat"})
-        if now < end and server.get("service", {}).get("MainPID", "0") == "0":
-            alerts.append({"region": region, "issue": "scheduler_not_running"})
-        if abs(server.get("server_time", now) - now) > 10:
-            alerts.append({"region": region, "issue": "clock_offset"})
-        if server.get("disk_free_gb", 100) < 5:
-            alerts.append({"region": region, "issue": "low_disk"})
-        if server.get("memory_used_pct", 0) > 90:
-            alerts.append({"region": region, "issue": "high_memory"})
+        alerts += _server_alerts(region, server, state, now, end)
         active = state.get("active")
         workers = [p for p in server.get("processes", []) if p.get("role") == "http_worker"]
         if active or workers:
@@ -50,47 +104,10 @@ def audit(manifest: dict, snapshot: dict, now: float) -> dict:
             if not start <= now < end + 5:
                 alerts.append({"region": region, "issue": "traffic_outside_regional_window"})
         jobs = state["jobs"]
-        bad = [
-            j
-            for j in jobs
-            if j["status"] in ("failed", "interrupted", "deadline", "not_started_deadline")
-        ]
-        if bad:
-            alerts.append({"region": region, "issue": "incomplete_jobs", "count": len(bad)})
-        late = [
-            j
-            for j in jobs
-            if j["status"] == "pending" and moment(j["scheduled_at"]).timestamp() + 3600 < now < end
-        ]
-        if late:
-            alerts.append({"region": region, "issue": "round_backlog", "count": len(late)})
         complete = sum(j["status"] in ("completed", "no_list") for j in jobs)
-        if now > end + 30 and (
-            state["status"] not in ("closed", "completed") or complete != len(jobs)
-        ):
-            alerts.append({"region": region, "issue": "region_not_complete_at_deadline"})
+        alerts += _job_alerts(region, state, complete, now, end)
         progress = state.get("progress") or {}
-        attempts = progress.get("requests", 0)
-        rate = progress.get("http_469_responses", 0)
-        if active and rate:
-            alerts.append(
-                {
-                    "region": region,
-                    "issue": "http_469_observed",
-                    "count": rate,
-                    "completed_attempts": attempts,
-                }
-            )
-        other = attempts - rate - progress.get("successes", 0)
-        if active and attempts - rate >= 1000 and other / (attempts - rate) > 0.10:
-            alerts.append(
-                {
-                    "region": region,
-                    "issue": "high_other_error_rate",
-                    "other_errors": other,
-                    "non_469_attempts": attempts - rate,
-                }
-            )
+        alerts += _traffic_alerts(region, progress, active)
         regions.append(
             {
                 "region": region,
