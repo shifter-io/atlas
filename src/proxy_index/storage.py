@@ -15,6 +15,7 @@ from . import storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
 from .partitions import partition as partition
 from .stats import Histogram
+from .storage_ingest import ADAPTER as ADAPTER
 from .storage_ingest import _profile, column
 from .storage_migrate import MIGRATION_CHECKS as MIGRATION_CHECKS
 from .storage_migrate import V6_CHECKS as V6_CHECKS
