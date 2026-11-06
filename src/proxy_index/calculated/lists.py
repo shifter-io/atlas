@@ -239,13 +239,13 @@ def _results(conn, ids, p, w, reason_ids):
     """Store window w's result rows: its own on its list (ids: build id, list id) with its scores
     and series, then one per target (no list) with its balanced score."""
     build_id, list_id = ids
-    for target, m, scores in [
-        ("", w["metrics"], w["scores"]),
-        *[(t, v["metrics"], {"balanced": v["score"]}) for t, v in w["targets"].items()],
+    for target, scores in [
+        ("", w["scores"]),
+        *[(t, {"balanced": v["score"]}) for t, v in w["targets"].items()],
     ]:
-        result = _window(conn, (build_id, None if target else list_id), p, w, target, m)
+        result = _window(conn, (build_id, None if target else list_id), p, w, target)
         for profile, s in scores.items():
-            _score(conn, result, profile, s, not target, reason_ids)
+            _score(conn, (result, profile), s, not target, reason_ids)
         if not target:
             _series(conn, result, w["series"])
 
@@ -336,8 +336,9 @@ def copy_rows(conn, rows):
             )
 
 
-def _window(conn, ids, p, w, target, m):
+def _window(conn, ids, p, w, target):
     """Insert one window row (ids: its build and list) and return its result_id."""
+    m = w["targets"][target]["metrics"] if target else w["metrics"]
     ps = w["pool"] if not target else {}
     pool = ("unique_ips", "new_ips", "recurring_share", "countries", "regions", "cities", "asns")
     return (
@@ -378,7 +379,9 @@ def _window(conn, ids, p, w, target, m):
     )
 
 
-def _score(conn, result, profile, s, product, reason_ids):
+def _score(conn, key, s, product, reason_ids):
+    """Insert score s with its components and reasons (key: its result_id and profile)."""
+    result, profile = key
     explicit = split_reasons(s, product)
     conn.execute(
         "INSERT INTO calculated_scores(result_id,profile,score,grade,rank,"
