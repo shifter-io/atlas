@@ -4,7 +4,7 @@ enrichment (`enrichment`). test_storage.py holds ingest and history, test_storag
 schema versions and migrations, test_storage_columns.py typed columns and cached metrics.
 
 Most test modules load the fixtures with `pytest_plugins = ["test_storage"]`, which loads this
-module in turn; test_storage keeps `measurement`, `enrichment` and `ALL_ATTRIBUTES` importable.
+module in turn; test_storage keeps the helpers below importable.
 The test modules import its names before pytest loads it, so pytest cannot rewrite it
 (PYTEST_DONT_REWRITE).
 """

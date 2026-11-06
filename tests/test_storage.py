@@ -7,15 +7,22 @@ from dataclasses import replace
 
 import pytest
 from helpers import FakeTransport
-from storage_cases import ALL_ATTRIBUTES, enrichment, measurement
+from storage_cases import (
+    ALL_ATTRIBUTES,
+    admin_credentials,
+    credentials_file,
+    enrichment,
+    measurement,
+)
 
 from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.cli import main
 from proxy_index.storage import ENRICHMENT_FIELDS, connect, ingest, read_summary, status
 
 # Other test modules load the storage fixtures through this module (`pytest_plugins =
-# ["test_storage"]`) and import `measurement`, `enrichment` and `ALL_ATTRIBUTES` from it.
+# ["test_storage"]`) and import storage_cases' helpers from it.
 pytest_plugins = ["storage_cases"]
+__all__ = ["ALL_ATTRIBUTES", "admin_credentials", "credentials_file", "enrichment", "measurement"]
 
 
 async def test_import_history_cache_enrichment_and_replay(database, tmp_path):
