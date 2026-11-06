@@ -310,6 +310,30 @@ async def test_worker_errors_reach_the_coordinator_without_their_message():
     gone(pids)
 
 
+async def test_failed_worker_start_cleans_up():
+    config = RunConfig(
+        "generic_http", ProxyConfig("http", "localhost", 1), concurrency=2, processes=2
+    )
+    target = registry.get("generic_http")
+    # A spawned worker needs a picklable factory; a lambda fails before any child runs.
+    transport = ProcessTransport(config, target, factory=lambda config: None)
+    with pytest.raises((pickle.PicklingError, AttributeError)):
+        async with transport:
+            pass
+    assert transport.children == [] and transport.pids == []
+
+
+async def test_answers_without_a_pending_request_are_ignored():
+    config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1), processes=1)
+    transport = ProcessTransport(config, registry.get("generic_http"))
+    done = asyncio.get_running_loop().create_future()
+    done.cancel()
+    transport.pending[1] = done
+    transport._settle(("result", 0, Outcome(latency_ms=1.0), 0.0))
+    transport._settle(("error", 1))
+    assert transport.pending == {}
+
+
 def test_process_configuration_is_bounded_and_validated():
     proxy = ProxyConfig("http", "localhost", 1)
     assert process_count(RunConfig("generic_http", proxy, concurrency=7, processes=4)) == 4
