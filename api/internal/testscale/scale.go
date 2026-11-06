@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -80,34 +81,20 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		return nil, err
 	}
 	template := doc["products"].([]any)[0].(map[string]any)
-	products := []any{}
+	// Network n's group for requested country c is products[n*Countries+c].
+	products := make([]any, shape.Networks*shape.Countries)
+	windows := make([]map[store.PlaceWindow]*store.List, len(products))
+	err = each(len(products), func(i int) error {
+		var err error
+		products[i], windows[i], err = group(template, shape, i/shape.Countries, i%shape.Countries)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
 	places := map[store.PlaceWindow]*store.List{}
-	for n := range shape.Networks {
-		for c := range shape.Countries {
-			id := n*1000 + c + 1
-			cohort := fmt.Sprintf("daily-%03d", c)
-			p, err := clone(template)
-			if err != nil {
-				return nil, err
-			}
-			p["id"], p["product_id"], p["cohort"] = fmt.Sprintf("%d:%s", id, cohort), id, cohort
-			p["provider"], p["name"] = fmt.Sprintf("net%02d", n), fmt.Sprintf("Net %02d residential", n)
-			p["criteria"] = map[string]any{"kind": "residential", "country": countryCode(c)}
-			// A daily test's group: no census or pulse (uptime, outages), no
-			// price evidence (QA-1 had none) and no load benchmark.
-			for _, k := range []string{"census", "outages", "pricing"} {
-				delete(p, k)
-			}
-			for label, w := range p["windows"].(map[string]any) {
-				hours := map[string]int64{"24h": 24, "7d": 168, "30d": 720}[label]
-				for _, k := range []string{"uptime", "benchmark", "census_overlap", "evidence", "evidence_sources", "ip_samples"} {
-					delete(w.(map[string]any), k)
-				}
-				fill(w.(map[string]any), shape, n, c)
-				places[store.PlaceWindow{Product: int64(id), Cohort: cohort, Hours: hours}] = tails(shape, n)
-			}
-			products = append(products, p)
-		}
+	for _, w := range windows {
+		maps.Copy(places, w)
 	}
 	doc["products"] = products
 	if shape.Browser {
@@ -121,6 +108,9 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 			return nil, err
 		}
 		doc["fleet"] = fleet
+	}
+	if err := marshalGroups(doc); err != nil {
+		return nil, err
 	}
 	payload, err := json.Marshal(doc)
 	if err != nil {
@@ -139,6 +129,35 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		in.FrameworkTargets = append(in.FrameworkTargets, store.FrameworkTarget{ID: t.(map[string]any)["id"].(string), Label: &label, SortOrder: int32(i), Engine: engine})
 	}
 	return in, nil
+}
+
+// group is network n's product group for requested country c, a copy of
+// template with the shape's lists, and the typed tails of its windows.
+func group(template map[string]any, shape Shape, n, c int) (map[string]any, map[store.PlaceWindow]*store.List, error) {
+	id := n*1000 + c + 1
+	cohort := fmt.Sprintf("daily-%03d", c)
+	p, err := clone(template)
+	if err != nil {
+		return nil, nil, err
+	}
+	p["id"], p["product_id"], p["cohort"] = fmt.Sprintf("%d:%s", id, cohort), id, cohort
+	p["provider"], p["name"] = fmt.Sprintf("net%02d", n), fmt.Sprintf("Net %02d residential", n)
+	p["criteria"] = map[string]any{"kind": "residential", "country": countryCode(c)}
+	// A daily test's group: no census or pulse (uptime, outages), no
+	// price evidence (QA-1 had none) and no load benchmark.
+	for _, k := range []string{"census", "outages", "pricing"} {
+		delete(p, k)
+	}
+	places := map[store.PlaceWindow]*store.List{}
+	for label, w := range p["windows"].(map[string]any) {
+		hours := map[string]int64{"24h": 24, "7d": 168, "30d": 720}[label]
+		for _, k := range []string{"uptime", "benchmark", "census_overlap", "evidence", "evidence_sources", "ip_samples"} {
+			delete(w.(map[string]any), k)
+		}
+		fill(w.(map[string]any), shape, n, c)
+		places[store.PlaceWindow{Product: int64(id), Cohort: cohort, Hours: hours}] = tails(shape, n)
+	}
+	return p, places, nil
 }
 
 // events is the shape's test events, newest first: hour releases per network
@@ -405,34 +424,6 @@ func Parts(payload []byte, sparse bool) (head []byte, products, runs [][]byte, e
 	}
 	head, err = json.Marshal(doc)
 	return head, products, runs, err
-}
-
-// eachGroup decodes the payload's top level and each product group in turn
-// (never the whole payload at once), applies edit to the group and returns
-// the top level and the groups re-encoded.
-func eachGroup(payload []byte, edit func(map[string]any)) (map[string]json.RawMessage, [][]byte, error) {
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &doc); err != nil {
-		return nil, nil, err
-	}
-	var raw []json.RawMessage
-	if err := json.Unmarshal(doc["products"], &raw); err != nil {
-		return nil, nil, err
-	}
-	groups := make([][]byte, len(raw))
-	for i, r := range raw {
-		var g map[string]any
-		if err := json.Unmarshal(r, &g); err != nil {
-			return nil, nil, err
-		}
-		edit(g)
-		b, err := json.Marshal(g)
-		if err != nil {
-			return nil, nil, err
-		}
-		groups[i], raw[i] = b, nil
-	}
-	return doc, groups, nil
 }
 
 // dayWindows is the group's 24-hour windows.

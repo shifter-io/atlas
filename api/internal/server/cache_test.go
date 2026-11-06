@@ -13,6 +13,7 @@ import (
 )
 
 func TestNextDataIsTheEndOfTheSnapshotsPeriod(t *testing.T) {
+	t.Parallel()
 	at := func(s string) time.Time {
 		v, err := time.Parse(time.RFC3339, s)
 		if err != nil {
@@ -40,6 +41,7 @@ func TestNextDataIsTheEndOfTheSnapshotsPeriod(t *testing.T) {
 }
 
 func TestDataCacheEndsAtTheNextUpdate(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 3, 13, 20, 0, 400e6, time.UTC)
 	next := time.Date(2026, 11, 3, 14, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
@@ -64,6 +66,7 @@ func TestDataCacheEndsAtTheNextUpdate(t *testing.T) {
 }
 
 func TestRenderVersionTakesTheNextUpdateFromTheSnapshot(t *testing.T) {
+	t.Parallel()
 	res, err := build.Build(fixture(1, nil, true))
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +92,7 @@ func TestRenderVersionTakesTheNextUpdateFromTheSnapshot(t *testing.T) {
 // version and the dataset redirect stay short, and the dataset file, the live
 // tape, health and errors keep their own.
 func TestDataAnswersAreCachedUntilTheNextUpdate(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1})
 	now := time.Date(2026, 11, 3, 13, 50, 0, 0, time.UTC)
 	s.opts.Now = func() time.Time { return now }
@@ -130,6 +134,7 @@ func TestDataAnswersAreCachedUntilTheNextUpdate(t *testing.T) {
 // which open pages poll, stays short-lived even while data answers are cached
 // until the next update.
 func TestANewEventKeepsTheDatasetFile(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1, complete: true}
 	s := newTestServer(t, src)
 	h := s.Handler()
@@ -165,6 +170,7 @@ func TestANewEventKeepsTheDatasetFile(t *testing.T) {
 }
 
 func TestDataPeriodMustDivideADay(t *testing.T) {
+	t.Parallel()
 	for _, ok := range []time.Duration{time.Hour, 5 * time.Minute, 30 * time.Second, 24 * time.Hour} {
 		if err := ValidDataPeriod(ok); err != nil {
 			t.Errorf("%v: %v", ok, err)

@@ -20,7 +20,7 @@ from .batches import (
     run_finished,
 )
 from .db import Database, setting
-from .events import emit, raise_alert
+from .events import EventRow, emit, raise_alert
 from .sqlrows import _now, _row, _rows
 
 COUNTERS = (
@@ -46,30 +46,8 @@ async def assignments(db: Database, node: dict, now: datetime | None = None) -> 
     that restarted while waiting for start_at does not lose it."""
     now = _now(now)
     async with db.transaction() as conn:
-        min_sample = int(await setting(conn, "census.min_sample"))
-        stall = float(await setting(conn, "census.stall_seconds"))
-        stall_seconds = int(stall) if stall.is_integer() else stall
-        pulse_timeout = int(await setting(conn, "pulse.timeout_ms"))
-        rows = await _rows(
-            conn,
-            "SELECT b.batch_id,b.kind,b.country_code,b.target_id,b.start_at,r.slug AS region,"
-            " br.product_id,p.provider,p.name,t.url,t.timeout_ms,t.census_concurrency,"
-            " t.pulse_requests,t.pulse_concurrency "
-            "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-            "JOIN products p ON p.product_id=br.product_id "
-            "JOIN targets t ON t.target_id=b.target_id "
-            "JOIN runner_regions r ON r.region_id=b.region_id "
-            "WHERE br.node_id=%s AND b.status IN ('scheduled','running') "
-            " AND (br.status='queued' OR (br.status='running' AND br.started_at IS NULL)) "
-            " AND b.start_at<=%s ORDER BY b.start_at,b.batch_id FOR UPDATE OF br SKIP LOCKED",
-            (node["node_id"], now + ASSIGN_AHEAD),
-        )
-        if rows:
-            await conn.execute(
-                "UPDATE batch_runs SET status='running' WHERE node_id=%s AND batch_id=ANY(%s) "
-                "AND status='queued'",
-                (node["node_id"], [row["batch_id"] for row in rows]),
-            )
+        limits = await _run_limits(conn)
+        rows = await _claim_runs(conn, node, now)
         kill = await _rows(
             conn,
             "SELECT br.batch_id FROM batch_runs br JOIN test_batches b USING(batch_id) "
@@ -78,38 +56,73 @@ async def assignments(db: Database, node: dict, now: datetime | None = None) -> 
             "AND coalesce(br.finished_at,b.finished_at,%s)>%s ORDER BY br.batch_id",
             (node["node_id"], now, now - timedelta(minutes=15)),
         )
-    work = []
-    for row in rows:
-        census = row["kind"] == "census"
-        # The load wave: census concurrency, one request per connection, counted like a pulse.
-        load = row["kind"] == "load"
-        work.append(
-            {
-                "batch_id": row["batch_id"],
-                "kind": row["kind"],
-                "product_id": row["product_id"],
-                "provider": row["provider"],
-                "product": row["name"],
-                "country_code": row["country_code"].strip(),
-                "region": row["region"],
-                "target_id": row["target_id"],
-                "target_url": row["url"] or None,
-                "timeout_ms": pulse_timeout if row["kind"] == "pulse" else row["timeout_ms"],
-                "concurrency": row["census_concurrency"]
-                if census or load
-                else row["pulse_concurrency"],
-                "stop_rule": "unique_ratio" if census else "count",
-                "requests": None
-                if census
-                else row["census_concurrency"]
-                if load
-                else row["pulse_requests"],
-                "min_sample": min_sample if census else None,
-                "stall_seconds": stall_seconds if census else None,
-                "start_at": row["start_at"].astimezone(UTC).isoformat(),
-            }
-        )
+    work = [_assignment(row, limits) for row in rows]
     return {"assignments": work, "kill": [row["batch_id"] for row in kill]}
+
+
+async def _run_limits(conn: psycopg.AsyncConnection) -> dict[str, Any]:
+    """The settings an assignment carries: census min_sample and stall, the pulse timeout."""
+    min_sample = int(await setting(conn, "census.min_sample"))
+    stall = float(await setting(conn, "census.stall_seconds"))
+    return {
+        "min_sample": min_sample,
+        "stall_seconds": int(stall) if stall.is_integer() else stall,
+        "pulse_timeout": int(await setting(conn, "pulse.timeout_ms")),
+    }
+
+
+async def _claim_runs(conn: psycopg.AsyncConnection, node: dict, now: datetime) -> list[dict]:
+    """The node's runs due within ASSIGN_AHEAD, locked; the queued ones become 'running'."""
+    rows = await _rows(
+        conn,
+        "SELECT b.batch_id,b.kind,b.country_code,b.target_id,b.start_at,r.slug AS region,"
+        " br.product_id,p.provider,p.name,t.url,t.timeout_ms,t.census_concurrency,"
+        " t.pulse_requests,t.pulse_concurrency "
+        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
+        "JOIN products p ON p.product_id=br.product_id "
+        "JOIN targets t ON t.target_id=b.target_id "
+        "JOIN runner_regions r ON r.region_id=b.region_id "
+        "WHERE br.node_id=%s AND b.status IN ('scheduled','running') "
+        " AND (br.status='queued' OR (br.status='running' AND br.started_at IS NULL)) "
+        " AND b.start_at<=%s ORDER BY b.start_at,b.batch_id FOR UPDATE OF br SKIP LOCKED",
+        (node["node_id"], now + ASSIGN_AHEAD),
+    )
+    if rows:
+        await conn.execute(
+            "UPDATE batch_runs SET status='running' WHERE node_id=%s AND batch_id=ANY(%s) "
+            "AND status='queued'",
+            (node["node_id"], [row["batch_id"] for row in rows]),
+        )
+    return rows
+
+
+def _assignment(row: dict, limits: dict[str, Any]) -> dict[str, Any]:
+    """One claimed run as the node receives it."""
+    census = row["kind"] == "census"
+    # The load wave: census concurrency, one request per connection, counted like a pulse.
+    load = row["kind"] == "load"
+    return {
+        "batch_id": row["batch_id"],
+        "kind": row["kind"],
+        "product_id": row["product_id"],
+        "provider": row["provider"],
+        "product": row["name"],
+        "country_code": row["country_code"].strip(),
+        "region": row["region"],
+        "target_id": row["target_id"],
+        "target_url": row["url"] or None,
+        "timeout_ms": limits["pulse_timeout"] if row["kind"] == "pulse" else row["timeout_ms"],
+        "concurrency": row["census_concurrency"] if census or load else row["pulse_concurrency"],
+        "stop_rule": "unique_ratio" if census else "count",
+        "requests": None
+        if census
+        else row["census_concurrency"]
+        if load
+        else row["pulse_requests"],
+        "min_sample": limits["min_sample"] if census else None,
+        "stall_seconds": limits["stall_seconds"] if census else None,
+        "start_at": row["start_at"].astimezone(UTC).isoformat(),
+    }
 
 
 def _counters(values: dict[str, Any]) -> dict[str, int]:
@@ -353,13 +366,15 @@ async def mark_offline(db: Database, now: datetime | None = None) -> dict[str, A
             )
             await emit(
                 conn,
-                "node_offline",
-                now,
-                product_id=node["product_id"],
-                region_id=node["region_id"],
-                signal=-1,
-                severity="major",
-                data=data,
+                EventRow(
+                    kind="node_offline",
+                    at=now,
+                    product_id=node["product_id"],
+                    region_id=node["region_id"],
+                    signal=-1,
+                    severity="major",
+                    data=data,
+                ),
             )
     return {"offline": [node["node_id"] for node in gone]}
 

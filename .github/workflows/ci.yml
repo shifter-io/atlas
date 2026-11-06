@@ -6,7 +6,9 @@
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
 # pytest-xdist on every CPU, each worker with its own databases in one PostgreSQL
-# (CI-SPEED-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
+# (CI-SPEED-1). Then scripts/ci/timing.py writes the 20 slowest tests and the test
+# step's time to the job summary and the ci-timing artifact (90 days), and fails the
+# job when a test takes 90 s or more or the step over 240 s (CI-TIME-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
 # run. A job-started hook on the servers refuses every job except the owner's pull
 # requests from this repository's own branches, merge-queue tests and owner dispatches.
@@ -175,10 +177,13 @@ jobs:
           echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
 
       - name: Checks in the background, tests in parallel
+        id: tests
         if: env.CODE == 'true'
         env:
           COVERAGE_FILE: ${{ runner.temp }}/ev/.coverage
         run: |
+          # The step's start, for the CI time step below.
+          date +%s > "$EV/step-start"
           # Each background check writes $EV/<name>.log and $EV/<name>.rc; after the tests,
           # every check with a non-zero status prints its log and fails the step.
           background() {
@@ -243,6 +248,26 @@ jobs:
             echo "secret scan tests were skipped"; exit 1
           fi
           exit "$failed"
+
+      - name: CI time (slowest tests, budgets)
+        # Also after a failed test step: the summary is there for failed runs too. Fails
+        # tier1 when a test takes 90 s or more or the test step over 240 s (CI-TIME-1).
+        id: timing
+        if: always() && env.CODE == 'true' && steps.tests.outcome != 'skipped'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python3 scripts/ci/timing.py --title "CI time: tier1 tests" --start "$EV/step-start"
+          --out "$EV/timing.json" "$EV/junit.xml" "$EV/junit-serial.xml"
+
+      - name: Keep the CI time record (scripts/ci/timing_history.py reads it)
+        if: always() && steps.timing.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-timing
+          path: ${{ runner.temp }}/ev/timing.json
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Changed lines covered (at least 85%)
         if: env.CODE == 'true'

@@ -51,6 +51,7 @@ campaign = [
     "tests/test_pulse_fleet.py",
     "tests/campaign_fakes.py",
     "tests/campaign_deploy_fakes.py",
+    "tests/campaign_tick_cases.py",
     "tests/fixtures/campaign-data/**",
     "docs/campaign.html",
 ]
