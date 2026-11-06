@@ -36,6 +36,17 @@ def test_parallel_remains_legacy_and_same_window(tmp_path):
     assert windows[0]["ends_at"] == m["ends_at"]
 
 
+def test_create_refuses_an_unregistered_provider_and_an_incomplete_region_order(tmp_path):
+    config = tmp_path / "provider.toml"
+    config.write_text('schema_version = 2\nprovider = "shifter"\n')
+    start, now = campaign.timestamp(START), START - timedelta(hours=1)
+    with pytest.raises(ValueError, match="registered provider adapter"):
+        campaign.create(config, "residential", start, tmp_path, now=now)
+    with pytest.raises(ValueError, match="each region exactly once"):
+        make(tmp_path, execution_mode="sequential", region_order=ORDER[:-1])
+    assert not (tmp_path / "shifter").exists()
+
+
 def make_eight_days(tmp_path):
     return make(
         tmp_path,

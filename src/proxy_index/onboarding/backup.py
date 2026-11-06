@@ -29,6 +29,61 @@ def tree_inventory(directory: Path) -> dict:
     return result
 
 
+# Checkpoint fields a completed job's summary.json must repeat exactly.
+SUMMARY_FIELDS = (
+    "country",
+    "round",
+    "scheduled_at",
+    "started_at",
+    "finished_at",
+    "status",
+    "observations",
+    "requests",
+    "errors",
+)
+
+
+def _verify_summary(folder: Path, job: dict) -> None:
+    summary_path = folder / "summary.json"
+    summary = read_json(summary_path) if summary_path.exists() else None
+    if job["status"] != "completed":
+        return
+    if summary is None or any(summary.get(k) != job.get(k) for k in SUMMARY_FIELDS):
+        raise ValueError("Country summary differs from checkpoint")
+    measurement = summary.get("measurement")
+    if (
+        measurement is None
+        or measurement["successes"] != job["observations"]
+        or measurement["completed"] != job["requests"]
+    ):
+        raise ValueError("Measurement counters differ from checkpoint")
+
+
+def _verify_observations(folder: Path, job: dict, end: str) -> tuple[int, int]:
+    """Verify a job's committed observation chunks; return their rows and chunk count."""
+    count = chunks = 0
+    committed = set()
+    for sidecar in sorted(folder.glob("observations-*.jsonl.meta.json")):
+        metadata = read_json(sidecar)
+        filename = metadata["file"]
+        if Path(filename).name != filename:
+            raise ValueError("Invalid observation filename")
+        chunk = folder / filename
+        if chunk.with_suffix(".meta.json") != sidecar:
+            raise ValueError("Invalid observation sidecar")
+        count += verify_chunk(chunk, metadata, job, end)
+        committed.add(filename)
+        chunks += 1
+    if count != job.get("observations", 0):
+        raise ValueError("Observation rows differ from checkpoint")
+    if any(
+        p.name.endswith(".partial") or (p.name.endswith(".gz") and p.name not in committed)
+        for p in folder.glob("observations-*")
+    ):
+        raise ValueError("Uncommitted observations present")
+    return count, chunks
+
+
 def verify_region(manifest: dict, region: str, directory: Path, expected: dict) -> dict:
     if tree_inventory(directory) != expected:
         raise ValueError("Local files differ from the remote original tree")
@@ -45,52 +100,10 @@ def verify_region(manifest: dict, region: str, directory: Path, expected: dict) 
                 {"round": job["round"], "country": job["country"], "status": job["status"]}
             )
         folder = job_directory(directory, job)
-        summary_path = folder / "summary.json"
-        summary = read_json(summary_path) if summary_path.exists() else None
-        if job["status"] == "completed":
-            if summary is None or any(
-                summary.get(k) != job.get(k)
-                for k in (
-                    "country",
-                    "round",
-                    "scheduled_at",
-                    "started_at",
-                    "finished_at",
-                    "status",
-                    "observations",
-                    "requests",
-                    "errors",
-                )
-            ):
-                raise ValueError("Country summary differs from checkpoint")
-            measurement = summary.get("measurement")
-            if (
-                measurement is None
-                or measurement["successes"] != job["observations"]
-                or measurement["completed"] != job["requests"]
-            ):
-                raise ValueError("Measurement counters differ from checkpoint")
-        count = 0
-        committed = set()
-        for sidecar in sorted(folder.glob("observations-*.jsonl.meta.json")):
-            metadata = read_json(sidecar)
-            filename = metadata["file"]
-            if Path(filename).name != filename:
-                raise ValueError("Invalid observation filename")
-            chunk = folder / filename
-            if chunk.with_suffix(".meta.json") != sidecar:
-                raise ValueError("Invalid observation sidecar")
-            count += verify_chunk(chunk, metadata, job, end)
-            committed.add(filename)
-            chunks += 1
-        if count != job.get("observations", 0):
-            raise ValueError("Observation rows differ from checkpoint")
-        if any(
-            p.name.endswith(".partial") or (p.name.endswith(".gz") and p.name not in committed)
-            for p in folder.glob("observations-*")
-        ):
-            raise ValueError("Uncommitted observations present")
+        _verify_summary(folder, job)
+        count, committed = _verify_observations(folder, job, end)
         rows += count
+        chunks += committed
     return {
         "region": region,
         "verified_backup": True,
