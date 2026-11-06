@@ -4,7 +4,6 @@ import json
 import os
 import shlex
 import stat
-import uuid
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
@@ -337,7 +336,7 @@ def test_staging_init_rejects_an_unknown_scope_country(tmp_path):
     admin = read_credentials(admin_file, "postgres")
     secrets = tmp_path / "secrets"
     secrets.mkdir(mode=0o700)
-    name = "proxy_test_" + uuid.uuid4().hex + "_staging"
+    name = scratch_database_name() + "_staging"
     private(secrets / "database.toml", toml(admin | {"dbname": "proxy_test_never_created"}))
     private(secrets / "postgres-admin.toml", toml(admin))
     config = profile(tmp_path / "staging.toml", name, countries=("RO", "ZZ"))
