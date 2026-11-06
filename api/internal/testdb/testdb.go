@@ -196,7 +196,9 @@ const partsTable = `CREATE TABLE IF NOT EXISTS calculated_snapshot_parts (
 // PublishParts stores a snapshot as calculated v8 does (contract K1): head in
 // calculated_snapshots and the product groups and runs parts in the build's
 // partition of calculated_snapshot_parts, as the current published
-// calculation, registering its products like Publish.
+// calculation, registering its products like Publish. The head and the
+// partition are committed first, then the parts are written over several
+// connections at once (insertParts); the build is current only once all are.
 func (d *DB) PublishParts(t testing.TB, head []byte, products, runs [][]byte) int64 {
 	t.Helper()
 	ctx := context.Background()
@@ -221,30 +223,75 @@ func (d *DB) PublishParts(t testing.TB, head []byte, products, runs [][]byte) in
 	if _, err := tx.Exec(ctx, "INSERT INTO calculated_snapshots VALUES ($1,$2,$3)", id, "test-"+hex.EncodeToString(randomBytes()), head); err != nil {
 		t.Fatal(err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.insertParts(ctx, id, products, runs); err != nil {
+		t.Fatal(err)
+	}
+	current(t, c, id)
+	return id
+}
+
+// partWriters is how many connections insertParts writes over: one
+// connection takes about 20 s for a QA-1-sized build's 720 product parts
+// (425 MB), most of it the server parsing their jsonb.
+const partWriters = 8
+
+// insertParts writes the build's product and runs parts from up to
+// partWriters connections at once and returns the first error.
+func (d *DB) insertParts(ctx context.Context, id int64, products, runs [][]byte) error {
 	insert := "INSERT INTO calculated_snapshot_parts VALUES ($1,$2,$3,$4,$5,$6,'test',$7)"
-	for i, p := range products {
+	write := func(c *pgx.Conn, i int) error {
+		if i >= len(products) {
+			r := i - len(products)
+			_, err := c.Exec(ctx, insert, id, "runs", r, fmt.Sprintf("runs:%d", r), nil, nil, runs[r])
+			return err
+		}
 		var g struct {
 			ID        string `json:"id"`
 			ProductID int64  `json:"product_id"`
 			Cohort    string `json:"cohort"`
 		}
-		if err := json.Unmarshal(p, &g); err != nil {
-			t.Fatal(err)
+		if err := json.Unmarshal(products[i], &g); err != nil {
+			return err
 		}
-		if _, err := tx.Exec(ctx, insert, id, "product", i, g.ID, g.ProductID, g.Cohort, p); err != nil {
-			t.Fatal(err)
+		_, err := c.Exec(ctx, insert, id, "product", i, g.ID, g.ProductID, g.Cohort, products[i])
+		return err
+	}
+	n := len(products) + len(runs)
+	work := make(chan int, n)
+	for i := range n {
+		work <- i
+	}
+	close(work)
+	writers := min(n, partWriters)
+	errs := make(chan error, writers)
+	for range writers {
+		go func() { errs <- d.writeParts(ctx, work, write) }()
+	}
+	var first error
+	for range writers {
+		if err := <-errs; err != nil && first == nil {
+			first = err
 		}
 	}
-	for i, r := range runs {
-		if _, err := tx.Exec(ctx, insert, id, "runs", i, fmt.Sprintf("runs:%d", i), nil, nil, r); err != nil {
-			t.Fatal(err)
+	return first
+}
+
+// writeParts writes, from one connection, each part taken from work.
+func (d *DB) writeParts(ctx context.Context, work <-chan int, write func(*pgx.Conn, int) error) error {
+	c, err := pgx.Connect(ctx, d.DSN)
+	if err != nil {
+		return err
+	}
+	defer c.Close(ctx)
+	for i := range work {
+		if err := write(c, i); err != nil {
+			return err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	current(t, c, id)
-	return id
+	return nil
 }
 
 // register records the snapshot's methodology, providers and products and a

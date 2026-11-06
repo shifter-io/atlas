@@ -59,6 +59,7 @@ func (e *eventSource) add(ev store.Event) {
 // the dataset file is not rebuilt, and /v1/events shows the new event. A data
 // change still rebuilds everything.
 func TestANewEventRefreshesOnlyTheEventsAnswers(t *testing.T) {
+	t.Parallel()
 	src := &eventSource{fakeSource: &fakeSource{rev: 1, events: events(30), complete: true}}
 	s := newTestServer(t, src)
 	before := s.Current()
@@ -102,6 +103,7 @@ func TestANewEventRefreshesOnlyTheEventsAnswers(t *testing.T) {
 // A failed events read keeps the previous version serving and reports the
 // error; the next successful refresh clears it.
 func TestAFailedEventsRefreshKeepsServing(t *testing.T) {
+	t.Parallel()
 	src := &eventSource{fakeSource: &fakeSource{rev: 1, events: events(3), complete: true}}
 	s := newTestServer(t, src)
 	before := s.Current()

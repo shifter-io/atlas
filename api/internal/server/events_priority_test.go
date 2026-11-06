@@ -57,6 +57,7 @@ func countKinds(rows []store.EventJSON) map[string]int {
 // the first page and on the dataset's tape; the hour as the framework writes it
 // (one row per network) is 18 rows beside the pulse down.
 func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
+	t.Parallel()
 	down := event(1, releaseHour.Add(-10*time.Minute), "pulse_down", "net00")
 	rise := event(2, releaseHour.Add(-20*time.Minute), "latency_rise", "net01")
 	rows := append(releaseBurst(3, 18*40), down, rise)
@@ -92,6 +93,7 @@ func TestReleaseBurstNeverHidesIncidents(t *testing.T) {
 // are notable, so the first page is answered without the database; a filter the
 // memory cannot prove goes to the database and gets the same choice.
 func TestNotableRowsPastTheWindowAnswerFromMemory(t *testing.T) {
+	t.Parallel()
 	window := releaseBurst(10, store.EventWindow)
 	down := event(1, releaseHour.Add(-time.Hour), "pulse_down", "net05")
 	src := &fakeSource{rev: 1, events: window, notable: []store.Event{down}}

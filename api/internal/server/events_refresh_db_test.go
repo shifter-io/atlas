@@ -41,6 +41,7 @@ var eventQueries = []string{"/v1/events", "/v1/events?limit=500", "/v1/events?li
 // Rendered, and answers every events query byte for byte like a full build of
 // the same database.
 func TestEventAnswersAfterAnEventsOnlyRefresh(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	ctx := context.Background()
 	snap, err := os.ReadFile(config.FindUp(filepath.Join("fixtures", "measured", "snapshot.json")))
