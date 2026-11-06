@@ -30,6 +30,7 @@ from .scheduler_state import (  # noqa: F401 (callers keep importing these from 
 )
 from .writer import ObservationWriter, SummarySink
 
+
 class Clock:
     def __init__(self):
         self.wall, self.mono = time.time(), time.monotonic()
