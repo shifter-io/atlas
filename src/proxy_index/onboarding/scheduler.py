@@ -147,7 +147,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             writer.check()
             context.state["progress"] = dict(counters) | {"observations_saved": writer.rows}
             context.save()
-        except Exception as exc:
+        except (OSError, TypeError, ValueError) as exc:  # the writer, or state.json not saved
             checkpoint_error[0] = exc
             country_stop.set()
 
@@ -166,14 +166,14 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             progress_interval=5,
         )
         summary = await context.run_country(config, sink, options)
-    except BaseException as exc:
-        error = exc
+    except BaseException as exc:  # boundary: saved in the job's summary.json; run_job re-raises
+        error = exc  # an interrupt or a cancellation too, once they are saved
     finally:
         watcher.cancel()
         await asyncio.gather(watcher, return_exceptions=True)
         try:
             await writer.close()
-        except Exception as exc:
+        except OSError as exc:  # the writer failed (``check``)
             error = error or exc
     return summary, error or checkpoint_error[0]
 

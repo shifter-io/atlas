@@ -218,7 +218,7 @@ def _round_command(action, *arguments) -> int:
     except RoundRefused as exc:
         print(f"Round refused: {exc}", file=sys.stderr)
         return 1
-    except Exception as exc:
+    except Exception as exc:  # boundary: the command's last handler; the type only, no message
         print(f"Round command failed ({type(exc).__name__}).", file=sys.stderr)
         return 1
 

@@ -299,7 +299,7 @@ async def _report(state: _RunState) -> None:
         result = state.progress(state.snapshot())
         if inspect.isawaitable(result):
             await result
-    except Exception as exc:
+    except Exception as exc:  # boundary: a progress post never ends the run; type only
         # A lost progress post must not end a measurement; the final
         # artifact carries the authoritative totals.
         log.warning("Progress callback failed (%s)", type(exc).__name__)
@@ -493,7 +493,7 @@ async def _execute(
             await _drive(state, engine, transport)
     except asyncio.CancelledError:
         return "cancelled", not state.stopped() and not state.expired(), None
-    except Exception as exc:
+    except Exception as exc:  # boundary: saved as a failed run; run() raises only its type
         return "failed", False, exc
     return "completed", False, None
 
