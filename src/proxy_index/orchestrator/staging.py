@@ -150,19 +150,10 @@ def _database(admin: dict[str, str], name: str, owner: str, clean: bool) -> dict
     return {"created": not exists, "dropped": dropped}
 
 
-def init(
-    config: str | Path | None = None,
-    *,
-    secrets_dir: str | Path = ".secrets",
-    clean: bool = False,
-    orchestrator_url: str = "http://127.0.0.1:8080",
-) -> dict[str, Any]:
-    """Create or refresh the staging database and print-ready summary (see the module doc)."""
-    profile = load_profile(config or STAGING_FILE)
-    secrets = Path(secrets_dir).resolve()
+def _connections(secrets: Path, name: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Read the app and admin connections and refuse a production or maintenance name."""
     app = read_credentials(secrets / "database.toml", "postgres")
     admin = read_credentials(secrets / "postgres-admin.toml", "postgres")
-    name = profile["name"]
     if name in RESERVED or name == app.get("dbname") or name == admin.get("dbname"):
         raise ValueError(
             f"Refusing to use {name!r} as the staging database: it is the production or a "
@@ -170,21 +161,25 @@ def init(
         )
     if not app.get("user"):
         raise ValueError("database.toml needs a user to own the staging database")
-    database = _database(admin, name, app["user"], clean)
+    return app, admin
 
-    staging_file = secrets / "staging-database.toml"
-    _write_private(staging_file, _toml("postgres", app | {"dbname": name}))
 
+def _schema(staging_file: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Apply both schema layers and seed, as db-init does."""
     from ..calculated.store import initialize as initialize_calculated
 
     schema = storage.initialize(staging_file) | initialize_calculated(staging_file)
-    seeded = storage.seed(staging_file)
-    reports_dir = (
-        str(Path(profile["reports_dir"]).expanduser().resolve()) if profile["reports_dir"] else None
-    )
-    methodology = (
-        str(Path(profile["methodology"]).expanduser().resolve()) if profile["methodology"] else None
-    )
+    return schema, storage.seed(staging_file)
+
+
+def _resolved(path: str | None) -> str | None:
+    return str(Path(path).expanduser().resolve()) if path else None
+
+
+def _apply_profile(
+    staging_file: Path, profile: dict[str, Any], reports_dir: str | None
+) -> tuple[list[str], list[str]]:
+    """Enable the scope countries, tune the census and pulse targets and write the settings."""
     with storage.connect(staging_file) as conn:
         known = {
             row[0]
@@ -226,10 +221,16 @@ def init(
                 "reports.dir": reports_dir,
             },
         )
+    return census_targets, pulse_targets
 
+
+def _issue_tokens(
+    nodes: list[dict[str, str]], staging_file: Path, secrets: Path, orchestrator_url: str
+) -> list[dict[str, Any]]:
+    """Issue one token per profile node, write its file and the command that starts the node."""
     tokens = []
     token_dir = secrets / "staging-tokens"
-    for node in profile["nodes"]:
+    for node in nodes:
         issued = issue_token(
             str(staging_file),
             provider=node["provider"],
@@ -261,6 +262,51 @@ def init(
                 ),
             }
         )
+    return tokens
+
+
+def _commands(
+    staging_file: Path, methodology: str | None, reports_dir: str | None, tokens: list[dict]
+) -> dict[str, Any]:
+    """The commands that run the orchestrator, the calculator, the nodes and the report."""
+    return {
+        "orchestrator": (
+            f"proxy-index orchestrator --dev --database-file {_quote(staging_file)}"
+            + (f" --methodology {_quote(methodology)}" if methodology else "")
+        ),
+        "calculate": (
+            f"proxy-index calculate --database-file {_quote(staging_file)}"
+            + (f" --methodology {_quote(methodology)}" if methodology else "")
+        ),
+        "nodes": [token["command"] for token in tokens],
+        "report": (
+            f"proxy-index report html --database-file {_quote(staging_file)} "
+            f"--out {_quote(reports_dir or 'reports/staging')}"
+        ),
+    }
+
+
+def init(
+    config: str | Path | None = None,
+    *,
+    secrets_dir: str | Path = ".secrets",
+    clean: bool = False,
+    orchestrator_url: str = "http://127.0.0.1:8080",
+) -> dict[str, Any]:
+    """Create or refresh the staging database and print-ready summary (see the module doc)."""
+    profile = load_profile(config or STAGING_FILE)
+    secrets = Path(secrets_dir).resolve()
+    name = profile["name"]
+    app, admin = _connections(secrets, name)
+    database = _database(admin, name, app["user"], clean)
+
+    staging_file = secrets / "staging-database.toml"
+    _write_private(staging_file, _toml("postgres", app | {"dbname": name}))
+    schema, seeded = _schema(staging_file)
+    reports_dir = _resolved(profile["reports_dir"])
+    methodology = _resolved(profile["methodology"])
+    census_targets, pulse_targets = _apply_profile(staging_file, profile, reports_dir)
+    tokens = _issue_tokens(profile["nodes"], staging_file, secrets, orchestrator_url)
     return {
         "database": name,
         "database_file": str(staging_file),
@@ -288,19 +334,5 @@ def init(
         "methodology": methodology,
         "reports_dir": reports_dir,
         "nodes": tokens,
-        "commands": {
-            "orchestrator": (
-                f"proxy-index orchestrator --dev --database-file {_quote(staging_file)}"
-                + (f" --methodology {_quote(methodology)}" if methodology else "")
-            ),
-            "calculate": (
-                f"proxy-index calculate --database-file {_quote(staging_file)}"
-                + (f" --methodology {_quote(methodology)}" if methodology else "")
-            ),
-            "nodes": [token["command"] for token in tokens],
-            "report": (
-                f"proxy-index report html --database-file {_quote(staging_file)} "
-                f"--out {_quote(reports_dir or 'reports/staging')}"
-            ),
-        },
+        "commands": _commands(staging_file, methodology, reports_dir, tokens),
     }
