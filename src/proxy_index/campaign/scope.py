@@ -200,10 +200,20 @@ async def _in_project(cloud: DigitalOcean, project_id: str, droplet_id: str) -> 
     return droplet_id in members
 
 
+@dataclass(frozen=True)
+class _Claim:
+    """Whose droplet the caller says it is: this client's, of `scope`, in `role`."""
+
+    cloud: DigitalOcean
+    scope: Scope
+    role: Role
+
+
 async def _droplet_checks(
-    cloud: DigitalOcean, droplet: Droplet, scope: Scope, ledger: Ledger, role: Role, entry: dict
+    claim: _Claim, droplet: Droplet, ledger: Ledger, entry: dict
 ) -> dict[str, bool]:
     """Checks 2-6; check 4 may be replaced only by the own-unassigned path (section 2)."""
+    cloud, scope, role = claim.cloud, claim.scope, claim.role
     checks = role_checks(droplet, scope, role)
     pulse = role == "pulse"
     project_name = PULSE_PROJECT_NAME if pulse else PROJECT_NAME
@@ -257,6 +267,30 @@ def _audit(path: Path, entry: dict) -> None:
         os.close(fd)
 
 
+def _require_known(kind: str, scope: Scope, role: str) -> None:
+    """A known kind and role; the pulse role only for a droplet of the pulse scope."""
+    if kind not in PATHS or role not in ROLES:
+        raise ValueError("unknown resource kind or role")
+    if (role == "pulse") != (scope.sid == PULSE_SID) or (role == "pulse" and kind != "droplet"):
+        raise ValueError("a pulse node is removed only by retire_pulse_node")
+
+
+def _entry(kind: Kind, rid: str, scope: Scope, ledger: Ledger, role: Role) -> dict:
+    """The audit fields every line of this delete shares, with the recorded removal cause."""
+    entry = {
+        "time": utcnow().isoformat(),
+        "kind": kind,
+        "id": rid,
+        "role": role,
+        "campaign": scope.sid,
+        "path": "normal",
+    }
+    record = ledger.records.get(rid) if kind == "droplet" else None
+    if record is not None and record.error_detail:  # why this removal happens
+        entry["cause"] = record.error_detail
+    return entry
+
+
 async def guarded_delete(
     cloud: DigitalOcean,
     kind: Kind,
@@ -272,23 +306,10 @@ async def guarded_delete(
     builder (for these two, `scope.created_at` is the inventory time). Returns "deleted", or
     "absent" when the fresh GET finds nothing. Any other error is audited and re-raised.
     """
-    if kind not in PATHS or role not in ROLES:
-        raise ValueError("unknown resource kind or role")
-    if (role == "pulse") != (scope.sid == PULSE_SID) or (role == "pulse" and kind != "droplet"):
-        raise ValueError("a pulse node is removed only by retire_pulse_node")
+    _require_known(kind, scope, role)
     rid = str(resource_id)
     path = PATHS[kind].format(rid)
-    entry = {
-        "time": utcnow().isoformat(),
-        "kind": kind,
-        "id": rid,
-        "role": role,
-        "campaign": scope.sid,
-        "path": "normal",
-    }
-    record = ledger.records.get(rid) if kind == "droplet" else None
-    if record is not None and record.error_detail:  # why this removal happens
-        entry["cause"] = record.error_detail
+    entry = _entry(kind, rid, scope, ledger, role)
     try:
         raw = await cloud.get_resource(path, kind)
         if raw is None:
@@ -296,7 +317,7 @@ async def guarded_delete(
             return "absent"
         entry["name"] = raw.get("name")
         checks = {"recorded": ledger.has(kind, rid)} | (
-            await _droplet_checks(cloud, parse_droplet(raw), scope, ledger, role, entry)
+            await _droplet_checks(_Claim(cloud, scope, role), parse_droplet(raw), ledger, entry)
             if kind == "droplet"
             else _other_checks(kind, raw, ledger, scope.environment)
         )
@@ -310,15 +331,8 @@ async def guarded_delete(
     except OwnershipError:
         raise
     except Exception as error:
-        _audit(
-            audit_path,
-            entry
-            | {
-                "result": "failed",
-                "error": type(error).__name__,
-                "http": getattr(error, "status", None),
-            },
-        )
+        failure = {"error": type(error).__name__, "http": getattr(error, "status", None)}
+        _audit(audit_path, entry | {"result": "failed"} | failure)
         raise
     _audit(audit_path, entry | {"result": "deleted", "http": 204})
     return "deleted"
@@ -334,15 +348,14 @@ async def retire_pulse_node(
     )
 
 
-async def _fresh_owned(
-    cloud: DigitalOcean, scope: Scope, rid: str, records: Mapping[str, DropletRecord], role: Role
-) -> list[str]:
+async def _fresh_owned(claim: _Claim, rid: str, records: Mapping[str, DropletRecord]) -> list[str]:
     """The failed checks of one id on a fresh GET ([] when it shows every marker).
 
     An id that is not recorded or not from this client's create raises `OwnershipError` on any
     failure. Our own create may also fail only checks that settle (`SETTLING`: unreadable, not
     shown yet, tags, name, creation time); the caller reads it again. Anything else raises.
     """
+    cloud, scope, role = claim.cloud, claim.scope, claim.role
     record = records.get(rid)
     checks = {
         "recorded": record is not None and record.droplet_id == rid,
@@ -400,12 +413,7 @@ async def _retrying(retry: Retry, step: Callable[[], Awaitable[bool]]) -> None:
 
 
 async def _shown(
-    cloud: DigitalOcean,
-    scope: Scope,
-    ids: list[str],
-    records: Mapping[str, DropletRecord],
-    role: Role,
-    retry: Retry,
+    claim: _Claim, ids: list[str], records: Mapping[str, DropletRecord], retry: Retry
 ) -> dict[str, list[str]]:
     """Before any POST: each id's failed checks on its latest fresh GET ([] when shown). Our
     own creates are read again, `retry.settle` apart, until shown. An id that is not provably
@@ -415,7 +423,7 @@ async def _shown(
     while True:
         for rid in ids:
             if reads.get(rid) != []:
-                reads[rid] = await _fresh_owned(cloud, scope, rid, records, role)
+                reads[rid] = await _fresh_owned(claim, rid, records)
         delay = next(delays, None)
         if delay is None or not any(reads.values()):
             return reads
@@ -471,7 +479,7 @@ async def assign_and_verify_project(
     ids = sorted({str(i) for i in droplet_ids})
     if not ids:
         return frozenset(), frozenset()
-    reads = await _shown(cloud, scope, ids, records, role, retry)
+    reads = await _shown(_Claim(cloud, scope, role), ids, records, retry)
     missing = {rid for rid in ids if not reads[rid]}
     if missing:
         name = PULSE_PROJECT_NAME if role == "pulse" else PROJECT_NAME

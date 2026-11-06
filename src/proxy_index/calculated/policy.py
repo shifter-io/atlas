@@ -82,6 +82,34 @@ OVERRIDES = {
     "display_name",
     "benchmark_weights",
 }
+# Every top-level methodology setting validate() accepts.
+KNOWN = {
+    "name",
+    "status",
+    "windows",
+    "refresh_seconds",
+    "required_targets",
+    "minimum_requests",
+    "minimum_coverage",
+    "score_valid_hours",
+    "sample_limit",
+    "weights",
+    "target_weights",
+    "benchmark_weights",
+    "peer",
+    "grades",
+    "profiles",
+    "products",
+    "targets",
+    "kind",
+    "display_name",
+    "uptime",
+    "slots",
+    "hosting_usage_types",
+    "latency_target",
+    "payload",
+    "target_groups",
+}
 
 
 def digest(value):
@@ -117,65 +145,16 @@ def _weights(values, keys):
 
 
 def validate(config):
-    known = {
-        "name",
-        "status",
-        "windows",
-        "refresh_seconds",
-        "required_targets",
-        "minimum_requests",
-        "minimum_coverage",
-        "score_valid_hours",
-        "sample_limit",
-        "weights",
-        "target_weights",
-        "benchmark_weights",
-        "peer",
-        "grades",
-        "profiles",
-        "products",
-        "targets",
-        "kind",
-        "display_name",
-        "uptime",
-        "slots",
-        "hosting_usage_types",
-        "latency_target",
-        "payload",
-        "target_groups",
-    }
-    if set(config) - known:
+    if set(config) - KNOWN:
         raise ValueError("Unknown methodology setting")
     if "balanced" not in config.get("profiles", {}):
         raise ValueError("The balanced profile is required")
     _weights(config["weights"], KEYS)
     _weights(config["target_weights"], ("reliability", "speed"))
-    for name in ("minimum_requests", "score_valid_hours", "refresh_seconds", "sample_limit"):
-        if type(config[name]) is not int or config[name] <= 0:
-            raise ValueError(f"Invalid {name}")
-    if not 0 <= config["minimum_coverage"] <= 1:
-        raise ValueError("Invalid coverage")
-    if sorted(config["windows"]) != [24, 168, 720]:
-        raise ValueError("Windows must be 24, 168 and 720 hours")
-    if not config["required_targets"] or len(set(config["required_targets"])) != len(
-        config["required_targets"]
-    ):
-        raise ValueError("Required targets must be distinct and nonempty")
+    _limits(config)
     _weights(config["benchmark_weights"], config["required_targets"])
-    if set(config["peer"]) != {"diversity"}:
-        raise ValueError("Unknown peer setting")
-    _weights(config["peer"]["diversity"], DIMENSIONS)
-    if abs(sum(config["peer"]["diversity"].values()) - 1) > 1e-9:
-        raise ValueError("Diversity weights must sum to one")
-    if set(config["grades"]) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
-        raise ValueError("Invalid grade labels")
-    grades = [config["grades"][g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
-    if (
-        not 100 >= grades[0]
-        or grades[-1] != 0
-        or any(a <= b for a, b in zip(grades, grades[1:], strict=False))
-    ):
-        raise ValueError("Invalid grade thresholds")
+    _peer(config["peer"])
+    _grades(config["grades"])
     for values in config.get("profiles", {}).values():
         _weights(values, KEYS)
     uptime = config.get("uptime", {})
@@ -188,6 +167,43 @@ def validate(config):
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
     return config
+
+
+def _limits(config):
+    """The positive counts, the coverage share, the windows and the required targets."""
+    for name in ("minimum_requests", "score_valid_hours", "refresh_seconds", "sample_limit"):
+        if type(config[name]) is not int or config[name] <= 0:
+            raise ValueError(f"Invalid {name}")
+    if not 0 <= config["minimum_coverage"] <= 1:
+        raise ValueError("Invalid coverage")
+    if sorted(config["windows"]) != [24, 168, 720]:
+        raise ValueError("Windows must be 24, 168 and 720 hours")
+    if not config["required_targets"] or len(set(config["required_targets"])) != len(
+        config["required_targets"]
+    ):
+        raise ValueError("Required targets must be distinct and nonempty")
+
+
+def _peer(peer):
+    """[peer]: only the diversity weights, over DIMENSIONS and summing to one."""
+    if set(peer) != {"diversity"}:
+        raise ValueError("Unknown peer setting")
+    _weights(peer["diversity"], DIMENSIONS)
+    if abs(sum(peer["diversity"].values()) - 1) > 1e-9:
+        raise ValueError("Diversity weights must sum to one")
+
+
+def _grades(thresholds):
+    """[grades]: the seven labels, strictly falling from at most 100 down to 0."""
+    if set(thresholds) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
+        raise ValueError("Invalid grade labels")
+    grades = [thresholds[g] for g in ("A+", "A", "B+", "B", "C+", "C", "D")]
+    if (
+        not 100 >= grades[0]
+        or grades[-1] != 0
+        or any(a <= b for a, b in zip(grades, grades[1:], strict=False))
+    ):
+        raise ValueError("Invalid grade thresholds")
 
 
 def latency_target(config):

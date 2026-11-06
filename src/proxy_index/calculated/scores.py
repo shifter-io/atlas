@@ -80,22 +80,31 @@ def product_inputs(p, prices, config, kind, measured_uptime=None, evidence=None)
     leave them out. "fixed" is a score that does not depend on peers (datacenter products keep
     100 on dcAsns).
     """
-    evidence = evidence or {}
-    daily = p["daily"]
-    inputs = {}
-    # Measured uptime (outage time over the countries tested) wins once enough pulse batches
-    # finished; evidence is the fallback.
+    inputs = {"uptime": _uptime(config, measured_uptime, evidence or {})}
+    inputs |= _pool_inputs(p, kind)
+    lowest = (prices or {}).get("lowest_per_gb")
+    inputs["value"] = component(lowest, reason=None if lowest is not None else PRICE_MISSING)
+    return inputs
+
+
+def _uptime(config, measured_uptime, evidence):
+    """The uptime component: measured uptime (outage time over the countries tested) wins once
+    enough pulse batches finished; evidence is the fallback."""
     batches = (measured_uptime or {}).get("batches", 0)
     value = (measured_uptime or {}).get("value")
     pct = 100 * value if batches and value is not None else None
     if pct is not None and batches >= uptime_settings(config)["min_batches"]:
-        inputs["uptime"] = component(pct)
-    elif "uptime_pct" in evidence:
-        inputs["uptime"] = component(evidence["uptime_pct"])
-    else:
-        inputs["uptime"] = component(
-            pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE
-        )
+        return component(pct)
+    if "uptime_pct" in evidence:
+        return component(evidence["uptime_pct"])
+    return component(pct, "incomplete", UPTIME_INCOMPLETE if batches else UPTIME_UNAVAILABLE)
+
+
+def _pool_inputs(p, kind):
+    """The coverage, diversity, dcAsns and authenticity components of the pool counts p (see
+    product_inputs())."""
+    daily = p["daily"]
+    inputs = {}
     seen = p["unique_ips"] > 0
     inputs["coverage"] = component(daily["unique_ips"] if seen else None)
     counts = {k: daily[k] for k in DIMENSIONS}
@@ -124,8 +133,6 @@ def product_inputs(p, prices, config, kind, measured_uptime=None, evidence=None)
         if accuracy is not None
         else "No exit IP with a DB-IP country for a requested country",
     )
-    lowest = (prices or {}).get("lowest_per_gb")
-    inputs["value"] = component(lowest, reason=None if lowest is not None else PRICE_MISSING)
     return inputs
 
 
