@@ -14,6 +14,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
+# How GitHub Actions runs a `shell: bash` step.
+BASH = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
+CI_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+
+
+def workflow_step(name: str) -> str:
+    """The run block of a ci.yml step, dedented as GitHub Actions runs it."""
+    step = CI_WORKFLOW.read_text().split(f"- name: {name}", 1)[1].split("\n      - name:", 1)[0]
+    block = step.split("run: |\n", 1)[1]
+    return "".join(line[10:] if line.strip() else "\n" for line in block.splitlines(True))
+
+
 def scratch_database_name() -> str:
     """A unique test database, `proxy_test_<xdist worker>_<uuid hex>` (`main` without xdist)."""
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")

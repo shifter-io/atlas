@@ -6,15 +6,23 @@
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
 # pytest-xdist on every CPU, each worker with its own databases in one PostgreSQL
-# (CI-SPEED-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
+# (CI-SPEED-1). The API (api/) is checked in the same job (CI-API-1): gofmt, go vet
+# and the Go tests run in the background beside pytest, each Go database test in its
+# own scratch database in the same PostgreSQL, and the latency test
+# (TestServeFromDatabase, p99 within 2 ms) runs alone once everything else has
+# finished; `go test -race` without the database runs on every event but pull
+# requests. Pinned tools (uv, CPython, PostgreSQL, Go), the uv and Go caches and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
 # run. A job-started hook on the servers refuses every job except the owner's pull
 # requests from this repository's own branches, pushes to main and owner dispatches.
-# Draft pull requests run nothing until they are marked ready. A change only to
-# docs/ (except docs/onboarding.html, which a test reads), LICENSE, Markdown outside
-# src/, tests/, scripts/ and configs/ (where Markdown can be a golden) or the API
-# (api/, tested by api.yml) runs only the privacy, commit-message, commit-identity
-# and secret checks.
+# Draft pull requests run nothing until they are marked ready.
+#
+# "What changed" sets CODE (the framework's checks) and API (the API's). A change
+# only to docs/ (except docs/onboarding.html, which a test reads), LICENSE or
+# Markdown outside src/, tests/, scripts/, configs/ (where Markdown can be a golden)
+# and api/fixtures/ (test input) runs only the privacy, commit-message,
+# commit-identity and secret checks. The framework's SQL (the schema the API's
+# database tests load) and this file set both.
 name: ci
 
 on:
@@ -41,6 +49,12 @@ env:
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
   GITLEAKS_VERSION: 8.30.1
   GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+  GO_VERSION: 1.27.1
+  GO_SHA256: 63d339f0da5ab53635a56f2490a7984dfe12dfcff22ad749f63edaf590168445
+  # The API's slowest test, run alone in the background beside the rest.
+  SLOW_TEST: ^TestEveryAnswerIsTheSameFromParts$
+  # The API's latency test, run alone after every other test (API-SUM-FIX-1).
+  LATENCY_TEST: ^TestServeFromDatabase$
 
 jobs:
   tier1:
@@ -68,19 +82,24 @@ jobs:
           case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
           files=$(git diff --name-only --no-renames "$BASE...HEAD")
           code=false
+          api=false
           while IFS= read -r f; do
             case "$f" in
+              # The schema the API's database tests load, and this workflow.
+              src/proxy_index/*.sql|.github/workflows/ci.yml) code=true api=true ;;
               # docs/onboarding.html: tests/test_onboarding_round.py reads it; Markdown
               # under these trees can be a golden (tests/fixtures/campaign-data/*.md).
               docs/onboarding.html|src/*|tests/*|scripts/*|configs/*) code=true ;;
-              # The API is tested by api.yml; its diff still gets the checks below.
-              docs/*|*.md|LICENSE|api/*) ;;
+              # api/fixtures/ is test input, Markdown included.
+              api/fixtures/*) api=true ;;
+              docs/*|*.md|LICENSE) ;;
+              api/*) api=true ;;
               *) code=true ;;
             esac
           done <<< "$files"
-          [ -n "$files" ] || code=true
+          [ -n "$files" ] || { code=true; api=true; }
           mkdir -p "$RUNNER_TEMP/ev"
-          printf 'BASE=%s\nCODE=%s\nEV=%s\n' "$BASE" "$code" "$RUNNER_TEMP/ev" | tee -a "$GITHUB_ENV"
+          printf 'BASE=%s\nCODE=%s\nAPI=%s\nEV=%s\n' "$BASE" "$code" "$api" "$RUNNER_TEMP/ev" | tee -a "$GITHUB_ENV"
 
       - name: Privacy (no local paths, emails, private keys, tokens or real IPs added)
         # Allowed: documentation, private and special ranges and the three public resolvers;
@@ -107,8 +126,9 @@ jobs:
       - name: Commit identities (GitHub noreply addresses only)
         run: python3 scripts/ci/identity_check.py . "$BASE" HEAD
 
-      - name: Pinned gitleaks, uv, CPython and PostgreSQL in the server cache
-        # gitleaks for every change; the build tools only when code changed.
+      - name: Pinned gitleaks, uv, CPython, PostgreSQL and Go in the server cache
+        # gitleaks for every change; uv, CPython and PostgreSQL when the framework or the
+        # API changed (the API's tests use the same PostgreSQL); Go when the API changed.
         run: |
           tools=$CI_CACHE_DIR/proxy-index/tools
           mkdir -p "$tools"
@@ -133,7 +153,7 @@ jobs:
           # The gitleaks archive has no top directory.
           fetch "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$tools/gitleaks-$GITLEAKS_VERSION" 0
           echo "GITLEAKS=$tools/gitleaks-$GITLEAKS_VERSION/gitleaks" >> "$GITHUB_ENV"
-          [ "$CODE" = true ] || exit 0
+          [ "$CODE" = true ] || [ "$API" = true ] || exit 0
           fetch "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv-$UV_VERSION"
           fetch "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql-$PG_VERSION"
           echo "$tools/uv-$UV_VERSION" >> "$GITHUB_PATH"
@@ -142,6 +162,16 @@ jobs:
             echo "UV_CACHE_DIR=$CI_CACHE_DIR/proxy-index/uv-cache"
             echo "UV_PYTHON_INSTALL_DIR=$tools/python"
             echo "UV_PROJECT_ENVIRONMENT=$CI_CACHE_DIR/proxy-index/venv/tier1"
+          } >> "$GITHUB_ENV"
+          [ "$API" = true ] || exit 0
+          fetch "https://go.dev/dl/go$GO_VERSION.linux-amd64.tar.gz" "$GO_SHA256" "$tools/go-$GO_VERSION"
+          echo "$tools/go-$GO_VERSION/bin" >> "$GITHUB_PATH"
+          {
+            echo "GOCACHE=$CI_CACHE_DIR/proxy-index/go/build"
+            echo "GOMODCACHE=$CI_CACHE_DIR/proxy-index/go/mod"
+            echo "GOTOOLCHAIN=local"
+            echo "GOFLAGS=-mod=readonly"
+            echo "GOTELEMETRY=off"
           } >> "$GITHUB_ENV"
 
       - name: No secrets in the commits (pinned gitleaks, redacted)
@@ -161,21 +191,22 @@ jobs:
           fi
 
       - name: uv sync (locked)
-        if: env.CODE == 'true'
+        if: env.CODE == 'true' || env.API == 'true'
         # The virtualenv persists across runs, and uv rebuilds the project only when
         # pyproject.toml changes; reinstall it so scripts (the benchmark,
         # postgres_local.py) import this head's code, not an earlier build.
         run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
 
       - name: Start a PostgreSQL for this job
-        if: env.CODE == 'true'
+        if: env.CODE == 'true' || env.API == 'true'
         run: |
           port=$(uv run --no-editable python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
           uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port"
-          echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
+          # PG_TEST_REQUIRED: a Go database test fails instead of skipping without the file.
+          printf 'PG_TEST_ADMIN_FILE=%s\nPG_TEST_REQUIRED=1\n' "$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
 
       - name: Checks in the background, tests in parallel
-        if: env.CODE == 'true'
+        if: env.CODE == 'true' || env.API == 'true'
         env:
           COVERAGE_FILE: ${{ runner.temp }}/ev/.coverage
           # Pull requests skip the tests marked slow.
@@ -192,31 +223,58 @@ jobs:
             git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
               | xargs -r uv run --no-editable ruff check --select C901 --config 'lint.mccabe.max-complexity = 25'
           }
-          background build uv build --out-dir "$RUNNER_TEMP/dist"
-          background ruff uv run --no-editable ruff check src tests scripts
-          background ruff-format uv run --no-editable ruff format --check src tests scripts
-          background complexity complexity
-          background limits uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
-          # CAMP-1 Tier 1 step 6: the campaign scope suite on its own.
-          scope=()
-          [ -z "$SKIP" ] || scope=(-m "not slow")
-          background scope uv run --no-editable pytest -p no:xdist -p no:cacheprovider \
-            --basetemp="$RUNNER_TEMP/scope-tmp" "${scope[@]}" tests/test_campaign_scope.py -q
-          background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
+          gofmt_check() {
+            local files
+            files=$(gofmt -l api) || return 1
+            [ -z "$files" ] || { echo "not gofmt-formatted: $files"; return 1; }
+          }
+          # The slowest Go test alone; never an empty pass: it ran and passed (its
+          # output is $EV/go-slow.log, written by `background`).
+          go_slow() {
+            go -C api test -count=1 -v -run "$SLOW_TEST" ./internal/server/ || return 1
+            grep -qE '^--- PASS: TestEveryAnswerIsTheSameFromParts ' "$EV/go-slow.log"
+          }
+          if [ "$CODE" = true ]; then
+            background build uv build --out-dir "$RUNNER_TEMP/dist"
+            background ruff uv run --no-editable ruff check src tests scripts
+            background ruff-format uv run --no-editable ruff format --check src tests scripts
+            background complexity complexity
+            background limits uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
+            # CAMP-1 Tier 1 step 6: the campaign scope suite on its own.
+            scope=()
+            [ -z "$SKIP" ] || scope=(-m "not slow")
+            background scope uv run --no-editable pytest -p no:xdist -p no:cacheprovider \
+              --basetemp="$RUNNER_TEMP/scope-tmp" "${scope[@]}" tests/test_campaign_scope.py -q
+            background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
+          fi
+          if [ "$API" = true ]; then
+            # Beside pytest, two Go packages at a time; alone, one per CPU (go's default).
+            packages=()
+            [ "$CODE" = true ] && packages=(-p 2)
+            background gofmt gofmt_check
+            background go-vet go -C api vet ./...
+            background go-test go -C api test -count=1 "${packages[@]}" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
+            background go-slow go_slow
+            if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+              background go-race env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go -C api test -count=1 -race ./...
+            fi
+          fi
 
-          # Every test, database tests included, with branch coverage: one xdist worker per
-          # CPU, then the `serial` set alone, appending to the same coverage.
-          report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "${SKIP}not serial" \
-            --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
-            | tee "$EV/pytest.log" || tests=$?
           serial=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m "${SKIP}serial" \
-            --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
-            --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
-          # Exit status 5: no test is marked serial.
-          [ "$serial" -eq 5 ] && serial=0
+          if [ "$CODE" = true ]; then
+            # Every test, database tests included, with branch coverage: one xdist worker per
+            # CPU, then the `serial` set alone, appending to the same coverage.
+            report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
+            uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "${SKIP}not serial" \
+              --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
+              | tee "$EV/pytest.log" || tests=$?
+            uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m "${SKIP}serial" \
+              --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
+              --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
+            # Exit status 5: no test is marked serial.
+            [ "$serial" -eq 5 ] && serial=0
+          fi
           wait
 
           failed=0
@@ -231,6 +289,10 @@ jobs:
           done
           [ "$tests" -eq 0 ] || { echo "pytest failed (exit $tests)"; failed=1; }
           [ "$serial" -eq 0 ] || { echo "the serial set failed (exit $serial)"; failed=1; }
+          if [ "$API" = true ]; then
+            grep -E '^(--- |ok)' "$EV/go-slow.log" || true
+          fi
+          [ "$CODE" = true ] || exit "$failed"
           # The database and gitleaks are what this job adds; their tests must never skip quietly.
           if grep -q 'Set PG_TEST_ADMIN_FILE' "$EV/pytest.log"; then
             echo "database tests were skipped"; exit 1
@@ -239,6 +301,18 @@ jobs:
             echo "secret scan tests were skipped"; exit 1
           fi
           exit "$failed"
+
+      - name: The API's latency test alone (TestServeFromDatabase, p99 within 2 ms)
+        if: env.API == 'true'
+        run: |
+          log=$EV/latency.log
+          if ! go -C api test -count=1 -v -run "$LATENCY_TEST" ./internal/server/ > "$log" 2>&1; then
+            tail -n 200 "$log"; exit 1
+          fi
+          grep -E '^(--- |ok)|p50 .* p99' "$log"
+          # Never an empty pass: the test ran, measured and passed.
+          grep -qE '^--- PASS: TestServeFromDatabase ' "$log"
+          grep -qE 'p50 .* p99' "$log"
 
       - name: Changed lines covered (at least 85%)
         if: env.CODE == 'true'

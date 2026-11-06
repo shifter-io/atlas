@@ -64,7 +64,9 @@ scale benchmark: `uv run --no-editable python scripts/benchmark.py`.
 Tier 1 is the CI check `tier1` (`.github/workflows/ci.yml`) on the exact head: every
 test, database tests included, in parallel on one self-hosted CI server, for every
 ready pull request, every push to `main` and every night. Pull requests skip the tests
-marked `slow` (over 60 s alone); `main`, the nightly run and dispatches run them. Tests
+marked `slow` (over 60 s alone); `main`, the nightly run and dispatches run them. The
+same job checks the API (`api/`) when it, the framework's SQL or the workflow changes:
+`gofmt`, `go vet` and the Go tests beside pytest, then the API's latency test alone. Tests
 outside CI run on a disposable test server, never on a workstation. See the HTML guide.
 
 Schema v5 stores each IP once and references it from product membership, history and
@@ -550,7 +552,7 @@ teardown) is described in [the campaign operating guide](docs/campaign.html).
 [`api/`](api/) holds `siteapi`, the Go service behind the Proxy Index website. It reads the
 framework's PostgreSQL database (the measurements plus the site's catalog rows in the `site`
 schema) and serves every answer the website shows as precomputed, precompressed JSON. It has
-its own Go module, tests and CI workflow (`.github/workflows/api.yml`) and is not part of the
-Python package. [Its README](api/README.md) covers building, running, deploying and testing it;
+its own Go module and tests, checked by the same `tier1` CI job as the framework, and is not
+part of the Python package. [Its README](api/README.md) covers building, running, deploying and testing it;
 [`api/FIELDS.md`](api/FIELDS.md) maps every dataset field to its source. It moved here from the
 `proxy-index-api` repository with its history. Rules for both parts: [`AGENTS.md`](AGENTS.md).

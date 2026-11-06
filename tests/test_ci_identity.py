@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 import pytest
+from helpers import BASH, CI_WORKFLOW, workflow_step
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CHECK = ROOT / "scripts" / "ci" / "identity_check.py"
 # Joined at run time so this file adds no literal address the privacy step would flag.
 DOMAIN = ".".join(("users", "noreply", "github", "com"))
@@ -20,8 +20,6 @@ OWNER = f"16010431+ice-zeus@{DOMAIN}"
 WEB_FLOW = "noreply@" + ".".join(("github", "com"))
 PERSONAL = "dev@example.invalid"
 AI = "noreply@" + ".".join(("anthropic", "com"))
-# How GitHub Actions runs a `shell: bash` step.
-BASH = ("bash", "--noprofile", "--norc", "-eo", "pipefail", "-c")
 
 
 def git(repo: Path, *args: str, author: str = OWNER, committer: str = OWNER) -> str:
@@ -115,15 +113,8 @@ def test_bad_usage_exits_2():
     assert subprocess.run([sys.executable, str(CHECK)], capture_output=True).returncode == 2
 
 
-def _step(name: str) -> str:
-    """The run block of a workflow step, dedented as GitHub Actions runs it."""
-    step = WORKFLOW.read_text().split(f"- name: {name}", 1)[1].split("\n      - name:", 1)[0]
-    block = step.split("run: |\n", 1)[1]
-    return "".join(line[10:] if line.strip() else "\n" for line in block.splitlines(True))
-
-
 def test_both_guards_run_for_every_change_before_any_build_step():
-    text = WORKFLOW.read_text()
+    text = CI_WORKFLOW.read_text()
     steps = text.split("\n      - name: ")
     names = [step.split("\n", 1)[0] for step in steps[1:]]
     for name in ("Commit identities", "No secrets in the commits", "Pinned gitleaks"):
@@ -139,7 +130,7 @@ def _secret_scan(repo: Path, tmp_path: Path) -> subprocess.CompletedProcess[str]
     ev.mkdir()
     env = {**os.environ, "BASE": "base", "EV": str(ev)}
     return subprocess.run(
-        [*BASH, _step("No secrets in the commits")],
+        [*BASH, workflow_step("No secrets in the commits")],
         cwd=repo,
         env=env,
         capture_output=True,

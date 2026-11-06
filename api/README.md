@@ -359,7 +359,7 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
+The repository's single CI gate, the `tier1` job of `.github/workflows/ci.yml`, checks the API on every ready pull request that changes `api/` (Markdown outside `api/fixtures/` aside), the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow. On the same CI server as the framework's checks it runs `gofmt`, `go vet` and `go test` with the database tests against the job's PostgreSQL 17 and the framework schema of the same checkout, in the background beside pytest; the slowest test (`TestEveryAnswerIsTheSameFromParts`) runs in its own process beside the rest, and the latency test (`TestServeFromDatabase`) runs alone once every other test of the job has finished. `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from

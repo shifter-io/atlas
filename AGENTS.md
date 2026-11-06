@@ -19,17 +19,20 @@ API; do not add website code here. New numbers the website needs go into the API
 Build and test on remote machines (CI or a disposable test server), never on a
 workstation.
 
-- Framework: `.github/workflows/ci.yml` (`tier1`) runs on every ready pull request:
-  privacy, commit-message, commit-identity and secret checks for every change, then
-  for framework code `uv sync --locked`, ruff, the source limits, pytest with a
-  PostgreSQL (database tests must not skip) and changed-line coverage of at least 85%.
-- API: `.github/workflows/api.yml` runs when `api/`, the framework's SQL
-  (`src/proxy_index/**/*.sql`) or that file changes: `gofmt`, `go vet` and `go test`
-  with the database tests against a throwaway PostgreSQL 17 and the framework schema
-  read from `src/proxy_index/` of the same checkout. A framework schema change that
-  breaks the API's database tests fixes them in the same pull request. The latency test
-  `TestServeFromDatabase` (p99 < 2 ms) runs alone in its own process, after the slowest
-  test; every other test runs in a second part. See "Tests" in `api/README.md`.
+One CI job, `tier1` in `.github/workflows/ci.yml`, gates every ready pull request for
+both parts, on one CI server: privacy, commit-message, commit-identity and secret checks
+for every change, then
+
+- Framework: `uv sync --locked`, ruff, the source limits, pytest with a PostgreSQL
+  (database tests must not skip) and changed-line coverage of at least 85%.
+- API, when `api/` (Markdown outside `api/fixtures/` aside), the framework's SQL
+  (`src/proxy_index/**/*.sql`) or `ci.yml` changes: `gofmt`, `go vet` and `go test`
+  with the database tests, each in its own scratch database in the job's PostgreSQL 17
+  with the framework schema read from `src/proxy_index/` of the same checkout, beside
+  pytest. A framework schema change that breaks the API's database tests fixes them in
+  the same pull request. The latency test `TestServeFromDatabase` (p99 < 2 ms) runs
+  alone in its own process after every other test of the job. See "Tests" in
+  `api/README.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
   ./cmd/siteapi`); `api/bin/` is ignored and never committed. An old binary serves
   only the routes it was built with and writes its own migration checksums.
