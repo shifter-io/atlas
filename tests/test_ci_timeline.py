@@ -1,6 +1,7 @@
 """The opt-in test timeline: helpers.timed writes it, scripts/ci/timeline.py sums it."""
 
 import json
+import os
 import runpy
 import subprocess
 import sys
@@ -144,3 +145,36 @@ def test_only_xdist_workers_reorder(monkeypatch, tmp_path):
     monkeypatch.setattr(conftest, "DURATIONS", tmp_path / "missing.json")
     conftest.pytest_collection_modifyitems(Config({"workercount": 2}), items := [Item("a")])
     assert [item.nodeid for item in items] == ["a"]
+
+
+def run_with_timeline(ev, **env):
+    """Run one fast test of this file in a fresh pytest with CI_TIMELINE=1 and EV=ev."""
+    inherited = ("PYTEST_XDIST", "CI_TIMELINE", "COV_CORE", "COVERAGE")
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(inherited)}
+    environment.update(CI_TIMELINE="1", EV=str(ev), **env)
+    nodeid = "tests/test_ci_timeline.py::test_chunks_follow_the_worksteal_first_split"
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-p", "no:xdist", "-q", nodeid],
+        cwd=SCRIPT.parents[2],
+        env=environment,
+        capture_output=True,
+        check=True,
+    )
+    return nodeid
+
+
+def test_the_timeline_records_each_phase_of_the_test_process(tmp_path):
+    nodeid = run_with_timeline(tmp_path)
+    (path,) = tmp_path.iterdir()
+    assert path.name == "timeline-main.jsonl"
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [(r["kind"], r["nodeid"], r["outcome"]) for r in records] == [
+        (phase, nodeid, "passed") for phase in ("setup", "call", "teardown")
+    ]
+    assert all(r["worker"] == "main" and r["start"] <= r["stop"] for r in records)
+
+
+def test_a_pytest_started_by_a_recording_test_does_not_record(tmp_path):
+    # pid 1 is never the nested pytest: it inherited another process's ownership.
+    run_with_timeline(tmp_path, CI_TIMELINE_OWNER="1")
+    assert list(tmp_path.iterdir()) == []
