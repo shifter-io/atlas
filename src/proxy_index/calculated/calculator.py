@@ -400,7 +400,7 @@ def build(
                     "readiness": "measured" if tm["completed"] else "unavailable",
                     **extra,  # browser targets: K-BP6 outcomes, page loads, group and sources
                 }
-            member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], up, values)
+            member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], (up, values))
             member["observed"] = m["last_observed"]
             previous_rows = [
                 r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since

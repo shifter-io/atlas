@@ -9,8 +9,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
-from helpers import FakeTransport, scratch_database_name
-from psycopg import sql
+from helpers import FakeTransport, drop_databases, scratch_database
 from psycopg.types.json import Jsonb
 
 from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run, storage
@@ -33,42 +32,55 @@ from proxy_index.storage import (
 )
 
 
-@pytest.fixture
-def databases(tmp_path):
+def admin_credentials():
     path = os.environ.get("PG_TEST_ADMIN_FILE")
     if not path:
         pytest.skip("Set PG_TEST_ADMIN_FILE for isolated real PostgreSQL integration tests")
-    admin = read_credentials(path, "postgres")
+    return read_credentials(path, "postgres")
+
+
+@pytest.fixture(scope="session")
+def database_template(tmp_path_factory):
+    """This worker's initialised schema; each `database` is a copy of it."""
+    admin = admin_credentials()
+    name = scratch_database(admin)
+    try:
+        initialize(credentials_file(admin, name, tmp_path_factory.mktemp("template")))
+        yield name
+    finally:
+        drop_databases(admin, [name])
+
+
+def credentials_file(admin, name, directory):
+    config = directory / f"{name}.toml"
+    config.write_text(
+        "[postgres]\n"
+        + "\n".join(
+            f"{key} = {json.dumps(value)}" for key, value in (admin | {"dbname": name}).items()
+        )
+    )
+    config.chmod(0o600)
+    return config
+
+
+@pytest.fixture
+def databases(tmp_path):
+    admin = admin_credentials()
     names = []
 
-    def create():
-        name = scratch_database_name()
-        with psycopg.connect(**admin, autocommit=True) as conn:
-            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
-        names.append(name)
-        config = tmp_path / f"{name}.toml"
-        config.write_text(
-            "[postgres]\n"
-            + "\n".join(
-                f"{key} = {json.dumps(value)}" for key, value in (admin | {"dbname": name}).items()
-            )
-        )
-        config.chmod(0o600)
-        return config
+    def create(template=None):
+        names.append(scratch_database(admin, template=template))
+        return credentials_file(admin, names[-1], tmp_path)
 
     try:
         yield create
     finally:
-        with psycopg.connect(**admin, autocommit=True) as conn:
-            for name in names:
-                conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+        drop_databases(admin, names)
 
 
 @pytest.fixture
-def database(databases):
-    config = databases()
-    initialize(config)
-    return config
+def database(databases, database_template):
+    return databases(template=database_template)
 
 
 async def measurement(
