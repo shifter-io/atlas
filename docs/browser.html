@@ -246,7 +246,7 @@ td:first-child{width:auto}</style>
 <h3>Service templates</h3>
 <p><code>configs/launchd/com.proxyindex.browser-node.plist.example</code> (macOS, a launchd agent) and <code>configs/systemd/proxy-index-browser-node.service.example</code> (Linux) run the command above, restart it when it exits and stop it with SIGTERM (120 s before a kill). They hold placeholders only (<code>__CHECKOUT__</code>, <code>__STATE__</code>, <code>__HOST__</code>, <code>__ORCHESTRATOR__</code>, <code>__USER__</code>); the real values are filled in privately on each host. Standard output and error go to <code>STATE/logs/browser-node.{out,err}.log</code> under launchd and to the journal under systemd.</p>
 </section>
-<section id="outbox"><h2>10. Bundles and outbox (browser/rawfiles.py)</h2>
+<section id="outbox"><h2>10. Bundles and outbox (browser/rawfiles.py, browser/rawfiles_seal.py)</h2>
 <p>On the host every run becomes one K-BP4 bundle (<a href="#bundle">section 4</a>), sent to the manager's ingest endpoint (<a href="#ingest">section 6</a>) and deleted only when the manager confirms it.</p>
 <h3>Layout</h3>
 <ul>

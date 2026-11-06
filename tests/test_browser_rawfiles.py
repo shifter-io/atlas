@@ -22,7 +22,7 @@ from test_browser_contracts import try_fields
 from test_browser_node import SHIFTER
 
 from proxy_index.browser import contracts as bc
-from proxy_index.browser import rawfiles
+from proxy_index.browser import rawfiles, rawfiles_seal
 from proxy_index.browser.rawfiles import Batch, DiskGuard, FileRecorder, Outbox, recover, seal
 from proxy_index.errors import UserError
 from proxy_index.node import NodeAgent
@@ -147,7 +147,7 @@ def test_the_run_directory_is_removed_only_after_the_sidecar_exists(tmp_path, mo
         return real(path, *args, **kwargs)
 
     real = shutil.rmtree
-    monkeypatch.setattr(rawfiles.shutil, "rmtree", checked_rmtree)
+    monkeypatch.setattr(rawfiles_seal.shutil, "rmtree", checked_rmtree)
     seal_dir(run_dir, tmp_path / "outbox")
     assert removed == [(run_dir, True, True)]
 
@@ -156,7 +156,7 @@ def test_a_bundle_that_changes_while_sealed_keeps_its_run_directory(tmp_path, mo
     run_dir = make_run(tmp_path)
     real = rawfiles.read_bundle
     monkeypatch.setattr(
-        rawfiles, "read_bundle", lambda sidecar: replace(real(sidecar), sha256="0" * 64)
+        rawfiles_seal, "read_bundle", lambda sidecar: replace(real(sidecar), sha256="0" * 64)
     )
     with pytest.raises(OSError, match="changed"):
         seal_dir(run_dir, tmp_path / "outbox")
@@ -604,7 +604,7 @@ def test_a_half_run_that_cannot_be_deleted_counts_discard_failed(tmp_path, monke
 
     caplog.set_level(logging.INFO)
     with monkeypatch.context() as patched:
-        patched.setattr(rawfiles.shutil, "rmtree", refuse)
+        patched.setattr(rawfiles_seal.shutil, "rmtree", refuse)
         assert recover(runs, outbox, seal_run) == (0, 0, 1)
     assert half.exists() and f"browser_run_discard_failed: run {RUN_ID} (PermissionError)" in (
         caplog.text
