@@ -16,7 +16,7 @@ from browser_ingest_cases import (
     sha256,
     upload,
 )
-from test_orchestrator import bearer, planned_run, query
+from orchestrator_cases import bearer, planned_run, query
 from test_storage import measurement
 
 from proxy_index.browser import contracts as bc

@@ -107,6 +107,7 @@ class WatchIO:
     notify: Callable[[str], None] = field(default_factory=lambda: notify)
     clock: Callable[[], datetime] = utc_now
     sleep: Callable[[float], None] = time.sleep
+    interval: float = 60  # seconds between polls of `run_watch`
 
 
 def write_text(path: Path, text: str) -> None:
@@ -289,7 +290,6 @@ def run_watch(
     status_file: Path,
     traffic_dir: Path,
     *,
-    interval: float = 60,
     io: WatchIO | None = None,
     iterations: int | None = None,
 ) -> str:
@@ -305,7 +305,7 @@ def run_watch(
         count += 1
         if state == "finished" or (iterations is not None and count >= iterations):
             return state
-        watch.io.sleep(interval)
+        watch.io.sleep(watch.io.interval)
 
 
 def _watch_command(args) -> int:
@@ -316,7 +316,7 @@ def _watch_command(args) -> int:
         Path(args.inventory),
         Path(args.status_file),
         Path(args.traffic_dir),
-        interval=args.interval,
+        io=WatchIO(interval=args.interval),
         iterations=1 if args.once else None,
     )
     print(json.dumps({"state": state}))

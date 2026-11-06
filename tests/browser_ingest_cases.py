@@ -21,8 +21,8 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from orchestrator_cases import bearer, prepare, query
 from test_archive_job import KEY_ID, SECRET, Bucket
-from test_orchestrator import bearer, prepare, query
 from test_storage import measurement
 
 from proxy_index.browser import contracts as bc

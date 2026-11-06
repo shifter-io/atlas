@@ -16,7 +16,7 @@ from browser_ingest_cases import (
     sha256,
     upload,
 )
-from test_orchestrator import query
+from orchestrator_cases import query
 
 from proxy_index.archive import ArchiveError
 from proxy_index.archive.spaces import Spaces

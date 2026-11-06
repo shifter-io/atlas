@@ -46,6 +46,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ..errors import UserError
 from ..node_tls import client_tls
@@ -248,12 +249,23 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+@dataclass(frozen=True)
+class FleetClients:
+    """The cloud, SSH remote, node-token issuer and clock of one reconcile pass."""
+
+    cloud: Any
+    remote: Any
+    issuer: Issuer
+    clock: Clock
+
+
 class Fleet:
     """One reconcile pass under the root's lock."""
 
-    def __init__(self, root: Path, config: FleetConfig, cloud, remote, issuer: Issuer, clock):
-        self.root, self.config, self.cloud, self.remote = root, config, cloud, remote
-        self.issuer, self.clock = issuer, clock
+    def __init__(self, root: Path, config: FleetConfig, clients: FleetClients):
+        self.root, self.config = root, config
+        self.cloud, self.remote = clients.cloud, clients.remote
+        self.issuer, self.clock = clients.issuer, clients.clock
         self.records = load_nodes(root)
         self.report: dict[str, list] = {
             k: [] for k in ("created", "present", "unknown", "failed", "destroy_refused")
@@ -436,20 +448,27 @@ class Fleet:
     def _sort(self, wanted: set[str]) -> None:
         lost = {item["name"] for item in self.report["failed"]}  # exists, but not under the tag
         for name in sorted(wanted & set(self.records) - lost):
-            record = self.records[name]
-            if record.status == "armed" and name not in self.report["created"]:
-                self.report["present"].append(name)
-            elif record.assign_failed_at or record.status in ("destroy_refused", "destroy_failed"):
-                self.report["destroy_refused"].append({"name": name, "id": record.droplet_id})
-            elif record.status != "armed":
-                self.report["failed"].append({"name": name, "status": record.status})
+            kind, entry = self._outcome(name, self.records[name])
+            if kind:
+                self.report[kind].append(entry)
+
+    def _outcome(self, name: str, record: DropletRecord) -> tuple[str | None, object]:
+        """The report list a wanted node belongs in, and its entry; None for a fresh create."""
+        if record.status == "armed" and name not in self.report["created"]:
+            return "present", name
+        if record.assign_failed_at or record.status in ("destroy_refused", "destroy_failed"):
+            return "destroy_refused", {"name": name, "id": record.droplet_id}
+        if record.status != "armed":
+            return "failed", {"name": name, "status": record.status}
+        return None, None
 
 
 async def reconcile(root: Path, cloud, remote, issuer: Issuer, clock=None) -> dict:
     """Create and arm the missing nodes; never deletes. Returns the report (no addresses)."""
     config = load_config(root)
     with lock(root / ".lock"):
-        return await Fleet(root, config, cloud, remote, issuer, clock or Clock()).reconcile()
+        clients = FleetClients(cloud, remote, issuer, clock or Clock())
+        return await Fleet(root, config, clients).reconcile()
 
 
 async def retire(root: Path, name: str, cloud, clock=None) -> dict:
