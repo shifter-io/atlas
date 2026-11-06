@@ -308,7 +308,7 @@ class NodeAgent:
         try:
             if await asyncio.to_thread(reload):
                 log.info("DB-IP database reopened: %s", self.enricher.release["sha256"][:12])
-        except Exception as exc:  # noqa: BLE001 - the open release stays in use
+        except Exception as exc:  # boundary: the open release stays in use; the loop goes on
             log.warning("could not reopen the DB-IP database (%s)", type(exc).__name__)
 
     async def poll(self) -> None:
@@ -497,7 +497,7 @@ class NodeAgent:
             await self.upload(batch_id, directory)
         except Rejected as exc:
             log.warning("batch %s: %s", batch_id, exc)
-        except Exception as exc:  # noqa: BLE001 - report the type only; it may carry secrets
+        except Exception as exc:  # boundary: fails only this batch; the type only (secrets)
             log.warning("batch %s failed (%s)", batch_id, type(exc).__name__)
             await self._fail(batch_id, f"node error ({type(exc).__name__})")
         finally:
