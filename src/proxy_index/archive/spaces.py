@@ -20,6 +20,7 @@ import hmac
 import http.client
 import re
 import subprocess
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -115,6 +116,17 @@ class ArchiveChanged(ArchiveError):
     """The object at a key holds other bytes than the file meant for it; nothing was written."""
 
 
+@dataclass(frozen=True)
+class _Send:
+    """A request's query, extra headers, body and signed payload sha256 (`Spaces._call`'s
+    options)."""
+
+    query: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+    body: Any = None
+    payload: str = EMPTY
+
+
 class Spaces:
     """One bucket. Raises ArchiveError on any answer other than the expected one."""
 
@@ -138,19 +150,21 @@ class Spaces:
         except (KeyError, ValueError, OSError) as exc:
             raise ArchiveError(f"Spaces settings: {type(exc).__name__}: {exc}") from None
 
-    def _request(self, method, key="", query=None, headers=None, body=None, payload=EMPTY):
+    def _request(self, method, key="", send: _Send | None = None):
+        send = send or _Send()
+        query, body, payload = send.query, send.body, send.payload
         path = f"/{self.bucket}/{key}" if key else f"/{self.bucket}"
         now = self.now()
         headers = {
-            **(headers or {}),
+            **send.headers,
             "x-amz-date": now.strftime("%Y%m%dT%H%M%SZ"),
             "x-amz-content-sha256": payload,
         }
-        request = {"method": method, "host": self.host, "path": path, "query": query or {}}
+        request = {"method": method, "host": self.host, "path": path, "query": query}
         request |= {"headers": headers, "payload": payload}
         headers["Authorization"] = sign(request, self.key_id, self.secret, self.region, now)
         target = quote(path, safe="/~") + (
-            "?" + "&".join(f"{k}={v}" if v else k for k, v in sorted((query or {}).items()))
+            "?" + "&".join(f"{k}={v}" if v else k for k, v in sorted(query.items()))
             if query
             else ""
         )
@@ -165,7 +179,7 @@ class Spaces:
             raise ArchiveError(f"Spaces {method} failed: {type(exc).__name__}") from None
 
     def _call(self, method, key="", expect=(200,), **options) -> tuple[int, dict, bytes]:
-        status, headers, response, connection = self._request(method, key, **options)
+        status, headers, response, connection = self._request(method, key, _Send(**options))
         try:
             data = response.read()
         finally:

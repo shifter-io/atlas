@@ -1,10 +1,209 @@
 package build
 
 import (
+	"encoding/json"
+	"fmt"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
+
+// catalog fills the targets, scopes, weights and ranking profiles.
+func (b *builder) catalog() error {
+	in, ds, s := b.in, b.ds, b.s
+	b.targets()
+	ds.Scopes = []model.TestScope{}
+	for _, r := range in.Scopes {
+		var targets any = "all"
+		if !r.AllTargets {
+			targets = append([]string{}, r.TargetIDs...)
+		}
+		ds.Scopes = append(ds.Scopes, model.TestScope{ID: r.Kind, Label: r.Label, Summary: r.Summary, Cadence: r.Cadence, Targets: targets,
+			LiveIPSampling: r.LiveIPSampling, PoolTracking: r.PoolTracking, OverlapAudit: r.OverlapAudit, StickinessTest: r.Stickiness,
+			GeoCoverage: r.GeoCoverage, Rationale: r.Rationale})
+	}
+	ds.Weights = model.NewBreakdown()
+	for _, w := range in.Weights {
+		ds.Weights.Set(w.Component, Num(w.Weight))
+	}
+	if s != nil && len(s.Methodology.Settings.Weights) > 0 {
+		// The published calculation's weights are the ones its scores used.
+		ds.Weights = model.NewBreakdown()
+		for k, v := range s.Methodology.Settings.Weights {
+			ds.Weights.Set(k, Num(v))
+		}
+	}
+	ds.Profiles = []model.RankingProfile{}
+	for _, r := range in.Profiles {
+		p := model.RankingProfile{ID: r.ID, Label: r.Label, Description: r.Description, Weights: model.NewBreakdown()}
+		if len(r.Weights) > 0 {
+			if err := json.Unmarshal(r.Weights, &p.Weights); err != nil {
+				return fmt.Errorf("profile %s weights: %w", r.ID, err)
+			}
+		}
+		ds.Profiles = append(ds.Profiles, p)
+	}
+	return nil
+}
+
+// targets orders the targets by sort_order (a framework target's own, else
+// the catalog row's): catalog rows first on a tie, in their order, then
+// framework targets without one. Group and sources come from the snapshot
+// (browser.go).
+func (b *builder) targets() {
+	in, ds := b.in, b.ds
+	frameworkTarget := map[string]store.FrameworkTarget{}
+	for _, t := range in.FrameworkTargets {
+		frameworkTarget[t.ID] = t
+	}
+	ds.Targets = []model.TargetMeta{}
+	order := map[string]int32{}
+	seen := map[string]bool{}
+	for _, r := range in.Targets {
+		ft, inFramework := frameworkTarget[r.ID]
+		t := model.TargetMeta{ID: r.ID, Label: r.Label, Category: r.Category, PassCondition: r.PassCondition, Difficulty: ptrNum(r.Difficulty), Source: "catalog"}
+		order[r.ID] = r.SortOrder
+		if inFramework {
+			t.Source, t.Engine, order[r.ID] = model.SourceMeasured, frameworkEngine(ft), ft.SortOrder
+			if t.Label == nil {
+				t.Label = ft.Label
+			}
+			if t.PassCondition == nil {
+				t.PassCondition = ft.PassCondition
+			}
+		}
+		ds.Targets = append(ds.Targets, t)
+		seen[r.ID] = true
+	}
+	for _, ft := range in.FrameworkTargets {
+		if !seen[ft.ID] {
+			ds.Targets = append(ds.Targets, model.TargetMeta{ID: ft.ID, Label: ft.Label, PassCondition: ft.PassCondition, Difficulty: nan,
+				Source: model.SourceMeasured, Engine: frameworkEngine(ft)})
+			order[ft.ID] = ft.SortOrder
+		}
+	}
+	sort.SliceStable(ds.Targets, func(i, j int) bool { return order[ds.Targets[i].ID] < order[ds.Targets[j].ID] })
+	addTargetGroups(ds.Targets, b.s)
+}
+
+// providers reads the providers, ranks them and indexes their names.
+func (b *builder) providers() error {
+	c := newCatalog(b.in)
+	entries, err := realProviders(b.in, b.s, c, b.ds.Targets)
+	if err != nil {
+		return err
+	}
+	addCountryLatencyRanks(entries)
+	addRanks(entries)
+	names := map[string]string{}
+	slugOfFramework := map[string]string{}
+	for _, e := range entries {
+		names[e.P.Slug] = e.P.Name
+		if e.P.Framework != nil {
+			slugOfFramework[e.P.Framework.Provider] = e.P.Slug
+		}
+	}
+	b.entries, b.names, b.slugOfFramework = entries, names, slugOfFramework
+	return nil
+}
+
+// siteRecords fills the reviews, community runs and changelog, newest first.
+func (b *builder) siteRecords() error {
+	in, ds := b.in, b.ds
+	ds.Reviews = []model.UserReview{}
+	for _, r := range in.Reviews {
+		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
+			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
+			Verification: r.Verification, InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
+			ProviderReply: r.ProviderReply, AgoSeconds: b.ageOf(r.PostedAt), Source: model.SourceMeasured})
+	}
+	sortByAge(ds.Reviews, func(r model.UserReview) Num { return r.AgoSeconds })
+	ds.CommunityRuns = []model.CommunityRun{}
+	for _, r := range in.CommunityRuns {
+		run, err := b.communityRun(r)
+		if err != nil {
+			return err
+		}
+		ds.CommunityRuns = append(ds.CommunityRuns, run)
+	}
+	sortByAge(ds.CommunityRuns, func(r model.CommunityRun) Num { return r.AgoSeconds })
+	ds.Changelog = []model.ChangeEvent{}
+	for _, r := range in.Changelog {
+		ch := model.ChangeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, Headline: r.Headline, Detail: r.Detail,
+			Delta: ptrNum(r.Delta), Unit: r.Unit, AgoSeconds: b.ageOf(r.OccurredAt), Severity: r.Severity, Source: model.SourceMeasured}
+		if r.ProviderSlug != nil {
+			ch.ProviderName = model.S(b.nameOrSlug(*r.ProviderSlug))
+		}
+		ds.Changelog = append(ds.Changelog, ch)
+	}
+	sortByAge(ds.Changelog, func(r model.ChangeEvent) Num { return r.AgoSeconds })
+	return nil
+}
+
+func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, error) {
+	run := model.CommunityRun{ID: r.ID, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug), SubmittedBy: r.SubmittedBy,
+		Region: r.Region, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
+		RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
+		UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), DeltaSuccessPts: ptrNum(r.DeltaSuccessPts),
+		DeltaLatencyPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: b.ageOf(r.SubmittedAt), Source: model.SourceMeasured}
+	var err error
+	if run.Targets, err = decodeRaw[model.TargetBenchmark](r.Targets, "community run "+r.ID+" targets"); err != nil {
+		return run, err
+	}
+	if run.SuccessSeries, err = decodeRaw[model.SeriesPoint](r.SuccessSeries, "community run "+r.ID+" success_series"); err != nil {
+		return run, err
+	}
+	if run.LatencySeries, err = decodeRaw[model.LatencyPoint](r.LatencySeries, "community run "+r.ID+" latency_series"); err != nil {
+		return run, err
+	}
+	return run, nil
+}
+
+// tape fills the tape: measured events first (newest first), then the
+// editorial rows.
+func (b *builder) tape() error {
+	in, ds, s := b.in, b.ds, b.s
+	products := []TapeProduct{}
+	if s != nil {
+		for _, p := range s.Products {
+			// The site's display name (catalog) wins over the snapshot's.
+			name := p.Name
+			if n, ok := b.names[b.slugOfFramework[p.Provider]]; ok {
+				name = n
+			}
+			products = append(products, TapeProduct{Provider: p.Provider, Name: name, Kind: p.Kind})
+		}
+	}
+	for _, fp := range in.FrameworkProducts {
+		products = append(products, TapeProduct{Provider: fp.Provider, Name: b.nameOrSlug(b.slugOfFramework[fp.Provider]), Kind: fp.Name})
+	}
+	b.res.Events = newEventWindow(in)
+	tapeEvents := b.res.Events.measuredTape()
+	tapeRef := ds.GeneratedAt
+	if s != nil {
+		tapeRef = s.GeneratedAt
+	}
+	sorted := append([]store.EventJSON{}, tapeEvents...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		x, y := snap.Ms(sorted[i].At), snap.Ms(sorted[j].At)
+		if x != y {
+			return x > y
+		}
+		return sorted[i].ID > sorted[j].ID
+	})
+	ds.Tape = TapeFromEvents(sorted, products, tapeRef, b.slugOfFramework)
+	editorial := []model.TapeEvent{}
+	for _, r := range in.Tape {
+		editorial = append(editorial, model.TapeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug),
+			Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal), Value: r.Value,
+			AgoSeconds: b.ageOf(r.OccurredAt), Source: model.SourceMeasured})
+	}
+	sortByAge(editorial, func(r model.TapeEvent) Num { return r.AgoSeconds })
+	ds.Tape = append(ds.Tape, editorial...)
+	return nil
+}
 
 // naManifests fills the N/A manifests of the providers, targets, scopes and
 // profiles.
