@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 // Row keys in jsonb order: a breakdown row's label keys per code plus the
@@ -166,71 +165,4 @@ func appendString(b []byte, s string) []byte {
 		}
 	}
 	return append(b, '"')
-}
-
-// poolRows is the pool list name picked from its dimension's rows as
-// proxy-index aggregate.pool_lists() picks it: rows with IPs, most IPs first,
-// then by Python's str() of the row.
-func poolRows(name string, l *List) []*ListRow {
-	all := l.Rows(map[string]string{"geo": "city", "countries_breakdown": "country", "asns_breakdown": "asn"}[name])
-	out := []*ListRow{}
-	for i := range all {
-		if all[i].Ips > 0 {
-			out = append(out, &all[i])
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Ips != out[j].Ips {
-			return out[i].Ips > out[j].Ips
-		}
-		return pyRepr(poolKeys[name], out[i]) < pyRepr(poolKeys[name], out[j])
-	})
-	return out
-}
-
-// pyRepr is Python's str() of a pool list row.
-func pyRepr(keys []string, r *ListRow) string {
-	var b strings.Builder
-	b.WriteByte('{')
-	for i, k := range keys {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		v := string(writers[k](nil, r))
-		if f, ok := texts[k]; ok && f(r) != nil {
-			v = pyStr(*f(r))
-		} else if v == "null" {
-			v = "None"
-		}
-		b.WriteString("'" + k + "': " + v)
-	}
-	return b.String() + "}"
-}
-
-// pyStr is Python's repr() of a str.
-func pyStr(s string) string {
-	q := '\''
-	if strings.ContainsRune(s, '\'') && !strings.ContainsRune(s, '"') {
-		q = '"'
-	}
-	var b strings.Builder
-	b.WriteRune(q)
-	for _, c := range s {
-		switch e := strings.IndexRune("\t\n\r", c); {
-		case c == q || c == '\\':
-			b.WriteString(`\` + string(c))
-		case e >= 0:
-			b.WriteString(`\` + "tnr"[e:e+1])
-		case unicode.IsPrint(c):
-			b.WriteRune(c)
-		case c < 0x100:
-			fmt.Fprintf(&b, `\x%02x`, c)
-		case c < 0x10000:
-			fmt.Fprintf(&b, `\u%04x`, c)
-		default:
-			fmt.Fprintf(&b, `\U%08x`, c)
-		}
-	}
-	b.WriteRune(q)
-	return b.String()
 }
