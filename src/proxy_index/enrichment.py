@@ -163,32 +163,7 @@ def enrich_run(directory: str | Path, mmdb: str | Path | None = None) -> dict[st
         if destination.exists() or report_path.exists():
             raise FileExistsError("This run already has enrichment for the selected MMDB")
         partial = destination.with_suffix(".gz.partial")
-        count, unmatched = 0, 0
-        # An exclusive creation also prevents two writers racing this release.
-        with partial.open("xb") as raw_output:
-            os.chmod(partial, 0o600)
-            with (
-                gzip.open(source, "rt", encoding="utf-8") as src,
-                gzip.open(raw_output, "wt", encoding="utf-8") as dst,
-            ):
-                for line in src:
-                    row = json.loads(line)
-                    if row["run_id"] != summary["run_id"]:
-                        raise ValueError("IP artifact contains a different run ID")
-                    data = enricher.lookup(row["ip"])
-                    unmatched += not data["matched"]
-                    count += 1
-                    dst.write(
-                        json.dumps(
-                            row
-                            | {
-                                "enrichment": data,
-                                "dbip_release": release_id,
-                            },
-                            separators=(",", ":"),
-                        )
-                        + "\n"
-                    )
+        count, unmatched = _write_enriched(source, partial, summary["run_id"], enricher, release_id)
         if count != summary["artifacts"]["ips"]["rows"]:
             raise ValueError("IP artifact row count does not match summary")
         partial.replace(destination)
@@ -204,3 +179,35 @@ def enrich_run(directory: str | Path, mmdb: str | Path | None = None) -> dict[st
             os.chmod(report_path, 0o600)
             json.dump(report, out, indent=2)
         return report
+
+
+def _write_enriched(
+    source: Path, partial: Path, run_id: str, enricher: LocalEnricher, release_id: str
+) -> tuple[int, int]:
+    """Write the enriched rows of `source` to `partial`; returns (rows, unmatched rows)."""
+    count, unmatched = 0, 0
+    # An exclusive creation also prevents two writers racing this release.
+    with partial.open("xb") as raw_output:
+        os.chmod(partial, 0o600)
+        with (
+            gzip.open(source, "rt", encoding="utf-8") as src,
+            gzip.open(raw_output, "wt", encoding="utf-8") as dst,
+        ):
+            for line in src:
+                data, enriched = _enrich_line(line, run_id, enricher, release_id)
+                unmatched += not data["matched"]
+                count += 1
+                dst.write(enriched)
+    return count, unmatched
+
+
+def _enrich_line(
+    line: str, run_id: str, enricher: LocalEnricher, release_id: str
+) -> tuple[dict[str, Any], str]:
+    """One IP artifact row's enrichment and its enriched JSON line."""
+    row = json.loads(line)
+    if row["run_id"] != run_id:
+        raise ValueError("IP artifact contains a different run ID")
+    data = enricher.lookup(row["ip"])
+    enriched = row | {"enrichment": data, "dbip_release": release_id}
+    return data, json.dumps(enriched, separators=(",", ":")) + "\n"

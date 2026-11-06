@@ -81,39 +81,65 @@ def unpack(
     `browser/tries.jsonl`), extracted under their parent directories; directory entries it
     admits are skipped. It must accept only safe, fixed path shapes.
     """
-    directory = Path(directory)
-    names: list[str] = []
-    total = 0
     try:
         with tarfile.open(source, "r:gz") as archive:
-            for member in archive:
-                if member.isdir() and nested is not None and nested(member.name):
-                    continue
-                if len(names) >= max_members:
-                    raise ArchiveError("Too many files in the archive")
-                if not member.isreg():
-                    raise ArchiveError("Archives may contain only regular files")
-                plain = NAME.fullmatch(member.name) is not None
-                if not (plain or (nested and nested(member.name))) or member.name in names:
-                    raise ArchiveError("Archive member names must be plain, unique file names")
-                if not plain:
-                    (directory / member.name).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                total += member.size
-                if member.size < 0 or total > max_bytes:
-                    raise ArchiveError("Archive is larger than the extraction limit")
-                stream = archive.extractfile(member)
-                if stream is None:
-                    raise ArchiveError("Archive member cannot be read")
-                written = 0
-                with stream, (directory / member.name).open("xb") as output:
-                    while chunk := stream.read(CHUNK):
-                        written += len(chunk)
-                        if written > member.size:
-                            raise ArchiveError("Archive member is longer than declared")
-                        output.write(chunk)
-                names.append(member.name)
+            names = _extract_all(archive, Path(directory), max_bytes, nested, max_members)
     except (tarfile.TarError, EOFError, OSError, zlib.error) as exc:
         raise ArchiveError(f"Unreadable archive ({type(exc).__name__})") from None
     if "summary.json" not in names:
         raise ArchiveError("Archive has no summary.json")
     return names
+
+
+def _extract_all(
+    archive: tarfile.TarFile,
+    directory: Path,
+    max_bytes: int,
+    nested: Callable[[str], bool] | None,
+    max_members: int,
+) -> list[str]:
+    """Extract unpack's admitted members in archive order; returns their names."""
+    names: list[str] = []
+    total = 0
+    for member in archive:
+        if member.isdir() and nested is not None and nested(member.name):
+            continue
+        if not _admit(member, names, nested, max_members):
+            (directory / member.name).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        total += member.size
+        if member.size < 0 or total > max_bytes:
+            raise ArchiveError("Archive is larger than the extraction limit")
+        _extract(archive, member, directory / member.name)
+        names.append(member.name)
+    return names
+
+
+def _admit(
+    member: tarfile.TarInfo,
+    names: list[str],
+    nested: Callable[[str], bool] | None,
+    max_members: int,
+) -> bool:
+    """Refuse a member unpack may not extract; True when its name is plain (no parent)."""
+    if len(names) >= max_members:
+        raise ArchiveError("Too many files in the archive")
+    if not member.isreg():
+        raise ArchiveError("Archives may contain only regular files")
+    plain = NAME.fullmatch(member.name) is not None
+    if not (plain or (nested and nested(member.name))) or member.name in names:
+        raise ArchiveError("Archive member names must be plain, unique file names")
+    return plain
+
+
+def _extract(archive: tarfile.TarFile, member: tarfile.TarInfo, path: Path) -> None:
+    """Copy a regular member to a new file, never past its declared size."""
+    stream = archive.extractfile(member)
+    if stream is None:
+        raise ArchiveError("Archive member cannot be read")
+    written = 0
+    with stream, path.open("xb") as output:
+        while chunk := stream.read(CHUNK):
+            written += len(chunk)
+            if written > member.size:
+                raise ArchiveError("Archive member is longer than declared")
+            output.write(chunk)
