@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from test_orchestrator import bearer, prepare, query
+from orchestrator_cases import bearer, prepare, query
 from test_storage import measurement
 
 from proxy_index.orchestrator import batches

@@ -74,6 +74,7 @@ orchestrator = [
     "src/proxy_index/node.py",
     "src/proxy_index/node_tls.py",
     "tests/test_orchestrator*.py",
+    "tests/orchestrator_cases.py",
     "tests/test_admin.py",
     "tests/test_manager_*.py",
     "tests/test_node.py",
