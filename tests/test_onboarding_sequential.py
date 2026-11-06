@@ -90,7 +90,7 @@ def test_eight_days_manifest_and_total_calls(tmp_path):
     assert sum(24 * len(m["regions"][region]) for region in ORDER) == 5976
 
 
-@pytest.mark.parametrize("day, region", enumerate(ORDER), ids=ORDER)
+@pytest.mark.parametrize("day, region", list(enumerate(ORDER)), ids=ORDER)
 async def test_each_day_hourly_in_its_own_window_and_closed(tmp_path, no_fsync, day, region):
     path = make_eight_days(tmp_path)
     await run_day(path, campaign.load(path), day, region)
