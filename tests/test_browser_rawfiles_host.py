@@ -18,6 +18,7 @@ from datetime import timedelta
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from browser_rawfiles_cases import CAMOUFOX, MEMBERS, RUN_ID, SLOT, make_run, seal_dir
 from test_browser_node import (
     CHEAP,
     SHIFTER,
@@ -29,7 +30,6 @@ from test_browser_node import (
     make_state,
     serve_until,
 )
-from test_browser_rawfiles import CAMOUFOX, MEMBERS, RUN_ID, SLOT, make_run, seal_dir
 
 from proxy_index.browser import contracts as bc
 from proxy_index.browser import node as host_module
