@@ -178,32 +178,48 @@ def count_windows(monkeypatch):
     return counted
 
 
-# Each day's cutoffs in chunks of CHUNK, each chunk its own case (they run in parallel).
+# Each day's cutoffs in chunks of CHUNK, each chunk its own case (they run in parallel). A late
+# chunk first replays most of its day, so each of SPLIT's is cut into its number of cases,
+# "<day>-<chunk>a", "b" and so on, of an equal share of its cutoffs.
 CHUNK = 6
-CHUNKS = [(day, chunk) for day in range(3) for chunk in range(len(cutoffs(day)) // CHUNK)]
-# The chunks with no window that has exactly one peer (overlap 1: two of the US cohort's alpha,
-# beta and delta with IPs): day 0's before beta's first run is in a window, and day 2's last,
-# where delta's run is in every window. Each day's other chunks have one.
-NO_SINGLE_PEER = {(0, 0), (0, 1), (0, 2), (2, 3)}
+SPLIT = {(day, 2): 2 for day in range(3)} | {(day, 3): 3 for day in range(3)}
+
+
+def chunks():
+    """Each case's day and the start and stop of its cutoffs in cutoffs(day)."""
+    for day in range(3):
+        for chunk in range(len(cutoffs(day)) // CHUNK):
+            parts = SPLIT.get((day, chunk), 1)
+            size = CHUNK // parts
+            for part in range(parts):
+                start = chunk * CHUNK + part * size
+                suffix = "abc"[part] if parts > 1 else ""
+                yield pytest.param(day, start, start + size, id=f"{day}-{chunk}{suffix}")
+
+
+# The cutoffs (hours before the end) with a window that has exactly one peer (overlap 1: two of
+# the US cohort's alpha, beta and delta with IPs): from beta's first run in a window to the
+# last before delta's run is in every window.
+SINGLE_PEER = range(10, 55)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("day", "chunk"), CHUNKS)
+@pytest.mark.parametrize(("day", "start", "stop"), list(chunks()))
 async def test_incremental_equals_full_at_every_hourly_cutoff(
-    day, chunk, database, tmp_path, monkeypatch
+    day, start, stop, database, tmp_path, monkeypatch
 ):
-    """One chunk of a day's sweep, which starts from no stored list: the day's cutoffs before the
-    chunk are replayed, then each of the chunk's is checked."""
+    """One case of a day's sweep, which starts from no stored list: the day's cutoffs before the
+    case's are replayed, then each of the case's is checked."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
     hours_of = cutoffs(day)
     late = min(36, hours_of[0])  # a late run: earlier than runs counted before (not on day 0)
     add_late = partial(h.daily, "beta", "us", 60 * HOUR)
-    await replay(database, policy, end, hours_of[: chunk * CHUNK], (late, add_late))
+    await replay(database, policy, end, hours_of[:start], (late, add_late))
     counted = count_windows(monkeypatch)
     log, seen = statements(monkeypatch), set()
-    for hours in hours_of[chunk * CHUNK : (chunk + 1) * CHUNK]:
+    for hours in hours_of[start:stop]:
         if hours == late:
             await add_late()
         payload = assert_equal(database, policy, end - hours * HOUR, log)
@@ -217,7 +233,7 @@ async def test_incremental_equals_full_at_every_hourly_cutoff(
     # Every case is exercised: empty and measured windows, estimates, peers, census-pulse
     # groups, and windows the incremental builds reused and ones they counted.
     assert {("data", True), ("estimated", True)} <= seen
-    assert (("overlap", 1) in seen) == ((day, chunk) not in NO_SINGLE_PEER)
+    assert (("overlap", 1) in seen) == any(at in SINGLE_PEER for at in hours_of[start:stop])
     assert ("data", False) in seen  # gamma's windows
     assert ("scheduled", "census_pulse") in seen and ("scheduled", None) in seen
     assert ("delta", "census_pulse") in seen
