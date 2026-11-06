@@ -19,8 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from campaign_fakes import CAMPAIGN_PROJECT, CID, FakeDigitalOcean, running
-from helpers import FakeTransport
-from test_campaign_hour import (
+from campaign_hour_cases import (
     PRE_CREATE,
     SCHEDULED,
     FakeClock,
@@ -29,6 +28,7 @@ from test_campaign_hour import (
     make_root,
     make_spec,
 )
+from helpers import FakeTransport
 from test_onboarding import ROOT, START, Clock, Proxy
 from test_onboarding_round import TOR1, make
 

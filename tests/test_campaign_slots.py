@@ -12,8 +12,8 @@ from datetime import timedelta
 
 import pytest
 from campaign_fakes import CID, FakeDigitalOcean
-from test_campaign_hour import NETWORKS, PRE_CREATE, REGIONS, launched
-from test_campaign_hour import make_spec as hour_spec
+from campaign_hour_cases import NETWORKS, PRE_CREATE, REGIONS, launched
+from campaign_hour_cases import make_spec as hour_spec
 from test_campaign_tick import START, Clock, fake_launcher, make_root, make_spec
 from test_onboarding import ROOT
 
