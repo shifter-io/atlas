@@ -6,6 +6,7 @@ HTTPS serving and the calculation subprocess in test_manager_orch_serve.py)."""
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from campaign_deploy_fakes import (
@@ -20,7 +21,7 @@ from campaign_deploy_fakes import (
     writes,
 )
 from campaign_deploy_fakes import Shell as DeployShell
-from campaign_fakes import running
+from campaign_fakes import Fault, running
 from manager_orch_cases import (
     CERT_PEM,
     CHECK_OK,
@@ -374,18 +375,26 @@ async def test_enable_never_swaps_the_formulas_under_the_hourly_test(job, tmp_pa
     assert guard < next(i for i, line in enumerate(lines) if "mv -Tf" in line)
 
 
-async def test_a_missing_pulse_tag_is_named_and_nothing_is_recorded(job, tmp_path):
+async def test_a_missing_pulse_tag_is_created_empty_and_a_refusal_names_the_error(job, tmp_path):
+    """MANAGER-TAG-1: enable creates the empty pi-pulse-node tag; a refused rule names why."""
     fake = await deployed(job, pulse_tag=False)
     await recorded_size(fake, job)
+    path = f"/v2/firewalls/{inventory(job)['manager_firewall_id']}"
+    fake.faults.append(Fault("PUT", path, 422))
     shell = Shell()
     async with running(fake) as cloud:
-        with pytest.raises(deploy.DeployError, match=f"does the tag {PULSE_TAG} exist"):
+        refused = re.escape(f"DigitalOcean refused the firewall rules: PUT {path} failed (422)")
+        with pytest.raises(deploy.DeployError, match=refused):
             await manager_orch.enable(
                 cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell
             )
     assert "node_api_port" not in inventory(job) and shell.calls == []
     assert "browser_port" not in inventory(job)
     assert len(manager_firewall(fake, job)["inbound_rules"]) == 1
+    async with running(fake) as cloud:
+        await manager_orch.enable(cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell)
+    assert manager_firewall(fake, job)["inbound_rules"][-2] == manager_rules.node_api_rule()
+    assert PULSE_TAG in fake.tags and not any(PULSE_TAG in d["tags"] for d in fake.droplets.values())
 
 
 async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port(job, tmp_path):

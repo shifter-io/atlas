@@ -50,6 +50,8 @@ HTTP_TRACE = 30
 ID, UUID = r"[0-9]+", r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 PAGE = frozenset({"page", "per_page"})
 TAG = re.escape(RESOURCE_PREFIX) + r"[a-z0-9-]+"
+# The tags a firewall write may create: a pi-camp- tag, or the pulse nodes' (MANAGER-TAG-1).
+ENSURED_TAG = f"(?:{TAG}|{re.escape(PULSE_TAG)})"
 NONE: frozenset[str] = frozenset()
 # (method, path pattern) -> (allowed query keys, needs the scope guard). A delete names one
 # resource. Later tasks add endpoints here under scope review; nothing else can be sent.
@@ -84,9 +86,9 @@ ALLOWED = MappingProxyType(
         ("POST", f"/v2/images/{ID}/actions"): (NONE, False),
         ("POST", "/v2/firewalls"): (NONE, False),
         ("PUT", f"/v2/firewalls/{UUID}"): (NONE, False),
-        # CAMP-1h: a firewall may only name a tag that exists. Read and create a pi-camp- tag;
-        # never list tags or tag/untag a resource.
-        ("GET", f"/v2/tags/{TAG}"): (NONE, False),
+        # CAMP-1h: a firewall may only name a tag that exists. Read and create a pi-camp- tag or
+        # pi-pulse-node; never list tags or tag/untag a resource.
+        ("GET", f"/v2/tags/{ENSURED_TAG}"): (NONE, False),
         ("POST", "/v2/tags"): (NONE, False),
     }
 )
@@ -128,7 +130,7 @@ OWNED_WRITES = MappingProxyType(
             ("POST", f"/v2/droplets/{ID}/actions"),
             ("POST", "/v2/firewalls"),
             ("PUT", f"/v2/firewalls/{UUID}"),
-            ("GET", f"/v2/tags/{TAG}"),
+            ("GET", f"/v2/tags/{ENSURED_TAG}"),
             ("POST", "/v2/tags"),
         )
     }
@@ -148,7 +150,7 @@ BODIES = MappingProxyType(
         ("POST", "/v2/firewalls"): _firewall,
         ("PUT", f"/v2/firewalls/{UUID}"): _firewall,
         ("POST", "/v2/tags"): lambda body: (
-            set(body) == {"name"} and bool(re.fullmatch(TAG, str(body["name"])))
+            set(body) == {"name"} and bool(re.fullmatch(ENSURED_TAG, str(body["name"])))
         ),
     }
 )
@@ -613,14 +615,21 @@ class DigitalOcean:
 
     async def _ensure_tags(self, rules: dict[str, Any]) -> None:
         """DigitalOcean refuses (422) a firewall naming a tag that does not exist yet, as
-        pi-camp-worker does before the first worker: create each missing one."""
-        for tag in rules.get("tags") or []:
+        pi-camp-worker does before the first worker, or pi-pulse-node as an inbound source
+        before the first pulse node: create each missing one, targets and sources."""
+        sources = [
+            tag
+            for rule in rules.get("inbound_rules") or []
+            for tag in (rule.get("sources") or {}).get("tags") or []
+        ]
+        for tag in dict.fromkeys([*(rules.get("tags") or []), *sources]):
             await self._ensure_tag(str(tag))
 
     async def _ensure_tag(self, name: str) -> None:
-        """Create the pi-camp- tag `name` unless it exists; it is never put on a resource."""
-        if not re.fullmatch(TAG, name):
-            raise ScopeError("only pi-camp- tags are created")
+        """Create the tag `name` (pi-camp- or pi-pulse-node) unless it exists; it is never
+        put on a resource."""
+        if not re.fullmatch(ENSURED_TAG, name):
+            raise ScopeError("only pi-camp- tags and pi-pulse-node are created")
         try:
             await self.request("GET", f"/v2/tags/{name}", guard=_OWNED)
         except ApiError as error:
