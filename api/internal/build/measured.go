@@ -70,78 +70,104 @@ func minutesAgo(refMs float64, stamp string) Num {
 // measuredProvider ports presentation.ts measuredProvider for one product.
 // overlapPeers supplies the 30d snapshot overlap rows for this product.
 func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetMeta, peers []model.PoolOverlap) measuredView {
+	kind := proxyKind(p.Kind)
+	mv := measuredView{Kind: kind, Product: model.DefaultProduct[kind]}
+	mv.Measured = measuredBlock(p, snap.Ms(s.AsOf), targets, peers)
+	mv.Declared = declaredNA(p, peers)
+	score := balancedScore(p.Window("30d"))
+	writeMeasuredCopy(&mv, p, score)
+	mv.Score = scoreView(score)
+	return mv
+}
+
+// measuredBlock is the measurement block of one product, aged against ref.
+func measuredBlock(p *snap.Product, ref float64, targets []model.TargetMeta, peers []model.PoolOverlap) model.Measured {
 	w := p.Window("30d")
 	day := p.Window("24h")
-	m := w.Metrics
-	score, ok := w.Scores["balanced"]
-	if !ok {
-		score = snap.EmptyScore()
-	}
-	ref := snap.Ms(s.AsOf)
-	points := func(win snap.Window) []snap.SeriesRow {
-		out := []snap.SeriesRow{}
-		for _, r := range win.Series {
-			if r.Completed > 0 {
-				out = append(out, r)
-			}
-		}
-		return out
-	}
-	successes := func(win snap.Window) []model.SeriesPoint {
-		out := []model.SeriesPoint{}
-		for _, r := range points(win) {
-			out = append(out, model.SeriesPoint{T: minutesAgo(ref, r.At), V: r.SuccessRate})
-		}
-		return out
-	}
-	kind := proxyKind(p.Kind)
-	product := model.DefaultProduct[kind]
-	mv := measuredView{Kind: kind, Product: product}
 	var meas model.Measured
-	meas.Pool = model.PoolStats{
+	meas.Pool = poolStats(w, day)
+	meas.Performance = performanceStats(w, day)
+	meas.Pricing = measuredPricing(p, w.Metrics)
+	meas.Trust = trustSignals(w)
+	meas.Targets = targetBenchmarks(w, targets)
+	meas.Series = providerSeries(w, day, ref)
+	meas.Geo = geoBuckets(w)
+	meas.Asns = asnBuckets(w)
+	meas.Overlap = overlapSummary(w, peers)
+	meas.IPSamples = []model.IPSample{}
+	countries := nan
+	if w.Uptime != nil {
+		countries = w.Uptime.Countries
+	}
+	meas.Incidents = outageIncidents(p, ref, countries)
+	return meas
+}
+
+func poolStats(w, day snap.Window) model.PoolStats {
+	return model.PoolStats{
 		UniqueIps24h: ipsOf(day), UniqueIps30d: ipsOf(w), ClaimedPoolSize: nan,
 		ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		RequestsPerIP: nan,
 	}
+}
+
+func performanceStats(w, day snap.Window) model.PerformanceStats {
+	m := w.Metrics
 	uptime := nan
 	if m.Uptime.OK() {
 		uptime = m.Uptime * 100
 	}
 	lm, _ := latencyMetrics(w)
 	head := headlineLatency(lm)
-	meas.Performance = model.PerformanceStats{
+	return model.PerformanceStats{
 		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan, LatencyDelta24h: nan,
 		LatencyP50: head.P50, LatencyMean: head.Mean, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
 		CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, TimeoutRate: m.TimeoutRate,
-		UptimePct: uptime, DowntimeMinutes24h: nan, Requests24h: day.Metrics.Completed, BandwidthMb24h: nan,
+		UptimePct: uptime, DowntimeMinutes24h: weightedDowntimeMinutes(day.Uptime), Requests24h: day.Metrics.Completed, BandwidthMb24h: nan,
 	}
+}
+
+// listPriced is whether the snapshot publishes the product's list prices.
+func listPriced(p *snap.Product) bool {
+	return p.Pricing != nil && (p.Pricing.LowestPerGb.OK() || p.Pricing.EntryPerGb.OK())
+}
+
+func measuredPricing(p *snap.Product, m snap.Metrics) model.Pricing {
 	// Pricing, billing model and editorial trust fields are catalog data (site.pricing,
 	// site.trust_signals) merged in by the caller; the snapshot has none of them.
-	meas.Pricing = model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, Plans: []model.PricingPlan{},
+	pricing := model.Pricing{PricePerGb: nan, PricePerGbAtScale: nan, MinCommit: nan, Plans: []model.PricingPlan{},
 		CostPer1kSuccess: nan, AvgPayloadKb: nan, HeadlinePriceRank: nan, ValueRank: nan}
 	// Every-request snapshots publish the product's list prices: the entry rate
 	// (smallest plan) is pricePerGb and the lowest rate pricePerGbAtScale, the
 	// site's `$ / GB` (listRate).
-	if pr := p.Pricing; pr != nil && (pr.LowestPerGb.OK() || pr.EntryPerGb.OK()) {
-		meas.Pricing.PricePerGb, meas.Pricing.PricePerGbAtScale = pr.EntryPerGb, pr.LowestPerGb
-		meas.Pricing.Model = model.S("per_gb")
+	if listPriced(p) {
+		pricing.PricePerGb, pricing.PricePerGbAtScale = p.Pricing.EntryPerGb, p.Pricing.LowestPerGb
+		pricing.Model = model.S("per_gb")
 	}
-	meas.Pricing.CostPer1kSuccess = wireCostPer1k(listRate(meas.Pricing), m)
-	if meas.Pricing.CostPer1kSuccess.OK() {
-		meas.Pricing.CostBasis = model.S(costBasisText(listRate(meas.Pricing), m))
+	pricing.CostPer1kSuccess = wireCostPer1k(listRate(pricing), m)
+	if pricing.CostPer1kSuccess.OK() {
+		pricing.CostBasis = model.S(costBasisText(listRate(pricing), m))
 	}
-	// Every-request snapshots (shares_basis): authenticity is the share of exit
-	// IPs in the requested country, the datacenter share is per IP, and there
-	// is no claim gap. Older snapshots keep the claim gap = datacenter share.
-	meas.Trust = model.TrustSignals{
+	return pricing
+}
+
+// trustSignals: in every-request snapshots (shares_basis) authenticity is the
+// share of exit IPs in the requested country, the datacenter share is per IP,
+// and there is no claim gap. Older snapshots keep the claim gap = datacenter share.
+func trustSignals(w snap.Window) model.TrustSignals {
+	trust := model.TrustSignals{
 		ResidentialAuthenticity: nan, DatacenterAsnShare: w.Pool.DatacenterAsnShare, ClaimGap: w.Pool.DatacenterAsnShare,
 		BlacklistHitRate: nan, StickinessHoldRate: nan, LeakChecks: []model.LeakCheck{},
 	}
 	if w.Pool.SharesBasis != nil {
-		meas.Trust.ResidentialAuthenticity, meas.Trust.ClaimGap = w.Pool.GeoAccuracy, nan
+		trust.ResidentialAuthenticity, trust.ClaimGap = w.Pool.GeoAccuracy, nan
 	}
-	meas.Targets = make([]model.TargetBenchmark, 0, len(targets))
+	return trust
+}
+
+func targetBenchmarks(w snap.Window, targets []model.TargetMeta) []model.TargetBenchmark {
+	out := make([]model.TargetBenchmark, 0, len(targets))
 	labels := map[string]model.Str{}
 	for _, t := range targets {
 		labels[t.ID] = t.Label
@@ -163,160 +189,216 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 		if isBrowser(t, tr, has) {
 			b.BrowserBenchmark = browserBenchmark(w, t, labels)
 		}
-		meas.Targets = append(meas.Targets, b)
+		out = append(out, b)
 	}
+	return out
+}
+
+// completedRows is a window's series rows that completed requests.
+func completedRows(win snap.Window) []snap.SeriesRow {
+	out := []snap.SeriesRow{}
+	for _, r := range win.Series {
+		if r.Completed > 0 {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// seriesPoints is v of each completed row, aged in minutes before ref.
+func seriesPoints(win snap.Window, ref float64, v func(snap.SeriesRow) Num) []model.SeriesPoint {
+	out := []model.SeriesPoint{}
+	for _, r := range completedRows(win) {
+		out = append(out, model.SeriesPoint{T: minutesAgo(ref, r.At), V: v(r)})
+	}
+	return out
+}
+
+func providerSeries(w, day snap.Window, ref float64) model.ProviderSeries {
+	success := func(r snap.SeriesRow) Num { return r.SuccessRate }
+	age := func(at string) Num { return minutesAgo(ref, at) }
 	lat24 := []model.LatencyPoint{}
-	for _, r := range points(day) {
+	for _, r := range completedRows(day) {
 		l := seriesLatency(day, r)
 		lat24 = append(lat24, model.LatencyPoint{T: minutesAgo(ref, r.At), P50: l.P50, P90: l.P90, P99: l.P99})
 	}
-	pointsV := func(win snap.Window, v func(snap.SeriesRow) Num) []model.SeriesPoint {
-		out := []model.SeriesPoint{}
-		for _, r := range points(win) {
-			out = append(out, model.SeriesPoint{T: minutesAgo(ref, r.At), V: v(r)})
-		}
-		return out
-	}
-	meas.Series = model.ProviderSeries{
-		Success24h: successes(day), Success30d: successes(w), Latency24h: lat24,
-		Latency30d:    pointsV(w, func(r snap.SeriesRow) Num { return seriesLatency(w, r).P50 }),
-		UniqueIps24h:  ipPoints(day, "24h", points(day), func(at string) Num { return minutesAgo(ref, at) }),
-		UniqueIps30d:  ipPoints(w, "30d", points(w), func(at string) Num { return minutesAgo(ref, at) }),
+	return model.ProviderSeries{
+		Success24h: seriesPoints(day, ref, success), Success30d: seriesPoints(w, ref, success), Latency24h: lat24,
+		Latency30d:    seriesPoints(w, ref, func(r snap.SeriesRow) Num { return seriesLatency(w, r).P50 }),
+		UniqueIps24h:  ipPoints(day, "24h", completedRows(day), age),
+		UniqueIps30d:  ipPoints(w, "30d", completedRows(w), age),
 		PricePerGb90d: []model.SeriesPoint{},
 	}
+}
+
+func geoBuckets(w snap.Window) []model.GeoBucket {
 	byCountry := map[string]snap.BreakdownRow{}
 	for _, r := range w.Breakdowns["country"] {
 		if r.CountryCode != nil {
 			byCountry[*r.CountryCode] = r
 		}
 	}
-	meas.Geo = []model.GeoBucket{}
+	out := []model.GeoBucket{}
 	for _, g := range w.Pool.CountriesBreakdown {
 		b := model.GeoBucket{CountryCode: g.CountryCode, Country: model.S(g.Country), Ips: scaledIps(w, g.Ips), Share: scaledShare(w, g.Ips), LatencyP50: nan, SuccessRate: nan}
 		if r, has := byCountry[g.CountryCode]; has {
 			b.LatencyP50, b.SuccessRate = r.P50, r.SuccessRate
 		}
-		meas.Geo = append(meas.Geo, b)
+		out = append(out, b)
 	}
-	meas.Asns = []model.AsnBucket{}
+	return out
+}
+
+// asnKind maps a pool ASN usage type to the site's ASN kind.
+func asnKind(usageType string) string {
+	switch usageType {
+	case "hosting":
+		return "hosting"
+	case "cellular":
+		return "mobile"
+	case "business":
+		return "business"
+	}
+	return "eyeball"
+}
+
+func asnBuckets(w snap.Window) []model.AsnBucket {
+	out := []model.AsnBucket{}
 	for _, a := range w.Pool.AsnsBreakdown {
-		k := "eyeball"
-		switch a.UsageType {
-		case "hosting":
-			k = "hosting"
-		case "cellular":
-			k = "mobile"
-		case "business":
-			k = "business"
-		}
-		meas.Asns = append(meas.Asns, model.AsnBucket{Asn: a.Asn, Name: model.S(a.Name), Kind: k, Ips: scaledIps(w, a.Ips), Share: scaledShare(w, a.Ips)})
+		out = append(out, model.AsnBucket{Asn: a.Asn, Name: model.S(a.Name), Kind: asnKind(a.UsageType), Ips: scaledIps(w, a.Ips), Share: scaledShare(w, a.Ips)})
 	}
-	// presentation.ts leaves the overlap block unavailable. The snapshot does publish the
-	// 30d exclusive/shared share and per-pair counts, so the API maps them when present.
-	meas.Overlap = model.OverlapSummary{ExclusiveShare: w.Overlap.ExclusiveShare, SharedShare: w.Overlap.SharedShare, Overlaps: peers}
-	if meas.Overlap.Overlaps == nil {
-		meas.Overlap.Overlaps = []model.PoolOverlap{}
+	return out
+}
+
+// overlapSummary: presentation.ts leaves the overlap block unavailable. The snapshot does publish the
+// 30d exclusive/shared share and per-pair counts, so the API maps them when present.
+func overlapSummary(w snap.Window, peers []model.PoolOverlap) model.OverlapSummary {
+	o := model.OverlapSummary{ExclusiveShare: w.Overlap.ExclusiveShare, SharedShare: w.Overlap.SharedShare, Overlaps: peers}
+	if o.Overlaps == nil {
+		o.Overlaps = []model.PoolOverlap{}
 	}
-	meas.IPSamples = []model.IPSample{}
-	countries := nan
-	if w.Uptime != nil {
-		countries = w.Uptime.Countries
-	}
-	meas.Incidents = outageIncidents(p, ref, countries)
-	meas.Performance.DowntimeMinutes24h = weightedDowntimeMinutes(day.Uptime)
-	mv.Measured = meas
-	mv.Declared = []string{"pricing.plans", "series.pricePerGb90d", "ipSamples", "trust.leakChecks", "overlap.likelyUpstream"}
+	return o
+}
+
+// declaredNA is the N/A paths the builder declares explicitly.
+func declaredNA(p *snap.Product, peers []model.PoolOverlap) []string {
+	declared := []string{"pricing.plans", "series.pricePerGb90d", "ipSamples", "trust.leakChecks", "overlap.likelyUpstream"}
 	if p.Outages == nil {
 		// A v1 snapshot publishes no outages: unknown, not zero.
-		mv.Declared = append(mv.Declared, "incidents")
+		declared = append(declared, "incidents")
 	}
 	if len(peers) == 0 {
-		mv.Declared = append(mv.Declared, "overlap.overlaps")
+		declared = append(declared, "overlap.overlaps")
 	}
+	return declared
+}
 
+func balancedScore(w snap.Window) snap.Score {
+	if score, ok := w.Scores["balanced"]; ok {
+		return score
+	}
+	return snap.EmptyScore()
+}
+
+func scoreView(score snap.Score) model.ScoreView {
+	v := model.ScoreView{Composite: score.Score, Rank: score.Rank, PreviousRank: score.PreviousRank, Breakdown: model.NewBreakdown(), Grade: score.Grade}
+	if peers := score.Peers(); peers.OK() {
+		v.Peers = peers
+	}
+	for k, c := range score.Components {
+		v.Breakdown.Set(k, c.Value)
+	}
+	return v
+}
+
+// writeMeasuredCopy writes the generated copy. It follows the data: the
+// schedule the network is measured on, its score once there is one, and only
+// what is really still missing.
+func writeMeasuredCopy(mv *measuredView, p *snap.Product, score snap.Score) {
+	w := p.Window("30d")
+	m := w.Metrics
 	census := productCensus(p)
 	pulses := 0.0
 	if w.Uptime != nil && w.Uptime.Batches.OK() {
 		pulses = w.Uptime.Batches.F()
 	}
-	httpsMeasured := false
-	if t, has := w.Targets["generic_https"]; has && t.Metrics.Completed.OK() && t.Metrics.Completed > 0 {
-		httpsMeasured = true
+	mv.Verdict = verdict(w, census, score)
+	mv.Strengths = strengths(w, census)
+	mv.Weaknesses = weaknesses(p, w, pulses)
+	switch {
+	case m.EveryRequest():
+		mv.Tagline = model.KindLabels[mv.Kind] + " proxies · measured on a census, pulse and load schedule"
+	case census != nil || pulses > 0:
+		mv.Tagline = model.KindLabels[mv.Kind] + " proxies · measured on a census and pulse schedule"
+	default:
+		mv.Tagline = model.KindLabels[mv.Kind] + " proxies · measured HTTP pool sample"
 	}
+}
+
+func verdict(w snap.Window, census *censusTotals, score snap.Score) string {
+	m := w.Metrics
+	totals := fmt.Sprintf("%s completed requests, %s successes and %s unique IPs.",
+		jsnum.Locale(m.Completed.F()), jsnum.Locale(m.Successes.F()), jsnum.Locale(ipsOf(w).F()))
+	if census == nil {
+		return totals + " This is one pool sample; a complete performance benchmark and overall score are not available yet."
+	}
+	tail := " An overall score is not available yet."
+	if score.Score.OK() {
+		tail = " MILF Score " + jsnum.ToFixed(score.Score.F(), 1)
+		if score.Grade != nil {
+			tail += " (" + *score.Grade + ")"
+		}
+		if score.Peers() == 1 {
+			tail += ", alone in its kind so far: every part is scored against itself"
+		}
+		tail += "."
+	}
+	return fmt.Sprintf("%s The latest census covers %s: %s unique IPs from %s requests.%s",
+		totals, plural(census.Countries, "country", "countries"), jsnum.Locale(census.UniqueIps), jsnum.Locale(census.Requests), tail)
+}
+
+func strengths(w snap.Window, census *censusTotals) []string {
+	success := " HTTP sampling success"
+	if w.Metrics.EveryRequest() {
+		success = " time-weighted success over every request"
+	}
+	out := []string{
+		jsnum.Locale(ipsOf(w).F()) + ipsPhrase(w),
+		jsnum.Pct(w.Metrics.SuccessRate.F(), 2) + success,
+	}
+	if census != nil {
+		out = append(out, fmt.Sprintf("%s unique IPs in the latest census across %s", jsnum.Locale(census.UniqueIps), plural(census.Countries, "country", "countries")))
+	}
+	return append(out, "Local DB-IP enrichment")
+}
+
+func weaknesses(p *snap.Product, w snap.Window, pulses float64) []string {
+	out := []string{}
+	if pulses == 0 {
+		out = append(out, "One short run; continuous coverage unavailable")
+	}
+	untested := untestedText(w)
+	out = append(out, strings.ToUpper(untested[:1])+untested[1:]+" not tested")
+	if listPriced(p) {
+		return append(out, "Billed usage not collected (list prices only)")
+	}
+	return append(out, "Pricing and billed usage not collected")
+}
+
+// untestedText lists what the window did not test: "HTTPS, uptime and sticky sessions".
+func untestedText(w snap.Window) string {
 	untested := []string{}
-	if !httpsMeasured {
+	if t, has := w.Targets["generic_https"]; !has || !t.Metrics.Completed.OK() || t.Metrics.Completed <= 0 {
 		untested = append(untested, "HTTPS")
 	}
-	if !m.Uptime.OK() {
+	if !w.Metrics.Uptime.OK() {
 		untested = append(untested, "uptime")
 	}
 	untested = append(untested, "sticky sessions")
-	untestedText := untested[0]
-	if len(untested) > 1 {
-		untestedText = strings.Join(untested[:len(untested)-1], ", ") + " and " + untested[len(untested)-1]
+	if len(untested) == 1 {
+		return untested[0]
 	}
-	totals := fmt.Sprintf("%s completed requests, %s successes and %s unique IPs.",
-		jsnum.Locale(m.Completed.F()), jsnum.Locale(m.Successes.F()), jsnum.Locale(ipsOf(w).F()))
-	// The copy follows the data: the schedule the network is measured on, its
-	// score once there is one, and only what is really still missing.
-	scheduled := census != nil || pulses > 0
-	priced := p.Pricing != nil && (p.Pricing.LowestPerGb.OK() || p.Pricing.EntryPerGb.OK())
-	if census != nil {
-		tail := " An overall score is not available yet."
-		if score.Score.OK() {
-			tail = " MILF Score " + jsnum.ToFixed(score.Score.F(), 1)
-			if score.Grade != nil {
-				tail += " (" + *score.Grade + ")"
-			}
-			if score.Peers() == 1 {
-				tail += ", alone in its kind so far: every part is scored against itself"
-			}
-			tail += "."
-		}
-		mv.Verdict = fmt.Sprintf("%s The latest census covers %s: %s unique IPs from %s requests.%s",
-			totals, plural(census.Countries, "country", "countries"), jsnum.Locale(census.UniqueIps), jsnum.Locale(census.Requests), tail)
-	} else {
-		mv.Verdict = totals + " This is one pool sample; a complete performance benchmark and overall score are not available yet."
-	}
-	success := " HTTP sampling success"
-	if m.EveryRequest() {
-		success = " time-weighted success over every request"
-	}
-	mv.Strengths = []string{
-		jsnum.Locale(ipsOf(w).F()) + ipsPhrase(w),
-		jsnum.Pct(m.SuccessRate.F(), 2) + success,
-	}
-	if census != nil {
-		mv.Strengths = append(mv.Strengths, fmt.Sprintf("%s unique IPs in the latest census across %s", jsnum.Locale(census.UniqueIps), plural(census.Countries, "country", "countries")))
-	}
-	mv.Strengths = append(mv.Strengths, "Local DB-IP enrichment")
-	mv.Weaknesses = []string{}
-	if pulses == 0 {
-		mv.Weaknesses = append(mv.Weaknesses, "One short run; continuous coverage unavailable")
-	}
-	mv.Weaknesses = append(mv.Weaknesses, strings.ToUpper(untestedText[:1])+untestedText[1:]+" not tested")
-	if priced {
-		mv.Weaknesses = append(mv.Weaknesses, "Billed usage not collected (list prices only)")
-	} else {
-		mv.Weaknesses = append(mv.Weaknesses, "Pricing and billed usage not collected")
-	}
-	switch {
-	case m.EveryRequest():
-		mv.Tagline = model.KindLabels[kind] + " proxies · measured on a census, pulse and load schedule"
-	case scheduled:
-		mv.Tagline = model.KindLabels[kind] + " proxies · measured on a census and pulse schedule"
-	default:
-		mv.Tagline = model.KindLabels[kind] + " proxies · measured HTTP pool sample"
-	}
-
-	mv.Score = model.ScoreView{Composite: score.Score, Rank: score.Rank, PreviousRank: score.PreviousRank, Breakdown: model.NewBreakdown(), Grade: score.Grade}
-	if peers := score.Peers(); peers.OK() {
-		mv.Score.Peers = peers
-	}
-	for k, c := range score.Components {
-		mv.Score.Breakdown.Set(k, c.Value)
-	}
-	return mv
+	return strings.Join(untested[:len(untested)-1], ", ") + " and " + untested[len(untested)-1]
 }
 
 // outageIncidents ports presentation.ts outageIncidents: each outage the
