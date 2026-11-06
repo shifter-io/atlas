@@ -258,7 +258,7 @@ def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
     slot_seconds = slot_length(pulse_minutes) * 60
     # Pulse and load runs that ran during a census of the same product: the census batch ids.
     flagged_runs = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
-    # The latency target (build()'s timed_target): only its light runs count for latency.
+    # Every latency figure comes from this one target (build()'s timed_target).
     timed_target = latency_target(config)
     groups, run_map, scheduled_groups, scope_groups = _group_runs(
         runs, config, flagged_runs, timed_target, pulse_minutes
