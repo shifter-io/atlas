@@ -165,11 +165,19 @@ def _cell_jobs(
     return state["jobs"], state
 
 
-def build_region(
-    path: Path, manifest: dict, network: str, region: str, ledger: Ledger, slots: int = HOURS
-) -> dict:
+@dataclass(frozen=True)
+class NetworkManifest:
+    """One network's loaded campaign manifest and the path it was read from."""
+
+    network: str
+    path: Path
+    manifest: dict
+
+
+def build_region(source: NetworkManifest, region: str, ledger: Ledger, slots: int = HOURS) -> dict:
     """The closed 24-round checkpoint of one region; raises on an unfinished cell. Rounds past
     the spec's `slots` (a compressed test) are never launched: they close unstarted."""
+    path, manifest, network = source.path, source.manifest, source.network
     jobs, rounds = [], []
     for hour in range(HOURS):
         if hour >= slots:
@@ -209,11 +217,11 @@ def merge_networks(root: Path, networks: list[str] | tuple[str, ...]) -> dict[st
     built = []
     for network in networks:
         path = manifest_path(root, network)
-        manifest = load(path)
-        if manifest["schema_version"] != 3:
+        source = NetworkManifest(network, path, load(path))
+        if source.manifest["schema_version"] != 3:
             raise ValueError("Campaign merge requires ephemeral (version 3) manifests")
         built += [
-            (network, path, build_region(path, manifest, network, region, ledger, spec.hours))
+            (network, path, build_region(source, region, ledger, spec.hours))
             for region in spec.regions
         ]
     summaries: dict[str, list[dict]] = {network: [] for network in networks}
