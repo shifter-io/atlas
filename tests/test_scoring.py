@@ -1,11 +1,11 @@
 """Scoring from every request: time-weighted success and latency, latency under load, per-IP
-shares without DB-IP unknowns, and methodology files that extend another."""
+shares without DB-IP unknowns (methodology files: test_scoring_methodology.py)."""
 
 from collections import Counter
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import timedelta
 
 import pytest
+from scoring_cases import HALF_HOUR, T, census_run, observation, row
 
 from proxy_index.calculated.aggregate import (
     LIGHT_CENSUS,
@@ -31,50 +31,8 @@ from proxy_index.calculated.latency import (
     load_factor,
     under_load_values,
 )
-from proxy_index.calculated.policy import events, load, slot_settings
+from proxy_index.calculated.policy import load
 from proxy_index.stats import Histogram
-
-T = datetime(2026, 10, 3, 18, tzinfo=UTC)
-HALF_HOUR = timedelta(minutes=30)
-
-
-def row(
-    slot,
-    ms,
-    *,
-    n=100,
-    successes=None,
-    test="pulse",
-    country="US",
-    target="generic_http",
-    census=(),
-    run_key=None,
-    region=None,
-):
-    """One bucket row: n requests in a time slot, every success at `ms` milliseconds; census
-    names the census batches the run overlapped (a pulse or load wave during a census)."""
-    successes = n if successes is None else successes
-    return {
-        "bucket_start": slot,
-        "last_observed": slot,
-        "slot": slot,
-        "run_key": run_key,
-        "test": test,
-        "during_census": bool(census),
-        "census_batches": list(census),
-        "light": test in (None, "pulse") and not census,
-        "country": country,
-        "region": region,
-        "target": target,
-        "concurrency": 1000 if test == "load" else 25,
-        "counters": {
-            "completed": n,
-            "successes": successes,
-            "errors": {"proxy_connect": n - successes} if n > successes else {},
-            "response_body_bytes": 0,
-            "latency_histogram": {"bins": [[ms, successes]] if successes else []},
-        },
-    }
 
 
 def test_blend_normalises_each_slot_and_never_averages_percentiles():
@@ -255,23 +213,6 @@ def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():
     assert under_load([row(T, 800, n=10)], factors, 30)["reason"] == UNDER_LOAD_LIGHT
 
 
-def observation(ip_id, country, asked, usage="residential", **fields):
-    return {
-        "ip_id": ip_id,
-        "bucket_start": T,
-        "first_seen": T,
-        "last_seen": T,
-        "count": 1,
-        "product_first_seen": T,
-        "requested_country": asked,
-        "country_code": country,
-        "usage_type": usage,
-        "asn": ip_id,
-        "matched": country is not None,
-        **fields,
-    }
-
-
 def test_shares_are_per_ip_and_leave_db_ip_unknowns_out():
     observations = [
         observation(1, "RO", "ro"),
@@ -298,61 +239,6 @@ def test_shares_are_per_ip_and_leave_db_ip_unknowns_out():
     # A datacenter product keeps 100 on dcAsns.
     datacenter = product_inputs(counts, {}, config, "datacenter")["dcAsns"]
     assert datacenter["fixed"] == 100 and datacenter["state"] == "ready"
-
-
-def test_staging_methodology_extends_production(tmp_path):
-    production, production_id = load("configs/methodology.toml")
-    staging, staging_id = load("configs/staging-methodology.toml")
-    assert (production["minimum_requests"], staging["minimum_requests"]) == (4000, 1000)
-    assert {k: v for k, v in staging.items() if k not in ("minimum_requests", "name")} == {
-        k: v for k, v in production.items() if k not in ("minimum_requests", "name")
-    }
-    assert "extends" not in staging and staging_id != production_id
-    assert slot_settings(staging) == {"min_latency_successes": 30}
-    assert events("configs/staging-methodology.toml") == events("configs/methodology.toml")
-    # Tables merge key by key; a cycle is refused.
-    child = tmp_path / "child.toml"
-    child.write_text(
-        f'extends = "{Path("configs/methodology.toml").resolve()}"\n'
-        '[products."shifter/residential"]\ndisplay_name = "Other"\n'
-    )
-    merged, _ = load(child)
-    assert merged["products"]["shifter/residential"] == {
-        "kind": "residential",
-        "display_name": "Other",
-    }
-    (tmp_path / "a.toml").write_text('extends = "b.toml"\n')
-    (tmp_path / "b.toml").write_text('extends = "a.toml"\n')
-    with pytest.raises(ValueError, match="cycle"):
-        load(tmp_path / "a.toml")
-
-
-def test_latency_target_is_a_required_target(tmp_path):
-    config, _ = load("configs/methodology.toml")
-    assert config["latency_target"] == "generic_http"
-    text = Path("configs/methodology.toml").read_text()
-    policy = tmp_path / "methodology.toml"
-    policy.write_text(text.replace('latency_target = "generic_http"', 'latency_target = "other"'))
-    with pytest.raises(ValueError, match="latency target"):
-        load(policy)
-
-
-def test_removed_settings_are_refused(tmp_path):
-    text = Path("configs/methodology.toml").read_text()
-    for extra in ('scored_roles = ["benchmark"]\n', "[authenticity]\nblocklist_penalty = 120\n"):
-        policy = tmp_path / "methodology.toml"
-        policy.write_text(extra + text if extra.startswith("scored") else text + extra)
-        with pytest.raises(ValueError, match="Unknown methodology setting"):
-            load(policy)
-
-
-def census_run(batch_id, start, minutes, product=1):
-    return {
-        "product_id": product,
-        "batch_id": batch_id,
-        "started_at": start,
-        "finished_at": start + timedelta(minutes=minutes),
-    }
 
 
 def test_census_overlap_detection_any_country_same_product():

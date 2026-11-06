@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import re
+import socket
 import subprocess
 import threading
 from contextlib import contextmanager
@@ -119,6 +120,25 @@ def fake_bucket(tmp_path):
         yield handler, settings
     finally:
         server.shutdown()
+        # Close the listening socket now, not when the server is collected: until then its
+        # port still accepts, so a request to it is reset instead of refused (FLAKE-1).
+        server.server_close()
+
+
+def test_fake_bucket_refuses_connections_once_it_is_gone(tmp_path, monkeypatch):
+    servers = []
+
+    class Kept(ThreadingHTTPServer):
+        def server_activate(self):
+            super().server_activate()
+            servers.append(self)
+
+    # The test holds the server, so only an explicit close can free its port.
+    monkeypatch.setitem(globals(), "ThreadingHTTPServer", Kept)
+    with fake_bucket(tmp_path):
+        pass
+    with pytest.raises(ConnectionRefusedError):
+        socket.create_connection(("127.0.0.1", servers[0].server_port), timeout=5).close()
 
 
 def shift(conn, run_key, to):
