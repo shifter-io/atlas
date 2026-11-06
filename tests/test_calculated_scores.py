@@ -5,7 +5,7 @@ import copy
 from datetime import timedelta
 
 import pytest
-from calculated_cases import ready_inputs
+from calculated_cases import build_inputs, ready_inputs
 
 from proxy_index.calculated import store
 from proxy_index.calculated.policy import digest
@@ -15,19 +15,19 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
-    result = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    result = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
     scores = [p["windows"]["24h"]["scores"]["balanced"] for p in result["products"]]
     assert [s["rank"] for s in scores] == [1, 2]
     assert all(s["state"] == "ready" for s in scores)
     assert scores[0]["valid_until"] == now + timedelta(hours=12)
     c["products"]["p1/residential"] = {"weights": dict.fromkeys(c["weights"], 0) | {"speed": 100}}
-    changed = build(r, b, o, e, c, digest(c), now, 2, None, None)
+    changed = build(build_inputs(r, b, o, e, now), c, digest(c), 2, None)
     score = changed["products"][0]["windows"]["24h"]["scores"]["balanced"]
     assert score["score"] == score["components"]["speed"]["value"]
     # Missing pricing cannot silently redistribute value's positive weight.
     c, now, r, b, o, e = ready_inputs()
     e = [v for v in e if v["metric"] != "price_per_gb_lowest"]
-    incomplete = build(r, b, o, e, c, digest(c), now, 3, None, None)
+    incomplete = build(build_inputs(r, b, o, e, now), c, digest(c), 3, None)
     score = incomplete["products"][0]["windows"]["24h"]["scores"]["balanced"]
     assert score["score"] is None
     assert score["components"]["value"]["reason"] == (
@@ -37,15 +37,16 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     c, now, r, b, o, e = ready_inputs()
     loads = {x["run_key"] for x in r if x["test"] == "load"}
     unloaded = build(
-        [x for x in r if x["run_key"] not in loads],
-        [x for x in b if x["run_key"] not in loads],
-        o,
-        e,
+        build_inputs(
+            [x for x in r if x["run_key"] not in loads],
+            [x for x in b if x["run_key"] not in loads],
+            o,
+            e,
+            now,
+        ),
         c,
         digest(c),
-        now,
         5,
-        None,
         None,
     )
     window = unloaded["products"][0]["windows"]["24h"]
@@ -62,7 +63,7 @@ def test_complete_scores_ranks_overrides_and_stale_evidence():
     for v in e:
         v["period_end"] = later
         v["valid_until"] = later + timedelta(days=1)
-    stale = build(r, b, o, e, c, digest(c), later, 4, None, None)
+    stale = build(build_inputs(r, b, o, e, later), c, digest(c), 4, None)
     assert stale["products"][0]["windows"]["7d"]["scores"]["balanced"]["score"] is None
 
 
@@ -70,18 +71,18 @@ def test_score_retention_and_methodology_change():
     from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs()
-    previous = store.jsonable(build(r, b, o, e, c, digest(c), now, 1, None, None))
+    previous = store.jsonable(build(build_inputs(r, b, o, e, now), c, digest(c), 1, None))
     later = now + timedelta(minutes=5)
-    retained = build(r, b, o, [], c, digest(c), later, 2, None, previous)
+    retained = build(build_inputs(r, b, o, [], later), c, digest(c), 2, previous)
     s = retained["products"][0]["windows"]["24h"]["scores"]["balanced"]
     assert s["state"] == "retained" and s["scored_at"] == previous["as_of"]
     assert s["previous_rank"] == 1
     c["weights"]["speed"] += 1
-    changed = build(r, b, o, [], c, digest(c), later, 3, None, previous)
+    changed = build(build_inputs(r, b, o, [], later), c, digest(c), 3, previous)
     historical = changed["products"][0]["windows"]["24h"]["scores"]["balanced"]
     assert historical["state"] == "historical" and historical["rank"] is None
     assert historical["methodology_id"] == previous["methodology"]["id"]
-    expired = build(r, b, o, [], c, digest(c), now + timedelta(days=2), 4, None, previous)
+    expired = build(build_inputs(r, b, o, [], now + timedelta(days=2)), c, digest(c), 4, previous)
     assert expired["products"][0]["windows"]["24h"]["scores"]["balanced"]["state"] == "expired"
 
 
@@ -110,7 +111,7 @@ def test_peer_ratio_scores():
     from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = peer_inputs()
-    result = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    result = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
     p1, p2, p3 = (p["windows"]["24h"] for p in result["products"])
     parts = [w["scores"]["balanced"]["components"] for w in (p1, p2, p3)]
 
@@ -183,7 +184,7 @@ def test_peer_ratio_scores():
     # Datacenter products keep 100 on dcAsns whatever their datacenter share.
     for i in (1, 2, 3):
         c["products"][f"p{i}/residential"] = {"kind": "datacenter"}
-    datacenter = build(r, b, o, e, c, digest(c), now, 2, None, None)
+    datacenter = build(build_inputs(r, b, o, e, now), c, digest(c), 2, None)
     dc = datacenter["products"][0]["windows"]["24h"]["scores"]["balanced"]["components"]["dcAsns"]
     assert dc["value"] == 100 and dc["state"] == "ready" and dc["inputs"]["value"] == 0
 
@@ -198,7 +199,7 @@ def test_peer_ratio_retained_scores_and_lone_products():
     for bucket in b:
         bucket["counters"] |= {"completed": 2, "successes": 2}
         bucket["counters"]["latency_histogram"]["bins"][0][1] = 2
-    previous = store.jsonable(build(r, b, o, e, c, digest(c), now, 1, None, None))
+    previous = store.jsonable(build(build_inputs(r, b, o, e, now), c, digest(c), 1, None))
     # Later, product 3 is the fastest but has too few requests: its score is retained and its
     # latency does not become the best of the others.
     later = now + timedelta(minutes=5)
@@ -209,7 +210,7 @@ def test_peer_ratio_retained_scores_and_lone_products():
                 "successes": 1,
                 "latency_histogram": {"bins": [[50, 1]]},
             }
-    result = build(r, b, o, e, c, digest(c), later, 2, None, previous)
+    result = build(build_inputs(r, b, o, e, later), c, digest(c), 2, previous)
     p1, p2, p3 = (p["windows"]["24h"] for p in result["products"])
     assert p3["scores"]["balanced"]["state"] == "retained"
     assert p3["targets"]["generic_http"]["score"]["state"] == "retained"
@@ -228,15 +229,16 @@ def test_peer_ratio_retained_scores_and_lone_products():
     # A product alone in its kind is its own leader: 100 on every ready component.
     c, now, r, b, o, e = peer_inputs()
     alone = build(
-        [x for x in r if x["product_id"] == 3],
-        [x for x in b if x["run_key"] // 10 == 3],
-        [x for x in o if x["run_key"] // 10 == 3],
-        [x for x in e if x["product_id"] == 3],
+        build_inputs(
+            [x for x in r if x["product_id"] == 3],
+            [x for x in b if x["run_key"] // 10 == 3],
+            [x for x in o if x["run_key"] // 10 == 3],
+            [x for x in e if x["product_id"] == 3],
+            now,
+        ),
         c,
         digest(c),
-        now,
         3,
-        None,
         None,
     )
     score = alone["products"][0]["windows"]["24h"]["scores"]["balanced"]
@@ -266,7 +268,7 @@ def test_daily_average_counts():
         for day in range(30)
     ] + [o[1]]
     b += [b[0] | {"bucket_start": now - timedelta(days=day, minutes=5)} for day in range(1, 30)]
-    result = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    result = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
     p1, p2 = result["products"]
     month = p1["windows"]["30d"]["pool"]
     assert month["unique_ips"] == 30
@@ -295,7 +297,7 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
     from proxy_index.calculated.calculator import build
 
     c, now, r, b, o, e = ready_inputs(products=(1,))
-    alone = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    alone = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
     for window in alone["products"][0]["windows"].values():
         assert window["pool"]["unique_ips"] == 1
         assert window["overlap"] == {
@@ -307,7 +309,7 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
     c, now, r, b, o, e = ready_inputs()
     # A second product with requests but no observed IPs is not a measured peer.
     first_observations = [obs for obs in o if obs["run_key"] == 10]
-    partial = build(r, b, first_observations, e, c, digest(c), now, 2, None, None)
+    partial = build(build_inputs(r, b, first_observations, e, now), c, digest(c), 2, None)
     first, second = partial["products"]
     assert first["windows"]["30d"]["overlap"] == {
         "exclusive_share": 1,
@@ -317,7 +319,7 @@ def test_single_network_uniqueness_uses_observed_ips_and_measured_peers():
     assert second["windows"]["30d"]["overlap"]["exclusive_share"] is None
 
     # Once both pools are observed, their shared IP changes the same calculation.
-    compared = build(r, b, o, e, c, digest(c), now, 3, None, None)
+    compared = build(build_inputs(r, b, o, e, now), c, digest(c), 3, None)
     for product in compared["products"]:
         assert product["windows"]["30d"]["overlap"] == {
             "exclusive_share": 0,
@@ -344,7 +346,7 @@ def test_cohorts_and_duplicate_overlap():
         assert cohort_for(custom, "residential")[0] != base
     # An IP recurring in many buckets remains one distinct member.
     o.append(o[0] | {"bucket_start": now - timedelta(days=1, minutes=5)})
-    result = build(r, b, o, e, c, digest(c), now, 1, None, None)
+    result = build(build_inputs(r, b, o, e, now), c, digest(c), 1, None)
     w = result["products"][0]["windows"]["7d"]
     assert w["pool"]["unique_ips"] == 1 and w["pool"]["recurring_share"] == 1
     assert w["overlap"]["shared_share"] == 1
