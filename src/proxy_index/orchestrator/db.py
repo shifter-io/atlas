@@ -239,10 +239,14 @@ class Database:
         async with self.connection() as conn:
             found = await conn.execute("SELECT to_regclass(%s) AS found", (name,))
             if (await found.fetchone())["found"] is None:
-                async with conn.transaction():
-                    for query in partitions.creation(table, name, start, end):
-                        await conn.execute(query)
+                await _run_in_transaction(conn, partitions.creation(table, name, start, end))
         self._partitions.add(name)
+
+
+async def _run_in_transaction(conn: psycopg.AsyncConnection, queries) -> None:
+    async with conn.transaction():
+        for query in queries:
+            await conn.execute(query)
 
 
 async def setting(conn: psycopg.AsyncConnection, key: str) -> Any:
