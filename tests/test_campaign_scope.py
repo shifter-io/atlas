@@ -1015,7 +1015,6 @@ def test_cloud_and_client_expose_no_delete():
         ]
 
 
-@pytest.mark.slow
 def test_scope_coverage_gate(tmp_path):
     """scope.py and do_api.py (allowlist, DELETE and assignment) stay at 100% line and branch."""
     if os.environ.get("CAMPAIGN_SCOPE_GATE") == "inner":

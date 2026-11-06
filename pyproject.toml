@@ -61,9 +61,6 @@ markers = [
   # CI runs the suite with pytest-xdist, then the serial set alone. Only for a test that
   # measures time or memory and fails under parallel load; never weaken such a test.
   "serial: measures time or memory; CI runs it after the parallel run, without xdist",
-  # Over 60 s alone. Pull requests skip these; pushes to main, the nightly run and
-  # dispatches run them.
-  "slow: over 60 s alone; CI runs it on main, nightly and on dispatch, not on pull requests",
 ]
 # A hung test fails on its own instead of stalling the whole run.
 timeout = 300
