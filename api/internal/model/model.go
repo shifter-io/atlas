@@ -397,7 +397,8 @@ type Provider struct {
 	TileRanks map[string]map[string]TileRanks `json:"tileRanks,omitempty"`
 	// CoverageEvidence is, by proxy type and time range, every observed city x
 	// ASN row of the type's headline group, most IPs first. Builds before
-	// payload v4 only: a v4 build's rows are the dataset's lists.*.city_asn.
+	// payload v4 only: a v4 build's rows are its Coverage answers (the
+	// dataset's lists.*.city_asn holds their first pages).
 	CoverageEvidence map[string]map[string][]CoverageRow `json:"coverageEvidence,omitempty"`
 	// Framework identity, null for unlinked catalog rows.
 	Framework *FrameworkLink `json:"framework"`
