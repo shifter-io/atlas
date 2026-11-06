@@ -470,7 +470,9 @@ nodes trust exactly that certificate, never a public CA in its place:
    reconcile. Arming copies it to the node as `pulse/orchestrator-ca.crt` and starts
    `proxy-index node ... --ca-file` on it.
 3. Browser hosts (the minis): copy the file into the host's state directory and add
-   `--ca-file STATE/campaign-manager.orchestrator.crt` to `proxy-index browser-node`.
+   `--ca-file STATE/campaign-manager.orchestrator.crt` to `proxy-index browser-node`. They use
+   the browser port, `https://<manager>:8444`, and present their own client certificate there
+   (`--client-cert`, `--client-key`, from `campaign manager browser-cert`; docs/browser.html).
 4. Any other node: `proxy-index node --orchestrator https://<manager>:8443 --ca-file <file> ...`.
 
 With `--ca-file` the node checks the server's certificate against that file alone, and the

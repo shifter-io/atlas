@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import psycopg
 from psycopg import sql
@@ -305,5 +306,71 @@ def self_signed(directory: Path, name: str, address: str = "127.0.0.1") -> tuple
             serialization.NoEncryption(),
         )
     )
+    private.chmod(0o600)
+    return cert, private
+
+
+def client_ca(directory: Path, name: str) -> tuple[Path, Any]:
+    """A browser client CA (EC P-256, CA:TRUE) as `orchestrator-enable` makes one: its PEM
+    path and (certificate, key) for `client_certificate`."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"{name}-ca")])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
+        .sign(key, hashes.SHA256())
+    )
+    path = directory / f"{name}-ca.crt"
+    path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    return path, (certificate, key)
+
+
+def client_certificate(directory: Path, ca: Any, common_name: str) -> tuple[Path, Path]:
+    """A clientAuth certificate for `common_name` signed by `ca` (from client_ca), and its key,
+    both owner-only as `browser-cert` writes them; returns their paths."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    issuer, issuer_key = ca
+    key = ec.generate_private_key(ec.SECP256R1())
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)]))
+        .issuer_name(issuer.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=90))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), False)
+        .sign(issuer_key, hashes.SHA256())
+    )
+    stem = f"{common_name}-{uuid.uuid4().hex[:8]}"
+    cert, private = directory / f"{stem}.crt", directory / f"{stem}.key"
+    cert.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    private.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    cert.chmod(0o600)
     private.chmod(0o600)
     return cert, private

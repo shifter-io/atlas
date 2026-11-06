@@ -262,7 +262,7 @@ def _manager_parsers(actions, accounts) -> None:
     for step in (deploy, upload, enable, stop, allow, teardown):
         step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
     manager_orch.add_parsers(steps)  # MANAGER-ORCH-1
-    browser_hosts.add_parser(steps)  # BP-FIREWALL
+    browser_hosts.add_parser(steps)  # BROWSER-MTLS-1
 
 
 def _deploy_parser(steps, accounts):
@@ -357,8 +357,8 @@ async def _manager_step(args) -> dict:
 
     if args.manager_action in manager_orch.ACTIONS:  # MANAGER-ORCH-1
         return await manager_orch.run(args, _cloud)
-    if args.manager_action == "browser-hosts":  # BP-FIREWALL
-        return await browser_hosts.run(args, _cloud)
+    if args.manager_action == "browser-cert":  # BROWSER-MTLS-1 (SSH only)
+        return await browser_hosts.issue(args.inventory, args.host, args.out)
     if args.manager_action == "upload-spec":
         return await deploy.upload_spec(args.inventory, args.root)
     if args.manager_action == "enable":

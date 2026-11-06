@@ -2,7 +2,7 @@
 # and every job (calculation, estimates, pulse evaluation, DB-IP, archive, raw files).
 # Installed and enabled only by `campaign manager orchestrator-enable --apply` (owner's go).
 [Unit]
-Description=Proxy Index orchestrator: node API on 8443 (HTTPS), scheduler and jobs
+Description=Proxy Index orchestrator: node API on 8443 and 8444 (HTTPS), scheduler and jobs
 Wants=network-online.target
 After=network-online.target
 StartLimitIntervalSec=0
@@ -19,7 +19,8 @@ Environment=PROXY_INDEX_CALCULATE_MEMORY_MAX=8G
 # The one DB-IP file the dbip_update job replaces atomically (setting dbip.dir is its folder).
 Environment=DBIP_MMDB=/opt/proxy-index-campaign/db-ip/dbip-full.mmdb
 # The database file installed on the manager is read in place, never copied (root-only 0600).
-ExecStart=/opt/proxy-index-campaign/venv/bin/proxy-index orchestrator --host 0.0.0.0 --port 8443 --database-file /etc/proxy-index/database.toml --tls-cert /opt/proxy-index-campaign/.secrets/tls/orchestrator.crt --tls-key /opt/proxy-index-campaign/.secrets/tls/orchestrator.key
+# Browser hosts use 8444 with a client certificate of the browser CA (BROWSER-MTLS-1).
+ExecStart=/opt/proxy-index-campaign/venv/bin/proxy-index orchestrator --host 0.0.0.0 --port 8443 --database-file /etc/proxy-index/database.toml --tls-cert /opt/proxy-index-campaign/.secrets/tls/orchestrator.crt --tls-key /opt/proxy-index-campaign/.secrets/tls/orchestrator.key --browser-port 8444 --client-ca /opt/proxy-index-campaign/.secrets/tls/browser-ca.crt
 # Relative settings (archive.spaces_file .secrets/spaces.toml, archive.work_dir) resolve here.
 WorkingDirectory=/opt/proxy-index-campaign
 Restart=always

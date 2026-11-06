@@ -8,12 +8,17 @@ be https:// and its host the address the certificate names. Without it an https:
 verified against the system's public CAs. Plain http:// is accepted only to this machine (a
 local staging orchestrator): to another host the node's bearer token would cross the network
 in clear text, so it is refused. Every refusal is a UserError that names no URL.
+
+A browser host also presents a client certificate and its key (BROWSER-MTLS-1: the manager's
+browser port asks for one signed by its browser CA): both owner-only files, https only.
 """
 
 from __future__ import annotations
 
 import ipaddress
+import os
 import ssl
+import stat
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -29,6 +34,19 @@ def _loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def check_private(path: str | Path) -> None:
+    """An owner-only (mode 600) regular file, opened without following links; ValueError."""
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        info = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError("must be a regular file")
+    if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077):
+        raise ValueError("must be owned by the current user with mode 600")
 
 
 def pinned_context(ca_file: str | Path) -> ssl.SSLContext:
@@ -49,19 +67,45 @@ def pinned_context(ca_file: str | Path) -> ssl.SSLContext:
     return context
 
 
-def client_tls(url: str, ca_file: str | Path | None = None) -> ssl.SSLContext | bool:
+def client_tls(
+    url: str,
+    ca_file: str | Path | None = None,
+    client: tuple[str | Path, str | Path] | None = None,
+) -> ssl.SSLContext | bool:
     """The aiohttp `ssl` value for the orchestrator at `url`: the pinned context, or True
-    (public CAs; unused for loopback http). Refuses a URL the node must not use."""
+    (public CAs; unused for loopback http); with `client` (certificate, key), a context that
+    presents them. Refuses a URL or file the node must not use."""
     parts = urlsplit(url)
     if parts.scheme == "https" and parts.hostname:
+        if client:
+            return _with_client(pinned_context(ca_file) if ca_file else None, *client)
         return pinned_context(ca_file) if ca_file else True
     if parts.scheme != "http" or not parts.hostname:
         raise UserError("the orchestrator URL must start with https://")
-    if ca_file:
-        raise UserError("an orchestrator CA file needs an https:// orchestrator URL")
+    if ca_file or client:
+        raise UserError("an orchestrator CA or client certificate needs an https:// URL")
     if not _loopback(parts.hostname):
         raise UserError(
             "plain http:// is refused for a remote orchestrator: use https:// "
             "(with --ca-file for the manager's own certificate)"
         )
     return True
+
+
+def _with_client(
+    context: ssl.SSLContext | None, cert: str | Path, key: str | Path
+) -> ssl.SSLContext:
+    """`context` (or one trusting the public CAs) presenting the client certificate `cert`
+    with its key `key`, both owner-only files."""
+    for name, path in (("certificate", cert), ("key", key)):
+        try:
+            check_private(path)
+        except (OSError, ValueError) as exc:
+            reason = str(exc) if isinstance(exc, ValueError) else "cannot be read"
+            raise UserError(f"the client {name} file {reason}") from None
+    context = context or ssl.create_default_context()
+    try:
+        context.load_cert_chain(cert, key)
+    except (ssl.SSLError, ValueError):
+        raise UserError("the client certificate and key are not a valid PEM pair") from None
+    return context

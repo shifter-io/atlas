@@ -22,8 +22,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
-import stat
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, replace
@@ -42,6 +40,7 @@ from ..node import (
     resident_mb,
     rotating_loader,
 )
+from ..node_tls import check_private as _check_private
 from ..node_tls import client_tls
 from ..sinks import JsonSink
 from ..targets import TargetRegistry, registry
@@ -89,19 +88,6 @@ class Network:
     untargeted: bool
     token: str = field(repr=False)
     proxy_factory: ProxyFactory = field(repr=False)
-
-
-def _check_private(path: Path) -> None:
-    """An owner-only regular file, opened without following links (as node.read_token)."""
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        info = os.fstat(descriptor)
-    finally:
-        os.close(descriptor)
-    if not stat.S_ISREG(info.st_mode):
-        raise ValueError("must be a regular file")
-    if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077):
-        raise ValueError("must be owned by the current user with mode 600")
 
 
 def untargeted_factory(provider_config: Path, credentials_file: Path) -> ProxyFactory:
@@ -532,6 +518,8 @@ def register(commands) -> None:
     parser.add_argument(
         "--ca-file", help="PEM certificate to trust alone for an https orchestrator (the manager's)"
     )
+    parser.add_argument("--client-cert", help="Owner-only PEM client certificate (browser port)")
+    parser.add_argument("--client-key", help="Owner-only PEM key of --client-cert")
     parser.add_argument(
         "--check", action="store_true", help="Check settings, state and browsers, then exit"
     )
@@ -557,7 +545,10 @@ def dispatch(args) -> int:
         return 0
     if not args.orchestrator:
         raise UserError("--orchestrator is required unless --check")
-    tls = client_tls(args.orchestrator, args.ca_file)  # refuses a URL the host must not use
+    if bool(args.client_cert) != bool(args.client_key):
+        raise UserError("--client-cert and --client-key go together")
+    client = (args.client_cert, args.client_key) if args.client_cert else None
+    tls = client_tls(args.orchestrator, args.ca_file, client)  # refuses what the host must not use
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

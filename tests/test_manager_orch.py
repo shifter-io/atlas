@@ -78,6 +78,10 @@ def test_the_units_are_rendered_from_the_assets():
         manager_orch.CERT,
         "--tls-key",
         manager_orch.KEY,
+        "--browser-port",
+        str(manager_rules.BROWSER_PORT),
+        "--client-ca",
+        manager_orch.BROWSER_CA,
     ]
     hourly = found[manager_daily.DAILY_TIMER]
     assert "OnCalendar=*-*-* *:56:00 UTC" in hourly
@@ -110,6 +114,17 @@ def test_the_firewall_keeps_its_rules_and_adds_the_node_api_rule():
         {"protocol": "tcp", "ports": "8443", "sources": {"tags": [PULSE_TAG]}},
     ]
     assert opened["outbound_rules"] == ops_api.outbound_all()
+    # BROWSER-MTLS-1: the browser port is open to every address (the minis' change), and an
+    # address list once recorded for them (BP-FIREWALL) is no longer a source of anything.
+    both = recorded | {"node_api_port": 8443, "browser_port": 8444}
+    browser = manager_orch.manager_rules(both | {"browser_host_ipv4s": ["8.8.8.8"]}, OTHER_IP)
+    assert browser["inbound_rules"] == [
+        *opened["inbound_rules"],
+        {"protocol": "tcp", "ports": "8444", "sources": {"addresses": ["0.0.0.0/0", "::/0"]}},
+    ]
+    staging = manager_orch.manager_rules(both | {"environment": "staging"}, OTHER_IP)
+    assert staging["inbound_rules"] == browser["inbound_rules"]
+    assert staging["name"] != browser["name"]
 
 
 def test_the_enable_script_reads_the_database_file_in_place():
@@ -132,6 +147,18 @@ def test_the_enable_script_reads_the_database_file_in_place():
     assert starts_hourly(f"systemctl start {timer}\nsystemctl is-active {timer}") == [
         f"systemctl start {timer}"
     ]  # the check itself sees a start
+
+
+def test_the_enable_script_makes_the_browser_ca_once_before_the_restart():
+    lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
+    make = next(i for i, line in enumerate(lines) if "/CN=proxy-index-browser-ca" in line)
+    assert lines[make - 1].startswith(f"if [ ! -s {manager_orch.BROWSER_CA_KEY} ]")
+    assert "basicConstraints=critical,CA:TRUE" in lines[make]
+    assert make < next(i for i, line in enumerate(lines) if "systemctl restart" in line)
+    assert not any(line.startswith("rm -f") for line in lines)  # kept across reruns
+    fresh = manager_orch.enable_script(MANAGER_IP, CID, new_ca=True).splitlines()
+    assert f"rm -f {manager_orch.BROWSER_CA} {manager_orch.BROWSER_CA_KEY}" in fresh
+    assert fresh.index(f"rm -f {manager_orch.BROWSER_CA} {manager_orch.BROWSER_CA_KEY}") < make
 
 
 def test_the_hourly_timer_is_never_started_by_enable_or_deploy():
@@ -202,7 +229,11 @@ async def test_enable_dry_run_changes_nothing(job, tmp_path):
     async with running(fake) as cloud:
         result = await manager_orch.enable(cloud, job.inventory, inputs, shell=shell)
     assert result["applied"] is False and result["node_api_port"] == 8443
-    assert result["firewall_inbound"][-1]["sources"] == {"tags": [PULSE_TAG]}
+    assert result["browser_port"] == 8444 and result["new_browser_ca"] is False
+    assert result["firewall_inbound"][-2:] == [
+        manager_rules.node_api_rule(),
+        manager_rules.browser_rule(),
+    ]
     assert sorted(result["units"]) == sorted(manager_orch.UNIT_FILES)
     assert result["daily"] == {"template": CID, "formulas": 2}
     assert result["started"] == list(manager_orch.STARTED)
@@ -247,7 +278,8 @@ async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path
     async with running(fake) as cloud:
         result = await manager_orch.enable(cloud, job.inventory, inputs, apply=True, shell=shell)
     rules = manager_firewall(fake, job)
-    assert rules["inbound_rules"][-1] == manager_rules.node_api_rule()
+    browser = [manager_rules.node_api_rule(), manager_rules.browser_rule()]
+    assert rules["inbound_rules"][-2:] == browser
     assert rules["droplet_ids"] == [int(inventory(job)["manager_id"])]
     ((argv, stdin),) = shell.calls
     assert argv[-1] == manager_orch.enable_script(MANAGER_IP, CID)
@@ -259,6 +291,7 @@ async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path
     cert = job.inventory.with_name("campaign-manager.orchestrator.crt")
     assert cert.read_text() == CERT_PEM and result["cert"] == cert.name
     assert saved["node_api_port"] == 8443 and saved["daily_template"] == CID
+    assert saved["browser_port"] == 8444
     record = saved["orchestrator"]
     assert record["orchestrator_url"] == f"https://{MANAGER_IP}:8443"
     assert record["cert_sha256"] == result["cert_sha256"] and record["owner_go_sha256"]
@@ -276,6 +309,7 @@ async def test_enable_opens_the_port_installs_and_starts_the_units(job, tmp_path
     assert manager_firewall(fake, job)["inbound_rules"] == [
         ops_api.ssh_from(OTHER_IP),
         manager_rules.node_api_rule(),
+        manager_rules.browser_rule(),
     ]
 
 
@@ -350,6 +384,7 @@ async def test_a_missing_pulse_tag_is_named_and_nothing_is_recorded(job, tmp_pat
                 cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell
             )
     assert "node_api_port" not in inventory(job) and shell.calls == []
+    assert "browser_port" not in inventory(job)
     assert len(manager_firewall(fake, job)["inbound_rules"]) == 1
 
 
@@ -376,6 +411,7 @@ async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port
     assert manager_firewall(fake, job)["inbound_rules"] == [ops_api.ssh_from(before["mac_ipv4"])]
     saved = inventory(job)
     assert "node_api_port" not in saved and saved["orchestrator_disabled_at"]
+    assert "browser_port" not in saved
     assert saved["hourly"] == {"on": False, "at": saved["orchestrator_disabled_at"]}
 
 

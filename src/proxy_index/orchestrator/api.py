@@ -3,6 +3,10 @@
 Nodes hold provider credentials; the orchestrator never sends a proxy URL. Each node presents
 its own bearer token (stored as sha256 in nodes.token_hash), which binds it to one region,
 provider and product: a node can only see, report and upload its own runs.
+
+The browser port (BROWSER-MTLS-1) serves only these routes, to a browser host that presents a
+client certificate of the manager's browser CA (the TLS handshake checks it) whose subject CN
+is the logical host name its token is bound to; anything else there is 404 or 403.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import hashlib
 import json
 import logging
 import re
+import ssl
 import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -34,6 +39,8 @@ log = logging.getLogger(__name__)
 DB_KEY: web.AppKey[Database] = web.AppKey("db", Database)
 CREDENTIALS_KEY: web.AppKey[str] = web.AppKey("credentials_file", str)
 NODE_KEY: web.RequestKey[dict[str, Any]] = web.RequestKey("node", dict)
+# The browser listener's TLS context: a request whose connection uses it came in on that port.
+BROWSER_TLS_KEY: web.AppKey[ssl.SSLContext] = web.AppKey("browser_tls", ssl.SSLContext)
 CHUNK = 1 << 20
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
@@ -42,10 +49,41 @@ def _error(status: type[web.HTTPException], message: str) -> web.HTTPException:
     return status(text=json.dumps({"error": message}), content_type="application/json")
 
 
+def _browser_listener(request: web.Request) -> bool:
+    """True when the request came in on the browser port (its TLS context is the app's)."""
+    context = request.app.get(BROWSER_TLS_KEY)
+    transport = request.transport
+    tls = transport.get_extra_info("ssl_object") if transport is not None else None
+    return context is not None and tls is not None and tls.context is context
+
+
+def _peer_name(request: web.Request) -> str | None:
+    """The subject CN of the client certificate the handshake verified, or None."""
+    transport = request.transport
+    peer = transport.get_extra_info("peercert") if transport is not None else None
+    for entry in (peer or {}).get("subject", ()):
+        for key, value in entry:
+            if key == "commonName":
+                return value
+    return None
+
+
+def _check_browser_peer(request: web.Request, node: dict[str, Any]) -> None:
+    """On the browser port the token is a browser host's and the certificate names that host."""
+    if node["region"] != BROWSER_REGION:
+        raise _error(web.HTTPForbidden, "the browser port takes only browser host tokens")
+    if node["host"] is None or _peer_name(request) != node["host"]:
+        raise _error(web.HTTPForbidden, "the client certificate is not the token's host")
+
+
 @web.middleware
 async def node_auth(request: web.Request, handler: Handler) -> web.StreamResponse:
-    """Bearer token on every /v1/ route; the node row rides on the request."""
+    """Bearer token on every /v1/ route; the node row rides on the request. The browser port
+    serves nothing else and also checks the client certificate against the token."""
+    browser = _browser_listener(request)
     if not request.path.startswith("/v1/"):
+        if browser:
+            raise _error(web.HTTPNotFound, "the browser port serves only the node API")
         return await handler(request)
     scheme, _, presented = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not presented.strip():
@@ -53,7 +91,7 @@ async def node_auth(request: web.Request, handler: Handler) -> web.StreamRespons
     async with request.app[DB_KEY].connection() as conn:
         node = await (
             await conn.execute(
-                "SELECT n.node_id,n.region_id,r.slug AS region,n.provider,n.product,"
+                "SELECT n.node_id,n.region_id,r.slug AS region,n.provider,n.product,n.host,"
                 "p.product_id FROM nodes n JOIN runner_regions r ON r.region_id=n.region_id "
                 "LEFT JOIN products p ON p.provider=n.provider AND p.name=n.product "
                 "WHERE n.token_hash=%s",
@@ -62,6 +100,8 @@ async def node_auth(request: web.Request, handler: Handler) -> web.StreamRespons
         ).fetchone()
     if node is None:
         raise _error(web.HTTPUnauthorized, "bad or missing bearer token")
+    if browser:
+        _check_browser_peer(request, node)
     request[NODE_KEY] = node
     return await handler(request)
 
