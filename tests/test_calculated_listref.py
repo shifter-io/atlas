@@ -16,9 +16,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from calculated_cases import POLICY, lenient_policy, payload_mismatches, spread
 from census_pulse_cases import outage
 from census_pulse_cases import scenario as census_scenario
-from test_calculated import POLICY, lenient_policy, payload_mismatches, spread
 from test_calculated_browser import add_browser_runs, ai_sources, generic  # noqa: F401 (fixture)
 from test_calculated_slim import TINY
 from test_sqlwindow import scenario  # noqa: F401 (fixture)

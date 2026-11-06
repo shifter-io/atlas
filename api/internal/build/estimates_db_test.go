@@ -2,6 +2,7 @@ package build_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"math"
 	"os"
@@ -265,7 +266,7 @@ func TestNoAnswerNamesTheEstimate(t *testing.T) {
 		if strings.HasPrefix(scope, "country/") {
 			dim = "city"
 		}
-		page, ok := res.Pages.List(res.Dataset.GeneratedAt, scope, "30d", dim, "", 1)
+		page, ok, _ := res.Pages.List(context.Background(), res.Dataset.GeneratedAt, scope, "30d", dim, "", 1)
 		if !ok {
 			t.Fatalf("no %s list", scope)
 		}

@@ -290,8 +290,8 @@ func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
 		}
 		for _, r := range []string{"24h", "7d", "30d"} {
 			for _, d := range []string{"country", "region", "city", "asn"} {
-				w, _ := fromV2.Pages.List("", "shifter/residential", r, d, "", 1)
-				g, _ := res.Pages.List("", "shifter/residential", r, d, "", 1)
+				w, _, _ := fromV2.Pages.List(context.Background(), "", "shifter/residential", r, d, "", 1)
+				g, _, _ := res.Pages.List(context.Background(), "", "shifter/residential", r, d, "", 1)
 				if !reflect.DeepEqual(generic(t, w), generic(t, g)) {
 					t.Errorf("%s %s %s: v3 page %+v, v2 page %+v", name, r, d, g, w)
 				}

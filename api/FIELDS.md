@@ -647,8 +647,8 @@ The gaps recorded above are closed for a v4 build:
   most IPs first (then Python's `str()` order), as a v3 build reads a group's ASN
   pool list whole.
 
-A v4 build reads every list answer from the compact network lists in place: it
-keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
+A v4 build reads every list answer from the compact network lists, their rows read
+from the database when needed (API-MEM-1): it keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
 and `/regions`, `/v1/networks/all/places`) is its networks' compact lists, merged
 and ordered as before (rows of one place key add up; most IPs first, then key,
 then network and kind) only when a page is asked for. The build keeps each list's
@@ -735,7 +735,7 @@ does exactly this, from the file alone):
   1 plus the rows with a lower latency, among rows with a latency.
 
 The file is written one dimension at a time, 1,000 rows at a time
-(`build.DatasetLists`, read in place from the compact lists), and compressed at
+(`build.DatasetLists`, each list's rows read from the database as it is written), and compressed at
 gzip level 6 and brotli quality 5 (4 MB window): at the 0.5 GB a v4 file reaches
 at 18 × 249 (K11, derived), quality 10 and gzip 9 would take minutes of CPU every
 hour.

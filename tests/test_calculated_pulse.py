@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from calculated_cases import OtherIP
 from census_pulse_cases import HOSTING, batch, batch_run, product, scenario
 from helpers import FakeTransport
 from psycopg.rows import dict_row
-from test_calculated import OtherIP
 from test_storage import measurement
 from test_storage_v6 import census
 

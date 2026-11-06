@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,14 +23,14 @@ type placeList struct{ rangeID, dimension string }
 // lists are merged from the groups' network lists, which it also gives per
 // range (srcs); the groups are network summaries.
 func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*snap.Product,
-	row *store.SnapshotRow) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
-	v4 := row != nil && row.Networks != nil
+	nr *netRead) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
+	v4 := nr.v4()
 	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups, v4),
 		RequestedCountries: requestedCountries(groups, v4), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
 		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []model.ChangeEvent{}, Tape: []model.TapeEvent{}}
 	lists, srcs = map[placeList][]PlaceRow{}, map[string][]placeSource{}
 	for _, r := range Ranges {
-		t, rows, s := rangeAnswer(head, kind, groups, row, v4, r.ID)
+		t, rows, s := rangeAnswer(head, kind, groups, nr, r.ID)
 		for d, l := range rows {
 			lists[placeList{r.ID, d}] = l
 		}
@@ -40,8 +41,9 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 
 // rangeAnswer is a network's totals of one range, its place lists by
 // dimension and, in a v4 build, the network lists they are merged from.
-func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, row *store.SnapshotRow, v4 bool,
+func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRead,
 	rangeID string) (*RangeTotals, map[string][]PlaceRow, []placeSource) {
+	row, v4 := nr.row, nr.v4()
 	t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
 		Lists: map[string]int{}}
 	merged := map[string]map[string]*PlaceRow{}
@@ -71,7 +73,7 @@ func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, row *stor
 	rows := map[string][]PlaceRow{}
 	for _, d := range placeDimensions {
 		if v4 {
-			rows[d] = mergeSources(srcs, d, "", false)
+			rows[d] = nr.merge(srcs, d)
 		} else {
 			rows[d] = sortedRows(merged[d])
 		}
@@ -365,21 +367,25 @@ type PlacePage struct {
 // List is a page of a list; ok is false for an unknown list. The query
 // keeps rows whose code, names or ASN contain every token (case-insensitive);
 // pages count from 1. A v4 build's first page without a query is the one it
-// computed; another page merges the list's rows (placeIndex).
-func (pg *Pages) List(generatedAt, scope, rangeID, dimension, query string, page int) (*PlacePage, bool) {
+// computed; another page merges the list's rows (placeIndex), read from the
+// database unless cached.
+func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimension, query string, page int) (*PlacePage, bool, error) {
 	if !pg.known(scope, dimension) {
-		return nil, false
+		return nil, false, nil
 	}
 	tokens := Tokens(query)
 	out := &PlacePage{GeneratedAt: generatedAt, Scope: scope, Range: rangeID, Dimension: dimension, Query: strings.Join(tokens, " "),
 		Page: page, PageSize: PageSize, Rows: []PlaceRow{}}
 	l := pg.lists[listKey{scope, rangeID, dimension}]
 	if l == nil {
-		return out, true
+		return out, true, nil
 	}
 	rows := l.first
 	if l.srcs == nil || page > 1 || len(tokens) > 0 {
-		rows = l.rows(tokens)
+		var err error
+		if rows, err = l.rows(ctx, tokens); err != nil {
+			return nil, false, err
+		}
 		if start := (page - 1) * PageSize; start < len(rows) {
 			out.Rows = rows[start:min(len(rows), start+PageSize)]
 		}
@@ -388,7 +394,7 @@ func (pg *Pages) List(generatedAt, scope, rangeID, dimension, query string, page
 		out.Rows, out.Total = append(out.Rows, rows...), l.total
 	}
 	out.Pages = (out.Total + PageSize - 1) / PageSize
-	return out, true
+	return out, true, nil
 }
 
 func (pg *Pages) known(scope, dimension string) bool {

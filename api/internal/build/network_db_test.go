@@ -252,8 +252,8 @@ func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 				for _, q := range []struct {
 					page  int
 					query string
-				}{{1, ""}, {2, ""}, {1, "de"}, {1, "be Berlin"}, {1, "telekom"}, {1, "as3209"}, {1, "zz"}} {
-					page, _ := res.Pages.List("", scope, r, d, q.query, q.page)
+				}{{1, ""}, {2, ""}, {3, ""}, {1, "de"}, {1, "be Berlin"}, {1, "telekom"}, {1, "as3209"}, {1, "zz"}, {1, "zyx"}, {2, "tail"}} {
+					page, _, _ := res.Pages.List(context.Background(), "", scope, r, d, q.query, q.page)
 					if out[fmt.Sprintf("places %s %s %s %d %q", scope, r, d, q.page, q.query)], err = json.Marshal(page); err != nil {
 						t.Fatal(err)
 					}
@@ -297,7 +297,8 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 	db.PublishParts(t, v4, groups, nil)
 	same()
 	fromV4, log4 := loadLogged(t, db, cache)
-	if log4.reads("calculated_snapshot_parts") || !subset(log4.listIDs, nc.netLists) || len(log4.listIDs) != 9 || cache.Fetched != 9 {
+	if read := slices.Compact(slices.Sorted(slices.Values(log4.listIDs))); log4.reads("calculated_snapshot_parts") ||
+		!subset(log4.listIDs, nc.netLists) || len(read) != 9 || cache.Fetched != 9 {
 		t.Errorf("the v4 build: parts read %v, list ids %v (want the 9 network lists only), group lists fetched %d more",
 			log4.reads("calculated_snapshot_parts"), log4.listIDs, cache.Fetched-9)
 	}
