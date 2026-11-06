@@ -583,47 +583,51 @@ async def census_retry(
         key = {"country": country, "target": census["target_id"], "product": product_id}
         if await _retry_blocked(conn, key, day):
             continue
-        retry = await _row(
-            conn,
-            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-            "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT DO NOTHING RETURNING batch_id",
-            (
-                country,
-                run["region_id"],
-                census["target_id"],
-                now,
-                now + LATE_START,
-                census["batch_id"],
-            ),
-        )
-        if retry is None:
-            continue
-        # The pulse's node is the product's node in the region.
-        await conn.execute(
-            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
-            (retry["batch_id"], product_id, run["node_id"]),
-        )
-        await emit(
-            conn,
-            EventRow(
-                kind="census_retry",
-                at=now,
-                batch_id=retry["batch_id"],
-                product_id=product_id,
-                country_code=country,
-                target_id=census["target_id"],
-                region_id=run["region_id"],
-                data={
-                    "region": run["region"],
-                    "retry_of": census["batch_id"],
-                    "reason": census["stop_reason"] or census["error"],
-                    "pulse_batch_id": batch_id,
-                },
-            ),
-        )
-        created.append(retry["batch_id"])
+        retry_id = await _open_retry(conn, run, census, now)
+        if retry_id is not None:
+            created.append(retry_id)
     return created
+
+
+async def _open_retry(
+    conn: psycopg.AsyncConnection, run: dict, census: dict, now: datetime
+) -> int | None:
+    """The rerun of `census` for the product of the pulse `run`, with its census_retry event;
+    None when the slot already exists."""
+    country = run["country_code"]
+    retry = await _row(
+        conn,
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+        "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT DO NOTHING RETURNING batch_id",
+        (country, run["region_id"], census["target_id"], now, now + LATE_START, census["batch_id"]),
+    )
+    if retry is None:
+        return None
+    # The pulse's node is the product's node in the region.
+    await conn.execute(
+        "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
+        (retry["batch_id"], run["product_id"], run["node_id"]),
+    )
+    await emit(
+        conn,
+        EventRow(
+            kind="census_retry",
+            at=now,
+            batch_id=retry["batch_id"],
+            product_id=run["product_id"],
+            country_code=country,
+            target_id=census["target_id"],
+            region_id=run["region_id"],
+            data={
+                "region": run["region"],
+                "retry_of": census["batch_id"],
+                "reason": census["stop_reason"] or census["error"],
+                "pulse_batch_id": run["batch_id"],
+            },
+        ),
+    )
+    return retry["batch_id"]
 
 
 async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime):

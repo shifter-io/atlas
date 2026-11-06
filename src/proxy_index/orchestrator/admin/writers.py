@@ -49,61 +49,82 @@ async def stop_batch(
     now = _now(now)
     await db.ensure_partition("test_events", now)
     async with db.transaction() as conn:
-        batch = await _row(
-            conn,
-            "SELECT b.batch_id,b.kind,b.status,b.country_code,b.target_id,b.region_id,"
-            "r.slug AS region FROM test_batches b JOIN runner_regions r "
-            "ON r.region_id=b.region_id WHERE b.batch_id=%s FOR UPDATE OF b",
-            (batch_id,),
-        )
+        batch = await _lock_open_batch(conn, batch_id)
         if batch is None:
             return None
-        if batch["status"] not in OPEN_BATCHES:
-            raise Conflict(f"batch {batch_id} is already {batch['status']}")
-        killed = await _rows(
-            conn,
-            "UPDATE batch_runs SET status='killed',finished_at=%s,stop_reason='operator' "
-            "WHERE batch_id=%s AND status IN ('queued','running','uploading') "
-            "RETURNING product_id",
-            (now, batch_id),
-        )
-        await conn.execute(
-            "UPDATE test_batches SET status=%s,finished_at=%s WHERE batch_id=%s",
-            (status, now, batch_id),
-        )
-        mark_closed(conn, batch_id)
-        for run in killed:
-            await run_finished(conn, batch_id, run["product_id"], now)
+        killed = await _end_batch(conn, batch_id, status, now)
         # Load batches (latency under load) have no tape event of their own.
         if batch["kind"] != "load" and (batch["kind"] == "pulse" or status == "skipped"):
-            totals = await _row(
-                conn,
-                "SELECT coalesce(sum(requests),0)::bigint AS requests,"
-                "coalesce(sum(successes),0)::bigint AS successes,"
-                "coalesce(sum(unique_ips),0)::bigint AS unique_ips "
-                "FROM batch_runs WHERE batch_id=%s",
-                (batch_id,),
-            )
-            await emit(
-                conn,
-                EventRow(
-                    kind="census_skipped" if batch["kind"] == "census" else "pulse_finished",
-                    at=now,
-                    batch_id=batch_id,
-                    country_code=batch["country_code"],
-                    target_id=batch["target_id"],
-                    region_id=batch["region_id"],
-                    severity="minor",
-                    data={
-                        "region": batch["region"],
-                        "reason": "operator",
-                        "status": status,
-                        "runs_killed": len(killed),
-                        **totals,
-                    },
-                ),
-            )
+            await _operator_event(conn, batch, status, len(killed), now)
     return {"batch_id": batch_id, "status": status, "runs_killed": len(killed)}
+
+
+async def _lock_open_batch(conn: psycopg.AsyncConnection, batch_id: int) -> dict | None:
+    """The batch row, locked; None for an unknown batch, Conflict when it is no longer open."""
+    batch = await _row(
+        conn,
+        "SELECT b.batch_id,b.kind,b.status,b.country_code,b.target_id,b.region_id,"
+        "r.slug AS region FROM test_batches b JOIN runner_regions r "
+        "ON r.region_id=b.region_id WHERE b.batch_id=%s FOR UPDATE OF b",
+        (batch_id,),
+    )
+    if batch is not None and batch["status"] not in OPEN_BATCHES:
+        raise Conflict(f"batch {batch_id} is already {batch['status']}")
+    return batch
+
+
+async def _end_batch(
+    conn: psycopg.AsyncConnection, batch_id: int, status: str, now: datetime
+) -> list[dict]:
+    """Kill the batch's open runs and close the batch; returns the killed runs."""
+    killed = await _rows(
+        conn,
+        "UPDATE batch_runs SET status='killed',finished_at=%s,stop_reason='operator' "
+        "WHERE batch_id=%s AND status IN ('queued','running','uploading') "
+        "RETURNING product_id",
+        (now, batch_id),
+    )
+    await conn.execute(
+        "UPDATE test_batches SET status=%s,finished_at=%s WHERE batch_id=%s",
+        (status, now, batch_id),
+    )
+    mark_closed(conn, batch_id)
+    for run in killed:
+        await run_finished(conn, batch_id, run["product_id"], now)
+    return killed
+
+
+async def _operator_event(
+    conn: psycopg.AsyncConnection, batch: dict, status: str, runs_killed: int, now: datetime
+) -> None:
+    """The census_skipped or pulse_finished event of a batch the operator stopped."""
+    totals = await _row(
+        conn,
+        "SELECT coalesce(sum(requests),0)::bigint AS requests,"
+        "coalesce(sum(successes),0)::bigint AS successes,"
+        "coalesce(sum(unique_ips),0)::bigint AS unique_ips "
+        "FROM batch_runs WHERE batch_id=%s",
+        (batch["batch_id"],),
+    )
+    await emit(
+        conn,
+        EventRow(
+            kind="census_skipped" if batch["kind"] == "census" else "pulse_finished",
+            at=now,
+            batch_id=batch["batch_id"],
+            country_code=batch["country_code"],
+            target_id=batch["target_id"],
+            region_id=batch["region_id"],
+            severity="minor",
+            data={
+                "region": batch["region"],
+                "reason": "operator",
+                "status": status,
+                "runs_killed": runs_killed,
+                **totals,
+            },
+        ),
+    )
 
 
 async def acknowledge(conn: psycopg.AsyncConnection, alert_id: int) -> bool | None:
