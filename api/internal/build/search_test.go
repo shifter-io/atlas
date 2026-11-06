@@ -11,6 +11,7 @@ import (
 // only: no articles (guides or network reviews), no Guides group and no link
 // to a page only the old website had.
 func TestTheSearchIndexHasNoArticles(t *testing.T) {
+	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60})
 	if err != nil {
 		t.Fatal(err)

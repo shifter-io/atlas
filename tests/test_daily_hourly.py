@@ -8,7 +8,9 @@ import json
 import shutil
 
 import pytest
-from test_daily import formulas, hours, make, make_spec, template
+from campaign_hour_cases import make_spec
+from daily_cases import formulas, hours, template
+from onboarding_round_cases import make
 
 from proxy_index.cli import main
 from proxy_index.daily import hourly

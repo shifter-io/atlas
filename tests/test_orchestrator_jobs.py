@@ -1,9 +1,11 @@
 """Orchestrator jobs and the scheduler: runs, schedules, calculate, detect, retention, the CLI."""
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime, time, timedelta
 
+import psycopg
 import pytest
 from orchestrator_cases import NOW, prepare, query, set_setting
 
@@ -56,6 +58,28 @@ async def test_scheduler_records_runs_failures_and_skips(database, db):
         ("job_failed", "job_failed:broken", 2)
     ]
     assert [t["job"] for t in scheduler.upcoming()] == ["broken", "idle", "ok"]
+
+
+class DownDatabase:
+    @contextlib.asynccontextmanager
+    async def connection(self):
+        raise psycopg.OperationalError("connection refused")
+        yield
+
+
+async def test_a_job_that_cannot_be_recorded_is_logged_and_the_clock_keeps_going(caplog):
+    scheduler = Scheduler(DownDatabase())
+    calls = []
+
+    async def job():
+        calls.append("ran")
+
+    scheduler.add("job", job, every_s=60)
+    await scheduler._fire(scheduler.tasks["job"])
+    assert calls == [] and scheduler.tasks["job"].running is False
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert record.getMessage() == "could not record job job"
+    assert record.exc_info[0] is psycopg.OperationalError
 
 
 def test_task_schedules():
@@ -208,3 +232,56 @@ def test_cli_node_token_and_dev_bind(database, capsys):
         )
         == 2
     )
+
+
+class _Recorder:
+    def __init__(self):
+        self.schedules = {}
+
+    def add(self, name, job, **schedule):
+        self.schedules[name] = schedule
+
+
+def test_job_table_registers_every_job_with_its_schedule():
+    from types import SimpleNamespace
+
+    from proxy_index.orchestrator import job_table
+
+    scheduler, db = _Recorder(), SimpleNamespace(on_close={})
+    assert jobs.register_jobs is job_table.register_jobs
+    jobs.register_jobs(scheduler, db, "db.toml")
+    minute, aligned = {"every_s": 60}, {"every_s": 60, "aligned": True}
+    assert scheduler.schedules == {
+        "census_plan": aligned,
+        "pulse_plan": aligned,
+        "pulse_evaluate": minute,
+        "reap": minute,
+        "offline": {"every_s": 15},
+        "calculate": minute,
+        "estimates_release": {"every_s": jobs.RELEASE_EVERY_S},
+        "detect": minute,
+        "retention": {"at_utc_minute": 3 * 60 + 17},
+        "archive": {"at_utc_minute": 40},
+        "raw_upload": {"every_s": 300},
+        "reports": {"every_s": 30},
+        "dbip_update": {"at_utc_minute": 5 * 60 + 23},
+        "browser_plan": aligned,
+    }
+    assert list(db.on_close) == ["reports"]
+
+
+@pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])
+def test_the_split_modules_import_in_any_order(first):
+    import subprocess
+    import sys
+
+    code = (
+        f"import proxy_index.orchestrator.{first}\n"
+        "from proxy_index.orchestrator.jobs import register_jobs\n"
+        "from proxy_index.orchestrator.pulse import GRACE, MIN_GAP, open_slot, spread\n"
+        "from proxy_index.orchestrator import job_table, pulse_slots\n"
+        "assert register_jobs is job_table.register_jobs\n"
+        "assert (GRACE, MIN_GAP, open_slot, spread) == (pulse_slots.GRACE, pulse_slots.MIN_GAP,"
+        " pulse_slots.open_slot, pulse_slots.spread)\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=60)

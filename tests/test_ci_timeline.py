@@ -74,6 +74,20 @@ def test_timeline_sums_busy_idle_spans_and_longest(tmp_path):
     assert out.rstrip().endswith("4.5 s  45.0% of wall  a")
 
 
+def test_timeline_reports_when_each_worker_ended(tmp_path):
+    write(tmp_path, "gw0", [phase("gw0", "a", "call", 100.0, 103.0)])
+    write(
+        tmp_path,
+        "gw1",
+        [phase("gw1", "b", "setup", 101.0, 102.0), phase("gw1", "b", "call", 102.0, 108.5)],
+    )
+    timeline = runpy.run_path(str(SCRIPT))
+    result = timeline["summarize"](timeline["load"](tmp_path))
+    assert result["ends"] == {"gw0": 3.0, "gw1": 8.5}
+    assert "\nworkers end 3.0-8.5 s: gw0 3.0, gw1 8.5\n" in timeline["report"](result)
+    assert timeline["summarize"]([])["ends"] == {}
+
+
 def test_timeline_of_no_tests(tmp_path):
     out = subprocess.run(
         [sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True, check=True

@@ -390,7 +390,7 @@ class Fleet:
             payload = await self._bundle(record)
             await self.remote.push_start(droplet, payload, NODE_COMMAND)
             record.status, record.armed_at, record.error_class = "armed", _now(), None
-        except Exception as error:
+        except Exception as error:  # boundary: per-node isolation; type and scrubbed detail kept
             record.status, record.error_class = "start_failed", type(error).__name__
             record.error_detail = scope.error_detail(self.cloud, [record.droplet_id], error)
         finally:

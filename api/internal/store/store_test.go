@@ -53,6 +53,7 @@ func fingerprint(t *testing.T, db *testdb.DB) store.Fingerprint {
 }
 
 func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t) // already migrated once
 	ctx := context.Background()
 	c := db.Conn(t)
@@ -98,6 +99,7 @@ func TestMigrateIsIdempotentAndChecksummed(t *testing.T) {
 // read with every site table empty, named once in SiteGaps; migrating it
 // changes the fingerprint, so a running server rebuilds.
 func TestLoadReadsADatabaseWithoutTheSiteSchema(t *testing.T) {
+	t.Parallel()
 	db := testdb.NewFramework(t)
 	in := load(t, db)
 	if len(in.SiteGaps) != 1 || !strings.Contains(in.SiteGaps[0], "site schema missing") || !strings.Contains(in.SiteGaps[0], "siteapi migrate") {
@@ -130,6 +132,7 @@ func TestLoadReadsADatabaseWithoutTheSiteSchema(t *testing.T) {
 // A missing table or column empties only that table's rows; rows a fixture
 // loader marked is_demo are never read.
 func TestLoadSkipsWhatTheSiteSchemaLacksAndDemoRows(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	db.Exec(t, `INSERT INTO site.providers(slug,name,framework_provider) VALUES ('acme','Acme','acme');
 INSERT INTO site.providers(slug,name,is_demo) VALUES ('nimbus','Nimbus',true);
