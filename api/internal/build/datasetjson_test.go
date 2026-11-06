@@ -86,9 +86,11 @@ func datasetFile(t *testing.T, shape testscale.Shape) ([]byte, *build.Result) {
 // file the earlier code wrote for goldenShape, with those two provider
 // fields and the N/A paths under placeRanks taken out. The new `pages` and
 // `coverageEvidence` are left out of the comparison; their own tests check
-// them. goldenShape is a build before v4, so its `lists` is {}.
+// them. goldenShape is a build before v4, so its `lists` is {}. Its snapshot
+// has no latency mean, so what LAT-MEAN-API adds for it is left out too.
 func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 	file, _ := datasetFile(t, goldenShape)
+	file = testscale.WithoutLatencyMean(file)
 	top := []pair{}
 	for _, kv := range pairs(t, file) {
 		if kv.key == "lists" && string(kv.raw) != "{}" {
@@ -135,9 +137,11 @@ func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 const preV4File = "557cf8117404a621f49101125b055769e293f90bf08480f74accbb5e8b032d9e"
 
 // A build before v4 writes the file it wrote before the lists, plus
-// "lists":{} (regression case 3 of API-DATASET-2).
+// "lists":{} (regression case 3 of API-DATASET-2), and what LAT-MEAN-API
+// adds without a latency mean.
 func TestAPreV4FileIsTheEarlierFileWithEmptyLists(t *testing.T) {
 	file, _ := datasetFile(t, goldenShape)
+	file = testscale.WithoutLatencyMean(file)
 	i := bytes.Index(file, []byte(`,"lists":{},"snapshot":`))
 	if i < 0 {
 		t.Fatal(`no "lists":{} before the snapshot`)

@@ -1,0 +1,73 @@
+package build_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+)
+
+// everyRequestWithMean is the every-request fixture with mean set on each
+// window's generic_http latency under load (the head's latency object), as
+// the framework writes it since #161; a nil mean leaves the fixture as it is.
+func everyRequestWithMean(t *testing.T, mean any) []byte {
+	t.Helper()
+	body, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil || mean == nil {
+		if err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	var s map[string]any
+	if err := json.Unmarshal(body, &s); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range s["products"].([]any)[0].(map[string]any)["windows"].(map[string]any) {
+		metrics := w.(map[string]any)["targets"].(map[string]any)["generic_http"].(map[string]any)["metrics"].(map[string]any)
+		metrics["latency_under_load_ms"].(map[string]any)["mean"] = mean
+	}
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// performance.latencyMean is the head's mean next to latencyP50 (LAT-MEAN-API);
+// a snapshot without the key gives null with latencyP50's N/A reason.
+func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		mean any
+		json string
+	}{
+		{"with mean", 1210.37, `"latencyP50":1454.08,"latencyMean":1210.37,"latencyP90":1770.54`},
+		{"without mean", nil, `"latencyP50":1454.08,"latencyMean":null,"latencyP90":1770.54`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := publishedBuild(t, everyRequestWithMean(t, c.mean))
+			p := res.Details["shifter"].Provider
+			got, na := p.Performance.LatencyMean, slices.Contains(p.NA, "performance.latencyMean")
+			if c.mean != nil && (got != Num(c.mean.(float64)) || na) || c.mean == nil && (got.OK() || !na) {
+				t.Errorf("latencyMean %v, N/A %v", got, na)
+			}
+			// latencyP50's reason, plus a snapshot from before the mean.
+			if reason := res.Coverage.Fields["performance.latencyMean"].Reason; c.mean == nil &&
+				(!strings.HasPrefix(reason, "No latency under load in the 30d window") || !strings.HasSuffix(reason, "without the latency mean")) {
+				t.Errorf("N/A reason %q", reason)
+			}
+			var file bytes.Buffer
+			if err := build.WriteDataset(&file, res.Dataset); err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(file.Bytes(), []byte(c.json)) {
+				t.Errorf("the dataset file has no %s", c.json)
+			}
+		})
+	}
+}

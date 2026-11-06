@@ -202,6 +202,7 @@ var reasons = map[string]string{
 	"performance.successRateDelta30d":      "Not mapped: the snapshot's success_delta is per window (see /v1/networks/{slug} stats)",
 	"performance.latencyDelta24h":          "Not published by the framework snapshot",
 	"performance.latencyP50":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
+	"performance.latencyMean":              "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why), or a snapshot without the latency mean",
 	"performance.latencyP90":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
 	"performance.latencyP99":               "No latency under load in the 30d window (no load test; the snapshot's under_load.reason says why)",
 	"performance.ttfbP50":                  "TTFB is not measured by the framework",
