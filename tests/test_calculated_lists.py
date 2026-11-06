@@ -12,10 +12,10 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
+from migration_cases import catalog
 from psycopg import sql
 from test_calculated import benchmark_scenario, lenient_policy, payload_mismatches
 from test_dbserver import apply, toml
-from test_migration import catalog
 from test_retention import clone
 
 from proxy_index import detect, traffic

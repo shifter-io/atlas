@@ -98,23 +98,35 @@ func main() {
 	}
 }
 
-func serve(args []string) error {
+// serveFlags holds the serve command's flags.
+type serveFlags struct {
+	common
+	listen, filesDir                 string
+	interval, dataPeriod, cacheFloor time.Duration
+}
+
+func parseServe(args []string) serveFlags {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	var c common
-	c.register(fs)
-	listen := fs.String("listen", env("SITEAPI_LISTEN", "127.0.0.1:8090"), "listen address")
-	interval := fs.Duration("interval", 10*time.Second, "change-detection interval")
-	dataPeriod := fs.Duration("data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
-	cacheFloor := fs.Duration("cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
-	filesDir := fs.String("files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
+	var f serveFlags
+	f.register(fs)
+	fs.StringVar(&f.listen, "listen", env("SITEAPI_LISTEN", "127.0.0.1:8090"), "listen address")
+	fs.DurationVar(&f.interval, "interval", 10*time.Second, "change-detection interval")
+	fs.DurationVar(&f.dataPeriod, "data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
+	fs.DurationVar(&f.cacheFloor, "cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
+	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
 	fs.Parse(args) //nolint:errcheck
-	if err := server.ValidDataPeriod(*dataPeriod); err != nil {
+	return f
+}
+
+func serve(args []string) error {
+	f := parseServe(args)
+	if err := server.ValidDataPeriod(f.dataPeriod); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(*filesDir, 0o755); err != nil {
+	if err := os.MkdirAll(f.filesDir, 0o755); err != nil {
 		return fmt.Errorf("files directory: %w", err)
 	}
-	dsn, err := c.dsn()
+	dsn, err := f.dsn()
 	if err != nil {
 		return err
 	}
@@ -127,17 +139,23 @@ func serve(args []string) error {
 	defer pool.Close()
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
-	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: *interval, DataPeriod: *dataPeriod, CacheFloor: *cacheFloor,
-		FilesDir: *filesDir})
+	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
+		FilesDir: f.filesDir})
 	if _, err := srv.Refresh(ctx, true); err != nil {
 		return fmt.Errorf("initial build: %w", err)
 	}
 	go srv.Run(ctx)
-	hs := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+	return listenAndServe(ctx, f.listen, srv.Handler())
+}
+
+// listenAndServe serves h on addr until ctx ends or the listener fails, then
+// shuts the server down, waiting at most 10 seconds for open requests.
+func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
+	hs := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- hs.ListenAndServe() }()
-	slog.Info("siteapi listening", "addr", *listen)
+	slog.Info("siteapi listening", "addr", addr)
 	select {
 	case <-ctx.Done():
 	case err := <-errc:
@@ -173,70 +191,97 @@ func migrate(args []string) error {
 	return nil
 }
 
-func dump(args []string) error {
+// dumpFlags holds the dump command's flags.
+type dumpFlags struct {
+	common
+	out, endpoint string
+	pretty        bool
+}
+
+func parseDump(args []string) dumpFlags {
 	fs := flag.NewFlagSet("dump", flag.ExitOnError)
-	var c common
-	c.register(fs)
-	out := fs.String("out", "", "output file (required)")
-	endpoint := fs.String("endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/networks, /v1/rankings/<range>, /v1/countries")
-	pretty := fs.Bool("pretty", false, "indent the JSON")
+	var f dumpFlags
+	f.register(fs)
+	fs.StringVar(&f.out, "out", "", "output file (required)")
+	fs.StringVar(&f.endpoint, "endpoint", "/v1/dataset", "which response to write: /v1/dataset, /v1/search-index, /v1/coverage, /v1/coverage/<slug>, /v1/networks, /v1/rankings/<range>, /v1/countries")
+	fs.BoolVar(&f.pretty, "pretty", false, "indent the JSON")
 	fs.Parse(args) //nolint:errcheck
-	if *out == "" {
+	return f
+}
+
+func dump(args []string) error {
+	f := parseDump(args)
+	if f.out == "" {
 		return errors.New("--out is required")
 	}
-	dsn, err := c.dsn()
+	res, err := buildFromDatabase(f.common)
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	pool, err := store.OpenReadOnly(ctx, dsn)
+	rendered, err := renderEndpoint(res, f.endpoint)
 	if err != nil {
 		return err
-	}
-	defer pool.Close()
-	in, err := store.Load(ctx, pool)
-	if err != nil {
-		return err
-	}
-	res, err := build.Build(in)
-	if err != nil {
-		return err
-	}
-	v, err := server.RenderVersion(0, res, server.Options{})
-	if err != nil {
-		return err
-	}
-	rendered, ok := v.Static[*endpoint]
-	if *endpoint == "/v1/dataset" {
-		// The dataset is served as a file (/v1/dataset redirects to it),
-		// written by the same streaming writer.
-		var buf bytes.Buffer
-		if err := build.WriteDataset(&buf, res.Dataset); err != nil {
-			return err
-		}
-		rendered, ok = &server.Rendered{Status: http.StatusOK, Identity: buf.Bytes()}, true
-	}
-	if !ok {
-		return fmt.Errorf("unknown endpoint %s", *endpoint)
 	}
 	body := rendered.Identity
-	if *pretty {
+	if f.pretty {
 		var buf bytes.Buffer
 		if err := json.Indent(&buf, body, "", "  "); err == nil {
 			body = buf.Bytes()
 		}
 	}
-	if err := os.WriteFile(*out, append(body, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(f.out, append(body, '\n'), 0o644); err != nil {
 		return err
 	}
 	bySource := map[string]int{}
 	for _, p := range res.Dataset.Providers {
 		bySource[p.Source]++
 	}
-	printJSON(map[string]any{"out": *out, "endpoint": *endpoint, "bytes": len(body) + 1, "status": rendered.Status, "providers": bySource,
+	printJSON(map[string]any{"out": f.out, "endpoint": f.endpoint, "bytes": len(body) + 1, "status": rendered.Status, "providers": bySource,
 		"generatedAt": res.Dataset.GeneratedAt, "snapshotPublished": res.Dataset.Snapshot.Available,
 		"naFields": res.Coverage.Summary.NAFields, "naFieldsBySource": res.Coverage.Summary.NAFieldsBySource})
 	return nil
+}
+
+// buildFromDatabase loads the inputs from the database c names, read-only,
+// and builds every answer from them.
+func buildFromDatabase(c common) (*build.Result, error) {
+	dsn, err := c.dsn()
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	pool, err := store.OpenReadOnly(ctx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Close()
+	in, err := store.Load(ctx, pool)
+	if err != nil {
+		return nil, err
+	}
+	return build.Build(in)
+}
+
+// renderEndpoint is the response serve gives for endpoint, rendered from res.
+func renderEndpoint(res *build.Result, endpoint string) (*server.Rendered, error) {
+	v, err := server.RenderVersion(0, res, server.Options{})
+	if err != nil {
+		return nil, err
+	}
+	if endpoint == "/v1/dataset" {
+		// The dataset is served as a file (/v1/dataset redirects to it),
+		// written by the same streaming writer.
+		var buf bytes.Buffer
+		if err := build.WriteDataset(&buf, res.Dataset); err != nil {
+			return nil, err
+		}
+		return &server.Rendered{Status: http.StatusOK, Identity: buf.Bytes()}, nil
+	}
+	rendered, ok := v.Static[endpoint]
+	if !ok {
+		return nil, fmt.Errorf("unknown endpoint %s", endpoint)
+	}
+	return rendered, nil
 }
 
 // deref is *p, or def when p is nil.

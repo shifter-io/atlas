@@ -23,6 +23,7 @@ from proxy_index.browser import contracts
 from proxy_index.calculated import browser, calculator, netlists, network, store
 from proxy_index.calculated.aggregate import timed
 from proxy_index.calculated.calculator import calculate
+from proxy_index.calculated.latency import KEYS
 from proxy_index.calculated.parts import dense
 from proxy_index.calculated.policy import latency_target, slot_settings
 from proxy_index.storage import connect
@@ -160,6 +161,8 @@ def assert_three_groups(database, net, groups, seen):
             assert m[key] == pytest.approx(expected[key], rel=1e-12), (label, key)
         assert m["time_slots"] == expected["time_slots"]
         assert target in m["time_slots"]["latency_targets"] or m["latency_ms"]["p50"] is None
+        # The head's latency objects carry the mean, other targets' included (all None there).
+        assert all(set(t["metrics"]["latency_ms"]) == set(KEYS) for t in w["targets"].values())
         assert w["uptime"] == scheduled["windows"][label]["uptime"]
         blocks = [x["estimated"] for x in windows if "estimated" in x]
         assert blocks and w["estimated"]["unique_ips"]["value"] == pytest.approx(
