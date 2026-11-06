@@ -161,39 +161,47 @@ def test_tcp_info_counts_real_loopback_payload():
 
 def test_estimate_and_sizes():
     plain = bytes_io.estimate(
-        request_line=10, request_headers=20, request_body=5, response_headers=30, response_body=8
+        bytes_io.Exchange(
+            request_line=10, request_headers=20, request_body=5, response_headers=30, response_body=8
+        )
     )
     assert plain == bytes_io.ByteCount(35, 38, exact=False)
     tunnelled = bytes_io.estimate(
-        request_line=10,
-        request_headers=20,
-        request_body=5,
-        response_headers=30,
-        response_body=8,
-        tls=True,
+        bytes_io.Exchange(
+            request_line=10,
+            request_headers=20,
+            request_body=5,
+            response_headers=30,
+            response_body=8,
+            tls=True,
+        )
     )
     assert tunnelled.up == 35 + bytes_io.CONNECT_REQUEST_BYTES + bytes_io.TLS_HANDSHAKE_UP_BYTES
     socks = bytes_io.estimate(
-        request_line=10,
-        request_headers=20,
-        request_body=5,
-        response_headers=30,
-        response_body=8,
-        tls=True,
-        connect=False,
-        extra_up=7,
-        extra_down=3,
+        bytes_io.Exchange(
+            request_line=10,
+            request_headers=20,
+            request_body=5,
+            response_headers=30,
+            response_body=8,
+            tls=True,
+            connect=False,
+            extra_up=7,
+            extra_down=3,
+        )
     )
     assert socks.up == 42 + bytes_io.TLS_HANDSHAKE_UP_BYTES
     assert socks.down == 41 + bytes_io.TLS_HANDSHAKE_DOWN_BYTES
     resumed = bytes_io.estimate(
-        request_line=0,
-        request_headers=0,
-        request_body=0,
-        response_headers=0,
-        response_body=0,
-        tls=True,
-        tls_resumed=True,
+        bytes_io.Exchange(
+            request_line=0,
+            request_headers=0,
+            request_body=0,
+            response_headers=0,
+            response_body=0,
+            tls=True,
+            tls_resumed=True,
+        )
     )
     assert resumed.down == bytes_io.CONNECT_RESPONSE_BYTES + bytes_io.TLS_RESUMED_DOWN_BYTES
     # greeting 4 + auth 3+4+6 + connect 4+1+9+2 up; 2 + 2 + 10 down.
