@@ -1,9 +1,12 @@
-"""Sealing and recovery of a browser host's runs (K-BP4; docs/browser.html, Bundles).
+"""A browser run's bundle on disk: its facts, its seal and its recovery (K-BP4; docs/browser.html,
+Bundles).
 
-seal() writes a finished run's manifest, packs its directory into the outbox with its sidecar
-and only then removes it; recover() seals at host start what a killed process left finished
-and deletes its half runs, under host_lock(). browser.rawfiles holds the recorder and the
-outbox and imports these names back, so existing imports keep working.
+FileRecorder.bind() keeps the run's batch facts in `browser/batch.json` (run_facts() reads them
+back). seal() writes a finished run's manifest, packs its directory into the outbox with its
+sidecar (read_bundle() reads one) and only then removes the directory. recover() seals at host
+start what a killed process left finished and deletes its half runs, under host_lock().
+browser.rawfiles holds the recorder and the outbox and imports these names, so existing
+imports keep working.
 """
 
 from __future__ import annotations
@@ -16,6 +19,8 @@ import os
 import re
 import shutil
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -24,19 +29,65 @@ from ..errors import UserError
 from ..models import VERDICTS
 from ..orchestrator.archive import pack
 from . import contracts as bc
-from .rawfiles import (
-    BATCH_FILE,
-    LOCK_NAME,
-    MEMBERS,
-    Batch,
-    Bundle,
-    _sync_dir,
-    _write,
-    read_bundle,
-    run_facts,
-)
 
 log = logging.getLogger(__name__)
+
+MEMBERS = bc.bundle_members()
+# The run's batch facts, for sealing after a restart; not a bundle member, so never packed.
+BATCH_FILE = "browser/batch.json"
+SIDECAR_FIELDS = ("batch_id", "sha256", "bytes", "network", "target", "country", "slot")
+LOCK_NAME = "host.lock"
+
+
+def _write(path: Path, data: bytes, mode: str = "wb", sync: bool = True) -> None:
+    """Write an owner-only file, fsynced unless `sync` is false."""
+    with path.open(mode) as stream:
+        os.chmod(path, 0o600)
+        stream.write(data)
+        if sync:
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
+def _sync_dir(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@dataclass(frozen=True, slots=True)
+class Batch:
+    """The facts of a run's batch that summary.json does not hold; slot is its UTC start."""
+
+    batch_id: int
+    country: str
+    slot: datetime
+    host: str
+
+
+def run_facts(run_dir: Path) -> tuple[Batch, str]:
+    """The batch and settings sha256 FileRecorder.bind() kept in the run directory."""
+    facts = json.loads((run_dir / BATCH_FILE).read_bytes())
+    settings_sha256 = facts.pop("settings_sha256")
+    return Batch(**(facts | {"slot": datetime.fromisoformat(facts["slot"])})), settings_sha256
+
+
+@dataclass(frozen=True, slots=True)
+class Bundle:
+    """One sealed bundle in the outbox, as its sidecar describes it."""
+
+    run_id: str
+    archive: Path
+    sidecar: Path
+    batch_id: int
+    sha256: str
+    bytes: int
+    network: str
+    target: str
+    country: str
+    slot: str
 
 
 def _outcomes(records: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
@@ -130,6 +181,13 @@ def seal(
         raise OSError("the sealed bundle changed on disk")
     shutil.rmtree(run_dir)
     return bundle
+
+
+def read_bundle(sidecar: Path) -> Bundle:
+    facts = bc.check_fields(json.loads(sidecar.read_bytes()), SIDECAR_FIELDS, "sidecar")
+    run_id = sidecar.name.removesuffix(".json")
+    archive, _ = bc.outbox_paths(sidecar.parent, run_id)
+    return Bundle(run_id, archive, sidecar, **facts)
 
 
 SealRun = Callable[[Path, Batch, dict, str], Bundle]

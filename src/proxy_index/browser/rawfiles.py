@@ -10,8 +10,8 @@ network errors keep it for a later pass with backoff, a 409 marks it `.conflict`
 4xx `.rejected`. Nothing unconfirmed is ever deleted. Above `max_pending_gb` of runs and
 outbox, no screenshot is written; the tries are still recorded. At host start, recover() seals
 what a killed process left finished and deletes its half runs (no summary.json), under
-host_lock(): one process per state directory. seal(), recover() and host_lock() live in
-browser.rawfiles_seal; this module imports them back.
+host_lock(): one process per state directory. The run facts, seal(), recover() and
+host_lock() live in browser.rawfiles_seal; this module imports them.
 
 Logs carry ids, statuses and error names, never a token, credential or proxy value.
 """
@@ -25,7 +25,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -34,37 +34,28 @@ import aiohttp
 
 from ..archive.export import file_digests
 from . import contracts as bc
+from .rawfiles_seal import BATCH_FILE as BATCH_FILE
+from .rawfiles_seal import LOCK_NAME as LOCK_NAME
+from .rawfiles_seal import MEMBERS as MEMBERS
+from .rawfiles_seal import Batch as Batch
+from .rawfiles_seal import Bundle as Bundle
+from .rawfiles_seal import Recovered as Recovered
+from .rawfiles_seal import SealRun as SealRun
+from .rawfiles_seal import _write
+from .rawfiles_seal import build_manifest as build_manifest
+from .rawfiles_seal import host_lock as host_lock
+from .rawfiles_seal import read_bundle as read_bundle
+from .rawfiles_seal import recover as recover
+from .rawfiles_seal import run_facts as run_facts
+from .rawfiles_seal import seal as seal
 
 log = logging.getLogger(__name__)
 
-MEMBERS = bc.bundle_members()
-# The run's batch facts, for sealing after a restart; not a bundle member, so never packed.
-BATCH_FILE = "browser/batch.json"
-SIDECAR_FIELDS = ("batch_id", "sha256", "bytes", "network", "target", "country", "slot")
 MARKERS = {"conflict": ".conflict", "rejected": ".rejected"}
 INGEST_PARALLEL = 2
 BACKOFF_S, BACKOFF_MAX_S = 30.0, 300.0
 GUARD_EVERY_S, FULL_LOG_EVERY_S = 60.0, 3600.0
 GB = 1 << 30
-LOCK_NAME = "host.lock"
-
-
-def _write(path: Path, data: bytes, mode: str = "wb", sync: bool = True) -> None:
-    """Write an owner-only file, fsynced unless `sync` is false."""
-    with path.open(mode) as stream:
-        os.chmod(path, 0o600)
-        stream.write(data)
-        if sync:
-            stream.flush()
-            os.fsync(stream.fileno())
-
-
-def _sync_dir(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _tree_bytes(path: Path) -> int:
@@ -97,23 +88,6 @@ class DiskGuard:
             if self.notify is not None:
                 self.notify({"kind": "browser_outbox_full", "limit_bytes": self.limit})
         return self._full
-
-
-@dataclass(frozen=True, slots=True)
-class Batch:
-    """The facts of a run's batch that summary.json does not hold; slot is its UTC start."""
-
-    batch_id: int
-    country: str
-    slot: datetime
-    host: str
-
-
-def run_facts(run_dir: Path) -> tuple[Batch, str]:
-    """The batch and settings sha256 FileRecorder.bind() kept in the run directory."""
-    facts = json.loads((run_dir / BATCH_FILE).read_bytes())
-    settings_sha256 = facts.pop("settings_sha256")
-    return Batch(**(facts | {"slot": datetime.fromisoformat(facts["slot"])})), settings_sha256
 
 
 class FileRecorder:
@@ -153,29 +127,6 @@ class FileRecorder:
             (run_dir / name).unlink(missing_ok=True)
             return False
         return True
-
-
-@dataclass(frozen=True, slots=True)
-class Bundle:
-    """One sealed bundle in the outbox, as its sidecar describes it."""
-
-    run_id: str
-    archive: Path
-    sidecar: Path
-    batch_id: int
-    sha256: str
-    bytes: int
-    network: str
-    target: str
-    country: str
-    slot: str
-
-
-def read_bundle(sidecar: Path) -> Bundle:
-    facts = bc.check_fields(json.loads(sidecar.read_bytes()), SIDECAR_FIELDS, "sidecar")
-    run_id = sidecar.name.removesuffix(".json")
-    archive, _ = bc.outbox_paths(sidecar.parent, run_id)
-    return Bundle(run_id, archive, sidecar, **facts)
 
 
 class Outbox:
@@ -309,14 +260,3 @@ async def _post(bundle: Bundle, agent: Any, sha256: str) -> tuple[int, Any, floa
     except ValueError:
         body = None
     return status, body, float(retry_after) if retry_after.isdigit() else 0.0
-
-
-# The sealing and recovery side (browser.rawfiles_seal), imported after everything it uses
-# is defined above. browser.rawfiles_seal imports this module back: that works because callers
-# import these names from here, and one that imports browser.rawfiles_seal imports this first.
-from .rawfiles_seal import Recovered as Recovered  # noqa: E402
-from .rawfiles_seal import SealRun as SealRun  # noqa: E402
-from .rawfiles_seal import build_manifest as build_manifest  # noqa: E402
-from .rawfiles_seal import host_lock as host_lock  # noqa: E402
-from .rawfiles_seal import recover as recover  # noqa: E402
-from .rawfiles_seal import seal as seal  # noqa: E402
