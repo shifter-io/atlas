@@ -1,4 +1,7 @@
-"""The admin JSON API (/admin/api) behind the Astro operator UI: routes.py and views.py."""
+"""The admin JSON API (/admin/api) behind the Astro operator UI.
+
+routes.py serves it; views.py holds the readers and writers.py the actions.
+"""
 
 from . import routes, views
 

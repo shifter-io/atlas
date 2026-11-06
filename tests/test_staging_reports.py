@@ -559,7 +559,7 @@ def test_rate_limited_stop_reason_has_its_own_text():
 
 
 async def test_reports_job_writes_live_pages(database, db, tmp_path):
-    from proxy_index.orchestrator.admin import views
+    from proxy_index.orchestrator.admin import writers
 
     now = datetime.now(UTC)
     prepare(database, ("DE",), DE=now.time())
@@ -610,7 +610,7 @@ async def test_reports_job_writes_live_pages(database, db, tmp_path):
     assert "Running now (live)" in index and ">900<" in index
 
     # Once the batch closes, its page is rewritten from the final data, without the banner.
-    await views.stop_batch(db, batch_id, "killed")
+    await writers.stop_batch(db, batch_id, "killed")
     await db.drain()
     final = text(out / f"batch-{batch_id}.html")
     assert "live counters" not in final and "http-equiv" not in final

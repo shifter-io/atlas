@@ -10,7 +10,7 @@ from test_orchestrator import bearer, prepare, product_id, query
 
 from proxy_index.orchestrator import app as app_module
 from proxy_index.orchestrator import batches
-from proxy_index.orchestrator.admin import routes, views
+from proxy_index.orchestrator.admin import routes, views, writers
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.db import Database
 from proxy_index.orchestrator.nodes import issue_token
@@ -346,7 +346,7 @@ async def test_target_edits_are_validated(database, db, admin):
     await post(admin, "/schedule/target", {"target_id": "nope", "pulse_requests": 5}, 404)
     async with db.connection() as conn:
         with pytest.raises(ValueError):
-            await views.set_target(conn, "generic_http", {"url": "x"})
+            await writers.set_target(conn, "generic_http", {"url": "x"})
 
 
 async def test_nodes_grid_includes_missing_cells(database, admin):
@@ -545,7 +545,7 @@ async def test_kill_pulse_writes_pulse_finished(database, db, admin):
     )
     assert event == ("pulse_finished", None, "operator", "killed")
     with pytest.raises(ValueError):
-        await views.stop_batch(db, batch_id, "done")
+        await writers.stop_batch(db, batch_id, "done")
 
 
 async def test_acknowledge_alert(database, admin):
