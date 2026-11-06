@@ -81,11 +81,17 @@ def test_target_urls_must_be_http(tmp_path):
         load_targets(targets(tmp_path, entry.format("ftp://example.test/ip")))
 
 
-@pytest.mark.parametrize("files", [[], ["a.mmdb", "b.mmdb"]])
-def test_find_source_needs_exactly_one_mmdb(tmp_path, monkeypatch, files):
+def only_cwd_db_ip(tmp_path, monkeypatch):
+    """find_source searches only tmp_path/db-ip: not $DBIP_MMDB, nor the checkout's db-ip."""
     monkeypatch.delenv("DBIP_MMDB", raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(enrichment, "__file__", str(tmp_path / "a" / "b" / "enrichment.py"))
     (tmp_path / "db-ip").mkdir()
+
+
+@pytest.mark.parametrize("files", [[], ["a.mmdb", "b.mmdb"]])
+def test_find_source_needs_exactly_one_mmdb(tmp_path, monkeypatch, files):
+    only_cwd_db_ip(tmp_path, monkeypatch)
     for name in files:
         (tmp_path / "db-ip" / name).write_bytes(b"")
     with pytest.raises(ValueError, match="exactly one local MMDB file"):
@@ -93,9 +99,7 @@ def test_find_source_needs_exactly_one_mmdb(tmp_path, monkeypatch, files):
 
 
 def test_find_source_takes_the_only_mmdb(tmp_path, monkeypatch):
-    monkeypatch.delenv("DBIP_MMDB", raising=False)
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "db-ip").mkdir()
+    only_cwd_db_ip(tmp_path, monkeypatch)
     (tmp_path / "db-ip" / "release.mmdb").write_bytes(b"")
     assert enrichment.find_source() == (tmp_path / "db-ip" / "release.mmdb").resolve()
 
