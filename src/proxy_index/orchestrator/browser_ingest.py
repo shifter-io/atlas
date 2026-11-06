@@ -198,9 +198,7 @@ async def _state(conn: psycopg.AsyncConnection, batch_id: int, node: dict) -> di
     ).fetchone()
 
 
-async def _process(
-    upload: _Upload, conn: psycopg.AsyncConnection, batch_id: int
-) -> web.Response:
+async def _process(upload: _Upload, conn: psycopg.AsyncConnection, batch_id: int) -> web.Response:
     request, node, config, digests = upload.request, upload.node, upload.config, upload.digests
     state = await _state(conn, batch_id, node)  # read again under the lock
     status = state["status"]
