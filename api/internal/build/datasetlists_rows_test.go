@@ -30,6 +30,7 @@ func rowsOf(n int, row func(int) any) (string, error) {
 // row, exactly one chunk, a chunk and one row; and a row encoding refuses is
 // an error.
 func TestTheRowWriterWritesOneArrayInChunks(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{0, 1, listChunk, listChunk + 1, 2*listChunk + 7} {
 		rows := make([]any, n)
 		for i := range rows {
@@ -49,6 +50,7 @@ func TestTheRowWriterWritesOneArrayInChunks(t *testing.T) {
 // dimension as an empty array; a published group whose provider has no
 // network has no rows; a build before v4 has none at all.
 func TestDatasetListsOfNetworksWithoutRows(t *testing.T) {
+	t.Parallel()
 	d := &DatasetLists{networks: []*datasetNetwork{{slug: "net", kinds: []*datasetKind{{kind: "residential"}}}}}
 	b, err := json.Marshal(d)
 	empty := `{"country":[],"region":[],"city":[],"asn":[],"city_asn":[]}`
@@ -81,6 +83,7 @@ var errDiskFull = errors.New("disk full")
 
 // A write that fails while the lists are written is an error naming them.
 func TestWriteDatasetReportsAListsWriteError(t *testing.T) {
+	t.Parallel()
 	d := &model.Dataset{Lists: &DatasetLists{}}
 	for range 40 {
 		k := &datasetKind{kind: "residential"}

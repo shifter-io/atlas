@@ -21,6 +21,7 @@ import (
 // counting better peers. The expected answers are the build's (what the
 // server renders), asked for by the build's keys.
 func TestTheDatasetFileRegeneratesEveryListAnswer(t *testing.T) {
+	t.Parallel()
 	file, res := v4File(t)
 	at, lists := readLists(t, file)
 	pg := res.Pages
@@ -243,6 +244,7 @@ func better(rows []build.PlaceRow, mine build.PlaceRow, is func(build.PlaceRow) 
 // every network kind's ranges and dimensions, and each dimension's row
 // length and field types.
 func TestTheDatasetFileHoldsOnlyWhatThePagesShow(t *testing.T) {
+	t.Parallel()
 	file, _ := v4File(t)
 	var keys []string
 	for _, kv := range pairs(t, file) {

@@ -16,6 +16,7 @@ import (
 // WriteDataset gives Marshal's bytes: with no, empty, nil and escaped
 // providers, and with escaped text in the other fields.
 func TestWriteDatasetEncodesLikeMarshal(t *testing.T) {
+	t.Parallel()
 	escaped := &model.Provider{Slug: "a<b>", Name: "R&D   \"quoted\""}
 	for name, providers := range map[string][]*model.Provider{"none": nil, "empty": {}, "nil entry": {nil, escaped}, "two": {escaped, {Slug: "b"}}} {
 		d := &model.Dataset{SchemaVersion: "<v>", GeneratedAt: "2026-11-04T00:00:00.000Z", Providers: providers,
@@ -38,6 +39,7 @@ func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full")
 // A write error and a value encoding/json refuses are errors, as they are
 // for Marshal; the error names the field.
 func TestWriteDatasetReportsErrors(t *testing.T) {
+	t.Parallel()
 	if err := build.WriteDataset(failWriter{}, &model.Dataset{}); err == nil || err.Error() != "disk full" {
 		t.Fatalf("write error: %v", err)
 	}
@@ -59,6 +61,7 @@ func TestWriteDatasetReportsErrors(t *testing.T) {
 // bytes of encoding the dataset whole; a dimension of exactly two chunks of
 // rows is one compact array of all its rows.
 func TestWriteDatasetStreamsTheListsInChunks(t *testing.T) {
+	t.Parallel()
 	in, err := testscale.NetworkInputs(testscale.NetworkShape{Shape: testscale.Shape{Networks: 1, Countries: 1, Exits: 3, Tail: 5,
 		CityAsn: 2000}, Requested: 2})
 	if err != nil {

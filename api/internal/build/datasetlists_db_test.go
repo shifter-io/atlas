@@ -16,6 +16,7 @@ import (
 // fails, naming the list, instead of writing its lists without them: a place
 // dimension's rows and the Coverage rows alike.
 func TestADatasetFileFailsWhenAListCannotBeRead(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	ctx := context.Background()
 	c := db.Conn(t)

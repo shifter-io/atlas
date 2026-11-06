@@ -114,6 +114,7 @@ func generic(t testing.TB, v any) any {
 // `siteapi migrate` yet) builds an honest empty dataset: no networks, the
 // framework's targets, and null fleet figures listed as N/A.
 func TestAFrameworkOnlyDatabaseBuildsAnHonestEmptyDataset(t *testing.T) {
+	t.Parallel()
 	db := testdb.NewFramework(t)
 	res := buildFrom(t, db)
 	ds := res.Dataset
@@ -199,6 +200,7 @@ const partialSnapshot = `{
 }`
 
 func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
+	t.Parallel()
 	db := catalogued(t)
 	db.Publish(t, []byte(partialSnapshot))
 	db.Exec(t, `INSERT INTO site.providers(slug,name,hq,website,framework_provider,kinds,primary_kind) VALUES ('acme-proxies','Acme Proxies','Berlin, DE','https://acme.example','acme','{residential}','residential');
@@ -395,6 +397,7 @@ func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
 }
 
 func TestMeasuredOnlyDatasetHasNoPriceFigures(t *testing.T) {
+	t.Parallel()
 	// The fixture as v2 with outages, so the dump also shows real outage bands.
 	res := measuredOnly(t, withOutages(t))
 	ds := res.Dataset
@@ -425,6 +428,7 @@ func TestMeasuredOnlyDatasetHasNoPriceFigures(t *testing.T) {
 // Staging once the framework publishes every-request snapshots: a priced
 // measured network is the whole fleet, so it fills the cost boards and bills.
 func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
+	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -443,6 +447,7 @@ func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
 }
 
 func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
+	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -469,6 +474,7 @@ func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
 }
 
 func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -508,6 +514,7 @@ func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T
 // Rows a fixture loader once marked is_demo are never served: not as a
 // network, a target, a tape row or in the measured market.
 func TestLeftoverDemoRowsAreNotServed(t *testing.T) {
+	t.Parallel()
 	db := catalogued(t)
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot.json"))
 	if err != nil {
@@ -560,6 +567,7 @@ func TestLeftoverDemoRowsAreNotServed(t *testing.T) {
 }
 
 func TestMeasuredMarketDrawsFromFirstObservedSamples(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)

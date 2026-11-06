@@ -281,6 +281,7 @@ func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 // product parts nor group lists, only its network lists. A v3 build read
 // afterwards reads both again and answers as before.
 func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
