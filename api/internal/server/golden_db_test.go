@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // goldenFile holds, per committed fixture, the SHA-256 of every answer the
@@ -40,8 +42,9 @@ var goldenPages = []string{"/v1/networks/shifter/places?dimension=city", "/v1/ne
 	"/v1/countries/US/cities", "/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=shift", "/v1/events"}
 
 // strippedAnswers is every answer of the database's current build, as
-// answers() renders them, with newTargetFields removed. /v1/version is left
-// out: its revision is the dataset's hash, which is compared itself.
+// answers() renders them, with newTargetFields and what LAT-MEAN-API adds
+// without a latency mean removed. /v1/version is left out: its revision is
+// the dataset's hash, which is compared itself.
 func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
 	t.Helper()
 	db.Exec(t, "UPDATE calculated_snapshots SET content_hash='same' WHERE build_id=$1", id)
@@ -61,13 +64,14 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
 	}
 	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
+	withoutLatencyMeanGaps(res.Coverage)
 	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := map[string]string{}
 	sum := func(name string, b []byte) {
-		h := sha256.Sum256(bytes.ReplaceAll(b, newTargetFields, nil))
+		h := sha256.Sum256(testscale.WithoutLatencyMean(bytes.ReplaceAll(b, newTargetFields, nil)))
 		out[name] = hex.EncodeToString(h[:])
 	}
 	sum("dataset", withoutDroppedKeys(t, fileBytes(t, v.Dataset)))
@@ -141,6 +145,34 @@ func TestWithoutBrowserEntriesEveryAnswerIsAsBefore(t *testing.T) {
 			if got.Answers[name][p] != answers[p] {
 				t.Errorf("%s %s differs from main %s", name, p, want.Main)
 			}
+		}
+	}
+}
+
+// withoutLatencyMeanGaps takes the performance.latencyMean N/A paths that
+// LAT-MEAN-API adds out of the coverage report, with their counts, so the
+// report is the one built before it.
+func withoutLatencyMeanGaps(c *build.Coverage) {
+	gap := func(path string) bool { return strings.HasSuffix(path, "performance.latencyMean") }
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		for name, fields := range p.Sections {
+			kept := []build.CoverageField{}
+			for _, f := range fields {
+				if !gap(f.Path) {
+					kept = append(kept, f)
+				}
+			}
+			gone := len(fields) - len(kept)
+			p.NACount -= gone
+			c.Summary.NAFields -= gone
+			c.Summary.NAFieldsBySource[p.Source] -= gone
+			p.Sections[name] = kept
+		}
+	}
+	for pt := range c.Fields {
+		if gap(pt) {
+			delete(c.Fields, pt)
 		}
 	}
 }

@@ -25,11 +25,14 @@ import (
 
 type Num = jsnum.Num
 
+// Latency is a latency object in milliseconds. Mean is set on the head's
+// (window metrics) latency only, and is NaN when the snapshot predates it.
 type Latency struct {
-	P50 Num `json:"p50"`
-	P90 Num `json:"p90"`
-	P95 Num `json:"p95"`
-	P99 Num `json:"p99"`
+	Mean Num `json:"mean"`
+	P50  Num `json:"p50"`
+	P90  Num `json:"p90"`
+	P95  Num `json:"p95"`
+	P99  Num `json:"p99"`
 }
 
 func (v *Latency) UnmarshalJSON(d []byte) error {

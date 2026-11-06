@@ -112,7 +112,7 @@ func measuredProvider(p *snap.Product, s *snap.Snapshot, targets []model.TargetM
 	head := headlineLatency(lm)
 	meas.Performance = model.PerformanceStats{
 		SuccessRate: m.SuccessRate, SuccessRateDelta24h: nan, SuccessRateDelta30d: nan, LatencyDelta24h: nan,
-		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
+		LatencyP50: head.P50, LatencyMean: head.Mean, LatencyP90: head.P90, LatencyP99: head.P99, TtfbP50: nan,
 		CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, TimeoutRate: m.TimeoutRate,
 		UptimePct: uptime, DowntimeMinutes24h: nan, Requests24h: day.Metrics.Completed, BandwidthMb24h: nan,
 	}
@@ -354,7 +354,7 @@ func weightedDowntimeMinutes(up *snap.Uptime) Num {
 	return Num(jsnum.FixedNum(up.DowntimeS.F()/up.Countries.F()/60, 1))
 }
 
-var naLatency = snap.Latency{P50: nan, P90: nan, P95: nan, P99: nan}
+var naLatency = snap.Latency{Mean: nan, P50: nan, P90: nan, P95: nan, P99: nan}
 
 // latencyTarget is the only target whose latency the site shows (product
 // rule): plain HTTP. HTTPS adds CONNECT + TLS round trips, about twice as

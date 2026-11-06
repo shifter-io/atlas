@@ -285,6 +285,7 @@ type PerformanceStats struct {
 	SuccessRateDelta30d Num `json:"successRateDelta30d"`
 	LatencyDelta24h     Num `json:"latencyDelta24h"`
 	LatencyP50          Num `json:"latencyP50"`
+	LatencyMean         Num `json:"latencyMean"`
 	LatencyP90          Num `json:"latencyP90"`
 	LatencyP99          Num `json:"latencyP99"`
 	TtfbP50             Num `json:"ttfbP50"`
