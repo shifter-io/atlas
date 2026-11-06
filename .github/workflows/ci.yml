@@ -257,7 +257,7 @@ jobs:
           if [ "$API" = true ]; then
             # Beside pytest, two Go packages at a time; alone, one per CPU (go's default).
             packages=()
-            [ "$CODE" = true ] && packages=(-p 2)
+            [ "$CODE" = true ] && packages=(-p 4)
             background gofmt gofmt_check
             background go-vet go -C api vet ./...
             background go-test go -C api test -count=1 "${packages[@]}" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
