@@ -29,8 +29,9 @@ Module: `github.com/Zeus-Development/proxy-index/api`, Go 1.27.
 ## Commands
 
 All commands find the database the same way: `DATABASE_URL`, else
-`--database-file <toml>` (a `[postgres]` section like `proxy-index/.secrets/database.toml`),
-else `proxy-index/.secrets/database.toml` in or above the working directory.
+`--database-file <toml>` (a `[postgres]` section like `.secrets/database.toml`),
+else `.secrets/database.toml` in the repository root: the working directory or its
+nearest parent that holds the framework tree `src/proxy_index/`.
 
 ```sh
 cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from the current checkout
@@ -49,7 +50,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | Flag / env | Default | Used by |
 |---|---|---|
 | `--listen`, `SITEAPI_LISTEN` | `127.0.0.1:8090` | serve |
-| `--database-file`, `SITEAPI_DATABASE_FILE`; `DATABASE_URL` wins | `proxy-index/.secrets/database.toml` | all |
+| `--database-file`, `SITEAPI_DATABASE_FILE`; `DATABASE_URL` wins | `.secrets/database.toml` in the repository root | all |
 | `--interval` | `10s` | serve: change-detection poll |
 | `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
@@ -353,17 +354,18 @@ is still missing.
 cd api
 go vet ./... && gofmt -l .
 go test ./...                                                   # database tests skip with a message
-PG_TEST_ADMIN_FILE=$PWD/../proxy-index/.secrets/postgres-admin.toml go test ./...   # full suite
+PG_TEST_ADMIN_FILE=$PWD/../.secrets/postgres-admin.toml go test ./...   # full suite
 PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema pinned in `api/fixtures/framework/` (`PG_TEST_FRAMEWORK_DIR`; `PIN` names its framework commit and checksums), on every ready pull request; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
+CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
-credentials. They load the framework schema from `proxy-index/src/proxy_index/` (or
-`PG_TEST_FRAMEWORK_DIR`) and drop the database afterwards. `proxy_reviews` is never
-touched. The framework schema must be calculated v9; the tests of the read before
+credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from
+`src/proxy_index/` in the repository root, so they always test the framework's current
+schema, and drop the database afterwards. `proxy_reviews` is never
+touched. The framework schema is calculated v10 (v9 and its memo tables); the tests of the read before
 v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), and
 `testdb.MoveToLists` moves it on to v9 the way the framework's migration does. The suite covers:
 

@@ -1,5 +1,6 @@
 # The API's Tier 1 (api/), on every ready pull request and every push to main
-# that touches api/ or this file, and on owner dispatches: gofmt, go vet and the
+# that touches api/, the framework's SQL (src/proxy_index/**/*.sql, the schema
+# the database tests load) or this file, and on owner dispatches: gofmt, go vet and the
 # Go tests, database tests included. The commit-message, identity, secret and
 # privacy checks run for every change in ci.yml's tier1.
 #
@@ -8,8 +9,8 @@
 # labelled ci-2cpu. `lint`: gofmt, go vet and, on main, go test -race without
 # the database. The two test parts run the Go tests
 # against a throwaway PostgreSQL 17 (the framework CI's pinned build, kept in
-# the server cache) loaded with the framework schema pinned in
-# api/fixtures/framework/ (PIN): `tests-parts` the slowest test alone, then the
+# the server cache) loaded with the framework schema from the same checkout
+# (src/proxy_index): `tests-parts` the slowest test alone, then the
 # cached-answer latency test (TestServeFromDatabase, p99 within 2 ms) alone in
 # its own process, so no other package's tests share the two CPUs while it
 # measures; `tests-rest` every other test. Go, the Go build cache
@@ -19,16 +20,16 @@
 # job except the owner's pull requests from this repository's own branches,
 # pushes to main and owner dispatches. Draft pull requests run nothing until
 # they are marked ready; a change whose only API files are Markdown outside
-# api/fixtures/ skips the build and tests.
+# api/fixtures/ and no framework SQL skips the build and tests.
 name: api
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['api/**', '.github/workflows/api.yml']
+    paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
   push:
     branches: [main]
-    paths: ['api/**', '.github/workflows/api.yml']
+    paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
   workflow_dispatch:
 
 # Its own group: ci.yml's `ci-` group would cancel tier1 in the same repository.
@@ -85,7 +86,9 @@ jobs:
               api/fixtures/*|.github/workflows/api.yml) code=true ;;
               api/*.md) ;;
               api/*) code=true ;;
-              # Framework files are tier1's (ci.yml).
+              # The schema the database tests load.
+              src/proxy_index/*.sql) code=true ;;
+              # Other framework files are tier1's (ci.yml).
               *) ;;
             esac
           done <<< "$files"
@@ -130,12 +133,10 @@ jobs:
       - name: go test -race without the database (main only; not a merge gate)
         if: steps.diff.outputs.code == 'true' && matrix.part == 'lint' && github.event_name != 'pull_request'
         run: go test -count=1 -race ./...
-      - name: PostgreSQL 17 and the pinned framework schema
+      - name: PostgreSQL 17
         if: steps.diff.outputs.code == 'true' && matrix.part != 'lint'
         working-directory: .
         run: |
-          # The pinned schema files must be the ones PIN names.
-          (cd api/fixtures/framework && grep -E '^[0-9a-f]{64}  ' PIN | sha256sum -c --strict -)
           cache=$CI_CACHE_DIR/${GITHUB_REPOSITORY#*/}
           dir=$cache/tools/postgresql-$PG_VERSION
           if [ ! -e "$dir/.complete" ]; then
@@ -163,7 +164,6 @@ jobs:
           {
             echo "PG_BIN=$dir/bin"
             echo "PG_TEST_ADMIN_FILE=$admin"
-            echo "PG_TEST_FRAMEWORK_DIR=$GITHUB_WORKSPACE/api/fixtures/framework"
             echo "PG_TEST_REQUIRED=1"
           } >> "$GITHUB_ENV"
       - name: go test, the slowest test (database)

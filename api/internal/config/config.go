@@ -11,11 +11,11 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// FrameworkFolder is the folder name of the framework checkout
-// (Zeus-Development/proxy-index) inside the website folder.
-const FrameworkFolder = "proxy-index"
+// FrameworkTree is the framework's source tree (the Python package with its
+// schema files), relative to the repository root. RepoRoot finds the root by it.
+var FrameworkTree = filepath.Join("src", "proxy_index")
 
-// Postgres is the [postgres] section of proxy-index/.secrets/*.toml.
+// Postgres is the [postgres] section of the repository's .secrets/*.toml.
 type Postgres struct {
 	Host     string `toml:"host"`
 	Port     any    `toml:"port"`
@@ -73,16 +73,16 @@ func (p Postgres) WithDB(name string) Postgres {
 }
 
 // ResolveDSN picks DATABASE_URL, an explicit --database-file, or the
-// framework's default credentials file found above the working directory.
+// default credentials file .secrets/database.toml in the repository root.
 func ResolveDSN(databaseURL, databaseFile string) (string, error) {
 	if databaseURL != "" {
 		return databaseURL, nil
 	}
 	if databaseFile == "" {
-		databaseFile = FrameworkPath(".secrets", "database.toml")
+		databaseFile = RepoPath(".secrets", "database.toml")
 	}
 	if databaseFile == "" {
-		return "", errors.New("no database configured: set DATABASE_URL or --database-file proxy-index/.secrets/database.toml")
+		return "", errors.New("no database configured: set DATABASE_URL or --database-file, or add .secrets/database.toml to the repository root")
 	}
 	p, err := ReadDatabaseFile(databaseFile)
 	if err != nil {
@@ -91,22 +91,44 @@ func ResolveDSN(databaseURL, databaseFile string) (string, error) {
 	return p.DSN(), nil
 }
 
-// FrameworkPath looks for FrameworkFolder/<parts...> in the working directory
-// and its parents, like FindUp, and returns "" when there is none.
-func FrameworkPath(parts ...string) string {
-	return FindUp(filepath.Join(append([]string{FrameworkFolder}, parts...)...))
+// RepoRoot returns the repository root: the working directory or its nearest
+// parent that holds FrameworkTree, or "" when there is none.
+func RepoRoot() string {
+	return findDir(FrameworkTree)
+}
+
+// RepoPath returns <repository root>/<parts...> when it exists, else "".
+func RepoPath(parts ...string) string {
+	root := RepoRoot()
+	if root == "" {
+		return ""
+	}
+	path := filepath.Join(append([]string{root}, parts...)...)
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
 }
 
 // FindUp looks for a relative path in the working directory and its parents.
 func FindUp(rel string) string {
+	dir := findDir(rel)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, rel)
+}
+
+// findDir returns the working directory or its nearest parent that holds the
+// relative path rel, or "" when there is none.
+func findDir(rel string) string {
 	dir, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
 	for {
-		candidate := filepath.Join(dir, rel)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if _, err := os.Stat(filepath.Join(dir, rel)); err == nil {
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
