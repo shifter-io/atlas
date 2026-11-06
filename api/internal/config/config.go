@@ -137,3 +137,5 @@ func findDir(rel string) string {
 		dir = parent
 	}
 }
+
+// CI-API-1: an API-only change to measure tier1 (reverted next).
