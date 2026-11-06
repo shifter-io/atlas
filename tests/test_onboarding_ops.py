@@ -2,6 +2,7 @@ import importlib.util
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 from test_onboarding import START, Clock, Proxy, fake_measurement
 
 from proxy_index.onboarding import manifest
@@ -51,3 +52,25 @@ async def test_calibration_stops_before_second_round_even_when_first_overruns(
     jobs = read_json(path.parent / "regions/tor1/state.json")["jobs"]
     assert all(j["status"] == "completed" for j in jobs[:3])
     assert all(j["status"] == "pending" for j in jobs[3:])
+
+
+async def test_region_checkpoint_is_refused_unless_resumed_and_a_crash_fails_it(tmp_path):
+    path = manifest.create(
+        ROOT / "configs/shifter.toml",
+        "residential",
+        manifest.timestamp(START),
+        tmp_path,
+        now=START - timedelta(hours=1),
+    )
+    with pytest.raises(ValueError, match="No region checkpoint"):
+        await execute(path, "tor1", Proxy, resume=True)
+
+    async def crashed(config, sink, **kwargs):
+        raise OSError("disk full")
+
+    with pytest.raises(OSError, match="disk full"):
+        await execute(path, "tor1", Proxy, clock=Clock(START.timestamp()), run_country=crashed)
+    state = read_json(path.parent / "regions/tor1/state.json")
+    assert state["status"] == "failed" and state["jobs"][0]["status"] == "failed"
+    with pytest.raises(ValueError, match="use --resume"):
+        await execute(path, "tor1", Proxy)
