@@ -1,8 +1,9 @@
 """SNAP-SIZE-3a: a snapshot stored as a head and parts, sparse daily 24h series, no IP samples.
 
 Every new path is compared with the old one on the same PostgreSQL: the head and parts read back
-as the single jsonb payload row would, a build stored before calculated v8 still reads, exports
-and serves, and the dense series the API serves equals the full series of the same inputs.
+as the single jsonb payload row would, a build stored before calculated v8 still exports (it
+still reads and serves: test_calculated_parts_legacy), and the dense series the API serves
+equals the full series of the same inputs.
 """
 
 import hashlib
@@ -15,7 +16,6 @@ import psycopg
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from census_pulse_cases import outage, scenario
-from migration_cases import catalog
 from psycopg import sql
 from psycopg.types.json import Jsonb
 from test_storage import measurement
@@ -25,9 +25,16 @@ from proxy_index.calculated.aggregate import series
 from proxy_index.calculated.api import CACHE, RESOURCES, app
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.policy import digest
-from proxy_index.storage import connect, ingest, initialize, migrate
+from proxy_index.storage import connect, ingest
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
+
 
 POLICY = Path("configs/methodology.toml")
 # Keys that differ between two builds of the same inputs (ids, clock, implementation).
@@ -36,7 +43,6 @@ VOLATILE = {"snapshot_id", "generated_at", "implementation_id"}
 
 async def two_providers(database, tmp_path):
     """Two unbatched measurements (daily groups); returns the cutoff after both."""
-    store.initialize(database)
     first = await measurement(tmp_path, requests=10)
     ingest(first, database)
     ingest(await measurement(tmp_path, requests=10, provider="second"), database)
@@ -149,46 +155,6 @@ def whole_payload_build(database, payload):
             (build_id, digest(whole), Jsonb(whole)),
         )
     return build_id
-
-
-@pytest.mark.asyncio
-async def test_a_build_stored_whole_before_v8_still_reads_publishes_and_serves(
-    database, tmp_path, monkeypatch
-):
-    # Both builds stay after the second publication (retention has its own tests).
-    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
-    end = await two_providers(database, tmp_path)
-    payload = calculate(database, POLICY, as_of=end, publish=True)
-    with connect(database) as conn:
-        split = parts.previous(conn)
-    legacy = whole_payload_build(database, payload)
-    expected = payload | {"snapshot_id": str(legacy)}
-    assert store.read(database, str(legacy)) == expected
-    assert store.read(database, str(legacy), assemble=False) == expected
-    assert store.read_head(database, str(legacy)) == {
-        k: v for k, v in expected.items() if k not in ("products", "runs")
-    }
-    assert store.read_parts(database, str(legacy)) == payload["products"]
-    assert store.read_parts(database, str(legacy), "runs") == payload["runs"]
-    one = payload["products"][0]
-    assert store.read_parts(database, str(legacy), product=str(one["product_id"])) == [one]
-    assert store.read_parts(database, str(legacy), keys=("id",)) == [
-        {"id": p["id"]} for p in payload["products"]
-    ]
-    store.publish(database, str(legacy))
-    with connect(database) as conn:
-        whole = parts.previous(conn)
-    # The next calculation reads the same projection from either layout: ids and scores only.
-    assert whole == split
-    window = whole["products"][0]["windows"]["24h"]
-    assert set(window) == {"scores", "targets"}
-    assert all(set(t) == {"score"} for t in window["targets"].values())
-    async with TestClient(TestServer(app(database))) as client:
-        for path in ["", *(f"/{r}?window=7d" for r in sorted(RESOURCES))]:
-            new = await client.get(f"/v1/snapshots/{payload['snapshot_id']}{path}")
-            old = await client.get(f"/v1/snapshots/{legacy}{path}")
-            assert (new.status, old.status) == (200, 200)
-            assert without(await new.json()) == without(await old.json()), path
 
 
 def without(answer, keys=VOLATILE):
@@ -387,84 +353,6 @@ async def test_parts_are_written_and_read_through_the_parent_by_non_owner_roles(
             for role in roles.values():
                 conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
                 conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-
-
-CALCULATED_V7 = Path(__file__).parent / "fixtures/calculated_v7.sql"
-
-
-def v7_layer(database, payloads):
-    """A current database whose calculated layer is the v7 release's, holding payloads as v7
-    stored them (one row each); the last one is current. Returns their build ids."""
-    assert hashlib.sha256(CALCULATED_V7.read_bytes()).hexdigest() == store.V7_CHECKSUM
-    initialize(database)
-    with connect(database) as conn:
-        conn.execute(CALCULATED_V7.read_text())
-        conn.execute("INSERT INTO calculation_schema VALUES (7,%s)", (store.V7_CHECKSUM,))
-        for payload in payloads:
-            method = payload["methodology"]
-            conn.execute(
-                "INSERT INTO methodologies VALUES (%s,%s,now()) ON CONFLICT DO NOTHING",
-                (method["id"], Jsonb(method["settings"])),
-            )
-    builds = [whole_payload_build(database, payload) for payload in payloads]
-    with connect(database) as conn:
-        if builds:
-            conn.execute("INSERT INTO current_calculation VALUES (true,%s)", (builds[-1],))
-        conn.execute("UPDATE calculation_builds SET published=true")
-    return builds
-
-
-def snapshots(database):
-    with connect(database) as conn:
-        return conn.execute(
-            "SELECT build_id,content_hash,payload::text FROM calculated_snapshots ORDER BY 1"
-        ).fetchall()
-
-
-@pytest.mark.asyncio
-async def test_calculated_v7_builds_migrate_unchanged_and_still_serve(databases, tmp_path):
-    source = databases()
-    end = await two_providers(source, tmp_path)
-    payloads = [calculate(source, POLICY, as_of=end + timedelta(hours=h)) for h in (0, 1)]
-    database = databases()
-    builds = v7_layer(database, payloads)
-    before = snapshots(database)
-    result = migrate(database)
-    assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
-        7,
-        12,
-    )
-    assert result["verified"] == [
-        *store.V7_CHECKS,
-        *store.V8_CHECKS,
-        *store.V9_CHECKS,
-        *store.V10_CHECKS,
-        *store.V11_CHECKS,
-    ]
-    assert snapshots(database) == before
-    for build_id, payload in zip(builds, payloads, strict=True):
-        assert store.read(database, str(build_id)) == payload | {"snapshot_id": str(build_id)}
-    with connect(database) as conn:
-        assert conn.execute("SELECT count(*) FROM calculated_snapshot_parts").fetchone() == (0,)
-    async with TestClient(TestServer(app(database))) as client:
-        for path in ["", *(f"/{r}?window=24h" for r in sorted(RESOURCES))]:
-            assert (await client.get(f"/v1/snapshots/{builds[0]}{path}")).status == 200
-    assert migrate(database)["migrated"] is False
-    store.initialize(database)
-    reference = databases()
-    store.initialize(reference)
-    assert catalog(database) == catalog(reference)
-
-
-def test_a_failed_v7_check_rolls_back(databases, monkeypatch):
-    database = databases()
-    v7_layer(database, [])
-    monkeypatch.setattr(store, "V7_CHECKS", {"always": "SELECT 1"})
-    with pytest.raises(ValueError, match="always"):
-        migrate(database)
-    with connect(database) as conn:
-        assert conn.execute("SELECT version FROM calculation_schema").fetchall() == [(7,)]
-        assert conn.execute("SELECT to_regclass('calculated_snapshot_parts')").fetchone() == (None,)
 
 
 @pytest.mark.asyncio
