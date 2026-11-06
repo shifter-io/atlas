@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from calculated_cases import OtherIP, lenient_policy, payload_mismatches
 from helpers import FakeTransport
 from psycopg.rows import dict_row
-from test_calculated import OtherIP, lenient_policy, payload_mismatches
 from test_storage import enrichment, measurement
 from test_storage_v6 import BERLIN, NETWORK, census
 

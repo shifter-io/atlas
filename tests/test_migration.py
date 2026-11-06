@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from test_calculated import payload_mismatches
+from calculated_cases import payload_mismatches
 from test_storage import measurement
 
 from proxy_index import names
