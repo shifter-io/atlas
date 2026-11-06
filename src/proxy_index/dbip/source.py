@@ -151,22 +151,29 @@ def private_file(path: Path):
         os.fsync(stream.fileno())
 
 
+def _copy(response, out, digest, step: str) -> int:
+    """Copy the response into `out` and `digest`; the bytes copied (at most MAX_DOWNLOAD_BYTES)."""
+    size = 0
+    try:
+        while chunk := response.read(CHUNK):
+            size += len(chunk)
+            if size > MAX_DOWNLOAD_BYTES:
+                raise UpdateError(f"{step}: larger than expected")
+            digest.update(chunk)
+            out.write(chunk)
+    except (OSError, HTTPException) as exc:
+        raise UpdateError(f"{step}: {type(exc).__name__}") from None
+    return size
+
+
 def download(release: Release, partial: Path) -> tuple[int, str]:
     """Stream the release into `partial`; its size and SHA-256. The size must be the one the
     HEAD and the GET announced (a cut-short download fails here)."""
-    digest, size = hashlib.sha256(), 0
+    digest = hashlib.sha256()
     step = f"download {release.name}"
     with _open(release.url, step) as response, private_file(partial) as out:
         announced = response.headers.get("Content-Length")
-        try:
-            while chunk := response.read(CHUNK):
-                size += len(chunk)
-                if size > MAX_DOWNLOAD_BYTES:
-                    raise UpdateError(f"{step}: larger than expected")
-                digest.update(chunk)
-                out.write(chunk)
-        except (OSError, HTTPException) as exc:
-            raise UpdateError(f"{step}: {type(exc).__name__}") from None
+        size = _copy(response, out, digest, step)
     expected = {int(n) for n in (announced, release.size) if n is not None and str(n).isdigit()}
     if expected - {size}:
         raise UpdateError(f"{step}: {size} bytes, not the {max(expected)} announced")

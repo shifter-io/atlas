@@ -37,6 +37,39 @@ workstation.
 - API migrations are checksummed: never edit an applied migration, even a comment;
   add a new one.
 
+## How a change reaches main
+
+Nobody pushes to `main`. Every change is a pull request that GitHub's merge queue
+merges (squashed), so `main` is only ever what the queue tested; pushes to `main` run
+no CI. What the checks run and how long they may take: the CI paragraph in
+`README.md`.
+
+1. Open a ready (not draft) pull request. On its head these must pass: `tier1`
+   (`ci.yml`), `maestro-policy` (size, privacy, attribution; `maestro-policy.yml`),
+   `api` (`api.yml`) when it touches `api/` or the framework's SQL, and the
+   `maestro/review` and `maestro/qa` statuses the reviewer and QA set on that same
+   commit. A new push, a merge of `main` into the branch included, needs review and
+   QA again for the new head.
+2. Join the queue: `gh pr merge <pr> --auto`. The queue's merge method is squash, so
+   pass no method flag. It enters the queue once every check is green.
+3. The queue tests the change on top of `main` and the entries ahead of it: `tier1`
+   and `api` run again for the merge commit (`merge_group` event), and the queue gate
+   (`maestro-queue.yml`) reports `maestro/review`, `maestro/qa` and `maestro-policy`
+   for it after checking that they passed on the pull request's head. Nothing is
+   re-reviewed. If the combined test fails, the entry leaves the queue and `main` is
+   unchanged.
+4. Wait without polling GitHub:
+   `maestro-wait pr --repo Zeus-Development/proxy-index --pr <pr> --head <sha>`
+   reports `merged`, `checks-failed`, `conflict` or `left-queue`.
+
+`tier1` and `api` each run as one job on their own fresh 32-CPU CI server
+(`ci-32cpu`), all their work in parallel there. Both write their slowest tests and
+their test step's time to the job summary and the `ci-timing` / `api-timing` artifact;
+they warn when a test takes over 60 s or the step over 90 s, and fail when a test takes
+90 s or more or the step over 240 s. Every test runs on every event, pull requests
+included. Trends across runs:
+`python3 scripts/ci/timing_history.py [--workflow api] --event merge_group`.
+
 ## Commits
 
 No local paths, emails, private keys, tokens or real IP addresses in a change (the

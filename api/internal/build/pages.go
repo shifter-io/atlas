@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -213,9 +214,11 @@ type CountryAnswer struct {
 	Cities      map[string]int        `json:"cities"`
 }
 
-// buildPages computes every per-page answer of a build.
+// buildPages computes every per-page answer of a build; it fails when a
+// network list's rows cannot be read.
 func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
-	s *snap.Snapshot, row *store.SnapshotRow) *Pages {
+	s *snap.Snapshot, row *store.SnapshotRow) (*Pages, error) {
+	nr := &netRead{ctx: context.Background(), row: row}
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
 		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, v4: row != nil && row.Networks != nil, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
@@ -228,9 +231,9 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 		pg.Primary[e.P.Slug] = e.P.PrimaryKind
 		for _, kind := range head.Kinds {
 			mine := groupsOfKind(e, groups, kind)
-			ans, places, srcs := networkAnswer(generatedAt, head, kind, mine, row)
+			ans, places, srcs := networkAnswer(generatedAt, head, kind, mine, nr)
 			pg.Network[e.P.Slug+"/"+kind] = ans
-			pg.addCoverage(e, kind, row)
+			pg.addCoverage(e, kind, nr)
 			for key, rows := range places {
 				pg.lists[listKey{scope: e.P.Slug + "/" + kind, rangeID: key.rangeID, dimension: key.dimension}] = pg.index(rows, srcs[key.rangeID], key.dimension)
 				switch {
@@ -250,7 +253,7 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	pg.countryAnswers(generatedAt, byCountry)
 	pg.Rankings = rankings(generatedAt, entries, stats)
 	if pg.Primary[AllNetworks] == "" {
-		ans, places, srcs := allAnswer(generatedAt, s, row)
+		ans, places, srcs := allAnswer(generatedAt, s, nr)
 		pg.Network[AllNetworks+"/"+AllNetworks], pg.Primary[AllNetworks] = ans, AllNetworks
 		for key, rows := range places {
 			pg.lists[listKey{scope: AllNetworks + "/" + AllNetworks, rangeID: key.rangeID, dimension: key.dimension}] = pg.index(rows, srcs[key.rangeID], key.dimension)
@@ -258,7 +261,7 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 		pg.allCharts(generatedAt, s)
 	}
 	pg.addDetails(generatedAt, details)
-	return pg
+	return pg, nr.err
 }
 
 // index is a list of rows in order: in a v4 build its count and first page

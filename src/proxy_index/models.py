@@ -225,33 +225,33 @@ class RunConfig:
         if self.answer_classes is not None and self.retry_http_469:
             raise ValueError("Answer classes replace retry_http_469; set only one")
 
-    def __post_init__(self) -> None:
-        self._check_policies()
-        if type(self.processes) is not int or self.processes < 0:
-            raise ValueError("processes must be a nonnegative integer (0 means automatic)")
-        if self.target_url is not None:
-            try:
-                expected = {"generic_http": "http", "generic_https": "https"}[self.target]
-                if not isinstance(self.target_url, str) or any(
-                    char.isspace() or ord(char) < 32 for char in self.target_url
-                ):
-                    raise ValueError
-                url = urlsplit(self.target_url)
-                if (
-                    url.scheme != expected
-                    or not url.hostname
-                    or url.username is not None
-                    or url.password is not None
-                    or url.fragment
-                    or (url.port is not None and not 1 <= url.port <= 65535)
-                ):
-                    raise ValueError
-                object.__setattr__(self, "target_url", url.geturl())
-            except (KeyError, ValueError):
-                raise ValueError(
-                    "Target URL must match the generic target protocol, "
-                    "without credentials or a fragment"
-                ) from None
+    def _check_target_url(self) -> None:
+        if self.target_url is None:
+            return
+        try:
+            expected = {"generic_http": "http", "generic_https": "https"}[self.target]
+            if not isinstance(self.target_url, str) or any(
+                char.isspace() or ord(char) < 32 for char in self.target_url
+            ):
+                raise ValueError
+            url = urlsplit(self.target_url)
+            if (
+                url.scheme != expected
+                or not url.hostname
+                or url.username is not None
+                or url.password is not None
+                or url.fragment
+                or (url.port is not None and not 1 <= url.port <= 65535)
+            ):
+                raise ValueError
+            object.__setattr__(self, "target_url", url.geturl())
+        except (KeyError, ValueError):
+            raise ValueError(
+                "Target URL must match the generic target protocol, "
+                "without credentials or a fragment"
+            ) from None
+
+    def _apply_labels(self) -> None:
         metadata = self.proxy.public()
         protocol_of(self.proxy)  # Reject an unknown network test protocol before any traffic.
         for name in ("provider", "product", "requested_country"):
@@ -261,6 +261,8 @@ class RunConfig:
                 raise LabelError(name, supplied, effective)
             if name in metadata:
                 object.__setattr__(self, name, effective)
+
+    def _check_limits(self) -> None:
         if self.stop_rule not in ("count", "unique_ratio"):
             raise ValueError("stop_rule must be 'count' or 'unique_ratio'")
         if self.requests is None and self.stop_rule == "count":
@@ -279,6 +281,14 @@ class RunConfig:
                 type(value) not in (float, int) or not math.isfinite(value) or value <= 0
             ):
                 raise ValueError(f"{name} must be finite and positive")
+
+    def __post_init__(self) -> None:
+        self._check_policies()
+        if type(self.processes) is not int or self.processes < 0:
+            raise ValueError("processes must be a nonnegative integer (0 means automatic)")
+        self._check_target_url()
+        self._apply_labels()
+        self._check_limits()
 
     def public(self) -> dict[str, Any]:
         # The stop-rule fields are omitted for count runs, so they keep the

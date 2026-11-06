@@ -256,6 +256,23 @@ def regional_window(manifest: dict, region: str) -> dict:
 
 
 def validate(data: dict) -> dict:
+    _validate_header(data)
+    mode = _validate_mode(data)
+    _validate_rounds(data, mode)
+    _validate_regions(data["regions"])
+    _due_countries(data)
+    settings(data["settings"])
+    if data["settings"].get("answer_classes") and data["schema_version"] != 3:
+        raise ValueError("Answer classes require an ephemeral (version 3) manifest")
+    # Validate custom destinations using the same constraints as the request runner.
+    from ..models import ProxyConfig, RunConfig
+
+    RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), target_url=data["target_url"])
+    return data
+
+
+def _validate_header(data: dict) -> None:
+    """The schema version, target, census rule, identifiers and provider checksum."""
     policy = data.get("settings", {})
     version, basis = census_rule(
         policy.get("retry_http_469", False), policy.get("answer_classes", False)
@@ -271,6 +288,10 @@ def validate(data: dict) -> dict:
         slug(data[key])
     if not re.fullmatch(r"[0-9a-f]{64}", data["provider_config_sha256"]):
         raise ValueError("Invalid provider configuration checksum")
+
+
+def _validate_mode(data: dict) -> str:
+    """The execution mode, which must match the schema version and region order."""
     mode = data.get("execution_mode", "parallel")
     if data["schema_version"] == 1 and (mode != "parallel" or "region_order" in data):
         raise ValueError("Sequential schedules require manifest version 2")
@@ -283,6 +304,11 @@ def validate(data: dict) -> dict:
             or set(order) != set(REGION_IDS)
         ):
             raise ValueError("Sequential schedule requires each region exactly once")
+    return mode
+
+
+def _validate_rounds(data: dict, mode: str) -> None:
+    """The campaign window and its 24 rounds, slot_minutes apart."""
     start, end = moment(data["starts_at"]), moment(data["ends_at"])
     slot = timedelta(minutes=slot_minutes(data))  # one hour but in an ephemeral manifest
     span = 24 * slot * (len(REGION_IDS) if mode == "sequential" else 1)
@@ -293,7 +319,10 @@ def validate(data: dict) -> dict:
         )
     if data["rounds"] != [timestamp(start + i * slot) for i in range(24)]:
         raise ValueError("Campaign must contain exactly 24 rounds slot_minutes apart")
-    regions = data["regions"]
+
+
+def _validate_regions(regions) -> None:
+    """All eight regions, each with an ordered country list; every country exactly once."""
     if not isinstance(regions, dict) or set(regions) != set(REGION_IDS):
         raise ValueError("Campaign must contain all eight regions")
     codes = []
@@ -305,15 +334,6 @@ def validate(data: dict) -> dict:
         codes.extend(countries)
     if len(codes) != len(set(codes)) or set(codes) != set(load_countries()):
         raise ValueError("Each configured country must occur exactly once")
-    _due_countries(data)
-    settings(data["settings"])
-    if data["settings"].get("answer_classes") and data["schema_version"] != 3:
-        raise ValueError("Answer classes require an ephemeral (version 3) manifest")
-    # Validate custom destinations using the same constraints as the request runner.
-    from ..models import ProxyConfig, RunConfig
-
-    RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), target_url=data["target_url"])
-    return data
 
 
 def slot_minutes(data: dict) -> int:

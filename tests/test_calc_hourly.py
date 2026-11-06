@@ -13,8 +13,8 @@ from collections import defaultdict
 from datetime import UTC, datetime
 
 import pytest
+from calculated_cases import lenient_policy
 from psycopg.rows import dict_row
-from test_calculated import lenient_policy
 from test_calculated_hourly_reads import (
     BUCKET,
     DAY,

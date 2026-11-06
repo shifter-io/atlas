@@ -26,7 +26,6 @@ from ..onboarding.manifest import moment, region_countries, timestamp
 from ..onboarding.scheduler import Clock
 from . import scope
 from .contracts import (
-    WORKER_TAG,
     CampaignSpec,
     Droplet,
     DropletRecord,
@@ -38,6 +37,7 @@ from .contracts import (
     hour_path,
     hour_tag,
     runtime_dir,
+    tags,
 )
 from .do_api import CreateError, DigitalOcean
 from .fanout import READY_POLL_SECONDS, start_command
@@ -375,14 +375,14 @@ class _Launch(HourWork):
 
     async def _create_call(self, workers: list[DropletRecord]) -> list[Droplet]:
         names, region = [w.name for w in workers], workers[0].region
-        tags = [WORKER_TAG, campaign_tag(self.spec.campaign_id), self.tag]
+        worker = tags(self.spec.environment)["worker"]  # CAMP-STAGING-1: its environment's
         try:
             return await self.cloud.create(
                 names,
                 region=region,
                 size=self.spec.size_by_region[region],
                 image=self.spec.image_by_region[region],
-                tags=tags,
+                tags=[worker, campaign_tag(self.spec.campaign_id), self.tag],
                 ssh_keys=[self.spec.ssh_key_id],
                 monitoring=False,
                 with_droplet_agent=False,

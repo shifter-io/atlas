@@ -122,19 +122,65 @@ def _health(state: dict, service: dict, age: float, lagging: bool, elapsed: floa
     return lifecycle
 
 
+def _without_state(data: dict) -> dict:
+    """A node with no scheduler state: starting, failed, idle or not deployed."""
+    if data.get("assignment"):
+        service = data.get("service", {})
+        return data | {
+            "health": "starting"
+            if service.get("ActiveState") in ("active", "activating")
+            else "failed"
+        }
+    return data | {"health": "idle" if data.get("installed") else "not_deployed"}
+
+
+def _elapsed(state: dict, active, remote_now: float) -> float:
+    """Seconds since the run started, up to its finish or the server's current time."""
+    started = state.get("started_at") or (active or {}).get("started_at")
+    return (
+        (
+            moment(state.get("finished_at") or timestamp(remote_now)) - moment(started)
+        ).total_seconds()
+        if started
+        else 0
+    )
+
+
+def _lagging(jobs: list, remote_now: float) -> bool:
+    """Whether a job of an earlier, already eligible hourly round is still unfinished."""
+    first = moment(jobs[0]["scheduled_at"]).timestamp() if jobs else None
+    eligible_round = min(23, int((remote_now - first) // 3600)) if first is not None else None
+    return bool(
+        jobs
+        and any(j["status"] in ("pending", "running") and j["round"] < eligible_round for j in jobs)
+    )
+
+
+def _counters(measurement: dict, progress: dict, jobs: list, active) -> dict:
+    """Request, IP, success and error counts: the measurement's, else the live progress."""
+    return {
+        "requests": measurement.get(
+            "completed",
+            sum(j.get("requests", 0) for j in jobs)
+            + (progress.get("requests", 0) if active else 0),
+        ),
+        "unique_ips": measurement.get("unique_ips", progress.get("unique_ips", 0)),
+        "successes": measurement.get("successes", progress.get("successes", 0)),
+        "errors": measurement.get(
+            "total_errors", progress.get("requests", 0) - progress.get("successes", 0)
+        ),
+        "requests_per_second": measurement.get(
+            "requests_per_second", progress.get("requests_per_second")
+        ),
+    }
+
+
 def classify(data: dict, now: float) -> dict:
     if data.get("error"):
         return data | {"health": "unreachable"}
     state = data.get("state")
     if not state:
-        if data.get("assignment"):
-            service = data.get("service", {})
-            return data | {
-                "health": "starting"
-                if service.get("ActiveState") in ("active", "activating")
-                else "failed"
-            }
-        return data | {"health": "idle" if data.get("installed") else "not_deployed"}
+        return _without_state(data)
     remote_now = data.get("server_time", now)
     age = max(0, remote_now - moment(state["updated_at"]).timestamp())
     lifecycle = state["status"]
@@ -142,20 +188,8 @@ def classify(data: dict, now: float) -> dict:
     progress = state.get("progress") or {}
     active = state.get("active")
     jobs = state.get("jobs", [])
-    started = state.get("started_at") or (active or {}).get("started_at")
-    elapsed = (
-        (
-            moment(state.get("finished_at") or timestamp(remote_now)) - moment(started)
-        ).total_seconds()
-        if started
-        else 0
-    )
-    first = moment(jobs[0]["scheduled_at"]).timestamp() if jobs else None
-    eligible_round = min(23, int((remote_now - first) // 3600)) if first is not None else None
-    lagging = bool(
-        jobs
-        and any(j["status"] in ("pending", "running") and j["round"] < eligible_round for j in jobs)
-    )
+    elapsed = _elapsed(state, active, remote_now)
+    lagging = _lagging(jobs, remote_now)
     data.update(
         health=_health(state, data.get("service", {}), age, lagging, elapsed),
         heartbeat_age_seconds=round(age, 1),
@@ -165,19 +199,7 @@ def classify(data: dict, now: float) -> dict:
             j["status"] == "pending" and moment(j["scheduled_at"]).timestamp() <= remote_now
             for j in jobs
         ),
-        requests=measurement.get(
-            "completed",
-            sum(j.get("requests", 0) for j in jobs)
-            + (progress.get("requests", 0) if active else 0),
-        ),
-        unique_ips=measurement.get("unique_ips", progress.get("unique_ips", 0)),
-        successes=measurement.get("successes", progress.get("successes", 0)),
-        errors=measurement.get(
-            "total_errors", progress.get("requests", 0) - progress.get("successes", 0)
-        ),
-        requests_per_second=measurement.get(
-            "requests_per_second", progress.get("requests_per_second")
-        ),
+        **_counters(measurement, progress, jobs, active),
         country=state.get("country") or (active or {}).get("country"),
         lifecycle=lifecycle,
     )
