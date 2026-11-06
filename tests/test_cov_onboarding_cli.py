@@ -9,8 +9,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from onboarding_round_cases import TOR1
 from test_onboarding import ROOT, Proxy
-from test_onboarding_round import TOR1
 from test_onboarding_sequential import ORDER, make
 
 from proxy_index.cli import main
