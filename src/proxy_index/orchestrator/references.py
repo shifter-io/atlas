@@ -5,7 +5,7 @@ chosen from the trailing light-load p50 of the census target and stored in load_
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -81,6 +81,59 @@ async def _reference_latency(
     }
 
 
+def _choose(
+    region: dict,
+    stats: dict[str, dict[str, Any]],
+    overrides: dict[str, str],
+    defaults: dict[str, str],
+    minimum: int,
+) -> tuple[str, str, int]:
+    """One region's reference country, its basis and the number of 'fastest' candidates."""
+    countries = region["countries"]
+    candidates = sorted(
+        (stats[c]["p50"], c)
+        for c in countries
+        if c in stats and stats[c]["p50"] is not None and stats[c]["successes"] >= minimum
+    )
+    if overrides.get(region["slug"]) in countries:
+        country, basis = overrides[region["slug"]], "override"
+    elif candidates:
+        country, basis = candidates[0][1], "fastest"
+    elif defaults.get(region["slug"]) in countries:
+        country, basis = defaults[region["slug"]], "default"
+    else:
+        country, basis = countries[0], "first_enabled"
+    return country, basis, len(candidates)
+
+
+async def _store_choices(conn: psycopg.AsyncConnection, day: date, missing: list[dict]) -> None:
+    """Choose and store the day's reference country of every region in missing."""
+    overrides = _countries(
+        await setting(conn, "load.reference_overrides"), "load.reference_overrides"
+    )
+    defaults = _countries(await setting(conn, "load.reference_defaults"), "load.reference_defaults")
+    minimum = int(await setting(conn, "load.reference_min_successes"))
+    day_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
+    stats = await _reference_latency(
+        conn, day_start, int(await setting(conn, "load.reference_days"))
+    )
+    for region in missing:
+        country, basis, candidates = _choose(region, stats, overrides, defaults, minimum)
+        await conn.execute(
+            "INSERT INTO load_references(day,region_id,country_code,basis,p50_ms,successes,"
+            "candidates) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+            (
+                day,
+                region["region_id"],
+                country,
+                basis,
+                stats.get(country, {}).get("p50"),
+                stats.get(country, {}).get("successes"),
+                candidates,
+            ),
+        )
+
+
 async def load_references(conn: psycopg.AsyncConnection, now: datetime) -> list[dict]:
     """Today's (UTC) latency-under-load reference country of every runner region with enabled
     countries, chosen on first use and stored in load_references (so every load batch of the day
@@ -106,45 +159,7 @@ async def load_references(conn: psycopg.AsyncConnection, now: datetime) -> list[
     }
     missing = [r for r in regions if r["region_id"] not in chosen]
     if missing:
-        overrides = _countries(
-            await setting(conn, "load.reference_overrides"), "load.reference_overrides"
-        )
-        defaults = _countries(
-            await setting(conn, "load.reference_defaults"), "load.reference_defaults"
-        )
-        minimum = int(await setting(conn, "load.reference_min_successes"))
-        day_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-        stats = await _reference_latency(
-            conn, day_start, int(await setting(conn, "load.reference_days"))
-        )
-        for region in missing:
-            countries = region["countries"]
-            candidates = sorted(
-                (stats[c]["p50"], c)
-                for c in countries
-                if c in stats and stats[c]["p50"] is not None and stats[c]["successes"] >= minimum
-            )
-            if overrides.get(region["slug"]) in countries:
-                country, basis = overrides[region["slug"]], "override"
-            elif candidates:
-                country, basis = candidates[0][1], "fastest"
-            elif defaults.get(region["slug"]) in countries:
-                country, basis = defaults[region["slug"]], "default"
-            else:
-                country, basis = countries[0], "first_enabled"
-            await conn.execute(
-                "INSERT INTO load_references(day,region_id,country_code,basis,p50_ms,successes,"
-                "candidates) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                (
-                    day,
-                    region["region_id"],
-                    country,
-                    basis,
-                    stats.get(country, {}).get("p50"),
-                    stats.get(country, {}).get("successes"),
-                    len(candidates),
-                ),
-            )
+        await _store_choices(conn, day, missing)
         chosen = {
             row["region_id"]: row
             for row in await _rows(conn, "SELECT * FROM load_references WHERE day=%s", (day,))
