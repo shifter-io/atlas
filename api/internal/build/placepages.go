@@ -1,6 +1,9 @@
 package build
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // PlaceAnswer is /v1/places/{region|city}/{key}: every network's row of one
 // region or city in one range, ranked among the networks of the same kind
@@ -15,21 +18,26 @@ type PlaceAnswer struct {
 }
 
 // Place is a region or city page of a v4 build; ok is false when no network
-// has a row with that key in that range (or the build is older).
-func (pg *Pages) Place(generatedAt, dimension, key, rangeID string) (*PlaceAnswer, bool) {
+// has a row with that key in that range (or the build is older). The rows
+// are read from the database unless cached.
+func (pg *Pages) Place(ctx context.Context, generatedAt, dimension, key, rangeID string) (*PlaceAnswer, bool, error) {
 	cc, _, _ := strings.Cut(key, "|")
 	if !pg.v4 || dimension != "region" && dimension != "city" || cc == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	out := &PlaceAnswer{GeneratedAt: generatedAt, Dimension: dimension, Key: key, Range: rangeID, Rows: []PlaceRow{}}
-	for _, r := range mergeSources(pg.sources[placeList{rangeID, dimension}], dimension, cc, true) {
+	rows, err := mergeSources(ctx, pg.sources[placeList{rangeID, dimension}], dimension, cc, true)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, r := range rows {
 		if r.Key == key {
 			out.Rows = append(out.Rows, r)
 		}
 	}
 	if len(out.Rows) == 0 {
-		return nil, false
+		return nil, false, nil
 	}
 	rankPlaces(out.Rows)
-	return out, true
+	return out, true, nil
 }

@@ -30,7 +30,7 @@ from campaign_probe_cases import (
 from proxy_index import cli as main_cli
 from proxy_index.campaign import probe as probing
 from proxy_index.campaign import shot as shooting
-from proxy_index.campaign.contracts import WORKER_TAG, audit_path
+from proxy_index.campaign.contracts import WORKER_TAG, audit_path, spec_path
 from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError
 from proxy_index.campaign.shot import ShotInputs
@@ -267,6 +267,16 @@ async def test_bad_inputs_are_refused_before_any_call(tmp_path):
         await fired(
             FakeDigitalOcean(), ShotRemote(clock), replace(inputs, root=tmp_path / "none"), clock
         )
+
+
+async def test_a_staging_campaign_is_refused(tmp_path):
+    """CAMP-STAGING-1: a shot creates production's workers only."""
+    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
+    inputs, spec = shot_world(tmp_path)
+    spec_path(inputs.root).write_text(replace(spec, environment="staging").to_json())
+    with pytest.raises(ProbeError, match="production's workers only"):
+        await fired(fake, ShotRemote(clock), inputs, clock)
+    assert fake.requests == [] and not inputs.output.exists()
 
 
 async def test_a_size_not_offered_stops_before_any_create(tmp_path):

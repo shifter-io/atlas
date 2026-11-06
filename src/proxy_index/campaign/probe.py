@@ -29,6 +29,7 @@ from ..providers import load_provider
 from ..providers.grammar import MAX_CONCURRENCY, load_grammar
 from . import ops_api, scope
 from .contracts import (
+    PRODUCTION,
     WORKER_ROOT,
     WORKER_SECRETS,
     WORKER_TAG,
@@ -326,6 +327,28 @@ def class_cells(step: dict[str, Any]) -> list[Any]:
     return ["-" if step.get(key) is None else step[key] for key in CLASS_COLUMNS.values()]
 
 
+STEP_COLUMNS = (
+    "concurrency",
+    "completed",
+    "success_pct",
+    "rate_limited_pct",
+    "gateway_5xx_pct",
+    "proxy_connect_pct",
+    "timeout_pct",
+    "other_pct",
+    "rps",
+    "latency_p50_ms",
+    "latency_p95_ms",
+)
+
+
+def step_row(network: str, s: dict[str, Any]) -> str:
+    """One step's row of the steps table; "-" where the step lacks a value."""
+    cells = [s.get(k, "-") for k in STEP_COLUMNS]
+    row = [network, *cells, *class_cells(s), ", ".join(s.get("step_down", [])) or "-"]
+    return "| " + " | ".join(map(str, row)) + " |"
+
+
 def markdown(result: dict[str, Any]) -> str:
     """The owner's table: one row per step, the maximum and the grammar line per network."""
     lines = [
@@ -350,39 +373,19 @@ def markdown(result: dict[str, Any]) -> str:
         "|" + "---|" * 17,
     ]
     for network, found in result["networks"].items():
-        for s in found["steps"]:
-            cells = [
-                s.get(k, "-")
-                for k in (
-                    "concurrency",
-                    "completed",
-                    "success_pct",
-                    "rate_limited_pct",
-                    "gateway_5xx_pct",
-                    "proxy_connect_pct",
-                    "timeout_pct",
-                    "other_pct",
-                    "rps",
-                    "latency_p50_ms",
-                    "latency_p95_ms",
-                )
-            ]
-            lines.append(
-                "| "
-                + " | ".join(
-                    map(
-                        str,
-                        [
-                            network,
-                            *cells,
-                            *class_cells(s),
-                            ", ".join(s.get("step_down", [])) or "-",
-                        ],
-                    )
-                )
-                + " |"
-            )
+        lines += [step_row(network, s) for s in found["steps"]]
     return "\n".join(lines) + "\n"
+
+
+def planned_campaign(root: Path) -> tuple[CampaignSpec, WorkerInputs]:
+    """The planned campaign at `root` and its worker inputs; a missing or bad one refuses."""
+    try:
+        spec = CampaignSpec.from_json(spec_path(root).read_text())
+        return spec, WorkerInputs.for_root(root, spec.wheel_sha256)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise ProbeError(
+            f"no planned campaign with its wheel at --root ({type(error).__name__})"
+        ) from None
 
 
 class Probe:
@@ -397,13 +400,7 @@ class Probe:
         sleep: ops_api.Sleep,
     ):
         self.cloud, self.inputs, self.sleep = cloud, inputs, sleep
-        try:
-            self.spec = CampaignSpec.from_json(spec_path(inputs.root).read_text())
-            self.files = WorkerInputs.for_root(inputs.root, self.spec.wheel_sha256)
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            raise ProbeError(
-                f"no planned campaign with its wheel at --root ({type(error).__name__})"
-            ) from None
+        self.spec, self.files = planned_campaign(inputs.root)
         self.networks = inputs.networks or self.spec.networks
         self.check()
         self.probe_id = f"{now:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
@@ -424,7 +421,12 @@ class Probe:
             size=inputs.size,
             image_id=self.spec.image_by_region[inputs.region],
         )
-        self.result: dict[str, Any] = {
+        self.result = self.first_result()
+
+    def first_result(self) -> dict[str, Any]:
+        """The results before any network: what the report and `--remove` need."""
+        inputs = self.inputs
+        return {
             "probe_id": self.probe_id,
             "campaign_id": self.spec.campaign_id,
             # What `campaign probe --remove` needs to rebuild this scope in a later process.
@@ -450,6 +452,7 @@ class Probe:
             (not planned, "networks not planned"),
             (not 1 <= i.floor <= i.start <= MAX_CONCURRENCY, "start or floor"),
             (i.step < 1 or i.requests < 1, "step or requests"),
+            (self.spec.environment != PRODUCTION, "a probe runs on production's workers only"),
         ]
         bad = [text for failed, text in problems if failed]
         for network in self.networks if planned else ():
@@ -530,13 +533,7 @@ class Probe:
                 ipv6=False,
             )
         except CreateError as error:
-            found = error.created[0] if error.created else None
-            if found is None and error.uncertain:
-                # The listing may lag a create that landed: look again later, as a launch does.
-                found = await self.adopt()
-                if found is None:
-                    await self.sleep(CREATE_RETRY_SECONDS)
-                    found = await self.adopt()
+            found = await self.created_anyway(error)
             if found is None:
                 worker.status = "create_failed"
                 worker.error_class = "create_uncertain" if error.uncertain else "create_failed"
@@ -544,6 +541,22 @@ class Probe:
             droplet = found
         worker.droplet_id, worker.error_class = droplet.id, None
         self.save()
+        return await self.arm(droplet)
+
+    async def created_anyway(self, error: CreateError) -> Droplet | None:
+        """The worker a failed create still made: in the error, or adopted when uncertain."""
+        found = error.created[0] if error.created else None
+        if found is None and error.uncertain:
+            # The listing may lag a create that landed: look again later, as a launch does.
+            found = await self.adopt()
+            if found is None:
+                await self.sleep(CREATE_RETRY_SECONDS)
+                found = await self.adopt()
+        return found
+
+    async def arm(self, droplet: Droplet) -> Droplet:
+        """Confirm the new worker in the project (fail closed), then wait for it and its SSH."""
+        worker = self.worker
         _, failed = await scope.assign_and_verify_project(
             self.cloud,
             self.scope,

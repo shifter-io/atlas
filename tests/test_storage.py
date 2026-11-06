@@ -620,8 +620,8 @@ def test_typed_columns_keep_json_forms():
     assert _steps([[10, 2], [12, 1], [40, 5]]) == ([10, 2, 28], [2, 1, 5])
 
 
-def test_storage_keeps_psycopg_importable_for_the_overnight_retry():
-    # scripts/shifter_local_overnight.py retries ingest on storage.psycopg.OperationalError.
+def test_storage_keeps_psycopg_importable_for_callers():
+    # storage re-exports psycopg so callers can catch storage.psycopg errors.
     assert storage.psycopg.OperationalError is psycopg.OperationalError
 
 

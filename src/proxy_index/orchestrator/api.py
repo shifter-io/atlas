@@ -252,16 +252,9 @@ async def results(request: web.Request) -> web.Response:
 
         return await ingest_bundle(request, run, node)
     sent = _sent_sha256(request, required=False)
-    if run["status"] in ("killed", "skipped"):
-        # An operator stopped it: the node discards the data.
-        return web.json_response({"ok": True, "ingested": False, "status": run["status"]})
-    if run["status"] in ("done", "failed") and run["run_key"] is not None:
-        # A retry after a lost response.
-        return web.json_response(
-            {"ok": True, "ingested": True, "status": run["status"], "run_key": run["run_key"]}
-        )
-    if run["status"] not in ("running", "uploading"):
-        raise _error(web.HTTPConflict, f"run is {run['status']}")
+    answered = _answered(run)
+    if answered is not None:
+        return answered
     async with db.connection() as conn:
         upload_limit = int(await setting(conn, "results.max_upload_bytes"))
         extract_limit = int(await setting(conn, "results.max_extracted_bytes"))
@@ -269,25 +262,10 @@ async def results(request: web.Request) -> web.Response:
     with tempfile.TemporaryDirectory(prefix="proxy-index-upload-") as temporary:
         archive, directory = Path(temporary, "run.tar.gz"), Path(temporary, "run")
         _check_sha256(sent, await _receive(request, archive, upload_limit))
-        try:
-            summary = await asyncio.to_thread(_open_upload, archive, directory, extract_limit)
-            if not isinstance(summary, dict):
-                raise ArchiveError("summary.json must be an object")
-            config, target = summary.get("config") or {}, summary.get("target") or {}
-            if (config.get("provider"), config.get("product")) != (
-                node["provider"],
-                node["product"],
-            ):
-                raise ArchiveError("results belong to another provider or product")
-            if target.get("id") != run["target_id"]:
-                raise ArchiveError("results are for another target")
-        except (ArchiveError, json.JSONDecodeError, UnicodeDecodeError, AttributeError) as exc:
-            reason = str(exc) if isinstance(exc, ArchiveError) else "unreadable summary.json"
-            await _reject(request, batch_id, f"bad archive: {reason}", "results_rejected")
-            raise _error(web.HTTPBadRequest, reason) from None
+        summary = await _summary(request, run, archive, directory, extract_limit)
         imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
-            await _spool(db, spool_dir, run["kind"], batch_id, summary, archive)
+            await _spool(db, spool_dir, run, summary, archive)
     status = await nodework.finish_run(db, node, batch_id, summary, imported["run_key"])
     return web.json_response(
         {
@@ -298,6 +276,46 @@ async def results(request: web.Request) -> web.Response:
             "imported": imported["imported"],
         }
     )
+
+
+def _answered(run: dict[str, Any]) -> web.Response | None:
+    """The reply to an upload for a run that takes no data now; None when it does."""
+    if run["status"] in ("killed", "skipped"):
+        # An operator stopped it: the node discards the data.
+        return web.json_response({"ok": True, "ingested": False, "status": run["status"]})
+    if run["status"] in ("done", "failed") and run["run_key"] is not None:
+        # A retry after a lost response.
+        return web.json_response(
+            {"ok": True, "ingested": True, "status": run["status"], "run_key": run["run_key"]}
+        )
+    if run["status"] not in ("running", "uploading"):
+        raise _error(web.HTTPConflict, f"run is {run['status']}")
+    return None
+
+
+async def _summary(
+    request: web.Request, run: dict[str, Any], archive: Path, directory: Path, limit: int
+) -> dict[str, Any]:
+    """Extract the upload and check its summary.json is this node's run: 400 and a failed run
+    when it is not."""
+    try:
+        summary = await asyncio.to_thread(_open_upload, archive, directory, limit)
+        _check_summary(summary, request[NODE_KEY], run)
+    except (ArchiveError, json.JSONDecodeError, UnicodeDecodeError, AttributeError) as exc:
+        reason = str(exc) if isinstance(exc, ArchiveError) else "unreadable summary.json"
+        await _reject(request, run["batch_id"], f"bad archive: {reason}", "results_rejected")
+        raise _error(web.HTTPBadRequest, reason) from None
+    return summary
+
+
+def _check_summary(summary: Any, node: dict[str, Any], run: dict[str, Any]) -> None:
+    if not isinstance(summary, dict):
+        raise ArchiveError("summary.json must be an object")
+    config, target = summary.get("config") or {}, summary.get("target") or {}
+    if (config.get("provider"), config.get("product")) != (node["provider"], node["product"]):
+        raise ArchiveError("results belong to another provider or product")
+    if target.get("id") != run["target_id"]:
+        raise ArchiveError("results are for another target")
 
 
 async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_rows: bool):
@@ -320,13 +338,14 @@ async def _ingest(request: web.Request, batch_id: int, directory: Path, *, ip_ro
         raise _error(web.HTTPUnprocessableEntity, f"ingest rejected: {exc}"[:300]) from None
 
 
-async def _spool(db: Database, root: str, kind: str, batch_id: int, summary: dict, archive):
+async def _spool(db: Database, root: str, run: dict[str, Any], summary: dict, archive):
     """Keep the upload's raw file. The import has committed, so a failure only raises an alert:
     the run is still finished and linked."""
     from datetime import UTC, datetime
 
     from ..archive.rawfiles import try_spool
 
+    kind, batch_id = run["kind"], run["batch_id"]
     name = f"{kind}-b{batch_id}-{summary.get('run_id')}.tar.gz"
     issue = await asyncio.to_thread(try_spool, root, datetime.now(UTC), name, archive, move=True)
     if issue:

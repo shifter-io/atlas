@@ -14,10 +14,10 @@ from pathlib import Path
 import psycopg
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from census_pulse_cases import outage, scenario
+from migration_cases import catalog
 from psycopg import sql
 from psycopg.types.json import Jsonb
-from test_census_pulse import outage, scenario
-from test_migration import catalog
 from test_storage import measurement
 
 from proxy_index.calculated import calculator, parts, store

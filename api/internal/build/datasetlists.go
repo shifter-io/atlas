@@ -3,6 +3,7 @@ package build
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"strconv"
 
@@ -22,8 +23,8 @@ var datasetDimensions = [...]string{"country", "region", "city", "asn", "city_as
 // window's lists as an array (FIELDS.md gives each dimension's field order),
 // so the file alone regenerates every list answer. It holds only the build's
 // compact lists (store.NetList), never their rows: WriteDataset streams it
-// one dimension at a time, listChunk rows at a time, and MarshalJSON gives the
-// same bytes. Networks and kinds are in the order the all-networks list
+// one list dimension at a time, read from the database unless cached, and
+// listChunk rows at a time, and MarshalJSON gives the same bytes. Networks and kinds are in the order the all-networks list
 // merges them (the snapshot's), so a reader that merges them in file order
 // gets that list's latency choices. Before v4 it is empty ({}).
 type DatasetLists struct {
@@ -109,7 +110,7 @@ func (d *DatasetLists) Repeated(n int) *DatasetLists {
 func (d *DatasetLists) MarshalJSON() ([]byte, error) {
 	var b bytes.Buffer
 	w := bufio.NewWriter(&b)
-	if err := d.write(w); err != nil {
+	if err := d.write(context.Background(), w); err != nil {
 		return nil, err
 	}
 	err := w.Flush()
@@ -117,14 +118,14 @@ func (d *DatasetLists) MarshalJSON() ([]byte, error) {
 }
 
 // write streams d as JSON.
-func (d *DatasetLists) write(w *bufio.Writer) error {
+func (d *DatasetLists) write(ctx context.Context, w *bufio.Writer) error {
 	w.WriteByte('{') //nolint:errcheck // bufio reports the first error at Flush
 	for i, n := range d.networks {
 		writeKey(w, i, n.slug)
 		w.WriteByte('{') //nolint:errcheck
 		for j, k := range n.kinds {
 			writeKey(w, j, k.kind)
-			if err := k.write(w); err != nil {
+			if err := k.write(ctx, w); err != nil {
 				return err
 			}
 		}
@@ -145,24 +146,24 @@ func writeKey(w *bufio.Writer, i int, key string) {
 }
 
 // write writes one network kind's ranges, each with its dimensions.
-func (k *datasetKind) write(w *bufio.Writer) error {
+func (k *datasetKind) write(ctx context.Context, w *bufio.Writer) error {
 	w.WriteByte('{') //nolint:errcheck
 	for r, rng := range Ranges {
 		writeKey(w, r, rng.ID)
 		w.WriteByte('{') //nolint:errcheck
 		for i, dimension := range datasetDimensions {
 			writeKey(w, i, dimension)
-			rows := &rowWriter{w: w}
+			out := &rowWriter{w: w}
+			var err error
 			if dimension == "city_asn" {
-				k.coverageRows(r, rows)
+				err = k.coverageRows(ctx, r, out)
 			} else {
-				for _, s := range k.srcs[r] {
-					for j := range s.list.Len(dimension) {
-						rows.add(placeArray(dimension, s.list.Row(dimension, j), s.scale))
-					}
-				}
+				err = k.placeRows(ctx, r, dimension, out)
 			}
-			if err := rows.close(); err != nil {
+			if err != nil {
+				return err
+			}
+			if err := out.close(); err != nil {
 				return err
 			}
 		}
@@ -171,18 +172,37 @@ func (k *datasetKind) write(w *bufio.Writer) error {
 	return w.WriteByte('}')
 }
 
-// coverageRows adds range r's Coverage rows: those with IPs, most IPs first,
-// as the Coverage answer writes them (with its country latency rank).
-func (k *datasetKind) coverageRows(r int, rows *rowWriter) {
-	c := k.coverage[r]
-	if c == nil {
-		return
-	}
-	for _, i := range c.list.ByIps("city_asn") {
-		if c.list.Row("city_asn", int(i)).Ips > 0 {
-			rows.add(c.row(i))
+// placeRows adds range r's rows of a place dimension, each source's in turn.
+func (k *datasetKind) placeRows(ctx context.Context, r int, dimension string, out *rowWriter) error {
+	for _, s := range k.srcs[r] {
+		rows, err := s.list.Rows(ctx, dimension)
+		if err != nil {
+			return err
+		}
+		for j := range rows.Len() {
+			out.add(placeArray(dimension, rows.Row(j), s.scale))
 		}
 	}
+	return nil
+}
+
+// coverageRows adds range r's Coverage rows: those with IPs, most IPs first,
+// as the Coverage answer writes them (with its country latency rank).
+func (k *datasetKind) coverageRows(ctx context.Context, r int, out *rowWriter) error {
+	c := k.coverage[r]
+	if c == nil {
+		return nil
+	}
+	rows, err := c.list.Rows(ctx, "city_asn")
+	if err != nil {
+		return err
+	}
+	for _, i := range rows.ByIps() {
+		if rows.Row(int(i)).Ips > 0 {
+			out.add(c.row(rows, i))
+		}
+	}
+	return nil
 }
 
 // placeArray is a compact place row as the dataset writes it: the fields its

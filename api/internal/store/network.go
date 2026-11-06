@@ -33,9 +33,9 @@ import (
 // A network with exactly one requested country gets it as criteria.country,
 // as the group it summarizes has it. Every window's compact list is
 // SnapshotRow.Networks: the build reads the region, city, ASN and City x ASN
-// rows there, in place. The country and ASN arrays are the only rows the
-// reader writes out, and Full is held only while a build is made: the API's
-// own state is the head and the compact lists (NetLists).
+// rows from there, each when it needs them. The country and ASN arrays are the
+// only rows the reader writes out, and Full is held only while a build is
+// made: the API's own state is the head and the lists' row counts (NetLists).
 
 // networkHeadSQL is a v4 head (s.payload) as text, without "parts", without
 // "overlap" (its rows are per cohort; a network's are its overlap.peers) and
@@ -93,23 +93,25 @@ func (s *SnapshotRow) networks() (field, []field, []networkEntry, error) {
 }
 
 // readNetworks reads a v4 build's network lists into cache (nil: a fresh
-// one), drops the group lists it held, and sets Full and Networks.
-func (s *SnapshotRow) readNetworks(ctx context.Context, tx pgx.Tx, cache *Lists) error {
+// one), drops the group lists it held, and sets Full and Networks. The lists
+// read their rows through db afterwards.
+func (s *SnapshotRow) readNetworks(ctx context.Context, tx pgx.Tx, cache *Lists, db TxBeginner) error {
 	if cache == nil {
 		cache = NewLists()
 	}
-	net := cache.networkLists()
-	return s.setNetworks(func(ids []int64) (map[int64]*NetList, error) { return net.Load(ctx, tx, ids) })
+	net := cache.networkLists(db)
+	return s.setNetworks(ctx, tx, func(ids []int64) (map[int64]*NetList, error) { return net.Load(ctx, tx, ids) })
 }
 
-// networkLists is the cache's network lists, made on first use; it drops the
-// group lists the cache holds (a v4 build reads none).
-func (c *Lists) networkLists() *NetLists {
+// networkLists is the cache's network lists reading through db, made on
+// first use or when db changes; it drops the group lists the cache holds (a
+// v4 build reads none).
+func (c *Lists) networkLists(db TxBeginner) *NetLists {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.held, c.missing = nil, nil
-	if c.net == nil {
-		c.net = NewNetLists()
+	if c.net == nil || c.net.db != db {
+		c.net = NewNetLists(db)
 	}
 	return c.net
 }
@@ -128,12 +130,13 @@ func (c *Lists) dropNetworks() {
 // from the network lists by id: each network becomes one product group (see
 // above). A window naming a list not in lists keeps only what the head has.
 func (s *SnapshotRow) SetNetworks(lists map[int64]*NetList) error {
-	return s.setNetworks(func([]int64) (map[int64]*NetList, error) { return lists, nil })
+	return s.setNetworks(context.Background(), nil, func([]int64) (map[int64]*NetList, error) { return lists, nil })
 }
 
 // setNetworks is SetNetworks with the lists load gives for the ids the
-// networks' windows name.
-func (s *SnapshotRow) setNetworks(load func(ids []int64) (map[int64]*NetList, error)) error {
+// networks' windows name, their country and ASN rows read in tx (nil: in
+// transactions of their own).
+func (s *SnapshotRow) setNetworks(ctx context.Context, tx pgx.Tx, load func(ids []int64) (map[int64]*NetList, error)) error {
 	nf, items, entries, err := s.networks()
 	if err != nil {
 		return err
@@ -156,7 +159,7 @@ func (s *SnapshotRow) setNetworks(load func(ids []int64) (map[int64]*NetList, er
 	overlap := overlapRows{seen: map[overlapPair]bool{}}
 	for i, it := range items {
 		e := &entries[i]
-		if groups[i], err = s.networkGroup(networks[it.Start:it.End], e, lists); err != nil {
+		if groups[i], err = s.networkGroup(ctx, tx, networks[it.Start:it.End], e, lists); err != nil {
 			return fmt.Errorf("snapshot %d network %d: %w", s.BuildID, e.ProductID, err)
 		}
 		overlap.add(e)
@@ -178,7 +181,7 @@ func (s *SnapshotRow) setNetworks(load func(ids []int64) (map[int64]*NetList, er
 
 // networkGroup is a network entry as a product group: its single requested
 // country as criteria.country and every window with its list's rows.
-func (s *SnapshotRow) networkGroup(raw []byte, e *networkEntry, lists map[int64]*NetList) ([]byte, error) {
+func (s *SnapshotRow) networkGroup(ctx context.Context, tx pgx.Tx, raw []byte, e *networkEntry, lists map[int64]*NetList) ([]byte, error) {
 	fields, err := objectFields(raw)
 	if err == nil && len(e.Criteria.RequestedCountries) == 1 {
 		// The entry has a criteria object: it decoded its requested countries.
@@ -210,7 +213,7 @@ func (s *SnapshotRow) networkGroup(raw []byte, e *networkEntry, lists map[int64]
 		}
 		l := lists[w.Lists.ID]
 		s.Networks[PlaceWindow{e.ProductID, e.Cohort, w.Period.Hours}] = l
-		if windows[j], err = listWindow(raw[wf.Start+f.Start:wf.Start+f.End], l); err != nil {
+		if windows[j], err = listWindow(ctx, tx, raw[wf.Start+f.Start:wf.Start+f.End], l); err != nil {
 			return nil, fmt.Errorf("window %s: %w", f.Key, err)
 		}
 	}
@@ -223,7 +226,11 @@ func (s *SnapshotRow) networkGroup(raw []byte, e *networkEntry, lists map[int64]
 // listWindow is a network window (an object: the entry decoded it) with the
 // arrays the build reads from its list l: breakdowns.country,
 // breakdown_entries and the pool's country and ASN lists.
-func listWindow(raw []byte, l *NetList) ([]byte, error) {
+func listWindow(ctx context.Context, tx pgx.Tx, raw []byte, l *NetList) ([]byte, error) {
+	head, err := l.headRows(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	fields, err := objectFields(raw)
 	pool := []byte(valueOf(raw, fields, "pool"))
 	if pool == nil {
@@ -240,7 +247,6 @@ func listWindow(raw []byte, l *NetList) ([]byte, error) {
 			set(&entries, name, strconv.AppendInt(nil, int64(l.Len(name)), 10))
 		}
 	}
-	head := l.headRows()
 	set(&breakdowns, "country", rowsJSON(rowColumns['c'], pointers(head.Rows("country"))))
 	set(&pool, "countries_breakdown", rowsJSON(poolColumns["countries_breakdown"], poolRows("countries_breakdown", head)))
 	set(&pool, "asns_breakdown", rowsJSON(poolColumns["asns_breakdown"], poolRows("asns_breakdown", head)))
@@ -250,27 +256,26 @@ func listWindow(raw []byte, l *NetList) ([]byte, error) {
 	return raw, err
 }
 
-// headRows is l's country and ASN rows as a typed list, for the arrays
-// listWindow writes; observations, challenges, blocks, p90 and p99 are NULL:
-// a compact row does not keep them, and no answer shows them.
-func (l *NetList) headRows() *List {
+// headRows is l's country and ASN rows (read in tx when not cached) as a
+// typed list, for the arrays listWindow writes; observations, challenges,
+// blocks, p90 and p99 are NULL: a compact row does not keep them, and no
+// answer shows them.
+func (l *NetList) headRows(ctx context.Context, tx pgx.Tx) (*List, error) {
 	out := &List{rows: map[byte][]ListRow{}}
-	for _, code := range []byte{'c', 'a'} {
-		d := strings.IndexByte(netCodes, code)
-		rows := make([]ListRow, len(l.rows[d]))
-		for i, r := range l.rows[d] {
-			rows[i] = ListRow{Ips: wide(r.ips), Observations: -1, Completed: wide(r.completed), Successes: wide(r.successes),
-				Challenges: -1, Blocks: -1, P50: r.p50, P90: -1, P99: -1, position: int32(i)}
-			if r.place >= 0 {
-				rows[i].Place = l.names.places[r.place]
-			}
-			if r.network >= 0 {
-				rows[i].Network = l.names.networks[r.network]
-			}
+	for _, name := range []string{"country", "asn"} {
+		v, err := l.rowsIn(ctx, tx, name)
+		if err != nil {
+			return nil, err
 		}
-		out.rows[code] = rows
+		rows := make([]ListRow, v.Len())
+		for i := range rows {
+			r := v.Row(i)
+			rows[i] = ListRow{Place: r.Place, Network: r.Network, Ips: r.Ips, Observations: -1, Completed: r.Completed, Successes: r.Successes,
+				Challenges: -1, Blocks: -1, P50: r.P50, P90: -1, P99: -1, position: int32(i)}
+		}
+		out.rows[dimensionCodes[name]] = rows
 	}
-	return out
+	return out, nil
 }
 
 // overlapPair is one pair of networks in one window, the lower product id first.
@@ -323,8 +328,7 @@ func (o *overlapRows) json() []byte {
 // (country, region, city, asn, city_asn), in position order, with names of
 // its own: a list as NetLists.Load reads it, for tests and synthetic builds.
 func NewNetList(rows map[string][]NetRow) (*NetList, error) {
-	n := NewNetLists()
-	n.reset()
+	n := NewNetLists(nil)
 	l := &NetList{}
 	places, networks := map[*Place]int32{}, map[*Network]int32{}
 	for name, rs := range rows {
@@ -351,9 +355,10 @@ func NewNetList(rows map[string][]NetRow) (*NetList, error) {
 			}
 			l.rows[d] = append(l.rows[d], c)
 		}
+		l.count[d] = len(l.rows[d])
 	}
 	n.fillTexts([2]int{})
-	l.finish(n.names)
+	l.names = n.names
 	return l, nil
 }
 

@@ -10,10 +10,18 @@ from datetime import UTC, datetime, timedelta
 
 from ..names import NETWORK, PLACE
 from ..stats import Histogram
+from .latency import (
+    KEYS,
+    LATENCY,
+    blended,
+    load_factor,
+    without_mean,
+)
+from .latency import blend as blend
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
 from .scores import NOT_LATENCY_TARGET as NOT_LATENCY_TARGET
-from .scores import UNDER_LOAD_NONE
+from .scores import UNDER_LOAD_NONE as UNDER_LOAD_NONE
 from .scores import component as component
 from .scores import leader as leader
 from .scores import peer_scores as peer_scores
@@ -21,6 +29,11 @@ from .scores import product_inputs as product_inputs
 from .scores import score_entry as score_entry
 from .scores import target_score as target_score
 from .scores import versus as versus
+from .underload import UNDER_LOAD_CENSUS as UNDER_LOAD_CENSUS
+from .underload import UNDER_LOAD_LATE as UNDER_LOAD_LATE
+from .underload import UNDER_LOAD_LIGHT as UNDER_LOAD_LIGHT
+from .underload import light_votes, slot_rate, time_slots, under_load
+from .underload import with_under_load as with_under_load
 
 # Challenge and block rates come from the typed outcome counters of v6 buckets and uptime from
 # pulse batches, so they are no longer listed here; a None metric means nothing measured them.
@@ -36,15 +49,8 @@ UNAVAILABLE = {
 # Effective-dated list prices (metric_evidence), USD per GB of the pool that is tested: the
 # lowest rate (the largest plan; scored by value) and the entry rate (the smallest plan).
 PRICES = {"price_per_gb_lowest": "lowest_per_gb", "price_per_gb_entry": "entry_per_gb"}
-UNDER_LOAD_LATE = "No load test before this window's light-load slots"
-UNDER_LOAD_LIGHT = "No light-load slot with enough successes in this window"
-UNDER_LOAD_CENSUS = (
-    "Every load test in this window ran during a census (or its reference pulse did)"
-)
 LIGHT_CENSUS = "Every pulse with enough successes in this window ran during a census"
 LIGHT_NONE = "No pulse with enough successes in this window"
-LATENCY = ("p50", "p90", "p95", "p99")
-FRACTIONS = {"p50": 0.5, "p90": 0.9, "p95": 0.95, "p99": 0.99}
 # Payload breakdown name -> calculated_list_rows dimension code.
 BREAKDOWNS = {
     "country": "c",
@@ -110,7 +116,7 @@ def metrics(rows, hours):
         "uptime": None,
         "bytes_up": outcomes["bytes_up"] if measured else None,
         "bytes_down": outcomes["bytes_down"] if measured else None,
-        "latency_ms": histogram.percentiles(),
+        "latency_ms": histogram.percentiles() | {"mean": histogram.mean()},
         "coverage": len({r["bucket_start"] for r in rows}) / (hours * 12),
         "coverage_basis": "5-minute buckets",
         "last_observed": max((r["last_observed"] for r in rows), default=None),
@@ -338,38 +344,6 @@ def floor_time(moment, seconds):
     return datetime.fromtimestamp(moment.timestamp() // seconds * seconds, UTC)
 
 
-def blend(histograms):
-    """Percentiles of an equal-weight mix of histograms (Counters of ms -> count).
-
-    Each histogram is normalised to weight 1 and the weights are merged; the percentile is the
-    nearest rank of the merged distribution (for one histogram, exactly Histogram.percentiles).
-    Percentiles are never averaged.
-    """
-    result = dict.fromkeys(LATENCY)
-    weights = Counter()
-    used = 0
-    for h in histograms:
-        total = sum(h.values())
-        if not total:
-            continue
-        used += 1
-        for ms, n in h.items():
-            weights[ms] += n / total
-    if not used:
-        return result
-    ordered = sorted(weights.items())
-    for label, fraction in FRACTIONS.items():
-        rank, seen = fraction * used - 1e-9 * used, 0.0
-        for ms, weight in ordered:
-            seen += weight
-            if seen >= rank:
-                result[label] = ms
-                break
-        else:
-            result[label] = ordered[-1][0]
-    return result
-
-
 def census_overlaps(census, runs):
     """Pulse and load runs that ran while a census of the same product was running.
 
@@ -408,77 +382,6 @@ def census_overlaps(census, runs):
     return result
 
 
-def time_slots(rows, pulses=()):
-    """Bucket rows (each with its time "slot") grouped per slot.
-
-    A slot holds every request observed in it: "completed"/"successes" count the requests that
-    vote on its success, "all_completed"/"all_successes" every request, including pulses and
-    load waves that ran during a census of the product (rows with "during_census"). Per target
-    it merges the histogram of its light-load successes ("light": {target: Counter},
-    "light_successes": {target: n}; rows without the "light" flag stay out). pulses are the
-    product's done pulse runs ({"slot", "requests", "successes", "counted", "during_census"}):
-    the live counters of a run whose artifact was never ingested (counted False) are added to
-    its slot as observed; nothing is invented for requests nobody observed.
-    """
-    slots = {}
-
-    def slot(key):
-        return slots.setdefault(
-            key,
-            {
-                "completed": 0,
-                "successes": 0,
-                "all_completed": 0,
-                "all_successes": 0,
-                "light": defaultdict(Counter),
-                "light_successes": Counter(),
-            },
-        )
-
-    def add(s, completed, successes, clean):
-        s["all_completed"] += completed
-        s["all_successes"] += successes
-        if clean:
-            s["completed"] += completed
-            s["successes"] += successes
-
-    for r in rows:
-        c = r["counters"]
-        s = slot(r["slot"])
-        add(s, c["completed"], c["successes"], not r.get("during_census"))
-        if r.get("light", True):
-            target = r.get("target")
-            for ms, n in c["latency_histogram"]["bins"]:
-                s["light"][target][ms] += n
-            s["light_successes"][target] += c["successes"]
-    for d in pulses:
-        if not d["counted"]:
-            add(slot(d["slot"]), d["requests"], d["successes"], not d.get("during_census"))
-    return slots
-
-
-def slot_rate(s):
-    """A slot's success vote: successes ÷ its voting requests (every request except pulses and
-    load waves that ran during a census). A slot left with only such requests votes 0 when all
-    of them failed too (the provider was down) and does not vote otherwise. None: no vote."""
-    if s["completed"]:
-        return s["successes"] / s["completed"]
-    if s["all_completed"] and not s["all_successes"]:
-        return 0.0
-    return None
-
-
-def light_votes(slots, minimum):
-    """(slot, target, histogram) of every slot and target with `minimum` light-load successes:
-    each votes with equal weight, so a target or a slot never outweighs another by volume."""
-    return [
-        (key, target, s["light"][target])
-        for key, s in sorted(slots.items())
-        for target in sorted(s["light"], key=str)
-        if s["light_successes"][target] >= minimum
-    ]
-
-
 def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
     """metrics(rows) with the time-weighted success rate and light-load latency.
 
@@ -497,7 +400,7 @@ def timed(rows, hours, minimum, pulses=(), slot_minutes=None):
     voting = light_votes(slots, minimum)
     m["request_success_rate"] = m["success_rate"]
     m["success_rate"] = sum(rates) / len(rates) if rates else None
-    m["latency_ms"] = blend(h for *_, h in voting)
+    m["latency_ms"] = blended(h for *_, h in voting)
     m["latency_reason"] = None
     if not voting:
         flagged = any(r.get("during_census") for r in rows) or any(
@@ -579,10 +482,9 @@ def load_factors(rows, minimum):
             if key in tainted:
                 excluded[region].add(slot)
             continue
-        high = Histogram(load[0]).percentiles()
-        low = Histogram(base[0]).percentiles()
-        if all(high[p] and low[p] for p in LATENCY):
-            factors[region][slot] = {p: high[p] / low[p] for p in LATENCY}
+        found = load_factor(load[0], base[0])
+        if found:
+            factors[region][slot] = found
     factors = {region: slots for region, slots in factors.items() if slots}
     return (
         factors,
@@ -593,67 +495,6 @@ def load_factors(rows, minimum):
             if slots - set(factors.get(region, {}))
         },
     )
-
-
-def under_load(rows, factors, minimum, excluded=None):
-    """Latency under load: per time slot and requested country, the country's light-load
-    percentile × the slot's factor of the country's runner region (load_factors()), or the
-    region's newest earlier factor in the window when the slot has none; the window value is the
-    mean of those values (equal weight per slot and country). Counts are of those values.
-    excluded: load slots load_factors() left without a factor because of a census (the reason).
-    """
-    excluded = excluded or {}
-    groups = defaultdict(list)
-    for r in rows:
-        groups[(r.get("region") or "", r.get("country") or "")].append(r)
-    values = {p: [] for p in LATENCY}
-    own = carried = missing = 0
-    voting = False
-    for (region, _), own_rows in sorted(groups.items()):
-        region_factors = factors.get(region, {})
-        known = sorted(region_factors)
-        for key, _, histogram in light_votes(time_slots(own_rows), minimum):
-            voting = True
-            if key in region_factors:
-                factor, own = region_factors[key], own + 1
-            else:
-                i = bisect_left(known, key)
-                if not i:
-                    missing += 1
-                    continue
-                factor, carried = region_factors[known[i - 1]], carried + 1
-            percentiles = Histogram(histogram).percentiles()
-            for p in LATENCY:
-                values[p].append(percentiles[p] * factor[p])
-    n = own + carried
-    reason = None
-    if not n:
-        regions = {region for region, _ in groups}
-        reason = (
-            UNDER_LOAD_LIGHT
-            if not voting
-            else UNDER_LOAD_LATE
-            if any(factors.get(region) for region in regions)
-            else UNDER_LOAD_CENSUS
-            if any(excluded.get(region) for region in regions)
-            else UNDER_LOAD_NONE
-        )
-    return {
-        "ms": {p: round(sum(v) / n, 3) if n else None for p, v in values.items()},
-        "slots": n,
-        "own_factor": own,
-        "carried_factor": carried,
-        "without_factor": missing,
-        "reason": reason,
-    }
-
-
-def with_under_load(m, rows, factors, minimum, excluded=None):
-    """Add latency_under_load_ms and its slot counts and reason to timed() metrics."""
-    result = under_load(rows, factors, minimum, excluded)
-    m["latency_under_load_ms"] = result.pop("ms")
-    m["under_load"] = result
-    return m
 
 
 def latency_detail(rows, factors, references, minimum, excluded=None, choices=()):
@@ -676,7 +517,7 @@ def latency_detail(rows, factors, references, minimum, excluded=None, choices=()
             {
                 "country": country or None,
                 "region": region or None,
-                "latency_ms": blend(h for *_, h in light_votes(time_slots(own), minimum)),
+                "latency_ms": blended(h for *_, h in light_votes(time_slots(own), minimum)),
                 "latency_under_load_ms": result.pop("ms"),
                 **result,
             }
@@ -753,7 +594,7 @@ def census_split(rows, pulses, minimum, slot_minutes=None, timed_target=None):
             "success_rate": m["success_rate"],
             "latency_ms": m["latency_ms"]
             if target in (None, timed_target) or timed_target is None
-            else dict.fromkeys(LATENCY),
+            else dict.fromkeys(KEYS),
         }
 
     loads = {}
@@ -927,12 +768,12 @@ def series(
                 "completed": m["completed"],
                 "successes": m["successes"],
                 "success_rate": m["success_rate"],
-                "latency_ms": timing["latency_ms"],
+                "latency_ms": without_mean(timing["latency_ms"]),
                 **(
                     {
-                        "latency_under_load_ms": under_load(
-                            latency_rows, factors or {}, minimum, excluded
-                        )["ms"]
+                        "latency_under_load_ms": without_mean(
+                            under_load(latency_rows, factors or {}, minimum, excluded)["ms"]
+                        )
                     }
                     if latency_target
                     else {}

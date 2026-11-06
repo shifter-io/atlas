@@ -1,3 +1,4 @@
+import gzip
 import json
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ from test_onboarding_sequential import ORDER, make
 from proxy_index.onboarding import backup
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.backup import collect_region, tree_inventory, verify_region
-from proxy_index.onboarding.files import atomic_json, read_json
+from proxy_index.onboarding.files import atomic_json, digest, read_json
 from proxy_index.onboarding.health import audit
 from proxy_index.onboarding.scheduler import job_directory, new_state
 
@@ -137,6 +138,68 @@ def test_backup_never_treats_terminal_failure_as_complete(tmp_path):
     receipt = verify_region(m, "tor1", directory, tree_inventory(directory))
     assert receipt["verified_backup"] and not receipt["complete_measurement"]
     assert receipt["completed_jobs"] == 71
+
+
+def region_with_a_chunk(tmp_path):
+    """A closed tor1 region whose first job committed one observation chunk of one row."""
+    m, state, directory = closed_empty_region(tmp_path)
+    job = state["jobs"][0]
+    job["observations"] = 1
+    folder = job_directory(directory, job)
+    row = {
+        "ip": "203.0.113.1",
+        "country_code": job["country"].lower(),
+        "round_scheduled_at": job["scheduled_at"],
+        "country_started_at": job["started_at"],
+        "observed_at": job["started_at"],
+    }
+    chunk = folder / "observations-000001.jsonl.gz"
+    chunk.write_bytes(gzip.compress((json.dumps(row) + "\n").encode()))
+    metadata = {"schema_version": 1, "file": chunk.name, "rows": 1, "sha256": digest(chunk)}
+    atomic_json(chunk.with_suffix(".meta.json"), metadata)
+    measurement = {"successes": 1, "completed": job["requests"]}
+    atomic_json(folder / "summary.json", job | {"measurement": measurement})
+    atomic_json(directory / "state.json", state)
+    return m, directory, folder
+
+
+def test_backup_counts_committed_chunks(tmp_path):
+    m, directory, _ = region_with_a_chunk(tmp_path)
+    receipt = verify_region(m, "tor1", directory, tree_inventory(directory))
+    assert (receipt["observations"], receipt["chunks"]) == (1, 1)
+
+
+def _rename_chunk(sidecar, name):
+    atomic_json(sidecar, read_json(sidecar) | {"file": name})
+
+
+@pytest.mark.parametrize(
+    ("damage", "message"),
+    [
+        (lambda folder, sidecar: _rename_chunk(sidecar, "../x.jsonl.gz"), "observation filename"),
+        (
+            lambda folder, sidecar: _rename_chunk(sidecar, "observations-000002.jsonl.gz"),
+            "observation sidecar",
+        ),
+        (lambda folder, sidecar: sidecar.unlink(), "Observation rows differ"),
+        (
+            lambda folder, sidecar: (folder / "observations-000002.jsonl.gz.partial").touch(),
+            "Uncommitted observations",
+        ),
+        (
+            lambda folder, sidecar: atomic_json(
+                folder / "summary.json",
+                read_json(folder / "summary.json") | {"measurement": {"successes": 2}},
+            ),
+            "Measurement counters differ",
+        ),
+    ],
+)
+def test_backup_refuses_damaged_observations(tmp_path, damage, message):
+    m, directory, folder = region_with_a_chunk(tmp_path)
+    damage(folder, folder / "observations-000001.jsonl.meta.json")
+    with pytest.raises(ValueError, match=message):
+        verify_region(m, "tor1", directory, tree_inventory(directory))
 
 
 def test_remote_tree_checks_only_the_current_unit_name():

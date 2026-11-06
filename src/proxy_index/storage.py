@@ -195,27 +195,34 @@ def _store_geo(conn, run_key, rows):
     )
 
 
-def _upsert_scope(conn, run, performance):
-    """Add the run's provider, product, target, pool and scope where new.
+def _lock(conn, action):
+    """Take the ingestion lock and require the current schema before the action."""
+    conn.execute("SELECT pg_advisory_xact_lock(817452901)")
+    if conn.execute("SELECT max(version) FROM schema_versions").fetchone()[0] != SCHEMA_VERSION:
+        raise ValueError(f"Database schema requires db-migrate or a rebuild before {action}")
 
-    Returns product_id, pool_id and the scope's (scope_id, metrics, histogram_steps,
-    histogram_counts).
-    """
-    summary, provider, product, scope = run.summary, run.provider, run.product, run.scope
+
+def _upsert_product(conn, provider, product):
+    """Add the provider and product where new; return the product_id."""
     conn.execute("INSERT INTO providers VALUES (%s) ON CONFLICT DO NOTHING", (provider,))
     conn.execute(
         "INSERT INTO products(provider,name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
         (provider, product),
     )
-    product_id = conn.execute(
+    return conn.execute(
         "SELECT product_id FROM products WHERE provider=%s AND name=%s", (provider, product)
     ).fetchone()[0]
+
+
+def _upsert_pool(conn, run, product_id):
+    """Add the run's target and pool where new; return the pool_id."""
+    summary, scope = run.summary, run.scope
     pool_definition = {
         "target": scope["target"],
         "config": {k: v for k, v in scope["config"].items() if k not in PERFORMANCE},
     }
     pool_hash = hashlib.sha256(json.dumps(pool_definition, sort_keys=True).encode()).hexdigest()
-    profile = _profile(pool_definition, provider, product)
+    profile = _profile(pool_definition, run.provider, run.product)
     # Pools and scopes reference targets; a target nobody seeded joins unscheduled.
     target = summary["target"]
     conn.execute(
@@ -235,11 +242,21 @@ def _upsert_scope(conn, run, performance):
         + ") ON CONFLICT DO NOTHING",
         (product_id, pool_hash, *profile.values()),
     )
-    pool_id = conn.execute(
+    return conn.execute(
         "SELECT pool_id FROM pool_stats WHERE product_id=%s AND pool_hash=%s",
         (product_id, pool_hash),
     ).fetchone()[0]
-    scope_key = (product_id, summary["target"]["id"], run.scope_hash)
+
+
+def _upsert_scope(conn, run, performance):
+    """Add the run's provider, product, target, pool and scope where new.
+
+    Returns product_id, pool_id and the scope's (scope_id, metrics, histogram_steps,
+    histogram_counts).
+    """
+    product_id = _upsert_product(conn, run.provider, run.product)
+    pool_id = _upsert_pool(conn, run, product_id)
+    scope_key = (product_id, run.summary["target"]["id"], run.scope_hash)
     conn.execute(
         "INSERT INTO scope_stats(product_id,target,scope_hash,pool_id,"
         + ",".join(PERFORMANCE)
@@ -254,16 +271,8 @@ def _upsert_scope(conn, run, performance):
     return product_id, pool_id, scope_row
 
 
-def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
-    """Import one finished run directory; replaying the same artifacts is a no-op.
-
-    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
-    A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
-    """
-    directory = Path(directory)
-    run = _read_run(directory)
-    run_id, summary_hash, scope = run.run_id, run.summary_hash, run.scope
-    histogram = run.histogram
+def _performance(scope):
+    """The scope's concurrency, timeout and rate columns; concurrency and timeout are required."""
     try:
         performance = [
             column(kind, scope["config"][key])
@@ -273,42 +282,62 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
             raise TypeError
     except (KeyError, TypeError):
         raise ValueError("Unsupported concurrency, timeout or rate setting") from None
+    return performance
+
+
+def _existing(conn, run, batch_id):
+    """The run's stored (summary_sha256, run_key, batch_id), linked to batch_id; None if new."""
+    existing = conn.execute(
+        "SELECT summary_sha256,run_key,batch_id FROM test_runs WHERE run_id=%s", (run.run_id,)
+    ).fetchone()
+    if existing and existing[0] != run.summary_hash:
+        raise ValueError("Run ID already exists with different content")
+    if existing and batch_id is not None and existing[2] != batch_id:
+        if existing[2] is not None:
+            raise ValueError("Run already belongs to another batch")
+        conn.execute("UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (batch_id, existing[1]))
+    return existing
+
+
+def _store_run(conn, run, performance, batch_id):
+    """Store a new run with its buckets, geo rows, addresses and scope totals; return run_key."""
+    histogram = run.histogram
+    product_id, pool_id, scope_row = _upsert_scope(conn, run, performance)
+    scope_id, metrics, histogram_steps, histogram_counts = scope_row
+    run_key = storage_ingest.insert_run(conn, run, scope_id, batch_id)
+    storage_ingest.insert_buckets(conn, run, run_key)
+    _store_geo(conn, run_key, run.geo_rows)
+    storage_ingest.check_stored(conn, run, run_key)
+    new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
+    storage_ingest.add_observations(conn, run_key, pool_id)
+    lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
+    histogram.merge(Histogram(Counter(dict(lifetime))))
+    _add_run_metrics(metrics, run.summary, run.attempted, new_ips, histogram)
+    conn.execute(
+        "UPDATE scope_stats SET metrics=%s,histogram_steps=%s,histogram_counts=%s,"
+        "updated_at=now() WHERE scope_id=%s",
+        (Jsonb(metrics), *_steps(histogram.export()["bins"]), scope_id),
+    )
+    return run_key
+
+
+def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
+    """Import one finished run directory; replaying the same artifacts is a no-op.
+
+    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
+    A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
+    """
+    directory = Path(directory)
+    run = _read_run(directory)
+    run_id = run.run_id
+    performance = _performance(run.scope)
     with connect(credentials_file) as conn:
         # Serialize ingestion; measurements and website reads run independently.
         # The entire history/enrichment/cache update commits together.
-        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
-        if conn.execute("SELECT max(version) FROM schema_versions").fetchone()[0] != SCHEMA_VERSION:
-            raise ValueError("Database schema requires db-migrate or a rebuild before import")
-        existing = conn.execute(
-            "SELECT summary_sha256,run_key,batch_id FROM test_runs WHERE run_id=%s", (run_id,)
-        ).fetchone()
-        if existing and existing[0] != summary_hash:
-            raise ValueError("Run ID already exists with different content")
-        if existing and batch_id is not None and existing[2] != batch_id:
-            if existing[2] is not None:
-                raise ValueError("Run already belongs to another batch")
-            conn.execute(
-                "UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (batch_id, existing[1])
-            )
+        _lock(conn, "import")
+        existing = _existing(conn, run, batch_id)
         rows = storage_ingest.load_ips(conn, run, ip_rows)
-        if not existing:
-            product_id, pool_id, scope_row = _upsert_scope(conn, run, performance)
-            scope_id, metrics, histogram_steps, histogram_counts = scope_row
-            run_key = storage_ingest.insert_run(conn, run, scope_id, batch_id)
-            storage_ingest.insert_buckets(conn, run, run_key)
-            _store_geo(conn, run_key, run.geo_rows)
-            storage_ingest.check_stored(conn, run, run_key)
-            new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
-            storage_ingest.add_observations(conn, run_key, pool_id)
-            lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
-            histogram.merge(Histogram(Counter(dict(lifetime))))
-            _add_run_metrics(metrics, run.summary, run.attempted, new_ips, histogram)
-            conn.execute(
-                "UPDATE scope_stats SET metrics=%s,histogram_steps=%s,histogram_counts=%s,"
-                "updated_at=now() WHERE scope_id=%s",
-                (Jsonb(metrics), *_steps(histogram.export()["bins"]), scope_id),
-            )
-        run_key = existing[1] if existing else run_key
+        run_key = existing[1] if existing else _store_run(conn, run, performance, batch_id)
         enriched = storage_ingest.enrich(conn, directory, run_id, run_key, rows) if ip_rows else 0
     return {
         "run_id": run_id,
@@ -373,6 +402,21 @@ def _membership(conn, provider, product_id):
     )
 
 
+def _migration_start(versions, checksum, layer_stale):
+    """The base schema version to migrate from; None when base and calculated layer are current."""
+    if versions == [(SCHEMA_VERSION, checksum)]:
+        return SCHEMA_VERSION if layer_stale else None
+    return storage_migrate.migratable_start(versions, MIGRATABLE)
+
+
+def _compact(credentials_file, tables):
+    """VACUUM FULL the rebuilt tables, after and outside the migration's transaction."""
+    if tables:
+        with connect(credentials_file) as conn:
+            conn.autocommit = True
+            conn.execute("VACUUM (FULL, ANALYZE) " + ",".join(tables))
+
+
 def migrate(credentials_file):
     """Migrate an unmodified v4 to v11 database, and its calculated layer, in one transaction.
 
@@ -393,12 +437,9 @@ def migrate(credentials_file):
     with connect(credentials_file) as conn:
         versions, layered, layers = storage_migrate.read_versions(conn)
         current_layer = [(store.SCHEMA_VERSION, calculated_checksum)]
-        if versions == [(SCHEMA_VERSION, checksum)]:
-            if not layered or layers == current_layer:
-                return {"schema_version": SCHEMA_VERSION, "migrated": False}
-            start = SCHEMA_VERSION
-        else:
-            start = storage_migrate.migratable_start(versions, MIGRATABLE)
+        start = _migration_start(versions, checksum, layered and layers != current_layer)
+        if start is None:
+            return {"schema_version": SCHEMA_VERSION, "migrated": False}
         upgraded, later = storage_migrate.layer_start(start, layered, layers, current_layer)
         stale = layered and not upgraded
         checks = storage_migrate.migrate_base(
@@ -414,11 +455,7 @@ def migrate(credentials_file):
             (SCHEMA_VERSION, checksum) if start < SCHEMA_VERSION else None,
             (store.SCHEMA_VERSION, calculated_checksum) if stale else None,
         )
-    tables = storage_migrate.compacted(start, layered, upgraded)
-    if tables:
-        with connect(credentials_file) as conn:
-            conn.autocommit = True
-            conn.execute("VACUUM (FULL, ANALYZE) " + ",".join(tables))
+    _compact(credentials_file, storage_migrate.compacted(start, layered, upgraded))
     return {
         "schema_version": SCHEMA_VERSION,
         "from_schema_version": start,
@@ -427,6 +464,56 @@ def migrate(credentials_file):
         "migrated": True,
         "verified": verified,
     }
+
+
+def _seed_regions(cursor, regions, times, reset_times):
+    """Upsert the runner regions and their countries; reset_times resets each census_time."""
+    cursor.executemany(
+        "INSERT INTO runner_regions(region_id,slug,cloud,pattern) VALUES (%s,%s,%s,%s) "
+        "ON CONFLICT(region_id) DO UPDATE SET slug=excluded.slug,cloud=excluded.cloud,"
+        "pattern=excluded.pattern",
+        [(r.region_id, r.slug, "digitalocean", r.pattern) for r in regions.regions],
+    )
+    cursor.executemany(
+        "INSERT INTO countries(country_code,name,region_id,census_time) "
+        "VALUES (%s,%s,%s,%s) ON CONFLICT(country_code) DO UPDATE SET "
+        "name=excluded.name,region_id=excluded.region_id,census_time=CASE WHEN %s "
+        "THEN excluded.census_time ELSE countries.census_time END",
+        [
+            (code, regions.names[code], region.region_id, times[code], reset_times)
+            for region in regions.regions
+            for code in region.countries
+        ],
+    )
+
+
+def _seed_targets(cursor, targets):
+    """Upsert the target definitions; a seeded target keeps the schedule operators left."""
+    definition = ("label", "url", "engine", "pass_condition", "timeout_ms", "sort_order")
+    schedule = (
+        "census",
+        "census_concurrency",
+        "pulse_enabled",
+        "pulse_interval_minutes",
+        "pulse_requests",
+        "pulse_concurrency",
+    )
+    columns = ("target_id", *definition, *schedule)
+    # Ingest-added targets have no label; their schedule comes from the seed once.
+    cursor.executemany(
+        "INSERT INTO targets("
+        + ",".join(columns)
+        + ") VALUES ("
+        + ",".join(["%s"] * len(columns))
+        + ") ON CONFLICT(target_id) DO UPDATE SET "
+        + ",".join(f"{c}=excluded.{c}" for c in definition)
+        + ","
+        + ",".join(
+            f"{c}=CASE WHEN targets.label IS NULL THEN excluded.{c} ELSE targets.{c} END"
+            for c in schedule
+        ),
+        [tuple(row[c] for c in columns) for row in targets],
+    )
 
 
 def seed(
@@ -449,52 +536,10 @@ def seed(
     targets = load_targets(targets_path)
     times = regions.census_times()
     with connect(credentials_file) as conn:
-        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
-        if conn.execute("SELECT max(version) FROM schema_versions").fetchone()[0] != SCHEMA_VERSION:
-            raise ValueError("Database schema requires db-migrate or a rebuild before seeding")
+        _lock(conn, "seeding")
         with conn.cursor() as cursor:
-            cursor.executemany(
-                "INSERT INTO runner_regions(region_id,slug,cloud,pattern) VALUES (%s,%s,%s,%s) "
-                "ON CONFLICT(region_id) DO UPDATE SET slug=excluded.slug,cloud=excluded.cloud,"
-                "pattern=excluded.pattern",
-                [(r.region_id, r.slug, "digitalocean", r.pattern) for r in regions.regions],
-            )
-            cursor.executemany(
-                "INSERT INTO countries(country_code,name,region_id,census_time) "
-                "VALUES (%s,%s,%s,%s) ON CONFLICT(country_code) DO UPDATE SET "
-                "name=excluded.name,region_id=excluded.region_id,census_time=CASE WHEN %s "
-                "THEN excluded.census_time ELSE countries.census_time END",
-                [
-                    (code, regions.names[code], region.region_id, times[code], reset_times)
-                    for region in regions.regions
-                    for code in region.countries
-                ],
-            )
-            definition = ("label", "url", "engine", "pass_condition", "timeout_ms", "sort_order")
-            schedule = (
-                "census",
-                "census_concurrency",
-                "pulse_enabled",
-                "pulse_interval_minutes",
-                "pulse_requests",
-                "pulse_concurrency",
-            )
-            columns = ("target_id", *definition, *schedule)
-            # Ingest-added targets have no label; their schedule comes from the seed once.
-            cursor.executemany(
-                "INSERT INTO targets("
-                + ",".join(columns)
-                + ") VALUES ("
-                + ",".join(["%s"] * len(columns))
-                + ") ON CONFLICT(target_id) DO UPDATE SET "
-                + ",".join(f"{c}=excluded.{c}" for c in definition)
-                + ","
-                + ",".join(
-                    f"{c}=CASE WHEN targets.label IS NULL THEN excluded.{c} ELSE targets.{c} END"
-                    for c in schedule
-                ),
-                [tuple(row[c] for c in columns) for row in targets],
-            )
+            _seed_regions(cursor, regions, times, reset_times)
+            _seed_targets(cursor, targets)
     return {
         "regions": len(regions.regions),
         "countries": len(times),

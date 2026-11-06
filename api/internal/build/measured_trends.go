@@ -17,13 +17,8 @@ type measuredPoint struct {
 
 // measuredHistory matches every-request.ts, using finer observed history where available.
 func measuredHistory(product *snap.Product, rangeID string, latency bool) []measuredPoint {
-	selected := product.Windows[rangeID]
-	start, err := time.Parse(time.RFC3339Nano, selected.Period.Start)
-	if err != nil {
-		return nil
-	}
-	end, err := time.Parse(time.RFC3339Nano, selected.Period.End)
-	if err != nil {
+	start, end, ok := measuredPeriod(product.Windows[rangeID])
+	if !ok {
 		return nil
 	}
 	points := []measuredPoint{}
@@ -32,40 +27,11 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 		if !ok {
 			continue
 		}
-		from, err := time.Parse(time.RFC3339Nano, w.Period.Start)
-		if err != nil {
+		from, until, ok := measuredPeriod(w)
+		if !ok || from.Before(start) || until.After(end) {
 			continue
 		}
-		until, err := time.Parse(time.RFC3339Nano, w.Period.End)
-		if err != nil {
-			continue
-		}
-		if from.Before(start) || until.After(end) {
-			continue
-		}
-		incoming := []measuredPoint{}
-		for _, row := range w.Series {
-			at, err := time.Parse(time.RFC3339Nano, row.At)
-			if err != nil || at.Before(start) || !at.Before(end) {
-				continue
-			}
-			value := row.SuccessRate
-			if latency {
-				value = nan
-				if windowLatencyIsHTTP(w) {
-					if w.Metrics.EveryRequest() {
-						if row.LatencyUnderLoadMs != nil {
-							value = row.LatencyUnderLoadMs.P50
-						}
-					} else {
-						value = row.LatencyMs.P50
-					}
-				}
-			}
-			if value.OK() {
-				incoming = append(incoming, measuredPoint{at: at, value: value})
-			}
-		}
+		incoming := measuredPoints(w, start, end, latency)
 		if len(incoming) == 0 {
 			continue
 		}
@@ -79,6 +45,51 @@ func measuredHistory(product *snap.Product, rangeID string, latency bool) []meas
 	}
 	sort.SliceStable(points, func(i, j int) bool { return points[i].at.Before(points[j].at) })
 	return points
+}
+
+// measuredPeriod is w's period, false when either end does not parse.
+func measuredPeriod(w snap.Window) (start, end time.Time, ok bool) {
+	start, err := time.Parse(time.RFC3339Nano, w.Period.Start)
+	if err != nil {
+		return start, end, false
+	}
+	end, err = time.Parse(time.RFC3339Nano, w.Period.End)
+	return start, end, err == nil
+}
+
+// measuredPoints are w's series values (success rate or latency) at
+// start <= at < end, those without a value left out.
+func measuredPoints(w snap.Window, start, end time.Time, latency bool) []measuredPoint {
+	points := []measuredPoint{}
+	for _, row := range w.Series {
+		at, err := time.Parse(time.RFC3339Nano, row.At)
+		if err != nil || at.Before(start) || !at.Before(end) {
+			continue
+		}
+		value := row.SuccessRate
+		if latency {
+			value = measuredLatency(w, row)
+		}
+		if value.OK() {
+			points = append(points, measuredPoint{at: at, value: value})
+		}
+	}
+	return points
+}
+
+// measuredLatency is a series row's median latency: under load in
+// every-request windows, else latency_ms; N/A when the window's latency is
+// not the latency target's alone.
+func measuredLatency(w snap.Window, row snap.SeriesRow) Num {
+	switch {
+	case !windowLatencyIsHTTP(w):
+		return nan
+	case !w.Metrics.EveryRequest():
+		return row.LatencyMs.P50
+	case row.LatencyUnderLoadMs != nil:
+		return row.LatencyUnderLoadMs.P50
+	}
+	return nan
 }
 
 // measuredTrend compares opening/closing fifths without treating missing history as zero.

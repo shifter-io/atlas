@@ -210,11 +210,15 @@ PARSERS.append(_scheduler_parsers)
 
 def _plan_parsers(actions) -> None:
     """CAMP-1g: the campaign plan and the manager's deploy, enable, allow-me and teardown."""
-    from . import browser_hosts, manager_orch
     from .contracts import ACCOUNTS
 
+    _plan_parser(actions, ACCOUNTS)
+    _manager_parsers(actions, ACCOUNTS)
+
+
+def _plan_parser(actions, accounts) -> None:
     plan = actions.add_parser("plan", help="Validate inputs; write the manifests and the spec")
-    plan.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    plan.add_argument("--account", choices=sorted(accounts), required=True)
     plan.add_argument("--start", required=True, help="ISO whole hour with offset, or now-hour")
     plan.add_argument("--networks", required=True, help="all16, or comma-separated names")
     plan.add_argument("--regions", nargs="+")
@@ -236,16 +240,47 @@ def _plan_parsers(actions) -> None:
     plan.add_argument("--configs", type=Path, default=Path("configs"))
     plan.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
     plan.add_argument("--images", type=Path, default=SECRETS / "campaign-images.json")
+
+
+def _manager_parsers(actions, accounts) -> None:
+    from . import browser_hosts, manager_orch
+
     manager = actions.add_parser("manager", help="Deploy and operate the campaign manager")
     steps = manager.add_subparsers(dest="manager_action", required=True)
+    deploy = _deploy_parser(steps, accounts)
+    upload = steps.add_parser("upload-spec", help="Copy a planned campaign to the manager")
+    upload.add_argument("root", type=Path)
+    enable = steps.add_parser("enable", help="Start a campaign's timers (owner's go only)")
+    enable.add_argument("campaign_id")
+    enable.add_argument("--owner-go", type=Path, help="the owner's recorded answer file")
+    stop = steps.add_parser("disable", help="Stop a campaign's timers and collector")
+    stop.add_argument("campaign_id")
+    allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
+    teardown = _teardown_parser(steps)
+    for step in (deploy, allow):
+        step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
+    for step in (deploy, upload, enable, stop, allow, teardown):
+        step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
+    manager_orch.add_parsers(steps)  # MANAGER-ORCH-1
+    browser_hosts.add_parser(steps)  # BP-FIREWALL
+
+
+def _deploy_parser(steps, accounts):
     deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
-    deploy.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
+    deploy.add_argument("--account", choices=sorted(accounts), required=True)
     deploy.add_argument("--wheel", type=Path, required=True)
     deploy.add_argument("--requirements", type=Path, required=True)
     deploy.add_argument(
         "--size",
         help="a new manager's droplet size slug, offered in lon1 "
         "(default: the recorded manager's, else s-8vcpu-16gb)",
+    )
+    deploy.add_argument(
+        "--environment",
+        choices=["production", "staging"],
+        default="production",
+        help="staging: a manager beside production with its own pi-camp-stg- tags, firewalls "
+        "and keys; give it its own --inventory and --mac-key (CAMP-STAGING-1)",
     )
     deploy.add_argument("--networks", default="all16")
     deploy.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
@@ -258,14 +293,10 @@ def _plan_parsers(actions) -> None:
     deploy.add_argument(
         "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
     )
-    upload = steps.add_parser("upload-spec", help="Copy a planned campaign to the manager")
-    upload.add_argument("root", type=Path)
-    enable = steps.add_parser("enable", help="Start a campaign's timers (owner's go only)")
-    enable.add_argument("campaign_id")
-    enable.add_argument("--owner-go", type=Path, help="the owner's recorded answer file")
-    stop = steps.add_parser("disable", help="Stop a campaign's timers and collector")
-    stop.add_argument("campaign_id")
-    allow = steps.add_parser("allow-me", help="Admit SSH from this Mac's current IPv4")
+    return deploy
+
+
+def _teardown_parser(steps):
     teardown = steps.add_parser("teardown", help="Remove the manager and its resources")
     teardown.add_argument(
         "--after-collect",
@@ -282,12 +313,7 @@ def _plan_parsers(actions) -> None:
         "snapshots, firewall and keys for the next manager (they can only "
         "be removed by a full teardown after the next deploy)",
     )
-    for step in (deploy, allow):
-        step.add_argument("--mac-ip", help="default: as the echo target sees this Mac")
-    for step in (deploy, upload, enable, stop, allow, teardown):
-        step.add_argument("--inventory", type=Path, default=SECRETS / "campaign-manager.json")
-    manager_orch.add_parsers(steps)  # MANAGER-ORCH-1
-    browser_hosts.add_parser(steps)  # BP-FIREWALL
+    return teardown
 
 
 def _plan(args) -> int:
@@ -374,6 +400,7 @@ async def _manager_step(args) -> dict:
             address,
             keychain_token(ACCOUNTS[args.account]),  # read only when streamed
             args.size,
+            args.environment,
         )
         spaces = manager_settings(args.spaces_file) if args.spaces_file else None
         result = await deploy.deploy(cloud, job)
@@ -384,10 +411,11 @@ async def _manager_step(args) -> dict:
 
 def _manager(args) -> int:
     from .deploy import DeployError
+    from .ops_api import OpsError
 
     try:
         result = asyncio.run(_manager_step(args))
-    except DeployError as exc:
+    except (DeployError, OpsError) as exc:
         print(f"Manager {args.manager_action} refused or failed: {exc}", file=sys.stderr)
         return 3
     print(json.dumps(result, indent=2, sort_keys=True))

@@ -142,7 +142,7 @@ not read).
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
 | `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`, null without a load test; older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
-| `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
+| `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
 | `performance.uptimePct` | `w.metrics.uptime × 100` | data | ✱ |
@@ -647,8 +647,8 @@ The gaps recorded above are closed for a v4 build:
   most IPs first (then Python's `str()` order), as a v3 build reads a group's ASN
   pool list whole.
 
-A v4 build reads every list answer from the compact network lists in place: it
-keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
+A v4 build reads every list answer from the compact network lists, their rows read
+from the database when needed (API-MEM-1): it keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
 and `/regions`, `/v1/networks/all/places`) is its networks' compact lists, merged
 and ordered as before (rows of one place key add up; most IPs first, then key,
 then network and kind) only when a page is asked for. The build keeps each list's
@@ -735,7 +735,7 @@ does exactly this, from the file alone):
   1 plus the rows with a lower latency, among rows with a latency.
 
 The file is written one dimension at a time, 1,000 rows at a time
-(`build.DatasetLists`, read in place from the compact lists), and compressed at
+(`build.DatasetLists`, each list's rows read from the database as it is written), and compressed at
 gzip level 6 and brotli quality 5 (4 MB window): at the 0.5 GB a v4 file reaches
 at 18 × 249 (K11, derived), quality 10 and gzip 9 would take minutes of CPU every
 hour.
