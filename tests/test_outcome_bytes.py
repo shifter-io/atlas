@@ -162,7 +162,11 @@ def test_tcp_info_counts_real_loopback_payload():
 def test_estimate_and_sizes():
     plain = bytes_io.estimate(
         bytes_io.Exchange(
-            request_line=10, request_headers=20, request_body=5, response_headers=30, response_body=8
+            request_line=10,
+            request_headers=20,
+            request_body=5,
+            response_headers=30,
+            response_body=8,
         )
     )
     assert plain == bytes_io.ByteCount(35, 38, exact=False)
