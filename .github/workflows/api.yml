@@ -256,8 +256,11 @@ jobs:
         # Also after a failed test step, so a failing night still reports the audit.
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
         run: |
-          go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-          go mod tidy && git diff --exit-code go.mod go.sum
+          # Both run; either failing fails the step. v1.1.4 panics on Go 1.27 code.
+          rc=0
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... || rc=$?
+          go mod tidy && git diff --exit-code go.mod go.sum || rc=1
+          exit "$rc"
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''
         working-directory: .
