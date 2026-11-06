@@ -30,6 +30,7 @@ from campaign_probe_cases import (
 from proxy_index import cli as main_cli
 from proxy_index.campaign import probe as probing
 from proxy_index.campaign import shot as shooting
+from proxy_index.campaign import shot_steps
 from proxy_index.campaign.contracts import WORKER_TAG, audit_path
 from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError
@@ -448,7 +449,7 @@ async def test_m3_a_list_country_network_needs_its_country(tmp_path, monkeypatch
     data = tomllib.loads(GRAMMARS.joinpath("proxy-seller.toml").read_text())
     data["flags"]["country"] = {"kind": "country", "preset": True}
     preset = Grammar.parse(data)
-    monkeypatch.setattr(shooting, "load_grammar", lambda network: preset)
+    monkeypatch.setattr(shot_steps, "load_grammar", lambda network: preset)
     probe_inputs, _ = world(tmp_path, ("proxy-seller",))
     inputs = ShotInputs(probe_inputs.root, tmp_path / "shots", regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
@@ -546,7 +547,7 @@ async def test_m4_remove_settles_a_create_that_never_landed(tmp_path):
 
 
 async def test_s1_worker_names_must_be_unique(tmp_path, monkeypatch):
-    monkeypatch.setattr(shooting, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
+    monkeypatch.setattr(shot_steps, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
     inputs, _ = shot_world(tmp_path, regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
     with pytest.raises(ProbeError, match="worker names repeated"):
