@@ -100,37 +100,59 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 		if i < 5 {
 			idx.TopNetworkIDs = append(idx.TopNetworkIDs, "network:"+p.Slug)
 		}
-		// The network's standing (every-request.ts kindStanding): a measured
-		// network alone in its kind with a ready score is "#1 of 1 in its kind".
-		rank := p.Score.KindStanding()
-		composite := jsnum.NA // format.ts fixed()
-		if p.Score.Composite.OK() {
-			composite = jsnum.ToFixed(p.Score.Composite.F(), 1)
-		}
-		hq := jsnum.NA
-		if p.HQ != nil {
-			hq = *p.HQ
-		}
-		grade := jsnum.NA
-		if p.Score.Grade != nil {
-			grade = *p.Score.Grade
-		}
-		kw := []string{dash(p.Slug), model.SV(p.Tagline), "grade " + grade}
-		for _, k := range p.Kinds {
-			kw = append(kw, model.KindLabels[k])
-		}
-		kw = append(kw, p.BestFor...)
-		for i, g := range p.Geo {
-			if i >= 8 {
-				break
-			}
-			kw = append(kw, model.SV(g.Country))
-		}
-		items = append(items, SearchItem{ID: "network:" + p.Slug, Group: "Networks", Title: p.Name,
-			Subtitle: model.KindLabels[p.PrimaryKind] + " · " + model.ProductLabels[p.MeasuredProduct] + " · " + hq,
-			Href:     "/networks/" + p.Slug, Icon: "server", Meta: sp(rank + " · " + composite), Keywords: strings.Join(kw, " ")})
+		items = append(items, networkItem(p))
 	}
-	blurbs := pageBlurbs(len(targets))
+	items = append(items, pageItems(len(targets))...)
+	for _, t := range targets {
+		items = append(items, targetItem(t))
+	}
+	items = append(items, countryItems(leaderboard)...)
+	items = append(items, actions...)
+	idx.byID = map[string]*SearchItem{}
+	for i := range items {
+		it := &items[i]
+		it.lowTitle, it.lowSubtitle, it.lowKeywords = strings.ToLower(it.Title), strings.ToLower(it.Subtitle), strings.ToLower(it.Keywords)
+		idx.byID[it.ID] = it
+	}
+	idx.Items = items
+	return idx
+}
+
+func networkItem(p *model.Provider) SearchItem {
+	// The network's standing (every-request.ts kindStanding): a measured
+	// network alone in its kind with a ready score is "#1 of 1 in its kind".
+	rank := p.Score.KindStanding()
+	composite := jsnum.NA // format.ts fixed()
+	if p.Score.Composite.OK() {
+		composite = jsnum.ToFixed(p.Score.Composite.F(), 1)
+	}
+	hq := jsnum.NA
+	if p.HQ != nil {
+		hq = *p.HQ
+	}
+	grade := jsnum.NA
+	if p.Score.Grade != nil {
+		grade = *p.Score.Grade
+	}
+	kw := []string{dash(p.Slug), model.SV(p.Tagline), "grade " + grade}
+	for _, k := range p.Kinds {
+		kw = append(kw, model.KindLabels[k])
+	}
+	kw = append(kw, p.BestFor...)
+	for i, g := range p.Geo {
+		if i >= 8 {
+			break
+		}
+		kw = append(kw, model.SV(g.Country))
+	}
+	return SearchItem{ID: "network:" + p.Slug, Group: "Networks", Title: p.Name,
+		Subtitle: model.KindLabels[p.PrimaryKind] + " · " + model.ProductLabels[p.MeasuredProduct] + " · " + hq,
+		Href:     "/networks/" + p.Slug, Icon: "server", Meta: sp(rank + " · " + composite), Keywords: strings.Join(kw, " ")}
+}
+
+func pageItems(targets int) []SearchItem {
+	items := []SearchItem{}
+	blurbs := pageBlurbs(targets)
 	for _, g := range navGroups {
 		for _, it := range g.items {
 			sub, ok := blurbs[it.match]
@@ -140,33 +162,40 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 			items = append(items, SearchItem{ID: "page:" + it.href, Group: "Pages", Title: it.label, Subtitle: sub, Href: it.href, Icon: it.icon, Keywords: g.name + " " + it.match})
 		}
 	}
-	for _, t := range targets {
-		meta := sp("difficulty " + jsnum.NA + "/5")
-		if t.Difficulty.OK() {
-			meta = sp("difficulty " + jsnum.ToFixed(t.Difficulty.F(), 0) + "/5")
-		}
-		cat, pass := jsnum.NA, jsnum.NA
-		if t.Category != nil {
-			cat = *t.Category
-		}
-		if t.PassCondition != nil {
-			pass = *t.PassCondition
-		}
-		items = append(items, SearchItem{ID: "target:" + t.ID, Group: "Targets", Title: model.SV(t.Label), Subtitle: cat + " · " + pass,
-			Href: "/targets", Icon: "flag", Meta: meta, Keywords: under(t.ID) + " test target endpoint"})
+	return items
+}
+
+func targetItem(t model.TargetMeta) SearchItem {
+	meta := sp("difficulty " + jsnum.NA + "/5")
+	if t.Difficulty.OK() {
+		meta = sp("difficulty " + jsnum.ToFixed(t.Difficulty.F(), 0) + "/5")
 	}
-	// Countries: every country with exits in at least one network.
-	type country struct {
-		code, name string
-		networks   []string
-		ips        float64
+	cat, pass := jsnum.NA, jsnum.NA
+	if t.Category != nil {
+		cat = *t.Category
 	}
-	countries := map[string]*country{}
+	if t.PassCondition != nil {
+		pass = *t.PassCondition
+	}
+	return SearchItem{ID: "target:" + t.ID, Group: "Targets", Title: model.SV(t.Label), Subtitle: cat + " · " + pass,
+		Href: "/targets", Icon: "flag", Meta: meta, Keywords: under(t.ID) + " test target endpoint"}
+}
+
+// searchCountry is one country with exits in at least one network.
+type searchCountry struct {
+	code, name string
+	networks   []string
+	ips        float64
+}
+
+// searchCountries gathers every country with exits in at least one network.
+func searchCountries(leaderboard []*model.Provider) map[string]*searchCountry {
+	countries := map[string]*searchCountry{}
 	for _, p := range leaderboard {
 		for _, g := range p.Geo {
 			c := countries[g.CountryCode]
 			if c == nil {
-				c = &country{code: g.CountryCode, name: model.SV(g.Country)}
+				c = &searchCountry{code: g.CountryCode, name: model.SV(g.Country)}
 				countries[g.CountryCode] = c
 			}
 			c.networks = append(c.networks, p.Name)
@@ -175,11 +204,18 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 			}
 		}
 	}
+	return countries
+}
+
+// countryItems is the Countries group, sorted by country code.
+func countryItems(leaderboard []*model.Provider) []SearchItem {
+	countries := searchCountries(leaderboard)
 	codes := make([]string, 0, len(countries))
 	for code := range countries {
 		codes = append(codes, code)
 	}
 	sort.Strings(codes)
+	items := make([]SearchItem, 0, len(codes))
 	for _, code := range codes {
 		c := countries[code]
 		n := float64(len(c.networks))
@@ -192,15 +228,7 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 			Href:     "/networks?country=" + code, Icon: "globe", Meta: sp(code),
 			Keywords: strings.ToLower(code) + " country geo exits " + strings.Join(c.networks, " ")})
 	}
-	items = append(items, actions...)
-	idx.byID = map[string]*SearchItem{}
-	for i := range items {
-		it := &items[i]
-		it.lowTitle, it.lowSubtitle, it.lowKeywords = strings.ToLower(it.Title), strings.ToLower(it.Subtitle), strings.ToLower(it.Keywords)
-		idx.byID[it.ID] = it
-	}
-	idx.Items = items
-	return idx
+	return items
 }
 
 // looseMatch is the palette's dropped-letter match, on runes.
