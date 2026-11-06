@@ -386,6 +386,7 @@ def test_the_workflows_time_their_tests_and_keep_the_record():
     assert '"$EV/junit.xml" "$EV/junit-serial.xml"' in timed["run"]
     api = steps("api.yml", "api")
     assert (
-        '--go --log "$EV/go-latency.json"' in next(s for s in api if "latency" in s["name"])["run"]
+        '--go --log "$EV/go-latency.json"'
+        in next(s for s in api if "latency" in s.get("name", ""))["run"]
     )
     assert "--go --title" in next(s for s in api if s.get("id") == "timing")["run"]
