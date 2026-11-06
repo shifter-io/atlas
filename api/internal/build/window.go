@@ -161,49 +161,67 @@ func availabilityAt(incidents []model.Incident, days int) availability {
 func windowStats(p *model.Provider, sp *snap.Product, rangeID string) *WindowStats {
 	meta := rangeMeta(rangeID)
 	if sp != nil {
-		w := sp.Window(rangeID)
-		m := w.Metrics
-		end := snap.Ms(w.Period.End)
-		age := func(at string) Num { return Num((end - snap.Ms(at)) / 60000) }
-		uptime := nan
-		if m.Uptime.OK() {
-			uptime = m.Uptime * 100
-		}
-		lm, target := latencyMetrics(w)
-		head, light := headlineLatency(lm), lightLatency(lm)
-		ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: measuredTrend(sp, rangeID, false),
-			LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
-			LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: measuredTrend(sp, rangeID, true),
-			UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
-			Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
-			IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
-		// Outages (snapshot v2) shade the charts and count as incidents; uptime
-		// and downtime stay the framework's own time-based figures.
-		if sp.Outages != nil {
-			av := availabilityAt(p.Incidents, meta.Days)
-			ws.Bands, ws.IncidentCount = av.bands, Num(av.incidentCount)
-		}
-		for _, s := range w.Series {
-			t := age(s.At)
-			ws.Success = append(ws.Success, model.SeriesPoint{T: t, V: s.SuccessRate})
-			ws.Availability = append(ws.Availability, model.SeriesPoint{T: t, V: s.Uptime})
-			l := seriesLatency(w, s)
-			ws.Latency = append(ws.Latency, model.LatencyPoint{T: t, P50: l.P50, P90: l.P90, P99: l.P99})
-		}
-		ws.Pool = ipPoints(w, rangeID, w.Series, age)
-		return ws
+		return measuredWindowStats(p, sp, rangeID, meta)
 	}
 	av := availabilityAt(p.Incidents, meta.Days)
 	if rangeID == "24h" {
-		return &WindowStats{Range: meta, SuccessRate: p.Performance.SuccessRate, SuccessDeltaPts: p.Performance.SuccessRateDelta24h,
-			LatencyP50: p.Performance.LatencyP50, LatencyP90: p.Performance.LatencyP90, LatencyP99: p.Performance.LatencyP99,
-			LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
-			LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
-			RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
-			CostPer1kSuccess: p.Pricing.CostPer1kSuccess, UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
-			IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(p.Series.Success24h), Availability: incidentAvailabilitySeries(p.Incidents, meta.Days),
-			Latency: nonNilLatency(p.Series.Latency24h), Pool: nonNilSeries(p.Series.UniqueIps24h)}
+		return published24hStats(p, meta, av)
 	}
+	return publishedWindowStats(p, meta, av)
+}
+
+// measuredWindowStats is a range's stats from the provider's snapshot product.
+func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, meta RangeMeta) *WindowStats {
+	w := sp.Window(rangeID)
+	m := w.Metrics
+	end := snap.Ms(w.Period.End)
+	age := func(at string) Num { return Num((end - snap.Ms(at)) / 60000) }
+	uptime := nan
+	if m.Uptime.OK() {
+		uptime = m.Uptime * 100
+	}
+	lm, target := latencyMetrics(w)
+	head, light := headlineLatency(lm), lightLatency(lm)
+	ws := &WindowStats{Range: meta, SuccessRate: m.SuccessRate, SuccessDeltaPts: measuredTrend(sp, rangeID, false),
+		LatencyP50: head.P50, LatencyP90: head.P90, LatencyP99: head.P99,
+		LightLatencyP50: light.P50, LightLatencyP90: light.P90, LightLatencyP99: light.P99, LatencyTarget: strOrNil(target), LatencyDeltaPct: measuredTrend(sp, rangeID, true),
+		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
+		Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
+		IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
+	// Outages (snapshot v2) shade the charts and count as incidents; uptime
+	// and downtime stay the framework's own time-based figures.
+	if sp.Outages != nil {
+		av := availabilityAt(p.Incidents, meta.Days)
+		ws.Bands, ws.IncidentCount = av.bands, Num(av.incidentCount)
+	}
+	for _, s := range w.Series {
+		t := age(s.At)
+		ws.Success = append(ws.Success, model.SeriesPoint{T: t, V: s.SuccessRate})
+		ws.Availability = append(ws.Availability, model.SeriesPoint{T: t, V: s.Uptime})
+		l := seriesLatency(w, s)
+		ws.Latency = append(ws.Latency, model.LatencyPoint{T: t, P50: l.P50, P90: l.P90, P99: l.P99})
+	}
+	ws.Pool = ipPoints(w, rangeID, w.Series, age)
+	return ws
+}
+
+// published24hStats is the 24h stats of a provider without a snapshot
+// product, from its published figures.
+func published24hStats(p *model.Provider, meta RangeMeta, av availability) *WindowStats {
+	return &WindowStats{Range: meta, SuccessRate: p.Performance.SuccessRate, SuccessDeltaPts: p.Performance.SuccessRateDelta24h,
+		LatencyP50: p.Performance.LatencyP50, LatencyP90: p.Performance.LatencyP90, LatencyP99: p.Performance.LatencyP99,
+		LightLatencyP50: nan, LightLatencyP90: nan, LightLatencyP99: nan,
+		LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
+		RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
+		CostPer1kSuccess: p.Pricing.CostPer1kSuccess, UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
+		IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(p.Series.Success24h), Availability: incidentAvailabilitySeries(p.Incidents, meta.Days),
+		Latency: nonNilLatency(p.Series.Latency24h), Pool: nonNilSeries(p.Series.UniqueIps24h)}
+}
+
+// publishedWindowStats is a longer range's stats of a provider without a
+// snapshot product: its daily series tails and its published figures scaled
+// to the range.
+func publishedWindowStats(p *model.Provider, meta RangeMeta, av availability) *WindowStats {
 	days := meta.Days
 	success := tail(p.Series.Success30d, days)
 	latencyDaily := tail(p.Series.Latency30d, days)
