@@ -53,6 +53,27 @@ def load_provider(
     Adapter settings are provider-owned so future providers need no target edits.
     A country the provider's grammar does not serve raises `NoCountryList`.
     """
+    data, credentials, settings, params, extras = _read_config(path)
+    env = os.environ if environ is None else environ
+    private = (
+        read_credentials(credentials_file, data.get("provider"))
+        if credentials_file is not None
+        else None
+    )
+    options = _credential_options(credentials, settings, private, env)
+    params = params | dict(parameters or {})
+    if session_policy is not None:
+        options["session_policy"] = session_policy
+    return providers.create(
+        data.get("provider"),
+        parameters=params,
+        extra_flags=extras,
+        **options,
+    )
+
+
+def _read_config(path: str | Path) -> tuple[dict[str, Any], ...]:
+    """The checked configuration file, then its credentials, settings, parameters and extras."""
     with Path(path).open("rb") as stream:
         data = tomllib.load(stream)
     allowed = {"schema_version", "provider", "credentials", "settings", "parameters", "extra_flags"}
@@ -70,12 +91,16 @@ def load_provider(
         raise ValueError("Provider configuration sections must be tables")
     if any(key in settings for key in ("account", "password", "parameters", "extra_flags")):
         raise ValueError("Use the dedicated credentials and parameters configuration sections")
-    env = os.environ if environ is None else environ
-    private = (
-        read_credentials(credentials_file, data.get("provider"))
-        if credentials_file is not None
-        else None
-    )
+    return data, credentials, settings, params, extras
+
+
+def _credential_options(
+    credentials: Mapping[str, Any],
+    settings: Mapping[str, Any],
+    private: Mapping[str, str] | None,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    """The settings plus each credential, read from the private file or the environment."""
     options = dict(settings)
     credential_names = set()
     for key, env_name in credentials.items():
@@ -95,15 +120,7 @@ def load_provider(
         options[name] = value
     if private is not None and set(private) != credential_names:
         raise ValueError("Private credential fields must match the provider configuration")
-    params = params | dict(parameters or {})
-    if session_policy is not None:
-        options["session_policy"] = session_policy
-    return providers.create(
-        data.get("provider"),
-        parameters=params,
-        extra_flags=extras,
-        **options,
-    )
+    return options
 
 
 __all__ = [
