@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from helpers import FakeTransport
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches, jobs, nodework
+from proxy_index.orchestrator import batches, jobs, nodework, references
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
 from proxy_index.orchestrator.db import Database, put_setting
@@ -271,7 +271,7 @@ async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
     later = await batches.pulse_plan(db, at + timedelta(hours=1))
     assert later["load"] == 0 and later["created"] in (0, 6)
     with pytest.raises(ValueError, match="two-letter"):
-        batches._countries({"fra1": "Germany"}, "load.reference_defaults")
+        references._countries({"fra1": "Germany"}, "load.reference_defaults")
 
 
 class SlowTransport(FakeTransport):
@@ -346,7 +346,7 @@ async def test_the_reference_is_the_fastest_clean_country_of_the_region(database
         )
     day_start = today.replace(hour=0, minute=0, second=0, microsecond=0)
     async with db.connection() as conn:
-        stats = await batches._reference_latency(conn, day_start, 7)
+        stats = await references._reference_latency(conn, day_start, 7)
     assert stats == {"DE": {"p50": 31, "successes": 3}}
 
 
