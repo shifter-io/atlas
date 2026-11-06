@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import conftest
 import helpers
 import pytest
 
@@ -77,3 +78,74 @@ def test_timeline_of_no_tests(tmp_path):
         [sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True, check=True
     ).stdout
     assert out == "wall 0.0 s\nbusy total 0.0 s over 0 workers\n"
+
+
+def test_durations_keep_the_tests_of_at_least_min_seconds(tmp_path):
+    write(
+        tmp_path,
+        "gw0",
+        [
+            phase("gw0", "slow", "setup", 0.0, 0.5),
+            phase("gw0", "slow", "call", 0.5, 2.04),
+            phase("gw0", "fast", "call", 2.04, 2.5),
+        ],
+    )
+    out = tmp_path / "durations.json"
+    timeline = runpy.run_path(str(SCRIPT))
+    assert timeline["main"]([str(tmp_path), "--durations", str(out), "--min", "1"]) == 0
+    assert json.loads(out.read_text()) == {"slow": 2.0}
+
+
+class Item:
+    def __init__(self, nodeid):
+        self.nodeid = nodeid
+
+    def __repr__(self):
+        return self.nodeid
+
+
+def test_chunks_follow_the_worksteal_first_split():
+    assert conftest.chunks(10, 3) == [3, 3, 4]
+    assert conftest.chunks(2, 3) == [0, 1, 1]
+    assert sum(conftest.chunks(2958, 32)) == 2958
+
+
+def test_spread_gives_each_chunk_its_share_of_slow_tests_longest_first():
+    items = [Item(name) for name in "abcdefghijkl"]
+    durations = {"b": 50.0, "c": 40.0, "d": 30.0, "e": 20.0, "k": 25.0, "x": 99.0}
+    ordered = [item.nodeid for item in conftest.spread(items, durations, 3)]
+    assert sorted(ordered) == list("abcdefghijkl")
+    # Chunks of 4: the longest to the least loaded chunk with room, then fast tests in order.
+    assert ordered == ["b", "a", "f", "g", "c", "e", "h", "i", "d", "k", "j", "l"]
+
+
+def test_spread_with_more_slow_tests_than_a_chunk_holds():
+    items = [Item(name) for name in "abcd"]
+    ordered = conftest.spread(items, {"a": 9.0, "b": 8.0, "c": 7.0, "d": 6.0}, 2)
+    assert [item.nodeid for item in ordered] == ["a", "d", "b", "c"]
+
+
+class Config:
+    def __init__(self, workerinput=None, dist="worksteal"):
+        if workerinput is not None:
+            self.workerinput = workerinput
+        self.dist = dist
+
+    def getoption(self, name, default=None):
+        return self.dist
+
+
+def test_only_worksteal_workers_reorder(monkeypatch, tmp_path):
+    durations = tmp_path / "durations.json"
+    durations.write_text(json.dumps({"b": 5.0}))
+    monkeypatch.setattr(conftest, "DURATIONS", durations)
+    for config in (Config(), Config({"workercount": 2}, dist="load")):
+        items = [Item("a"), Item("b")]
+        conftest.pytest_collection_modifyitems(config, items)
+        assert [item.nodeid for item in items] == ["a", "b"]
+    items = [Item("a"), Item("b")]
+    conftest.pytest_collection_modifyitems(Config({"workercount": 2}), items)
+    assert [item.nodeid for item in items] == ["b", "a"]
+    monkeypatch.setattr(conftest, "DURATIONS", tmp_path / "missing.json")
+    conftest.pytest_collection_modifyitems(Config({"workercount": 2}), items := [Item("a")])
+    assert [item.nodeid for item in items] == ["a"]

@@ -30,17 +30,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # name eph storage dist workers cov background timeline
-          - group: before
-            variants: "main-exact,off,main,worksteal,auto,1,1,0 main-timeline,off,main,worksteal,auto,1,1,1 collect"
-          - group: fixes
-            variants: "eph,on,main,worksteal,auto,1,1,0 eph-tmpl,on,branch,worksteal,auto,1,1,0 eph-tmpl-timeline,on,branch,worksteal,auto,1,1,1 covcmp"
-          - group: dist
-            variants: "load,on,branch,load,auto,1,1,0 loadfile,on,branch,loadfile,auto,1,1,0 loadscope,on,branch,loadscope,auto,1,1,0"
-          - group: workers
-            variants: "n32,on,branch,worksteal,32,1,1,0 n48,on,branch,worksteal,48,1,1,0 n64,on,branch,worksteal,64,1,1,0"
-          - group: other
-            variants: "nocov,on,branch,worksteal,auto,0,1,0 nobg,on,branch,worksteal,auto,1,0,0 main-control,off,main,worksteal,auto,1,1,0"
+          # name eph storage dist workers cov background timeline serial(run|skip) core
+          - group: lpt-a
+            variants: "tmpl-tl,on,branch,worksteal,auto,1,1,1,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace lpt-tl,on,branch,worksteal,auto,1,1,1,run,ctrace lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace"
+          - group: lpt-b
+            variants: "main-exact,off,main,worksteal,auto,1,1,0,run,ctrace tmpl-tl,on,branch,worksteal,auto,1,1,1,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace"
+          - group: cov
+            variants: "tmpl,on,branch,worksteal,auto,1,1,0,run,ctrace sysmon,on,branch,worksteal,auto,1,1,0,run,sysmon covcmp:tmpl:sysmon"
     defaults:
       run:
         shell: bash
@@ -129,7 +125,7 @@ jobs:
           EOF
           }
           variant() {
-            IFS=, read -r name eph storage dist workers cov bg tl <<< "$1"
+            IFS=, read -r name eph storage dist workers cov bg tl serial core <<< "$1"
             echo "::group::variant $name"
             export EV=$M/$name; mkdir -p "$EV"
             if [ "$storage" = main ]; then
@@ -142,6 +138,7 @@ jobs:
             covappend=(); [ "$cov" = 1 ] && covappend=(--cov=proxy_index --cov-branch --cov-append --cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
             export COVERAGE_FILE=$EV/.coverage
             [ "$tl" = 1 ] && export CI_TIMELINE=1 || unset CI_TIMELINE
+            [ "$core" = sysmon ] && export COVERAGE_CORE=sysmon || unset COVERAGE_CORE
             t0=$(now)
             if [ "$bg" = 1 ]; then
               background build uv build --out-dir "$EV/dist"
@@ -156,12 +153,14 @@ jobs:
             uv run --no-editable pytest -p no:cacheprovider -rs -n "$workers" --dist "$dist" -m "not serial" \
               "${covargs[@]}" --junitxml="$EV/junit.xml" --durations=25 > "$EV/pytest.log" 2>&1 || echo "pytest exit $?"
             t1=$(now)
-            uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-              "${covappend[@]}" --junitxml="$EV/junit-serial.xml" --durations=25 >> "$EV/pytest.log" 2>&1 || echo "serial exit $?"
+            if [ "$serial" = run ]; then
+              uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
+                "${covappend[@]}" --junitxml="$EV/junit-serial.xml" --durations=25 >> "$EV/pytest.log" 2>&1 || echo "serial exit $?"
+            fi
             t2=$(now)
             wait
             t3=$(now)
-            unset CI_TIMELINE
+            unset CI_TIMELINE COVERAGE_CORE
             for rc in "$EV"/*.rc; do [ -e "$rc" ] && [ "$(cat "$rc")" != 0 ] && echo "$(basename "$rc") failed"; done
             grep -E '^[0-9]+ (passed|failed)|passed|Set PG_TEST' "$EV/pytest.log" | tail -4
             sed -n '/slowest 25 durations/,/^$/p' "$EV/pytest.log" | head -30
@@ -169,7 +168,8 @@ jobs:
             printf '| %s | %s s | %s s | %s s | %s |\n' "$name" \
               "$(dt "$t0" "$t1")" "$(dt "$t1" "$t2")" "$(dt "$t0" "$t3")" "$c" >> "$table"
             if [ "$tl" = 1 ]; then
-              uv run --no-editable python scripts/ci/timeline.py "$EV" --top 15 | tee "$EV/timeline.txt"
+              uv run --no-editable python scripts/ci/timeline.py "$EV" --top 15 --durations "$EV/durations.json" | tee "$EV/timeline.txt"
+              cp "$EV/durations.json" "$M/durations.json"
             fi
             echo "::endgroup::"
           }
@@ -187,7 +187,7 @@ jobs:
             echo "::endgroup::"
           }
           covcmp() {
-            python3 - "$M/eph/coverage.json" "$M/eph-tmpl/coverage.json" <<'EOF'
+            python3 - "$M/$1/coverage.json" "$M/$2/coverage.json" <<'EOF'
           import json, sys
           def sets(path):
               files = json.load(open(path))["files"]
@@ -204,12 +204,25 @@ jobs:
           for v in $VARIANTS; do
             case "$v" in
               collect) collect ;;
-              covcmp) covcmp ;;
+              covcmp:*) IFS=: read -r _ a b <<< "$v"; covcmp "$a" "$b" ;;
+              use-durations) cp "$M/durations.json" tests/durations.json; wc -l tests/durations.json ;;
               *) variant "$v" ;;
             esac
           done
           git checkout HEAD -- tests/test_storage.py
           echo; cat "$table"; cat "$table" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the durations and timelines
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: measure-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/m/durations.json
+            ${{ runner.temp }}/m/*/timeline*
+            ${{ runner.temp }}/m/*/junit*.xml
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Stop PostgreSQL
         if: always()

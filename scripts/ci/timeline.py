@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Sum the opt-in test timeline (CI_TIMELINE=1, tests/conftest.py) per xdist worker.
 
-Usage: timeline.py <dir with timeline-*.jsonl> [--top N]
+Usage: timeline.py <dir with timeline-*.jsonl> [--top N] [--durations FILE [--min S]]
 Prints the run's wall time (first test start to last test end), then per worker its busy
 time (setup + call + teardown), idle time (the rest of the wall) and test count, the
 totals spent creating scratch databases and initialising schemas, and the N longest tests
-with their share of the wall time.
+with their share of the wall time. --durations writes each test of at least S seconds
+(default 1) as {node id: seconds}, the input of tests/conftest.py's longest-first order.
 """
 
 import argparse
@@ -28,7 +29,7 @@ def load(directory):
 def summarize(records, top=10):
     phases = [r for r in records if r["kind"] in PHASES]
     if not phases:
-        return {"wall": 0.0, "workers": {}, "spans": {}, "phases": {}, "longest": []}
+        return {"wall": 0.0, "workers": {}, "spans": {}, "phases": {}, "longest": [], "tests": {}}
     begin = min(r["start"] for r in phases)
     wall = max(r["stop"] for r in phases) - begin
     workers = defaultdict(lambda: {"busy": 0.0, "tests": 0})
@@ -46,13 +47,14 @@ def summarize(records, top=10):
     for r in records:
         if r["kind"] in SPANS:
             spans[r["kind"]] += r["stop"] - r["start"]
-    longest = sorted(tests.items(), key=lambda item: -item[1])[:top]
+    longest = sorted(tests.items(), key=lambda item: -item[1])
     return {
         "wall": wall,
         "workers": dict(sorted(workers.items())),
         "spans": spans,
         "phases": dict(totals),
-        "longest": [(nodeid, seconds, seconds / wall) for nodeid, seconds in longest],
+        "longest": [(nodeid, seconds, seconds / wall) for nodeid, seconds in longest[:top]],
+        "tests": dict(longest),
     }
 
 
@@ -77,8 +79,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("directory")
     parser.add_argument("--top", type=int, default=10)
+    parser.add_argument("--durations", type=Path)
+    parser.add_argument("--min", type=float, default=1.0)
     args = parser.parse_args(argv)
-    print(report(summarize(load(args.directory), args.top)))
+    summary = summarize(load(args.directory), args.top)
+    print(report(summary))
+    if args.durations:
+        slow = {test: round(s, 1) for test, s in summary["tests"].items() if s >= args.min}
+        args.durations.write_text(json.dumps(slow, indent=0, sort_keys=True) + "\n")
     return 0
 
 
