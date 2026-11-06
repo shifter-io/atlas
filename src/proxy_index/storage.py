@@ -4,26 +4,26 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import ipaddress
 import json
 import math
-import re
-import uuid
 from collections import Counter
-from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from itertools import accumulate
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from . import names
+from . import names, storage_ingest
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
 from .partitions import partition
 from .providers.credentials import read_credentials
 from .stats import Histogram
+from .storage_ingest import ENRICHMENT_FIELDS as ENRICHMENT_FIELDS
+from .storage_ingest import OUTCOME_KEYS as OUTCOME_KEYS
+from .storage_ingest import _digest, _time
 
 SCHEMA_VERSION = 12
 # Only an unmodified v4 to v11 schema (these checksums) is migrated in place; migrate().
@@ -68,8 +68,6 @@ BUCKET_KEYS = (
     "status_codes",
     "latency_histogram",
 )
-# Request outcomes and wire bytes (v6 artifacts), per run, bucket and geography bucket.
-OUTCOME_KEYS = ("challenges", "blocks", "timeouts", "proxy_errors", "bytes_up", "bytes_down")
 GEO_COUNTERS = (
     "completed",
     "successes",
@@ -98,23 +96,6 @@ ADAPTER = {
     "session_policy": ("session_policy", "text"),
     "effective_ttl_seconds": ("ttl_seconds", "integer"),
     "extra_flags": ("extra_flags", "json"),
-}
-
-ENRICHMENT_FIELDS = {
-    "matched": "boolean",
-    "country_code": "text",
-    "country": "text",
-    "region_code": "text",
-    "region": "text",
-    "city": "text",
-    "latitude": "double precision",
-    "longitude": "double precision",
-    "isp": "text",
-    "organization": "text",
-    "asn": "bigint",
-    "asn_organization": "text",
-    "connection_type": "text",
-    "usage_type": "text",
 }
 
 
@@ -146,22 +127,6 @@ def initialize(credentials_file):
             (SCHEMA_VERSION, checksum),
         )
     return {"schema_version": SCHEMA_VERSION}
-
-
-def _digest(path):
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
-def _time(value):
-    result = datetime.fromisoformat(value)
-    if result.tzinfo is None:
-        raise ValueError("Artifact timestamps require a timezone")
-    return result.astimezone(UTC)
-
-
-def _canonical(value):
-    return json.dumps(value, sort_keys=True)
 
 
 def _histogram(value):
@@ -310,9 +275,6 @@ def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     )
 
 
-_partition = partition  # daily for the raw tables (partitions.py)
-
-
 def _dimension(value, fields):
     """Typed column values for a location or network; null (no exit address) is all NULL."""
     if value is None:
@@ -430,13 +392,8 @@ def _check_bucket_histograms(buckets, histogram):
         raise ValueError("Bucket histograms differ from run histogram")
 
 
-def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
-    """Import one finished run directory; replaying the same artifacts is a no-op.
-
-    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
-    A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
-    """
-    directory = Path(directory)
+def _read_run(directory):
+    """Read and reconcile a run directory's summary, buckets and geo rows before any write."""
     summary_path = directory / "summary.json"
     summary = json.loads(summary_path.read_text())
     summary_hash = _digest(summary_path)
@@ -492,6 +449,93 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
         ):
             raise ValueError("Outcome counters do not reconcile")
     geo_rows = _geo_rows(directory, summary, buckets, bucket_rows)
+    return SimpleNamespace(
+        summary=summary,
+        summary_hash=summary_hash,
+        attempted=attempted,
+        in_country=in_country,
+        histogram=histogram,
+        source=source,
+        provider=provider,
+        product=product,
+        scope=scope,
+        scope_hash=scope_hash,
+        run_id=run_id,
+        buckets=buckets,
+        bucket_rows=bucket_rows,
+        geo_rows=geo_rows,
+    )
+
+
+def _upsert_scope(conn, run, performance):
+    """Add the run's provider, product, target, pool and scope where new.
+
+    Returns product_id, pool_id and the scope's (scope_id, metrics, histogram_steps,
+    histogram_counts).
+    """
+    summary, provider, product, scope = run.summary, run.provider, run.product, run.scope
+    conn.execute("INSERT INTO providers VALUES (%s) ON CONFLICT DO NOTHING", (provider,))
+    conn.execute(
+        "INSERT INTO products(provider,name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+        (provider, product),
+    )
+    product_id = conn.execute(
+        "SELECT product_id FROM products WHERE provider=%s AND name=%s", (provider, product)
+    ).fetchone()[0]
+    pool_definition = {
+        "target": scope["target"],
+        "config": {k: v for k, v in scope["config"].items() if k not in PERFORMANCE},
+    }
+    pool_hash = hashlib.sha256(json.dumps(pool_definition, sort_keys=True).encode()).hexdigest()
+    profile = _profile(pool_definition, provider, product)
+    # Pools and scopes reference targets; a target nobody seeded joins unscheduled.
+    target = summary["target"]
+    conn.execute(
+        "INSERT INTO targets(target_id,url,engine,census,pulse_enabled) "
+        "VALUES (%s,%s,%s,false,false) ON CONFLICT DO NOTHING",
+        (
+            profile["target_id"],
+            target["url"] if type(target.get("url")) is str else "",
+            target["engine"] if type(target.get("engine")) is str else "http",
+        ),
+    )
+    conn.execute(
+        "INSERT INTO pool_stats(product_id,pool_hash,"
+        + ",".join(profile)
+        + ") VALUES ("
+        + ",".join(["%s"] * (len(profile) + 2))
+        + ") ON CONFLICT DO NOTHING",
+        (product_id, pool_hash, *profile.values()),
+    )
+    pool_id = conn.execute(
+        "SELECT pool_id FROM pool_stats WHERE product_id=%s AND pool_hash=%s",
+        (product_id, pool_hash),
+    ).fetchone()[0]
+    scope_key = (product_id, summary["target"]["id"], run.scope_hash)
+    conn.execute(
+        "INSERT INTO scope_stats(product_id,target,scope_hash,pool_id,"
+        + ",".join(PERFORMANCE)
+        + ") VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (*scope_key, pool_id, *performance),
+    )
+    scope_row = conn.execute(
+        "SELECT scope_id,metrics,histogram_steps,histogram_counts FROM scope_stats WHERE "
+        "product_id=%s AND target=%s AND scope_hash=%s",
+        scope_key,
+    ).fetchone()
+    return product_id, pool_id, scope_row
+
+
+def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
+    """Import one finished run directory; replaying the same artifacts is a no-op.
+
+    batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
+    A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
+    """
+    directory = Path(directory)
+    run = _read_run(directory)
+    run_id, summary_hash, scope = run.run_id, run.summary_hash, run.scope
+    histogram = run.histogram
     try:
         performance = [
             column(kind, scope["config"][key])
@@ -518,194 +562,52 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
             conn.execute(
                 "UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (batch_id, existing[1])
             )
-        conn.execute(
-            "CREATE TEMP TABLE incoming_ips (bucket timestamptz, ip inet, count bigint, "
-            "first_seen timestamptz, last_seen timestamptz, PRIMARY KEY(bucket,ip)) "
-            "ON COMMIT DROP"
-        )
-        with (
-            conn.cursor().copy("COPY incoming_ips FROM STDIN") as copy,
-            gzip.open(source, "rt") as f,
-        ):
-            for line in f if ip_rows else ():
-                row = json.loads(line)
-                bucket, first, last = (
-                    _time(row[k]) for k in ("bucket_start", "first_seen", "last_seen")
-                )
-                if (
-                    row["run_id"] != run_id
-                    or row["schema_version"] != "1"
-                    or bucket not in buckets
-                    or bucket.timestamp() % 300
-                    or not bucket <= first <= last < bucket + timedelta(seconds=300)
-                    or type(row["count"]) is not int
-                    or row["count"] <= 0
-                ):
-                    raise ValueError("Invalid IP observation")
-                copy.write_row(
-                    (bucket, str(ipaddress.ip_address(row["ip"])), row["count"], first, last)
-                )
-        rows, observations, unique = conn.execute(
-            "SELECT count(*),coalesce(sum(count),0),count(DISTINCT ip) FROM incoming_ips"
-        ).fetchone()
-        if ip_rows and (
-            rows != summary["artifacts"]["ips"]["rows"]
-            or observations != (in_country if summary["pool_eligible"] else 0)
-            or unique != (summary["unique_ips"] or 0)
-        ):
-            raise ValueError("IP observations do not reconcile with the run")
+        rows = storage_ingest.load_ips(conn, run, ip_rows)
         if not existing:
-            conn.execute("INSERT INTO providers VALUES (%s) ON CONFLICT DO NOTHING", (provider,))
-            conn.execute(
-                "INSERT INTO products(provider,name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                (provider, product),
-            )
-            product_id = conn.execute(
-                "SELECT product_id FROM products WHERE provider=%s AND name=%s", (provider, product)
-            ).fetchone()[0]
-            pool_definition = {
-                "target": scope["target"],
-                "config": {k: v for k, v in scope["config"].items() if k not in PERFORMANCE},
-            }
-            pool_hash = hashlib.sha256(
-                json.dumps(pool_definition, sort_keys=True).encode()
-            ).hexdigest()
-            profile = _profile(pool_definition, provider, product)
-            # Pools and scopes reference targets; a target nobody seeded joins unscheduled.
-            target = summary["target"]
-            conn.execute(
-                "INSERT INTO targets(target_id,url,engine,census,pulse_enabled) "
-                "VALUES (%s,%s,%s,false,false) ON CONFLICT DO NOTHING",
-                (
-                    profile["target_id"],
-                    target["url"] if type(target.get("url")) is str else "",
-                    target["engine"] if type(target.get("engine")) is str else "http",
-                ),
-            )
-            conn.execute(
-                "INSERT INTO pool_stats(product_id,pool_hash,"
-                + ",".join(profile)
-                + ") VALUES ("
-                + ",".join(["%s"] * (len(profile) + 2))
-                + ") ON CONFLICT DO NOTHING",
-                (product_id, pool_hash, *profile.values()),
-            )
-            pool_id = conn.execute(
-                "SELECT pool_id FROM pool_stats WHERE product_id=%s AND pool_hash=%s",
-                (product_id, pool_hash),
-            ).fetchone()[0]
-            scope_key = (product_id, summary["target"]["id"], scope_hash)
-            conn.execute(
-                "INSERT INTO scope_stats(product_id,target,scope_hash,pool_id,"
-                + ",".join(PERFORMANCE)
-                + ") VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                (*scope_key, pool_id, *performance),
-            )
-            scope_id, metrics, histogram_steps, histogram_counts = conn.execute(
-                "SELECT scope_id,metrics,histogram_steps,histogram_counts FROM scope_stats WHERE "
-                "product_id=%s AND target=%s AND scope_hash=%s",
-                scope_key,
-            ).fetchone()
-            compact = {
-                key: value
-                for key, value in summary.items()
-                if key not in ("buckets", "latency_histogram", "config", "target")
-            }
-            compact["config_overrides"] = {
-                key: value for key, value in config.items() if key not in scope["config"]
-            }
-            started_at, finished_at = _time(summary["started_at"]), _time(summary["finished_at"])
-            # Keys the columns reproduce exactly are not stored twice.
-            for key, value in (
-                ("run_id", str(uuid.UUID(run_id))),
-                ("status", summary["status"]),
-                ("started_at", started_at.isoformat(timespec="microseconds")),
-                ("finished_at", finished_at.isoformat(timespec="microseconds")),
-            ):
-                if compact[key] == value:
-                    del compact[key]
-            run_key = conn.execute(
-                "INSERT INTO test_runs (run_id,scope_id,"
-                "started_at,finished_at,status,summary_sha256,summary,batch_id) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING run_key",
-                (
-                    run_id,
-                    scope_id,
-                    started_at,
-                    finished_at,
-                    summary["status"],
-                    summary_hash,
-                    Jsonb(compact),
-                    batch_id,
-                ),
-            )
-            run_key = run_key.fetchone()[0]
-            for bucket, values in bucket_rows.items():
-                _partition(conn, "run_buckets", bucket)
-                _partition(conn, "ip_observations", bucket)
-                conn.execute(
-                    "INSERT INTO run_buckets(bucket_start,run_key,completed,successes,"
-                    "response_body_bytes,errors,status_codes,histogram_steps,histogram_counts,"
-                    "extra,outcome_counters,"
-                    + ",".join(OUTCOME_KEYS)
-                    + ") VALUES ("
-                    + ",".join(["%s"] * (len(values) + 2))
-                    + ")",
-                    (bucket, run_key, *values),
-                )
-            _store_geo(conn, run_key, geo_rows)
-            # The run histogram is stored only as bucket bins, exactly as in v4.
-            expected = summary | {"latency_histogram": histogram.export()}
-            stored = conn.execute("SELECT stored_run_summary(%s)", (run_key,)).fetchone()[0]
-            if _canonical(stored) != _canonical(expected):
-                raise ValueError("Run summary cannot be stored losslessly")
-            conn.execute(
-                "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips "
-                "ON CONFLICT(ip) DO NOTHING"
-            )
-            _membership(conn, provider, product_id)
-            # Avoid another persisted membership set per performance configuration.
-            # First presence within this exact scope: the anti-join reads via test_runs_scope.
-            new_ips = conn.execute(
-                "SELECT count(*) FROM (SELECT DISTINCT a.ip_id FROM incoming_ips i "
-                "JOIN ip_addresses a USING(ip)) n WHERE NOT EXISTS (SELECT 1 FROM "
-                "ip_observations o JOIN test_runs r USING(run_key) "
-                "WHERE o.ip_id=n.ip_id AND r.scope_id=%s)",
-                (scope_id,),
-            ).fetchone()[0]
-            conn.execute(
-                "INSERT INTO ip_observations SELECT i.bucket,%s,a.ip_id,i.count,"
-                "i.first_seen,i.last_seen FROM incoming_ips i JOIN ip_addresses a USING(ip)",
-                (run_key,),
-            )
-            pool_new = conn.execute(
-                "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT %s,a.ip_id FROM "
-                "incoming_ips i JOIN ip_addresses a USING(ip) ON CONFLICT DO NOTHING RETURNING 1) "
-                "SELECT count(*) FROM added",
-                (pool_id,),
-            ).fetchone()[0]
-            conn.execute(
-                "UPDATE pool_stats SET unique_ips=unique_ips+%s WHERE pool_id=%s",
-                (pool_new, pool_id),
-            )
+            product_id, pool_id, scope_row = _upsert_scope(conn, run, performance)
+            scope_id, metrics, histogram_steps, histogram_counts = scope_row
+            run_key = storage_ingest.insert_run(conn, run, scope_id, batch_id)
+            storage_ingest.insert_buckets(conn, run, run_key)
+            _store_geo(conn, run_key, run.geo_rows)
+            storage_ingest.check_stored(conn, run, run_key)
+            new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
+            storage_ingest.add_observations(conn, run_key, pool_id)
             lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
             histogram.merge(Histogram(Counter(dict(lifetime))))
-            _add_run_metrics(metrics, summary, attempted, new_ips, histogram)
+            _add_run_metrics(metrics, run.summary, run.attempted, new_ips, histogram)
             conn.execute(
                 "UPDATE scope_stats SET metrics=%s,histogram_steps=%s,histogram_counts=%s,"
                 "updated_at=now() WHERE scope_id=%s",
                 (Jsonb(metrics), *_steps(histogram.export()["bins"]), scope_id),
             )
         run_key = existing[1] if existing else run_key
-        enriched = _enrich(conn, directory, run_id, run_key, rows) if ip_rows else 0
+        enriched = storage_ingest.enrich(conn, directory, run_id, run_key, rows) if ip_rows else 0
     return {
         "run_id": run_id,
         "run_key": run_key,
         "imported": not bool(existing),
         "observation_rows": rows,
         "enrichment_releases_added": enriched,
-        "scope_hash": scope_hash,
+        "scope_hash": run.scope_hash,
     }
+
+
+def _add_addresses(conn, provider, product_id, scope_id):
+    """Add the new addresses and product memberships; return the IPs new to this scope."""
+    conn.execute(
+        "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips "
+        "ON CONFLICT(ip) DO NOTHING"
+    )
+    _membership(conn, provider, product_id)
+    # Avoid another persisted membership set per performance configuration.
+    # First presence within this exact scope: the anti-join reads via test_runs_scope.
+    return conn.execute(
+        "SELECT count(*) FROM (SELECT DISTINCT a.ip_id FROM incoming_ips i "
+        "JOIN ip_addresses a USING(ip)) n WHERE NOT EXISTS (SELECT 1 FROM "
+        "ip_observations o JOIN test_runs r USING(run_key) "
+        "WHERE o.ip_id=n.ip_id AND r.scope_id=%s)",
+        (scope_id,),
+    ).fetchone()[0]
 
 
 def _membership(conn, provider, product_id):
@@ -741,115 +643,6 @@ def _membership(conn, provider, product_id):
         "run_count=product_ips.run_count+1",
         (product_id,),
     )
-
-
-def _enrich(conn, directory, run_id, run_key, expected_rows):
-    added = 0
-    for report_path in sorted(directory.glob("enrichment-*.json")):
-        report = json.loads(report_path.read_text())
-        release = report["release"]["sha256"]
-        if (
-            not re.fullmatch(r"[a-f0-9]{64}", release)
-            or report["run_id"] != run_id
-            or report["file"] != f"enriched-{release}.jsonl.gz"
-            or report["rows"] != expected_rows
-        ):
-            raise ValueError("Invalid enrichment manifest")
-        artifact = directory / report["file"]
-        checksum = _digest(artifact)
-        conn.execute(
-            "INSERT INTO dbip_releases(sha256,metadata) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-            (release, Jsonb(report["release"])),
-        )
-        release_id = conn.execute(
-            "SELECT release_id FROM dbip_releases WHERE sha256=%s", (release,)
-        ).fetchone()[0]
-        previous = conn.execute(
-            "SELECT artifact_sha256 FROM run_enrichments WHERE run_key=%s AND release_id=%s",
-            (run_key, release_id),
-        ).fetchone()
-        if previous:
-            if previous[0] != checksum:
-                raise ValueError("Previously imported enrichment has changed")
-            continue
-        conn.execute(
-            "CREATE TEMP TABLE incoming_geo (bucket timestamptz, ip inet, count bigint, "
-            "attributes jsonb, PRIMARY KEY(bucket,ip)) ON COMMIT DROP"
-        )
-        with (
-            conn.cursor().copy("COPY incoming_geo FROM STDIN") as copy,
-            gzip.open(artifact, "rt") as f,
-        ):
-            for line in f:
-                row = json.loads(line)
-                if row["run_id"] != run_id or row["dbip_release"] != release:
-                    raise ValueError("Enrichment row belongs to another run or release")
-                copy.write_row(
-                    (
-                        _time(row["bucket_start"]),
-                        str(ipaddress.ip_address(row["ip"])),
-                        row["count"],
-                        Jsonb(row["enrichment"]),
-                    )
-                )
-        count, matched = conn.execute(
-            "SELECT count(*),count(i.ip) FROM incoming_geo g LEFT JOIN incoming_ips i "
-            "ON (g.bucket,g.ip,g.count)=(i.bucket,i.ip,i.count)"
-        ).fetchone()
-        if count != expected_rows or matched != expected_rows:
-            raise ValueError("Enrichment does not match IP observations")
-        if conn.execute(
-            "SELECT 1 FROM incoming_geo GROUP BY ip HAVING count(DISTINCT attributes)>1 LIMIT 1"
-        ).fetchone():
-            raise ValueError("Conflicting enrichment for the same IP")
-        # Cast and compare the same typed values used on insert; missing and null
-        # known fields both map to SQL NULL. Unknown attributes remain lossless.
-        values = [f"(g.attributes->>'{key}')::{kind}" for key, kind in ENRICHMENT_FIELDS.items()]
-        extras = (
-            "g.attributes - ARRAY["
-            + ",".join(f"'{key}'" for key in ENRICHMENT_FIELDS)
-            + "]::text[]"
-        )
-        comparisons = [
-            f"e.{key} IS DISTINCT FROM {value}"
-            for key, value in zip(ENRICHMENT_FIELDS, values, strict=True)
-        ]
-        comparisons.append(f"e.extra_attributes IS DISTINCT FROM ({extras})")
-        if conn.execute(
-            "SELECT 1 FROM incoming_geo g JOIN ip_addresses a USING(ip) "
-            "JOIN ip_enrichment_fields e USING(ip_id) WHERE e.release_id=%s AND ("
-            + " OR ".join(comparisons)
-            + ") LIMIT 1",
-            (release_id,),
-        ).fetchone():
-            raise ValueError("Enrichment release conflicts with prior data")
-        joins = names.resolve(
-            conn, "incoming_geo g", lambda f: f"(g.attributes->>'{f}')::{ENRICHMENT_FIELDS[f]}"
-        )
-        conn.execute(
-            "INSERT INTO ip_enrichment(ip_id,release_id,location_id,network_id,matched,"
-            "extra_attributes) SELECT DISTINCT a.ip_id,%s,location_id.location_id,"
-            "network_id.network_id,(g.attributes->>'matched')::boolean,nullif(("
-            + extras
-            + "),'{}'::jsonb) FROM incoming_geo g JOIN ip_addresses a USING(ip) "
-            + joins
-            + " ON CONFLICT DO NOTHING",
-            (release_id,),
-        )
-        countries = {
-            country: {"requests": int(requests), "unique_ips": unique}
-            for country, requests, unique in conn.execute(
-                "SELECT coalesce(attributes->>'country_code','Unknown'),sum(count),"
-                "count(DISTINCT ip) FROM incoming_geo GROUP BY 1 ORDER BY 1"
-            )
-        }
-        conn.execute(
-            "INSERT INTO run_enrichments VALUES (%s,%s,%s,%s)",
-            (run_key, release_id, checksum, Jsonb(countries)),
-        )
-        conn.execute("DROP TABLE incoming_geo")
-        added += 1
-    return added
 
 
 def status(credentials_file):
