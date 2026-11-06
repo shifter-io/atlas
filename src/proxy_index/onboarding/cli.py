@@ -9,10 +9,11 @@ import json
 import signal
 import sys
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 from ..providers import NoCountryList, load_provider
-from ..runner import run
+from ..runner import RunOptions, run
 from .export import export_campaign
 from .files import digest, read_json
 from .manifest import create, load
@@ -170,6 +171,11 @@ async def _run(args):
         return 130 if stop.is_set() else 0
 
 
+async def _enriched(config, sink, options: RunOptions, *, enricher):
+    """runner.run with the round's enricher added to the scheduler's options."""
+    return await run(config, sink, replace(options, enricher=enricher))
+
+
 async def _round(args):
     """Exit 0 when the round finished (any provider outcome), 130 when stopped."""
     from ..enrichment import LocalEnricher
@@ -178,7 +184,7 @@ async def _round(args):
     stop = asyncio.Event()
     with _signals(stop), LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
         # The round's census runs get the enricher, which turns on the country check.
-        extra = {"run_country": functools.partial(run, enricher=enricher)} if enricher else {}
+        extra = {"run_country": functools.partial(_enriched, enricher=enricher)} if enricher else {}
         result = await execute_round(
             args.manifest, args.region, args.round, proxies.__getitem__, stop=stop, **extra
         )

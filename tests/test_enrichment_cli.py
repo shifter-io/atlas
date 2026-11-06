@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.browser.contracts import RUN_TARGETS
 from proxy_index.cli import main
 from proxy_index.enrichment import LocalEnricher, enrich_run, find_database
@@ -75,7 +75,7 @@ async def test_enrichment_preserves_original_and_versions_output(tmp_path, fake_
     await run(
         RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
         sink,
-        transport_factory=FakeTransport,
+        RunOptions(transport_factory=FakeTransport),
     )
     summary_before = (sink.directory / "summary.json").read_bytes()
     report = enrich_run(sink.directory, database)

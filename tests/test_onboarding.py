@@ -6,6 +6,7 @@ import json
 import stat
 import subprocess
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport
 
-from proxy_index import ProxyConfig, RunConfig, run
+from proxy_index import ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.cli import main
 from proxy_index.models import Outcome
 from proxy_index.onboarding import manifest as campaign
@@ -125,7 +126,7 @@ async def test_fifo_overruns_preserve_all_rounds_and_country_order(manifest):
     clock = Clock(START.timestamp())
     calls = []
 
-    async def measure(config, sink, **kwargs):
+    async def measure(config, sink, options):
         calls.append((config.requested_country, clock.now()))
         # Toronto takes 66 minutes per round, ensuring a growing backlog.
         clock.value += 22 * 60
@@ -157,7 +158,7 @@ async def test_all_rounds_wait_for_absolute_hours_and_close_at_deadline(manifest
     clock = Clock(START.timestamp())
     calls = []
 
-    async def measure(config, sink, **kwargs):
+    async def measure(config, sink, options):
         calls.append(clock.now())
         clock.value += 10
         return fake_measurement()
@@ -179,7 +180,7 @@ async def test_restart_preserves_settings_skips_interrupted_and_completed(manife
     clock = Clock(START.timestamp() + 30)
     calls = []
 
-    async def measure(config, sink, **kwargs):
+    async def measure(config, sink, options):
         calls.append((config.requested_country, config.concurrency, config.timeout_seconds))
         clock.value = START.timestamp() + 86400
         return fake_measurement(status="cancelled", stop_reason="deadline")
@@ -354,9 +355,9 @@ async def test_real_runner_streams_each_success_and_uses_new_rule(tmp_path):
             stop_rule="unique_ratio",
         ),
         SummarySink(),
-        observation_consumer=writer.observe,
-        aggregate_ips=False,
-        transport_factory=Mixed,
+        RunOptions(
+            observation_consumer=writer.observe, aggregate_ips=False, transport_factory=Mixed
+        ),
     )
     await writer.close()
     assert summary.completed == 1000 and summary.successes == writer.rows == 500
@@ -381,9 +382,9 @@ async def test_deadline_cancels_slow_requests_without_observations():
         run(
             RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
             SummarySink(),
-            transport_factory=Slow,
-            observation_consumer=observe,
-            deadline=time.time() + 0.06,
+            RunOptions(
+                transport_factory=Slow, observation_consumer=observe, deadline=time.time() + 0.06
+            ),
         ),
         1,
     )
@@ -400,8 +401,7 @@ async def test_observation_failure_stops_shared_runner():
         await run(
             RunConfig("generic_http", ProxyConfig("http", "localhost", 8080)),
             SummarySink(),
-            transport_factory=FakeTransport,
-            observation_consumer=broken,
+            RunOptions(transport_factory=FakeTransport, observation_consumer=broken),
         )
 
 
@@ -473,7 +473,7 @@ async def test_exactly_half_unique_keeps_running_and_failure_crosses_threshold()
             stop_rule="unique_ratio",
         ),
         SummarySink(),
-        transport_factory=Half,
+        RunOptions(transport_factory=Half),
     )
     assert result.completed == 1001 and result.successes == 500
     assert result.stop_reason == "unique_ratio"
@@ -499,9 +499,9 @@ async def test_deadline_rejects_a_late_response_even_without_watchdog_tick(monke
     result = await run(
         RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=1),
         SummarySink(),
-        transport_factory=Late,
-        observation_consumer=observe,
-        deadline=time.time() + 0.01,
+        RunOptions(
+            transport_factory=Late, observation_consumer=observe, deadline=time.time() + 0.01
+        ),
     )
     assert not observed and result.stop_reason == "deadline"
     assert result.completed == 0
@@ -522,9 +522,7 @@ async def test_cancellation_during_backpressure_keeps_completed_observation():
                 "generic_http", ProxyConfig("http", "localhost", 8080), requests=10, concurrency=1
             ),
             SummarySink(),
-            transport_factory=FakeTransport,
-            observation_consumer=observe,
-            stop=stop,
+            RunOptions(transport_factory=FakeTransport, observation_consumer=observe, stop=stop),
         )
     )
     await entered.wait()
@@ -569,11 +567,11 @@ async def test_onboarding_never_calls_normal_persistence(manifest, monkeypatch):
     monkeypatch.setattr(JsonSink, "start", forbidden)
     clock = Clock(START.timestamp())
 
-    async def measure(config, sink, **kwargs):
+    async def measure(config, sink, options):
         # Exercise the real shared runner while controlling campaign time outside it.
-        kwargs.pop("deadline")
         config = RunConfig("generic_http", config.proxy, requests=1, concurrency=1)
-        result = await run(config, sink, transport_factory=FakeTransport, **kwargs)
+        options = replace(options, deadline=None, transport_factory=FakeTransport)
+        result = await run(config, sink, options)
         clock.value = START.timestamp() + 86400
         return result
 
@@ -612,10 +610,12 @@ async def test_runner_uses_campaign_clock_for_observation_timestamp():
     result = await run(
         RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=1),
         SummarySink(),
-        transport_factory=FakeTransport,
-        observation_consumer=observe,
-        deadline=anchor + 60,
-        wall_clock=lambda: anchor,
+        RunOptions(
+            transport_factory=FakeTransport,
+            observation_consumer=observe,
+            deadline=anchor + 60,
+            wall_clock=lambda: anchor,
+        ),
     )
     assert result.completed == 1
     assert anchor <= observed[0] < anchor + 1

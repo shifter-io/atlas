@@ -38,9 +38,9 @@ async def calibrate(manifest_path, region, provider_config, credentials_file):
         loop.add_signal_handler(sig, stop.set)
     completed = 0
 
-    async def measure(*args, **kwargs):
+    async def measure(config, sink, options):
         nonlocal completed
-        summary = await run(*args, **kwargs)
+        summary = await run(config, sink, options)
         completed += 1
         if completed == len(countries):
             # Set this before returning to the scheduler: no second-round request

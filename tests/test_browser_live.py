@@ -31,7 +31,7 @@ from proxy_index.browser.pool import BrowserPool
 from proxy_index.browser.settings import BrowserOptions, TargetSettings
 from proxy_index.browser.transport import BrowserTransport
 from proxy_index.models import ProxyConfig, RequestContext, RunConfig
-from proxy_index.runner import run
+from proxy_index.runner import RunOptions, run
 from proxy_index.sinks import JsonSink
 from proxy_index.targets import TargetRegistry
 
@@ -139,8 +139,7 @@ async def test_a_pool_of_three_runs_thirty_tries_and_leaks_no_process(executable
             summary = await run(
                 config(port, requests=30, concurrency=6),
                 JsonSink(tmp_path),
-                targets=registry,
-                transport_factory=factory,
+                RunOptions(targets=registry, transport_factory=factory),
             )
         stats = pool.stats()
     print(f"30 tries: {summary.successes} ok, latency {summary.latency_ms}, pool {stats}")

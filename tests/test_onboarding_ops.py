@@ -32,7 +32,7 @@ async def test_calibration_stops_before_second_round_even_when_first_overruns(
     clock = Clock(START.timestamp())
     calls = []
 
-    async def measured(config, sink, **kwargs):
+    async def measured(config, sink, options):
         calls.append(config.requested_country)
         clock.value += 3700  # Every country overruns the next hourly boundary.
         return fake_measurement()
@@ -65,7 +65,7 @@ async def test_region_checkpoint_is_refused_unless_resumed_and_a_crash_fails_it(
     with pytest.raises(ValueError, match="No region checkpoint"):
         await execute(path, "tor1", Proxy, resume=True)
 
-    async def crashed(config, sink, **kwargs):
+    async def crashed(config, sink, options):
         raise OSError("disk full")
 
     with pytest.raises(OSError, match="disk full"):

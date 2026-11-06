@@ -4,13 +4,14 @@ count like duplicates, and a run with only rate limits stops after two minutes."
 import asyncio
 import gzip
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from aiohttp import web
 from helpers import FakeTransport, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index import cli as cli_module
 from proxy_index.answers import Answers
 from proxy_index.cli import main
@@ -85,8 +86,10 @@ async def test_rl1_429s_do_not_consume_the_request_goal(tmp_path):
     result = await run(
         config(requests=100, concurrency=10),
         JsonSink(tmp_path),
-        progress=progress.append,
-        transport_factory=scripted(lambda n: limited() if n % 2 else ok(f"192.0.2.{n % 7}")),
+        RunOptions(
+            progress=progress.append,
+            transport_factory=scripted(lambda n: limited() if n % 2 else ok(f"192.0.2.{n % 7}")),
+        ),
     )
     assert result.completed == 200 and result.successes == 100
     assert result.rate_limited == {"429": 100} and result.total_errors == 100
@@ -112,7 +115,7 @@ async def test_rl1_connect_refusals_are_rate_limits_only_while_succeeding(tmp_pa
     result = await run(
         config(requests=5, answer_classes=answer_classes("dataimpulse")),
         JsonSink(tmp_path),
-        transport_factory=scripted(answers),
+        RunOptions(transport_factory=scripted(answers)),
     )
     assert result.completed == 7 and result.successes == 3
     assert result.rate_limited == {"429": 0, "proxy_connect": 2}
@@ -124,7 +127,7 @@ async def test_rl1_rate_limit_safety_stop_after_two_minutes_without_success(tmp_
     result = await run(
         config(requests=1000),
         JsonSink(tmp_path / "only"),
-        transport_factory=scripted(lambda n: limited(at=10.0 * (n - 1))),
+        RunOptions(transport_factory=scripted(lambda n: limited(at=10.0 * (n - 1)))),
     )
     assert result.stop_reason == "rate_limited" and result.status == "completed"
     assert result.completed == 13 and result.successes == 0  # stops at t = 120 s
@@ -135,7 +138,9 @@ async def test_rl1_rate_limit_safety_stop_after_two_minutes_without_success(tmp_
         return limited(at=10.0 * n) if n % 2 else timeout(10.0 * n)
 
     result = await run(
-        config(requests=1000), JsonSink(tmp_path / "mixed"), transport_factory=scripted(mixed)
+        config(requests=1000),
+        JsonSink(tmp_path / "mixed"),
+        RunOptions(transport_factory=scripted(mixed)),
     )
     assert result.stop_reason == "rate_limited" and result.completed == 12  # t = 120 s
     assert result.rate_limited == {"429": 5} and result.timeouts == 6
@@ -145,7 +150,7 @@ async def test_rl1_no_safety_stop_without_rate_limits(tmp_path):
     result = await run(
         config(requests=40),
         JsonSink(tmp_path),
-        transport_factory=scripted(lambda n: timeout(10.0 * n)),
+        RunOptions(transport_factory=scripted(lambda n: timeout(10.0 * n))),
     )
     assert result.stop_reason == "requests" and result.completed == 40
 
@@ -155,7 +160,7 @@ async def test_rl1_no_safety_stop_without_rate_limits(tmp_path):
     result = await run(
         config(requests=3),
         JsonSink(tmp_path / "recovering"),
-        transport_factory=scripted(recovering),
+        RunOptions(transport_factory=scripted(recovering)),
     )
     assert result.stop_reason == "requests" and result.completed == 23
 
@@ -166,7 +171,9 @@ async def test_rl1_census_rule_4_excludes_rate_limits_from_the_sample(tmp_path):
 
     progress = []
     result = await run(
-        census(), JsonSink(tmp_path), transport_factory=scripted(answers), progress=progress.append
+        census(),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=scripted(answers), progress=progress.append),
     )
     assert result.stop_reason == "unique_ratio"
     assert result.completed == 513 and result.census_requests == 13
@@ -184,7 +191,7 @@ async def test_rl1_469_and_429_together_for_geonode(tmp_path):
     result = await run(
         census(min_sample=4, answer_classes=answer_classes("geonode")),
         JsonSink(tmp_path),
-        transport_factory=scripted(answers),
+        RunOptions(transport_factory=scripted(answers)),
     )
     assert result.stop_reason == "no_success"
     assert result.completed == 24 and result.census_requests == 4
@@ -204,9 +211,9 @@ async def test_ctry_other_country_exits_count_like_duplicates(tmp_path):
     result = await run(
         census(requested_country="us"),
         JsonSink(tmp_path),
-        enricher=Countries(),
-        transport_factory=scripted(answers),
-        observation_consumer=observe,
+        RunOptions(
+            enricher=Countries(), transport_factory=scripted(answers), observation_consumer=observe
+        ),
     )
     assert result.stop_reason == "unique_ratio" and result.completed == 10
     assert result.successes == 10 and result.other_country == 5 and result.unique_ips == 3
@@ -220,8 +227,9 @@ async def test_ctry_all_other_country_stops_at_min_sample(tmp_path):
     result = await run(
         census(requested_country="US"),
         JsonSink(tmp_path),
-        enricher=Countries(),
-        transport_factory=scripted(lambda n: ok(f"198.51.100.{n}")),
+        RunOptions(
+            enricher=Countries(), transport_factory=scripted(lambda n: ok(f"198.51.100.{n}"))
+        ),
     )
     assert result.stop_reason == "unique_ratio" and result.completed == 10
     assert result.unique_ips == 0 and result.other_country == 10
@@ -231,15 +239,16 @@ async def test_ctry_unmatched_address_counts_in_country(tmp_path):
     result = await run(
         config(requests=20, requested_country="US"),
         JsonSink(tmp_path),
-        enricher=Countries(),
-        transport_factory=scripted(lambda n: ok(f"203.0.113.{n}")),
+        RunOptions(
+            enricher=Countries(), transport_factory=scripted(lambda n: ok(f"203.0.113.{n}"))
+        ),
     )
     assert result.unique_ips == 20 and result.other_country == 0
     # Without an enricher the check is off: other_country is not reported.
     plain = await run(
         config(requests=2, requested_country="US"),
         JsonSink(tmp_path / "off"),
-        transport_factory=scripted(lambda n: ok(f"198.51.100.{n}")),
+        RunOptions(transport_factory=scripted(lambda n: ok(f"198.51.100.{n}"))),
     )
     assert plain.unique_ips == 2 and plain.other_country is None
 
@@ -248,7 +257,7 @@ async def test_ctry_no_inventory_status_counts_in_sample_not_as_unique(tmp_path)
     result = await run(
         census(answer_classes=GEONODE),
         JsonSink(tmp_path / "empty"),
-        transport_factory=scripted(lambda n: limited(465)),
+        RunOptions(transport_factory=scripted(lambda n: limited(465))),
     )
     assert result.stop_reason == "no_success" and result.completed == 10
     assert result.no_inventory == 10 and result.total_errors == 10
@@ -260,7 +269,7 @@ async def test_ctry_no_inventory_status_counts_in_sample_not_as_unique(tmp_path)
     result = await run(
         census(answer_classes=GEONODE),
         JsonSink(tmp_path / "thin"),
-        transport_factory=scripted(thin),
+        RunOptions(transport_factory=scripted(thin)),
     )
     assert result.stop_reason == "unique_ratio" and result.completed == 10
     assert result.no_inventory == 7 and result.unique_ips == 3
@@ -291,7 +300,9 @@ async def test_rl1_configs_without_answer_classes_are_unchanged(tmp_path):
     progress = []
     first_limited = scripted(lambda n: limited() if n == 1 else ok("192.0.2.8"))
     result = await run(
-        count, JsonSink(tmp_path), progress=progress.append, transport_factory=first_limited
+        count,
+        JsonSink(tmp_path),
+        RunOptions(progress=progress.append, transport_factory=first_limited),
     )
     # Without answer classes a 429 is an ordinary answer: it consumes the request goal.
     assert result.completed == 100 and result.successes == 99
@@ -324,15 +335,10 @@ def test_cli_answer_classes_and_mmdb_build_the_config_and_enricher(capsys, monke
         def __exit__(self, *args):
             seen["closed"] = True
 
-    async def fake_run(config, sink, *, stop, enricher):
-        seen.update(classes=config.answer_classes, enricher=enricher)
-        return await run(
-            config,
-            sink,
-            stop=stop,
-            enricher=enricher,
-            transport_factory=scripted(lambda n: ok("192.0.2.1")),
-        )
+    async def fake_run(config, sink, options):
+        seen.update(classes=config.answer_classes, enricher=options.enricher)
+        factory = scripted(lambda n: ok("192.0.2.1"))
+        return await run(config, sink, replace(options, transport_factory=factory))
 
     monkeypatch.setattr("proxy_index.enrichment.LocalEnricher", Enricher)
     monkeypatch.setattr(cli_module, "run", fake_run)

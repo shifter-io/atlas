@@ -4,6 +4,7 @@ import json
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import psycopg
@@ -12,7 +13,7 @@ from helpers import FakeTransport
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.cli import main
 from proxy_index.providers.credentials import read_credentials
 from proxy_index.stats import Histogram
@@ -95,7 +96,7 @@ async def measurement(
             product=product,
         ),
         sink,
-        transport_factory=transport_factory,
+        RunOptions(transport_factory=transport_factory),
     )
     return sink.directory
 
@@ -231,8 +232,8 @@ def test_cli_automatic_ingest_and_durable_fallback(
     capsys,
     available,
 ):
-    async def simulated_run(config, sink, **kwargs):
-        return await run(config, sink, transport_factory=FakeTransport, **kwargs)
+    async def simulated_run(config, sink, options):
+        return await run(config, sink, replace(options, transport_factory=FakeTransport))
 
     monkeypatch.setattr("proxy_index.cli.run", simulated_run)
     monkeypatch.setenv("PROXY_URL", "http://unused.invalid:8080")
@@ -502,7 +503,7 @@ async def test_dimensions_keep_same_city_and_asn_with_different_details(database
             product="residential",
         ),
         sink,
-        transport_factory=SecondIP,
+        RunOptions(transport_factory=SecondIP),
     )
     enrichment(
         sink.directory,
@@ -732,8 +733,7 @@ async def test_ingest_reconciles_replacements_and_other_country(database, tmp_pa
             answer_classes=AnswerClasses(("429",), ()),
         ),
         sink,
-        transport_factory=Answers,
-        enricher=Countries(),
+        RunOptions(transport_factory=Answers, enricher=Countries()),
     )
     assert summary.requested == 20 and summary.started == 29 and summary.not_started == 0
     assert summary.rate_limited == {"429": 9} and summary.other_country > 0
@@ -777,8 +777,7 @@ async def test_ingest_counts_replacements_before_any_database_access(tmp_path):
             answer_classes=AnswerClasses(("429",), ()),
         ),
         sink,
-        transport_factory=Answers,
-        enricher=Countries(),
+        RunOptions(transport_factory=Answers, enricher=Countries()),
     )
     path = sink.directory / "summary.json"
     saved = json.loads(path.read_text())

@@ -54,12 +54,12 @@ async def test_all_eight_days_hourly_no_overlap_retry_and_complete_export(tmp_pa
         window = campaign.regional_window(m, region)
         calls = []
 
-        async def run(config, sink, clock=clock, window=window, calls=calls, **kw):
+        async def run(config, sink, options, clock=clock, window=window, calls=calls):
             now = clock.now()
             assert config.retry_http_469 and config.concurrency == 1500 and config.processes == 4
             assert config.target_url == "http://example.test/"
-            assert campaign.moment(window["starts_at"]).timestamp() <= now < kw["deadline"]
-            assert kw["deadline"] == campaign.moment(window["ends_at"]).timestamp()
+            assert campaign.moment(window["starts_at"]).timestamp() <= now < options.deadline
+            assert options.deadline == campaign.moment(window["ends_at"]).timestamp()
             calls.append((config.proxy.country, now))
             return fake_measurement(completed=0)
 

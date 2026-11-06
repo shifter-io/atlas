@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
-from proxy_index import JsonSink, RunConfig, load_provider, run
+from proxy_index import JsonSink, RunConfig, RunOptions, load_provider, run
 from proxy_index.enrichment import LocalEnricher
 
 
@@ -48,8 +48,7 @@ async def check(args):
                         timeout_seconds=15,
                     ),
                     sink,
-                    enricher=enricher,
-                    observation_consumer=observe,
+                    RunOptions(enricher=enricher, observation_consumer=observe),
                 )
                 path = sink.directory / "observations.jsonl.gz"
                 with gzip.open(path, "wt") as stream:
