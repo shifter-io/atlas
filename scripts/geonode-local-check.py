@@ -37,14 +37,7 @@ async def check_one(args, output, enricher, target, spec):
     observations = []
 
     async def observe(ip, timestamp):
-        observations.append(
-            {
-                "ip": ip,
-                "requested_country": country,
-                "observed_at": datetime.fromtimestamp(timestamp, UTC).isoformat(),
-                "geo": enricher.lookup(ip),
-            }
-        )
+        observations.append(observation(enricher, ip, timestamp, country))
 
     sink = JsonSink(output)
     result = await run(
@@ -78,6 +71,15 @@ async def check_one(args, output, enricher, target, spec):
         "status_codes": result.status_codes,
         "directory": str(sink.directory),
         "observations_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def observation(enricher, ip, timestamp, country):
+    return {
+        "ip": ip,
+        "requested_country": country,
+        "observed_at": datetime.fromtimestamp(timestamp, UTC).isoformat(),
+        "geo": enricher.lookup(ip),
     }
 
 
