@@ -7,8 +7,8 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from daily_cases import daily_root
 from estimates_cases import POLICY, formula, imported, stored
-from test_daily import daily_root
 from test_onboarding import START
 
 from proxy_index.calculated import store
