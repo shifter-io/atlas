@@ -5,8 +5,8 @@
 #
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
-# pytest-xdist on every CPU, each worker with its own databases in one PostgreSQL
-# (CI-SPEED-1). Then scripts/ci/timing.py writes the 20 slowest tests and the test
+# pytest-xdist on every CPU, each worker with its own databases (copies of its template)
+# in one throwaway PostgreSQL without crash safety (CI-SPEED-1, CI-FAST-2). Then scripts/ci/timing.py writes the 20 slowest tests and the test
 # step's time to the job summary and the ci-timing artifact (90 days), and fails the
 # job when a test takes 90 s or more or the step over 240 s (CI-TIME-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
@@ -53,7 +53,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The pull request's exact head, or the queue's merge commit (github.sha),
           # with full history for the diff-based checks.
@@ -172,7 +172,8 @@ jobs:
         if: env.CODE == 'true'
         run: |
           port=$(uv run --no-editable python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port"
+          # A throwaway cluster: no crash safety (fsync and the rest off, CI-FAST-2).
+          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port" --ephemeral
           echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
 
       - name: Checks in the background, tests in parallel
@@ -204,19 +205,27 @@ jobs:
             --basetemp="$RUNNER_TEMP/scope-tmp" tests/test_campaign_scope.py -q
           background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
 
+          # Is any test marked serial? Collected alongside the tests (exit 5: none), so an empty
+          # serial set costs nothing; any other status runs the set, which then reports it.
+          ( rc=0; uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+              -m serial > "$EV/serial-collect.log" 2>&1 || rc=$?; echo "$rc" > "$EV/serial-collect" ) &
+          collecting=$!
+
           # Every test, database tests included, with branch coverage: one xdist worker per
-          # CPU, then the `serial` set alone, appending to the same coverage.
+          # CPU (longest first once tests/durations.json exists, tests/conftest.py), then the
+          # `serial` set alone, appending to the same coverage.
           report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
           uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
             --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
           serial=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-            --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
-            --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
-          # Exit status 5: no test is marked serial.
-          [ "$serial" -eq 5 ] && serial=0
+          wait "$collecting"
+          if [ "$(cat "$EV/serial-collect")" != 5 ]; then
+            uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
+              --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
+              --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
+          fi
           wait
 
           failed=0
@@ -247,13 +256,16 @@ jobs:
         if: always() && env.CODE == 'true' && steps.tests.outcome != 'skipped'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: >-
-          python3 scripts/ci/timing.py --title "CI time: tier1 tests" --start "$EV/step-start"
-          --out "$EV/timing.json" "$EV/junit.xml" "$EV/junit-serial.xml"
+        run: |
+          results=("$EV/junit.xml")
+          # The serial set runs, and writes its results, only when a test is marked serial.
+          if [ -e "$EV/junit-serial.xml" ]; then results+=("$EV/junit-serial.xml"); fi
+          python3 scripts/ci/timing.py --title "CI time: tier1 tests" --start "$EV/step-start" \
+            --out "$EV/timing.json" "${results[@]}"
 
       - name: Keep the CI time record (scripts/ci/timing_history.py reads it)
         if: always() && steps.timing.outcome != 'skipped'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ci-timing
           path: ${{ runner.temp }}/ev/timing.json

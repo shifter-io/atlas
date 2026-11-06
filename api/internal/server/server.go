@@ -150,18 +150,8 @@ func (s *Server) Current() *Version { return s.current.Load() }
 func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	s.refreshMu.Lock()
 	defer s.refreshMu.Unlock()
-	if s.files == nil {
-		err := errors.New("no files directory (Options.FilesDir) for the dataset file")
-		s.fail(err)
-		return false, err
-	}
-	s.files.expire(s.opts.Now())
-	fp, err := s.src.Fingerprint(ctx)
-	s.state.Lock()
-	s.state.lastCheck = time.Now()
-	s.state.Unlock()
+	fp, err := s.fingerprint(ctx)
 	if err != nil {
-		s.fail(fmt.Errorf("fingerprint: %w", err))
 		return false, err
 	}
 	cur := s.current.Load()
@@ -171,22 +161,56 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	case changeEvents:
 		return s.refreshEvents(ctx, cur)
 	}
-	start := time.Now()
-	v, err := s.build(ctx, cur)
+	v, err := s.rebuild(ctx, cur)
 	if err != nil {
 		s.fail(err)
 		return false, err
+	}
+	s.current.Store(v)
+	s.rebuilt(v)
+	return true, nil
+}
+
+// fingerprint drops the dataset files whose grace ended and reads the
+// source's fingerprint, recording the check; a failure is recorded too.
+func (s *Server) fingerprint(ctx context.Context) (store.Fingerprint, error) {
+	if s.files == nil {
+		err := errors.New("no files directory (Options.FilesDir) for the dataset file")
+		s.fail(err)
+		return store.Fingerprint{}, err
+	}
+	s.files.expire(s.opts.Now())
+	fp, err := s.src.Fingerprint(ctx)
+	s.state.Lock()
+	s.state.lastCheck = time.Now()
+	s.state.Unlock()
+	if err != nil {
+		s.fail(fmt.Errorf("fingerprint: %w", err))
+	}
+	return fp, err
+}
+
+// rebuild builds a new Version from prev and gives it its dataset file.
+func (s *Server) rebuild(ctx context.Context, prev *Version) (*Version, error) {
+	start := time.Now()
+	v, err := s.build(ctx, prev)
+	if err != nil {
+		return nil, err
 	}
 	f, err := s.files.ensure(v.Result.Dataset, datasetMarker(v.Result.Fingerprint), s.opts.Now())
 	if err == nil {
 		err = setDataset(v, f)
 	}
 	if err != nil {
-		s.fail(err)
-		return false, err
+		return nil, err
 	}
 	v.BuildTime = time.Since(start)
-	s.current.Store(v)
+	return v, nil
+}
+
+// rebuilt records and logs the Version that now serves, with the pages it
+// does not serve (unservedPages) and its site gaps when they changed.
+func (s *Server) rebuilt(v *Version) {
 	unserved := s.unservedPages(v)
 	s.state.Lock()
 	s.state.builds++
@@ -203,7 +227,6 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	if len(unserved) > 0 {
 		s.log.Warn("published products without their network pages", "version", v.ID, "pages", unserved)
 	}
-	return true, nil
 }
 
 func (s *Server) fail(err error) {
