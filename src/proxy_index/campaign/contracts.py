@@ -35,7 +35,30 @@ CAMPAIGN_ROLES = {
     "manager": (MANAGER_TAG, MANAGER_NAME_RE),
     "builder": (BUILDER_TAG, BUILDER_NAME_RE),
 }
-ROLES = {**CAMPAIGN_ROLES, "pulse": (PULSE_TAG, PULSE_NAME_RE)}
+PULSE_ROLE = (PULSE_TAG, PULSE_NAME_RE)
+ROLES = {**CAMPAIGN_ROLES, "pulse": PULSE_ROLE}
+# CAMP-STAGING-1: a staging manager runs beside production on the same account. Its droplets,
+# firewalls and keys carry the pi-camp-stg- prefix; worker names and campaign tags stay the
+# campaign's (its short id), and the worker image is production's, read only.
+PRODUCTION, STAGING = "production", "staging"
+STAGING_PREFIX = "pi-camp-stg-"
+STAGING_MANAGER_NAME_RE = r"^pi-camp-stg-manager-[0-9]{8}-[0-9a-f]{4}$"
+STAGING_ROLES = {
+    "worker": ("pi-camp-stg-worker", WORKER_NAME_RE),
+    "manager": ("pi-camp-stg-manager", STAGING_MANAGER_NAME_RE),
+    "builder": ("pi-camp-stg-builder", r"^pi-camp-stg-builder-[0-9]{8}-[0-9a-f]{4}$"),
+}
+# Environment -> (resource prefix, role -> (role tag, name pattern)).
+ENVIRONMENTS = {
+    PRODUCTION: (RESOURCE_PREFIX, CAMPAIGN_ROLES),
+    STAGING: (STAGING_PREFIX, STAGING_ROLES),
+}
+# Every role of every environment, and the pulse role: a droplet carries exactly one role tag.
+ALL_ROLES = (
+    *(role for _, table in ENVIRONMENTS.values() for role in table.values()),
+    PULSE_ROLE,
+)
+ALL_ROLE_TAGS = frozenset(tag for tag, _ in ALL_ROLES)
 CAMPAIGN_ID_RE = r"^[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$"
 NETWORK_RE = r"^[a-z0-9][a-z0-9-]*$"
 # CPU-Optimized (c-2, c2-4, c-4-intel) or Basic (s-2vcpu-4gb, s-4vcpu-8gb-amd) droplet slugs.
@@ -63,6 +86,50 @@ DropletStatus = Literal[
     "destroy_refused",
     "destroy_failed",
 ]
+
+
+def check_environment(value: object) -> str:
+    if value not in ENVIRONMENTS:
+        raise ValueError(f"environment must be one of {', '.join(ENVIRONMENTS)}")
+    return str(value)
+
+
+def environment_of(name: str) -> str | None:
+    """The environment whose resource prefix `name` carries (staging's is the longer), else
+    None. A campaign tag (`pi-camp-<short id>`) reads as production's."""
+    if name.startswith(STAGING_PREFIX):
+        return STAGING
+    return PRODUCTION if name.startswith(RESOURCE_PREFIX) else None
+
+
+def roles(environment: str) -> dict[str, tuple[str, str]]:
+    """Role -> (role tag, name pattern) of one environment, with the pulse role."""
+    return ROLES | ENVIRONMENTS[check_environment(environment)][1]
+
+
+def tags(environment: str) -> dict[str, str]:
+    """Role -> role tag of one environment's campaign droplets (worker, manager, builder)."""
+    found = ENVIRONMENTS[check_environment(environment)][1]
+    return {role: tag for role, (tag, _) in found.items()}
+
+
+@dataclass(frozen=True)
+class Names:
+    """One environment's resource names: its firewalls, the manager and dated SSH keys."""
+
+    prefix: str
+
+    def firewall(self, role: str) -> str:
+        return f"{self.prefix}{role}-fw"
+
+    def dated(self, role: str, day: datetime, suffix: str = "") -> str:
+        """`<prefix><role>-<yyyymmdd>[-<suffix>]`: the manager (role "manager", a random
+        suffix) or an SSH key (role "mac" or "worker")."""
+        return f"{self.prefix}{role}-{day:%Y%m%d}" + (f"-{suffix}" if suffix else "")
+
+
+def names(environment: str) -> Names:
+    return Names(ENVIRONMENTS[check_environment(environment)][0])
 
 
 def short_id(cid: str) -> str:
@@ -136,6 +203,7 @@ class CampaignSpec:
     hours: int = 24  # the number of slots (24 for a campaign; fewer for a compressed test)
     schema_version: int = 1
     slot_minutes: int = 60  # slot k is scheduled at starts_at + k * slot_minutes
+    environment: str = PRODUCTION  # the manager's; its workers carry that environment's tag
 
     def validate(self) -> CampaignSpec:
         short_id(self.campaign_id)
@@ -170,6 +238,7 @@ class CampaignSpec:
                 "timing",
             ),
             (not 1 <= self.concurrency <= 5000, "concurrency"),
+            (self.environment not in ENVIRONMENTS, "environment"),
         ]
         integers = (
             "hours",
@@ -187,7 +256,11 @@ class CampaignSpec:
         return self
 
     def to_json(self) -> str:
-        return json.dumps(asdict(self), indent=2, sort_keys=True, allow_nan=False) + "\n"
+        """A production spec is written without `environment`, exactly as before staging."""
+        raw = asdict(self)
+        if raw["environment"] == PRODUCTION:
+            del raw["environment"]
+        return json.dumps(raw, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
     @classmethod
     def from_json(cls, text: str) -> CampaignSpec:
@@ -299,13 +372,14 @@ class Droplet:
 
 @dataclass(frozen=True)
 class Scope:
-    """What one campaign owns: its short id, project and recorded manager."""
+    """What one campaign owns: its short id, project, recorded manager and environment."""
 
     campaign_id: str
     sid: str
     project_id: str
     manager_droplet_id: str
     created_at: datetime
+    environment: str = PRODUCTION
 
 
 class Cloud(Protocol):

@@ -14,8 +14,8 @@ import pytest
 from campaign_fakes import CID
 from campaign_hour_cases import make_spec
 from daily_cases import chunk, daily_root, observation
+from onboarding_round_cases import make
 from test_onboarding import START
-from test_onboarding_round import make
 
 from proxy_index.campaign.contracts import spec_path
 from proxy_index.cli import main

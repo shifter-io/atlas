@@ -1,6 +1,6 @@
 """Window latency objects: the percentiles and the mean (KEYS) of light-load latency, an
 equal-weight mix of histograms (blend, blend_mean), and of latency under load (load_factor,
-under_load_values, averaged; aggregate.under_load()).
+under_load_values, averaged; underload.under_load()).
 
 Histograms are Counters of ms -> count, binned at the ceiling of each latency in ms (stats
 Histogram), so a mean over them is up to about 1 ms above the mean of the raw latencies, as

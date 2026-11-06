@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / ".state" / "postgres"
 DATA = STATE / "data"
 PRIVATE = ROOT / ".secrets"
+# A throwaway test cluster (CI) need not survive a crash; the local and production
+# clusters never get these.
+EPHEMERAL = "fsync = off\nsynchronous_commit = off\nfull_page_writes = off\n"
 
 
 def save_private(path, data):
@@ -33,6 +36,12 @@ def parse_args():
     parser.add_argument("command", choices=("init", "start", "stop", "status"))
     parser.add_argument("--bin-dir", type=Path)
     parser.add_argument("--port", type=int, default=55432)
+    parser.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help="a new cluster skips crash safety (fsync, synchronous_commit, full_page_writes); "
+        "only for a throwaway test cluster",
+    )
     return parser.parse_args()
 
 
@@ -79,7 +88,7 @@ def load_credentials(runtime):
     return read_credentials(admin_path, "postgres"), read_credentials(app_path, "postgres")
 
 
-def init_cluster(binary, admin, runtime):
+def init_cluster(binary, admin, runtime, *, ephemeral=False):
     """Create the data directory and point the server at its address and socket."""
     password_path = PRIVATE / ".initdb-password"
     try:
@@ -111,7 +120,7 @@ def init_cluster(binary, admin, runtime):
         stream.write(
             f"\nlisten_addresses = '127.0.0.1'\nport = {runtime['port']}\n"
             f"unix_socket_directories = '{socket_value}'\n"
-            "password_encryption = 'scram-sha-256'\n"
+            "password_encryption = 'scram-sha-256'\n" + (EPHEMERAL if ephemeral else "")
         )
 
 
@@ -146,7 +155,7 @@ def main():
     if not (DATA / "PG_VERSION").exists():
         if args.command != "init":
             raise ValueError("Initialize the project cluster first")
-        init_cluster(binary, admin, runtime)
+        init_cluster(binary, admin, runtime, ephemeral=args.ephemeral)
     running = subprocess.run(ctl + ["status"], capture_output=True).returncode == 0
     if not running:
         subprocess.run(ctl + ["start", "-l", str(STATE / "server.log"), "-w"], check=True)

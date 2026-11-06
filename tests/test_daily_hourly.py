@@ -10,7 +10,7 @@ import shutil
 import pytest
 from campaign_hour_cases import make_spec
 from daily_cases import formulas, hours, template
-from test_onboarding_round import make
+from onboarding_round_cases import make
 
 from proxy_index.cli import main
 from proxy_index.daily import hourly

@@ -433,7 +433,9 @@ var (
 // LoadLists reads every input in one consistent read-only snapshot, holding
 // the typed lists in lists between calls (nil: none held). Only the
 // framework schema is required; site tables that are missing read as empty
-// (Inputs.SiteGaps names them).
+// (Inputs.SiteGaps names them). A v4 build's network lists read their rows
+// through db when a build or a request needs them: db stays open while the
+// Inputs, or a build made from them, are used.
 //
 // Before K2 a build's typed rows are a calculated_breakdowns partition, which
 // a publication can drop: the snapshot would still see the build as current
@@ -466,7 +468,7 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 	steps = append(steps, in.communitySteps(ctx, tx, l)...)
 	steps = append(steps, in.frameworkSteps(ctx, tx)...)
 	steps = append(steps,
-		func() error { return in.loadSnapshot(ctx, tx, lists) },
+		func() error { return in.loadSnapshot(ctx, db, tx, lists) },
 		func() error { return in.loadEvents(ctx, tx) },
 	)
 	for _, step := range steps {
@@ -611,8 +613,8 @@ func (in *Inputs) frameworkSteps(ctx context.Context, tx pgx.Tx) []func() error 
 }
 
 // loadSnapshot reads the current snapshot row, if any, and its parts,
-// networks or typed lists.
-func (in *Inputs) loadSnapshot(ctx context.Context, tx pgx.Tx, lists *Lists) error {
+// networks (whose rows are read through db afterwards) or typed lists.
+func (in *Inputs) loadSnapshot(ctx context.Context, db TxBeginner, tx pgx.Tx, lists *Lists) error {
 	var s SnapshotRow
 	var parts *int
 	var v4 bool
@@ -633,7 +635,7 @@ func (in *Inputs) loadSnapshot(ctx context.Context, tx pgx.Tx, lists *Lists) err
 		afterSnapshot()
 	}
 	if v4 {
-		return s.readNetworks(ctx, tx, lists)
+		return s.readNetworks(ctx, tx, lists, db)
 	}
 	lists.dropNetworks()
 	return s.readLists(ctx, tx, lists)

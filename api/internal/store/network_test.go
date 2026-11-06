@@ -2,12 +2,14 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/jackc/pgx/v5"
 )
 
 func ptr(s string) *string { return &s }
@@ -120,10 +122,13 @@ func TestSetNetworksKeepsTheCompactLists(t *testing.T) {
 		t.Fatalf("networks %v, places %v", s.Networks, s.Places)
 	}
 	l := s.Networks[PlaceWindow{1, NetworkCohort, 720}]
-	if l.Len("city_asn") != 2 || l.Row("city_asn", 0).Place != l.Row("city", 0).Place || s.Networks[PlaceWindow{2, NetworkCohort, 720}].Len("asn") != 0 {
+	if l.Len("city_asn") != 2 || dim(t, l, "city_asn").Row(0).Place != dim(t, l, "city").Row(0).Place || s.Networks[PlaceWindow{2, NetworkCohort, 720}].Len("asn") != 0 {
 		t.Errorf("list 11 %+v", l)
 	}
-	head := l.headRows()
+	head, err := l.headRows(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if c := head.Rows("country")[1]; c.Ips != 8 || c.Completed != -1 || c.Observations != -1 || c.P90 != -1 || c.P99 != -1 || c.Challenges != -1 ||
 		c.Blocks != -1 || head.Rows("city") != nil || len(head.Rows("asn")) != 61 {
 		t.Errorf("head rows: country %+v, %d ASN rows", c, len(head.Rows("asn")))
@@ -142,7 +147,7 @@ func TestSetNetworksRefusesAHeadWithoutNetworks(t *testing.T) {
 		}
 	}
 	s := &SnapshotRow{Payload: []byte(netHead)}
-	err := s.setNetworks(func(ids []int64) (map[int64]*NetList, error) { return nil, fmt.Errorf("no lists %v", ids) })
+	err := s.setNetworks(context.Background(), nil, func(ids []int64) (map[int64]*NetList, error) { return nil, fmt.Errorf("no lists %v", ids) })
 	if err == nil || s.full != nil {
 		t.Errorf("a failed list load gave %v, a payload of %d bytes", err, len(s.full))
 	}
@@ -167,12 +172,15 @@ func TestListsHoldOneKindOfList(t *testing.T) {
 	none.dropNetworks()
 	c := NewLists()
 	c.held = map[int64]*List{1: {}}
-	n := c.networkLists()
-	if c.held != nil || c.networkLists() != n {
+	n := c.networkLists(nil)
+	if c.held != nil || c.networkLists(nil) != n {
 		t.Error("the network lists did not drop the group lists, or were made twice")
 	}
+	if other := c.networkLists(&pgx.Conn{}); other == n || other.db == nil {
+		t.Error("network lists read through another database were kept")
+	}
 	c.dropNetworks()
-	if c.net != nil || c.networkLists() == n {
+	if c.net != nil || c.networkLists(nil) == n {
 		t.Error("a v3 read kept the network lists")
 	}
 }

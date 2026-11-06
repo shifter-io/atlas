@@ -252,13 +252,8 @@ def _check_bucket_histograms(buckets, histogram):
         raise ValueError("Bucket histograms differ from run histogram")
 
 
-def _read_run(directory):
-    """Read and reconcile a run directory's summary, buckets and geo rows before any write."""
-    summary_path = directory / "summary.json"
-    summary = json.loads(summary_path.read_text())
-    summary_hash = _digest(summary_path)
-    if summary["schema_version"] != "1":
-        raise ValueError("Unsupported measurement schema")
+def _reconcile_counters(summary):
+    """The run's attempted and in-country counts and its histogram, reconciled with its counters."""
     requested, started, completed, successes = (
         summary[name] for name in ("requested", "started", "completed", "successes")
     )
@@ -280,9 +275,11 @@ def _read_run(directory):
     histogram = _histogram(summary["latency_histogram"])
     if histogram.counts.total() != successes:
         raise ValueError("Latency histogram does not reconcile")
-    source = directory / "ips.jsonl.gz"
-    if _digest(source) != summary["artifacts"]["ips"]["sha256"]:
-        raise ValueError("IP artifact checksum mismatch")
+    return attempted, in_country, histogram
+
+
+def _scope(summary):
+    """The run's provider and product labels, and its scope with the scope's hash."""
     config = summary["config"]
     provider, product = config.get("provider"), config.get("product")
     if not provider or not product:
@@ -292,12 +289,16 @@ def _read_run(directory):
         "config": {key: value for key, value in config.items() if key not in RUN_LENGTH},
     }
     scope_hash = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
-    run_id = summary["run_id"]
+    return provider, product, scope, scope_hash
+
+
+def _read_buckets(summary, histogram):
+    """The run's buckets by start and their rows, reconciled with the run's counters."""
     buckets = {_time(b["bucket_start"]): b for b in summary["buckets"]}
     if (
         len(buckets) != len(summary["buckets"])
-        or sum(b["completed"] for b in buckets.values()) != completed
-        or sum(b["successes"] for b in buckets.values()) != successes
+        or sum(b["completed"] for b in buckets.values()) != summary["completed"]
+        or sum(b["successes"] for b in buckets.values()) != summary["successes"]
     ):
         raise ValueError("Bucket counters do not reconcile")
     _check_bucket_histograms(buckets, histogram)
@@ -308,6 +309,23 @@ def _read_run(directory):
             and any(sum(buckets[b][key] for b in buckets) != summary[key] for key in OUTCOME_KEYS)
         ):
             raise ValueError("Outcome counters do not reconcile")
+    return buckets, bucket_rows
+
+
+def _read_run(directory):
+    """Read and reconcile a run directory's summary, buckets and geo rows before any write."""
+    summary_path = directory / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary_hash = _digest(summary_path)
+    if summary["schema_version"] != "1":
+        raise ValueError("Unsupported measurement schema")
+    attempted, in_country, histogram = _reconcile_counters(summary)
+    source = directory / "ips.jsonl.gz"
+    if _digest(source) != summary["artifacts"]["ips"]["sha256"]:
+        raise ValueError("IP artifact checksum mismatch")
+    provider, product, scope, scope_hash = _scope(summary)
+    run_id = summary["run_id"]
+    buckets, bucket_rows = _read_buckets(summary, histogram)
     geo_rows = _geo_rows(directory, summary, buckets, bucket_rows)
     return SimpleNamespace(
         summary=summary,

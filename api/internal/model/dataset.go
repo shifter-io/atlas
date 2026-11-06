@@ -69,9 +69,9 @@ type Dataset struct {
 	// Pages is every page answer the site draws, by the path that serves it
 	// (build.DatasetPages), so the file alone regenerates each one.
 	Pages any `json:"pages"`
-	// Lists is, in a v4 build, every row of every network list the list
-	// answers page through, as compact arrays (build.DatasetLists, streamed
-	// by build.WriteDataset); {} before v4.
+	// Lists is, in a v4 build, every network list's total, page count and
+	// first page as compact arrays (build.DatasetLists, streamed by
+	// build.WriteDataset); {} before v4.
 	Lists    any          `json:"lists"`
 	Snapshot SnapshotMeta `json:"snapshot"`
 	NA       []string     `json:"na"`

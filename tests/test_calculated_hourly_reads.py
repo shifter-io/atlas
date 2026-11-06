@@ -14,8 +14,8 @@ from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
+from calculated_cases import lenient_policy
 from census_pulse_cases import batch, batch_run, product
-from test_calculated import lenient_policy
 from test_calculated_browser import browser_run
 from test_sqlwindow import _labels
 from test_storage import measurement

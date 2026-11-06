@@ -13,8 +13,8 @@ from datetime import timedelta
 
 from campaign_hour_cases import make_root, make_spec
 from helpers import FakeTransport
+from onboarding_round_cases import make
 from test_onboarding import ROOT, START, Clock, Proxy
-from test_onboarding_round import make
 
 from proxy_index import RunConfig, run
 from proxy_index.campaign.contracts import spec_path

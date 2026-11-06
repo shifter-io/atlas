@@ -25,17 +25,17 @@ import aiohttp
 from ..errors import UserError
 from ..regions import REGION_IDS
 from .contracts import (
+    ALL_ROLES,
     BUILDER_NAME_RE,
     BUILDER_TAG,
-    CAMPAIGN_ROLES,
+    ENVIRONMENTS,
     PROJECT_NAME,
     PULSE_PREFIX,
     PULSE_TAG,
     RESOURCE_PREFIX,
-    ROLES,
-    WORKER_TAG,
     Account,
     Droplet,
+    environment_of,
 )
 
 API = "https://api.digitalocean.com"
@@ -90,7 +90,9 @@ ALLOWED = MappingProxyType(
         ("POST", "/v2/tags"): (NONE, False),
     }
 )
-ROLE_TAGS = frozenset(tag for tag, _ in CAMPAIGN_ROLES.values())
+# The campaign role tags of every environment; a firewall names only its own environment's.
+ROLE_TAGS = frozenset(tag for tag, _ in ALL_ROLES) - {PULSE_TAG}
+WORKER_TAGS = frozenset(table["worker"][0] for _, table in ENVIRONMENTS.values())
 SNAPSHOT_NAME_RE = r"^pi-camp-worker-[0-9A-Za-z.+]+-[0-9a-f]{12}-[0-9]{8}$"
 FIREWALL_KEYS = frozenset({"name", "inbound_rules", "outbound_rules", "tags", "droplet_ids"})
 
@@ -104,10 +106,14 @@ def _droplet_action(body: dict) -> bool:
 
 
 def _firewall(body: dict) -> bool:
+    """A pi-camp- name, and only role tags of the name's environment (CAMP-STAGING-1: a
+    staging firewall never attaches to production's droplets, nor production's to staging's)."""
+    environment = environment_of(str(body.get("name", "")))
     return (
         set(body) <= FIREWALL_KEYS
-        and str(body.get("name", "")).startswith(RESOURCE_PREFIX)
+        and environment is not None
         and set(body.get("tags") or []) <= ROLE_TAGS
+        and all(environment_of(str(tag)) == environment for tag in body.get("tags") or [])
         and all(str(i).isdigit() for i in body.get("droplet_ids") or [])
     )
 
@@ -271,16 +277,16 @@ def parse_droplet(raw: dict[str, Any]) -> Droplet:
 
 def check_create(names: list[str], tags: list[str], ssh_keys: list[str]) -> None:
     """Refuse a create whose names, tags or keys do not carry all ownership markers."""
-    roles = [(tag, pattern) for tag, pattern in ROLES.values() if tag in tags]
-    prefix = PULSE_PREFIX if [tag for tag, _ in roles] == [PULSE_TAG] else RESOURCE_PREFIX
-    if len(roles) != 1 or any(not tag.startswith(prefix) for tag in tags):
+    found = [(tag, pattern) for tag, pattern in ALL_ROLES if tag in tags]
+    prefix = PULSE_PREFIX if [tag for tag, _ in found] == [PULSE_TAG] else RESOURCE_PREFIX
+    if len(found) != 1 or any(not tag.startswith(prefix) for tag in tags):
         raise ScopeError("create needs exactly one role tag and only that role's tag prefix")
     if not names or not ssh_keys:
         raise ScopeError("create needs names and ssh_keys")
-    [(role_tag, pattern)] = roles
+    [(role_tag, pattern)] = found
     if any(not re.fullmatch(pattern, name) for name in names):
         raise ScopeError("create name does not match its role's pattern")
-    if role_tag == WORKER_TAG:
+    if role_tag in WORKER_TAGS:
         sids = {name.split("-")[1] for name in names}
         if len(sids) != 1 or f"{RESOURCE_PREFIX}{sids.pop()}" not in tags:
             raise ScopeError("worker create needs the campaign tag of its names")
@@ -590,16 +596,16 @@ class DigitalOcean:
         )["firewall"]
 
     async def _own_firewall(self, rules: dict[str, Any], project_id: str) -> None:
-        """A pi-camp- name, only role tags, and droplets that each show a role's markers on a
-        fresh GET and are in project Proxy Index."""
+        """A pi-camp- name, only role tags, and droplets that each show a role's markers of
+        the name's environment on a fresh GET and are in project Proxy Index."""
         if not _firewall({key: rules[key] for key in FIREWALL_KEYS if key in rules}):
             raise ScopeError("firewall is outside the campaign's scope")
         ids = [str(i) for i in rules.get("droplet_ids") or []]
+        own = ENVIRONMENTS[environment_of(str(rules["name"]))][1].values()
         for droplet_id in ids:
             found = await self.get(droplet_id)
             if found is None or not any(
-                tag in found.tags and re.fullmatch(pattern, found.name)
-                for tag, pattern in CAMPAIGN_ROLES.values()
+                tag in found.tags and re.fullmatch(pattern, found.name) for tag, pattern in own
             ):
                 raise ScopeError("firewall targets a droplet that is not the campaign's")
         if not await self._in_project(project_id, ids):

@@ -117,6 +117,7 @@ def judge(
 # PageView.found holds one count per selector of the target's PageSpec.wait_for, a CSS
 # selector list: the transport counts each selector that selectors() returns, under its text.
 _TOKENS = re.compile(r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[()\[\],]""")
+_DEPTH = {"(": 1, "[": 1, ")": -1, "]": -1}
 
 
 def selectors(wait_for: str | None) -> tuple[str, ...]:
@@ -125,13 +126,10 @@ def selectors(wait_for: str | None) -> tuple[str, ...]:
     parts, depth, start = [], 0, 0
     for token in _TOKENS.finditer(wait_for or ""):
         mark = token.group()
-        if mark in "([":
-            depth += 1
-        elif mark in ")]":
-            depth -= 1
-        elif mark == "," and depth == 0:
+        if mark == "," and depth == 0:
             parts.append(wait_for[start : token.start()])
             start = token.end()
+        depth += _DEPTH.get(mark, 0)
     parts.append((wait_for or "")[start:])
     return tuple(part.strip() for part in parts if part.strip())
 

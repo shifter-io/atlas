@@ -1,11 +1,13 @@
 package testscale
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // A small v3 build of two networks, one group each, with overlap rows,
@@ -62,7 +64,7 @@ func TestNetworksOfASmallBuild(t *testing.T) {
 	if w.Entries["country"] != 3 || w.Entries["region"] != 4 || w.Entries["city_asn"] != 5 || l.Len("city_asn") != 5 || l.Len("asn") != 4 {
 		t.Errorf("list %d: entries %v", w.ID, w.Entries)
 	}
-	if r := l.Row("city_asn", 0); r.Place == nil || r.Place.City == nil || r.Network == nil || r.Network.Asn == nil || r.Completed != 3000 {
+	if r := dim(t, l, "city_asn").Row(0); r.Place == nil || r.Place.City == nil || r.Network == nil || r.Network.Asn == nil || r.Completed != 3000 {
 		t.Errorf("city x ASN row %+v", r)
 	}
 	if count(snap.Num(math.NaN())) != -1 || count(2.6) != 3 {
@@ -83,8 +85,18 @@ func TestNetworksReadsCappedBreakdowns(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, l := range lists {
-		if l.Len("region") != 25 || l.Len("asn") != 25 || l.Row("asn", 0).Network.Asn == nil || l.Row("region", 0).Place.City != nil {
+		if l.Len("region") != 25 || l.Len("asn") != 25 || dim(t, l, "asn").Row(0).Network.Asn == nil || dim(t, l, "region").Row(0).Place.City != nil {
 			t.Errorf("capped list: %d regions, %d ASNs", l.Len("region"), l.Len("asn"))
 		}
 	}
+}
+
+// dim is l's rows of a dimension, failing t when they cannot be read.
+func dim(t testing.TB, l *store.NetList, dimension string) *store.NetRows {
+	t.Helper()
+	v, err := l.Rows(context.Background(), dimension)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
