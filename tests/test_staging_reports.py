@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import stat
+import uuid
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
