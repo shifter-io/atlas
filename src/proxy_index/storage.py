@@ -10,6 +10,7 @@ from decimal import Decimal
 from itertools import accumulate
 from pathlib import Path
 
+import psycopg as psycopg  # re-exported: scripts catch storage.psycopg errors
 from psycopg.types.json import Jsonb
 
 from . import names, storage_ingest, storage_migrate
