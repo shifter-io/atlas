@@ -1,14 +1,14 @@
 """In-place v10 → v11 migration (the batch kind 'browser'), and a v10 build refusing v11.
 
 fixtures/schema_v10.sql is the exact v10 schema (storage.V10_CHECKSUM); load_v10 builds the v10
-release's database from test_migration's v9 database the way the v10 release migrated it.
+release's database from migration_cases's v9 database the way the v10 release migrated it.
 """
 
 import hashlib
 from pathlib import Path
 
 import pytest
-from test_migration import SOURCE, catalog, load_v9
+from migration_cases import SOURCE, catalog, load_v9
 
 from proxy_index import storage
 from proxy_index.calculated import store
