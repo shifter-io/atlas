@@ -3,239 +3,101 @@ package build_test
 import (
 	"context"
 	"encoding/json"
-	"math"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
-// The v4 dataset file alone regenerates every list answer and place page
-// (contract K11, regression case 1 of API-DATASET-2): each network's places
-// in every dimension, the all-networks places, each country's cities and
-// regions (first page, last page and a recorded query), each network's
-// Coverage (every page without a query, and three recorded queries with their
-// totals) and every region and city page, with its ranks recomputed here by
-// counting better peers. The expected answers are the build's (what the
-// server renders), asked for by the build's keys.
-func TestTheDatasetFileRegeneratesEveryListAnswer(t *testing.T) {
+// The v4 dataset file holds every network list's first page, its exact
+// total and its page count (contract K11 as DATASET-SIZE-2 changed it): for
+// each network kind, range and place dimension, and each Coverage list, the
+// first page regenerated from the file alone is the served one byte for
+// byte, and the API serves every further page: the rows of every page add up
+// to the file's total. The expected answers are the build's (what the server
+// renders), asked for by the build's keys.
+func TestTheDatasetFileHoldsEveryListsFirstPage(t *testing.T) {
+	t.Parallel()
 	file, res := v4File(t)
 	at, lists := readLists(t, file)
 	pg := res.Pages
-	if len(pg.Network) < 4 || len(pg.Country) < 2 {
-		t.Fatalf("fixture too small: %d network answers, %d countries", len(pg.Network), len(pg.Country))
-	}
 	byScope := map[string]fileNetwork{}
 	for _, n := range lists {
 		byScope[n.slug+"/"+n.kind] = n
 	}
-	checked := 0
+	checked, long := 0, 0
 	for scope := range pg.Network {
+		if scope == build.AllNetworks+"/"+build.AllNetworks {
+			continue
+		}
+		// A network kind without a published group has no lists in the
+		// file: every list it serves is empty.
+		n, ok := byScope[scope]
+		if !ok {
+			n.slug, n.kind, _ = strings.Cut(scope, "/")
+		}
 		for _, r := range build.Ranges {
-			for dim, q := range listQueries {
-				var rows []build.PlaceRow
-				if scope == build.AllNetworks+"/"+build.AllNetworks {
-					var all []fileRow
-					for _, n := range lists {
-						all = append(all, n.rows[r.ID][dim]...)
-					}
-					rows = ordered(merged(dim, all, nil))
-				} else {
-					rows = byScope[scope].networkRows(r.ID, dim, nil)
-				}
-				checked += checkList(t, pg, at, scope, r.ID, dim, q, rows)
+			for _, dim := range []string{"country", "region", "city", "asn"} {
+				l := n.lists[r.ID][dim]
+				served, ok, _ := pg.List(context.Background(), at, scope, r.ID, dim, "", 1)
+				sameBody(t, scope+" "+r.ID+" "+dim, served, ok, l.firstPage(at, scope, r.ID, dim))
+				long += everyPage(t, scope+" "+r.ID+" "+dim, l, func(p int) int {
+					page, _, _ := pg.List(context.Background(), at, scope, r.ID, dim, "", p)
+					return len(page.Rows)
+				})
 			}
+			long += checkCoverage(t, pg, at, n, r.ID)
+			checked += 5
 		}
 	}
-	for cc := range pg.Country {
-		in := func(r fileRow) bool { return strings.ToUpper(strings.TrimSpace(model.SV(r.cc))) == cc }
-		for _, r := range build.Ranges {
-			for _, dim := range []string{"city", "region"} {
-				checked += checkList(t, pg, at, "country/"+cc, r.ID, dim, listQueries[dim], acrossNetworks(lists, r.ID, dim, in))
-			}
-		}
+	if len(byScope) < 3 || long == 0 {
+		t.Fatalf("fixture too small: %d network kinds in the file, %d lists of more than a page", len(byScope), long)
 	}
-	checked += checkCoverage(t, pg, at, byScope) + checkPlacePages(t, pg, at, lists)
-	t.Logf("%d answers regenerated from the file", checked)
+	t.Logf("%d first pages regenerated from the file, %d lists of more than a page served whole", checked, long)
 }
 
-// checkList compares one list's first and last pages and its first page
-// with query q; it returns how many answers it compared.
-func checkList(t *testing.T, pg *build.Pages, at, scope, rangeID, dim, q string, rows []build.PlaceRow) int {
+// checkCoverage compares a network kind's Coverage first page of a range
+// with the file's, then reads its further pages; it returns 1 for a list of
+// more than a page.
+func checkCoverage(t *testing.T, pg *build.Pages, at string, n fileNetwork, rangeID string) int {
 	t.Helper()
-	n := 0
-	for _, p := range pagesOf(len(rows)) {
-		served, ok, _ := pg.List(context.Background(), at, scope, rangeID, dim, "", p)
-		sameBody(t, scope+" "+rangeID+" "+dim+" page "+strconv.Itoa(p), served, ok, page(at, scope, rangeID, dim, "", p, rows))
-		n++
+	scope, l := n.slug+"/"+n.kind, n.lists[rangeID]["city_asn"]
+	served, ok, _ := pg.Coverage(context.Background(), at, scope, rangeID, "", 1)
+	if !ok {
+		if l.total != 0 || len(l.coverage) != 0 {
+			t.Errorf("%s %s: no Coverage answer, but the file has %d rows", scope, rangeID, l.total)
+		}
+		return 0
 	}
-	served, ok, _ := pg.List(context.Background(), at, scope, rangeID, dim, q, 1)
-	sameBody(t, scope+" "+rangeID+" "+dim+" q="+q, served, ok, page(at, scope, rangeID, dim, q, 1, rows))
-	return n + 1
+	want := &build.CoveragePage{GeneratedAt: at, Network: n.slug, Kind: n.kind, Range: rangeID, Page: 1, PageSize: build.PageSize,
+		Total: l.total, Pages: l.pages, Rows: append([]build.CoverageRow{}, l.coverage...)}
+	sameBody(t, scope+" "+rangeID+" coverage", served, ok, want)
+	return everyPage(t, scope+" "+rangeID+" coverage", l, func(p int) int {
+		page, _, _ := pg.Coverage(context.Background(), at, scope, rangeID, "", p)
+		return len(page.Rows)
+	})
 }
 
-// coverageQueries are the recorded Coverage queries.
-var coverageQueries = []string{"city 1", "AS64513", "aa region"}
-
-// checkCoverage compares every Coverage page without a query and the first
-// page of each recorded query, for every network kind the build has a
-// Coverage answer for.
-func checkCoverage(t *testing.T, pg *build.Pages, at string, byScope map[string]fileNetwork) int {
+// everyPage checks that the file's page count is its total's and that the
+// served pages after the first hold the rest of its rows (rows(p) is page
+// p's row count); it returns 1 for a list of more than a page.
+func everyPage(t *testing.T, what string, l fileList, rows func(int) int) int {
 	t.Helper()
-	n := 0
-	for scope := range pg.Network {
-		slug, kind, _ := strings.Cut(scope, "/")
-		nw := byScope[scope]
-		nw.slug, nw.kind = slug, kind
-		for _, r := range build.Ranges {
-			first, ok, _ := pg.Coverage(context.Background(), at, scope, r.ID, "", 1)
-			if !ok {
-				continue
-			}
-			for p := 1; p <= max(first.Pages, 1); p++ {
-				served, ok, _ := pg.Coverage(context.Background(), at, scope, r.ID, "", p)
-				sameBody(t, scope+" "+r.ID+" coverage page "+strconv.Itoa(p), served, ok, coveragePage(at, nw, r.ID, "", p))
-				n++
-			}
-			for _, q := range coverageQueries {
-				served, ok, _ := pg.Coverage(context.Background(), at, scope, r.ID, q, 1)
-				sameBody(t, scope+" "+r.ID+" coverage q="+q, served, ok, coveragePage(at, nw, r.ID, q, 1))
-				n++
-			}
-		}
+	first := max(len(l.rows), len(l.coverage))
+	if l.pages != (l.total+build.PageSize-1)/build.PageSize || first != min(l.total, build.PageSize) {
+		t.Errorf("%s: total %d, %d pages, %d rows in the file", what, l.total, l.pages, first)
 	}
-	if n == 0 {
-		t.Fatal("the build has no Coverage answer")
+	n := first
+	for p := 2; p <= l.pages; p++ {
+		n += rows(p)
 	}
-	return n
-}
-
-// coveragePage is a Coverage page: the rows (already most IPs first) that
-// hold every word of q in their place or "as<n>" and ASN name, and with a
-// query their totals.
-func coveragePage(at string, nw fileNetwork, rangeID, q string, p int) *build.CoveragePage {
-	words := strings.Fields(strings.ToLower(q))
-	out := &build.CoveragePage{GeneratedAt: at, Network: nw.slug, Kind: nw.kind, Range: rangeID, Query: strings.Join(words, " "), Page: p,
-		PageSize: build.PageSize, Rows: []build.CoverageRow{}}
-	var rows []build.CoverageRow
-	for _, r := range nw.coverage[rangeID] {
-		c := r.CoverageRow
-		place := strings.ToLower(strings.Join([]string{model.SV(c.CountryCode), model.SV(c.Country), model.SV(c.Region), model.SV(c.City)}, " "))
-		network := strings.ToLower(model.SV(c.AsnName))
-		if c.Asn.OK() {
-			network += " as" + strconv.FormatInt(int64(c.Asn), 10)
-		}
-		if holdsAll(q, place, network) {
-			rows = append(rows, r)
-		}
+	if n != l.total {
+		t.Errorf("%s: the served pages hold %d rows, the file's total is %d", what, n, l.total)
 	}
-	out.Total, out.Pages = len(rows), (len(rows)+build.PageSize-1)/build.PageSize
-	if len(words) > 0 {
-		countries, cities, asns := map[string]bool{}, map[[4]string]bool{}, map[model.Num]bool{}
-		out.Totals = &build.CoverageTotals{}
-		for _, r := range rows {
-			c := r.CoverageRow
-			out.Totals.Ips += c.Ips
-			if c.CountryCode != nil {
-				countries[*c.CountryCode] = true
-			}
-			if c.City != nil {
-				cities[[4]string{model.SV(c.CountryCode), model.SV(c.Country), model.SV(c.Region), *c.City}] = true
-			}
-			if c.Asn.OK() {
-				asns[c.Asn] = true
-			}
-		}
-		out.Totals.Countries, out.Totals.Cities, out.Totals.Asns = len(countries), len(cities), len(asns)
+	if l.pages > 1 {
+		return 1
 	}
-	if start := (p - 1) * build.PageSize; start < len(rows) {
-		out.Rows = rows[start:min(len(rows), start+build.PageSize)]
-	}
-	return out
-}
-
-// checkPlacePages compares every region and city page: the keys are those
-// of the build's all-networks lists.
-func checkPlacePages(t *testing.T, pg *build.Pages, at string, lists []fileNetwork) int {
-	t.Helper()
-	n := 0
-	for _, r := range build.Ranges {
-		for _, dim := range []string{"region", "city"} {
-			for key := range placeKeys(pg, at, r.ID, dim) {
-				cc, _, _ := strings.Cut(key, "|")
-				in := func(f fileRow) bool { return strings.ToUpper(strings.TrimSpace(model.SV(f.cc))) == cc }
-				want := &build.PlaceAnswer{GeneratedAt: at, Dimension: dim, Key: key, Range: r.ID, Rows: []build.PlaceRow{}}
-				for _, row := range acrossNetworks(lists, r.ID, dim, in) {
-					if row.Key == key {
-						want.Rows = append(want.Rows, row)
-					}
-				}
-				ranked(want.Rows)
-				served, ok, _ := pg.Place(context.Background(), at, dim, key, r.ID)
-				sameBody(t, dim+" page "+key+" "+r.ID, served, ok, want)
-				n++
-			}
-		}
-	}
-	if n == 0 {
-		t.Fatal("the build has no region or city page")
-	}
-	return n
-}
-
-// placeKeys is every key of the build's all-networks list of a range and
-// dimension, every page read.
-func placeKeys(pg *build.Pages, at, rangeID, dim string) map[string]bool {
-	keys := map[string]bool{}
-	for p := 1; ; p++ {
-		list, ok, _ := pg.List(context.Background(), at, build.AllNetworks+"/"+build.AllNetworks, rangeID, dim, "", p)
-		if !ok || len(list.Rows) == 0 {
-			return keys
-		}
-		for _, row := range list.Rows {
-			keys[row.Key] = true
-		}
-	}
-}
-
-// ranked ranks each row among the rows of its kind: IPs (more is better,
-// among rows with IPs) and latency (lower is better, among rows with one),
-// rank 1 plus the peers strictly better.
-func ranked(rows []build.PlaceRow) {
-	for i := range rows {
-		ips, lat := model.Rank{Rank: model.Num(math.NaN())}, model.Rank{Rank: model.Num(math.NaN())}
-		mine := rows[i]
-		for _, peer := range rows {
-			if peer.Kind != mine.Kind {
-				continue
-			}
-			if peer.IpsSum.OK() && peer.IpsSum > 0 {
-				ips.Peers++
-			}
-			if peer.LatencyP50.OK() {
-				lat.Peers++
-			}
-		}
-		if mine.IpsSum.OK() && mine.IpsSum > 0 {
-			ips.Rank = 1 + better(rows, mine, func(p build.PlaceRow) bool { return p.IpsSum.OK() && p.IpsSum > mine.IpsSum })
-		}
-		if mine.LatencyP50.OK() {
-			lat.Rank = 1 + better(rows, mine, func(p build.PlaceRow) bool { return p.LatencyP50.OK() && p.LatencyP50 < mine.LatencyP50 })
-		}
-		rows[i].IpsSumRank, rows[i].LatencyRank = &ips, &lat
-	}
-}
-
-func better(rows []build.PlaceRow, mine build.PlaceRow, is func(build.PlaceRow) bool) model.Num {
-	n := 0
-	for _, p := range rows {
-		if p.Kind == mine.Kind && is(p) {
-			n++
-		}
-	}
-	return model.Num(n)
+	return 0
 }
 
 // The pages and lists hold nothing the pages do not show (regression case
@@ -243,6 +105,7 @@ func better(rows []build.PlaceRow, mine build.PlaceRow, is func(build.PlaceRow) 
 // every network kind's ranges and dimensions, and each dimension's row
 // length and field types.
 func TestTheDatasetFileHoldsOnlyWhatThePagesShow(t *testing.T) {
+	t.Parallel()
 	file, _ := v4File(t)
 	var keys []string
 	for _, kv := range pairs(t, file) {
@@ -300,7 +163,7 @@ func checkListShapes(t *testing.T, raw []byte) {
 				var dims []string
 				for _, dim := range pairs(t, rng.raw) {
 					dims = append(dims, dim.key)
-					rows += checkRowTypes(t, slug.key+" "+kind.key+" "+rng.key+" "+dim.key, rowTypes[dim.key], dim.raw)
+					rows += checkList(t, slug.key+" "+kind.key+" "+rng.key+" "+dim.key, rowTypes[dim.key], dim.raw)
 				}
 				if got := strings.Join(dims, " "); got != "country region city asn city_asn" {
 					t.Errorf("%s %s %s: dimensions %s", slug.key, kind.key, rng.key, got)
@@ -316,11 +179,32 @@ func checkListShapes(t *testing.T, raw []byte) {
 	}
 }
 
+// checkList checks a list's keys (total, pages, rows), that it holds at most
+// a page of rows, and each row's field types; it returns its row count.
+func checkList(t *testing.T, what, types string, raw []byte) int {
+	t.Helper()
+	var keys []string
+	var rows []byte
+	for _, kv := range pairs(t, raw) {
+		keys = append(keys, kv.key)
+		if kv.key == "rows" {
+			rows = kv.raw
+		}
+	}
+	if got := strings.Join(keys, " "); got != "total pages rows" {
+		t.Errorf("%s: keys %s", what, got)
+	}
+	return checkRowTypes(t, what, types, rows)
+}
+
 func checkRowTypes(t *testing.T, what, types string, raw []byte) int {
 	t.Helper()
 	var rows [][]any
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatal(err)
+	}
+	if len(rows) > build.PageSize {
+		t.Errorf("%s: %d rows, more than a page", what, len(rows))
 	}
 	for i, r := range rows {
 		got := make([]byte, len(r))

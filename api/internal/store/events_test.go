@@ -22,6 +22,7 @@ var tapeKinds = map[string]string{
 }
 
 func TestCategoryOfEveryKind(t *testing.T) {
+	t.Parallel()
 	for kind, want := range tapeKinds {
 		if got := store.Category(kind); got != want {
 			t.Errorf("Category(%q) = %q, want %q", kind, got, want)
@@ -31,6 +32,7 @@ func TestCategoryOfEveryKind(t *testing.T) {
 
 // The database filter of /v1/events must put each kind on the same tab as Category.
 func TestQueryEventsCategoryMatchesCategory(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	ctx := context.Background()
 	for kind := range tapeKinds {
@@ -67,6 +69,7 @@ func kindsOf(rows []store.Event) []string {
 }
 
 func TestRoutineKinds(t *testing.T) {
+	t.Parallel()
 	for kind, tab := range tapeKinds {
 		want := tab == "census" || kind == "pulse_finished"
 		if store.Routine(kind) != want {
@@ -78,6 +81,7 @@ func TestRoutineKinds(t *testing.T) {
 // Prioritize keeps the newest notable rows up to half the page, then fills it
 // with the newest rows of any kind, newest first.
 func TestPrioritize(t *testing.T) {
+	t.Parallel()
 	kinds := []string{"estimate_hour_released", "pulse_finished", "estimate_hour_released", "pulse_down",
 		"latency_rise", "estimate_hour_released", "down", "recovered", "new_hosting_asn"}
 	kind := func(i int) string { return kinds[i] }
@@ -103,6 +107,7 @@ func TestPrioritize(t *testing.T) {
 
 // A named kind or tab gets exactly the newest rows; the tape's filters get the choice.
 func TestPickPrioritizesOnlyUnnamedFilters(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 11, 2, 16, 0, 0, 0, time.UTC)
 	rows := []store.Event{}
 	for i, k := range []string{"estimate_hour_released", "estimate_hour_released", "estimate_hour_released", "pulse_down"} {
@@ -123,6 +128,7 @@ func TestPickPrioritizesOnlyUnnamedFilters(t *testing.T) {
 // leaves the older pulse down and latency rise in memory (Inputs.Notable) and on
 // the database fallback's first page.
 func TestNotableEventsSurviveAReleaseBurst(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	ctx := context.Background()
 	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T15:00:00Z','pulse_down',-1,'major'),"+
@@ -165,6 +171,7 @@ func TestNotableEventsSurviveAReleaseBurst(t *testing.T) {
 
 // Two lists held newest first merge into one, a row in both kept once.
 func TestMergeNewest(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 11, 2, 16, 0, 0, 0, time.UTC)
 	row := func(id int64, minutes int) store.Event {
 		return store.Event{ID: id, At: at.Add(time.Duration(minutes) * time.Minute)}
@@ -184,6 +191,7 @@ func TestMergeNewest(t *testing.T) {
 // and the newest event id the fingerprint has: none on an empty table, then a
 // cut window with notable rows past it.
 func TestLoadEventsReadsTheEventsLoadReads(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	ctx := context.Background()
 	pool, err := store.OpenReadOnly(ctx, db.DSN)

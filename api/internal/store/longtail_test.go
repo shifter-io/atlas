@@ -68,6 +68,7 @@ func restored(t *testing.T, payload []byte, l *List, picked bool) (map[string]an
 func marshal(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 func TestRestoreV2PutsBackTheWholeListsWithMatchingCounts(t *testing.T) {
+	t.Parallel()
 	w, full := restored(t, groupPayload(v2Window), testList(), true)
 	cities := w["breakdowns"].(map[string]any)["city_asn"].([]any)
 	if len(cities) != 3 || cities[2].(map[string]any)["name"] != `O"2` || cities[2].(map[string]any)["success_rate"] != nil {
@@ -93,6 +94,7 @@ func TestRestoreV2PutsBackTheWholeListsWithMatchingCounts(t *testing.T) {
 }
 
 func TestRestoreV2LeavesListsWhoseRowsDoNotMatch(t *testing.T) {
+	t.Parallel()
 	l := testList()
 	l.rows['y'] = l.rows['y'][:2]
 	l.rows['a'] = l.rows['a'][:1]
@@ -103,6 +105,7 @@ func TestRestoreV2LeavesListsWhoseRowsDoNotMatch(t *testing.T) {
 }
 
 func TestRestoreV3IsItsV2Form(t *testing.T) {
+	t.Parallel()
 	v3 := `{"pool": {"unique_ips": 9, "list_entries": {"asns_breakdown": 2}}, "lists": {"id": 7, "entries": {"asn": 1, "city_asn": 1, "asns_breakdown": 1}}, ` +
 		`"period": {"hours": 24}, "breakdown_entries": {"city_asn": 3}}`
 	w, _ := restored(t, groupPayload(v3), testList(), true)
@@ -130,6 +133,7 @@ func TestRestoreV3IsItsV2Form(t *testing.T) {
 }
 
 func TestJSONMembersAndPythonText(t *testing.T) {
+	t.Parallel()
 	obj := []byte(`{"a": 1, "ccc": 3}`)
 	for _, c := range []struct{ key, want string }{{"bb", `{"a": 1, "bb": 0, "ccc": 3}`}, {"", `{"": 0, "a": 1, "ccc": 3}`}, {"dddd", `{"a": 1, "ccc": 3, "dddd": 0}`}, {"a", `{"a": 0, "ccc": 3}`}} {
 		if got, err := setMember(obj, c.key, []byte("0")); err != nil || string(got) != c.want {
@@ -164,6 +168,7 @@ func TestJSONMembersAndPythonText(t *testing.T) {
 }
 
 func TestSnapshotsNeverSlimmedAreServedAsPublished(t *testing.T) {
+	t.Parallel()
 	s := &SnapshotRow{Payload: []byte(`{"schema_version":2,"products":[]}`)}
 	// A snapshot without list counts never queries the typed rows (no transaction is needed).
 	if err := s.readLists(context.Background(), nil, nil); err != nil {
@@ -175,6 +180,7 @@ func TestSnapshotsNeverSlimmedAreServedAsPublished(t *testing.T) {
 }
 
 func TestMalformedSnapshotsAreErrors(t *testing.T) {
+	t.Parallel()
 	for _, payload := range []string{`not json`, `{"products": {}}`, `{"products": [1]}`, `{"products": [`} {
 		s := &SnapshotRow{Payload: []byte(payload)}
 		if _, _, _, err := s.groups(); err == nil {
@@ -209,6 +215,7 @@ func TestMalformedSnapshotsAreErrors(t *testing.T) {
 }
 
 func TestV3WindowWithoutAPoolAndRowsWithoutLabels(t *testing.T) {
+	t.Parallel()
 	w, _ := restored(t, groupPayload(`{"lists": {"id": 1, "entries": {"geo": 0}}, "period": {"hours": 24}}`), testList(), true)
 	if got := marshal(w["pool"]); got != `{"geo":[]}` {
 		t.Errorf("pool %s", got)
@@ -259,6 +266,7 @@ func (o *observedTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
 // city x ASN rows it no longer reads) before it reads new rows, so two
 // builds' lists are never held at once.
 func TestFetchDropsUnreferencedListsBeforeReading(t *testing.T) {
+	t.Parallel()
 	c := NewLists()
 	c.k2, c.held, c.places, c.networks = true, map[int64]*List{1: testList(), 2: testList(), 3: testList()}, map[int32]*Place{}, map[int32]*Network{}
 	tx := &observedTx{c: c}
@@ -276,6 +284,7 @@ func TestFetchDropsUnreferencedListsBeforeReading(t *testing.T) {
 
 // A failed fetch keeps no list and no pending label.
 func TestAFailedFetchKeepsNothing(t *testing.T) {
+	t.Parallel()
 	c := NewLists()
 	c.k2, c.held, c.places, c.networks = true, map[int64]*List{3: testList()}, map[int32]*Place{}, map[int32]*Network{}
 	if _, err := c.fetch(context.Background(), failingTx{}, true, 0, []int64{3, 4}, nil); err == nil {
@@ -299,6 +308,7 @@ func (failingBeginner) BeginTx(context.Context, pgx.TxOptions) (pgx.Tx, error) {
 }
 
 func TestLoadListsReportsAnUnreachableDatabase(t *testing.T) {
+	t.Parallel()
 	if _, err := LoadLists(context.Background(), failingBeginner{}, NewLists()); err == nil || !strings.Contains(err.Error(), "connection refused") {
 		t.Errorf("load error %v", err)
 	}

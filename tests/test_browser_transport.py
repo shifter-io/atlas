@@ -285,6 +285,14 @@ async def test_a_crash_is_browser_error_and_the_pool_relaunches():
     assert harness.pool.stats()["crashes"] == 1
 
 
+async def test_a_failed_try_logs_its_type_but_not_its_message(caplog):
+    harness = Harness(Script(error=RuntimeError("http://user:pass@192.0.2.10:8080")))
+    outcome = await harness.execute()
+    assert (outcome.verdict, outcome.error) == ("error", "browser_error")
+    assert "Browser try failed (RuntimeError)" in caplog.text
+    assert "pass@" not in caplog.text
+
+
 class Raising(SiteTarget):
     async def interact(self, driver, spec) -> None:
         raise TimeoutError("an interact wait")

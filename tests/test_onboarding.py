@@ -16,6 +16,7 @@ from helpers import FakeTransport
 
 from proxy_index import ProxyConfig, RunConfig, run
 from proxy_index.cli import main
+from proxy_index.onboarding import cli as onboarding_cli
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.export import export_campaign
 from proxy_index.onboarding.files import atomic_json, lock, read_json
@@ -415,6 +416,26 @@ def test_export_rejects_swapped_regional_state(manifest):
     atomic_json(manifest.parent / "regions/tor1/state.json", wrong)
     with pytest.raises(ValueError, match="Checkpoint"):
         export_campaign(manifest)
+
+
+def test_cli_status_reads_one_regions_checked_state(manifest, capsys):
+    data = campaign.load(manifest)
+    state = new_state(data, "tor1", data["settings"])
+    state["jobs"][0].update(status="completed", observations=3)
+    atomic_json(manifest.parent / "regions/tor1/state.json", state)
+    assert main(["onboarding", "status", "--manifest", str(manifest), "--region", "tor1"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["region"] == "tor1" and report["campaign_id"] == data["campaign_id"]
+    assert report["observations"] == 3 and report["completed_countries"] == 1
+    assert main(["onboarding", "status", "--manifest", str(manifest), "--region", "nowhere"]) == 2
+    status = SimpleNamespace(onboarding_action="status", manifest=manifest, region="nowhere")
+    with pytest.raises(ValueError, match="Unknown campaign region"):
+        onboarding_cli.dispatch(status)
+    swapped = new_state(data, "fra1", data["settings"])
+    atomic_json(manifest.parent / "regions/tor1/state.json", swapped)
+    status.region = "tor1"
+    with pytest.raises(ValueError, match="Checkpoint"):
+        onboarding_cli.dispatch(status)
 
 
 async def test_reordered_checkpoint_cannot_change_execution_order(manifest):

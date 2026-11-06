@@ -94,6 +94,7 @@ func v4Head(t *testing.T, cohortRows int) []byte {
 // figures. On main it is read as a payload without products: nothing is
 // served (regression demonstration, API-SUM-1 case 6).
 func TestAV4BuildServesItsNetworks(t *testing.T) {
+	t.Parallel()
 	db, _ := networkLists(t)
 	db.Publish(t, v4Head(t, 0))
 	res, err := build.Build(load(t, db))
@@ -117,6 +118,7 @@ func TestAV4BuildServesItsNetworks(t *testing.T) {
 // row; the every-group fleet entry is, and the networks' peers reach the
 // ownership answer.
 func TestAV4HeadIsReadWithoutItsCohortRows(t *testing.T) {
+	t.Parallel()
 	db, _ := networkLists(t)
 	db.Publish(t, v4Head(t, 10000))
 	in := load(t, db)
@@ -148,6 +150,7 @@ func TestAV4HeadIsReadWithoutItsCohortRows(t *testing.T) {
 // A head with networks and no schema version is not a v4 head: it loads as
 // a payload before v4 (review N1: the v4 test is never NULL).
 func TestAHeadWithNetworksWithoutASchemaVersionLoads(t *testing.T) {
+	t.Parallel()
 	db, _ := networkLists(t)
 	var doc map[string]any
 	if err := json.Unmarshal(v4Head(t, 0), &doc); err != nil {

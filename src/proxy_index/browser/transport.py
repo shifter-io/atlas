@@ -161,7 +161,7 @@ class BrowserTransport:
                 assessment = await self._attempt(target, context, state)
         except UserAgentRefused:
             raise
-        except Exception as exc:
+        except Exception as exc:  # boundary: a failed try is recorded, never raised
             if isinstance(exc, TimeoutError) and budget.expired():
                 assessment = failed("timeout", "deadline")
             else:
