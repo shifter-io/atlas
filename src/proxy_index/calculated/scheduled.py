@@ -27,9 +27,7 @@ GEO_SOURCE = (
     "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
     "LEFT JOIN test_batches b ON b.batch_id=r.batch_id "
 )
-GEO_WINDOW = (
-    f"WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s AND {browser.NOT_BROWSER}"
-)
+GEO_WINDOW = f"WHERE g.bucket_start>=%(start)s AND g.bucket_start<%(end)s AND {browser.NOT_BROWSER}"
 # Breakdown latency is light-load latency of the latency target: its pulses and runs outside
 # a batch, never census or load runs (census concurrency), nor pulses that ran during a
 # census. Counters keep every request of every target.
