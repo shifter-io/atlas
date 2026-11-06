@@ -225,7 +225,7 @@ class SlowTransport(FakeTransport):
     async def execute(self, target, *, context=None):
         from proxy_index.models import Outcome
 
-        return Outcome(30.2, ip="8.8.4.4", status=200, response_body_bytes=8)
+        return Outcome(30.2, ip="9.9.9.9", status=200, response_body_bytes=8)
 
 
 async def pulse_history(database, tmp_path, country, at, transport):
