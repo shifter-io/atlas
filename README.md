@@ -236,6 +236,14 @@ window edge falls inside (a cutoff off the hour) is read from `run_geo_buckets`,
 ran during a census are subtracted from the rollups when read, so the rows equal the full mode's at
 every cutoff. Rollups of hours over a day older than the window read are deleted. The first
 incremental build after the migration fills the 30 days once, at about the cost of one full read.
+Calculated schema v12 (`calculated/migrate_v11_v12.sql`, CALC-PULSE-1b) adds per-hour copies of the
+batch runs' `run_buckets` (`calculated_pulse_buckets`, `calculated_pulse_rollups`): the incremental
+calculation reads the request buckets of every census, pulse, load and browser run from them in one
+query, instead of one scan of the 30-day window per product. A copy keeps every column but the
+status codes, which nothing reads. Hours are copied, rewritten and collected as the geo rollups are;
+`calculated_pulse_rollups.loose` records the runs outside a batch an hour held, so a run linked to a
+batch since rewrites its hour. The census overlaps, pulse slots and tested spans come from one read
+of the batch runs instead of three.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and

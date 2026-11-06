@@ -162,7 +162,7 @@ def read(conn, config, method_id, as_of, mode="incremental"):
         summary = "CASE WHEN r.batch_id IS NULL THEN r.summary END"
         query = RUNS.format(summary=summary, roles=roles, where=WINDOW_RUNS)
         runs = conn.execute(query, bounds).fetchall()
-        buckets = _buckets(conn, runs, start, as_of)
+        buckets = _buckets(conn, start, as_of)
         active = sorted({b["run_key"] for b in buckets})
         release = used_releases(
             conn, [r["run_key"] for r in conn.execute(OBSERVED, (active, start, as_of))]
@@ -187,13 +187,12 @@ def periods(as_of):
     }
 
 
-def _buckets(conn, runs, start, as_of):
-    """The window's buckets: the daily runs', then each product's batch runs'
-    (rollups.scheduled_rows()), together in the full calculation's order."""
+def _buckets(conn, start, as_of):
+    """The window's buckets: the daily runs', then the batch runs' (rollups.scheduled_rows(), one
+    read), together in the full calculation's order."""
     query = BUCKETS.format(join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NULL")
     found = conn.execute(query, (start, as_of)).fetchall()
-    for product in sorted({r["product_id"] for r in runs if r["batch_id"] is not None}):
-        found += rollups.scheduled_rows(conn, product, start, as_of)
+    found += rollups.scheduled_rows(conn, start, as_of)
     return sorted(found, key=lambda b: (b["bucket_start"], b["run_key"]))
 
 
