@@ -90,8 +90,6 @@ def dispatch(args) -> int:
             raise ValueError("--database-file or PROXY_INDEX_DATABASE_FILE is required")
         from .app import serve
 
-        if (args.browser_port is None) != (args.client_ca is None):
-            raise ValueError("--browser-port and --client-ca go together")
         serve(
             args.database_file,
             host=args.host,
@@ -99,7 +97,7 @@ def dispatch(args) -> int:
             dev=args.dev,
             methodology=args.methodology,
             tls=(args.tls_cert, args.tls_key),
-            browser=None if args.browser_port is None else (args.browser_port, args.client_ca),
+            browser=(args.browser_port, args.client_ca),
         )
         return 0
     if args.command == "scheduler":

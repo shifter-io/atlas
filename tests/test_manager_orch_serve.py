@@ -76,14 +76,19 @@ def test_the_orchestrator_cli_passes_the_certificate(monkeypatch):
         ["orchestrator", "--database-file", "db.toml", "--tls-cert", "c", "--tls-key", "k"]
     )
     assert orchestrator_cli.dispatch(args) == 0 and seen["tls"] == ("c", "k")
-    assert seen["browser"] is None
+    assert seen["browser"] == (None, None)
     browser = ["--browser-port", "8444", "--client-ca", "ca.pem"]
     args = parser.parse_args(["orchestrator", "--database-file", "db.toml", *browser])
     assert orchestrator_cli.dispatch(args) == 0 and seen["browser"] == (8444, "ca.pem")
-    for half in (browser[:2], browser[2:]):
-        args = parser.parse_args(["orchestrator", "--database-file", "db.toml", *half])
+
+
+def test_the_browser_port_and_its_client_ca_go_together():
+    tls = ("cert.pem", "key.pem")
+    assert orchestrator_app.browser_tls(tls, None) is None
+    assert orchestrator_app.browser_tls(tls, (None, None)) is None
+    for half in ((8444, None), (None, "ca.pem")):
         with pytest.raises(ValueError, match="--browser-port and --client-ca go together"):
-            orchestrator_cli.dispatch(args)
+            orchestrator_app.browser_tls(tls, half)
 
 
 # --- calculation subprocess ---------------------------------------------------------------------

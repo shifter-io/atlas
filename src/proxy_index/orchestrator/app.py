@@ -127,15 +127,22 @@ async def until_signal(app: web.Application, sites: list[Site]) -> None:
             loop.remove_signal_handler(sig)
 
 
+Browser = tuple[int | None, str | None]
+
+
 def browser_tls(
-    tls: tuple[str | None, str | None], browser: tuple[int, str] | None
+    tls: tuple[str | None, str | None], browser: Browser | None
 ) -> ssl.SSLContext | None:
-    """The browser port's context (the server's certificate, client certificates of the CA)."""
-    if not browser:
+    """The browser port's context (the server's certificate, client certificates of the CA);
+    None without a browser port (port, client CA), refused with half of one."""
+    port, client_ca = browser or (None, None)
+    if port is None and not client_ca:
         return None
+    if port is None or not client_ca:
+        raise ValueError("--browser-port and --client-ca go together")
     if not (tls[0] and tls[1]):
         raise ValueError("--browser-port needs --tls-cert and --tls-key")
-    return server_tls(*tls, client_ca=browser[1])
+    return server_tls(*tls, client_ca=client_ca)
 
 
 def serve(
@@ -146,7 +153,7 @@ def serve(
     dev: bool = False,
     methodology: str | Path | None = None,
     tls: tuple[str | None, str | None] = (None, None),
-    browser: tuple[int, str] | None = None,
+    browser: Browser | None = None,
 ) -> None:
     """Run until SIGINT or SIGTERM. --dev logs verbosely and refuses to bind beyond loopback;
     `tls` (certificate, key) serves HTTPS; `browser` (port, client CA) adds the browser port."""
@@ -166,7 +173,7 @@ def serve(
     logging.getLogger("psycopg").setLevel(logging.INFO)
     app = build_app(credentials_file, dev=dev, methodology=methodology)
     sites: list[Site] = [(host, port, context)]
-    if browser and browser_context:
+    if browser and browser[0] is not None and browser_context:
         app[BROWSER_TLS_KEY] = browser_context
         sites.append((host, browser[0], browser_context))
     asyncio.run(until_signal(app, sites))
