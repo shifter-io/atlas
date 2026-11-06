@@ -202,7 +202,7 @@ jobs:
           background limits uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
           # CAMP-1 Tier 1 step 6: the campaign scope suite on its own.
           background scope uv run --no-editable pytest -p no:xdist -p no:cacheprovider \
-            --basetemp="$RUNNER_TEMP/scope-tmp" tests/test_campaign_scope.py -q
+            --basetemp="$RUNNER_TEMP/scope-tmp" tests/test_campaign_scope*.py -q
           background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
 
           # Is any test marked serial? Collected alongside the tests (exit 5: none), so an empty
