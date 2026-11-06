@@ -141,8 +141,9 @@ async def calculate(db: Database, credentials_file: str, methodology: Path) -> d
 def calculation_argv(
     credentials_file: str, methodology: Path | str, memory_max: str | None = None
 ) -> list[str]:
-    """`proxy-index calculate --publish` of this installation, under the systemd scope SCOPE_UNIT
-    capped at `memory_max` when given (the database file is passed by path, never read here)."""
+    """`proxy-index calculate --publish --incremental` of this installation (explicit, so the hourly
+    job never depends on the CLI's default), under the systemd scope SCOPE_UNIT capped at
+    `memory_max` when given (the database file is passed by path, never read here)."""
     script = Path(sys.executable).with_name("proxy-index")
     command = (
         [str(script)]
@@ -154,7 +155,7 @@ def calculation_argv(
         ]
     )
     command += ["calculate", "--database-file", str(credentials_file)]
-    command += ["--methodology", str(methodology), "--publish"]
+    command += ["--methodology", str(methodology), "--publish", "--incremental"]
     if not memory_max:
         return command
     if not MEMORY_RE.fullmatch(memory_max):

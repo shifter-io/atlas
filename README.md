@@ -187,10 +187,10 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 (`figures.first_seen`, outside the content hash, for CALC-INC-2). The values
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
-CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the
-Python `calculate()`'s default) stays the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte; the
-incremental one is `calculate --incremental`. Measured on scale-generator data (6 networks × 60
+CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
+Python `calculate()`'s default) is the full calculation, which reads and aggregates every
+observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.

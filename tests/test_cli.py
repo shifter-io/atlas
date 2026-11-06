@@ -94,3 +94,19 @@ def test_handler_errors_become_exit_codes(error, message, monkeypatch, capsys):
         130 if isinstance(error, KeyboardInterrupt) else 2
     )
     assert capsys.readouterr().err == message
+
+
+@pytest.mark.parametrize(
+    "flags, mode",
+    [([], "incremental"), (["--incremental"], "incremental"), (["--full"], "full")],
+)
+def test_calculate_is_incremental_unless_full_is_asked(flags, mode):
+    parser, _ = cli._build_parser()
+    args = parser.parse_args(["calculate", "--database-file", "db.toml", *flags])
+    assert args.mode == mode
+
+
+def test_calculate_takes_one_mode():
+    parser, _ = cli._build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["calculate", "--database-file", "db.toml", "--full", "--incremental"])
