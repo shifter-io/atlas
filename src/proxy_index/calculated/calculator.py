@@ -100,7 +100,6 @@ class _Build:
     flagged_batches: dict
 
 
-
 def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
     oracle; "incremental" (`calculate --incremental`) reads only the missed windows'."""
