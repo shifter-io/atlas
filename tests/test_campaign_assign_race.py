@@ -26,7 +26,7 @@ from campaign_fakes import (
     Fault,
     running,
 )
-from test_campaign_hour import NETWORKS, SCHEDULED, launched, make_spec
+from campaign_hour_cases import NETWORKS, SCHEDULED, launched, make_spec
 
 from proxy_index.campaign import launch, scope
 from proxy_index.campaign.contracts import (
