@@ -71,7 +71,7 @@ td:first-child{width:auto}</style>
 <h2 id="add">Add a provider</h2>
 <ol><li>Write <code>src/proxy_index/providers/grammars/&lt;id&gt;.toml</code>: where flags go (<code>username</code> or <code>password</code>), the base template, separators, each flag's format and validation, session generation and gateway endpoints.</li>
 <li>Add <code>configs/&lt;id&gt;.toml</code> with credential environment names and defaults.</li>
-<li>Add a golden case to <code>tests/test_grammars.py</code> and verify it with a small live run.</li></ol>
+<li>Add a golden case to <code>tests/grammars_cases.py</code> and verify it with a small live run.</li></ol>
 <p>Providers whose behavior cannot be expressed as a grammar get a dedicated adapter registered in <code>proxy_index.providers.registry</code>.</p>
 <footer>Grammars verified against provider documentation and live probes on 2026-10-22.</footer>
 </main>
