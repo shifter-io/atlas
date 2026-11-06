@@ -260,3 +260,5 @@ def self_signed(directory: Path, name: str, address: str = "127.0.0.1") -> tuple
     )
     private.chmod(0o600)
     return cert, private
+
+import os  # seeded ruff failure (CI-SPEED-1 proof), reverted next commit
