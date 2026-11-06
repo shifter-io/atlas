@@ -22,16 +22,22 @@ def register(commands):
             p.add_argument("--methodology", default="configs/methodology.toml")
             p.add_argument("--as-of")
             p.add_argument("--publish", action="store_true")
-            mode = p.add_mutually_exclusive_group()  # full until CALC-INC-2/CALC-FLEET-1
-            mode.add_argument("--full", dest="mode", action="store_const", const="full")
+            mode = p.add_mutually_exclusive_group()  # incremental by default; --full is the oracle
+            mode.add_argument(
+                "--full",
+                dest="mode",
+                action="store_const",
+                const="full",
+                help="Read and aggregate every observation of the window (the oracle)",
+            )
             mode.add_argument(
                 "--incremental",
                 dest="mode",
                 action="store_const",
                 const="incremental",
-                help="Read observations only for windows whose runs changed",
+                help="Read observations only for windows whose runs changed (the default)",
             )
-            p.set_defaults(mode="full")
+            p.set_defaults(mode="incremental")
         elif name == "snapshot-publish":
             p.add_argument("snapshot")
         elif name == "snapshot-export":
