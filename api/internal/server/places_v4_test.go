@@ -19,6 +19,7 @@ import (
 // dimension, range, key or parameter is 400, an unknown key 404, and nothing
 // is served before the first build.
 func TestPlacePagesAnswerAndRefuse(t *testing.T) {
+	t.Parallel()
 	h, res := smallV4(t)
 	cities, _, _ := res.Pages.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
 	city := cities.Rows[0].Key

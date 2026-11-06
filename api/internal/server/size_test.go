@@ -54,6 +54,7 @@ const (
 // an answer: it is the download file /v1/dataset redirects to, bounded by
 // datasetMaxBytes and datasetMaxGzip.
 func TestEveryAnswerFitsTheCap(t *testing.T) {
+	t.Parallel()
 	v, res, took := scaleVersion(t)
 	// The scale build must reproduce the answer that once broke the cap: the
 	// whole coverage report (324,621 bytes at QA-1; about 240 KB here, since

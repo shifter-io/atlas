@@ -22,7 +22,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import math
 import os
 import stat
 import time
@@ -30,7 +29,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from functools import partial
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -46,21 +44,27 @@ from ..node import (
 )
 from ..node_tls import client_tls
 from ..sinks import JsonSink
-from ..targets import Target, TargetRegistry, registry
+from ..targets import TargetRegistry, registry
 from . import rawfiles, release
 from .contracts import BROWSER_KIND, BROWSER_REGION, user_agent
 from .contracts import CAMOUFOX_FIELDS as CAMOUFOX
 from .driver import host_os
 from .pool import BrowserPool, Pooled
+from .run import BundleSink as BundleSink
+from .run import JsonLog as JsonLog
+from .run import RunTiming as RunTiming
+from .run import RunTransport as RunTransport
+from .run import _iso as _iso
+from .run import _percentile as _percentile
+from .run import slot_deadline as slot_deadline
+from .run import slot_start as slot_start
+from .run import try_seconds as try_seconds
 from .settings import BrowserSettings, TargetSettings, load_settings
-from .transport import BrowserTransport, Recorder
+from .transport import Recorder
 
 log = logging.getLogger(__name__)
 
-DEADLINE_MARGIN_S = 120
 LOG_NAME = "browser-node.jsonl"
-LOG_BYTES = 20 << 20
-LOG_BACKUPS = 5
 HOUR_S = 3600.0
 OUTBOX_EVERY_S = 300.0
 NETWORK_FILES = ("provider.toml", "credentials.toml", "node.token")
@@ -150,96 +154,6 @@ def bound_registry(settings: BrowserSettings) -> TargetRegistry:
         changes = {k: v for k, v in values.items() if k in names and v is not None}
         bound.register(replace(target, **changes))
     return bound
-
-
-def try_seconds(target: Target, page_timeout_s: int) -> float:
-    """The try timeout: the page timeout plus the target's answer or challenge wait."""
-    budget = getattr(target, "budget_s", None)
-    wait = budget() if budget is not None else getattr(target, "challenge_wait_s", 0)
-    return float(page_timeout_s + wait)
-
-
-def slot_start(start_at: str, every_minutes: int) -> int:
-    """The start (Unix time) of the target slot holding start_at."""
-    every = every_minutes * 60
-    return math.floor(datetime.fromisoformat(start_at).timestamp() / every) * every
-
-
-def slot_deadline(start_at: str, every_minutes: int) -> float:
-    """The run deadline: the end of the target slot holding start_at, minus 2 minutes."""
-    return slot_start(start_at, every_minutes) + every_minutes * 60 - DEADLINE_MARGIN_S
-
-
-def _iso(moment: float) -> str:
-    return datetime.fromtimestamp(moment, UTC).isoformat()
-
-
-def _percentile(values: list[int], share: float) -> int | None:
-    """Nearest-rank percentile; None for no values."""
-    ordered = sorted(values)
-    return ordered[max(math.ceil(share * len(ordered)) - 1, 0)] if ordered else None
-
-
-class RunTiming:
-    """One run's recorder: keeps the timing of every try and passes it on to `inner`."""
-
-    def __init__(self, inner: Recorder) -> None:
-        self.inner = inner
-        self.tries = self.ok = self.busy_ms = 0
-        self.latency: list[int] = []
-        self.queue: list[int] = []
-
-    def try_done(self, record: dict[str, Any], screenshot: bytes | None) -> None:
-        timings = record["timings_ms"]
-        self.tries += 1
-        self.ok += record["error"] is None
-        if timings["navigate"] is not None:
-            self.latency.append(timings["navigate"] + (timings["settle"] or 0))
-        if timings["queue"] is not None:  # it held a browser from the lease to its end
-            self.queue.append(timings["queue"])
-            self.busy_ms += max((timings["total"] or 0) - timings["queue"], 0)
-        self.inner.try_done(record, screenshot)
-
-
-class RunTransport(BrowserTransport):
-    """BrowserTransport that reports when its run ends (the runner leaves the transport)."""
-
-    def __init__(self, config: RunConfig, *, finished: Callable[[RunConfig], None], **options):
-        super().__init__(config, **options)
-        self._finished = finished
-
-    async def __aexit__(self, *args: object) -> None:
-        self._finished(self.config)
-
-
-class JsonLog:
-    """JSON lines, size-rotated: LOG_BYTES per file, LOG_BACKUPS old files kept."""
-
-    def __init__(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        handler = RotatingFileHandler(path, maxBytes=LOG_BYTES, backupCount=LOG_BACKUPS)
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        self.handler = handler
-
-    def write(self, line: dict[str, Any]) -> None:
-        message = json.dumps(line, sort_keys=True)
-        self.handler.handle(logging.makeLogRecord({"msg": message, "levelno": logging.INFO}))
-
-    def close(self) -> None:
-        self.handler.close()
-
-
-class BundleSink(JsonSink):
-    """The run's JsonSink; its run directory, once made, is the recorder's."""
-
-    def __init__(self, output: Path, recorder: rawfiles.FileRecorder) -> None:
-        super().__init__(output)
-        self.recorder = recorder
-
-    def start(self, run_id: str) -> None:
-        super().start(run_id)
-        assert self.directory is not None
-        self.recorder.bind(self.directory)
 
 
 class BrowserAgent(NodeAgent):

@@ -42,27 +42,48 @@ from proxy_index.campaign.contracts import (
 )
 
 
-@pytest.mark.slow
-async def test_a_full_hour_launches_16_networks_in_8_regions(tmp_path):
-    """1: 16 creates and one confirmed assignment per region; all armed before HH:00."""
+@pytest.mark.parametrize("region", REGIONS)
+async def test_a_full_hour_of_16_networks_in_8_regions_launches_region(tmp_path, region):
+    """1: two creates and one confirmed assignment per region; all armed before HH:00.
+
+    One part per region (#338): every save rewrites the whole record, so launching all 128
+    workers at once took 51.6 s under tier1's load. Each part plans the whole hour on the full
+    spec, then launches its region's 16 workers."""
     fake = FakeDigitalOcean()
     fake.seed_production(40)
     spec = make_spec(NETWORKS, REGIONS)
-    record, root, remote, _ = await launched(tmp_path, fake, spec)
-    assert len(posts(fake, "/v2/droplets")) == 16
-    assert len(posts(fake, f"/v2/projects/{CAMPAIGN_PROJECT}/resources")) == 8
-    assert len(record.droplets) == 128 and len(remote.pushes) == 128
+    root = make_root(tmp_path, spec)
+    record = HourRecord(CID, 0, SCHEDULED)
+    planner = launch._Launch(spec, record, root, None, lambda hour: None, FakeClock(PRE_CREATE))
+    planner._plan_workers()
+    assert [(d.name, d.size, d.image_id) for d in record.droplets] == [
+        (droplet_name(CID, 0, r, n), "c-2", f"snap-{r}") for n in NETWORKS for r in REGIONS
+    ]
+    assert {n: t["countries_total"] for n, t in record.traffic.items()} == dict.fromkeys(
+        NETWORKS, 16
+    )
+    record.droplets = [d for d in record.droplets if d.region == region]
+    record.cells = {c: s for c, s in record.cells.items() if c.endswith(f"/{region}")}
+    record, root, remote, _ = await launched(tmp_path, fake, spec, record=record)
+    assert len(posts(fake, "/v2/droplets")) == 2
+    assert len(posts(fake, f"/v2/projects/{CAMPAIGN_PROJECT}/resources")) == 1
+    names = sorted(droplet_name(CID, 0, region, n) for n in NETWORKS)
+    assert sorted(d["name"] for d in fake.droplets.values() if d["name"].startswith("pic-")) == (
+        names
+    )
+    assert len(record.droplets) == 16 and sorted(p[0] for p in remote.pushes) == names
     assert {d.status for d in record.droplets} == {"armed"}
     assert all(
         d.armed_at < SCHEDULED and d.droplet_id in fake.projects[CAMPAIGN_PROJECT]
         for d in record.droplets
     )
-    assert record.state == "running" and set(record.cells.values()) == {"running"}
-    assert record.traffic["net00"]["countries_total"] == 16
+    assert record.state == "running" and len(record.cells) == 16
+    assert set(record.cells.values()) == {"running"}
     text = hour_path(root, 0).read_text()
     assert "203.0.113" not in text and "192.0.2" not in text
     hosts = launch.hosts_path(root, 0)
     assert stat.S_IMODE(hosts.stat().st_mode) == 0o600 and "203.0.113.10" in hosts.read_text()
+    assert set(launch.read_hosts(root, 0)) == {d.droplet_id for d in record.droplets}
     assert fake.deleted == [] and fake.unlisted == []
     tags = [d["tags"] for d in fake.droplets.values() if d["name"].startswith("pic-")]
     assert all(t == [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)] for t in tags)

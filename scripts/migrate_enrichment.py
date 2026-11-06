@@ -15,10 +15,7 @@ from proxy_index.storage import ENRICHMENT_FIELDS, SCHEMA_VERSION, connect, init
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main():
-    if SCHEMA_VERSION != 3:
-        raise SystemExit("Historical v2/v3 tool; use scripts/migrate_database.py for v4 to v5")
-    credentials = ROOT / ".secrets/database.toml"
+def _local_config(credentials):
     config = read_credentials(credentials, "postgres")
     if (config["host"], str(config["port"]), config["dbname"]) != (
         "127.0.0.1",
@@ -26,14 +23,18 @@ def main():
         "proxy_reviews",
     ):
         raise ValueError("Only the dedicated local project database is supported")
+    return config
+
+
+def _original(credentials):
     with connect(credentials) as conn:
         version = conn.execute("SELECT version FROM schema_versions").fetchone()[0]
         if version != 2:
             raise ValueError("This verification script requires schema v2")
-        original = dict(
-            conn.execute("SELECT (ip_id,release_id)::text,attributes FROM ip_enrichment")
-        )
-    before = status(credentials)
+        return dict(conn.execute("SELECT (ip_id,release_id)::text,attributes FROM ip_enrichment"))
+
+
+def _backup(config):
     folder = ROOT / ".state/postgres/backups" / datetime.now(UTC).strftime("%Y%m%d_%H%M%S_v2")
     folder.mkdir(parents=True, mode=0o700)
     binary = Path(json.loads((ROOT / ".state/postgres/runtime.json").read_text())["bin_dir"])
@@ -61,7 +62,10 @@ def main():
     subprocess.run(
         [str(binary / "pg_restore"), "--list", str(dump)], check=True, capture_output=True
     )
-    initialize(credentials)
+    return dump
+
+
+def _verify_enrichment(credentials, original):
     with connect(credentials) as conn:
         migrated = dict(
             conn.execute(
@@ -80,9 +84,9 @@ def main():
         }
         if row != expected or extras != unknown:
             raise ValueError("Enrichment values differ after migration")
-    after = status(credentials)
-    if after != before:
-        raise ValueError("Measurement history or cached metrics changed")
+
+
+def _write_evidence(dump, original, after):
     evidence = {
         "schema_version": 3,
         "backup": str(dump),
@@ -91,9 +95,25 @@ def main():
         "typed_fields": list(ENRICHMENT_FIELDS),
         "status": after,
     }
-    (folder / "migration.json").write_text(json.dumps(evidence, indent=2) + "\n")
+    (dump.parent / "migration.json").write_text(json.dumps(evidence, indent=2) + "\n")
     (ROOT / "artifacts/postgresql.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print(json.dumps({key: value for key, value in evidence.items() if key != "status"}))
+
+
+def main():
+    if SCHEMA_VERSION != 3:
+        raise SystemExit("Historical v2/v3 tool; use scripts/migrate_database.py for v4 to v5")
+    credentials = ROOT / ".secrets/database.toml"
+    config = _local_config(credentials)
+    original = _original(credentials)
+    before = status(credentials)
+    dump = _backup(config)
+    initialize(credentials)
+    _verify_enrichment(credentials, original)
+    after = status(credentials)
+    if after != before:
+        raise ValueError("Measurement history or cached metrics changed")
+    _write_evidence(dump, original, after)
 
 
 if __name__ == "__main__":

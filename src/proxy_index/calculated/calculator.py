@@ -16,7 +16,6 @@ from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
 from . import browser, incremental, network
-from .aggregate import LATENCY as PERCENTILES
 from .aggregate import (
     NOT_LATENCY_TARGET,
     PRICES,
@@ -40,6 +39,7 @@ from .aggregate import (
 )
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
+from .latency import KEYS
 from .lists import CRITERIA
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
@@ -411,8 +411,8 @@ def build(
                 # Latency is the latency target's alone; every other target has none.
                 with_under_load(tm, own, factors, minimum, excluded)
                 if target != timed_target:
-                    tm["latency_ms"] = dict.fromkeys(PERCENTILES)
-                    tm["latency_under_load_ms"] = dict.fromkeys(PERCENTILES)
+                    tm["latency_ms"] = dict.fromkeys(KEYS)
+                    tm["latency_under_load_ms"] = dict.fromkeys(KEYS)
                     tm["latency_reason"] = NOT_LATENCY_TARGET
                     tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
                 # Outages are per product and country, so a target keeps its pulse-slot share.

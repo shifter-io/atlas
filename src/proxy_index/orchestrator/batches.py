@@ -38,7 +38,7 @@ from typing import Any
 import psycopg
 
 from .db import Database, mark_closed, setting
-from .events import emit
+from .events import EventRow, emit
 from .planparts import TAKING as TAKING
 from .planparts import _create_runs, _report_no_node
 from .planparts import census_every as census_every
@@ -153,19 +153,21 @@ async def _skip_census(
     mark_closed(conn, batch_id)
     await emit(
         conn,
-        "census_skipped",
-        now,
-        batch_id=batch_id,
-        country_code=slot["country_code"],
-        target_id=slot["target_id"],
-        region_id=slot["region_id"],
-        severity="minor",
-        data={
-            "region": slot["region"],
-            "reason": "previous census still " + previous["status"],
-            "previous_batch_id": previous["batch_id"],
-            "scheduled_for": slot["slot"].astimezone(UTC).isoformat(),
-        },
+        EventRow(
+            kind="census_skipped",
+            at=now,
+            batch_id=batch_id,
+            country_code=slot["country_code"],
+            target_id=slot["target_id"],
+            region_id=slot["region_id"],
+            severity="minor",
+            data={
+                "region": slot["region"],
+                "reason": "previous census still " + previous["status"],
+                "previous_batch_id": previous["batch_id"],
+                "scheduled_for": slot["slot"].astimezone(UTC).isoformat(),
+            },
+        ),
     )
 
 
@@ -373,32 +375,34 @@ async def run_finished(
     signal = _signal(run)
     await emit(
         conn,
-        "census_finished",
-        now,
-        batch_id=batch_id,
-        product_id=product_id,
-        country_code=run["country_code"],
-        target_id=run["target_id"],
-        region_id=run["region_id"],
-        signal=signal,
-        severity="minor" if signal < 0 else "info",
-        data={
-            "region": run["region"],
-            "requests": requests,
-            "successes": successes,
-            "unique_ips": run["unique_ips"],
-            "success_rate": successes / requests if requests else None,
-            "duration_s": (
-                round(max((run["finished_at"] - run["started_at"]).total_seconds(), 0.0), 3)
-                if run["started_at"] and run["finished_at"]
-                else None
-            ),
-            "stop_reason": run["stop_reason"],
-            "status": run["status"],
-            "bytes_up": run["bytes_up"],
-            "bytes_down": run["bytes_down"],
-            **({"error": run["error"]} if run["error"] else {}),
-        },
+        EventRow(
+            kind="census_finished",
+            at=now,
+            batch_id=batch_id,
+            product_id=product_id,
+            country_code=run["country_code"],
+            target_id=run["target_id"],
+            region_id=run["region_id"],
+            signal=signal,
+            severity="minor" if signal < 0 else "info",
+            data={
+                "region": run["region"],
+                "requests": requests,
+                "successes": successes,
+                "unique_ips": run["unique_ips"],
+                "success_rate": successes / requests if requests else None,
+                "duration_s": (
+                    round(max((run["finished_at"] - run["started_at"]).total_seconds(), 0.0), 3)
+                    if run["started_at"] and run["finished_at"]
+                    else None
+                ),
+                "stop_reason": run["stop_reason"],
+                "status": run["status"],
+                "bytes_up": run["bytes_up"],
+                "bytes_down": run["bytes_down"],
+                **({"error": run["error"]} if run["error"] else {}),
+            },
+        ),
     )
 
 
@@ -437,22 +441,26 @@ async def census_recovered(
     for outage in closed:
         await emit(
             conn,
-            "recovered",
-            now,
-            batch_id=batch_id,
-            product_id=product_id,
-            country_code=run["country_code"],
-            target_id=run["target_id"],
-            region_id=run["region_id"],
-            signal=1,
-            data={
-                "region": run["region"],
-                "source": "census",
-                "incident": "down",
-                "since": outage["started_at"].astimezone(UTC).isoformat(),
-                "duration_s": round((outage["ended_at"] - outage["started_at"]).total_seconds(), 3),
-                "outage_batch_id": outage["batch_id"],
-            },
+            EventRow(
+                kind="recovered",
+                at=now,
+                batch_id=batch_id,
+                product_id=product_id,
+                country_code=run["country_code"],
+                target_id=run["target_id"],
+                region_id=run["region_id"],
+                signal=1,
+                data={
+                    "region": run["region"],
+                    "source": "census",
+                    "incident": "down",
+                    "since": outage["started_at"].astimezone(UTC).isoformat(),
+                    "duration_s": round(
+                        (outage["ended_at"] - outage["started_at"]).total_seconds(), 3
+                    ),
+                    "outage_batch_id": outage["batch_id"],
+                },
+            ),
         )
     return len(closed)
 
@@ -493,23 +501,25 @@ async def census_down(
         return False
     await emit(
         conn,
-        "down",
-        now,
-        batch_id=batch_id,
-        product_id=product_id,
-        country_code=run["country_code"],
-        target_id=run["target_id"],
-        region_id=run["region_id"],
-        signal=-1,
-        severity="critical",
-        data={
-            "region": run["region"],
-            "since": since.astimezone(UTC).isoformat(),
-            "source": "census",
-            "batch_id": batch_id,
-            "requests": run["requests"],
-            "successes": run["successes"],
-        },
+        EventRow(
+            kind="down",
+            at=now,
+            batch_id=batch_id,
+            product_id=product_id,
+            country_code=run["country_code"],
+            target_id=run["target_id"],
+            region_id=run["region_id"],
+            signal=-1,
+            severity="critical",
+            data={
+                "region": run["region"],
+                "since": since.astimezone(UTC).isoformat(),
+                "source": "census",
+                "batch_id": batch_id,
+                "requests": run["requests"],
+                "successes": run["successes"],
+            },
+        ),
     )
     return True
 
@@ -573,33 +583,39 @@ async def census_retry(
         key = {"country": country, "target": census["target_id"], "product": product_id}
         if await _retry_blocked(conn, key, day):
             continue
-        retry = await _row(
-            conn,
-            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-            "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT DO NOTHING RETURNING batch_id",
-            (
-                country,
-                run["region_id"],
-                census["target_id"],
-                now,
-                now + LATE_START,
-                census["batch_id"],
-            ),
-        )
-        if retry is None:
-            continue
-        # The pulse's node is the product's node in the region.
-        await conn.execute(
-            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
-            (retry["batch_id"], product_id, run["node_id"]),
-        )
-        await emit(
-            conn,
-            "census_retry",
-            now,
+        retry_id = await _open_retry(conn, run, census, now)
+        if retry_id is not None:
+            created.append(retry_id)
+    return created
+
+
+async def _open_retry(
+    conn: psycopg.AsyncConnection, run: dict, census: dict, now: datetime
+) -> int | None:
+    """The rerun of `census` for the product of the pulse `run`, with its census_retry event;
+    None when the slot already exists."""
+    country = run["country_code"]
+    retry = await _row(
+        conn,
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+        "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT DO NOTHING RETURNING batch_id",
+        (country, run["region_id"], census["target_id"], now, now + LATE_START, census["batch_id"]),
+    )
+    if retry is None:
+        return None
+    # The pulse's node is the product's node in the region.
+    await conn.execute(
+        "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
+        (retry["batch_id"], run["product_id"], run["node_id"]),
+    )
+    await emit(
+        conn,
+        EventRow(
+            kind="census_retry",
+            at=now,
             batch_id=retry["batch_id"],
-            product_id=product_id,
+            product_id=run["product_id"],
             country_code=country,
             target_id=census["target_id"],
             region_id=run["region_id"],
@@ -607,11 +623,11 @@ async def census_retry(
                 "region": run["region"],
                 "retry_of": census["batch_id"],
                 "reason": census["stop_reason"] or census["error"],
-                "pulse_batch_id": batch_id,
+                "pulse_batch_id": run["batch_id"],
             },
-        )
-        created.append(retry["batch_id"])
-    return created
+        ),
+    )
+    return retry["batch_id"]
 
 
 async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime):
@@ -634,12 +650,17 @@ async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, 
     if run["kind"] == "census":
         await emit(
             conn,
-            "census_started",
-            now,
-            batch_id=batch_id,
-            product_id=product_id,
-            country_code=run["country_code"],
-            target_id=run["target_id"],
-            region_id=run["region_id"],
-            data={"region": run["region"], "start_at": run["start_at"].astimezone(UTC).isoformat()},
+            EventRow(
+                kind="census_started",
+                at=now,
+                batch_id=batch_id,
+                product_id=product_id,
+                country_code=run["country_code"],
+                target_id=run["target_id"],
+                region_id=run["region_id"],
+                data={
+                    "region": run["region"],
+                    "start_at": run["start_at"].astimezone(UTC).isoformat(),
+                },
+            ),
         )

@@ -34,6 +34,7 @@ from test_browser_rawfiles import CAMOUFOX, MEMBERS, RUN_ID, SLOT, make_run, sea
 from proxy_index.browser import contracts as bc
 from proxy_index.browser import node as host_module
 from proxy_index.browser import rawfiles
+from proxy_index.browser import run as run_module
 from proxy_index.browser.node import BrowserHost
 from proxy_index.errors import UserError
 
@@ -99,7 +100,7 @@ async def host_with(state, fake, **options):
 async def test_a_host_seals_sends_and_deletes_and_logs_no_credentials(
     tmp_path, monkeypatch, caplog
 ):
-    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
+    monkeypatch.setattr(run_module, "DEADLINE_MARGIN_S", -600)
     caplog.set_level(logging.DEBUG)
     state = make_state(tmp_path)
     work = {TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")], TOKENS[CHEAP]: []}
@@ -120,7 +121,7 @@ async def test_a_host_seals_sends_and_deletes_and_logs_no_credentials(
 
 
 async def test_an_unconfirmed_upload_never_calls_failed_and_stays(tmp_path, monkeypatch):
-    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
+    monkeypatch.setattr(run_module, "DEADLINE_MARGIN_S", -600)
     state = make_state(tmp_path)
     fake = Kbp7({TOKENS[SHIFTER]: [browser_work(1, "amazon_pdp")]}, replies=[503])
     host, server = await host_with(state, fake)
@@ -176,7 +177,7 @@ async def test_a_host_start_seals_a_finished_run_and_deletes_a_half_run(tmp_path
 
 
 async def test_a_run_that_cannot_be_sealed_is_kept_and_not_failed(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(host_module, "DEADLINE_MARGIN_S", -600)
+    monkeypatch.setattr(run_module, "DEADLINE_MARGIN_S", -600)
 
     def refuse(*args, **kwargs):
         raise OSError("disk")

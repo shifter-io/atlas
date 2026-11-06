@@ -10,6 +10,17 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 
+def latency_rows(summary):
+    """The latency table's rows: each percentile, then the mean (latency_mean_ms; "n/a" in a
+    summary from before it was recorded or of a run without successes)."""
+    rows = [
+        (key.upper(), f"{value:,.0f}" if value is not None else "—")
+        for key, value in summary["latency_ms"].items()
+    ]
+    mean = summary.get("latency_mean_ms")
+    return [*rows, ("Mean", f"{mean:,.1f}" if mean is not None else "n/a")]
+
+
 def report(directory: Path) -> Path:
     summary = json.loads((directory / "summary.json").read_text())
     config = summary["config"]
@@ -71,13 +82,7 @@ Differences can also reflect database disagreement.</p>"""
 
     errors = table(("Error category", "Requests"), summary["errors"].items())
     statuses = table(("HTTP status received", "Requests"), summary["status_codes"].items())
-    latencies = table(
-        ("Percentile", "Milliseconds"),
-        (
-            (key.upper(), f"{value:,.0f}" if value is not None else "—")
-            for key, value in summary["latency_ms"].items()
-        ),
-    )
+    latencies = table(("Percentile", "Milliseconds"), latency_rows(summary))
     cards = [
         (
             f"{summary['success_rate']:.2%}" if summary["success_rate"] is not None else "—",
@@ -140,7 +145,7 @@ Session policy: {esc(provider.get("session_policy"))}.
 Success requires HTTP 200 and a single valid IP address.</p>
 <div class="columns"><section><h2>Successful-request latency</h2>{latencies}
 <p class="caption">Connection setup through complete response body; successful requests
-only. Nearest-rank percentiles from the 1 ms ceiling histogram.</p></section>
+only. Nearest-rank percentiles and the mean from the 1 ms ceiling histogram.</p></section>
 <section><h2>Failures</h2>{errors}<p class="caption">Raw response bodies were not retained,
 so the invalid-body response cannot be diagnosed further from this run.</p></section></div>
 <h2>HTTP statuses</h2>{statuses}<p class="caption">A 200 response can still fail body

@@ -16,6 +16,7 @@ an observation row, and each list it wrote stores its window's first-seen histog
 
 import json
 from datetime import UTC, datetime
+from functools import partial
 
 import psycopg
 import pytest
@@ -142,14 +143,25 @@ def lists_count(database):
         return conn.execute(query).fetchone()[0]
 
 
-@pytest.mark.slow
-@pytest.mark.asyncio
-@pytest.mark.parametrize("day", [0, 1, 2])
-async def test_incremental_equals_full_at_every_hourly_cutoff(day, database, tmp_path, monkeypatch):
-    """Each day of the 3 is its own case (they run in parallel), from no stored list."""
-    end = floor_hour(datetime.now(UTC)) + HOUR
-    h = await history(database, tmp_path, end)
-    policy = lenient_policy(tmp_path)
+def cutoffs(day):
+    """The day's 24 hourly cutoffs, in hours before the fixture's end, oldest first."""
+    return range(72 - 24 * day, 48 - 24 * day, -1)
+
+
+async def replay(database, policy, end, hours, late):
+    """A sweep's incremental builds at its cutoffs hours (before end), unasserted, adding its late
+    run (late: the cutoff and the coroutine function that adds it) where the sweep does. They
+    leave the lists and memos the sweep's next build reads: the sweep's full builds add none an
+    incremental build reads, so the next one has the same hits, misses and statements."""
+    at, add = late
+    for cutoff in hours:
+        if cutoff == at:
+            await add()
+        calculate(database, policy, as_of=end - cutoff * HOUR, mode="incremental")
+
+
+def count_windows(monkeypatch):
+    """The windows the incremental builds reuse (hit) and count (miss), counted from now on."""
     counted = {"hit": 0, "miss": 0}
     window, missed = incremental.Incremental.window, incremental.Incremental._missed
 
@@ -163,10 +175,53 @@ async def test_incremental_equals_full_at_every_hourly_cutoff(day, database, tmp
 
     monkeypatch.setattr(incremental.Incremental, "window", counted_window)
     monkeypatch.setattr(incremental.Incremental, "_missed", counted_miss)
+    return counted
+
+
+# Each day's cutoffs in chunks of CHUNK, each chunk its own case (they run in parallel). A late
+# chunk first replays most of its day, so each of SPLIT's is cut into its number of cases,
+# "<day>-<chunk>a", "b" and so on, of an equal share of its cutoffs.
+CHUNK = 6
+SPLIT = {(day, 2): 2 for day in range(3)} | {(day, 3): 3 for day in range(3)}
+
+
+def chunks():
+    """Each case's day and the start and stop of its cutoffs in cutoffs(day)."""
+    for day in range(3):
+        for chunk in range(len(cutoffs(day)) // CHUNK):
+            parts = SPLIT.get((day, chunk), 1)
+            size = CHUNK // parts
+            for part in range(parts):
+                start = chunk * CHUNK + part * size
+                suffix = "abc"[part] if parts > 1 else ""
+                yield pytest.param(day, start, start + size, id=f"{day}-{chunk}{suffix}")
+
+
+# The cutoffs (hours before the end) with a window that has exactly one peer (overlap 1: two of
+# the US cohort's alpha, beta and delta with IPs): from beta's first run in a window to the
+# last before delta's run is in every window.
+SINGLE_PEER = range(10, 55)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("day", "start", "stop"), list(chunks()))
+async def test_incremental_equals_full_at_every_hourly_cutoff(
+    day, start, stop, database, tmp_path, monkeypatch
+):
+    """One case of a day's sweep, which starts from no stored list: the day's cutoffs before the
+    case's are replayed, then each of the case's is checked."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    h = await history(database, tmp_path, end)
+    policy = lenient_policy(tmp_path)
+    hours_of = cutoffs(day)
+    late = min(36, hours_of[0])  # a late run: earlier than runs counted before (not on day 0)
+    add_late = partial(h.daily, "beta", "us", 60 * HOUR)
+    await replay(database, policy, end, hours_of[:start], (late, add_late))
+    counted = count_windows(monkeypatch)
     log, seen = statements(monkeypatch), set()
-    for hours in range(72 - 24 * day, 48 - 24 * day, -1):
-        if hours == min(36, 72 - 24 * day):  # a late run: earlier than runs counted before
-            await h.daily("beta", "us", 60 * HOUR)
+    for hours in hours_of[start:stop]:
+        if hours == late:
+            await add_late()
         payload = assert_equal(database, policy, end - hours * HOUR, log)
         for p in payload["products"]:
             for w in p["windows"].values():
@@ -177,7 +232,8 @@ async def test_incremental_equals_full_at_every_hourly_cutoff(day, database, tmp
         seen |= {(p["provider"], p["criteria"].get("schedule")) for p in payload["products"]}
     # Every case is exercised: empty and measured windows, estimates, peers, census-pulse
     # groups, and windows the incremental builds reused and ones they counted.
-    assert {("data", True), ("estimated", True), ("overlap", 1)} <= seen
+    assert {("data", True), ("estimated", True)} <= seen
+    assert (("overlap", 1) in seen) == any(at in SINGLE_PEER for at in hours_of[start:stop])
     assert ("data", False) in seen  # gamma's windows
     assert ("scheduled", "census_pulse") in seen and ("scheduled", None) in seen
     assert ("delta", "census_pulse") in seen
@@ -228,11 +284,12 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
         # Back to calculated v9: the same schema without the memo tables.
         for table in MEMOS:
             conn.execute(f"DROP TABLE {table}")
+        conn.execute("DROP TABLE calculated_geo_hours,calculated_geo_rollups")  # calculated v11
         conn.execute("UPDATE calculation_schema SET version=9,checksum=%s", (store.V9_CHECKSUM,))
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         9,
-        10,
+        11,
     )
     assert set(store.V9_CHECKS) <= set(result["verified"])
     with connect(database) as conn:
@@ -251,8 +308,8 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
 
 def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noqa: F811
     roles, files = owned.roles, owned.files
-    # The admin role migrates (v8 → v9 → v10); the memo tables get the default privileges only.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 10
+    # The admin role migrates (v8 → v11); the memo tables and rollups get the default privileges.
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 11
     now = datetime.now(UTC)
     rows = {
         "calculated_run_ranges": (1, 0, now, now, "{}", now),
@@ -260,17 +317,19 @@ def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noq
         "calculated_distinct": ("d", "{}", now),
         "calculated_bucket_ips": (now, "d", 1),
         "calculated_ip_last_seen": (1, now),
+        "calculated_geo_hours": (now, None, 1, 1, 1, None, "t", None, 1, 1, 0, 0, [1], [1]),
+        "calculated_geo_rollups": (now, 1),
     }
     with connect(files[roles.runtime]) as conn:
         for table, row in rows.items():
             marks = ",".join(["%s"] * len(row))
             conn.execute(f"INSERT INTO {table} VALUES ({marks})", row)
     with connect(files[roles.api]) as conn:
-        for table in MEMOS:
+        for table in rows:
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (1,)
-    for table in MEMOS:
+    for table in rows:
         with pytest.raises(psycopg.errors.InsufficientPrivilege), connect(files[roles.api]) as c:
             c.execute(f"DELETE FROM {table}")
     with connect(files[roles.runtime]) as conn:
-        for table in MEMOS:
+        for table in rows:
             conn.execute(f"DELETE FROM {table}")

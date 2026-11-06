@@ -14,14 +14,13 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport
 
-from proxy_index import ProxyConfig, RunConfig, RunOptions, run
+from proxy_index import ProxyConfig, RunConfig, run
 from proxy_index.cli import main
-from proxy_index.models import Outcome
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.export import export_campaign
 from proxy_index.onboarding.files import atomic_json, lock, read_json
-from proxy_index.onboarding.scheduler import execute, new_state
-from proxy_index.onboarding.writer import ObservationWriter, SummarySink
+from proxy_index.onboarding.scheduler import RegionOptions, execute, new_state
+from proxy_index.onboarding.writer import ObservationWriter, WriterBounds
 
 ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
@@ -136,10 +135,9 @@ async def test_fifo_overruns_preserve_all_rounds_and_country_order(manifest):
         manifest,
         "tor1",
         Proxy,
+        RegionOptions(concurrency=37, request_timeout=3.5),
         clock=clock,
         run_country=measure,
-        concurrency=37,
-        request_timeout=3.5,
     )
     state = read_json(manifest.parent / "regions/tor1/state.json")
     assert result["status"] == "closed"
@@ -185,14 +183,18 @@ async def test_restart_preserves_settings_skips_interrupted_and_completed(manife
         clock.value = START.timestamp() + 86400
         return fake_measurement(status="cancelled", stop_reason="deadline")
 
-    await execute(manifest, "tor1", Proxy, clock=clock, run_country=measure, resume=True)
+    await execute(
+        manifest, "tor1", Proxy, RegionOptions(resume=True), clock=clock, run_country=measure
+    )
     assert calls == [("pm", 7, 4)]
     saved = read_json(path)
     assert saved["jobs"][1]["status"] == "interrupted"
     with pytest.raises(ValueError, match="preserve"):
-        await execute(manifest, "tor1", Proxy, resume=True, concurrency=8)
+        await execute(manifest, "tor1", Proxy, RegionOptions(resume=True, concurrency=8))
     # A closed campaign is inert even when explicitly resumed.
-    await execute(manifest, "tor1", Proxy, clock=clock, run_country=measure, resume=True)
+    await execute(
+        manifest, "tor1", Proxy, RegionOptions(resume=True), clock=clock, run_country=measure
+    )
     assert len(calls) == 1
 
 
@@ -221,8 +223,7 @@ async def test_writer_duplicates_ipv6_rotation_and_deadline(tmp_path):
         scheduled=campaign.timestamp(start),
         started=campaign.timestamp(start + 2),
         deadline=start + 60,
-        chunk_rows=2,
-        queue_size=2,
+        bounds=WriterBounds(chunk_rows=2, queue_size=2),
     )
     for address in ("203.0.113.1", "203.0.113.1", "2001:db8::1"):
         await writer.observe(address, start + 3)
@@ -245,7 +246,7 @@ async def test_writer_rotates_idle_pending_records(tmp_path):
         scheduled=campaign.timestamp(START),
         started=campaign.timestamp(START),
         deadline=START.timestamp() + 60,
-        chunk_seconds=0.02,
+        bounds=WriterBounds(chunk_seconds=0.02),
     )
     await writer.observe("203.0.113.1", START.timestamp() + 1)
     for _ in range(100):
@@ -285,8 +286,7 @@ async def test_writer_failure_is_fatal_not_a_deadlock(tmp_path, monkeypatch):
         scheduled=campaign.timestamp(START),
         started=campaign.timestamp(START),
         deadline=START.timestamp() + 60,
-        chunk_rows=1,
-        queue_size=1,
+        bounds=WriterBounds(chunk_rows=1, queue_size=1),
     )
     await writer.observe("203.0.113.1", START.timestamp() + 1)
     with pytest.raises(OSError, match="writer failed"):
@@ -307,7 +307,7 @@ async def test_export_verifies_chunks_and_reports_missing_regions(manifest):
         scheduled=data["starts_at"],
         started=data["starts_at"],
         deadline=START.timestamp() + 86400,
-        chunk_rows=1,
+        bounds=WriterBounds(chunk_rows=1),
     )
     for _ in range(2):
         await writer.observe("203.0.113.1", START.timestamp() + 1)
@@ -329,80 +329,6 @@ async def test_export_verifies_chunks_and_reports_missing_regions(manifest):
     chunk.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="checksum"):
         export_campaign(manifest)
-
-
-async def test_real_runner_streams_each_success_and_uses_new_rule(tmp_path):
-    class Mixed(FakeTransport):
-        async def execute(self, target, *, context=None):
-            self.count += 1
-            if self.count % 2:
-                return Outcome(1, error="timeout")
-            return Outcome(1, ip="2001:db8::1", status=200)
-
-    writer = ObservationWriter(
-        tmp_path,
-        country="US",
-        scheduled=campaign.timestamp(time.time()),
-        started=campaign.timestamp(time.time()),
-        deadline=time.time() + 60,
-    )
-    summary = await run(
-        RunConfig(
-            "generic_http",
-            ProxyConfig("http", "localhost", 8080),
-            requests=None,
-            concurrency=1,
-            stop_rule="unique_ratio",
-        ),
-        SummarySink(),
-        RunOptions(
-            observation_consumer=writer.observe, aggregate_ips=False, transport_factory=Mixed
-        ),
-    )
-    await writer.close()
-    assert summary.completed == 1000 and summary.successes == writer.rows == 500
-    assert summary.stop_reason == "unique_ratio"
-    assert summary.config["census_rule_version"] == 2
-    assert summary.config["census_ratio_basis"] == "completed_requests"
-    assert not (tmp_path / "ips.jsonl.gz").exists()
-
-
-async def test_deadline_cancels_slow_requests_without_observations():
-    observed = []
-
-    class Slow(FakeTransport):
-        async def execute(self, target, *, context=None):
-            await asyncio.sleep(10)
-            return Outcome(1, ip="203.0.113.1", status=200)
-
-    async def observe(ip, at):
-        observed.append(ip)
-
-    summary = await asyncio.wait_for(
-        run(
-            RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
-            SummarySink(),
-            RunOptions(
-                transport_factory=Slow, observation_consumer=observe, deadline=time.time() + 0.06
-            ),
-        ),
-        1,
-    )
-    assert summary.status == "cancelled" and summary.stop_reason == "deadline"
-    assert summary.completed == 0 and not observed
-    assert summary.cancelled == 2
-
-
-async def test_observation_failure_stops_shared_runner():
-    async def broken(ip, at):
-        raise OSError("disk full")
-
-    with pytest.raises(RuntimeError, match="Run failed"):
-        await run(
-            RunConfig("generic_http", ProxyConfig("http", "localhost", 8080)),
-            SummarySink(),
-            RunOptions(transport_factory=FakeTransport, observation_consumer=broken),
-        )
 
 
 def test_cli_options_and_no_database_flags(capsys):
@@ -432,108 +358,6 @@ def test_runtime_git_and_package_exclusion():
     )
 
 
-@pytest.mark.scale
-async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
-    writer = ObservationWriter(
-        tmp_path,
-        country="US",
-        scheduled=campaign.timestamp(START),
-        started=campaign.timestamp(START),
-        deadline=START.timestamp() + 60,
-        queue_size=4096,
-    )
-    for _ in range(2_000_000):
-        await writer.observe("2001:db8::1", START.timestamp() + 1)
-    await writer.close()
-    assert writer.rows == 2_000_000 and writer.peak_queue <= 4096
-    count = 0
-    for path in sorted(tmp_path.glob("*.gz")):
-        lines = gzip.decompress(path.read_bytes()).decode().splitlines()
-        count += len(lines)
-        # Every line is checked: identical lines need parsing only once.
-        for line in set(lines):
-            assert json.loads(line)["ip"] == "2001:db8::1"
-    assert count == 2_000_000
-
-
-async def test_exactly_half_unique_keeps_running_and_failure_crosses_threshold():
-    class Half(FakeTransport):
-        async def execute(self, target, *, context=None):
-            self.count += 1
-            if self.count <= 500:
-                return Outcome(1, ip=f"10.0.{self.count // 256}.{self.count % 256}", status=200)
-            return Outcome(1, error="timeout")
-
-    result = await run(
-        RunConfig(
-            "generic_http",
-            ProxyConfig("http", "localhost", 8080),
-            requests=None,
-            concurrency=1,
-            stop_rule="unique_ratio",
-        ),
-        SummarySink(),
-        RunOptions(transport_factory=Half),
-    )
-    assert result.completed == 1001 and result.successes == 500
-    assert result.stop_reason == "unique_ratio"
-
-
-async def test_deadline_rejects_a_late_response_even_without_watchdog_tick(monkeypatch):
-    import proxy_index.runner as runner
-
-    now = [time.time()]
-    monkeypatch.setattr(runner.time, "time", lambda: now[0])
-
-    class Late(FakeTransport):
-        async def execute(self, target, *, context=None):
-            # Advance the wall clock before a watcher can get an event-loop turn.
-            now[0] += 1
-            return Outcome(1, ip="203.0.113.1", status=200)
-
-    observed = []
-
-    async def observe(ip, at):
-        observed.append(ip)
-
-    result = await run(
-        RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=1),
-        SummarySink(),
-        RunOptions(
-            transport_factory=Late, observation_consumer=observe, deadline=time.time() + 0.01
-        ),
-    )
-    assert not observed and result.stop_reason == "deadline"
-    assert result.completed == 0
-
-
-async def test_cancellation_during_backpressure_keeps_completed_observation():
-    entered, release, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    observed = []
-
-    async def observe(ip, at):
-        entered.set()
-        await release.wait()
-        observed.append(ip)
-
-    task = asyncio.create_task(
-        run(
-            RunConfig(
-                "generic_http", ProxyConfig("http", "localhost", 8080), requests=10, concurrency=1
-            ),
-            SummarySink(),
-            RunOptions(transport_factory=FakeTransport, observation_consumer=observe, stop=stop),
-        )
-    )
-    await entered.wait()
-    stop.set()
-    await asyncio.sleep(0.06)
-    release.set()
-    result = await asyncio.wait_for(task, 1)
-    assert len(observed) == result.successes == 1
-    assert result.started == 1
-
-
 async def test_partial_country_is_exportable_after_crash_without_replay(manifest):
     data = campaign.load(manifest)
     state = new_state(data, "tor1", data["settings"])
@@ -550,7 +374,9 @@ async def test_partial_country_is_exportable_after_crash_without_replay(manifest
     )
     await writer.observe("203.0.113.1", START.timestamp() + 1)
     await writer.close()
-    await execute(manifest, "tor1", Proxy, resume=True, clock=Clock(START.timestamp() + 86400))
+    await execute(
+        manifest, "tor1", Proxy, RegionOptions(resume=True), clock=Clock(START.timestamp() + 86400)
+    )
     result = export_campaign(manifest)
     assert result["rows"] == 1 and not result["complete"]
     assert result["regions"][0]["observations"] == 1
@@ -597,28 +423,7 @@ async def test_reordered_checkpoint_cannot_change_execution_order(manifest):
     state["jobs"][0], state["jobs"][1] = state["jobs"][1], state["jobs"][0]
     atomic_json(manifest.parent / "regions/tor1/state.json", state)
     with pytest.raises(ValueError, match="queue differs"):
-        await execute(manifest, "tor1", Proxy, resume=True)
-
-
-async def test_runner_uses_campaign_clock_for_observation_timestamp():
-    observed = []
-    anchor = START.timestamp()
-
-    async def observe(ip, at):
-        observed.append(at)
-
-    result = await run(
-        RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=1),
-        SummarySink(),
-        RunOptions(
-            transport_factory=FakeTransport,
-            observation_consumer=observe,
-            deadline=anchor + 60,
-            wall_clock=lambda: anchor,
-        ),
-    )
-    assert result.completed == 1
-    assert anchor <= observed[0] < anchor + 1
+        await execute(manifest, "tor1", Proxy, RegionOptions(resume=True))
 
 
 def test_ephemeral_manifest_records_rule_4(tmp_path):

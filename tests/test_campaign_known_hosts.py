@@ -21,7 +21,7 @@ from campaign_deploy_fakes import (
 )
 from campaign_fakes import CAMPAIGN_PROJECT
 
-from proxy_index.campaign import collect, deploy, watch
+from proxy_index.campaign import collect, deploy, teardown, watch
 
 RECORD = ".secrets/campaign-manager.known_hosts"  # what the default inventory path records
 
@@ -92,7 +92,7 @@ async def test_enable_and_disable_use_the_record_beside_the_inventory(checkout, 
 
 
 async def test_upload_spec_uses_the_record_beside_the_inventory(checkout, recorded):
-    from test_campaign_deploy import planned_root
+    from campaign_deploy_cases import planned_root
 
     deploy.save(
         recorded,
@@ -156,5 +156,5 @@ async def test_two_inventories_in_one_folder_keep_their_own_host_key_files(tmp_p
     ]
     for file in files:
         file.write_text("pinned host key\n")
-    deploy._retire(second.inventory, json.loads(second.inventory.read_text()), {})
+    teardown._retire(second.inventory, json.loads(second.inventory.read_text()), {})
     assert files[0].exists() and not files[1].exists()

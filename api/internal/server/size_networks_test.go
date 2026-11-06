@@ -22,6 +22,7 @@ import (
 // Coverage, region and place page answers, within build.MaxAnswerBytes, and
 // its network figures are the summaries' own.
 func TestEveryV4AnswerFitsTheCap(t *testing.T) {
+	t.Parallel()
 	if testing.Short() || underRace {
 		t.Skip("renders a QA-1-sized build (see scaleVersion)")
 	}
@@ -106,6 +107,7 @@ func heap() uint64 {
 // (SITEAPI_MEMORY_PROBE=1), like TestPeakRSS: it holds about 1 GB for about
 // 25 s of the default suite on a 4 GB CI runner.
 func TestNetworkMemoryProbe(t *testing.T) {
+	// Serial: it measures the whole process's heap.
 	if os.Getenv("SITEAPI_MEMORY_PROBE") == "" {
 		t.Skip("set SITEAPI_MEMORY_PROBE=1 to log the heap of a QA-1-sized v3 and v4 snapshot")
 	}

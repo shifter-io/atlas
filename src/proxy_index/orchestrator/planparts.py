@@ -13,7 +13,7 @@ from typing import Any
 import psycopg
 
 from ..browser.contracts import BROWSER_REGION_ID
-from .events import emit, raise_alert
+from .events import EventRow, emit, raise_alert
 from .sqlrows import _rows
 
 TAKING = (
@@ -81,13 +81,15 @@ async def _report_no_node(conn: psycopg.AsyncConnection, gaps: list[dict], now: 
         if opened:
             await emit(
                 conn,
-                "no_node",
-                now,
-                product_id=gap["product_id"],
-                region_id=gap["region_id"],
-                signal=-1,
-                severity="major",
-                data=data,
+                EventRow(
+                    kind="no_node",
+                    at=now,
+                    product_id=gap["product_id"],
+                    region_id=gap["region_id"],
+                    signal=-1,
+                    severity="major",
+                    data=data,
+                ),
             )
             events += 1
     return events

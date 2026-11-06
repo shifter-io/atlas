@@ -1,10 +1,10 @@
 """What a calculation reads before build(), in its two modes (contract K6).
 
-"full" (`calculate`'s and calculator.calculate()'s default) reads every run and every IP
+"full" (`calculate --full`, and calculator.calculate()'s default) reads every run and every IP
 observation of the 30-day window and aggregates them in Python (Full): the oracle
 every test compares the incremental calculation with.
 
-"incremental" (`calculate --incremental`) reads metadata first: the runs (every run
+"incremental" (`calculate`'s default) reads metadata first: the runs (every run
 outside a batch, whose payload rows list them; batch runs started since a day before the window,
 with a slot or a bucket in it, and each product's first, so every group exists in payload order;
 census and pulse summaries are not read), the window's buckets and each daily window's list
@@ -15,7 +15,8 @@ own release as full mode reads them): breakdowns() over the label combinations, 
 IPs, and the window's geo rows give its list, written (lists.write_list(), one COPY) as soon as it
 is counted, so a missed window keeps only its counts in memory, as a hit does, and both name
 their list. No observation row comes back to Python. What moves with the cutoff comes from the
-frozen extension modules (hourly.py, fleetsql.py, rollups.py), whose bodies count in the database.
+frozen extension modules (hourly.py, fleetsql.py, rollups.py: the census-pulse geo rows from
+per-hour rollups), whose bodies count in the database.
 The fingerprint hashes run metadata and signatures instead of observations: a stored run's
 observations never change.
 """
@@ -37,6 +38,7 @@ from .inputs import light_load
 from .policy import digest, effective, latency_target, payload_limits
 from .poolfig import pool_figures
 from .releases import enriched_observations, used_releases
+from .scheduled import scheduled_inputs
 from .slim import POOL_LISTS
 from .sqlwindow import WindowSpec, window_inputs
 from .store import jsonable, write
@@ -144,7 +146,9 @@ def read(conn, config, method_id, as_of, mode="incremental"):
     start = as_of - timedelta(days=RAW_DAYS)  # older raw rows are archived
     roles = " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in calculator.BATCH_ROLES.items())
     evidence = conn.execute(EVIDENCE).fetchall()
-    scheduled = rollups.scheduled_inputs(conn, as_of, latency_target(config))
+    # The full mode reads the 30-day geo rows (the oracle), the incremental one their rollups.
+    reader = scheduled_inputs if mode == "full" else rollups.scheduled_inputs
+    scheduled = reader(conn, as_of, latency_target(config))
     common = {"evidence": evidence, "scheduled": scheduled}
     if mode == "full":
         runs = conn.execute(RUNS.format(summary="r.summary", roles=roles, where="")).fetchall()

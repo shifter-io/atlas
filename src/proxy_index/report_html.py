@@ -25,17 +25,15 @@ import json
 import os
 import tempfile
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import psycopg
 from psycopg.rows import dict_row
 
 from . import storage
-from .report_data import _keyed as _keyed
-from .report_data import _percentiles as _percentiles
 from .report_data import batch_data as batch_data
+from .report_data import index_data as index_data
 from .report_parts import CSS as CSS
 from .report_parts import INDEX as INDEX
 from .report_parts import INDEX_LIMIT as INDEX_LIMIT
@@ -65,135 +63,6 @@ from .report_parts import table as table
 from .report_parts import timeline as timeline
 from .report_parts import when as when
 
-# --- queries -----------------------------------------------------------------------------
-
-
-def index_data(conn: psycopg.Connection, now: datetime, limit: int = INDEX_LIMIT) -> dict[str, Any]:
-    from .orchestrator.batches import census_every, next_slot
-    from .orchestrator.control import state
-
-    counts = conn.execute(
-        "SELECT kind,status,count(*)::bigint AS n FROM test_batches GROUP BY 1,2 ORDER BY 1,2"
-    ).fetchall()
-    by_kind = conn.execute(
-        "SELECT b.kind,coalesce(sum(br.requests),0)::bigint AS requests,"
-        "coalesce(sum(br.successes),0)::bigint AS successes,"
-        "coalesce(sum(br.bytes_up),0)::bigint AS bytes_up,"
-        "coalesce(sum(br.bytes_down),0)::bigint AS bytes_down "
-        "FROM test_batches b JOIN batch_runs br USING(batch_id) GROUP BY 1 ORDER BY 1"
-    ).fetchall()
-    unique = conn.execute(
-        "SELECT b.country_code,p.provider,p.name AS product,"
-        "count(DISTINCT o.ip_id)::bigint AS ips FROM test_batches b "
-        "JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-        "JOIN ip_observations o ON o.run_key=br.run_key GROUP BY 1,2,3 ORDER BY 1,2,3"
-    ).fetchall()
-    batches = conn.execute(
-        "SELECT b.batch_id,b.kind,b.country_code,r.slug AS region,b.target_id,b.scheduled_for,"
-        "b.started_at,b.finished_at,b.status,count(br.product_id)::int AS runs,"
-        "coalesce(sum(br.requests),0)::bigint AS requests,"
-        "coalesce(sum(br.successes),0)::bigint AS successes,"
-        "coalesce(sum(br.unique_ips),0)::bigint AS unique_ips "
-        "FROM test_batches b JOIN runner_regions r ON r.region_id=b.region_id "
-        "LEFT JOIN batch_runs br USING(batch_id) GROUP BY b.batch_id,r.slug "
-        "ORDER BY b.scheduled_for DESC,b.batch_id DESC LIMIT %s",
-        (limit,),
-    ).fetchall()
-    if batches:
-        p50 = _keyed(
-            conn.execute(
-                _percentiles(
-                    "SELECT br.batch_id,b.histogram_steps AS steps,b.histogram_counts AS counts "
-                    "FROM batch_runs br JOIN run_buckets b ON b.run_key=br.run_key "
-                    "AND b.bucket_start>=%(since)s WHERE br.batch_id=ANY(%(ids)s)",
-                    ["batch_id"],
-                ),
-                {
-                    "ids": [b["batch_id"] for b in batches],
-                    "since": min(b["scheduled_for"] for b in batches) - timedelta(days=1),
-                },
-            ).fetchall(),
-            ["batch_id"],
-        )
-        for row in batches:
-            row["p50"] = p50.get((row["batch_id"],), {}).get("p50")
-    scheduler = state(conn)
-    every = census_every(scheduler["census_every_minutes"])
-    if every is not None:
-        census_next = conn.execute(
-            "SELECT c.country_code,r.slug AS region,%s::timestamptz AS next_at FROM countries c "
-            "JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled WHERE c.enabled "
-            "ORDER BY c.country_code LIMIT 20",
-            (next_slot(every, now),),
-        ).fetchall()
-    else:
-        census_next = conn.execute(
-            "SELECT c.country_code,r.slug AS region,CASE WHEN s.today>=%(now)s THEN s.today "
-            "ELSE s.today+interval '1 day' END AS next_at FROM countries c "
-            "JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
-            "CROSS JOIN LATERAL (SELECT ((%(now)s AT TIME ZONE 'UTC')::date+c.census_time) "
-            " AT TIME ZONE 'UTC' AS today) s WHERE c.enabled ORDER BY 3,1 LIMIT 20",
-            {"now": now},
-        ).fetchall()
-    pulse_next = [
-        row | {"next_at": next_slot(timedelta(minutes=row["pulse_interval_minutes"]), now)}
-        for row in conn.execute(
-            "SELECT target_id,pulse_interval_minutes,pulse_requests FROM targets "
-            "WHERE pulse_enabled ORDER BY sort_order,target_id"
-        ).fetchall()
-    ]
-    live = conn.execute(
-        "SELECT count(DISTINCT b.batch_id)::int AS batches,"
-        "coalesce(sum(br.requests),0)::bigint AS requests,"
-        "coalesce(sum(br.successes),0)::bigint AS successes,"
-        "coalesce(sum(br.unique_ips),0)::bigint AS unique_ips,"
-        "max(br.last_progress_at) AS updated "
-        "FROM test_batches b JOIN batch_runs br USING(batch_id) WHERE b.status='running'"
-    ).fetchone()
-    live_unique = {
-        (row["country_code"], row["provider"], row["product"]): row["unique_ips"]
-        for row in conn.execute(
-            "SELECT b.country_code,p.provider,p.name AS product,"
-            "sum(br.unique_ips)::bigint AS unique_ips FROM test_batches b "
-            "JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-            "WHERE b.status='running' GROUP BY 1,2,3"
-        )
-    }
-    stored = {(row["country_code"], row["provider"], row["product"]) for row in unique}
-    unique = sorted(
-        [
-            row | {"live": live_unique.get(key)}
-            for row in unique
-            for key in [(row["country_code"], row["provider"], row["product"])]
-        ]
-        + [
-            {"country_code": c, "provider": p, "product": n, "ips": None, "live": ips}
-            for (c, p, n), ips in live_unique.items()
-            if (c, p, n) not in stored
-        ],
-        key=lambda row: (row["country_code"], row["provider"], row["product"]),
-    )
-    nodes = conn.execute(
-        "SELECT n.node_id,r.slug AS region,n.provider,n.product,n.status,n.last_heartbeat "
-        "FROM nodes n JOIN runner_regions r ON r.region_id=n.region_id ORDER BY 3,4,2"
-    ).fetchall()
-    enabled = conn.execute("SELECT count(*)::int AS n FROM countries WHERE enabled").fetchone()["n"]
-    return {
-        "now": now,
-        "counts": counts,
-        "by_kind": by_kind,
-        "unique": unique,
-        "batches": batches,
-        "scheduler": scheduler,
-        "census_next": census_next,
-        "pulse_next": pulse_next,
-        "nodes": nodes,
-        "enabled_countries": enabled,
-        "live": live,
-        "limit": limit,
-    }
-
-
 # --- rendering ---------------------------------------------------------------------------
 
 
@@ -208,9 +77,8 @@ def _event_data(data: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
-def render_batch(batch: dict[str, Any], now: datetime) -> str:
+def _batch_head(batch: dict[str, Any], title: str, now: datetime) -> str:
     runs = batch["runs"]
-    title = f"Batch {batch['batch_id']} · {KIND_LABELS.get(batch['kind'], batch['kind'])}"
     total_requests = sum(r["requests"] for r in runs)
     total_successes = sum(r["successes"] for r in runs)
     live = batch["status"] in OPEN
@@ -228,7 +96,7 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
             f"{esc(when(updated) if updated else 'never (no progress yet)')}</b>. Latency, new "
             "IPs, cities and ASNs appear once each run has uploaded its results.</p>"
         )
-    head += cards(
+    return head + cards(
         [
             ("Scheduled", esc(when(batch["scheduled_for"]))),
             ("Start at", esc(when(batch["start_at"]))),
@@ -242,7 +110,10 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
             ("Success rate", pct(total_successes, total_requests)),
         ]
     )
-    summary = table(
+
+
+def _batch_summary(runs: list[dict[str, Any]]) -> str:
+    return table(
         [
             "Product",
             "Status",
@@ -286,90 +157,115 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
         ),
         numeric=set(range(2, 17)),
     )
-    sections = []
-    for r in runs:
-        detail = (
-            f'<section class="product"><h2>{esc(r["provider"])}/{esc(r["product"])} '
-            f"{badge(r['status'])}</h2>"
-            f"<p>{esc(stop_reason(r['stop_reason'], r['status']))}"
-            + (f' <span class="muted">({esc(r["error"])})</span>' if r["error"] else "")
-            + "</p>"
+
+
+def _run_rule(batch: dict[str, Any], r: dict[str, Any]) -> str:
+    """A running census run's progress towards the unique-ratio stop rule ("" otherwise)."""
+    running = r["status"] in OPEN_RUNS
+    if not (running and batch["kind"] == "census"):
+        return ""
+    version = str(r.get("node_version") or "0.0.0").split(".")
+    modern_node = (
+        len(version) >= 2
+        and all(v.isdigit() for v in version[:2])
+        and tuple(map(int, version[:2])) >= (0, 9)
+    )
+    completed_basis = str(r.get("census_rule_version")) == "2" or modern_node
+    denominator = r["requests"] if completed_basis else r["successes"]
+    basis = "completed requests" if completed_basis else "successes"
+    rule = rule_progress(denominator, r["unique_ips"], batch["min_sample"])
+    detail = (
+        f"<p>{esc(rule_text(denominator, r['unique_ips'], batch['min_sample'], basis))}</p>"
+        + meter(rule["sample"], "share of the minimum sample reached")
+        + '<p class="muted">Minimum sample</p>'
+    )
+    if rule["share"] is not None:
+        # Full bar at a unique share of 100%; the rule fires below the 50% midpoint.
+        detail += meter(rule["share"], "current unique share") + (
+            '<p class="muted">Unique share (stops below 50%)</p>'
         )
-        running = r["status"] in OPEN_RUNS
-        version = str(r.get("node_version") or "0.0.0").split(".")
-        modern_node = (
-            len(version) >= 2
-            and all(v.isdigit() for v in version[:2])
-            and tuple(map(int, version[:2])) >= (0, 9)
-        )
-        completed_basis = str(r.get("census_rule_version")) == "2" or (running and modern_node)
-        denominator = r["requests"] if completed_basis else r["successes"]
-        basis = "completed requests" if completed_basis else "successes"
-        if running and batch["kind"] == "census":
-            rule = rule_progress(denominator, r["unique_ips"], batch["min_sample"])
-            detail += (
-                f"<p>{esc(rule_text(denominator, r['unique_ips'], batch['min_sample'], basis))}</p>"
-                + meter(rule["sample"], "share of the minimum sample reached")
-                + '<p class="muted">Minimum sample</p>'
-            )
-            if rule["share"] is not None:
-                # Full bar at a unique share of 100%; the rule fires below the 50% midpoint.
-                detail += meter(rule["share"], "current unique share") + (
-                    '<p class="muted">Unique share (stops below 50%)</p>'
-                )
-        detail += cards(
+    return detail
+
+
+def _run_cards(r: dict[str, Any], now: datetime) -> str:
+    running = r["status"] in OPEN_RUNS
+    return cards(
+        [
+            (
+                "Elapsed" if running else "Run time",
+                esc(duration(span(r["started_at"], r["finished_at"], now))),
+            ),
+            *([("Last progress", esc(when(r["last_progress_at"])))] if running else []),
+            ("Unique share", pct(r["unique_ips"], r["successes"])),
+            ("Node", esc(f"#{r['node_id']} {r['host'] or ''}" if r["node_id"] else "–")),
+            ("Unique IPs", num(r["unique_ips"])),
+            ("New IPs", num(r["new_ips"])),
+            (
+                "Latency p50 / p90 / p99",
+                f"{ms(r['p50'])} / {ms(r['p90'])} / {ms(r['p99'])}",
+            ),
+            ("Traffic", mb((r["bytes_up"] or 0) + (r["bytes_down"] or 0))),
+        ]
+    )
+
+
+def _run_geo(r: dict[str, Any]) -> str:
+    """The run's top cities and top ASNs, side by side."""
+    cities = table(
+        ["Region / state", "City", "Requests", "Success rate", "p50"],
+        (
             [
-                (
-                    "Elapsed" if running else "Run time",
-                    esc(duration(span(r["started_at"], r["finished_at"], now))),
-                ),
-                *([("Last progress", esc(when(r["last_progress_at"])))] if running else []),
-                ("Unique share", pct(r["unique_ips"], r["successes"])),
-                ("Node", esc(f"#{r['node_id']} {r['host'] or ''}" if r["node_id"] else "–")),
-                ("Unique IPs", num(r["unique_ips"])),
-                ("New IPs", num(r["new_ips"])),
-                (
-                    "Latency p50 / p90 / p99",
-                    f"{ms(r['p50'])} / {ms(r['p90'])} / {ms(r['p99'])}",
-                ),
-                ("Traffic", mb((r["bytes_up"] or 0) + (r["bytes_down"] or 0))),
+                esc(c["region"] or "–"),
+                esc(c["city"] or ("unknown" if c["region"] is None else "–")),
+                num(c["requests"]),
+                pct(c["successes"], c["requests"]),
+                ms(c["p50"]),
             ]
-        )
-        if r["timeline"]:
-            detail += "<h3>Requests per 5 minutes</h3>" + timeline(r["timeline"])
-        detail += '<div class="cols"><div><h3>Top cities</h3>' + table(
-            ["Region / state", "City", "Requests", "Success rate", "p50"],
-            (
-                [
-                    esc(c["region"] or "–"),
-                    esc(c["city"] or ("unknown" if c["region"] is None else "–")),
-                    num(c["requests"]),
-                    pct(c["successes"], c["requests"]),
-                    ms(c["p50"]),
-                ]
-                for c in r["cities"]
-            ),
-            numeric={2, 3, 4},
-        )
-        detail += "</div><div><h3>Top ASNs</h3>" + table(
-            ["ASN", "Organization", "Usage", "Requests", "IPs", "Success rate", "p50"],
-            (
-                [
-                    esc(f"AS{a['asn']}" if a["asn"] is not None else "–"),
-                    esc(a["org"] or ("unknown" if a["asn"] is None else "–")),
-                    esc(a["usage_type"] or "–"),
-                    num(a["requests"]),
-                    num(a["ips"]),
-                    pct(a["successes"], a["requests"]),
-                    ms(a["p50"]),
-                ]
-                for a in r["asns"]
-            ),
-            numeric={3, 4, 5, 6},
-        )
-        detail += "</div></div></section>"
-        sections.append(detail)
-    events = table(
+            for c in r["cities"]
+        ),
+        numeric={2, 3, 4},
+    )
+    asns = table(
+        ["ASN", "Organization", "Usage", "Requests", "IPs", "Success rate", "p50"],
+        (
+            [
+                esc(f"AS{a['asn']}" if a["asn"] is not None else "–"),
+                esc(a["org"] or ("unknown" if a["asn"] is None else "–")),
+                esc(a["usage_type"] or "–"),
+                num(a["requests"]),
+                num(a["ips"]),
+                pct(a["successes"], a["requests"]),
+                ms(a["p50"]),
+            ]
+            for a in r["asns"]
+        ),
+        numeric={3, 4, 5, 6},
+    )
+    return (
+        '<div class="cols"><div><h3>Top cities</h3>'
+        + cities
+        + "</div><div><h3>Top ASNs</h3>"
+        + asns
+        + "</div></div>"
+    )
+
+
+def _run_section(batch: dict[str, Any], r: dict[str, Any], now: datetime) -> str:
+    detail = (
+        f'<section class="product"><h2>{esc(r["provider"])}/{esc(r["product"])} '
+        f"{badge(r['status'])}</h2>"
+        f"<p>{esc(stop_reason(r['stop_reason'], r['status']))}"
+        + (f' <span class="muted">({esc(r["error"])})</span>' if r["error"] else "")
+        + "</p>"
+    )
+    detail += _run_rule(batch, r) + _run_cards(r, now)
+    if r["timeline"]:
+        detail += "<h3>Requests per 5 minutes</h3>" + timeline(r["timeline"])
+    return detail + _run_geo(r) + "</section>"
+
+
+def _batch_events(events: list[dict[str, Any]]) -> str:
+    return table(
         ["At", "Event", "Product", "Signal", "Severity", "Data"],
         (
             [
@@ -380,26 +276,29 @@ def render_batch(batch: dict[str, Any], now: datetime) -> str:
                 esc(e["severity"]),
                 _event_data(e["data"]),
             ]
-            for e in batch["events"]
+            for e in events
         ),
     )
+
+
+def render_batch(batch: dict[str, Any], now: datetime) -> str:
+    runs = batch["runs"]
+    title = f"Batch {batch['batch_id']} · {KIND_LABELS.get(batch['kind'], batch['kind'])}"
+    live = batch["status"] in OPEN
     body = (
-        head
+        _batch_head(batch, title, now)
         + "<h2>Products</h2>"
-        + summary
-        + "".join(sections)
+        + _batch_summary(runs)
+        + "".join(_run_section(batch, r, now) for r in runs)
         + "<h2>Events</h2>"
-        + events
+        + _batch_events(batch["events"])
         + f'<p class="muted">Generated {esc(when(now))}.</p>'
     )
     return page(title, body, refresh=REFRESH_SECONDS if live else None)
 
 
-def render_index(data: dict[str, Any], existing: set[int]) -> str:
-    now = data["now"]
+def _index_head(data: dict[str, Any]) -> str:
     sched = data["scheduler"]
-    kinds = sorted({row["kind"] for row in data["counts"]})
-    statuses = ["scheduled", "running", "done", "failed", "skipped", "killed"]
     grid = {(row["kind"], row["status"]): row["n"] for row in data["counts"]}
     traffic = {row["kind"]: row for row in data["by_kind"]}
     total_requests = sum(row["requests"] for row in data["by_kind"])
@@ -410,12 +309,12 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
         if sched["census_every_minutes"]
         else "daily census_time"
     )
-    body = (
+    head = (
         "<h1>Census and pulse batches</h1>"
-        f'<p class="muted">Generated {esc(when(now))} · refreshes every '
+        f'<p class="muted">Generated {esc(when(data["now"]))} · refreshes every '
         f"{REFRESH_SECONDS} s · {num(data['enabled_countries'])} countries enabled</p>"
     )
-    body += cards(
+    return head + cards(
         [
             ("Census scheduler", f"{switch[sched['census']]} · {esc(census_mode)}"),
             ("Pulse scheduler", switch[sched["pulse"]]),
@@ -438,7 +337,14 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
             ),
         ]
     )
-    body += "<h2>Batches by test and status</h2>" + table(
+
+
+def _index_counts(data: dict[str, Any]) -> str:
+    kinds = sorted({row["kind"] for row in data["counts"]})
+    statuses = ["scheduled", "running", "done", "failed", "skipped", "killed"]
+    grid = {(row["kind"], row["status"]): row["n"] for row in data["counts"]}
+    traffic = {row["kind"]: row for row in data["by_kind"]}
+    return "<h2>Batches by test and status</h2>" + table(
         ["Test", *statuses, "Requests", "MB up", "MB down"],
         (
             [
@@ -452,7 +358,12 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
         ),
         numeric=set(range(1, len(statuses) + 4)),
     )
-    body += '<div class="cols"><div><h3>Next census slots</h3>' + table(
+
+
+def _index_slots(data: dict[str, Any]) -> str:
+    """The next census and pulse slots, side by side."""
+    now = data["now"]
+    census = table(
         ["Country", "Region", "Next slot", "In"],
         (
             [
@@ -464,7 +375,7 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
             for row in data["census_next"]
         ),
     )
-    body += "</div><div><h3>Next pulse slots</h3>" + table(
+    pulse = table(
         ["Target", "Every", "Requests", "Next slot", "In"],
         (
             [
@@ -478,8 +389,18 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
         ),
         numeric={2},
     )
-    body += "</div></div>"
-    body += '<div class="cols"><div><h3>Unique IPs per country and product</h3>' + table(
+    return (
+        '<div class="cols"><div><h3>Next census slots</h3>'
+        + census
+        + "</div><div><h3>Next pulse slots</h3>"
+        + pulse
+        + "</div></div>"
+    )
+
+
+def _index_fleet(data: dict[str, Any]) -> str:
+    """Unique IPs per country and product next to the nodes."""
+    unique = table(
         ["Country", "Product", "Unique IPs (uploaded runs)", "Running now (live)"],
         (
             [
@@ -492,7 +413,7 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
         ),
         numeric={2, 3},
     )
-    body += "</div><div><h3>Nodes</h3>" + table(
+    nodes = table(
         ["Node", "Product", "Region", "Status", "Last heartbeat"],
         (
             [
@@ -505,7 +426,17 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
             for row in data["nodes"]
         ),
     )
-    body += "</div></div>"
+    return (
+        '<div class="cols"><div><h3>Unique IPs per country and product</h3>'
+        + unique
+        + "</div><div><h3>Nodes</h3>"
+        + nodes
+        + "</div></div>"
+    )
+
+
+def _index_batches(data: dict[str, Any], existing: set[int]) -> str:
+    now = data["now"]
     rows = []
     for b in data["batches"]:
         link = (
@@ -529,7 +460,7 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
             ]
         )
     shown = f"latest {num(data['limit'])}" if len(data["batches"]) >= data["limit"] else "all"
-    body += f"<h2>Batches ({shown}, newest first)</h2>" + table(
+    return f"<h2>Batches ({shown}, newest first)</h2>" + table(
         [
             "Batch",
             "Test",
@@ -545,6 +476,16 @@ def render_index(data: dict[str, Any], existing: set[int]) -> str:
         ],
         rows,
         numeric={6, 7, 8, 9, 10},
+    )
+
+
+def render_index(data: dict[str, Any], existing: set[int]) -> str:
+    body = (
+        _index_head(data)
+        + _index_counts(data)
+        + _index_slots(data)
+        + _index_fleet(data)
+        + _index_batches(data, existing)
     )
     return page("Census and pulse batches", body, refresh=REFRESH_SECONDS)
 

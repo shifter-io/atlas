@@ -367,7 +367,7 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them.
+CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from

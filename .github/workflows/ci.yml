@@ -1,15 +1,17 @@
 # The framework's Tier 1 (CAMP-1 PLAN §17), on every ready pull request, every
-# push to main, every night and on owner dispatches. Pull requests skip the tests
-# marked `slow` (over 60 s alone); the other events run every test. The nightly run
-# compares HEAD with itself, so it runs everything.
+# merge-queue test and on owner dispatches. main only ever gets what the queue
+# tested, so pushes to main run nothing. Every event runs every test (CI-ALL-1). A
+# queue test compares its merge commit with the queue's base.
 #
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
 # pytest-xdist on every CPU, each worker with its own databases in one PostgreSQL
-# (CI-SPEED-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
+# (CI-SPEED-1). Then scripts/ci/timing.py writes the 20 slowest tests and the test
+# step's time to the job summary and the ci-timing artifact (90 days), and fails the
+# job when a test takes 90 s or more or the step over 240 s (CI-TIME-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
 # run. A job-started hook on the servers refuses every job except the owner's pull
-# requests from this repository's own branches, pushes to main and owner dispatches.
+# requests from this repository's own branches, merge-queue tests and owner dispatches.
 # Draft pull requests run nothing until they are marked ready. A change only to
 # docs/ (except docs/onboarding.html, which a test reads), LICENSE, Markdown outside
 # src/, tests/, scripts/ and configs/ (where Markdown can be a golden) or the API
@@ -20,14 +22,13 @@ name: ci
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: [main]
-  schedule:
-    - cron: "0 1 * * *"
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  # One group per queue entry (its merge commit), never cancelled.
+  group: ci-${{ github.event_name == 'merge_group' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -54,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The exact head that merges (merges are up to date and head-pinned),
+          # The pull request's exact head, or the queue's merge commit (github.sha),
           # with full history for the diff-based checks.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -62,7 +63,7 @@ jobs:
 
       - name: What changed
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'schedule' && 'HEAD' || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
         run: |
           # A dispatch has no "before": compare with the parent.
           case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
@@ -175,12 +176,13 @@ jobs:
           echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
 
       - name: Checks in the background, tests in parallel
+        id: tests
         if: env.CODE == 'true'
         env:
           COVERAGE_FILE: ${{ runner.temp }}/ev/.coverage
-          # Pull requests skip the tests marked slow.
-          SKIP: ${{ github.event_name == 'pull_request' && 'not slow and ' || '' }}
         run: |
+          # The step's start, for the CI time step below.
+          date +%s > "$EV/step-start"
           # Each background check writes $EV/<name>.log and $EV/<name>.rc; after the tests,
           # every check with a non-zero status prints its log and fails the step.
           background() {
@@ -198,21 +200,19 @@ jobs:
           background complexity complexity
           background limits uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
           # CAMP-1 Tier 1 step 6: the campaign scope suite on its own.
-          scope=()
-          [ -z "$SKIP" ] || scope=(-m "not slow")
           background scope uv run --no-editable pytest -p no:xdist -p no:cacheprovider \
-            --basetemp="$RUNNER_TEMP/scope-tmp" "${scope[@]}" tests/test_campaign_scope.py -q
+            --basetemp="$RUNNER_TEMP/scope-tmp" tests/test_campaign_scope.py -q
           background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
 
           # Every test, database tests included, with branch coverage: one xdist worker per
           # CPU, then the `serial` set alone, appending to the same coverage.
           report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "${SKIP}not serial" \
+          uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
             --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
           serial=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m "${SKIP}serial" \
+          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
             --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
             --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
           # Exit status 5: no test is marked serial.
@@ -240,6 +240,26 @@ jobs:
           fi
           exit "$failed"
 
+      - name: CI time (slowest tests, budgets)
+        # Also after a failed test step: the summary is there for failed runs too. Fails
+        # tier1 when a test takes 90 s or more or the test step over 240 s (CI-TIME-1).
+        id: timing
+        if: always() && env.CODE == 'true' && steps.tests.outcome != 'skipped'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python3 scripts/ci/timing.py --title "CI time: tier1 tests" --start "$EV/step-start"
+          --out "$EV/timing.json" "$EV/junit.xml" "$EV/junit-serial.xml"
+
+      - name: Keep the CI time record (scripts/ci/timing_history.py reads it)
+        if: always() && steps.timing.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-timing
+          path: ${{ runner.temp }}/ev/timing.json
+          retention-days: 90
+          if-no-files-found: ignore
+
       - name: Changed lines covered (at least 85%)
         if: env.CODE == 'true'
         run: |
@@ -252,7 +272,7 @@ jobs:
           uv run --no-editable python - "$EV/diff-cover.json" <<'EOF'
           import json, sys
           critical = tuple(f"campaign/{name}.py" for name in (
-              "scope", "do_api", "launch", "harvest", "tick", "collector", "deploy", "ops_api"))
+              "scope", "do_api", "launch", "harvest", "tick", "collector", "deploy", "ops_api", "teardown"))
           stats = json.load(open(sys.argv[1]))["src_stats"]
           low = [f for f in stats if f.endswith(critical) and stats[f]["percent_covered"] < 90]
           print("critical files under 90%:", low)

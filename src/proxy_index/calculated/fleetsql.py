@@ -260,18 +260,19 @@ def _digests(conn, as_of, sets):
 def _counts(conn, as_of, sets):
     """sets: [(since, [(group, run keys) per member])] -> per set, {(a, b): (IPs, shared)} with
     (None, None) the set's distinct IPs."""
-    params = {k: [] for k in ("slots", "members", "providers", "keys", "since")}
-    for slot, (since, members) in enumerate(sets):
-        for member, (group, keys) in enumerate(members):
-            for run_key in sorted(set(keys)):
-                values = (slot, member, group["provider"], run_key, since)
-                for name, value in zip(params, values, strict=True):
-                    params[name].append(value)
+    rows = [
+        (slot, member, group["provider"], run_key, since)
+        for slot, (since, members) in enumerate(sets)
+        for member, (group, keys) in enumerate(members)
+        for run_key in sorted(set(keys))
+    ]
     found = [{} for _ in sets]
-    if params["slots"]:
-        rows = conn.cursor(row_factory=dict_row).execute(COUNTS, params | {"as_of": as_of})
-        for row in rows:
-            found[row["slot"]][row["a"], row["b"]] = (row["ips"], row["shared"])
+    if not rows:
+        return found
+    names = ("slots", "members", "providers", "keys", "since")
+    params = {name: [row[n] for row in rows] for n, name in enumerate(names)}
+    for row in conn.cursor(row_factory=dict_row).execute(COUNTS, params | {"as_of": as_of}):
+        found[row["slot"]][row["a"], row["b"]] = (row["ips"], row["shared"])
     return found
 
 

@@ -18,12 +18,22 @@ from .export import export_campaign
 from .files import digest, read_json
 from .manifest import create, load
 from .rounds import RoundRefused, execute_round, verify_round
-from .scheduler import execute, status, validate_state
+from .scheduler import RegionOptions, execute, status, validate_state
 
 
 def register(commands):
     parser = commands.add_parser("onboarding", help="Private 24-hour network onboarding")
     actions = parser.add_subparsers(dest="onboarding_action", required=True)
+    _plan_parser(actions)
+    _run_parsers(actions)
+    _round_parsers(actions)
+    _probe_parser(actions)
+    from . import fleet
+
+    fleet.register(actions)
+
+
+def _plan_parser(actions) -> None:
     plan = actions.add_parser("plan", help="Create the shared 24-hour campaign manifest")
     plan.add_argument("--provider-config", type=Path, required=True)
     plan.add_argument("--product", required=True)
@@ -55,6 +65,10 @@ def register(commands):
         action="store_true",
         help="Ephemeral only: accept the current whole UTC hour as the start",
     )
+
+
+def _run_parsers(actions) -> None:
+    """run, status and export."""
     run = actions.add_parser("run", help="Arm or explicitly resume one region")
     run.add_argument("--manifest", type=Path, required=True)
     run.add_argument("--region", required=True)
@@ -71,6 +85,10 @@ def register(commands):
     check.add_argument("--region", required=True)
     export = actions.add_parser("export", help="Verify collected regions and export observations")
     export.add_argument("--manifest", type=Path, required=True)
+
+
+def _round_parsers(actions) -> None:
+    """round and verify-round of an ephemeral campaign."""
     one = actions.add_parser("round", help="Run one round of an ephemeral campaign to its end")
     verify = actions.add_parser("verify-round", help="Verify one collected ephemeral round")
     for action in (one, verify):
@@ -83,6 +101,8 @@ def register(commands):
         "--mmdb", type=Path, help="Local MMDB: other-country exits count like duplicates (rule 4)"
     )
 
+
+def _probe_parser(actions) -> None:
     probe = actions.add_parser("probe", help="Single-country census calibration")
     probe.add_argument("--provider-config", type=Path, required=True)
     probe.add_argument("--credentials-file", type=Path)
@@ -96,9 +116,6 @@ def register(commands):
         "--start", help="Optional future whole UTC hour; otherwise start immediately"
     )
     probe.add_argument("--max-seconds", type=float, default=86400)
-    from . import fleet
-
-    fleet.register(actions)
 
 
 def _proxies(args, manifest: dict, *, no_list: bool = False) -> dict:
@@ -161,10 +178,12 @@ async def _run(args):
             args.manifest,
             args.region,
             proxies.__getitem__,
-            concurrency=args.concurrency,
-            processes=args.processes,
-            request_timeout=args.timeout,
-            resume=args.resume,
+            RegionOptions(
+                concurrency=args.concurrency,
+                processes=args.processes,
+                request_timeout=args.timeout,
+                resume=args.resume,
+            ),
             stop=stop,
         )
         print(json.dumps(result, allow_nan=False))
@@ -211,7 +230,7 @@ def _verify_round(args) -> int:
 
 
 async def _probe(args):
-    from .probe import execute_probe
+    from .probe import ProbeOptions, execute_probe
 
     proxy = load_provider(
         args.provider_config,
@@ -225,11 +244,13 @@ async def _probe(args):
             proxy,
             args.region,
             args.country,
-            concurrency=args.concurrency,
-            processes=args.processes,
-            request_timeout=args.timeout,
-            start=args.start,
-            max_seconds=args.max_seconds,
+            ProbeOptions(
+                concurrency=args.concurrency,
+                processes=args.processes,
+                request_timeout=args.timeout,
+                start=args.start,
+                max_seconds=args.max_seconds,
+            ),
             stop=stop,
         )
         print(json.dumps(result, allow_nan=False))

@@ -44,6 +44,7 @@ INSERT INTO site.tape_events(tape_id,kind,provider_slug,product,title,detail,occ
 // runtime pool cannot write, that a database change is picked up, and that
 // cached responses meet the latency target over loopback.
 func TestServeFromDatabase(t *testing.T) {
+	// Serial: the p99 latency measurement runs alone (api.yml runs it alone too).
 	db := testdb.New(t)
 	ctx := context.Background()
 	w := db.Conn(t)
@@ -163,6 +164,7 @@ func TestServeFromDatabase(t *testing.T) {
 // altogether (`siteapi migrate` never ran), or missing some tables and a
 // column. Every page answers 200, and a missing site table is logged once.
 func TestAFreshDatabaseServesEveryPageOfOnePublishedProduct(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		db   func(t *testing.T) *testdb.DB
@@ -185,7 +187,10 @@ func TestAFreshDatabaseServesEveryPageOfOnePublishedProduct(t *testing.T) {
 			return db
 		}, 1},
 	} {
-		t.Run(c.name, func(t *testing.T) { freshDatabaseServesEveryPage(t, c.db(t), c.gaps) })
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			freshDatabaseServesEveryPage(t, c.db(t), c.gaps)
+		})
 	}
 }
 

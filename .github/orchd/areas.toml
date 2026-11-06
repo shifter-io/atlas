@@ -51,6 +51,7 @@ campaign = [
     "tests/test_pulse_fleet.py",
     "tests/campaign_fakes.py",
     "tests/campaign_deploy_fakes.py",
+    "tests/campaign_tick_cases.py",
     "tests/fixtures/campaign-data/**",
     "docs/campaign.html",
 ]
@@ -67,7 +68,7 @@ onboarding = [
     "docs/onboarding.html",
 ]
 # the manager: the orchestrator package (admin API, nodes, staging, events), the node process and
-# its TLS, the staging config, the local overnight collection that drives them, and their tests
+# its TLS, the staging config and their tests
 orchestrator = [
     "src/proxy_index/orchestrator/**",
     "src/proxy_index/node.py",
@@ -75,6 +76,7 @@ orchestrator = [
     "tests/test_orchestrator*.py",
     "tests/test_admin.py",
     "tests/test_manager_*.py",
+    "tests/manager_orch_cases.py",
     "tests/test_node.py",
     "tests/test_node_tls.py",
     "tests/test_db_drain.py",
@@ -82,7 +84,6 @@ orchestrator = [
     "tests/test_tape_events.py",
     "tests/test_outage_scenario.py",
     "configs/staging.toml",
-    "scripts/shifter_local_overnight.py",
 ]
 # the daily test and its inputs: the daily, DB-IP, enrichment, hour-estimate and hour-formula
 # packages, the formulas they publish, db-ip/ and their tests
@@ -151,6 +152,7 @@ storage = [
     "src/proxy_index/migrate_*.sql",
     "tests/test_storage*.py",
     "tests/test_migration*.py",
+    "tests/migration_cases.py",
     "tests/test_breakdown_view.py",
     "tests/fixtures/schema_v*.sql",
     "tests/fixtures/database_v*.sql.gz",

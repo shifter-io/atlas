@@ -13,7 +13,7 @@ from helpers import FakeTransport, scratch_database_name
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run, storage
 from proxy_index.cli import main
 from proxy_index.providers.credentials import read_credentials
 from proxy_index.stats import Histogram
@@ -606,6 +606,11 @@ def test_typed_columns_keep_json_forms():
             column(kind, value)
     assert column("text", None) is None and column("json", None) is None
     assert _steps([[10, 2], [12, 1], [40, 5]]) == ([10, 2, 28], [2, 1, 5])
+
+
+def test_storage_keeps_psycopg_importable_for_callers():
+    # storage re-exports psycopg so callers can catch storage.psycopg errors.
+    assert storage.psycopg.OperationalError is psycopg.OperationalError
 
 
 def test_bucket_counters_split_into_columns_and_extra():

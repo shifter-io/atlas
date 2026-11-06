@@ -63,9 +63,15 @@ real database tests: `PG_TEST_ADMIN_FILE=.secrets/postgres-admin.toml uv run --n
 scale benchmark: `uv run --no-editable python scripts/benchmark.py`.
 Tier 1 is the CI check `tier1` (`.github/workflows/ci.yml`) on the exact head: every
 test, database tests included, in parallel on one self-hosted CI server, for every
-ready pull request, every push to `main` and every night. Pull requests skip the tests
-marked `slow` (over 60 s alone); `main`, the nightly run and dispatches run them. Tests
+ready pull request, every merge-queue test and every owner dispatch. Tests
 outside CI run on a disposable test server, never on a workstation. See the HTML guide.
+CI time: every `tier1` and `api` run writes its 20 slowest tests and its test step's time
+to the job summary and keeps them for 90 days as the artifact `ci-timing` (`api-timing`);
+it warns when a test takes over 60 s or the step over 90 s, and fails when a test takes
+90 s or more or the step over 240 s (`scripts/ci/timing.py`). The history across runs:
+`python3 scripts/ci/timing_history.py [--workflow api] [--runs 30] [--event merge_group]
+[--branch BRANCH]` (one `gh` call per run; neither workflow runs on pushes to `main`, so
+`--event merge_group` shows what landed).
 
 Schema v5 stores each IP once and references it from product membership, history and
 versioned enrichment. Lifetime provider overlap is cached and deduplicated across products.
@@ -187,10 +193,10 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 (`figures.first_seen`, outside the content hash, for CALC-INC-2). The values
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
-CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the
-Python `calculate()`'s default) stays the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte; the
-incremental one is `calculate --incremental`. Measured on scale-generator data (6 networks × 60
+CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
+Python `calculate()`'s default) is the full calculation, which reads and aggregates every
+observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
@@ -217,6 +223,17 @@ whatever their window, so a run backfilled more than 30 days back is too; a run 
 commits after a build that already recorded a newer run, and that no window holds, is not.
 This module's memos unused for 2 days and the ranges of runs started over 31 days ago are deleted
 once per build transaction.
+Calculated schema v11 (`calculated/migrate_v10_v11.sql`, CALC-PULSE-1a) adds per-hour rollups of
+`run_geo_buckets` (`calculated_geo_hours`, `calculated_geo_rollups`): the incremental calculation
+reads its census-pulse geo rows (geo totals and light-load histograms) from them instead of
+scanning the 30-day window (`calculated/rollups.py`); the full calculation keeps the 30-day query
+as the oracle. Each rollup row sums one hour per product group, location, network, fallback country
+and target. A build writes the hours it reads that have no rollup, and rewrites an hour holding a
+run newer than its rollup (a late run) or a run outside a batch that a batch now owns. An hour a
+window edge falls inside (a cutoff off the hour) is read from `run_geo_buckets`, and pulses that
+ran during a census are subtracted from the rollups when read, so the rows equal the full mode's at
+every cutoff. Rollups of hours over a day older than the window read are deleted. The first
+incremental build after the migration fills the 30 days once, at about the cost of one full read.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and

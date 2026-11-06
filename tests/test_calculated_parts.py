@@ -14,10 +14,10 @@ from pathlib import Path
 import psycopg
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from migration_cases import catalog
 from psycopg import sql
 from psycopg.types.json import Jsonb
 from test_census_pulse import outage, scenario
-from test_migration import catalog
 from test_storage import measurement
 
 from proxy_index.calculated import calculator, parts, store
@@ -432,9 +432,14 @@ async def test_calculated_v7_builds_migrate_unchanged_and_still_serve(databases,
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         7,
-        10,
+        11,
     )
-    assert result["verified"] == [*store.V7_CHECKS, *store.V8_CHECKS, *store.V9_CHECKS]
+    assert result["verified"] == [
+        *store.V7_CHECKS,
+        *store.V8_CHECKS,
+        *store.V9_CHECKS,
+        *store.V10_CHECKS,
+    ]
     assert snapshots(database) == before
     for build_id, payload in zip(builds, payloads, strict=True):
         assert store.read(database, str(build_id)) == payload | {"snapshot_id": str(build_id)}

@@ -23,6 +23,7 @@ const memoryListBytes = 90_000_000
 // 9 writes 2) and brotli quality 5 with a 4 MB window: quality 10 and gzip 9
 // would take minutes of CPU every hour at the 0.5 GB a v4 file reaches.
 func TestTheDatasetFileCompressesAtGzip6AndBrotli5(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1, events: events(5), complete: true})
 	f := s.Current().Dataset
 	gz, err := os.ReadFile(filepath.Join(f.dir, f.Name()+".gz"))
@@ -42,6 +43,10 @@ func TestTheDatasetFileCompressesAtGzip6AndBrotli5(t *testing.T) {
 func TestWritingAV4DatasetFileHasBoundedMemory(t *testing.T) {
 	if testing.Short() || underRace {
 		t.Skip("writes a 90 MB dataset file")
+	}
+	// In a process of its own: heapPeak sets GOGC and measures the whole heap.
+	if !alone(t) {
+		return
 	}
 	in, err := testscale.NetworkInputs(testscale.QA1Networks)
 	if err != nil {

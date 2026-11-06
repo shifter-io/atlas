@@ -12,8 +12,9 @@ import (
 )
 
 // everyRequestWithMean is the every-request fixture with mean set on each
-// window's generic_http latency under load (the head's latency object), as
-// the framework writes it since #161; a nil mean leaves the fixture as it is.
+// window's generic_http latency under load (the head's latency object) and a
+// different light-load mean on its latency_ms, as the framework writes both
+// since #161; a nil mean leaves the fixture as it is.
 func everyRequestWithMean(t *testing.T, mean any) []byte {
 	t.Helper()
 	body, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
@@ -30,6 +31,7 @@ func everyRequestWithMean(t *testing.T, mean any) []byte {
 	for _, w := range s["products"].([]any)[0].(map[string]any)["windows"].(map[string]any) {
 		metrics := w.(map[string]any)["targets"].(map[string]any)["generic_http"].(map[string]any)["metrics"].(map[string]any)
 		metrics["latency_under_load_ms"].(map[string]any)["mean"] = mean
+		metrics["latency_ms"].(map[string]any)["mean"] = 1031.4
 	}
 	out, err := json.Marshal(s)
 	if err != nil {
@@ -38,8 +40,9 @@ func everyRequestWithMean(t *testing.T, mean any) []byte {
 	return out
 }
 
-// performance.latencyMean is the head's mean next to latencyP50 (LAT-MEAN-API);
-// a snapshot without the key gives null with latencyP50's N/A reason.
+// performance.latencyMean is the head's mean next to latencyP50 (LAT-MEAN-API),
+// the under-load one and never the light-load latency_ms mean; a snapshot
+// without the key gives null with latencyP50's N/A reason.
 func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
 	for _, c := range []struct {
 		name string
