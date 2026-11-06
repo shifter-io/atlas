@@ -1,0 +1,247 @@
+# TEMPORARY (#335): measures the tier1 test step on ci-32cpu. Removed before merge.
+name: measure-335
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: measure-335-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: 0.12.10
+  UV_SHA256: 173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b
+  PYTHON_VERSION: 3.12.14
+  PG_VERSION: 17.11.1
+  PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
+  GITLEAKS_VERSION: 8.30.1
+  GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+
+jobs:
+  measure:
+    name: measure ${{ matrix.group }}
+    runs-on: [self-hosted, ci-32cpu]
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Refresh tests/durations.json after SPLIT-6 and the test-file splits.
+          - group: refresh
+            variants: "tl,on,branch,worksteal,auto,1,1,1,skip,ctrace"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Tools
+        run: |
+          tools=$CI_CACHE_DIR/proxy-index/tools
+          mkdir -p "$tools"
+          fetch() {
+            [ -e "$3/.complete" ] && return 0
+            tmp=$(mktemp -d "$tools/.tmp.XXXXXX")
+            if curl -fsSL --retry 3 -o "$tmp/a.tgz" "$1" \
+                && echo "$2  $tmp/a.tgz" | sha256sum -c --quiet - \
+                && mkdir "$tmp/x" && tar -C "$tmp/x" --strip-components="${4:-1}" -xzf "$tmp/a.tgz" \
+                && touch "$tmp/x/.complete"; then
+              mv -T "$tmp/x" "$3" 2>/dev/null || true
+              rm -rf "$tmp"
+            else
+              rm -rf "$tmp"
+              return 1
+            fi
+          }
+          fetch "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" "$tools/gitleaks-$GITLEAKS_VERSION" 0
+          fetch "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv-$UV_VERSION"
+          fetch "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql-$PG_VERSION"
+          echo "$tools/uv-$UV_VERSION" >> "$GITHUB_PATH"
+          {
+            echo "GITLEAKS=$tools/gitleaks-$GITLEAKS_VERSION/gitleaks"
+            echo "PG_BIN=$tools/postgresql-$PG_VERSION/bin"
+            echo "UV_CACHE_DIR=$CI_CACHE_DIR/proxy-index/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$tools/python"
+            echo "UV_PROJECT_ENVIRONMENT=$CI_CACHE_DIR/proxy-index/venv/tier1"
+            echo "BASE=origin/main"
+          } >> "$GITHUB_ENV"
+
+      - name: uv sync
+        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
+
+      - name: Measure
+        env:
+          VARIANTS: ${{ matrix.variants }}
+        run: |
+          set +e
+          nproc; lscpu | grep -E 'Model name|^CPU\(s\)'; free -g | head -2
+          M=$RUNNER_TEMP/m; mkdir -p "$M"
+          table=$M/table.md
+          echo "| variant | parallel pytest | serial | test step | junit tests/fail/err/skip |" > "$table"
+          echo "|---|---|---|---|---|" >> "$table"
+          now() { date +%s.%N; }
+          dt() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", b - a }'; }
+          pg_fresh() {
+            if [ -f .state/postgres/data/postmaster.pid ]; then
+              "$PG_BIN/pg_ctl" -D .state/postgres/data stop -m fast
+            fi
+            rm -rf .state/postgres .secrets
+            port=$(uv run --no-editable python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+            flag=""; [ "$1" = on ] && flag=--ephemeral
+            uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port" $flag
+            export PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml
+            grep -E '^(fsync|synchronous_commit|full_page_writes)' .state/postgres/data/postgresql.conf
+          }
+          background() {
+            local name=$1
+            shift
+            ( rc=0; "$@" > "$EV/$name.log" 2>&1 || rc=$?; echo "$rc" > "$EV/$name.rc" ) &
+          }
+          complexity() {
+            git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
+              | xargs -r uv run --no-editable ruff check --select C901 --config 'lint.mccabe.max-complexity = 25'
+          }
+          counts() {
+            python3 - "$@" <<'EOF'
+          import sys, xml.etree.ElementTree as ET
+          t = f = e = s = 0
+          for path in sys.argv[1:]:
+              for suite in ET.parse(path).getroot().iter("testsuite"):
+                  t += int(suite.get("tests")); f += int(suite.get("failures"))
+                  e += int(suite.get("errors")); s += int(suite.get("skipped"))
+          print(f"{t}/{f}/{e}/{s}")
+          EOF
+          }
+          variant() {
+            IFS=, read -r name eph storage dist workers cov bg tl serial core <<< "$1"
+            echo "::group::variant $name"
+            export EV=$M/$name; mkdir -p "$EV"
+            if [ "$storage" = main ]; then
+              git show origin/main:tests/test_storage.py > tests/test_storage.py
+            else
+              git checkout HEAD -- tests/test_storage.py
+            fi
+            pg_fresh "$eph"
+            covargs=(); [ "$cov" = 1 ] && covargs=(--cov=proxy_index --cov-branch --cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
+            covappend=(); [ "$cov" = 1 ] && covappend=(--cov=proxy_index --cov-branch --cov-append --cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
+            export COVERAGE_FILE=$EV/.coverage
+            [ "$tl" = 1 ] && export CI_TIMELINE=1 || unset CI_TIMELINE
+            [ "$core" = sysmon ] && export COVERAGE_CORE=sysmon || unset COVERAGE_CORE
+            t0=$(now)
+            if [ "$bg" = 1 ]; then
+              background build uv build --out-dir "$EV/dist"
+              background ruff uv run --no-editable ruff check src tests scripts
+              background ruff-format uv run --no-editable ruff format --check src tests scripts
+              background complexity complexity
+              background limits uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
+              background scope env -u CI_TIMELINE uv run --no-editable pytest -p no:xdist -p no:cacheprovider \
+                --basetemp="$EV/scope-tmp" tests/test_campaign_scope.py -q
+              background benchmark uv run --no-editable python scripts/benchmark.py --output "$EV/scale"
+            fi
+            if [ "$core" = rep ]; then
+              covargs=(--cov=proxy_index --cov-branch --cov-report=)
+            fi
+            uv run --no-editable pytest -p no:cacheprovider -rs -n "$workers" --dist "$dist" -m "not serial" \
+              "${covargs[@]}" --junitxml="$EV/junit.xml" --durations=25 2>&1 \
+              | python3 -u -c 'import sys, time
+          t = time.time()
+          for line in sys.stdin: print(f"{time.time() - t:7.2f} {line}", end="", flush=True)' > "$EV/pytest.log" || echo "pytest exit $?"
+            tp=$(now)
+            if [ "$core" = rep ]; then
+              printf '[run]\nsource = proxy_index\nbranch = True\n' > "$EV/rc"
+              ( uv run --no-editable coverage xml --rcfile "$EV/rc" -o "$EV/coverage.xml" > "$EV/xml.log" 2>&1 & \
+                uv run --no-editable coverage json --rcfile "$EV/rc" -o "$EV/coverage.json" > "$EV/json.log" 2>&1 & wait )
+              cat "$EV/xml.log" "$EV/json.log"
+            fi
+            t1=$(now)
+            echo "pytest $(dt "$t0" "$tp") s, reports after it $(dt "$tp" "$t1") s"
+            grep -E "created:|workers \[|passed|Coverage|written|^ *[0-9.]+ \[|%\]" "$EV/pytest.log" | grep -vE "^ *[0-9.]+ \.+ *\[ *[1-9]" | head -20
+            awk '$2 ~ /^[.sFE]+$/ {print "first progress at", $1; exit}' "$EV/pytest.log"
+            if [ "$serial" = run ]; then
+              uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
+                "${covappend[@]}" --junitxml="$EV/junit-serial.xml" --durations=25 >> "$EV/pytest.log" 2>&1 || echo "serial exit $?"
+            fi
+            t2=$(now)
+            wait
+            t3=$(now)
+            unset CI_TIMELINE COVERAGE_CORE
+            for rc in "$EV"/*.rc; do [ -e "$rc" ] && [ "$(cat "$rc")" != 0 ] && echo "$(basename "$rc") failed"; done
+            grep -E '^[0-9]+ (passed|failed)|passed|Set PG_TEST' "$EV/pytest.log" | tail -4
+            sed -n '/slowest 25 durations/,/^$/p' "$EV/pytest.log" | head -30
+            c=$(counts "$EV/junit.xml" "$EV/junit-serial.xml" 2>/dev/null || echo "?")
+            printf '| %s | %s s | %s s | %s s | %s |\n' "$name" \
+              "$(dt "$t0" "$t1")" "$(dt "$t1" "$t2")" "$(dt "$t0" "$t3")" "$c" >> "$table"
+            if [ "$tl" = 1 ]; then
+              uv run --no-editable python scripts/ci/timeline.py "$EV" --top 15 --durations "$EV/durations.json" | tee "$EV/timeline.txt"
+              cp "$EV/durations.json" "$M/durations.json"
+            fi
+            echo "::endgroup::"
+          }
+          collect() {
+            echo "::group::collect"
+            git checkout HEAD -- tests/test_storage.py
+            t0=$(now)
+            uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q > "$M/collect.log" 2>&1 || true
+            t1=$(now)
+            uv run --no-editable python -X importtime -m pytest -p no:cacheprovider -p no:xdist --collect-only -q > /dev/null 2> "$M/importtime.txt" || true
+            tail -2 "$M/collect.log"
+            printf '| collect-only (no xdist) | %s s | | | |\n' "$(dt "$t0" "$t1")" >> "$table"
+            echo "top cumulative imports (us):"
+            sort -t'|' -k2 -n -r "$M/importtime.txt" | head -25
+            echo "::endgroup::"
+          }
+          covcmp() {
+            python3 - "$M/$1/coverage.json" "$M/$2/coverage.json" <<'EOF'
+          import json, sys
+          def sets(path):
+              files = json.load(open(path))["files"]
+              lines = {(f, l) for f, d in files.items() for l in d["executed_lines"]}
+              branches = {(f, tuple(b)) for f, d in files.items() for b in d.get("executed_branches", [])}
+              return lines, branches
+          (la, ba), (lb, bb) = sets(sys.argv[1]), sets(sys.argv[2])
+          print(f"lines {len(la)} vs {len(lb)}; only before {len(la - lb)}, only after {len(lb - la)}")
+          print(f"branches {len(ba)} vs {len(bb)}; only before {len(ba - bb)}, only after {len(bb - ba)}")
+          for item in sorted(la ^ lb)[:40]: print("line diff", item)
+          for item in sorted(ba ^ bb)[:40]: print("branch diff", item)
+          EOF
+          }
+          for v in $VARIANTS; do
+            case "$v" in
+              collect) collect ;;
+              covcmp:*) IFS=: read -r _ a b <<< "$v"; covcmp "$a" "$b"
+                python3 -c 'import json, sys; [print(p, json.load(open(p))["totals"]) for p in sys.argv[1:]]' "$M/$a/coverage.json" "$M/$b/coverage.json"
+                grep -c "<class " "$M/$a/coverage.xml" "$M/$b/coverage.xml" ;;
+              use-durations) git checkout HEAD -- tests/durations.json; wc -l tests/durations.json ;;
+              no-durations) rm -f tests/durations.json ;;
+              *) variant "$v" ;;
+            esac
+          done
+          git checkout HEAD -- tests/test_storage.py
+          echo; cat "$table"; cat "$table" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the durations and timelines
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: measure-${{ matrix.group }}
+          path: |
+            ${{ runner.temp }}/m/durations.json
+            ${{ runner.temp }}/m/*/timeline*
+            ${{ runner.temp }}/m/*/junit*.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop PostgreSQL
+        if: always()
+        run: |
+          data=.state/postgres/data
+          [ -f "$data/postmaster.pid" ] || exit 0
+          "$PG_BIN/pg_ctl" -D "$data" stop -m fast
