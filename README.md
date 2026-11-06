@@ -65,6 +65,13 @@ Tier 1 is the CI check `tier1` (`.github/workflows/ci.yml`) on the exact head: e
 test, database tests included, in parallel on one self-hosted CI server, for every
 ready pull request, every merge-queue test and every owner dispatch. Tests
 outside CI run on a disposable test server, never on a workstation. See the HTML guide.
+CI time: every `tier1` and `api` run writes its 20 slowest tests and its test step's time
+to the job summary and keeps them for 90 days as the artifact `ci-timing` (`api-timing`);
+it warns when a test takes over 60 s or the step over 90 s, and fails when a test takes
+90 s or more or the step over 240 s (`scripts/ci/timing.py`). The history across runs:
+`python3 scripts/ci/timing_history.py [--workflow api] [--runs 30] [--event merge_group]
+[--branch BRANCH]` (one `gh` call per run; neither workflow runs on pushes to `main`, so
+`--event merge_group` shows what landed).
 
 Schema v5 stores each IP once and references it from product membership, history and
 versioned enrichment. Lifetime provider overlap is cached and deduplicated across products.
