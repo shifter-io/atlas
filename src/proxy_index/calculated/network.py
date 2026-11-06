@@ -35,6 +35,7 @@ from . import browser, fleetsql, hourly, netlists, network_scores, parts
 from .aggregate import (
     KEYS,
     NOT_LATENCY_TARGET,
+    SeriesSpec,
     floor_time,
     load_factors,
     outage_list,
@@ -185,7 +186,7 @@ class Network:
         windows = [p["windows"][label] for p in groups]
         latency = {"latency_target": self.target, "minimum": self.minimum}
         latency |= {"factors": factors, "excluded": excluded, "outages": self.down}
-        points = series(rows, (), since, end, hours, tested=self.monitored, **latency)
+        points = series(rows, (), SeriesSpec(since, end, hours, tested=self.monitored, **latency))
         rate, old = m["success_rate"], prev["success_rate"]
         return {
             "period": period,

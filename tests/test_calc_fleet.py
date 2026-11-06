@@ -20,7 +20,7 @@ from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal, replay
 
 from proxy_index.calculated import fleetsql
-from proxy_index.calculated.aggregate import OUTCOMES, series, timed
+from proxy_index.calculated.aggregate import OUTCOMES, SeriesSpec, series, timed
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.fleet import merged
 from proxy_index.storage import connect
@@ -97,9 +97,9 @@ def test_timed_and_series_of_merged_rows_equal_the_rows(seed):
         )
     start = datetime(2026, 11, 1, tzinfo=UTC)
     for hours in (24, 168):
-        args = (start, start + timedelta(hours=hours), hours)
-        kwargs = {"latency_target": "generic_http", "minimum": 2}
-        assert series(together, (), *args, **kwargs) == series(rows, (), *args, **kwargs)
+        end = start + timedelta(hours=hours)
+        spec = SeriesSpec(start, end, hours, latency_target="generic_http", minimum=2)
+        assert series(together, (), spec) == series(rows, (), spec)
     # Errors and histograms keep their counts (as Counters), whatever the rows' order.
     assert sum((Counter(r["counters"]["errors"]) for r in together), Counter()) == sum(
         (Counter(r["counters"]["errors"]) for r in rows), Counter()

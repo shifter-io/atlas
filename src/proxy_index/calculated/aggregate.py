@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from bisect import bisect_left
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from ..names import NETWORK, PLACE
@@ -591,27 +592,34 @@ def outage_list(outages, since, end, limit=50):
     return result
 
 
-def series(
-    rows,
-    observations,
-    start,
-    end,
-    hours,
-    *,
-    outages=(),
-    tested=(),
-    latency_target=None,
-    minimum=1,
-    factors=None,
-    excluded=None,
-):
+@dataclass(frozen=True)
+class SeriesSpec:
+    """What series() covers, [start, end) of a window of `hours`, and how it times latency:
+    the latency target's rows (none: every row), the minimum per figure and the under-load
+    factors and exclusions; outages and tested runs give each bucket's availability."""
+
+    start: datetime
+    end: datetime
+    hours: int
+    outages: tuple | list = ()
+    tested: tuple | list = ()
+    latency_target: str | None = None
+    minimum: int = 1
+    factors: dict | None = None
+    excluded: dict | None = None
+
+
+def series(rows, observations, spec: SeriesSpec):
     """Request history plus outage-time availability at the same bucket resolution.
 
     A country contributes only in buckets intersecting a started census/pulse run
     or a recorded outage. Missing monitoring evidence is null, never assumed healthy.
     Outage intervals are unioned per country and clipped to each half-open bucket.
     """
-    step = timedelta(minutes=5) if hours == 24 else timedelta(days=1)
+    start, end, outages, tested = spec.start, spec.end, spec.outages, spec.tested
+    latency_target, minimum = spec.latency_target, spec.minimum
+    factors, excluded = spec.factors or {}, spec.excluded
+    step = timedelta(minutes=5) if spec.hours == 24 else timedelta(days=1)
     buckets = defaultdict(list)
     seen = defaultdict(set)
 
@@ -628,6 +636,7 @@ def series(
         m = metrics(buckets[t], step.total_seconds() / 3600)
         latency_rows = [r for r in buckets[t] if r["target"] == latency_target]
         timing = timed(latency_rows, step.total_seconds() / 3600, minimum) if latency_target else m
+        loaded = under_load(latency_rows, factors, minimum, excluded) if latency_target else None
         stop = min(t + step, end)
         countries = {r["country"] for r in tested if r["started_at"] < stop and r["last"] > t} | {
             o["country"] for o in outages if o["started_at"] < stop and (o["ended_at"] or end) > t
@@ -640,15 +649,7 @@ def series(
                 "successes": m["successes"],
                 "success_rate": m["success_rate"],
                 "latency_ms": without_mean(timing["latency_ms"]),
-                **(
-                    {
-                        "latency_under_load_ms": without_mean(
-                            under_load(latency_rows, factors or {}, minimum, excluded)["ms"]
-                        )
-                    }
-                    if latency_target
-                    else {}
-                ),
+                **({"latency_under_load_ms": without_mean(loaded["ms"])} if loaded else {}),
                 "unique_ips": len(seen[t]) if buckets[t] else None,
                 "uptime": availability["value"],
             }
