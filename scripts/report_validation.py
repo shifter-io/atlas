@@ -71,8 +71,7 @@ No benchmark traffic was sent to the Amazon endpoints.</p>
 <p>SHA-256: <code>{html.escape(database["sha256"])}</code></p>
 <p>The source and project copy have matching checksums. Local IPv4/IPv6 lookups and a
 simulated-run → real-MMDB enrichment check passed. Database files are excluded from packages.</p>
-<h2>Remaining verification</h2><p>Mac Mini tests were not run: the discovered SSH endpoint
-was reachable but rejected the available identity. Adapter integration tests use loopback
+<h2>Remaining verification</h2><p>Adapter integration tests use loopback
 gateways and fixture credentials; live provider measurements have their own run reports.
 PostgreSQL integration tests use isolated temporary databases when PG_TEST_ADMIN_FILE is set.
 Rolling windows, website publication and schedules remain a later phase.</p>

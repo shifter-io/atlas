@@ -167,6 +167,7 @@ def by_name(record, name):
     return [d for d in record.droplets if d.name == name]
 
 
+@pytest.mark.slow
 async def test_a_full_hour_launches_16_networks_in_8_regions(tmp_path):
     """1: 16 creates and one confirmed assignment per region; all armed before HH:00."""
     fake = FakeDigitalOcean()
