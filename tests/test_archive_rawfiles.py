@@ -6,8 +6,8 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from archive_job_cases import fake_bucket
 from test_archive import empty_database
-from test_archive_job import fake_bucket
 from test_storage import measurement
 
 from proxy_index.archive import ArchiveError
