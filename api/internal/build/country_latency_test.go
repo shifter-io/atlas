@@ -8,6 +8,7 @@ import (
 )
 
 func TestCountryLatencyRanks(t *testing.T) {
+	t.Parallel()
 	makeEntry := func(kind, cohort, end string, latency Num) *entry {
 		country := " bg "
 		product := &snap.Product{Kind: kind, Cohort: cohort, Windows: map[string]snap.Window{

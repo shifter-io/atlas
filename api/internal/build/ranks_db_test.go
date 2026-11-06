@@ -203,6 +203,7 @@ func sameDBRank(got model.Rank, rank *int64, peers int64) bool {
 // The ranks are the same read from calculated v8's breakdown partition and
 // from v9's lists.
 func TestRanksMatchADirectSQLRanking(t *testing.T) {
+	t.Parallel()
 	for _, k2 := range []bool{false, true} {
 		t.Run(map[bool]string{false: "calculated_breakdowns", true: "lists"}[k2], func(t *testing.T) {
 			db := testdb.New(t)

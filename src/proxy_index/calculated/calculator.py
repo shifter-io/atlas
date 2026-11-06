@@ -15,33 +15,12 @@ from psycopg.types.json import Jsonb
 from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
-from . import browser, incremental, network
-from .aggregate import (
-    NOT_LATENCY_TARGET,
-    PRICES,
-    UNAVAILABLE,
-    census_split,
-    daily_average,
-    floor_time,
-    latency_detail,
-    load_factors,
-    metrics,
-    outage_list,
-    outage_uptime,
-    product_inputs,
-    series,
-    slot_coverage,
-    target_score,
-    timed,
-    uptime,
-    with_under_load,
-)
+from . import browser, incremental, network, product_windows
+from .aggregate import floor_time
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
-from .latency import KEYS
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
-from .parts import sparse
 from .policy import (
     effective,
     hosting_usage_types,
@@ -67,6 +46,7 @@ SCHEMA_VERSION = 4
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists incremental hourly fleetsql rollups "
 SOURCES += "sqlwindow poolfig network network_scores scheduled scores window_scoring hourly_windows"
+SOURCES += " product_windows"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
@@ -78,9 +58,10 @@ BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark
 
 @dataclass(frozen=True)
 class _Build:
-    """What build() hands its fleet and payload steps: its inputs, its settings and its groups
-    (by_product: build()'s scheduled group, pulse batch runs, outages, tested countries and
-    monitored spans of each product, as network.summaries() reads them)."""
+    """What build() hands its steps: its inputs, its settings and its groups (by_product:
+    build()'s scheduled group, pulse batch runs, outages, tested countries and monitored spans of
+    each product, as network.summaries() reads them). product_windows.measure() fills
+    fleet_groups and sets (the IPs of each (group key, window label))."""
 
     runs: list
     config: dict
@@ -98,6 +79,27 @@ class _Build:
     bucket_groups: dict
     by_product: tuple
     flagged_batches: dict
+    source: object
+    evidence: list
+    references: object
+    census_groups: dict
+    geo_groups: dict
+    threshold: int
+    prev_products: dict
+    sets: dict
+
+
+@dataclass(frozen=True)
+class _Groups:
+    """build()'s inputs grouped (_group_inputs()): the product groups by key ((product_id,
+    cohort)), the runs by run key, each group's bucket and geo rows, and each product's
+    scheduled (census/pulse) group."""
+
+    groups: dict
+    run_map: dict
+    buckets: dict
+    geo: dict
+    scheduled: dict
 
 
 def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
@@ -195,18 +197,116 @@ def build(
     events=(),
     traffic=None,
 ):
+    """The payload of build build_id at as_of: the runs grouped by product and cohort
+    (_group_inputs()), each group's windows measured (product_windows.py) and scored with its
+    peers (_fleet_rows()), the previous payload's scores kept as each window's "old"."""
     slot_minutes = slot_length(pulse_minutes)
-    slot_seconds = slot_minutes * 60
-    # Pulse and load runs that ran during a census of the same product: the census batch ids.
-    flagged_runs = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
     flagged_batches = {(o["batch_id"], o["product_id"]): o["census"] for o in overlaps}
     minimum = slot_settings(config)["min_latency_successes"]
     # Every latency figure comes from this one target.
     timed_target = latency_target(config)
-    groups = {}
-    run_map = {}
+    grouped = _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes)
+    groups, bucket_groups, scheduled_groups = grouped.groups, grouped.buckets, grouped.scheduled
+    # What build() derives from IPs comes from its source (incremental.py): the observations, all
+    # aggregated here (the full calculation), or the incremental calculation's.
+    source = observations
+    if not isinstance(source, incremental.Full):
+        source = incremental.Full(observations)
+    source.group(grouped.run_map)
+    pulse_groups, outage_groups = group_by_product(pulses), group_by_product(outages)
+    tested_groups, monitored_groups = tested_by_product(tested)
+    sets = {}
+    fleet_groups = defaultdict(list)
+    step = _Build(
+        runs=runs,
+        config=config,
+        method_id=method_id,
+        as_of=as_of,
+        build_id=build_id,
+        release=release,
+        events=events,
+        traffic=traffic,
+        minimum=minimum,
+        slot_minutes=slot_minutes,
+        timed_target=timed_target,
+        groups=groups,
+        fleet_groups=fleet_groups,
+        bucket_groups=bucket_groups,
+        by_product=(scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
+        flagged_batches=flagged_batches,
+        source=source,
+        evidence=evidence_rows,
+        references=references,
+        census_groups=group_by_product(census, drop_id=True),
+        geo_groups=grouped.geo,
+        threshold=uptime_settings(config)["min_successes"],
+        prev_products=previous_products(previous, as_of),
+        sets=sets,
+    )
+    for key, p in groups.items():
+        product_windows.measure(step, key, p)
+    fleets, overlaps = _fleet_rows(step, sets)
+    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
+    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
+    return _payload(step, fleets, overlaps)
+
+
+def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
+    """build()'s inputs by product group ((product_id, cohort)): the groups, the runs by run key,
+    the bucket and geo rows of each group, and each product's scheduled (census/pulse) group.
+    Every run gets its group and light flag."""
+    slot_seconds = slot_length(pulse_minutes) * 60
+    # Pulse and load runs that ran during a census of the same product: the census batch ids.
+    flagged_runs = {o["run_key"]: o["census"] for o in overlaps if o["run_key"] is not None}
+    # Every latency figure comes from this one target (build()'s timed_target).
+    timed_target = latency_target(config)
+    groups, run_map, scheduled_groups, scope_groups = _group_runs(
+        runs, config, flagged_runs, timed_target, pulse_minutes
+    )
     bucket_groups = defaultdict(list)
     geo_groups = defaultdict(list)
+    for b in buckets:
+        r = run_map[b["run_key"]]
+        test = r.get("test")
+        # Pulse and load requests belong to their batch's slot; census and unbatched requests
+        # to the slot their bucket starts in.
+        at = r.get("slot_at") if test in ("pulse", "load") and r.get("slot_at") else None
+        country = r.get("batch_country") or r["scope"]["config"].get("requested_country")
+        # Pulses and load waves that ran during a census of the product: requests, not light.
+        overlapped = flagged_runs.get(b["run_key"], [])
+        bucket_groups[r["group"]].append(
+            b
+            | {
+                "target": r["scope"]["target"]["id"],
+                "role": r["role"],
+                "test": test,
+                "during_census": bool(overlapped),
+                "census_batches": overlapped,
+                "light": r["light"],
+                "slot": floor_time(at or b["bucket_start"], slot_seconds),
+                "country": country.strip().upper() if country else None,
+                "region": r.get("batch_region"),
+                "concurrency": r["scope"]["config"].get("concurrency"),
+                "last_observed": min(r["finished_at"], b["bucket_start"] + timedelta(minutes=5)),
+            }
+        )
+    for g in geo:
+        key = (
+            scheduled_groups.get(g["product_id"])
+            if g["scope_id"] is None
+            else scope_groups.get(g["scope_id"])
+        )
+        if key:
+            geo_groups[key].append(g)
+    return _Groups(groups, run_map, bucket_groups, geo_groups, scheduled_groups)
+
+
+def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
+    """The product groups of runs by key, the runs by run key, and each product's scheduled
+    group and each scope's group; every run gets its group and light flag."""
+    slot_minutes = slot_length(pulse_minutes)
+    groups = {}
+    run_map = {}
     scheduled_groups = {}
     scope_groups = {}
     for r in runs:
@@ -251,268 +351,7 @@ def build(
                 },
             },
         )
-    for b in buckets:
-        r = run_map[b["run_key"]]
-        test = r.get("test")
-        # Pulse and load requests belong to their batch's slot; census and unbatched requests
-        # to the slot their bucket starts in.
-        at = r.get("slot_at") if test in ("pulse", "load") and r.get("slot_at") else None
-        country = r.get("batch_country") or r["scope"]["config"].get("requested_country")
-        # Pulses and load waves that ran during a census of the product: requests, not light.
-        overlapped = flagged_runs.get(b["run_key"], [])
-        bucket_groups[r["group"]].append(
-            b
-            | {
-                "target": r["scope"]["target"]["id"],
-                "role": r["role"],
-                "test": test,
-                "during_census": bool(overlapped),
-                "census_batches": overlapped,
-                "light": r["light"],
-                "slot": floor_time(at or b["bucket_start"], slot_seconds),
-                "country": country.strip().upper() if country else None,
-                "region": r.get("batch_region"),
-                "concurrency": r["scope"]["config"].get("concurrency"),
-                "last_observed": min(r["finished_at"], b["bucket_start"] + timedelta(minutes=5)),
-            }
-        )
-    # What build() derives from IPs comes from its source (incremental.py): the observations, all
-    # aggregated here (the full calculation), or the incremental calculation's.
-    source = observations
-    if not isinstance(source, incremental.Full):
-        source = incremental.Full(observations)
-    source.group(run_map)
-    for g in geo:
-        key = (
-            scheduled_groups.get(g["product_id"])
-            if g["scope_id"] is None
-            else scope_groups.get(g["scope_id"])
-        )
-        if key:
-            geo_groups[key].append(g)
-    pulse_groups, outage_groups = group_by_product(pulses), group_by_product(outages)
-    census_groups = group_by_product(census, drop_id=True)
-    tested_groups, monitored_groups = tested_by_product(tested)
-    threshold = uptime_settings(config)["min_successes"]
-    prev_products = previous_products(previous, as_of)
-    sets = {}
-    fleet_groups = defaultdict(list)
-    for key, p in groups.items():
-        cfg = effective(config, p["provider"], p["product"])
-        raw, browser_raw = browser.split(bucket_groups[key])  # browser rows: per target only
-        p["census"] = sorted(census_groups[p["product_id"]], key=lambda c: c["country"])
-        # Uptime is a product fact measured by pulse batches; it belongs to the scheduled cohort.
-        scheduled = scheduled_groups.get(p["product_id"]) == key
-        batches = pulse_groups[p["product_id"]] if scheduled else []
-        # Done pulse runs in their time slots.
-        slot_runs = network.slot_runs(batches, slot_seconds, flagged_batches)
-        p["pricing"], price_rows = pricing(evidence_rows, p["product_id"], p["cohort"], as_of)
-        down = (
-            [o | {"country": o["country"].strip()} for o in outage_groups[p["product_id"]]]
-            if scheduled
-            else []
-        )
-        p["outages"] = outage_list(down, as_of - timedelta(hours=720), as_of)
-        # Daily pools of the last 30 days; every window averages its own days of them.
-        days = source.days(key, as_of, max(config["windows"]) // 24)
-        for hours in config["windows"]:
-            label = {24: "24h", 168: "7d", 720: "30d"}[hours]
-            since = as_of - timedelta(hours=hours)
-            rows = [r for r in raw if since <= r["bucket_start"] < as_of]
-            seen = source.seen(key, since, as_of)
-            slots_now = [d for d in slot_runs if since <= d["scheduled_for"] < as_of]
-            # Every request counts (census, pulse and load alike); success is time-weighted.
-            m = timed(rows, hours, minimum, slots_now, slot_minutes)
-            timed_rows = [r for r in rows if r["target"] == timed_target]
-            factors, reference, excluded = load_factors(timed_rows, minimum)
-            with_under_load(m, rows, factors, minimum, excluded)
-            located = [g for g in geo_groups[key] if g["hours"] <= hours]
-            host = hosting_usage_types(cfg)
-            ps, ips, lists, kept = source.window(key, seen, since, hours, host, located, build_id)
-            ps["daily"] = daily_average(days, hours)
-            # Pulse-slot counts stay for reference; the published value is outage time.
-            up = uptime(batches, since, as_of, threshold)
-            up |= outage_uptime(
-                down, tested_groups[p["product_id"]] if scheduled else {}, since, as_of
-            )
-            m["uptime"] = up["value"]
-            if scheduled:
-                # Census/pulse cohorts: coverage is the share of pulse slots filled, not of
-                # 5-minute buckets (pulses run every 30 minutes, all countries at one tick).
-                slot_coverage(m, batches, since, as_of)
-            ps |= lists
-            old = prev_products.get(p["id"], {}).get("windows", {}).get(label, {})
-            ev = [
-                e
-                for e in evidence_rows
-                if e["product_id"] == p["product_id"]
-                and e["cohort"] in (p["cohort"], "*")
-                and e["metric"] not in PRICES
-                and e["period_start"] <= since
-                and e["period_end"] >= as_of
-                and e["valid_until"] > as_of
-            ]
-            values = {e["metric"]: e["value"] for e in ev}
-            targets = {}
-            # Raw inputs of this window's scores; the peer pass below scores them.
-            member = {
-                "config": cfg,
-                "fresh": fresh(m["last_observed"], as_of, cfg["score_valid_hours"]),
-                "targets": {},
-                "old": old,
-                "evidence": ev + price_rows,
-            }
-            for target, own, extra in browser.targets(cfg, rows, browser_raw, since, as_of):
-                tm = timed(
-                    own,
-                    hours,
-                    minimum,
-                    [d for d in slots_now if d["target"] == target],
-                    slot_minutes,
-                )
-                # Latency is the latency target's alone; every other target has none.
-                with_under_load(tm, own, factors, minimum, excluded)
-                if target != timed_target:
-                    tm["latency_ms"] = dict.fromkeys(KEYS)
-                    tm["latency_under_load_ms"] = dict.fromkeys(KEYS)
-                    tm["latency_reason"] = NOT_LATENCY_TARGET
-                    tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
-                # Outages are per product and country, so a target keeps its pulse-slot share.
-                tm["uptime"] = uptime(
-                    [b for b in batches if b["target_id"] == target], since, as_of, threshold
-                )["value"]
-                tm["units"] = tm["units"] | {"uptime": "fraction of pulse batches"}
-                if scheduled and not extra:  # a browser target's coverage stays its buckets'
-                    slot_coverage(
-                        tm, [b for b in batches if b["target_id"] == target], since, as_of
-                    )
-                tc = effective(config, p["provider"], p["product"], target)
-                member["targets"][target] = target_score(tm, tc, target) | {
-                    "fresh": fresh(tm["last_observed"], as_of, tc["score_valid_hours"]),
-                    "observed": tm["last_observed"],
-                    "valid_hours": tc["score_valid_hours"],
-                }
-                targets[target] = {
-                    # benchmark is kept for older readers: every request is the benchmark now.
-                    "metrics": tm,
-                    "benchmark": tm,
-                    "score": None,
-                    "readiness": "measured" if tm["completed"] else "unavailable",
-                    **extra,  # browser targets: K-BP6 outcomes, page loads, group and sources
-                }
-            member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], (up, values))
-            member["observed"] = m["last_observed"]
-            previous_rows = [
-                r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since
-            ]
-            before = since - timedelta(hours=hours)
-            prev_m = timed(
-                previous_rows,
-                hours,
-                minimum,
-                [d for d in slot_runs if before <= d["scheduled_for"] < since],
-                slot_minutes,
-            )
-            if scheduled:
-                slot_coverage(prev_m, batches, since - timedelta(hours=hours), since)
-            w = {
-                "period": {"start": since, "end": as_of, "hours": hours, "boundary": "[start,end)"},
-                "readiness": None,  # once scored
-                "metrics": m,
-                # Kept for older readers; identical to metrics (every request counts).
-                "benchmark": m,
-                "latency": latency_detail(
-                    timed_rows,
-                    factors,
-                    reference,
-                    minimum,
-                    excluded,
-                    [
-                        c
-                        for c in references
-                        if since.date().isoformat() <= c["day"] <= as_of.date().isoformat()
-                    ],
-                )
-                | {"target": timed_target},
-                # Pulses (and load waves) that ran during a census, and the clean ones.
-                "census_overlap": census_split(
-                    rows, slots_now, minimum, slot_minutes, timed_target
-                ),
-                "pool": ps,
-                "uptime": up,
-                **kept,  # "breakdowns", or a reused list (incremental.py)
-                "targets": targets,
-                "scores": {},
-                "evidence": values,
-                "evidence_sources": [
-                    {
-                        k: e[k]
-                        for k in ("metric", "source", "period_start", "period_end", "valid_until")
-                    }
-                    for e in ev + price_rows
-                ],
-                "unavailable": {k: v for k, v in UNAVAILABLE.items() if k not in values},
-                "series": sparse(
-                    series(
-                        rows,
-                        seen,
-                        since,
-                        as_of,
-                        hours,
-                        outages=down,
-                        tested=monitored_groups[p["product_id"]] if scheduled else (),
-                        latency_target=timed_target,
-                        minimum=minimum,
-                        factors=factors,
-                        excluded=excluded,
-                    ),
-                    every=scheduled or hours != 24,  # only daily groups' 24h series are sparse
-                ),
-                "previous_period": prev_m,
-                "success_delta": m["success_rate"] - prev_m["success_rate"]
-                if m["success_rate"] is not None and prev_m["success_rate"] is not None
-                else None,
-                "overlap": {"exclusive_share": None, "shared_share": None, "compared_products": 0},
-                "roles": {
-                    role: metrics([r for r in rows if r["role"] == role], hours)["completed"]
-                    for role in ("exploratory", "pool_sampling", "benchmark", "monitor")
-                },
-                # Completed requests per test; all of them count for every metric.
-                "tests": {
-                    name: sum(
-                        r["counters"]["completed"]
-                        for r in rows
-                        if (r["test"] or "unscheduled") == name
-                    )
-                    for name in ("census", "pulse", "load", "unscheduled")
-                },
-            }
-            w["series"] = source.ips(key, hours, w["series"])  # incremental: counted IPs
-            p["windows"][label] = w
-            sets[(key, label)] = set(ips)
-            fleet_groups[(p["cohort"], label)].append((p, rows, seen, member))
-    step = _Build(
-        runs=runs,
-        config=config,
-        method_id=method_id,
-        as_of=as_of,
-        build_id=build_id,
-        release=release,
-        events=events,
-        traffic=traffic,
-        minimum=minimum,
-        slot_minutes=slot_minutes,
-        timed_target=timed_target,
-        groups=groups,
-        fleet_groups=fleet_groups,
-        bucket_groups=bucket_groups,
-        by_product=(scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
-        flagged_batches=flagged_batches,
-    )
-    fleets, overlaps = _fleet_rows(step, sets)
-    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
-    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
-    return _payload(step, fleets, overlaps)
+    return groups, run_map, scheduled_groups, scope_groups
 
 
 def _fleet_rows(step, sets):

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 from browser_site import SiteTarget
+from browser_transport_cases import FakeBrowser, Harness, Script
 from test_browser_node import make_state
-from test_browser_transport import FakeBrowser, Harness, Script
 
 from proxy_index.browser.driver import NavigationError
 from proxy_index.browser.judge import selector_list

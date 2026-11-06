@@ -136,6 +136,23 @@ CREATE INDEX IF NOT EXISTS calculated_geo_hours_hour ON calculated_geo_hours(hou
 CREATE TABLE IF NOT EXISTS calculated_geo_rollups (
  hour timestamptz PRIMARY KEY, through_run bigint NOT NULL
 );
+-- Per-hour copies of the batch runs' run_buckets (CALC-PULSE-1b, calculated v12, rollups.py): the
+-- columns the calculator reads (all but the status codes). calculated_pulse_rollups
+-- records per copied hour the newest run key and the runs outside a batch it held (loose), so a
+-- late run or a run linked to a batch since rewrites the hour. Hours over a day older than the
+-- window read are collected.
+CREATE TABLE IF NOT EXISTS calculated_pulse_buckets (
+ hour timestamptz NOT NULL, bucket_start timestamptz NOT NULL, run_key bigint NOT NULL,
+ completed bigint NOT NULL, successes bigint NOT NULL, response_body_bytes bigint NOT NULL,
+ errors jsonb NOT NULL, histogram_steps integer[] NOT NULL, histogram_counts integer[] NOT NULL,
+ outcome_counters boolean NOT NULL, challenges bigint NOT NULL, blocks bigint NOT NULL,
+ timeouts bigint NOT NULL, proxy_errors bigint NOT NULL, bytes_up bigint NOT NULL,
+ bytes_down bigint NOT NULL, extra jsonb
+);
+CREATE INDEX IF NOT EXISTS calculated_pulse_buckets_hour ON calculated_pulse_buckets(hour);
+CREATE TABLE IF NOT EXISTS calculated_pulse_rollups (
+ hour timestamptz PRIMARY KEY, through_run bigint NOT NULL, loose bigint[] NOT NULL
+);
 CREATE TABLE IF NOT EXISTS calculated_series (
  result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
  bucket_start timestamptz NOT NULL,

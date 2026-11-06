@@ -7,6 +7,7 @@ never schedule replacement requests, count unique IPs, or write result files.
 from __future__ import annotations
 
 import asyncio
+import logging
 import multiprocessing as mp
 import os
 import pickle
@@ -17,6 +18,8 @@ import time
 from dataclasses import replace
 
 from .transport import HttpTransport
+
+log = logging.getLogger(__name__)
 
 
 def process_count(config):
@@ -87,8 +90,9 @@ async def _serve(sock, config, target, factory, deadline):
             except TimeoutError:
                 send(writer, ("expired", context.request_index))
                 await writer.drain()
-            except Exception:
-                # Do not serialize exception strings that might contain credentials.
+            except Exception as exc:  # boundary: one failed request must not stop the worker
+                # Do not serialize or log exception strings that might contain credentials.
+                log.warning("HTTP worker request failed (%s)", type(exc).__name__)
                 send(writer, ("error", context.request_index))
                 await writer.drain()
 
@@ -101,8 +105,9 @@ def _entry(sock, config, target, factory, deadline):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     try:
         asyncio.run(_serve(sock, config, target, factory, deadline))
-    except Exception:
+    except Exception as exc:  # boundary: a worker process exits with a status, not a traceback
         # Parent diagnoses an EOF as a failed worker. Never print config/tracebacks.
+        log.error("HTTP worker stopped (%s)", type(exc).__name__)
         raise SystemExit(1) from None
     finally:
         sock.close()

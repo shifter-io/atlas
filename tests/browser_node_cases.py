@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from aiohttp import web
-from test_browser_transport import FakeBrowser, Script
+from browser_transport_cases import FakeBrowser, Script
 
 from proxy_index.browser import node as host_module
 from proxy_index.browser.node import BrowserHost

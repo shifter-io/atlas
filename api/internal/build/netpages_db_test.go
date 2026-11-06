@@ -59,6 +59,7 @@ func tailLists(t *testing.T, c *pgx.Conn, nc netCase) {
 // cities and regions, the all-networks list, the Coverage pages, the place
 // pages and the dataset file. An unknown list is still not found.
 func TestLongNetworkListsPageFromTheDatabase(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
@@ -204,6 +205,7 @@ func longPages(t *testing.T, res *build.Result) map[string][]byte {
 // A build whose network list lost its rows after the load (contract K2
 // deleted it) fails, naming the list, instead of serving lists without them.
 func TestABuildFailsWhenAListCannotBeRead(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
