@@ -13,7 +13,7 @@ V6_FIXTURE_SHA256 and V7_FIXTURE_SHA256, while the loaders record storage.V6_CHE
 V7_CHECKSUM as a real v6 or v7 database does; fixtures/schema_v8.sql is the exact v8 schema
 (storage.V8_CHECKSUM), and fixtures/calculated_v6.sql the exact calculated v6 schema
 (store.V6_CHECKSUM); fixtures/schema_v9.sql is the exact v9 schema (storage.V9_CHECKSUM). Every
-path ends at schema v12 with calculated v10; test_migration_v11.py and _v12.py start at v10, v11.
+path ends at schema v12 with calculated v11; test_migration_v11.py and _v12.py start at v10, v11.
 """
 
 import gzip
@@ -283,7 +283,7 @@ async def test_v5_database_migrates_in_place(databases, tmp_path):
     assert (result["from_schema_version"], result["schema_version"]) == (5, 12)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         2,
-        10,
+        11,
     )
     assert set(store.V2_CHECKS) <= set(result["verified"])
     assert migrate(database)["migrated"] is False
@@ -390,7 +390,7 @@ def test_v6_database_migrates_through_v7(databases):
     assert (result["from_schema_version"], result["schema_version"]) == (6, 12)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         3,
-        10,
+        11,
     )
     assert result["verified"] == [
         *V6_CHECKS,
@@ -402,6 +402,7 @@ def test_v6_database_migrates_through_v7(databases):
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -449,6 +450,7 @@ def test_v7_database_migrates_to_v12(databases):
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)
@@ -505,6 +507,7 @@ async def test_calculated_v4_preserves_published_history_and_enables_city_networ
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     assert canonical(v5_state(database)) == canonical(before)
     assert await api_bodies(database, sorted(before["payloads"])) == bodies
@@ -548,7 +551,7 @@ async def test_calculated_v5_expires_then_partitions_breakdowns_by_build(databas
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         5,
-        10,
+        11,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -557,6 +560,7 @@ async def test_calculated_v5_expires_then_partitions_breakdowns_by_build(databas
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     assert canonical(v5_state(database)) == canonical(before)
     assert await api_bodies(database, kept) == bodies
@@ -640,7 +644,7 @@ async def test_calculated_v6_moves_breakdown_names_into_the_shared_lists(databas
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         6,
-        10,
+        11,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -648,6 +652,7 @@ async def test_calculated_v6_moves_breakdown_names_into_the_shared_lists(databas
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     with connect(database) as conn:
         assert breakdowns_by_build(conn) == counts and breakdown_views(conn) == views
@@ -723,6 +728,7 @@ async def test_calculated_v2_on_v6_migrates_in_place(databases, tmp_path):
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     store.initialize(database)
@@ -837,7 +843,7 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
     assert (result["from_schema_version"], result["schema_version"]) == (8, 12)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         5,
-        10,
+        11,
     )
     assert result["verified"] == [
         *names.V8_CHECKS,
@@ -846,6 +852,7 @@ async def test_v8_database_moves_names_into_shared_lists(databases, tmp_path, re
         *store.V7_CHECKS,
         *store.V8_CHECKS,
         *store.V9_CHECKS,
+        *store.V10_CHECKS,
     ]
     assert migrate(database)["migrated"] is False
     initialize(database)

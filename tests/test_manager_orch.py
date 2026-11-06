@@ -736,7 +736,7 @@ def python(code):
 def test_the_calculation_command():
     plain = jobs.calculation_argv("db.toml", "m.toml")
     tail = ["calculate", "--database-file", "db.toml", "--methodology", "m.toml", "--publish"]
-    assert plain[-6:] == tail
+    assert plain[-7:] == [*tail, "--incremental"]  # never the CLI's default
     scoped = jobs.calculation_argv("db.toml", "m.toml", "8G")
     assert scoped[:9] == [
         "systemd-run",

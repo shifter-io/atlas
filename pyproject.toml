@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 dependencies = [
-  "aiohttp>=3.14.3,<4",
+  "aiohttp>=3.14.4,<4",
   "aiohttp-socks>=0.11,<0.12",
   "maxminddb>=2.8,<4",
   "psycopg[binary]>=3.2,<4",
@@ -26,7 +26,7 @@ browser = ["camoufox==0.5.9", "playwright==1.62.0"]
 proxy-index = "proxy_index.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "pytest-timeout>=2.4", "ruff>=0.12", "trustme>=1.2"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=6", "pytest-timeout>=2.4", "pytest-xdist>=3.8", "ruff>=0.12", "trustme>=1.2"]
 
 [tool.uv]
 # fpgen (camoufox) needs indexed-zstd: 1.7.x has no macOS x86_64 wheel; 1.6.1 has
@@ -55,7 +55,13 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q --strict-markers"
-markers = ["scale: simulated high-volume benchmark", "browser_live: the real pinned Camoufox (scripts/ci/browser_live.sh)"]
+markers = [
+  "scale: simulated high-volume benchmark",
+  "browser_live: the real pinned Camoufox (scripts/ci/browser_live.sh)",
+  # CI runs the suite with pytest-xdist, then the serial set alone. Only for a test that
+  # measures time or memory and fails under parallel load; never weaken such a test.
+  "serial: measures time or memory; CI runs it after the parallel run, without xdist",
+]
 # A hung test fails on its own instead of stalling the whole run.
 timeout = 300
 

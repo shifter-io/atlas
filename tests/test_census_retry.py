@@ -7,7 +7,7 @@ import pytest
 from aiohttp import web
 from helpers import FakeTransport
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.models import Outcome
 
 
@@ -38,7 +38,9 @@ async def test_469s_do_not_trigger_saturation_but_remain_in_attempts_and_bytes(t
 
     progress = []
     result = await run(
-        config(), JsonSink(tmp_path), transport_factory=Responses, progress=progress.append
+        config(),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=Responses, progress=progress.append),
     )
     assert result.stop_reason == "unique_ratio"
     assert result.completed == 513 and result.census_requests == 13
@@ -58,7 +60,9 @@ async def test_469s_do_not_consume_minimum_sample_or_no_success_count(tmp_path):
             self.count += 1
             return Outcome(1, error="http_status", status=469 if self.count <= 20 else 503)
 
-    result = await run(config(min_sample=4), JsonSink(tmp_path), transport_factory=Responses)
+    result = await run(
+        config(min_sample=4), JsonSink(tmp_path), RunOptions(transport_factory=Responses)
+    )
     assert result.stop_reason == "no_success"
     assert result.completed == 24 and result.census_requests == 4
     assert result.status_codes == {"469": 20, "503": 4}
@@ -74,7 +78,9 @@ async def test_other_failures_still_count_toward_unique_ratio(tmp_path):
                 return Outcome(1, ip="2001:db8::1", status=200)
             return Outcome(1, error="timeout")
 
-    result = await run(config(min_sample=4), JsonSink(tmp_path), transport_factory=Responses)
+    result = await run(
+        config(min_sample=4), JsonSink(tmp_path), RunOptions(transport_factory=Responses)
+    )
     assert result.stop_reason == "unique_ratio"
     assert result.completed == 24 and result.census_requests == 4
     assert result.successes == 1 and result.timeouts == 3
@@ -89,8 +95,7 @@ async def test_all_469_retries_are_bounded_by_deadline(tmp_path):
     result = await run(
         config(min_sample=2),
         JsonSink(tmp_path),
-        transport_factory=RateLimited,
-        deadline=time.time() + 0.1,
+        RunOptions(transport_factory=RateLimited, deadline=time.time() + 0.1),
     )
     assert result.completed > 2 and result.census_requests == 0
     assert result.http_469_responses == result.completed
@@ -105,14 +110,14 @@ async def test_explicit_attempt_cap_and_legacy_policy_remain_bounded(tmp_path):
     result = await run(
         config(requests=25, min_sample=2),
         JsonSink(tmp_path / "retry"),
-        transport_factory=RateLimited,
+        RunOptions(transport_factory=RateLimited),
     )
     assert result.completed == 25 and result.census_requests == 0
     assert result.stop_reason == "requests"
     legacy = await run(
         config(retry_http_469=False, min_sample=2),
         JsonSink(tmp_path / "legacy"),
-        transport_factory=RateLimited,
+        RunOptions(transport_factory=RateLimited),
     )
     assert legacy.completed == 2 and legacy.stop_reason == "no_success"
     assert legacy.config["census_rule_version"] == 2

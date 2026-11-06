@@ -15,12 +15,12 @@ import os
 import shutil
 import signal
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from campaign_fakes import CAMPAIGN_PROJECT, CID, FakeDigitalOcean, running
-from helpers import FakeTransport
-from test_campaign_hour import (
+from campaign_hour_cases import (
     PRE_CREATE,
     SCHEDULED,
     FakeClock,
@@ -29,6 +29,7 @@ from test_campaign_hour import (
     make_root,
     make_spec,
 )
+from helpers import FakeTransport
 from test_onboarding import ROOT, START, Clock, Proxy
 from test_onboarding_round import TOR1, make
 
@@ -541,10 +542,10 @@ async def daily_root(tmp_path):
     spec_path(root).write_text(spec.to_json())
     clock = Clock(START.timestamp())
 
-    async def measure(config, sink, **kwargs):
-        kwargs.pop("deadline")
+    async def measure(config, sink, options):
         config = RunConfig("generic_http", config.proxy, requests=3, concurrency=1)
-        result = await run(config, sink, transport_factory=FakeTransport, **kwargs)
+        options = replace(options, deadline=None, transport_factory=FakeTransport)
+        result = await run(config, sink, options)
         clock.value += 30
         return result
 

@@ -8,6 +8,10 @@ incremental build's peak (tracemalloc) stays under BOUND, while the full build (
 holds every observation row) peaks above three times it, and the two builds read back equal.
 Measured on the CI PostgreSQL server (2026-11-05): 10,947 observations, incremental 10.9 MB,
 full 63.7 MB.
+
+One test measures the incremental peak, the other the full build's peak after an incremental
+build and the equality of the two, each on its own copy of the fixture, so neither waits for
+the other. tracemalloc counts only this process's allocations, so xdist runs them in parallel.
 """
 
 import json
@@ -38,15 +42,30 @@ def peak(database, mode):
         tracemalloc.stop()
 
 
-def test_missed_windows_keep_memory_under_a_bound(databases):
+def scale_fixture(databases):
+    """A fresh database with the scale fixture and an empty calculated schema, and its
+    observation count."""
     config = databases()
     run(config, "1..2", networks="iproyal", countries="DE,US", scale=SCALE)
     store.initialize(config)
     with connect(config) as conn:
-        rows = conn.execute("SELECT count(*) FROM ip_observations").fetchone()[0]
-    new, incremental = peak(config, "incremental")
+        return config, conn.execute("SELECT count(*) FROM ip_observations").fetchone()[0]
+
+
+def test_missed_windows_keep_the_incremental_peak_under_a_bound(databases):
+    config, rows = scale_fixture(databases)
+    _, incremental = peak(config, "incremental")
+    print(json.dumps({"observations": rows, "incremental": incremental}))
+    assert incremental < BOUND, (rows, incremental)
+
+
+def test_the_full_build_peaks_above_the_bound_and_reads_back_equal(databases):
+    """The full build after the incremental one, as the oracle: its peak is over three times
+    BOUND and the two builds read back equal."""
+    config, rows = scale_fixture(databases)
+    new = calculate(config, POLICY, as_of=AS_OF, mode="incremental")
     full, whole = peak(config, "full")
-    print(json.dumps({"observations": rows, "incremental": incremental, "full": whole}))
-    assert incremental < BOUND and whole > 3 * BOUND, (rows, incremental, whole)
+    print(json.dumps({"observations": rows, "full": whole}))
+    assert whole > 3 * BOUND, (rows, whole)
     a, b = (without(store.read(config, p["snapshot_id"])) for p in (new, full))
     assert json.dumps(a) == json.dumps(b), first_difference(a, b)

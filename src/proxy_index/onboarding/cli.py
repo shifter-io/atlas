@@ -9,15 +9,16 @@ import json
 import signal
 import sys
 from contextlib import contextmanager, nullcontext
+from dataclasses import replace
 from pathlib import Path
 
 from ..providers import NoCountryList, load_provider
-from ..runner import run
+from ..runner import RunOptions, run
 from .export import export_campaign
 from .files import digest, read_json
 from .manifest import create, load
 from .rounds import RoundRefused, execute_round, verify_round
-from .scheduler import execute, status, validate_state
+from .scheduler import RegionOptions, execute, status, validate_state
 
 
 def register(commands):
@@ -160,14 +161,21 @@ async def _run(args):
             args.manifest,
             args.region,
             proxies.__getitem__,
-            concurrency=args.concurrency,
-            processes=args.processes,
-            request_timeout=args.timeout,
-            resume=args.resume,
+            RegionOptions(
+                concurrency=args.concurrency,
+                processes=args.processes,
+                request_timeout=args.timeout,
+                resume=args.resume,
+            ),
             stop=stop,
         )
         print(json.dumps(result, allow_nan=False))
         return 130 if stop.is_set() else 0
+
+
+async def _enriched(config, sink, options: RunOptions, *, enricher):
+    """runner.run with the round's enricher added to the scheduler's options."""
+    return await run(config, sink, replace(options, enricher=enricher))
 
 
 async def _round(args):
@@ -178,7 +186,7 @@ async def _round(args):
     stop = asyncio.Event()
     with _signals(stop), LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
         # The round's census runs get the enricher, which turns on the country check.
-        extra = {"run_country": functools.partial(run, enricher=enricher)} if enricher else {}
+        extra = {"run_country": functools.partial(_enriched, enricher=enricher)} if enricher else {}
         result = await execute_round(
             args.manifest, args.region, args.round, proxies.__getitem__, stop=stop, **extra
         )
@@ -205,7 +213,7 @@ def _verify_round(args) -> int:
 
 
 async def _probe(args):
-    from .probe import execute_probe
+    from .probe import ProbeOptions, execute_probe
 
     proxy = load_provider(
         args.provider_config,
@@ -219,11 +227,13 @@ async def _probe(args):
             proxy,
             args.region,
             args.country,
-            concurrency=args.concurrency,
-            processes=args.processes,
-            request_timeout=args.timeout,
-            start=args.start,
-            max_seconds=args.max_seconds,
+            ProbeOptions(
+                concurrency=args.concurrency,
+                processes=args.processes,
+                request_timeout=args.timeout,
+                start=args.start,
+                max_seconds=args.max_seconds,
+            ),
             stop=stop,
         )
         print(json.dumps(result, allow_nan=False))

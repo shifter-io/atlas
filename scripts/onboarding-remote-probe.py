@@ -10,8 +10,16 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+MARKER_SCRIPT = """import json,os,pathlib,sys
+root=pathlib.Path(sys.argv[1]); value=json.loads(sys.argv[2])
+p=root/"active-run.json.partial"
+with p.open("w") as f:
+ os.chmod(p,0o600);json.dump(value,f);f.flush();os.fsync(f.fileno())
+p.replace(root/"active-run.json")
+"""
 
-def main():
+
+def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--region", required=True)
@@ -28,19 +36,11 @@ def main():
         raise ValueError("Network must be provider/product")
     if not re.fullmatch(r"[a-z]{2}", args.country):
         raise ValueError("Country must be lowercase ISO alpha-2")
-    start = datetime.fromisoformat(args.start) if args.start else datetime.now(UTC)
-    name = f"{args.country}-{start.strftime('%Y%m%dt%H%M%Sz')}-c{args.concurrency}"
-    server = json.loads(args.inventory.read_text())["servers"][args.region]
-    root = server["root"]
-    unit = f"proxy-index-onboarding-{name}"
-    output = f"{root}/onboarding-networks/{args.network}/probes/{name}"
-    marker = {
-        "kind": "probe",
-        "region": args.region,
-        "unit": unit + ".service",
-        "state_path": str(Path(output).relative_to(root) / "state.json"),
-    }
-    options = [
+    return args
+
+
+def ssh_options(server):
+    return [
         "-o",
         "BatchMode=yes",
         "-o",
@@ -48,14 +48,10 @@ def main():
         "-i",
         os.path.expanduser(server["identity_file"]),
     ]
-    target = f"{server.get('user', 'root')}@{server['host']}"
-    marker_script = """import json,os,pathlib,sys
-root=pathlib.Path(sys.argv[1]); value=json.loads(sys.argv[2])
-p=root/"active-run.json.partial"
-with p.open("w") as f:
- os.chmod(p,0o600);json.dump(value,f);f.flush();os.fsync(f.fileno())
-p.replace(root/"active-run.json")
-"""
+
+
+def service(args, root, unit, output):
+    """Return the systemd-run command that supervises the probe."""
     command = [
         "systemd-run",
         "--unit=" + unit,
@@ -87,11 +83,30 @@ p.replace(root/"active-run.json")
     ]
     if args.start:
         command += ["--start", args.start]
+    return command
+
+
+def main():
+    args = parse_args()
+    start = datetime.fromisoformat(args.start) if args.start else datetime.now(UTC)
+    name = f"{args.country}-{start.strftime('%Y%m%dt%H%M%Sz')}-c{args.concurrency}"
+    server = json.loads(args.inventory.read_text())["servers"][args.region]
+    root = server["root"]
+    unit = f"proxy-index-onboarding-{name}"
+    output = f"{root}/onboarding-networks/{args.network}/probes/{name}"
+    marker = {
+        "kind": "probe",
+        "region": args.region,
+        "unit": unit + ".service",
+        "state_path": str(Path(output).relative_to(root) / "state.json"),
+    }
+    options = ssh_options(server)
+    target = f"{server.get('user', 'root')}@{server['host']}"
     script = (
         "set -eu\numask 077\n"
-        + shlex.join(command)
+        + shlex.join(service(args, root, unit, output))
         + "\n"
-        + shlex.join(["python3", "-c", marker_script, root, json.dumps(marker)])
+        + shlex.join(["python3", "-c", MARKER_SCRIPT, root, json.dumps(marker)])
         + "\n"
     )
     subprocess.run(["ssh", *options, target, "sh -s"], input=script, text=True, check=True)

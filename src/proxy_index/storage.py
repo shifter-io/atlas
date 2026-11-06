@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import json
 import math
@@ -10,20 +9,24 @@ from collections import Counter
 from decimal import Decimal
 from itertools import accumulate
 from pathlib import Path
-from types import SimpleNamespace
 
-import psycopg
-from psycopg import sql
+import psycopg as psycopg  # re-exported: scripts catch storage.psycopg errors
 from psycopg.types.json import Jsonb
 
-from . import names, storage_ingest
+from . import names, storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
 from .partitions import partition
-from .providers.credentials import read_credentials
 from .stats import Histogram
-from .storage_ingest import ENRICHMENT_FIELDS as ENRICHMENT_FIELDS
-from .storage_ingest import OUTCOME_KEYS as OUTCOME_KEYS
-from .storage_ingest import _digest, _time
+from .storage_migrate import MIGRATION_CHECKS as MIGRATION_CHECKS
+from .storage_migrate import V6_CHECKS as V6_CHECKS
+from .storage_read import ENRICHMENT_FIELDS as ENRICHMENT_FIELDS
+from .storage_read import GEO_COUNTERS as GEO_COUNTERS
+from .storage_read import LOCATION_FIELDS, NETWORK_FIELDS, _read_run, _steps
+from .storage_read import OUTCOME_KEYS as OUTCOME_KEYS
+from .storage_read import _bucket as _bucket
+from .storage_read import connect as connect
+from .storage_read import read_summary as read_summary
+from .storage_read import status as status
 
 SCHEMA_VERSION = 12
 # Only an unmodified v4 to v11 schema (these checksums) is migrated in place; migrate().
@@ -41,53 +44,6 @@ MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7,
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
-# Run-length settings stay out of the scope (and pool) definition; they are kept per run in
-# config_overrides. A census (stop_rule unique_ratio, min_sample, stall_seconds, requests null)
-# and a pulse of the same product, target and country therefore share one pool.
-RUN_LENGTH = (
-    "requests",
-    "target_url",
-    "stop_rule",
-    "min_sample",
-    "stall_seconds",
-    "census_rule_version",
-    "census_ratio_basis",
-    "retry_http_469",
-    "processes",
-    "execution_processes",
-    "execution_backend",
-    "worker_pids",
-    "answer_classes",
-)
-BUCKET_KEYS = (
-    "bucket_start",
-    "completed",
-    "successes",
-    "response_body_bytes",
-    "errors",
-    "status_codes",
-    "latency_histogram",
-)
-GEO_COUNTERS = (
-    "completed",
-    "successes",
-    "challenges",
-    "blocks",
-    "timeouts",
-    "bytes_up",
-    "bytes_down",
-)
-GEO_KEYS = {"bucket_start", "location", "network", "latency_histogram", *GEO_COUNTERS}
-LOCATION_FIELDS = (
-    "country_code",
-    "country",
-    "region_code",
-    "region",
-    "city",
-    "latitude",
-    "longitude",
-)
-NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_type", "usage_type")
 ADAPTER = {
     "adapter": ("adapter", "text"),
     "version": ("adapter_version", "text"),
@@ -97,13 +53,6 @@ ADAPTER = {
     "effective_ttl_seconds": ("ttl_seconds", "integer"),
     "extra_flags": ("extra_flags", "json"),
 }
-
-
-def connect(credentials_file):
-    credentials = read_credentials(credentials_file, "postgres")
-    if set(credentials) - {"host", "port", "dbname", "user", "password", "sslmode"}:
-        raise ValueError("Unsupported database connection field")
-    return psycopg.connect(**credentials, connect_timeout=5)
 
 
 def _schema():
@@ -127,22 +76,6 @@ def initialize(credentials_file):
             (SCHEMA_VERSION, checksum),
         )
     return {"schema_version": SCHEMA_VERSION}
-
-
-def _histogram(value):
-    if value["format"] != "ceil_ms_v1":
-        raise ValueError("Unsupported latency histogram")
-    counts = Counter()
-    for latency, count in value["bins"]:
-        if (
-            type(latency) is not int
-            or not 0 <= latency < 2**31
-            or type(count) is not int
-            or not 0 < count < 2**31
-        ):
-            raise ValueError("Invalid latency histogram")
-        counts[latency] += count
-    return Histogram(counts)
 
 
 def column(kind, value):
@@ -202,49 +135,6 @@ def _profile(definition, provider, product):
     return row | typed | {"extra": Jsonb(extra) if extra else None}
 
 
-def _count(value):
-    return type(value) is int and 0 <= value < 2**63
-
-
-def _bucket(bucket, counters):
-    """Typed column values in run_buckets order: the v5 columns and extra, then the outcomes.
-
-    The six outcome counters are typed only when all are present as counts; then
-    outcome_counters is true and run_bucket_counters() emits them. Otherwise any of them that
-    appear stay verbatim in extra, so pre-v6 buckets rebuild without them.
-    """
-    if set(BUCKET_KEYS) - set(counters) or any(
-        type(counters[k]) is not int or counters[k] < 0
-        for k in ("completed", "successes", "response_body_bytes")
-    ):
-        raise ValueError("Invalid bucket counters")
-    typed = all(_count(counters.get(k)) for k in OUTCOME_KEYS)
-    known = (*BUCKET_KEYS, *OUTCOME_KEYS) if typed else BUCKET_KEYS
-    extra = {k: v for k, v in counters.items() if k not in known}
-    if counters["bucket_start"] != bucket.isoformat(timespec="microseconds"):
-        extra["bucket_start"] = counters["bucket_start"]
-    histogram = counters["latency_histogram"]
-    if set(histogram) != {"format", "bins"}:
-        extra["latency_histogram"] = histogram
-    return (
-        counters["completed"],
-        counters["successes"],
-        counters["response_body_bytes"],
-        Jsonb(counters["errors"]),
-        Jsonb(counters["status_codes"]),
-        *_steps(histogram["bins"]),
-        Jsonb(extra) if extra else None,
-        typed,
-        *(counters[k] if typed else 0 for k in OUTCOME_KEYS),
-    )
-
-
-def _steps(bins):
-    """Millisecond gaps between consecutive bins (the first is absolute) and their counts."""
-    ms = [m for m, _ in bins]
-    return [b - a for a, b in zip([0, *ms], ms, strict=False)], [n for _, n in bins]
-
-
 def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     """Add one run to a scope's cached metrics; histogram is the merged lifetime one."""
     for name in (
@@ -275,81 +165,6 @@ def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     )
 
 
-def _dimension(value, fields):
-    """Typed column values for a location or network; null (no exit address) is all NULL."""
-    if value is None:
-        return (None,) * len(fields)
-    if not isinstance(value, dict) or set(value) - set(fields):
-        raise ValueError("Invalid geo dimension")
-    result = []
-    for field in fields:
-        item = value.get(field)
-        kind = ENRICHMENT_FIELDS[field]
-        if item is None:
-            result.append(None)
-        elif kind == "text" and type(item) is str:
-            result.append(item)
-        elif kind == "bigint" and type(item) is int and -(2**63) <= item < 2**63:
-            result.append(item)
-        elif kind == "double precision" and type(item) in (int, float) and math.isfinite(item):
-            result.append(float(item))
-        else:
-            raise ValueError("Invalid geo dimension")
-    return tuple(result)
-
-
-def _geo_rows(directory, summary, buckets, bucket_rows):
-    """Validated geo.jsonl.gz rows, reconciled with the bucket counters; [] when absent."""
-    manifest = summary.get("artifacts", {}).get("geo")
-    if manifest is None:
-        return []
-    name = manifest.get("file")
-    if not isinstance(name, str) or Path(name).name != name or not name:
-        raise ValueError("Invalid geo artifact")
-    path = directory / name
-    if _digest(path) != manifest["sha256"]:
-        raise ValueError("Geo artifact checksum mismatch")
-    rows, seen = [], set()
-    totals = {bucket: Counter() for bucket in buckets}
-    histograms = {bucket: Histogram(Counter()) for bucket in buckets}
-    with gzip.open(path, "rt") as stream:
-        for line in stream:
-            row = json.loads(line)
-            if not isinstance(row, dict) or set(row) != GEO_KEYS:
-                raise ValueError("Invalid geo row")
-            bucket = _time(row["bucket_start"])
-            location = _dimension(row["location"], LOCATION_FIELDS)
-            network = _dimension(row["network"], NETWORK_FIELDS)
-            counters = [row[k] for k in GEO_COUNTERS]
-            histogram = _histogram(row["latency_histogram"])
-            if (
-                bucket not in buckets
-                or not all(_count(n) for n in counters)
-                or row["successes"] > row["completed"]
-                or histogram.counts.total() != row["successes"]
-            ):
-                raise ValueError("Invalid geo row")
-            if (bucket, location, network) in seen:
-                raise ValueError("Duplicate geo bucket")
-            seen.add((bucket, location, network))
-            totals[bucket].update(dict(zip(GEO_COUNTERS, counters, strict=True)))
-            histograms[bucket].merge(histogram)
-            rows.append(
-                (bucket, *location, *network, *counters, *_steps(histogram.export()["bins"]))
-            )
-    if len(rows) != manifest["rows"]:
-        raise ValueError("Geo artifact row count mismatch")
-    for bucket, counters in buckets.items():
-        keys = ["completed", "successes"]
-        if bucket_rows[bucket][8]:
-            keys += [k for k in GEO_COUNTERS if k in OUTCOME_KEYS]
-        if any(totals[bucket][k] != counters[k] for k in keys) or (
-            histograms[bucket].export() != _histogram(counters["latency_histogram"]).export()
-        ):
-            raise ValueError("Geo buckets do not reconcile with run buckets")
-    return rows
-
-
 def _store_geo(conn, run_key, rows):
     """Resolve each location and network to its enrichment id and add the geo buckets."""
     if not rows:
@@ -377,93 +192,6 @@ def _store_geo(conn, run_key, rows):
         "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
         "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + joins,
         (run_key,),
-    )
-
-
-def _check_bucket_histograms(buckets, histogram):
-    """Each bucket's histogram counts its successes, and together they equal the run's."""
-    merged = Histogram(Counter())
-    for bucket in buckets.values():
-        part = _histogram(bucket["latency_histogram"])
-        if part.counts.total() != bucket["successes"]:
-            raise ValueError("Bucket histogram does not reconcile")
-        merged.merge(part)
-    if merged.export() != histogram.export():
-        raise ValueError("Bucket histograms differ from run histogram")
-
-
-def _read_run(directory):
-    """Read and reconcile a run directory's summary, buckets and geo rows before any write."""
-    summary_path = directory / "summary.json"
-    summary = json.loads(summary_path.read_text())
-    summary_hash = _digest(summary_path)
-    if summary["schema_version"] != "1":
-        raise ValueError("Unsupported measurement schema")
-    requested, started, completed, successes = (
-        summary[name] for name in ("requested", "started", "completed", "successes")
-    )
-    # A census is unbounded; a bounded run also attempted one replacement per rate limit.
-    attempted = (
-        started + summary["not_started"]
-        if requested is None
-        else requested + sum(summary.get("rate_limited", {}).values())
-    )
-    in_country = successes - summary.get("other_country", 0)  # other-country exits: no rows
-    if (
-        not all(type(n) is int and n >= 0 for n in (attempted, started, completed, successes))
-        or attempted != started + summary["not_started"]
-        or started != completed + summary["cancelled"]
-        or completed != successes + summary["total_errors"]
-        or sum(summary["errors"].values()) != summary["total_errors"]
-    ):
-        raise ValueError("Measurement counters do not reconcile")
-    histogram = _histogram(summary["latency_histogram"])
-    if histogram.counts.total() != successes:
-        raise ValueError("Latency histogram does not reconcile")
-    source = directory / "ips.jsonl.gz"
-    if _digest(source) != summary["artifacts"]["ips"]["sha256"]:
-        raise ValueError("IP artifact checksum mismatch")
-    config = summary["config"]
-    provider, product = config.get("provider"), config.get("product")
-    if not provider or not product:
-        raise ValueError("Persistence requires provider and product labels")
-    scope = {
-        "target": summary["target"],
-        "config": {key: value for key, value in config.items() if key not in RUN_LENGTH},
-    }
-    scope_hash = hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest()
-    run_id = summary["run_id"]
-    buckets = {_time(b["bucket_start"]): b for b in summary["buckets"]}
-    if (
-        len(buckets) != len(summary["buckets"])
-        or sum(b["completed"] for b in buckets.values()) != completed
-        or sum(b["successes"] for b in buckets.values()) != successes
-    ):
-        raise ValueError("Bucket counters do not reconcile")
-    _check_bucket_histograms(buckets, histogram)
-    bucket_rows = {bucket: _bucket(bucket, counters) for bucket, counters in buckets.items()}
-    if any(key in summary for key in OUTCOME_KEYS):
-        if not all(_count(summary.get(key)) for key in OUTCOME_KEYS) or (
-            all(row[8] for row in bucket_rows.values())
-            and any(sum(buckets[b][key] for b in buckets) != summary[key] for key in OUTCOME_KEYS)
-        ):
-            raise ValueError("Outcome counters do not reconcile")
-    geo_rows = _geo_rows(directory, summary, buckets, bucket_rows)
-    return SimpleNamespace(
-        summary=summary,
-        summary_hash=summary_hash,
-        attempted=attempted,
-        in_country=in_country,
-        histogram=histogram,
-        source=source,
-        provider=provider,
-        product=product,
-        scope=scope,
-        scope_hash=scope_hash,
-        run_id=run_id,
-        buckets=buckets,
-        bucket_rows=bucket_rows,
-        geo_rows=geo_rows,
     )
 
 
@@ -645,102 +373,6 @@ def _membership(conn, provider, product_id):
     )
 
 
-def status(credentials_file):
-    with connect(credentials_file) as conn:
-        counts = {}
-        for table in (
-            "test_runs",
-            "ip_addresses",
-            "product_ips",
-            "provider_overlap",
-            "ip_observations",
-            "run_buckets",
-            "run_geo_buckets",
-            "dbip_releases",
-            "ip_enrichment",
-            "run_enrichments",
-            "scope_stats",
-        ):
-            counts[table] = conn.execute(
-                sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(table))
-            ).fetchone()[0]
-        return {
-            "counts": counts,
-            "cached_scopes": [
-                {
-                    "provider": row[0],
-                    "product": row[1],
-                    "target": row[2],
-                    "scope_hash": row[3],
-                    "metrics": row[4],
-                }
-                for row in conn.execute(
-                    "SELECT provider,product,target,scope_hash,metrics FROM scope_details "
-                    "ORDER BY scope_id"
-                )
-            ],
-            "cached_pools": [
-                {"provider": p, "product": product, "pool_hash": digest, "unique_ips": count}
-                for p, product, digest, count in conn.execute(
-                    "SELECT p.provider,p.name,s.pool_hash,s.unique_ips FROM pool_stats s "
-                    "JOIN products p USING(product_id) ORDER BY p.provider,p.name,s.pool_hash"
-                )
-            ],
-            "provider_overlaps": [
-                {"provider_a": a, "provider_b": b, "shared_ips": count, "window": "lifetime"}
-                for a, b, count in conn.execute(
-                    "SELECT provider_a,provider_b,shared_ips FROM provider_overlap "
-                    "ORDER BY provider_a,provider_b"
-                )
-            ],
-        }
-
-
-def read_summary(run_id, credentials_file):
-    """Reconstruct the complete artifact-shaped summary from authoritative DB rows."""
-    with connect(credentials_file) as conn:
-        row = conn.execute(
-            "SELECT stored_run_summary(run_key) FROM test_runs WHERE run_id=%s", (run_id,)
-        ).fetchone()
-        if row is None:
-            raise KeyError(run_id)
-        return row[0]
-
-
-# Each check counts rows whose rebuilt JSON differs from the v4 copy kept by the migration.
-MIGRATION_CHECKS = {
-    "pool definitions": "SELECT count(*) FROM v4_pools o FULL JOIN pool_details n USING(pool_id) "
-    "WHERE o.definition::text IS DISTINCT FROM n.definition::text",
-    "scopes and metrics": "SELECT count(*) FROM v4_scopes o FULL JOIN scope_details n "
-    "USING(scope_id) WHERE (o.scope::text,o.metrics::text) "
-    "IS DISTINCT FROM (n.scope::text,n.metrics::text)",
-    "bucket counters": "SELECT count(*) FROM v4_buckets o FULL JOIN (SELECT run_key,bucket_start,"
-    "run_bucket_counters(b) AS counters FROM run_buckets b) n USING(run_key,bucket_start) "
-    "WHERE o.counters::text IS DISTINCT FROM n.counters::text",
-    "run summaries": "SELECT count(*) FROM v4_summaries o FULL JOIN test_runs t USING(run_key) "
-    "WHERE o.summary::text IS DISTINCT FROM stored_run_summary(t.run_key)::text",
-}
-# A v5 database is captured the same way before migrate_v5_v6.sql, then checked identically.
-V5_SNAPSHOT = (
-    "CREATE TEMP TABLE v5_before_pools ON COMMIT DROP AS "
-    "SELECT pool_id,definition FROM pool_details;"
-    "CREATE TEMP TABLE v5_before_scopes ON COMMIT DROP AS "
-    "SELECT scope_id,scope,metrics FROM scope_details;"
-    "CREATE TEMP TABLE v5_before_buckets ON COMMIT DROP AS "
-    "SELECT run_key,bucket_start,run_bucket_counters(b) AS counters FROM run_buckets b;"
-    "CREATE TEMP TABLE v5_before_summaries ON COMMIT DROP AS "
-    "SELECT run_key,stored_run_summary(run_key) AS summary FROM test_runs"
-)
-V5_CHECKS = {name: query.replace("v4_", "v5_before_") for name, query in MIGRATION_CHECKS.items()}
-# v6 → v7 changes test_batches only: every batch must be unchanged (and no batch a retry).
-V6_SNAPSHOT = "CREATE TEMP TABLE v6_before_batches ON COMMIT DROP AS SELECT * FROM test_batches"
-V6_CHECKS = {
-    "test batches": "SELECT count(*) FROM v6_before_batches o FULL JOIN test_batches n "
-    "USING(batch_id) WHERE to_jsonb(o)::text IS DISTINCT FROM (to_jsonb(n) - 'retry_of')::text "
-    "OR n.retry_of IS NOT NULL",
-}
-
-
 def migrate(credentials_file):
     """Migrate an unmodified v4 to v11 database, and its calculated layer, in one transaction.
 
@@ -756,99 +388,33 @@ def migrate(credentials_file):
     """
     from .calculated import store
 
-    root = Path(__file__).parent
     schema, checksum = _schema()
     calculated, calculated_checksum = store.schema()
     with connect(credentials_file) as conn:
-        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
-        conn.execute("SELECT pg_advisory_xact_lock(817452902)")
-        if not conn.execute("SELECT to_regclass(current_schema||'.schema_versions')").fetchone()[0]:
-            raise ValueError("No schema to migrate; use db-init")
-        versions = conn.execute("SELECT version,checksum FROM schema_versions").fetchall()
-        layered = conn.execute("SELECT to_regclass('calculation_schema')").fetchone()[0]
-        layers = (
-            conn.execute("SELECT version,checksum FROM calculation_schema").fetchall()
-            if layered
-            else None
-        )
+        versions, layered, layers = storage_migrate.read_versions(conn)
         current_layer = [(store.SCHEMA_VERSION, calculated_checksum)]
         if versions == [(SCHEMA_VERSION, checksum)]:
             if not layered or layers == current_layer:
                 return {"schema_version": SCHEMA_VERSION, "migrated": False}
             start = SCHEMA_VERSION
         else:
-            start = MIGRATABLE.get(versions[0] if len(versions) == 1 else None)
-            if start is None:
-                raise ValueError("Only an unmodified v4 to v11 schema can be migrated in place")
-        # A v6 to v11 database may already carry the current calculated layer, and a v6 or
-        # later one a calculated v3 to v6 layer (later is its version, else None).
-        upgraded = layered and start >= 6 and layers == current_layer
-        known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in range(3, store.SCHEMA_VERSION)}
-        later = known.get(layers[0]) if layered and start >= 6 and len(layers) == 1 else None
-        expected = [(1, store.V1_CHECKSUM)] if start == 4 else [(2, store.V2_CHECKSUM)]
-        if layered and not upgraded and not later and layers != expected:
-            raise ValueError(
-                "Only an unmodified calculated v1 schema can be migrated in place"
-                if start == 4
-                else "The calculated schema differs from this release; only an unmodified "
-                "calculated v2 to v9 schema can be migrated in place"
-            )
-        checks = {}
-        if start == 4:
-            checks |= MIGRATION_CHECKS
-            conn.execute((root / "migrate_v4_v5.sql").read_text())
-            if layered:
-                conn.execute((root / "calculated/migrate_v1_v2.sql").read_text())
-                checks |= store.MIGRATION_CHECKS
-        elif start == 5:
-            checks |= V5_CHECKS
-            conn.execute(V5_SNAPSHOT)
-        if layered and start > 4 and not upgraded and not later:
-            checks |= store.V2_CHECKS
-            conn.execute(store.V2_SNAPSHOT)
-        if start == 6:
-            checks |= V6_CHECKS
-            conn.execute(V6_SNAPSHOT)
-        for step in range(max(start, 5), SCHEMA_VERSION):  # migrate_v5_v6.sql .. v11_v12.sql
-            conn.execute((root / f"migrate_v{step}_v{step + 1}.sql").read_text())
-        if start < 9:
-            checks |= names.V8_CHECKS
-        if layered and not upgraded and not later:
-            conn.execute((root / "calculated/migrate_v2_v3.sql").read_text())
-        steps = []
-        for n in range(3, store.SCHEMA_VERSION):  # calculated v3 → v4 up to v8 → v9, from its step
-            if layered and not upgraded and (later or n) <= n:
-                conn.execute(getattr(store, f"V{n}_SNAPSHOT"))
-                conn.execute((root / f"calculated/migrate_v{n}_v{n + 1}.sql").read_text())
-                # Checked at once: they compare stored rows, which a later step may change.
-                steps += _verify(conn, getattr(store, f"V{n}_CHECKS"), start)
+            start = storage_migrate.migratable_start(versions, MIGRATABLE)
+        upgraded, later = storage_migrate.layer_start(start, layered, layers, current_layer)
+        stale = layered and not upgraded
+        checks = storage_migrate.migrate_base(
+            conn, start, layered, stale and not later, SCHEMA_VERSION
+        )
+        steps = storage_migrate.migrate_calculated(conn, start, stale, later)
         conn.execute(schema)
         if layered:
             conn.execute(calculated)
-        verified = [*_verify(conn, checks, start), *steps]
-        if start < SCHEMA_VERSION:
-            conn.execute("DELETE FROM schema_versions")
-            conn.execute(
-                "INSERT INTO schema_versions(version,checksum) VALUES (%s,%s)",
-                (SCHEMA_VERSION, checksum),
-            )
-        if layered and not upgraded:
-            conn.execute("DELETE FROM calculation_schema")
-            conn.execute(
-                "INSERT INTO calculation_schema VALUES (%s,%s)",
-                (store.SCHEMA_VERSION, calculated_checksum),
-            )
-    # Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
-    # columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
-    # v5 → v6 to v11 → v12 (but v8 → v9) and calculated v2 → v3 only add tables, nullable or
-    # constant-default columns and an index (and swap a check constraint or index): no rewrite.
-    tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
-    if start == 4:
-        tables += ["pool_stats", "scope_stats", "test_runs", "run_buckets"]
-    if start == 4 and layered:
-        tables += ["calculated_windows", "calculated_scores"]
-    if layered and not upgraded:
-        tables += ["asn_labels"]  # calculated v9 drops calculated_breakdowns
+        verified = [*storage_migrate.verify(conn, checks, start), *steps]
+        storage_migrate.record(
+            conn,
+            (SCHEMA_VERSION, checksum) if start < SCHEMA_VERSION else None,
+            (store.SCHEMA_VERSION, calculated_checksum) if stale else None,
+        )
+    tables = storage_migrate.compacted(start, layered, upgraded)
     if tables:
         with connect(credentials_file) as conn:
             conn.autocommit = True
@@ -861,18 +427,6 @@ def migrate(credentials_file):
         "migrated": True,
         "verified": verified,
     }
-
-
-def _verify(conn, checks, start):
-    """Raise unless every check counts no differing row; return the checks' names."""
-    failed = {
-        name: count
-        for name, query in checks.items()
-        if (count := conn.execute(query).fetchone()[0])
-    }
-    if failed:
-        raise ValueError(f"Migrated rows do not rebuild their v{start} JSON: {failed}")
-    return list(checks)
 
 
 def seed(

@@ -6,7 +6,7 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.targets import Assessment, EchoIpTarget, RequestSpec, TargetRegistry
 from proxy_index.transport import HttpTransport
 
@@ -127,8 +127,9 @@ async def test_tls_tunnel_and_verification(tmp_path, scheme, trusted):
         result = await run(
             RunConfig("generic_https", proxy, requests=2),
             JsonSink(tmp_path),
-            targets=targets,
-            transport_factory=partial(HttpTransport, ssl_context=tls_client),
+            RunOptions(
+                targets=targets, transport_factory=partial(HttpTransport, ssl_context=tls_client)
+            ),
         )
     assert result.errors == ({} if trusted else {"tls": 2})
     # HTTPS records the exit IP like every echo target: one stub address, or none on TLS failure.
@@ -152,7 +153,9 @@ async def test_socks_http_auth_and_remote_dns(tmp_path, valid):
         targets.register(EchoIpTarget("generic_http", f"http://localhost:{origin_port}/", True))
         proxy = ProxyConfig("socks5", "127.0.0.1", port, "test", "secret" if valid else "bad")
         result = await run(
-            RunConfig("generic_http", proxy, requests=3), JsonSink(tmp_path), targets=targets
+            RunConfig("generic_http", proxy, requests=3),
+            JsonSink(tmp_path),
+            RunOptions(targets=targets),
         )
     assert result.errors == ({} if valid else {"proxy_auth": 3})
     if valid:
@@ -164,7 +167,9 @@ async def test_stop_in_flight(tmp_path):
     stop = asyncio.Event()
     async with server(gateway) as port:
         task = asyncio.create_task(
-            run(config(port, requests=100, concurrency=3), JsonSink(tmp_path), stop=stop)
+            run(
+                config(port, requests=100, concurrency=3), JsonSink(tmp_path), RunOptions(stop=stop)
+            )
         )
         await asyncio.wait_for(gateway.accepted.wait(), 5)
         stop.set()
@@ -184,7 +189,9 @@ async def test_socks_without_authentication(tmp_path):
         targets = TargetRegistry()
         targets.register(EchoIpTarget("generic_http", f"http://localhost:{origin_port}/", True))
         result = await run(
-            config(port, scheme="socks5", requests=1), JsonSink(tmp_path), targets=targets
+            config(port, scheme="socks5", requests=1),
+            JsonSink(tmp_path),
+            RunOptions(targets=targets),
         )
     assert result.successes == 1
 
@@ -208,7 +215,7 @@ async def test_custom_target_controls_method_headers_and_success(tmp_path):
     async with server(gateway) as port:
         proxy = ProxyConfig("http", "127.0.0.1", port, "test", "secret")
         result = await run(
-            RunConfig("custom", proxy, requests=1), JsonSink(tmp_path), targets=targets
+            RunConfig("custom", proxy, requests=1), JsonSink(tmp_path), RunOptions(targets=targets)
         )
     assert result.successes == 1
     assert b"POST http://example.test/" in gateway.requests[0]

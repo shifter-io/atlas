@@ -15,8 +15,8 @@ from importlib import resources
 import pytest
 from aiohttp import web
 from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault, running
-from test_campaign_hour import FakeClock
-from test_campaign_probe import (
+from campaign_hour_cases import FakeClock
+from campaign_probe_cases import (
     IP,
     NOW,
     PROBED,

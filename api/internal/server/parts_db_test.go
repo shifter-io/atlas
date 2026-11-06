@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"testing"
@@ -78,9 +77,11 @@ func answers(t *testing.T, db *testdb.DB, id int64, pages []string) map[string][
 // payload is more than one jsonb row holds (why builds are stored in parts),
 // so its whole form is the same parts with every point kept; the
 // every-request case and store's TestPartsReadAsTheSinglePayload show those
-// read as the single row does.
+// read as the single row does. Each form is stored in its own database and
+// read in its own subtest, both at once (form/whole and form/parts); then
+// the case compares their answers.
 func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
-	db := testdb.New(t)
+	t.Parallel()
 	for _, c := range []struct {
 		name    string
 		payload func() ([]byte, error)
@@ -100,36 +101,29 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 			"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if c.name == "QA-1" {
-				if testing.Short() {
-					t.Skip("stores a QA-1-sized build twice")
-				}
-				// Two QA-1-sized builds read and rendered one after the
-				// other: collect sooner than the default, so the test fits
-				// an 8 GB machine beside its database.
-				defer debug.SetMemoryLimit(debug.SetMemoryLimit(3 << 30))
+			t.Parallel()
+			if c.name == "QA-1" && testing.Short() {
+				t.Skip("stores a QA-1-sized build twice")
 			}
 			payload, err := c.payload()
 			if err != nil {
 				t.Fatal(err)
 			}
-			var id int64
-			if c.single {
-				id = db.Publish(t, payload)
-			} else {
-				head, products, runs, err := testscale.Parts(payload, false)
-				if err != nil {
-					t.Fatal(err)
-				}
-				id = db.PublishParts(t, head, products, runs)
+			var whole, parts map[string][32]byte
+			t.Run("form", func(t *testing.T) {
+				t.Run("whole", func(t *testing.T) {
+					t.Parallel()
+					whole = formAnswers(t, payload, c.single, false, c.pages)
+				})
+				t.Run("parts", func(t *testing.T) {
+					t.Parallel()
+					parts = formAnswers(t, payload, false, true, c.pages)
+				})
+			})
+			if t.Failed() {
+				return
 			}
-			whole := answers(t, db, id, c.pages)
-			head, products, runs, err := testscale.Parts(payload, true)
-			if err != nil {
-				t.Fatal(err)
-			}
-			id = db.PublishParts(t, head, products, runs)
-			sameAnswers(t, whole, answers(t, db, id, c.pages))
+			sameAnswers(t, whole, parts)
 			if status, err := os.ReadFile("/proc/self/status"); err == nil {
 				for _, line := range strings.Split(string(status), "\n") {
 					if strings.HasPrefix(line, "VmHWM:") {
@@ -139,6 +133,22 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// formAnswers stores the payload in a database of its own, as one row
+// (single) or in parts (with sparse, the daily groups' 24-hour series
+// sparse), and returns its answers.
+func formAnswers(t *testing.T, payload []byte, single, sparse bool, pages []string) map[string][32]byte {
+	t.Helper()
+	db := testdb.New(t)
+	if single {
+		return answers(t, db, db.Publish(t, payload), pages)
+	}
+	head, products, runs, err := testscale.Parts(payload, sparse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return answers(t, db, db.PublishParts(t, head, products, runs), pages)
 }
 
 func sameAnswers(t *testing.T, whole, parts map[string][32]byte) {

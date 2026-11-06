@@ -1,5 +1,7 @@
+import asyncio
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,7 @@ from helpers import FakeTransport
 from proxy_index.onboarding.files import read_json
 from proxy_index.onboarding.fleet import classify, cpu_usage, render
 from proxy_index.onboarding.manifest import timestamp
-from proxy_index.onboarding.probe import execute_probe
+from proxy_index.onboarding.probe import ProbeOptions, execute_probe
 from proxy_index.providers import load_provider
 from proxy_index.runner import run
 
@@ -80,6 +82,15 @@ def test_monitor_distinguishes_live_dead_stale_and_unreachable():
     )
 
 
+def test_monitor_flags_a_probe_running_past_an_hour_unless_it_finished():
+    now = time.time()
+    data = {"server_time": now, "service": {"ActiveState": "active"}}
+    late = probe_state(now, started_at=timestamp(now - 3700))
+    assert classify(data | {"state": late}, now)["health"] == "over_hour"
+    late["status"] = "stopped"
+    assert classify(data | {"state": late}, now)["health"] == "stopped"
+
+
 def test_monitor_detects_older_round_backlog():
     now = time.time()
     state = probe_state(
@@ -114,12 +125,17 @@ async def test_probe_uses_shared_census_and_writes_live_and_final_status(tmp_pat
         environ={"SHIFTER_ACCOUNT": "fixture", "SHIFTER_PASSWORD": "fixture"},
     )
 
-    async def measured(config, sink, **kwargs):
+    async def measured(config, sink, options):
         assert config.concurrency == 7 and config.timeout_seconds == 2
-        return await run(config, sink, transport_factory=FakeTransport, **kwargs)
+        return await run(config, sink, replace(options, transport_factory=FakeTransport))
 
     result = await execute_probe(
-        tmp_path, proxy, "nyc3", "us", concurrency=7, request_timeout=2, run_country=measured
+        tmp_path,
+        proxy,
+        "nyc3",
+        "us",
+        ProbeOptions(concurrency=7, request_timeout=2),
+        run_country=measured,
     )
     assert result["status"] == "completed"
     assert result["measurement"]["completed"] >= 1000
@@ -132,3 +148,67 @@ async def test_probe_uses_shared_census_and_writes_live_and_final_status(tmp_pat
         await execute_probe(tmp_path, proxy, "nyc3", "us")
     with pytest.raises(ValueError, match="does not belong"):
         await execute_probe(tmp_path / "wrong", proxy, "fra1", "us")
+
+
+def shifter(country="us"):
+    return load_provider(
+        ROOT / "configs/shifter.toml",
+        parameters={"country": country},
+        environ={"SHIFTER_ACCOUNT": "fixture", "SHIFTER_PASSWORD": "fixture"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("country", "kwargs", "message"),
+    [
+        ("de", {}, "must target the requested country"),
+        ("us", {"max_seconds": 0}, "finite and positive"),
+        ("us", {"start": timestamp(time.time() - 3600)}, "must be in the future"),
+        ("us", {"start": timestamp(time.time() // 3600 * 3600 + 7230)}, "whole UTC hour"),
+    ],
+)
+async def test_probe_rejects_bad_requests_before_creating_state(tmp_path, country, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        await execute_probe(tmp_path, shifter(country), "nyc3", "us", ProbeOptions(**kwargs))
+    assert not (tmp_path / "state.json").exists()
+
+
+async def test_probe_armed_for_a_later_hour_stops_before_measuring(tmp_path):
+    stop = asyncio.Event()
+    asyncio.get_running_loop().call_later(0.05, stop.set)
+    start = timestamp(time.time() // 3600 * 3600 + 7200)
+
+    async def never(*args, **kwargs):
+        raise AssertionError("A stopped probe must not measure")
+
+    result = await execute_probe(
+        tmp_path, shifter(), "nyc3", "us", ProbeOptions(start=start), stop=stop, run_country=never
+    )
+    assert result["status"] == "stopped" and result["scheduled_at"] == start
+    assert read_json(tmp_path / "state.json")["status"] == "stopped"
+    assert not (tmp_path / "summary.json").exists()
+
+
+async def test_probe_failure_is_saved_and_reported_without_details(tmp_path):
+    async def broken(config, sink, options):
+        raise ConnectionError("private detail")
+
+    with pytest.raises(RuntimeError, match=r"Probe failed \(ConnectionError\)") as raised:
+        await execute_probe(tmp_path, shifter(), "nyc3", "us", run_country=broken)
+    assert "private detail" not in str(raised.value)
+    summary = read_json(tmp_path / "summary.json")
+    assert summary["status"] == "failed" and summary["error_type"] == "ConnectionError"
+    assert summary["active"] is None and summary["measurement"] is None
+
+
+async def test_probe_checkpoint_error_stops_the_run_and_fails_it(tmp_path):
+    async def measured(config, sink, options):
+        await options.progress({"requests": 1, "unsaved": object()})
+        assert options.stop.is_set()
+        await options.progress({"requests": 2})
+
+    with pytest.raises(RuntimeError, match=r"Probe failed \(TypeError\)"):
+        await execute_probe(tmp_path, shifter(), "nyc3", "us", run_country=measured)
+    summary = read_json(tmp_path / "summary.json")
+    assert summary["status"] == "failed" and summary["error_type"] == "TypeError"
+    assert summary["progress"]["requests"] == 2

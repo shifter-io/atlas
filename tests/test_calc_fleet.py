@@ -11,12 +11,13 @@ collected by age.
 import random
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import psycopg
 import pytest
 from test_calculated import lenient_policy
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
-from test_calculated_incremental import assert_equal
+from test_calculated_incremental import assert_equal, replay
 
 from proxy_index.calculated import fleetsql
 from proxy_index.calculated.aggregate import OUTCOMES, series, timed
@@ -29,6 +30,11 @@ pytest_plugins = ["test_storage"]
 MEMOS = ("calculated_bucket_ips", "calculated_ip_last_seen", "calculated_distinct")
 MINUTE = timedelta(minutes=1)
 COUNTRIES = {"us": 3, "de": 3, "fr": 3, "jp": 2, "gb": 1}  # groups (networks) per country
+# The sweep's cutoffs (hours before the fixture's end, oldest first), its late run's cutoff, and
+# its chunks of CHUNK cutoffs, each its own case (they run in parallel).
+CUTOFFS = range(24, 0, -2)
+LATE = 12
+CHUNK = 3
 
 
 async def fleet_history(database, tmp_path, end):
@@ -117,24 +123,40 @@ def memo_rows(database):
         return {t: sorted(conn.execute(f"SELECT * FROM {t}").fetchall()) for t in MEMOS}
 
 
+async def late_run(h):
+    await h.daily("beta", "jp", 40 * HOUR - 30 * MINUTE)  # late: before folded buckets
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("chunk", range(len(CUTOFFS) // CHUNK))
 async def test_fleet_counts_from_memos_equal_full_at_every_hourly_cutoff(
-    database, tmp_path, monkeypatch
+    chunk, database, tmp_path, monkeypatch
 ):
+    """One chunk of the sweep, which starts from no memo: the cutoffs before the chunk are
+    replayed, then each of the chunk's is checked; the last chunk checks the memos the sweep
+    ends with."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     h = await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
+    await replay(database, policy, end, CUTOFFS[: chunk * CHUNK], (LATE, partial(late_run, h)))
+    own = CUTOFFS[chunk * CHUNK : (chunk + 1) * CHUNK]
     calls = counting(monkeypatch)
     seen = set()
-    for hours in range(24, 0, -2):
-        if hours == 12:
-            await h.daily("beta", "jp", 40 * HOUR - 30 * MINUTE)  # late: before folded buckets
+    for hours in own:
+        if hours == LATE:
+            await late_run(h)
         payload = assert_equal(database, policy, end - hours * HOUR)
         for f in payload["fleet"]:
             seen.add((f["cohort"] == "*", f["products"], bool(f["unique_ips"])))
     # The fleet totals and cohorts of three, two and one group were all counted.
     assert {(True, 12, True), (False, 3, True), (False, 2, True), (False, 1, True)} <= seen
     assert sum(calls) > 0
+    if own[-1] == CUTOFFS[-1]:
+        assert_last_memos(database, policy, end, calls)
+
+
+def assert_last_memos(database, policy, end, calls):
+    """The memos after the sweep's last cutoff (end - 2h), and a build five minutes on."""
     with connect(database) as conn:
         assert conn.execute("SELECT count(*) FROM calculated_ip_last_seen").fetchone()[0] > 0
         assert conn.execute(fleetsql.NEWEST).fetchone()[0] < end - 2 * HOUR

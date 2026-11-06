@@ -51,6 +51,7 @@ campaign = [
     "tests/test_pulse_fleet.py",
     "tests/campaign_fakes.py",
     "tests/campaign_deploy_fakes.py",
+    "tests/campaign_tick_cases.py",
     "tests/fixtures/campaign-data/**",
     "docs/campaign.html",
 ]
@@ -216,8 +217,6 @@ shared = [
     ".git-blame-ignore-revs",
     "scripts/ci/**",
     "scripts/postgres_local.py",
-    "scripts/remote-check.sh",
-    "scripts/test-remote.sh",
     "tests/helpers.py",
     "tests/test_ci_*.py",
     "credentials.toml.example",

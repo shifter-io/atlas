@@ -4,12 +4,13 @@ A test_batches row is one synchronized slot (kind x country x target x scheduled
 participating product runs from its node in the country's region, starting at the same
 `start_at`. Each product's part is a batch_runs row. A 'load' batch is the latency-under-load
 test: every pulse slot of a census target also opens one per runner region, in the region's
-reference country of the day (`load_references`, see `load_references()`), where each product
+reference country of the day (`load_references`, see references.py), where each product
 runs one wave of census_concurrency requests at census concurrency, load.delay_seconds after
 that country's pulse. A product participates when it has at least one registered node outside
 the browser region (whose 'browser' batches orchestrator/browser.py plans); a participating
 product without a node in the batch's region gets a 'failed' run with stop_reason/error
-'no_node' (plus an alert, and a 'no_node' tape event when that alert opens).
+'no_node' (plus an alert, and a 'no_node' tape event when that alert opens). Those shared
+planning parts, and the aligned slots, are in planparts.py.
 
 Lock order, everywhere: test_batches row (FOR UPDATE) first, then its batch_runs rows. The
 barrier (`close_batch`) runs under the batch lock: a batch is 'done' once every run is terminal
@@ -36,11 +37,17 @@ from typing import Any
 
 import psycopg
 
-from ..browser.contracts import BROWSER_REGION_ID
-from ..calculated.aggregate import blend, census_overlaps
 from .db import Database, mark_closed, setting
-from .events import emit, raise_alert
+from .events import EventRow, emit
+from .planparts import TAKING as TAKING
+from .planparts import _create_runs, _report_no_node
+from .planparts import census_every as census_every
+from .planparts import interval_slots as interval_slots
+from .planparts import next_slot as next_slot
+from .planparts import participants as participants
 from .pulse import open_slot
+from .references import load_references as load_references
+from .sqlrows import _now, _row, _rows
 
 log = logging.getLogger(__name__)
 
@@ -56,122 +63,112 @@ CENSUS_GRACE = timedelta(seconds=120)
 # A census planned after its start_at (a deferred slot, a restart) starts this long after now.
 LATE_START = timedelta(seconds=5)
 PLAN_LOCK = 817452902
-TAKING = (
-    "SELECT DISTINCT p.product_id,p.provider,p.name FROM nodes n JOIN products p ON "
-    f"p.provider=n.provider AND p.name=n.product AND n.region_id<>{BROWSER_REGION_ID}"
-)
-
-
-def _now(now: datetime | None) -> datetime:
-    return (now or datetime.now(UTC)).astimezone(UTC)
-
-
-async def _rows(conn: psycopg.AsyncConnection, query: str, params: Any = None) -> list[dict]:
-    return await (await conn.execute(query, params)).fetchall()
-
-
-async def _row(conn: psycopg.AsyncConnection, query: str, params: Any = None) -> dict | None:
-    return await (await conn.execute(query, params)).fetchone()
 
 
 # --- planning ----------------------------------------------------------------------------
 
 
-async def participants(conn: psycopg.AsyncConnection) -> list[dict]:
-    """Products with at least one registered node, in any region but the browser one."""
-    return await _rows(conn, TAKING + " ORDER BY p.product_id")
-
-
-async def _create_runs(
-    conn: psycopg.AsyncConnection, batch_ids: list[int], now: datetime
+async def _census_due(
+    conn: psycopg.AsyncConnection, now: datetime, lead: timedelta, every: timedelta | None
 ) -> list[dict]:
-    """One batch_runs row per participating product; returns the no_node gaps per region."""
-    if not batch_ids:
-        return []
-    await conn.execute(
-        "WITH taking AS (" + TAKING + ") "
-        "INSERT INTO batch_runs(batch_id,product_id,node_id,status,finished_at,stop_reason,error) "
-        "SELECT b.batch_id,t.product_id,n.node_id,"
-        " CASE WHEN n.node_id IS NULL THEN 'failed' ELSE 'queued' END,"
-        " CASE WHEN n.node_id IS NULL THEN %(now)s END,"
-        " CASE WHEN n.node_id IS NULL THEN 'no_node' END,"
-        " CASE WHEN n.node_id IS NULL THEN 'no_node' END "
-        "FROM test_batches b CROSS JOIN taking t LEFT JOIN nodes n ON n.region_id=b.region_id "
-        " AND n.provider=t.provider AND n.product=t.name "
-        "WHERE b.batch_id=ANY(%(ids)s) ON CONFLICT DO NOTHING",
-        {"ids": batch_ids, "now": now},
-    )
+    """The census slots in [now - lead - CENSUS_GRACE, now + CENSUS_HORIZON), one per enabled
+    country and census target: the daily census_time, or every `every` since the epoch."""
+    window = {"now": now, "lo": now - lead - CENSUS_GRACE, "hi": now + CENSUS_HORIZON}
+    if every is None:
+        # Slots on the previous, current and next UTC day cover a window across midnight.
+        return await _rows(
+            conn,
+            "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
+            "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
+            "CROSS JOIN targets t CROSS JOIN generate_series(-1,1) d "
+            "CROSS JOIN LATERAL (SELECT (((%(now)s AT TIME ZONE 'UTC')::date + d)"
+            " + c.census_time) AT TIME ZONE 'UTC' AS slot) s "
+            "WHERE c.enabled AND t.census AND s.slot >= %(lo)s AND s.slot < %(hi)s "
+            "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
+            window,
+        )
+    # Every enabled country on the same aligned slots: floor(epoch / every) * every.
     return await _rows(
         conn,
-        "SELECT br.product_id,p.provider,p.name,b.region_id,r.slug AS region,b.kind,"
-        " count(*) AS batches,array_agg(b.country_code ORDER BY b.country_code) AS countries "
-        "FROM batch_runs br JOIN test_batches b USING(batch_id) JOIN products p USING(product_id) "
-        "JOIN runner_regions r ON r.region_id=b.region_id "
-        "WHERE br.batch_id=ANY(%s) AND br.error='no_node' "
-        "GROUP BY br.product_id,p.provider,p.name,b.region_id,r.slug,b.kind",
-        (batch_ids,),
+        "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
+        "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
+        "CROSS JOIN targets t CROSS JOIN unnest(%(slots)s::timestamptz[]) s(slot) "
+        "WHERE c.enabled AND t.census "
+        "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
+        {"slots": interval_slots(every, window["lo"], window["hi"])},
     )
 
 
-async def _report_no_node(conn: psycopg.AsyncConnection, gaps: list[dict], now: datetime) -> int:
-    events = 0
-    for gap in gaps:
-        label = f"{gap['provider']}/{gap['name']}"
-        data = {
-            "region": gap["region"],
-            "provider": gap["provider"],
-            "product": label,
-            "kind": gap["kind"],
-            "batches": gap["batches"],
-            "countries": [c.strip() for c in gap["countries"]][:50],
-        }
-        opened = await raise_alert(
-            conn,
-            "no_node",
-            f"{label} has no node in {gap['region']}; its {gap['kind']} runs there fail",
-            severity="major",
-            dedupe_key=f"no_node:{gap['product_id']}:{gap['region_id']}",
-            data=data,
-        )
-        if opened:
-            await emit(
-                conn,
-                "no_node",
-                now,
-                product_id=gap["product_id"],
-                region_id=gap["region_id"],
-                signal=-1,
-                severity="major",
-                data=data,
-            )
-            events += 1
-    return events
+async def _census_slot(
+    conn: psycopg.AsyncConnection, slot: dict, lead: timedelta, now: datetime
+) -> tuple[str, int | None]:
+    """Plan one due census slot. Returns ('exists' or 'deferred', None) when nothing new is
+    written, else the new batch's status ('scheduled' or 'skipped') and its id."""
+    key = (slot["country_code"], slot["target_id"], slot["slot"])
+    if await _row(
+        conn,
+        "SELECT 1 FROM test_batches WHERE kind='census' AND country_code=%s "
+        "AND target_id=%s AND scheduled_for=%s",
+        key,
+    ):
+        return "exists", None
+    previous = await _row(
+        conn,
+        "SELECT batch_id,status,scheduled_for FROM test_batches WHERE kind='census' "
+        "AND country_code=%s AND target_id=%s AND status IN ('scheduled','running') "
+        "AND scheduled_for<%s ORDER BY scheduled_for DESC LIMIT 1",
+        key,
+    )
+    start_at = slot["slot"] + lead
+    if previous and now < start_at:
+        # It may still finish in time: the next tick decides.
+        return "deferred", None
+    status = "skipped" if previous else "scheduled"
+    inserted = await _row(
+        conn,
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+        "start_at,status,finished_at) VALUES ('census',%s,%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT DO NOTHING RETURNING batch_id",
+        (
+            slot["country_code"],
+            slot["region_id"],
+            slot["target_id"],
+            slot["slot"],
+            start_at if previous else max(start_at, now + LATE_START),
+            status,
+            now if previous else None,
+        ),
+    )
+    if inserted is None:
+        return "exists", None
+    if previous:
+        await _skip_census(conn, inserted["batch_id"], slot, previous, now)
+    return status, inserted["batch_id"]
 
 
-def census_every(value: Any) -> timedelta | None:
-    """The census.every_minutes setting as an interval; None (unset) means the daily slot."""
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int | float) or value < 1:
-        raise ValueError("census.every_minutes must be a positive number of minutes or null")
-    return timedelta(minutes=value)
-
-
-def interval_slots(every: timedelta, lo: datetime, hi: datetime) -> list[datetime]:
-    """The slots aligned to multiples of `every` since the epoch in [lo, hi)."""
-    step = every.total_seconds()
-    k = -(-lo.timestamp() // step)  # ceil
-    slots = []
-    while k * step < hi.timestamp():
-        slots.append(datetime.fromtimestamp(k * step, UTC))
-        k += 1
-    return slots
-
-
-def next_slot(every: timedelta, now: datetime) -> datetime:
-    """The first aligned slot after `now`."""
-    step = every.total_seconds()
-    return datetime.fromtimestamp((now.timestamp() // step + 1) * step, UTC)
+async def _skip_census(
+    conn: psycopg.AsyncConnection, batch_id: int, slot: dict, previous: dict, now: datetime
+) -> None:
+    """Close a census batch planned 'skipped' and put its census_skipped event on the tape."""
+    mark_closed(conn, batch_id)
+    await emit(
+        conn,
+        EventRow(
+            kind="census_skipped",
+            at=now,
+            batch_id=batch_id,
+            country_code=slot["country_code"],
+            target_id=slot["target_id"],
+            region_id=slot["region_id"],
+            severity="minor",
+            data={
+                "region": slot["region"],
+                "reason": "previous census still " + previous["status"],
+                "previous_batch_id": previous["batch_id"],
+                "scheduled_for": slot["slot"].astimezone(UTC).isoformat(),
+            },
+        ),
+    )
 
 
 async def census_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
@@ -197,244 +194,63 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
         products = await participants(conn)
         if not products:
             return {"created": 0, "skipped": 0, "reason": "no registered nodes"}
-        window = {"now": now, "lo": now - lead - CENSUS_GRACE, "hi": now + CENSUS_HORIZON}
-        if every is None:
-            # Slots on the previous, current and next UTC day cover a window across midnight.
-            due = await _rows(
-                conn,
-                "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
-                "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
-                "CROSS JOIN targets t CROSS JOIN generate_series(-1,1) d "
-                "CROSS JOIN LATERAL (SELECT (((%(now)s AT TIME ZONE 'UTC')::date + d)"
-                " + c.census_time) AT TIME ZONE 'UTC' AS slot) s "
-                "WHERE c.enabled AND t.census AND s.slot >= %(lo)s AND s.slot < %(hi)s "
-                "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
-                window,
-            )
-        else:
-            # Every enabled country on the same aligned slots: floor(epoch / every) * every.
-            due = await _rows(
-                conn,
-                "SELECT c.country_code,c.region_id,r.slug AS region,t.target_id,s.slot "
-                "FROM countries c JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
-                "CROSS JOIN targets t CROSS JOIN unnest(%(slots)s::timestamptz[]) s(slot) "
-                "WHERE c.enabled AND t.census "
-                "ORDER BY s.slot,c.country_code,t.sort_order,t.target_id",
-                {"slots": interval_slots(every, window["lo"], window["hi"])},
-            )
-        created, skipped, deferred = [], 0, 0
+        due = await _census_due(conn, now, lead, every)
+        created, outcomes = [], Counter()
         for slot in due:
-            key = (slot["country_code"], slot["target_id"], slot["slot"])
-            if await _row(
-                conn,
-                "SELECT 1 FROM test_batches WHERE kind='census' AND country_code=%s "
-                "AND target_id=%s AND scheduled_for=%s",
-                key,
-            ):
-                continue
-            previous = await _row(
-                conn,
-                "SELECT batch_id,status,scheduled_for FROM test_batches WHERE kind='census' "
-                "AND country_code=%s AND target_id=%s AND status IN ('scheduled','running') "
-                "AND scheduled_for<%s ORDER BY scheduled_for DESC LIMIT 1",
-                key,
-            )
-            start_at = slot["slot"] + lead
-            if previous and now < start_at:
-                # It may still finish in time: the next tick decides.
-                deferred += 1
-                continue
-            status = "skipped" if previous else "scheduled"
-            inserted = await _row(
-                conn,
-                "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-                "start_at,status,finished_at) VALUES ('census',%s,%s,%s,%s,%s,%s,%s) "
-                "ON CONFLICT DO NOTHING RETURNING batch_id",
-                (
-                    slot["country_code"],
-                    slot["region_id"],
-                    slot["target_id"],
-                    slot["slot"],
-                    start_at if previous else max(start_at, now + LATE_START),
-                    status,
-                    now if previous else None,
-                ),
-            )
-            if inserted is None:
-                continue
-            if previous:
-                skipped += 1
-                mark_closed(conn, inserted["batch_id"])
-                await emit(
-                    conn,
-                    "census_skipped",
-                    now,
-                    batch_id=inserted["batch_id"],
-                    country_code=slot["country_code"],
-                    target_id=slot["target_id"],
-                    region_id=slot["region_id"],
-                    severity="minor",
-                    data={
-                        "region": slot["region"],
-                        "reason": "previous census still " + previous["status"],
-                        "previous_batch_id": previous["batch_id"],
-                        "scheduled_for": slot["slot"].astimezone(UTC).isoformat(),
-                    },
-                )
-            else:
-                created.append(inserted["batch_id"])
+            status, batch_id = await _census_slot(conn, slot, lead, now)
+            outcomes[status] += 1
+            if status == "scheduled":
+                created.append(batch_id)
         gaps = await _create_runs(conn, created, now)
         await _report_no_node(conn, gaps, now)
         for batch_id in created:
             await close_batch(conn, batch_id, now)
     return {
         "created": len(created),
-        "skipped": skipped,
-        "deferred": deferred,
+        "skipped": outcomes["skipped"],
+        "deferred": outcomes["deferred"],
         "no_node": len(gaps),
     }
 
 
-def _countries(value: Any, name: str) -> dict[str, str]:
-    """A {region slug: country code} setting, upper-cased."""
-    if not isinstance(value, dict) or not all(
-        isinstance(k, str) and isinstance(v, str) and len(v) == 2 and v.isalpha()
-        for k, v in value.items()
-    ):
-        raise ValueError(f"{name} must map region slugs to two-letter country codes")
-    return {k: v.upper() for k, v in value.items()}
+async def _open_loads(
+    conn: psycopg.AsyncConnection,
+    references: list[dict],
+    target_id: int,
+    slot: datetime,
+    start_at: datetime,
+) -> list[int]:
+    """One 'load' batch per region's reference country for a census target's pulse slot."""
+    created = []
+    for reference in references:
+        # The reference country's own pulse runs next to it in the same slot.
+        load = await _row(
+            conn,
+            "INSERT INTO test_batches(kind,country_code,region_id,target_id,"
+            "scheduled_for,start_at) VALUES ('load',%s,%s,%s,%s,%s) "
+            "ON CONFLICT DO NOTHING RETURNING batch_id",
+            (
+                reference["country_code"],
+                reference["region_id"],
+                target_id,
+                slot,
+                start_at,
+            ),
+        )
+        if load:
+            created.append(load["batch_id"])
+    return created
 
 
-async def _reference_latency(
-    conn: psycopg.AsyncConnection, day_start: datetime, days: int
-) -> dict[str, dict[str, Any]]:
-    """Per country, the light-load p50 of the census target over [day_start - days, day_start).
-
-    From every product's done pulses of a census target whose run was ingested, except those
-    that ran during a census of the same product (census_overlaps(): from stored run times). Each
-    product's merged histogram weighs the same (blend()). Returns {country: {"p50", "successes"}}.
-    """
-    lo = day_start - timedelta(days=days)
-    times = (
-        "coalesce(r.started_at,br.started_at) AS started_at,"
-        "least(coalesce(r.finished_at,br.finished_at,%(hi)s),%(hi)s) AS finished_at "
-        "FROM batch_runs br JOIN test_batches b USING(batch_id) "
-        "LEFT JOIN test_runs r ON r.run_key=br.run_key "
-    )
-    bounds = {"lo": lo, "hi": day_start, "margin": lo - timedelta(days=1)}
-    pulses = await _rows(
-        conn,
-        f"SELECT br.product_id,br.batch_id,br.run_key,trim(b.country_code) AS country,{times}"
-        "JOIN targets t ON t.target_id=b.target_id AND t.census WHERE b.kind='pulse' "
-        "AND br.status='done' AND br.run_key IS NOT NULL AND b.scheduled_for>=%(lo)s "
-        "AND b.scheduled_for<%(hi)s",
-        bounds,
-    )
-    if not pulses:
-        return {}
-    census = await _rows(
-        conn,
-        f"SELECT br.product_id,br.batch_id,{times}WHERE b.kind='census' "
-        "AND br.started_at IS NOT NULL AND br.started_at<%(hi)s "
-        "AND coalesce(br.finished_at,%(hi)s)>=%(margin)s",
-        bounds,
-    )
-    flagged = {o["run_key"] for o in census_overlaps(census, pulses)}
-    clean = {p["run_key"]: p for p in pulses if p["run_key"] not in flagged}
-    histograms: dict[str, dict[int, Counter]] = {}
+async def _close_unmanned(conn: psycopg.AsyncConnection, created: list[int], now: datetime) -> None:
+    """Batches whose every run failed (no node in the region) close at once."""
     for row in await _rows(
         conn,
-        "SELECT b.run_key,h.ms,sum(h.n)::bigint AS n FROM run_buckets b CROSS JOIN LATERAL "
-        "histogram(b.histogram_steps,b.histogram_counts::bigint[]) h WHERE b.run_key=ANY(%s) "
-        "AND b.bucket_start>=%s GROUP BY 1,2",
-        (sorted(clean), lo - timedelta(hours=1)),
+        "SELECT batch_id FROM test_batches b WHERE batch_id=ANY(%s) AND NOT EXISTS "
+        "(SELECT 1 FROM batch_runs r WHERE r.batch_id=b.batch_id AND r.status='queued')",
+        (created,),
     ):
-        run = clean[row["run_key"]]
-        products = histograms.setdefault(run["country"], {})
-        products.setdefault(run["product_id"], Counter())[row["ms"]] += row["n"]
-    return {
-        country: {
-            "p50": blend(products.values())["p50"],
-            "successes": sum(sum(h.values()) for h in products.values()),
-        }
-        for country, products in histograms.items()
-    }
-
-
-async def load_references(conn: psycopg.AsyncConnection, now: datetime) -> list[dict]:
-    """Today's (UTC) latency-under-load reference country of every runner region with enabled
-    countries, chosen on first use and stored in load_references (so every load batch of the day
-    and every later calculation sees the same choice).
-
-    Per region: an override (load.reference_overrides) that is one of its enabled countries
-    ('override'); else the enabled country with the lowest light-load p50 over the trailing
-    load.reference_days among those with at least load.reference_min_successes successes, ties
-    broken by country code ('fastest'); else its default (load.reference_defaults, 'default');
-    else its first enabled country by code ('first_enabled'). A stored choice whose country was
-    disabled since is skipped (no load wave there today).
-    """
-    day = now.astimezone(UTC).date()
-    regions = await _rows(
-        conn,
-        "SELECT r.region_id,r.slug,array_agg(trim(c.country_code) ORDER BY c.country_code) "
-        "AS countries FROM runner_regions r JOIN countries c ON c.region_id=r.region_id "
-        "AND c.enabled WHERE r.enabled GROUP BY 1,2 ORDER BY 1",
-    )
-    chosen = {
-        row["region_id"]: row
-        for row in await _rows(conn, "SELECT * FROM load_references WHERE day=%s", (day,))
-    }
-    missing = [r for r in regions if r["region_id"] not in chosen]
-    if missing:
-        overrides = _countries(
-            await setting(conn, "load.reference_overrides"), "load.reference_overrides"
-        )
-        defaults = _countries(
-            await setting(conn, "load.reference_defaults"), "load.reference_defaults"
-        )
-        minimum = int(await setting(conn, "load.reference_min_successes"))
-        day_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-        stats = await _reference_latency(
-            conn, day_start, int(await setting(conn, "load.reference_days"))
-        )
-        for region in missing:
-            countries = region["countries"]
-            candidates = sorted(
-                (stats[c]["p50"], c)
-                for c in countries
-                if c in stats and stats[c]["p50"] is not None and stats[c]["successes"] >= minimum
-            )
-            if overrides.get(region["slug"]) in countries:
-                country, basis = overrides[region["slug"]], "override"
-            elif candidates:
-                country, basis = candidates[0][1], "fastest"
-            elif defaults.get(region["slug"]) in countries:
-                country, basis = defaults[region["slug"]], "default"
-            else:
-                country, basis = countries[0], "first_enabled"
-            await conn.execute(
-                "INSERT INTO load_references(day,region_id,country_code,basis,p50_ms,successes,"
-                "candidates) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                (
-                    day,
-                    region["region_id"],
-                    country,
-                    basis,
-                    stats.get(country, {}).get("p50"),
-                    stats.get(country, {}).get("successes"),
-                    len(candidates),
-                ),
-            )
-        chosen = {
-            row["region_id"]: row
-            for row in await _rows(conn, "SELECT * FROM load_references WHERE day=%s", (day,))
-        }
-    return [
-        chosen[r["region_id"]]
-        for r in regions
-        if r["region_id"] in chosen
-        and chosen[r["region_id"]]["country_code"].strip() in r["countries"]
-    ]
+        await close_batch(conn, row["batch_id"], now)
 
 
 async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
@@ -485,34 +301,12 @@ async def pulse_plan(db: Database, now: datetime | None = None) -> dict[str, Any
             if target["census"] and loading:
                 if references is None:
                     references = await load_references(conn, now)
-                for reference in references:
-                    # The reference country's own pulse runs next to it in the same slot.
-                    load = await _row(
-                        conn,
-                        "INSERT INTO test_batches(kind,country_code,region_id,target_id,"
-                        "scheduled_for,start_at) VALUES ('load',%s,%s,%s,%s,%s) "
-                        "ON CONFLICT DO NOTHING RETURNING batch_id",
-                        (
-                            reference["country_code"],
-                            reference["region_id"],
-                            target["target_id"],
-                            slot,
-                            start + delay,
-                        ),
-                    )
-                    if load:
-                        created.append(load["batch_id"])
-                        loads += 1
+                load = await _open_loads(conn, references, target["target_id"], slot, start + delay)
+                created.extend(load)
+                loads += len(load)
         gaps = await _create_runs(conn, created, now)
         await _report_no_node(conn, gaps, now)
-        # Batches whose every run failed (no node in the region) close at once.
-        for row in await _rows(
-            conn,
-            "SELECT batch_id FROM test_batches b WHERE batch_id=ANY(%s) AND NOT EXISTS "
-            "(SELECT 1 FROM batch_runs r WHERE r.batch_id=b.batch_id AND r.status='queued')",
-            (created,),
-        ):
-            await close_batch(conn, row["batch_id"], now)
+        await _close_unmanned(conn, created, now)
     return {
         "targets": opened,
         "created": len(created) - loads,
@@ -581,32 +375,34 @@ async def run_finished(
     signal = _signal(run)
     await emit(
         conn,
-        "census_finished",
-        now,
-        batch_id=batch_id,
-        product_id=product_id,
-        country_code=run["country_code"],
-        target_id=run["target_id"],
-        region_id=run["region_id"],
-        signal=signal,
-        severity="minor" if signal < 0 else "info",
-        data={
-            "region": run["region"],
-            "requests": requests,
-            "successes": successes,
-            "unique_ips": run["unique_ips"],
-            "success_rate": successes / requests if requests else None,
-            "duration_s": (
-                round(max((run["finished_at"] - run["started_at"]).total_seconds(), 0.0), 3)
-                if run["started_at"] and run["finished_at"]
-                else None
-            ),
-            "stop_reason": run["stop_reason"],
-            "status": run["status"],
-            "bytes_up": run["bytes_up"],
-            "bytes_down": run["bytes_down"],
-            **({"error": run["error"]} if run["error"] else {}),
-        },
+        EventRow(
+            kind="census_finished",
+            at=now,
+            batch_id=batch_id,
+            product_id=product_id,
+            country_code=run["country_code"],
+            target_id=run["target_id"],
+            region_id=run["region_id"],
+            signal=signal,
+            severity="minor" if signal < 0 else "info",
+            data={
+                "region": run["region"],
+                "requests": requests,
+                "successes": successes,
+                "unique_ips": run["unique_ips"],
+                "success_rate": successes / requests if requests else None,
+                "duration_s": (
+                    round(max((run["finished_at"] - run["started_at"]).total_seconds(), 0.0), 3)
+                    if run["started_at"] and run["finished_at"]
+                    else None
+                ),
+                "stop_reason": run["stop_reason"],
+                "status": run["status"],
+                "bytes_up": run["bytes_up"],
+                "bytes_down": run["bytes_down"],
+                **({"error": run["error"]} if run["error"] else {}),
+            },
+        ),
     )
 
 
@@ -645,22 +441,26 @@ async def census_recovered(
     for outage in closed:
         await emit(
             conn,
-            "recovered",
-            now,
-            batch_id=batch_id,
-            product_id=product_id,
-            country_code=run["country_code"],
-            target_id=run["target_id"],
-            region_id=run["region_id"],
-            signal=1,
-            data={
-                "region": run["region"],
-                "source": "census",
-                "incident": "down",
-                "since": outage["started_at"].astimezone(UTC).isoformat(),
-                "duration_s": round((outage["ended_at"] - outage["started_at"]).total_seconds(), 3),
-                "outage_batch_id": outage["batch_id"],
-            },
+            EventRow(
+                kind="recovered",
+                at=now,
+                batch_id=batch_id,
+                product_id=product_id,
+                country_code=run["country_code"],
+                target_id=run["target_id"],
+                region_id=run["region_id"],
+                signal=1,
+                data={
+                    "region": run["region"],
+                    "source": "census",
+                    "incident": "down",
+                    "since": outage["started_at"].astimezone(UTC).isoformat(),
+                    "duration_s": round(
+                        (outage["ended_at"] - outage["started_at"]).total_seconds(), 3
+                    ),
+                    "outage_batch_id": outage["batch_id"],
+                },
+            ),
         )
     return len(closed)
 
@@ -701,23 +501,25 @@ async def census_down(
         return False
     await emit(
         conn,
-        "down",
-        now,
-        batch_id=batch_id,
-        product_id=product_id,
-        country_code=run["country_code"],
-        target_id=run["target_id"],
-        region_id=run["region_id"],
-        signal=-1,
-        severity="critical",
-        data={
-            "region": run["region"],
-            "since": since.astimezone(UTC).isoformat(),
-            "source": "census",
-            "batch_id": batch_id,
-            "requests": run["requests"],
-            "successes": run["successes"],
-        },
+        EventRow(
+            kind="down",
+            at=now,
+            batch_id=batch_id,
+            product_id=product_id,
+            country_code=run["country_code"],
+            target_id=run["target_id"],
+            region_id=run["region_id"],
+            signal=-1,
+            severity="critical",
+            data={
+                "region": run["region"],
+                "since": since.astimezone(UTC).isoformat(),
+                "source": "census",
+                "batch_id": batch_id,
+                "requests": run["requests"],
+                "successes": run["successes"],
+            },
+        ),
     )
     return True
 
@@ -726,6 +528,26 @@ def _spoiled(run: dict) -> bool:
     """Whether a census run ended because the provider was down: a done run that never got a
     success (no_success) or lost its network mid-run (stalled). A failed run is our side's."""
     return run["status"] == "done" and run["stop_reason"] in ("no_success", "stalled")
+
+
+async def _retry_blocked(conn: psycopg.AsyncConnection, key: dict, day: datetime) -> bool:
+    """Whether the product's census for the country and target was already rerun since `day`
+    or a census for the country and target is still open."""
+    return bool(
+        await _row(
+            conn,
+            "SELECT 1 FROM test_batches b JOIN batch_runs br USING(batch_id) "
+            "WHERE b.kind='census' AND b.retry_of IS NOT NULL AND b.country_code=%(country)s "
+            "AND b.target_id=%(target)s AND br.product_id=%(product)s AND b.scheduled_for>=%(day)s",
+            key | {"day": day},
+        )
+        or await _row(
+            conn,
+            "SELECT 1 FROM test_batches WHERE kind='census' AND country_code=%(country)s "
+            "AND target_id=%(target)s AND status IN ('scheduled','running')",
+            key,
+        )
+    )
 
 
 async def census_retry(
@@ -759,46 +581,41 @@ async def census_retry(
         if not _spoiled(census):
             continue
         key = {"country": country, "target": census["target_id"], "product": product_id}
-        if await _row(
-            conn,
-            "SELECT 1 FROM test_batches b JOIN batch_runs br USING(batch_id) "
-            "WHERE b.kind='census' AND b.retry_of IS NOT NULL AND b.country_code=%(country)s "
-            "AND b.target_id=%(target)s AND br.product_id=%(product)s AND b.scheduled_for>=%(day)s",
-            key | {"day": day},
-        ) or await _row(
-            conn,
-            "SELECT 1 FROM test_batches WHERE kind='census' AND country_code=%(country)s "
-            "AND target_id=%(target)s AND status IN ('scheduled','running')",
-            key,
-        ):
+        if await _retry_blocked(conn, key, day):
             continue
-        retry = await _row(
-            conn,
-            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-            "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT DO NOTHING RETURNING batch_id",
-            (
-                country,
-                run["region_id"],
-                census["target_id"],
-                now,
-                now + LATE_START,
-                census["batch_id"],
-            ),
-        )
-        if retry is None:
-            continue
-        # The pulse's node is the product's node in the region.
-        await conn.execute(
-            "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
-            (retry["batch_id"], product_id, run["node_id"]),
-        )
-        await emit(
-            conn,
-            "census_retry",
-            now,
+        retry_id = await _open_retry(conn, run, census, now)
+        if retry_id is not None:
+            created.append(retry_id)
+    return created
+
+
+async def _open_retry(
+    conn: psycopg.AsyncConnection, run: dict, census: dict, now: datetime
+) -> int | None:
+    """The rerun of `census` for the product of the pulse `run`, with its census_retry event;
+    None when the slot already exists."""
+    country = run["country_code"]
+    retry = await _row(
+        conn,
+        "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
+        "start_at,retry_of) VALUES ('census',%s,%s,%s,%s,%s,%s) "
+        "ON CONFLICT DO NOTHING RETURNING batch_id",
+        (country, run["region_id"], census["target_id"], now, now + LATE_START, census["batch_id"]),
+    )
+    if retry is None:
+        return None
+    # The pulse's node is the product's node in the region.
+    await conn.execute(
+        "INSERT INTO batch_runs(batch_id,product_id,node_id,status) VALUES (%s,%s,%s,'queued')",
+        (retry["batch_id"], run["product_id"], run["node_id"]),
+    )
+    await emit(
+        conn,
+        EventRow(
+            kind="census_retry",
+            at=now,
             batch_id=retry["batch_id"],
-            product_id=product_id,
+            product_id=run["product_id"],
             country_code=country,
             target_id=census["target_id"],
             region_id=run["region_id"],
@@ -806,11 +623,11 @@ async def census_retry(
                 "region": run["region"],
                 "retry_of": census["batch_id"],
                 "reason": census["stop_reason"] or census["error"],
-                "pulse_batch_id": batch_id,
+                "pulse_batch_id": run["batch_id"],
             },
-        )
-        created.append(retry["batch_id"])
-    return created
+        ),
+    )
+    return retry["batch_id"]
 
 
 async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, now: datetime):
@@ -833,12 +650,17 @@ async def _start(conn: psycopg.AsyncConnection, batch_id: int, product_id: int, 
     if run["kind"] == "census":
         await emit(
             conn,
-            "census_started",
-            now,
-            batch_id=batch_id,
-            product_id=product_id,
-            country_code=run["country_code"],
-            target_id=run["target_id"],
-            region_id=run["region_id"],
-            data={"region": run["region"], "start_at": run["start_at"].astimezone(UTC).isoformat()},
+            EventRow(
+                kind="census_started",
+                at=now,
+                batch_id=batch_id,
+                product_id=product_id,
+                country_code=run["country_code"],
+                target_id=run["target_id"],
+                region_id=run["region_id"],
+                data={
+                    "region": run["region"],
+                    "start_at": run["start_at"].astimezone(UTC).isoformat(),
+                },
+            ),
         )

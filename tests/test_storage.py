@@ -4,15 +4,16 @@ import json
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import psycopg
 import pytest
-from helpers import FakeTransport
+from helpers import FakeTransport, scratch_database_name
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run, storage
 from proxy_index.cli import main
 from proxy_index.providers.credentials import read_credentials
 from proxy_index.stats import Histogram
@@ -41,7 +42,7 @@ def databases(tmp_path):
     names = []
 
     def create():
-        name = "proxy_test_" + uuid.uuid4().hex
+        name = scratch_database_name()
         with psycopg.connect(**admin, autocommit=True) as conn:
             conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
         names.append(name)
@@ -95,7 +96,7 @@ async def measurement(
             product=product,
         ),
         sink,
-        transport_factory=transport_factory,
+        RunOptions(transport_factory=transport_factory),
     )
     return sink.directory
 
@@ -231,8 +232,8 @@ def test_cli_automatic_ingest_and_durable_fallback(
     capsys,
     available,
 ):
-    async def simulated_run(config, sink, **kwargs):
-        return await run(config, sink, transport_factory=FakeTransport, **kwargs)
+    async def simulated_run(config, sink, options):
+        return await run(config, sink, replace(options, transport_factory=FakeTransport))
 
     monkeypatch.setattr("proxy_index.cli.run", simulated_run)
     monkeypatch.setenv("PROXY_URL", "http://unused.invalid:8080")
@@ -502,7 +503,7 @@ async def test_dimensions_keep_same_city_and_asn_with_different_details(database
             product="residential",
         ),
         sink,
-        transport_factory=SecondIP,
+        RunOptions(transport_factory=SecondIP),
     )
     enrichment(
         sink.directory,
@@ -605,6 +606,11 @@ def test_typed_columns_keep_json_forms():
             column(kind, value)
     assert column("text", None) is None and column("json", None) is None
     assert _steps([[10, 2], [12, 1], [40, 5]]) == ([10, 2, 28], [2, 1, 5])
+
+
+def test_storage_keeps_psycopg_importable_for_the_overnight_retry():
+    # scripts/shifter_local_overnight.py retries ingest on storage.psycopg.OperationalError.
+    assert storage.psycopg.OperationalError is psycopg.OperationalError
 
 
 def test_bucket_counters_split_into_columns_and_extra():
@@ -732,8 +738,7 @@ async def test_ingest_reconciles_replacements_and_other_country(database, tmp_pa
             answer_classes=AnswerClasses(("429",), ()),
         ),
         sink,
-        transport_factory=Answers,
-        enricher=Countries(),
+        RunOptions(transport_factory=Answers, enricher=Countries()),
     )
     assert summary.requested == 20 and summary.started == 29 and summary.not_started == 0
     assert summary.rate_limited == {"429": 9} and summary.other_country > 0
@@ -777,8 +782,7 @@ async def test_ingest_counts_replacements_before_any_database_access(tmp_path):
             answer_classes=AnswerClasses(("429",), ()),
         ),
         sink,
-        transport_factory=Answers,
-        enricher=Countries(),
+        RunOptions(transport_factory=Answers, enricher=Countries()),
     )
     path = sink.directory / "summary.json"
     saved = json.loads(path.read_text())

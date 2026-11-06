@@ -1,40 +1,48 @@
-# The API's Tier 1 (api/), on every ready pull request and every push to main
-# that touches api/, the framework's SQL (src/proxy_index/**/*.sql, the schema
-# the database tests load) or this file, and on owner dispatches: gofmt, go vet and the
-# Go tests, database tests included. The commit-message, identity, secret and
-# privacy checks run for every change in ci.yml's tier1.
+# The API's Tier 1 (api/), on every ready pull request that touches api/, the
+# framework's SQL (src/proxy_index/**/*.sql, the schema the database tests load) or
+# this file, on every merge-queue test, nightly and on owner dispatches: gofmt, go vet
+# and the Go tests, database tests included. main only ever gets what the queue
+# tested, so pushes to main run nothing. GitHub ignores paths: for merge_group, so a
+# queue test compares its merge commit with the queue's base and runs the build and
+# tests only when the entry changes those files. The commit-message, identity, secret
+# and privacy checks run for every change in ci.yml's tier1.
 #
-# One job in three parts, all starting at once, so no dependency level is
-# spent on gating; each part runs on a fresh one-job CI-SelfHosted runner
-# labelled ci-2cpu. `lint`: gofmt, go vet and, on main, go test -race without
-# the database. The two test parts run the Go tests
-# against a throwaway PostgreSQL 17 (the framework CI's pinned build, kept in
-# the server cache) loaded with the framework schema from the same checkout
-# (src/proxy_index): `tests-parts` the slowest test alone, then the
-# cached-answer latency test (TestServeFromDatabase, p99 within 2 ms) alone in
-# its own process, so no other package's tests share the two CPUs while it
-# measures; `tests-rest` every other test. Go, the Go build cache
-# and the module cache live under $CI_CACHE_DIR/<repository name>/, beside
-# tier1's tools (both fill the same PostgreSQL folder, each by an atomic
-# rename); the checkout is cleaned each run. A job-started hook on the servers refuses every
-# job except the owner's pull requests from this repository's own branches,
-# pushes to main and owner dispatches. Draft pull requests run nothing until
-# they are marked ready; a change whose only API files are Markdown outside
-# api/fixtures/ and no framework SQL skips the build and tests.
+# One job on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with
+# all its work in parallel there (CI-SPEED-2): gofmt, go vet and, nightly and on
+# dispatches, go test -race without the database in the background, while the Go tests
+# run every package at once (-p = the CPU count) against a throwaway PostgreSQL 17
+# (the framework CI's pinned build, kept in the server cache) loaded with the
+# framework schema from the same checkout (src/proxy_index). The slowest test runs in
+# its own process beside them, so the rest of its package does not wait for it. When
+# all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
+# within 2 ms) runs alone, so no other test shares the CPUs while it measures. Every go
+# test run writes go test -json; then scripts/ci/timing.py writes the 20 slowest tests
+# and subtests and the test steps' time to the job summary and the api-timing artifact
+# (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
+# (CI-TIME-1). Go, the Go build cache and the module cache live under
+# $CI_CACHE_DIR/<repository name>/, beside tier1's tools (both fill the same
+# PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A job-started hook on the servers refuses
+# every job except the owner's pull requests from this repository's own branches,
+# merge-queue tests, schedules on main and owner dispatches. Draft pull requests run
+# nothing until they are marked ready; a change whose only API files are Markdown
+# outside api/fixtures/ and no framework SQL skips the build and tests.
 name: api
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
-  push:
-    branches: [main]
-    paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    # The race run (not a merge gate).
+    - cron: '30 1 * * *'
   workflow_dispatch:
 
 # Its own group: ci.yml's `ci-` group would cancel tier1 in the same repository.
+# One group per queue entry (its merge commit), never cancelled.
 concurrency:
-  group: api-${{ github.event_name == 'push' && github.sha || github.ref }}
+  group: api-${{ github.event_name == 'merge_group' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -46,21 +54,17 @@ env:
   # The framework CI's PostgreSQL (theseus-rs/postgresql-binaries).
   PG_VERSION: 17.11.1
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
-  # The slowest test, run alone in its own part.
+  # The slowest test, in its own process beside the others.
   SLOW_TEST: ^TestEveryAnswerIsTheSameFromParts$
-  # The latency test, run alone after it in the same part (API-SUM-FIX-1).
+  # The latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
 
 jobs:
   api:
-    name: api (${{ matrix.part }})
+    name: api
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, ci-2cpu]
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [lint, tests-parts, tests-rest]
-    timeout-minutes: 20
+    runs-on: [self-hosted, ci-32cpu]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash
@@ -75,9 +79,9 @@ jobs:
         name: Changed files
         working-directory: .
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
         run: |
-          # A dispatch has no "before": compare with the parent.
+          # A dispatch or schedule has no "before": compare with the parent.
           case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
           files=$(git diff --name-only --no-renames "$BASE...HEAD")
           code=false
@@ -93,6 +97,8 @@ jobs:
             esac
           done <<< "$files"
           [ -n "$files" ] || code=true
+          # The nightly race run tests main whatever its last commit changed.
+          [ "$GITHUB_EVENT_NAME" != schedule ] || code=true
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
       - name: Docs-only change
         if: steps.diff.outputs.code != 'true'
@@ -123,18 +129,8 @@ jobs:
             echo "GOFLAGS=-mod=readonly"
             echo "GOTELEMETRY=off"
           } >> "$GITHUB_ENV"
-      - name: gofmt
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'lint'
-        run: |
-          unformatted=$(gofmt -l .)
-          [ -z "$unformatted" ] || { echo "$unformatted"; exit 1; }
-      - if: steps.diff.outputs.code == 'true' && matrix.part == 'lint'
-        run: go vet ./...
-      - name: go test -race without the database (main only; not a merge gate)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'lint' && github.event_name != 'pull_request'
-        run: go test -count=1 -race ./...
       - name: PostgreSQL 17
-        if: steps.diff.outputs.code == 'true' && matrix.part != 'lint'
+        if: steps.diff.outputs.code == 'true'
         working-directory: .
         run: |
           cache=$CI_CACHE_DIR/${GITHUB_REPOSITORY#*/}
@@ -166,26 +162,94 @@ jobs:
             echo "PG_TEST_ADMIN_FILE=$admin"
             echo "PG_TEST_REQUIRED=1"
           } >> "$GITHUB_ENV"
-      - name: go test, the slowest test (database)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'tests-parts'
+      - name: Checks in the background, tests in parallel (database)
+        id: tests
+        if: steps.diff.outputs.code == 'true'
+        env:
+          # The race run, without the database: nightly and on dispatches, not a merge gate.
+          RACE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
-          log=$RUNNER_TEMP/slow.log
-          if ! go test -count=1 -v -run "$SLOW_TEST" ./internal/server/ > "$log" 2>&1; then tail -n 200 "$log"; exit 1; fi
-          grep -E '^(--- |ok)' "$log"
-          # Never an empty pass: the test ran and passed.
-          grep -qE '^--- PASS: TestEveryAnswerIsTheSameFromParts ' "$log"
+          EV=$RUNNER_TEMP/ev
+          mkdir -p "$EV"
+          echo "EV=$EV" >> "$GITHUB_ENV"
+          # The step's start, for the CI time step below.
+          date +%s > "$EV/step-start"
+          # Each background job writes $EV/<name>.log and $EV/<name>.rc; once all have
+          # finished, every one with a non-zero status prints its log and fails the step.
+          background() {
+            local name=$1
+            shift
+            ( rc=0; "$@" > "$EV/$name.log" 2>&1 || rc=$?; echo "$rc" > "$EV/$name.rc" ) &
+          }
+          gofmt_check() {
+            local unformatted
+            unformatted=$(gofmt -l .) || return 1
+            [ -z "$unformatted" ] || { echo "$unformatted"; return 1; }
+          }
+          # go test -json into $EV/go-<name>.json, for the CI time step (every test and
+          # subtest with its time); prints the tests' output as go test -v text.
+          gotest() {
+            local name=$1 rc=0
+            shift
+            go test -json "$@" > "$EV/go-$name.json" || rc=$?
+            python3 ../scripts/ci/timing.py --go --log "$EV/go-$name.json"
+            return "$rc"
+          }
+          background gofmt gofmt_check
+          background vet go vet ./...
+          if [ "$RACE" = true ]; then
+            background race env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go test -count=1 -race ./...
+          fi
+          background slow gotest slow -count=1 -run "$SLOW_TEST" ./internal/server/
+          background tests gotest tests -count=1 -p "$(nproc)" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
+          wait
+
+          failed=0
+          for rc in "$EV"/*.rc; do
+            name=$(basename "$rc" .rc)
+            [ "$(cat "$rc")" = 0 ] && continue
+            echo "::group::$name failed (exit $(cat "$rc"))"
+            cat "$EV/$name.log"
+            echo "::endgroup::"
+            echo "$name failed"
+            failed=1
+          done
+          grep -E '^(--- FAIL|ok|FAIL)' "$EV/tests.log" || true
+          grep -E '^(--- |ok)' "$EV/slow.log" || true
+          # Never an empty pass: the slowest test ran and passed.
+          grep -qE '^--- PASS: TestEveryAnswerIsTheSameFromParts ' "$EV/slow.log" \
+            || { echo "TestEveryAnswerIsTheSameFromParts did not pass"; failed=1; }
+          exit "$failed"
       - name: go test, the latency test alone (database)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'tests-parts'
+        if: steps.diff.outputs.code == 'true'
         run: |
-          log=$RUNNER_TEMP/latency.log
-          if ! go test -count=1 -v -run "$LATENCY_TEST" ./internal/server/ > "$log" 2>&1; then tail -n 200 "$log"; exit 1; fi
+          log=$EV/latency.log
+          status=0
+          go test -count=1 -json -run "$LATENCY_TEST" ./internal/server/ > "$EV/go-latency.json" 2> "$log" || status=$?
+          python3 ../scripts/ci/timing.py --go --log "$EV/go-latency.json" >> "$log"
+          if [ "$status" -ne 0 ]; then tail -n 200 "$log"; exit 1; fi
           grep -E '^(--- |ok)|p50 .* p99' "$log"
           # Never an empty pass: the test ran, measured and passed.
           grep -qE '^--- PASS: TestServeFromDatabase ' "$log"
           grep -qE 'p50 .* p99' "$log"
-      - name: go test, every other test (database)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'tests-rest'
-        run: go test -count=1 -skip "$SLOW_TEST|$LATENCY_TEST" ./...
+      - name: CI time (slowest Go tests, budgets)
+        # Also after a failed test step: the summary is there for failed runs too. Fails
+        # the job when a test takes 90 s or more or the test steps over 240 s (CI-TIME-1).
+        id: timing
+        if: always() && steps.diff.outputs.code == 'true' && steps.tests.outcome != 'skipped'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python3 ../scripts/ci/timing.py --go --title "CI time: api Go tests"
+          --start "$EV/step-start" --out "$EV/timing.json" "$EV"/go-*.json
+      - name: Keep the CI time record (scripts/ci/timing_history.py --workflow api reads it)
+        if: always() && steps.timing.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-timing
+          path: ${{ runner.temp }}/ev/timing.json
+          retention-days: 90
+          if-no-files-found: ignore
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''
         working-directory: .

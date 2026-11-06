@@ -56,12 +56,12 @@ from .probe import (
     network_problems,
     payload,
     reasons,
-    recover_worker,
     release,
     run_command,
     set_up,
     step_result,
 )
+from .recover import recover_worker
 
 # The country each region's workers ask for, unless `country_by_network` names one.
 REGION_COUNTRY = {
@@ -536,7 +536,7 @@ async def recover(
     cloud: DigitalOcean, folder: Path, *, sleep: ops_api.Sleep = asyncio.sleep
 ) -> dict[str, Any]:
     """`campaign shot --remove <folder>`: remove the workers a stopped shot left, each by its
-    exact name under the shot's hour tag (and recorded id), through `probe.recover_worker`.
+    exact name under the shot's hour tag (and recorded id), through `recover.recover_worker`.
     Writes the outcome back into the record; never touches anything the record does not name."""
     path = folder / "shot-result.json"
     try:

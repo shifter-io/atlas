@@ -15,6 +15,7 @@ import (
 // network has no Coverage answer (404); after the change the load holds no
 // typed row and the answer pages the network's City x ASN rows.
 func TestAV4BuildServesCoverageFromTheCompactLists(t *testing.T) {
+	t.Parallel()
 	smallV4(t)
 }
 

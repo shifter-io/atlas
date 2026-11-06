@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from helpers import FakeTransport
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches, jobs, nodework
+from proxy_index.orchestrator import batches, jobs, nodework, references
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
 from proxy_index.orchestrator.db import Database, put_setting
@@ -271,7 +271,7 @@ async def test_pulse_slots_add_a_load_wave_per_region(database, db, client):
     later = await batches.pulse_plan(db, at + timedelta(hours=1))
     assert later["load"] == 0 and later["created"] in (0, 6)
     with pytest.raises(ValueError, match="two-letter"):
-        batches._countries({"fra1": "Germany"}, "load.reference_defaults")
+        references._countries({"fra1": "Germany"}, "load.reference_defaults")
 
 
 class SlowTransport(FakeTransport):
@@ -346,7 +346,7 @@ async def test_the_reference_is_the_fastest_clean_country_of_the_region(database
         )
     day_start = today.replace(hour=0, minute=0, second=0, microsecond=0)
     async with db.connection() as conn:
-        stats = await batches._reference_latency(conn, day_start, 7)
+        stats = await references._reference_latency(conn, day_start, 7)
     assert stats == {"DE": {"p50": 31, "successes": 3}}
 
 
@@ -914,6 +914,13 @@ def test_archive_limits(tmp_path):
     (tmp_path / "ns").mkdir()
     with pytest.raises(ArchiveError, match="no summary"):
         unpack(tmp_path / "nosummary.tar.gz", tmp_path / "ns", max_bytes=100)
+    link = tarfile.TarInfo("summary.json")
+    link.type, link.linkname = tarfile.SYMTYPE, "../outside"
+    (tmp_path / "link.tar.gz").write_bytes(archive_bytes([(link, None)]))
+    (tmp_path / "ln").mkdir()
+    with pytest.raises(ArchiveError, match="only regular files"):
+        unpack(tmp_path / "link.tar.gz", tmp_path / "ln", max_bytes=100)
+    assert not list((tmp_path / "ln").iterdir())
 
 
 # --- jobs and scheduler ---------------------------------------------------------------------
@@ -993,7 +1000,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
     calls = []
 
     async def fake(argv, limit_s):
-        calls.append(argv[-1])
+        calls.append(argv[-2:])
         return {"snapshot_id": "s1", "as_of": "now"}
 
     # A stand-in for the subprocess (test_manager_orch runs the real one).
@@ -1010,7 +1017,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
         conn.execute("INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',now())")
         conn.execute("UPDATE test_batches SET finished_at=now()+interval '1 second'")
     assert (await calculate(db, database, "m.toml")) == {"skipped": "debounced"}
-    assert calls == ["--publish"]
+    assert calls == [["--publish", "--incremental"]]
 
 
 async def test_detect_job_is_optional(database, monkeypatch):

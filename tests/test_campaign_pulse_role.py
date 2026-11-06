@@ -24,7 +24,7 @@ from campaign_fakes import (
     running,
 )
 
-from proxy_index.campaign import contracts, deploy, do_api
+from proxy_index.campaign import contracts, do_api, teardown
 from proxy_index.campaign.contracts import (
     BUILDER_TAG,
     MANAGER_TAG,
@@ -186,7 +186,7 @@ async def test_teardown_ignores_a_live_pulse_node(tmp_path, monkeypatch):
     fake, _, _ = await owned_world(job)
     node = fake.add(PULSE_NAME, [PULSE_TAG])
     async with running(fake) as cloud:
-        done = await deploy.teardown(
+        done = await teardown.teardown(
             cloud, job.inventory, [clean_report(tmp_path)], shell=Shell(), remove_agent=lambda: True
         )
     assert done["clean"] is True and PULSE_TAG not in done["tag_counts"]

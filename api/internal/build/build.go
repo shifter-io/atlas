@@ -96,22 +96,59 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 	t.Requests24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.Requests24h.F() }))
 	ips := sum(func(p *model.Provider) float64 { return p.Pool.UniqueIps24h.F() })
 	t.UniqueIps24h = Num(ips)
-	countries := map[string]bool{}
-	costs, resCosts, lat, sr := []float64{}, []float64{}, []float64{}, []float64{}
+	s := scanFleet(fleet)
+	distinct := math.Max(1, ips-s.shared)
+	if len(fleet) == 0 {
+		distinct = math.NaN()
+	}
+	t.Countries = Num(len(s.countries))
+	t.MedianLatency = Num(prepareMedian(s.lat))
+	t.MedianSuccessRate = Num(prepareMedian(s.sr))
+	t.CheapestCostPer1kSuccess = Num(jsMin(s.costs))
+	t.DearestCostPer1kSuccess = Num(jsMax(s.costs))
+	t.PriceSpreadX = Num(jsMax(s.costs) / jsMin(s.costs))
+	t.ResidentialSpreadX = Num(jsMax(s.resCosts) / jsMin(s.resCosts))
+	t.Incidents24h = Num(s.incidents)
+	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1024)
+	t.MisclassifiedShare = Num(sum(func(p *model.Provider) float64 {
+		return float64(p.Pool.UniqueIps24h.F() * p.Trust.DatacenterAsnShare.F())
+	}) / ips)
+	t.DistinctIpsAcrossFleet = Num(distinct)
+	t.FleetDuplicationShare = Num(1 - distinct/ips)
+	t.LikelyResellers = Num(s.resellers)
+	if len(fleet) == 0 {
+		t.Requests24h, t.UniqueIps24h, t.Countries, t.Incidents24h, t.LikelyResellers, t.BandwidthGb24h = nan, nan, nan, nan, nan, nan
+	}
+	recordCounts(&t, reviews, runs)
+	return t
+}
+
+// fleetScan is what fleetTotals gathers in one pass over the fleet.
+type fleetScan struct {
+	countries                map[string]bool
+	costs, resCosts, lat, sr []float64
+	// shared is the shared IPs of every overlapping pair, each pair once.
+	shared               float64
+	incidents, resellers int
+}
+
+// scanFleet is the per-provider loop of the prepare-design-demo.mjs totals
+// block.
+func scanFleet(fleet []*entry) fleetScan {
+	s := fleetScan{countries: map[string]bool{}, costs: []float64{}, resCosts: []float64{}, lat: []float64{}, sr: []float64{}}
 	pairs := map[string]float64{}
 	pairOrder := []string{}
-	incidents, resellers := 0, 0
 	for _, e := range fleet {
 		p := e.P
 		for _, g := range p.Geo {
-			countries[g.CountryCode] = true
+			s.countries[g.CountryCode] = true
 		}
-		costs = append(costs, p.Pricing.CostPer1kSuccess.F())
+		s.costs = append(s.costs, p.Pricing.CostPer1kSuccess.F())
 		if p.PrimaryKind == "residential" {
-			resCosts = append(resCosts, p.Pricing.CostPer1kSuccess.F())
+			s.resCosts = append(s.resCosts, p.Pricing.CostPer1kSuccess.F())
 		}
-		lat = append(lat, p.Performance.LatencyP50.F())
-		sr = append(sr, p.Performance.SuccessRate.F())
+		s.lat = append(s.lat, p.Performance.LatencyP50.F())
+		s.sr = append(s.sr, p.Performance.SuccessRate.F())
 		for _, o := range p.Overlap.Overlaps {
 			k := []string{p.Slug, o.Slug}
 			sort.Strings(k)
@@ -123,39 +160,21 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 		}
 		for _, inc := range p.Incidents {
 			if inc.StartedAgoSeconds <= 86400 {
-				incidents++
+				s.incidents++
 			}
 		}
 		if p.Overlap.LikelyUpstream != nil {
-			resellers++
+			s.resellers++
 		}
 	}
-	shared := 0.0
 	for _, k := range pairOrder {
-		shared += pairs[k]
+		s.shared += pairs[k]
 	}
-	distinct := math.Max(1, ips-shared)
-	if len(fleet) == 0 {
-		distinct = math.NaN()
-	}
-	t.Countries = Num(len(countries))
-	t.MedianLatency = Num(prepareMedian(lat))
-	t.MedianSuccessRate = Num(prepareMedian(sr))
-	t.CheapestCostPer1kSuccess = Num(jsMin(costs))
-	t.DearestCostPer1kSuccess = Num(jsMax(costs))
-	t.PriceSpreadX = Num(jsMax(costs) / jsMin(costs))
-	t.ResidentialSpreadX = Num(jsMax(resCosts) / jsMin(resCosts))
-	t.Incidents24h = Num(incidents)
-	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1024)
-	t.MisclassifiedShare = Num(sum(func(p *model.Provider) float64 {
-		return float64(p.Pool.UniqueIps24h.F() * p.Trust.DatacenterAsnShare.F())
-	}) / ips)
-	t.DistinctIpsAcrossFleet = Num(distinct)
-	t.FleetDuplicationShare = Num(1 - distinct/ips)
-	t.LikelyResellers = Num(resellers)
-	if len(fleet) == 0 {
-		t.Requests24h, t.UniqueIps24h, t.Countries, t.Incidents24h, t.LikelyResellers, t.BandwidthGb24h = nan, nan, nan, nan, nan, nan
-	}
+	return s
+}
+
+// recordCounts sets the review and run counts of t.
+func recordCounts(t *model.FleetTotals, reviews []model.UserReview, runs []model.CommunityRun) {
 	published, verified, accepted := 0, 0, 0
 	for _, r := range reviews {
 		if r.Verification != "pending" {
@@ -171,7 +190,6 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 		}
 	}
 	t.Reviews, t.VerifiedReviews, t.CommunityRuns = Num(published), Num(verified), Num(accepted)
-	return t
 }
 
 func jsRound2(x float64) Num { return Num(jsnum.Round(x*100) / 100) }
@@ -234,6 +252,38 @@ func providerForProduct(p *model.Provider, kind string) *model.Provider {
 
 // Build assembles every response from one consistent read.
 func Build(in *store.Inputs) (*Result, error) {
+	b, err := newBuilder(in)
+	if err != nil {
+		return nil, err
+	}
+	steps := []func() error{b.catalog, b.providers, b.siteRecords, b.tape, b.measured, b.naManifests, b.recordCoverage, b.datasetNA}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return nil, err
+		}
+	}
+	b.details()
+	b.assemble()
+	return b.res, nil
+}
+
+// builder is the state one Build shares between its steps, in step order.
+type builder struct {
+	in              *store.Inputs
+	res             *Result
+	s               *snap.Snapshot
+	ds              *model.Dataset
+	generated       time.Time
+	entries         []*entry
+	names           map[string]string
+	slugOfFramework map[string]string
+	stats           map[string]map[string]*WindowStats
+	records         map[string]CoverageRecords
+	leader          []*model.Provider
+}
+
+// newBuilder reads the published snapshot and fills the dataset's header.
+func newBuilder(in *store.Inputs) (*builder, error) {
 	res := &Result{Fingerprint: in.Fingerprint, BuiltAt: time.Now().UTC(), Details: map[string]*ProviderDetail{}, SiteGaps: in.SiteGaps}
 	var s *snap.Snapshot
 	if in.Snapshot != nil {
@@ -257,13 +307,64 @@ func Build(in *store.Inputs) (*Result, error) {
 	} else {
 		ds.Snapshot = model.SnapshotMeta{SchemaVersion: nan, RefreshSeconds: nan}
 	}
-	ageOf := func(at time.Time) Num {
-		return Num(math.Max(0, jsnum.Round(generated.Sub(at).Seconds())))
-	}
+	return &builder{in: in, res: res, s: s, ds: ds, generated: generated}, nil
+}
 
-	// Targets by sort_order (a framework target's own, else the catalog row's):
-	// catalog rows first on a tie, in their order, then framework targets
-	// without one. Group and sources come from the snapshot (browser.go).
+func (b *builder) ageOf(at time.Time) Num {
+	return Num(math.Max(0, jsnum.Round(b.generated.Sub(at).Seconds())))
+}
+
+func (b *builder) nameOrSlug(slug string) string {
+	if n, ok := b.names[slug]; ok {
+		return n
+	}
+	return slug
+}
+
+// catalog fills the targets, scopes, weights and ranking profiles.
+func (b *builder) catalog() error {
+	in, ds, s := b.in, b.ds, b.s
+	b.targets()
+	ds.Scopes = []model.TestScope{}
+	for _, r := range in.Scopes {
+		var targets any = "all"
+		if !r.AllTargets {
+			targets = append([]string{}, r.TargetIDs...)
+		}
+		ds.Scopes = append(ds.Scopes, model.TestScope{ID: r.Kind, Label: r.Label, Summary: r.Summary, Cadence: r.Cadence, Targets: targets,
+			LiveIPSampling: r.LiveIPSampling, PoolTracking: r.PoolTracking, OverlapAudit: r.OverlapAudit, StickinessTest: r.Stickiness,
+			GeoCoverage: r.GeoCoverage, Rationale: r.Rationale})
+	}
+	ds.Weights = model.NewBreakdown()
+	for _, w := range in.Weights {
+		ds.Weights.Set(w.Component, Num(w.Weight))
+	}
+	if s != nil && len(s.Methodology.Settings.Weights) > 0 {
+		// The published calculation's weights are the ones its scores used.
+		ds.Weights = model.NewBreakdown()
+		for k, v := range s.Methodology.Settings.Weights {
+			ds.Weights.Set(k, Num(v))
+		}
+	}
+	ds.Profiles = []model.RankingProfile{}
+	for _, r := range in.Profiles {
+		p := model.RankingProfile{ID: r.ID, Label: r.Label, Description: r.Description, Weights: model.NewBreakdown()}
+		if len(r.Weights) > 0 {
+			if err := json.Unmarshal(r.Weights, &p.Weights); err != nil {
+				return fmt.Errorf("profile %s weights: %w", r.ID, err)
+			}
+		}
+		ds.Profiles = append(ds.Profiles, p)
+	}
+	return nil
+}
+
+// targets orders the targets by sort_order (a framework target's own, else
+// the catalog row's): catalog rows first on a tie, in their order, then
+// framework targets without one. Group and sources come from the snapshot
+// (browser.go).
+func (b *builder) targets() {
+	in, ds := b.in, b.ds
 	frameworkTarget := map[string]store.FrameworkTarget{}
 	for _, t := range in.FrameworkTargets {
 		frameworkTarget[t.ID] = t
@@ -295,44 +396,15 @@ func Build(in *store.Inputs) (*Result, error) {
 		}
 	}
 	sort.SliceStable(ds.Targets, func(i, j int) bool { return order[ds.Targets[i].ID] < order[ds.Targets[j].ID] })
-	addTargetGroups(ds.Targets, s)
-	ds.Scopes = []model.TestScope{}
-	for _, r := range in.Scopes {
-		var targets any = "all"
-		if !r.AllTargets {
-			targets = append([]string{}, r.TargetIDs...)
-		}
-		ds.Scopes = append(ds.Scopes, model.TestScope{ID: r.Kind, Label: r.Label, Summary: r.Summary, Cadence: r.Cadence, Targets: targets,
-			LiveIPSampling: r.LiveIPSampling, PoolTracking: r.PoolTracking, OverlapAudit: r.OverlapAudit, StickinessTest: r.Stickiness,
-			GeoCoverage: r.GeoCoverage, Rationale: r.Rationale})
-	}
-	ds.Weights = model.NewBreakdown()
-	for _, w := range in.Weights {
-		ds.Weights.Set(w.Component, Num(w.Weight))
-	}
-	if s != nil && len(s.Methodology.Settings.Weights) > 0 {
-		// The published calculation's weights are the ones its scores used.
-		ds.Weights = model.NewBreakdown()
-		for k, v := range s.Methodology.Settings.Weights {
-			ds.Weights.Set(k, Num(v))
-		}
-	}
-	ds.Profiles = []model.RankingProfile{}
-	for _, r := range in.Profiles {
-		p := model.RankingProfile{ID: r.ID, Label: r.Label, Description: r.Description, Weights: model.NewBreakdown()}
-		if len(r.Weights) > 0 {
-			if err := json.Unmarshal(r.Weights, &p.Weights); err != nil {
-				return nil, fmt.Errorf("profile %s weights: %w", r.ID, err)
-			}
-		}
-		ds.Profiles = append(ds.Profiles, p)
-	}
+	addTargetGroups(ds.Targets, b.s)
+}
 
-	// Providers.
-	c := newCatalog(in)
-	entries, err := realProviders(in, s, c, ds.Targets)
+// providers reads the providers, ranks them and indexes their names.
+func (b *builder) providers() error {
+	c := newCatalog(b.in)
+	entries, err := realProviders(b.in, b.s, c, b.ds.Targets)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	addCountryLatencyRanks(entries)
 	addRanks(entries)
@@ -344,37 +416,26 @@ func Build(in *store.Inputs) (*Result, error) {
 			slugOfFramework[e.P.Framework.Provider] = e.P.Slug
 		}
 	}
-	nameOrSlug := func(slug string) string {
-		if n, ok := names[slug]; ok {
-			return n
-		}
-		return slug
-	}
+	b.entries, b.names, b.slugOfFramework = entries, names, slugOfFramework
+	return nil
+}
 
-	// Records.
+// siteRecords fills the reviews, community runs and changelog, newest first.
+func (b *builder) siteRecords() error {
+	in, ds := b.in, b.ds
 	ds.Reviews = []model.UserReview{}
 	for _, r := range in.Reviews {
 		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
 			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
 			Verification: r.Verification, InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
-			ProviderReply: r.ProviderReply, AgoSeconds: ageOf(r.PostedAt), Source: model.SourceMeasured})
+			ProviderReply: r.ProviderReply, AgoSeconds: b.ageOf(r.PostedAt), Source: model.SourceMeasured})
 	}
 	sortByAge(ds.Reviews, func(r model.UserReview) Num { return r.AgoSeconds })
 	ds.CommunityRuns = []model.CommunityRun{}
 	for _, r := range in.CommunityRuns {
-		run := model.CommunityRun{ID: r.ID, ProviderSlug: r.ProviderSlug, ProviderName: nameOrSlug(r.ProviderSlug), SubmittedBy: r.SubmittedBy,
-			Region: r.Region, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
-			RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
-			UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), DeltaSuccessPts: ptrNum(r.DeltaSuccessPts),
-			DeltaLatencyPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: ageOf(r.SubmittedAt), Source: model.SourceMeasured}
-		if run.Targets, err = decodeRaw[model.TargetBenchmark](r.Targets, "community run "+r.ID+" targets"); err != nil {
-			return nil, err
-		}
-		if run.SuccessSeries, err = decodeRaw[model.SeriesPoint](r.SuccessSeries, "community run "+r.ID+" success_series"); err != nil {
-			return nil, err
-		}
-		if run.LatencySeries, err = decodeRaw[model.LatencyPoint](r.LatencySeries, "community run "+r.ID+" latency_series"); err != nil {
-			return nil, err
+		run, err := b.communityRun(r)
+		if err != nil {
+			return err
 		}
 		ds.CommunityRuns = append(ds.CommunityRuns, run)
 	}
@@ -382,54 +443,83 @@ func Build(in *store.Inputs) (*Result, error) {
 	ds.Changelog = []model.ChangeEvent{}
 	for _, r := range in.Changelog {
 		ch := model.ChangeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, Headline: r.Headline, Detail: r.Detail,
-			Delta: ptrNum(r.Delta), Unit: r.Unit, AgoSeconds: ageOf(r.OccurredAt), Severity: r.Severity, Source: model.SourceMeasured}
+			Delta: ptrNum(r.Delta), Unit: r.Unit, AgoSeconds: b.ageOf(r.OccurredAt), Severity: r.Severity, Source: model.SourceMeasured}
 		if r.ProviderSlug != nil {
-			ch.ProviderName = model.S(nameOrSlug(*r.ProviderSlug))
+			ch.ProviderName = model.S(b.nameOrSlug(*r.ProviderSlug))
 		}
 		ds.Changelog = append(ds.Changelog, ch)
 	}
 	sortByAge(ds.Changelog, func(r model.ChangeEvent) Num { return r.AgoSeconds })
+	return nil
+}
 
-	// Tape: measured events first (newest first), then the editorial rows.
+func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, error) {
+	run := model.CommunityRun{ID: r.ID, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug), SubmittedBy: r.SubmittedBy,
+		Region: r.Region, Product: r.ProductKind, PlanTier: r.PlanTier, CollectorVersion: r.CollectorVersion, Status: r.Status,
+		RejectionReason: r.RejectionReason, Requests: ptrNum(r.Requests), SuccessRate: ptrNum(r.SuccessRate), LatencyP50: ptrNum(r.LatencyP50),
+		UniqueIps: ptrNum(r.UniqueIps), OverlapShare: ptrNum(r.OverlapShare), DeltaSuccessPts: ptrNum(r.DeltaSuccessPts),
+		DeltaLatencyPct: ptrNum(r.DeltaLatencyPct), AgoSeconds: b.ageOf(r.SubmittedAt), Source: model.SourceMeasured}
+	var err error
+	if run.Targets, err = decodeRaw[model.TargetBenchmark](r.Targets, "community run "+r.ID+" targets"); err != nil {
+		return run, err
+	}
+	if run.SuccessSeries, err = decodeRaw[model.SeriesPoint](r.SuccessSeries, "community run "+r.ID+" success_series"); err != nil {
+		return run, err
+	}
+	if run.LatencySeries, err = decodeRaw[model.LatencyPoint](r.LatencySeries, "community run "+r.ID+" latency_series"); err != nil {
+		return run, err
+	}
+	return run, nil
+}
+
+// tape fills the tape: measured events first (newest first), then the
+// editorial rows.
+func (b *builder) tape() error {
+	in, ds, s := b.in, b.ds, b.s
 	products := []TapeProduct{}
 	if s != nil {
 		for _, p := range s.Products {
 			// The site's display name (catalog) wins over the snapshot's.
 			name := p.Name
-			if n, ok := names[slugOfFramework[p.Provider]]; ok {
+			if n, ok := b.names[b.slugOfFramework[p.Provider]]; ok {
 				name = n
 			}
 			products = append(products, TapeProduct{Provider: p.Provider, Name: name, Kind: p.Kind})
 		}
 	}
 	for _, fp := range in.FrameworkProducts {
-		products = append(products, TapeProduct{Provider: fp.Provider, Name: nameOrSlug(slugOfFramework[fp.Provider]), Kind: fp.Name})
+		products = append(products, TapeProduct{Provider: fp.Provider, Name: b.nameOrSlug(b.slugOfFramework[fp.Provider]), Kind: fp.Name})
 	}
-	res.Events = newEventWindow(in)
-	tapeEvents := res.Events.measuredTape()
+	b.res.Events = newEventWindow(in)
+	tapeEvents := b.res.Events.measuredTape()
 	tapeRef := ds.GeneratedAt
 	if s != nil {
 		tapeRef = s.GeneratedAt
 	}
 	sorted := append([]store.EventJSON{}, tapeEvents...)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		a, b := snap.Ms(sorted[i].At), snap.Ms(sorted[j].At)
-		if a != b {
-			return a > b
+		x, y := snap.Ms(sorted[i].At), snap.Ms(sorted[j].At)
+		if x != y {
+			return x > y
 		}
 		return sorted[i].ID > sorted[j].ID
 	})
-	ds.Tape = TapeFromEvents(sorted, products, tapeRef, slugOfFramework)
+	ds.Tape = TapeFromEvents(sorted, products, tapeRef, b.slugOfFramework)
 	editorial := []model.TapeEvent{}
 	for _, r := range in.Tape {
-		editorial = append(editorial, model.TapeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, ProviderName: nameOrSlug(r.ProviderSlug),
+		editorial = append(editorial, model.TapeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug),
 			Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal), Value: r.Value,
-			AgoSeconds: ageOf(r.OccurredAt), Source: model.SourceMeasured})
+			AgoSeconds: b.ageOf(r.OccurredAt), Source: model.SourceMeasured})
 	}
 	sortByAge(editorial, func(r model.TapeEvent) Num { return r.AgoSeconds })
 	ds.Tape = append(ds.Tape, editorial...)
+	return nil
+}
 
-	// Review summaries, then the provider list.
+// measured fills the review summaries, the provider list, the totals, the
+// window statistics of every provider (headline) and the measured market.
+func (b *builder) measured() error {
+	ds, entries := b.ds, b.entries
 	for _, e := range entries {
 		e.P.Reviews = reviewSummary(e.P.Slug, ds.Reviews)
 	}
@@ -439,164 +529,16 @@ func Build(in *store.Inputs) (*Result, error) {
 	}
 	ds.Totals = fleetTotals(entries, entries, ds.Reviews, ds.CommunityRuns)
 	ds.MeasuredTotals = fleetTotals(entries, entries, nil, nil)
-
-	// Window statistics for every provider (headline) and every category.
-	stats := map[string]map[string]*WindowStats{}
+	b.stats = map[string]map[string]*WindowStats{}
 	for _, e := range entries {
-		stats[e.P.Slug] = map[string]*WindowStats{}
+		b.stats[e.P.Slug] = map[string]*WindowStats{}
 		for _, r := range Ranges {
-			stats[e.P.Slug][r.ID] = windowStats(e.P, e.Snap[e.P.PrimaryKind], r.ID)
+			b.stats[e.P.Slug][r.ID] = windowStats(e.P, e.Snap[e.P.PrimaryKind], r.ID)
 		}
 	}
-
-	ds.MeasuredMarket, err = measuredMarket(entries, stats, ds.MeasuredTotals, ds.Targets)
-	if err != nil {
-		return nil, err
-	}
-
-	// N/A manifests.
-	for _, e := range entries {
-		declared := append([]string{}, e.Declared...)
-		declared = append(declared, "overlap.likelyUpstream")
-		for _, k := range e.P.ProductMeasurements.Keys {
-			declared = append(declared, "productMeasurements."+k+".overlap.likelyUpstream")
-		}
-		e.P.NA, err = naOf(e.P, declared, true, "framework")
-		if err != nil {
-			return nil, err
-		}
-		e.P.NA = withoutPublishedEmpties(e)
-	}
-	// After the N/A manifests: a coverage row's nulls are the row's own
-	// unknown fields, not gaps of the provider (FIELDS.md).
-	addCoverageEvidence(entries, in.Snapshot)
-	for i := range ds.Targets {
-		if ds.Targets[i].NA, err = naOf(ds.Targets[i], nil, false); err != nil {
-			return nil, err
-		}
-	}
-	for i := range ds.Scopes {
-		if ds.Scopes[i].NA, err = naOf(ds.Scopes[i], nil, false); err != nil {
-			return nil, err
-		}
-	}
-	for i := range ds.Profiles {
-		if ds.Profiles[i].NA, err = naOf(ds.Profiles[i], nil, false); err != nil {
-			return nil, err
-		}
-	}
-	records := map[string]CoverageRecords{}
-	countRecords := func(name string, na []string) {
-		r := records[name]
-		if r.Fields == nil {
-			r.Fields = map[string]int{}
-		}
-		r.Count++
-		r.NACount += len(na)
-		for _, p := range na {
-			r.Fields[pattern(p)]++
-		}
-		records[name] = r
-	}
-	for i := range ds.Reviews {
-		if ds.Reviews[i].NA, err = naOf(ds.Reviews[i], nil, false); err != nil {
-			return nil, err
-		}
-		countRecords("reviews", ds.Reviews[i].NA)
-	}
-	for i := range ds.CommunityRuns {
-		if ds.CommunityRuns[i].NA, err = naOf(ds.CommunityRuns[i], nil, false); err != nil {
-			return nil, err
-		}
-		countRecords("communityRuns", ds.CommunityRuns[i].NA)
-	}
-	for i := range ds.Changelog {
-		if ds.Changelog[i].NA, err = naOf(ds.Changelog[i], nil, false); err != nil {
-			return nil, err
-		}
-		countRecords("changelog", ds.Changelog[i].NA)
-	}
-	for i := range ds.Tape {
-		if ds.Tape[i].NA, err = naOf(ds.Tape[i], nil, false); err != nil {
-			return nil, err
-		}
-		countRecords("tape", ds.Tape[i].NA)
-	}
-	for _, name := range []string{"reviews", "communityRuns", "changelog", "tape"} {
-		if _, ok := records[name]; !ok {
-			records[name] = CoverageRecords{Fields: map[string]int{}}
-		}
-	}
-	meta := struct {
-		SchemaVersion    string               `json:"schemaVersion"`
-		GeneratedAt      string               `json:"generatedAt"`
-		Seed             Num                  `json:"seed"`
-		RunID            model.Str            `json:"runId"`
-		CollectorVersion model.Str            `json:"collectorVersion"`
-		WindowHours      Num                  `json:"windowHours"`
-		Weights          model.Breakdown      `json:"weights"`
-		Totals           model.FleetTotals    `json:"totals"`
-		MeasuredTotals   model.FleetTotals    `json:"measuredTotals"`
-		MeasuredMarket   model.MeasuredMarket `json:"measuredMarket"`
-		Snapshot         model.SnapshotMeta   `json:"snapshot"`
-	}{ds.SchemaVersion, ds.GeneratedAt, ds.Seed, ds.RunID, ds.CollectorVersion, ds.WindowHours, ds.Weights, ds.Totals, ds.MeasuredTotals, ds.MeasuredMarket, ds.Snapshot}
-	// The dataset has no seed by design (only the removed demo fixtures had one).
-	meta.Seed = 0
-	if ds.NA, err = naOf(meta, []string{}, false); err != nil {
-		return nil, err
-	}
-	res.Dataset = ds
-
-	// Leaderboard: score rank, unranked last (stable).
-	leader := append([]*model.Provider{}, ds.Providers...)
-	sort.SliceStable(leader, func(i, j int) bool {
-		a, b := leader[i].Score.Rank, leader[j].Score.Rank
-		if a.OK() != b.OK() {
-			return a.OK()
-		}
-		return a-b < 0
-	})
-
-	for _, e := range entries {
-		p := e.P
-		d := &ProviderDetail{Provider: p, Windows: map[string]map[string]*WindowStats{}, Reviews: []model.UserReview{},
-			CommunityRuns: []model.CommunityRun{}, Changelog: []model.ChangeEvent{}, Tape: []model.TapeEvent{}, GeneratedAt: ds.GeneratedAt}
-		for _, k := range p.ProductMeasurements.Keys {
-			view := providerForProduct(p, k)
-			d.Windows[k] = map[string]*WindowStats{}
-			for _, r := range Ranges {
-				d.Windows[k][r.ID] = windowStats(view, e.Snap[k], r.ID)
-			}
-		}
-		for _, r := range ds.Reviews {
-			if r.ProviderSlug == p.Slug && r.Verification != "pending" {
-				d.Reviews = append(d.Reviews, r)
-			}
-		}
-		for _, r := range ds.CommunityRuns {
-			if r.ProviderSlug == p.Slug {
-				d.CommunityRuns = append(d.CommunityRuns, r)
-			}
-		}
-		for _, r := range ds.Changelog {
-			if r.ProviderSlug != nil && *r.ProviderSlug == p.Slug {
-				d.Changelog = append(d.Changelog, r)
-			}
-		}
-		for _, r := range ds.Tape {
-			if r.ProviderSlug == p.Slug {
-				d.Tape = append(d.Tape, r)
-			}
-		}
-		res.Details[p.Slug] = d
-	}
-	res.Pages = buildPages(ds.GeneratedAt, entries, stats, res.Details, s, in.Snapshot)
-	res.Pages.Published = publishedProducts(s, entries, in.Providers)
-	ds.Pages = datasetPages(res.Pages)
-	ds.Lists = datasetLists(res.Pages, s, entries, in.Snapshot)
-	res.Search = buildSearchIndex(leader, ds.Targets, ds.GeneratedAt)
-	res.Coverage = coverage(ds, res.BuiltAt, records)
-	return res, nil
+	var err error
+	ds.MeasuredMarket, err = measuredMarket(entries, b.stats, ds.MeasuredTotals, ds.Targets)
+	return err
 }
 
 // sortByAge orders records newest first (data.ts sorts by agoSeconds ascending), stably.

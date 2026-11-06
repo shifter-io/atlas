@@ -105,6 +105,23 @@ def load_inventory(path: Path) -> dict:
     return data["servers"]
 
 
+def _health(state: dict, service: dict, age: float, lagging: bool, elapsed: float) -> str:
+    """A node's lifecycle, unless an unfinished one has a dead service, an old heartbeat, an
+    unfinished earlier round or a probe running past an hour."""
+    lifecycle = state["status"]
+    if lifecycle in ("completed", "closed", "cancelled", "stopped", "failed"):
+        return lifecycle
+    if service and service.get("ActiveState") not in ("active", "activating"):
+        return "failed"
+    if age > 20:
+        return "stale"
+    if lagging:
+        return "behind"
+    if state.get("kind") == "probe" and elapsed > 3600:
+        return "over_hour"
+    return lifecycle
+
+
 def classify(data: dict, now: float) -> dict:
     if data.get("error"):
         return data | {"health": "unreachable"}
@@ -139,20 +156,8 @@ def classify(data: dict, now: float) -> dict:
         jobs
         and any(j["status"] in ("pending", "running") and j["round"] < eligible_round for j in jobs)
     )
-    health = lifecycle
-    terminal = lifecycle in ("completed", "closed", "cancelled", "stopped", "failed")
-    service = data.get("service", {})
-    if not terminal:
-        if service and service.get("ActiveState") not in ("active", "activating"):
-            health = "failed"
-        elif age > 20:
-            health = "stale"
-        elif lagging:
-            health = "behind"
-        elif state.get("kind") == "probe" and elapsed > 3600:
-            health = "over_hour"
     data.update(
-        health=health,
+        health=_health(state, data.get("service", {}), age, lagging, elapsed),
         heartbeat_age_seconds=round(age, 1),
         elapsed_seconds=round(elapsed, 2),
         behind=lagging,
@@ -219,40 +224,40 @@ async def inspect(region: str, server: dict) -> dict:
         return {"region": region, "error": "SSH inspection timed out or returned invalid data"}
 
 
-def render(snapshot: dict) -> bytes:
-    def esc(value):
-        return html.escape(str(value))
+def esc(value) -> str:
+    return html.escape(str(value))
 
-    cards = []
-    for node in snapshot["servers"]:
-        state = node.get("state") or {}
-        active = state.get("active") or {}
-        config = state.get("settings") or {}
-        health = node["health"]
-        warning = health in ("unreachable", "failed", "stale", "behind", "over_hour")
-        tone = (
-            "warning"
-            if warning
-            else "healthy"
-            if health in ("running", "armed", "completed")
-            else "muted"
-        )
-        elapsed = node.get("elapsed_seconds")
-        duration = f"{elapsed / 60:.1f} min" if elapsed is not None else "—"
-        rate = node.get("requests_per_second")
-        speed = f"{rate:,.1f}/s" if rate is not None else "—"
 
-        def number(key, node=node):
-            value = node.get(key)
-            return f"{value:,}" if isinstance(value, (int, float)) else "—"
+def _card(node: dict) -> str:
+    """One server's status card on the fleet page."""
+    state = node.get("state") or {}
+    active = state.get("active") or {}
+    config = state.get("settings") or {}
+    health = node["health"]
+    warning = health in ("unreachable", "failed", "stale", "behind", "over_hour")
+    tone = (
+        "warning"
+        if warning
+        else "healthy"
+        if health in ("running", "armed", "completed")
+        else "muted"
+    )
+    elapsed = node.get("elapsed_seconds")
+    duration = f"{elapsed / 60:.1f} min" if elapsed is not None else "—"
+    rate = node.get("requests_per_second")
+    speed = f"{rate:,.1f}/s" if rate is not None else "—"
 
-        cores = " · ".join(f"{esc(k)} {v}%" for k, v in node.get("core_cpu_pct", {}).items())
-        processes = "<br>".join(
-            f"{esc(p['role'])} PID {p['pid']}: {p.get('cpu_pct', '—')}% CPU, {p['rss_mb']} MiB"
-            for p in node.get("processes", [])
-        )
+    def number(key):
+        value = node.get(key)
+        return f"{value:,}" if isinstance(value, (int, float)) else "—"
 
-        cards.append(f'''<article class="node"><header><b>{esc(node["region"])}</b>
+    cores = " · ".join(f"{esc(k)} {v}%" for k, v in node.get("core_cpu_pct", {}).items())
+    processes = "<br>".join(
+        f"{esc(p['role'])} PID {p['pid']}: {p.get('cpu_pct', '—')}% CPU, {p['rss_mb']} MiB"
+        for p in node.get("processes", [])
+    )
+
+    return f'''<article class="node"><header><b>{esc(node["region"])}</b>
 <span class="{tone}">{esc(health.replace("_", " "))}</span></header>
 <p>{esc(node.get("country") or "No active country")} · {esc(duration)} · {esc(speed)}</p>
 <div class="metrics"><div><b>{number("requests")}</b><small>Requests</small></div>
@@ -267,7 +272,11 @@ Host RAM {esc(node.get("memory_used_pct", "—"))}% · Run total {esc(node.get("
 Free disk {esc(node.get("disk_free_gb", "—"))} GB · CPUs {esc(node.get("cpu_count", "—"))}<br>
 {cores}<br>{processes}<br>
 Scheduled {esc(state.get("scheduled_at") or "—")}<br>
-Service {esc((node.get("service") or {}).get("SubState", "—"))}</p></details></article>''')
+Service {esc((node.get("service") or {}).get("SubState", "—"))}</p></details></article>'''
+
+
+def render(snapshot: dict) -> bytes:
+    cards = [_card(node) for node in snapshot["servers"]]
     warnings = "".join(
         f"<li>{esc(n['region'])}: {esc(n.get('error') or n['health'])}</li>"
         for n in snapshot["servers"]

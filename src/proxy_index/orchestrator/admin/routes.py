@@ -1,7 +1,8 @@
 """Admin JSON API under /admin/api, for the Astro operator UI (src/pages/admin).
 
 Data and actions only: no templates and no formatting. Every reader is a thin wrapper over
-`views`, which owns every query, so the UI cannot see a shape the tests do not.
+`views` and every action over `writers` (or `views.set_scheduler`), which own every query, so
+the UI cannot see a shape the tests do not.
 
 Authentication is HTTP Basic against ADMIN_USER / ADMIN_PASSWORD (the Astro server sends the
 same pair). With no password the admin answers only over loopback, and only in --dev;
@@ -31,7 +32,7 @@ from aiohttp import web
 
 from ... import __version__
 from ..api import DB_KEY
-from . import views
+from . import views, writers
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -260,8 +261,8 @@ async def _stop(request: web.Request, status: str) -> web.Response:
     await _body(request)
     batch_id = _id(request, "batch_id")
     try:
-        result = await views.stop_batch(request.app[DB_KEY], batch_id, status)
-    except views.Conflict as exc:
+        result = await writers.stop_batch(request.app[DB_KEY], batch_id, status)
+    except writers.Conflict as exc:
         raise _error(web.HTTPConflict, str(exc)) from None
     if result is None:
         raise _error(web.HTTPNotFound, f"no batch {batch_id}")
@@ -282,7 +283,7 @@ async def acknowledge_alert(request: web.Request) -> web.Response:
     await _body(request)
     alert_id = _id(request, "alert_id")
     async with request.app[DB_KEY].connection() as conn:
-        fresh = await views.acknowledge(conn, alert_id)
+        fresh = await writers.acknowledge(conn, alert_id)
     if fresh is None:
         raise _error(web.HTTPNotFound, f"no alert {alert_id}")
     return _json({"alert_id": alert_id, "acknowledged": True, "already": not fresh})
@@ -320,7 +321,7 @@ async def set_country(request: web.Request) -> web.Response:
     if census_time is None and enabled is None:
         raise _error(web.HTTPBadRequest, "send census_time and/or enabled")
     async with request.app[DB_KEY].connection() as conn:
-        row = await views.set_country(conn, cc, census_time=census_time, enabled=enabled)
+        row = await writers.set_country(conn, cc, census_time=census_time, enabled=enabled)
     if row is None:
         raise _error(web.HTTPNotFound, f"no country {cc}")
     return _json(row)
@@ -332,17 +333,17 @@ async def set_target(request: web.Request) -> web.Response:
     if not isinstance(target_id, str) or not target_id:
         raise _error(web.HTTPBadRequest, "missing 'target_id'")
     fields = {key: value for key, value in body.items() if key != "target_id"}
-    unknown = set(fields) - set(views.TARGET_FIELDS)
+    unknown = set(fields) - set(writers.TARGET_FIELDS)
     if unknown:
         raise _error(web.HTTPBadRequest, f"unknown fields: {', '.join(sorted(unknown))}")
     if not fields:
         raise _error(web.HTTPBadRequest, "send at least one field to change")
     values: dict[str, Any] = {}
     for key, value in fields.items():
-        bounds = views.TARGET_FIELDS[key]
+        bounds = writers.TARGET_FIELDS[key]
         values[key] = _bool(value, key) if bounds is None else _int(value, key, *bounds)
     async with request.app[DB_KEY].connection() as conn:
-        row = await views.set_target(conn, target_id, values)
+        row = await writers.set_target(conn, target_id, values)
     if row is None:
         raise _error(web.HTTPNotFound, f"no target {target_id!r}")
     return _json(row)

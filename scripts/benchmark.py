@@ -12,7 +12,7 @@ import resource
 import time
 from pathlib import Path
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.models import Outcome
 
 
@@ -54,7 +54,7 @@ async def benchmark(requests, concurrency, output):
     transport = SyntheticTransport(config)
     sink = JsonSink(output)
     start = time.perf_counter()
-    summary = await run(config, sink, transport_factory=lambda _: transport)
+    summary = await run(config, sink, RunOptions(transport_factory=lambda _: transport))
     elapsed = time.perf_counter() - start
     with gzip.open(sink.directory / "ips.jsonl.gz", "rt") as stream:
         rows = 0

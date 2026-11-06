@@ -107,6 +107,60 @@ sequential country testing and file finalization. The initial target is 30–40 
 <tbody>{"".join(rows)}</tbody></table></div></html>""".encode()
 
 
+def _copy_chunks(folder: Path, job: dict, end: str, destination, result: dict) -> tuple[int, set]:
+    """Verify each committed chunk of one country run and append it to the export."""
+    count = 0
+    verified = set()
+    for meta_path in sorted(folder.glob("observations-*.jsonl.meta.json")):
+        metadata = read_json(meta_path)
+        filename = metadata["file"]
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            raise ValueError("Invalid chunk filename")
+        chunk = folder / filename
+        if chunk.with_suffix(".meta.json") != meta_path:
+            raise ValueError("Chunk filename does not match its sidecar")
+        count += verify_chunk(chunk, metadata, job, end)
+        with chunk.open("rb") as source:
+            shutil.copyfileobj(source, destination, length=1024 * 1024)
+        verified.add(filename)
+        result["chunks"] += 1
+    return count, verified
+
+
+def _export_region(manifest: dict, root: Path, region: str, destination, result: dict) -> None:
+    directory = root / "regions" / region
+    if not (directory / "state.json").exists():
+        result["issues"].append(f"{region}: missing regional checkpoint")
+        return
+    state = read_json(directory / "state.json")
+    validate_state(state, manifest, region)
+    regional = status(state)
+    result["regions"].append(regional)
+    if regional["unfinished_countries"]:
+        result["issues"].append(
+            f"{region}: {regional['unfinished_countries']} unfinished country runs"
+        )
+    end = regional_window(manifest, region)["ends_at"]
+    for job in state["jobs"]:
+        folder = job_directory(directory, job)
+        count, verified = _copy_chunks(folder, job, end, destination, result)
+        result["rows"] += count
+        if job["status"] == "completed" and count != job.get("observations"):
+            raise ValueError("Country observation count does not reconcile")
+        leftovers = [
+            p.name
+            for p in folder.glob("observations-*")
+            if p.name.endswith(".partial") or (p.name.endswith(".gz") and p.name not in verified)
+        ]
+        if leftovers:
+            result["issues"].append(
+                f"{region} round {job['round']} {job['country']}: "
+                f"{len(leftovers)} uncommitted chunk files excluded"
+            )
+    if state["status"] not in ("closed", "completed"):
+        result["issues"].append(f"{region}: regional state is {state['status']}")
+
+
 def export_campaign(manifest_path: Path) -> dict:
     manifest = load(manifest_path)
     root = manifest_path.parent
@@ -133,53 +187,7 @@ def export_campaign(manifest_path: Path) -> dict:
         try:
             with os.fdopen(fd, "wb") as destination:
                 for region in manifest["regions"]:
-                    directory = root / "regions" / region
-                    if not (directory / "state.json").exists():
-                        result["issues"].append(f"{region}: missing regional checkpoint")
-                        continue
-                    state = read_json(directory / "state.json")
-                    validate_state(state, manifest, region)
-                    regional = status(state)
-                    result["regions"].append(regional)
-                    if regional["unfinished_countries"]:
-                        result["issues"].append(
-                            f"{region}: {regional['unfinished_countries']} unfinished country runs"
-                        )
-                    for job in state["jobs"]:
-                        folder = job_directory(directory, job)
-                        count = 0
-                        verified = set()
-                        for meta_path in sorted(folder.glob("observations-*.jsonl.meta.json")):
-                            metadata = read_json(meta_path)
-                            filename = metadata["file"]
-                            if not isinstance(filename, str) or Path(filename).name != filename:
-                                raise ValueError("Invalid chunk filename")
-                            chunk = folder / filename
-                            if chunk.with_suffix(".meta.json") != meta_path:
-                                raise ValueError("Chunk filename does not match its sidecar")
-                            count += verify_chunk(
-                                chunk, metadata, job, regional_window(manifest, region)["ends_at"]
-                            )
-                            with chunk.open("rb") as source:
-                                shutil.copyfileobj(source, destination, length=1024 * 1024)
-                            verified.add(filename)
-                            result["chunks"] += 1
-                        result["rows"] += count
-                        if job["status"] == "completed" and count != job.get("observations"):
-                            raise ValueError("Country observation count does not reconcile")
-                        leftovers = [
-                            p.name
-                            for p in folder.glob("observations-*")
-                            if p.name.endswith(".partial")
-                            or (p.name.endswith(".gz") and p.name not in verified)
-                        ]
-                        if leftovers:
-                            result["issues"].append(
-                                f"{region} round {job['round']} {job['country']}: "
-                                f"{len(leftovers)} uncommitted chunk files excluded"
-                            )
-                    if state["status"] not in ("closed", "completed"):
-                        result["issues"].append(f"{region}: regional state is {state['status']}")
+                    _export_region(manifest, root, region, destination, result)
                 if result["chunks"] == 0:
                     destination.write(gzip.compress(b"", mtime=0))
                 destination.flush()

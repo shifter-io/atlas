@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from test_campaign_tick import START, Clock, disk, make_root
+from campaign_tick_cases import START, Clock, disk, make_root
 
 from proxy_index.campaign import collector as collector_module
 from proxy_index.campaign.collector import Pacing

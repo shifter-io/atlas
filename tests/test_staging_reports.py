@@ -4,12 +4,12 @@ import json
 import os
 import shlex
 import stat
-import uuid
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 import psycopg
 import pytest
+from helpers import scratch_database_name
 from psycopg import sql
 from test_census_pulse import scenario
 from test_orchestrator import prepare, query
@@ -318,6 +318,39 @@ def test_staging_init_refuses_the_real_database(tmp_path, name):
     assert sorted(os.listdir(secrets)) == ["database.toml", "postgres-admin.toml"]
 
 
+def test_staging_init_needs_an_app_user(tmp_path):
+    secrets = tmp_path / "secrets"
+    secrets.mkdir()
+    fake = {"host": "127.0.0.1", "port": "1", "password": "x"}
+    private(secrets / "database.toml", toml(fake | {"dbname": "proxy_live_main"}))
+    private(secrets / "postgres-admin.toml", toml(fake | {"user": "admin", "dbname": "postgres"}))
+    with pytest.raises(ValueError, match="needs a user to own the staging database"):
+        init(profile(tmp_path / "staging.toml", "proxy_test_staging"), secrets_dir=secrets)
+    assert sorted(os.listdir(secrets)) == ["database.toml", "postgres-admin.toml"]
+
+
+def test_staging_init_rejects_an_unknown_scope_country(tmp_path):
+    admin_file = os.environ.get("PG_TEST_ADMIN_FILE")
+    if not admin_file:
+        pytest.skip("Set PG_TEST_ADMIN_FILE for isolated real PostgreSQL integration tests")
+    admin = read_credentials(admin_file, "postgres")
+    secrets = tmp_path / "secrets"
+    secrets.mkdir(mode=0o700)
+    name = scratch_database_name() + "_staging"
+    private(secrets / "database.toml", toml(admin | {"dbname": "proxy_test_never_created"}))
+    private(secrets / "postgres-admin.toml", toml(admin))
+    config = profile(tmp_path / "staging.toml", name, countries=("RO", "ZZ"))
+    try:
+        with pytest.raises(ValueError, match="^Unknown scope countries: ZZ$"):
+            init(config, secrets_dir=secrets)
+        assert not (secrets / "staging-tokens").exists()
+    finally:
+        with psycopg.connect(**admin, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name))
+            )
+
+
 def mode(path):
     return stat.S_IMODE(path.stat().st_mode)
 
@@ -329,7 +362,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
     admin = read_credentials(admin_file, "postgres")
     secrets = tmp_path / "secrets"
     secrets.mkdir(mode=0o700)
-    name = "proxy_test_" + uuid.uuid4().hex + "_staging"
+    name = scratch_database_name()
     # The "production" dbname is another scratch name; the app user is the test admin.
     private(secrets / "database.toml", toml(admin | {"dbname": "proxy_test_never_created"}))
     private(secrets / "postgres-admin.toml", toml(admin))
@@ -559,7 +592,7 @@ def test_rate_limited_stop_reason_has_its_own_text():
 
 
 async def test_reports_job_writes_live_pages(database, db, tmp_path):
-    from proxy_index.orchestrator.admin import views
+    from proxy_index.orchestrator.admin import writers
 
     now = datetime.now(UTC)
     prepare(database, ("DE",), DE=now.time())
@@ -610,7 +643,7 @@ async def test_reports_job_writes_live_pages(database, db, tmp_path):
     assert "Running now (live)" in index and ">900<" in index
 
     # Once the batch closes, its page is rewritten from the final data, without the banner.
-    await views.stop_batch(db, batch_id, "killed")
+    await writers.stop_batch(db, batch_id, "killed")
     await db.drain()
     final = text(out / f"batch-{batch_id}.html")
     assert "live counters" not in final and "http-equiv" not in final

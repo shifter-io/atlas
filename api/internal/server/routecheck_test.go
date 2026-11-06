@@ -94,6 +94,7 @@ var FreshPages = []string{"/v1/networks", "/v1/networks/shifter", "/v1/networks/
 	"/v1/countries", "/v1/countries/us", "/v1/countries/US", "/v1/rankings", "/v1/networks/all"}
 
 func TestOnePublishedProductWithoutCatalogRowsServesEveryPage(t *testing.T) {
+	t.Parallel()
 	s, log := freshServer(t, newFreshSource(t))
 	h := s.Handler()
 	for _, p := range FreshPages {
@@ -111,6 +112,7 @@ func TestOnePublishedProductWithoutCatalogRowsServesEveryPage(t *testing.T) {
 }
 
 func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
+	t.Parallel()
 	// A catalog row gives the network a slug the routes refuse: the product
 	// is published but its pages answer 400.
 	s, log := freshServer(t, newFreshSource(t, store.ProviderRow{Slug: "Shifter_IO", Name: "Shifter", Kinds: []string{"residential"},
@@ -132,6 +134,7 @@ func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
 }
 
 func TestAHiddenProviderIsNotAGap(t *testing.T) {
+	t.Parallel()
 	s, _ := freshServer(t, newFreshSource(t, store.ProviderRow{Slug: "shifter", Name: "Shifter", Kinds: []string{"residential"},
 		FrameworkProvider: sptr("shifter"), Listed: false, Strengths: []string{}, Weaknesses: []string{}, BestFor: []string{}}))
 	if rec := get(s.Handler(), "/v1/networks/shifter"); rec.Code != 404 {
@@ -143,6 +146,7 @@ func TestAHiddenProviderIsNotAGap(t *testing.T) {
 }
 
 func TestUnservedPagesAreBounded(t *testing.T) {
+	t.Parallel()
 	s, _ := freshServer(t, newFreshSource(t))
 	v := s.Current()
 	pages := *v.Result.Pages
@@ -159,6 +163,7 @@ func TestUnservedPagesAreBounded(t *testing.T) {
 }
 
 func TestHealthNamesTheBinarysRevision(t *testing.T) {
+	t.Parallel()
 	s, _ := freshServer(t, newFreshSource(t))
 	rec := get(s.Handler(), "/healthz")
 	var raw map[string]map[string]any

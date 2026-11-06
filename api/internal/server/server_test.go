@@ -131,6 +131,7 @@ func getOnce(h http.Handler, path string, headers ...string) *httptest.ResponseR
 }
 
 func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1})
 	h := s.Handler()
 	plain := get(h, "/v1/dataset")
@@ -214,6 +215,7 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 }
 
 func TestRefreshRebuildsOnlyOnChange(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1}
 	s := newTestServer(t, src)
 	h := s.Handler()
@@ -247,6 +249,7 @@ func TestRefreshRebuildsOnlyOnChange(t *testing.T) {
 }
 
 func TestFailedRebuildKeepsServingThePreviousVersion(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1}
 	s := newTestServer(t, src)
 	h := s.Handler()
@@ -275,6 +278,7 @@ func TestFailedRebuildKeepsServingThePreviousVersion(t *testing.T) {
 }
 
 func TestRefreshIsSingleFlight(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1}
 	s := newTestServer(t, src)
 	src.slowLoad = 50 * time.Millisecond
@@ -297,6 +301,7 @@ func TestRefreshIsSingleFlight(t *testing.T) {
 }
 
 func TestSearchIsServedFromABoundedLRU(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1})
 	h := s.Handler()
 	r := get(h, "/v1/search?q=Alpha")
@@ -367,6 +372,7 @@ func events(n int) []store.Event {
 }
 
 func TestEventsEndpoint(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1, events: events(30), complete: true}
 	s := newTestServer(t, src)
 	h := s.Handler()
@@ -433,6 +439,7 @@ func BenchmarkCachedDataset(b *testing.B) {
 }
 
 func TestVersionNamesTheDatasetAndAnswersConditionally(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1}
 	s := newTestServer(t, src)
 	h := s.Handler()
@@ -491,6 +498,7 @@ func TestVersionNamesTheDatasetAndAnswersConditionally(t *testing.T) {
 }
 
 func TestPageRoutesRefuseBadInputAndWaitForTheFirstBuild(t *testing.T) {
+	t.Parallel()
 	cold := New(&fakeSource{rev: 1}, Options{}).Handler()
 	for _, path := range []string{"/v1/networks/alpha-net", "/v1/networks/alpha-net/places", "/v1/countries/DE/cities", "/v1/rankings"} {
 		if r := get(cold, path); r.Code != http.StatusServiceUnavailable {
@@ -513,6 +521,7 @@ func TestPageRoutesRefuseBadInputAndWaitForTheFirstBuild(t *testing.T) {
 }
 
 func TestRankingsAnswerPerRangeInOrder(t *testing.T) {
+	t.Parallel()
 	h := newTestServer(t, &fakeSource{rev: 1}).Handler()
 	for _, rangeID := range []string{"24h", "7d", "30d"} {
 		path := "/v1/rankings?range=" + rangeID
@@ -532,6 +541,7 @@ func TestRankingsAnswerPerRangeInOrder(t *testing.T) {
 }
 
 func TestTheDatasetIsAHashNamedFileBehindARedirect(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1}
 	s := newTestServer(t, src)
 	h := s.Handler()

@@ -11,16 +11,16 @@ import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from . import __version__
 from .answers import Answers
-from .models import RequestContext, RunConfig, RunSummary, protocol_of
+from .models import Outcome, RequestContext, RunConfig, RunSummary, protocol_of
 from .process_transport import ProcessTransport, process_count
 from .sinks import JsonSink, ResultSink
 from .stats import LOCATION_FIELDS, NETWORK_FIELDS, Counters, bucket_of, iso
-from .targets import EchoIpTarget, TargetRegistry, https_only, registry
+from .targets import EchoIpTarget, Target, TargetRegistry, https_only, registry
 from .transport import HttpTransport, Transport
 
 log = logging.getLogger(__name__)
@@ -47,22 +47,9 @@ def _part(info: dict[str, Any], fields: tuple[str, ...]) -> tuple[Any, ...] | No
     return values if any(value is not None for value in values) else None
 
 
-async def run(
-    config: RunConfig,
-    result_sink: ResultSink | None = None,
-    *,
-    stop: asyncio.Event | None = None,
-    targets: TargetRegistry = registry,
-    transport_factory: Callable[[RunConfig], Transport] = HttpTransport,
-    progress: Callable[[dict[str, Any]], Any] | None = None,
-    progress_interval: float = 30.0,
-    enricher: Enricher | None = None,
-    observation_consumer: Callable[[str, float], Awaitable[None]] | None = None,
-    deadline: float | None = None,
-    aggregate_ips: bool = True,
-    wall_clock: Callable[[], float] | None = None,
-) -> RunSummary:
-    """Keep `concurrency` requests in flight until the stop rule ends the run.
+@dataclass(frozen=True)
+class RunOptions:
+    """run()'s optional inputs, each with its default.
 
     `progress` receives cumulative counters at most every `progress_interval`
     seconds and once at the end; it may be a coroutine function. `enricher`
@@ -72,6 +59,69 @@ async def run(
     absolute Unix timestamp: no new requests or observations at/after it.
     Disabling `aggregate_ips` leaves exact uniqueness and all counters intact.
     """
+
+    stop: asyncio.Event | None = None
+    targets: TargetRegistry = registry
+    transport_factory: Callable[[RunConfig], Transport] = HttpTransport
+    progress: Callable[[dict[str, Any]], Any] | None = None
+    progress_interval: float = 30.0
+    enricher: Enricher | None = None
+    observation_consumer: Callable[[str, float], Awaitable[None]] | None = None
+    deadline: float | None = None
+    aggregate_ips: bool = True
+    wall_clock: Callable[[], float] | None = None
+
+
+async def run(
+    config: RunConfig,
+    result_sink: ResultSink | None = None,
+    options: RunOptions | None = None,
+) -> RunSummary:
+    """Keep `concurrency` requests in flight until the stop rule ends the run.
+
+    `options` (RunOptions) holds the optional inputs; None means all defaults.
+    """
+    options = options or RunOptions()
+    transport_factory = options.transport_factory
+    target, protocol = _resolve_target(config, options.targets, transport_factory)
+    _check_timing(options.progress, options.progress_interval, options.deadline)
+    state = _RunState(
+        config=config,
+        target=target,
+        protocol=protocol,
+        sink=result_sink if result_sink is not None else JsonSink(),
+        wall_now=options.wall_clock if options.wall_clock is not None else time.time,
+        deadline=options.deadline,
+        stop=options.stop,
+        progress=options.progress,
+        progress_interval=options.progress_interval,
+        enricher=options.enricher,
+        observation_consumer=options.observation_consumer,
+        aggregate_ips=options.aggregate_ips,
+        parallel=transport_factory is HttpTransport and process_count(config) > 1,
+    )
+    state.sink.start(state.run_id)
+    state.writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ip-export")
+    status, cancelled, failure = await _execute(state, transport_factory)
+    status, stop_reason = _outcome(state, status)
+    elapsed = time.perf_counter() - state.began
+    summary = _summary(state, status, stop_reason, elapsed)
+    await _finish(state, summary)
+    if cancelled:
+        raise asyncio.CancelledError
+    if failure:
+        # Preserve a useful error type without publishing arbitrary exception text.
+        message = f"Run failed ({type(failure).__name__}); partial results saved"
+        raise RuntimeError(message) from None
+    return summary
+
+
+def _resolve_target(
+    config: RunConfig,
+    targets: TargetRegistry,
+    transport_factory: Callable[[RunConfig], Transport],
+) -> tuple[Target, str]:
+    """The target this run measures, and the network's test protocol."""
     target = targets.get(config.target)
     if config.target_url is not None:
         if not isinstance(target, EchoIpTarget):
@@ -85,288 +135,377 @@ async def run(
         raise ValueError("This target requires a different execution adapter")
     if config.stop_rule == "unique_ratio" and not target.pool_eligible:
         raise ValueError("The unique-ratio stop rule requires a pool-eligible target")
+    return target, protocol
+
+
+def _check_timing(
+    progress: Callable[[dict[str, Any]], Any] | None,
+    progress_interval: float,
+    deadline: float | None,
+) -> None:
     if progress is not None and (
         type(progress_interval) not in (int, float)
         or not math.isfinite(progress_interval)
         or progress_interval <= 0
     ):
         raise ValueError("progress_interval must be finite and positive")
-    limit = config.requests
     if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
         raise ValueError("deadline must be a finite Unix timestamp")
-    ratio_rule = config.stop_rule == "unique_ratio"
-    sink = result_sink if result_sink is not None else JsonSink()
-    run_id = str(uuid.uuid4())
-    wall_now = wall_clock if wall_clock is not None else time.time
-    began_wall, began = wall_now(), time.perf_counter()
-    deadline_mono = began + deadline - began_wall if deadline is not None else None
 
-    def expired() -> bool:
-        return deadline is not None and (
-            wall_now() >= deadline or time.perf_counter() >= deadline_mono
-        )
 
-    totals = Counters()
-    answers = Answers(config, enricher if target.pool_eligible else None)
-    buckets: dict[int, Counters] = {}
+@dataclass(eq=False)
+class _RunState:
+    """One run's settings and the mutable state its steps share."""
+
+    config: RunConfig
+    target: Target
+    protocol: str
+    sink: ResultSink
+    wall_now: Callable[[], float]
+    deadline: float | None
+    stop: asyncio.Event | None
+    progress: Callable[[dict[str, Any]], Any] | None
+    progress_interval: float
+    enricher: Enricher | None
+    observation_consumer: Callable[[str, float], Awaitable[None]] | None
+    aggregate_ips: bool
+    parallel: bool
+    run_id: str = field(init=False)
+    began_wall: float = field(init=False)
+    began: float = field(init=False)
+    deadline_mono: float | None = field(init=False)
+    answers: Answers = field(init=False)
+    execution: dict[str, Any] = field(init=False)
+    # Created once the sink has started.
+    writer: ThreadPoolExecutor = field(init=False)
+    pending: deque[Future] = field(default_factory=deque)
+    totals: Counters = field(default_factory=Counters)
+    buckets: dict[int, Counters] = field(default_factory=dict)
     # Only current-bucket observations (IPs and geo rows) and a lifetime
     # distinct-IP set are held.
     current_bucket: int | None = None
-    ip_rows: dict[str, list[float | int]] = {}
-    geo_rows: dict[GeoKey, Counters] = {}
-    unique: set[str] = set()
-    started = 0
+    ip_rows: dict[str, list[float | int]] = field(default_factory=dict)
+    geo_rows: dict[GeoKey, Counters] = field(default_factory=dict)
+    unique: set[str] = field(default_factory=set)
+    started: int = 0
     # Set when a stop rule ends the run: 'unique_ratio', 'no_success' or 'stalled'.
     halted: str | None = None
     # Monotonic and wall time of the latest success (the stall rule's clock).
     last_success: float | None = None
     last_success_wall: float | None = None
-    status = "completed"
-    next_start = 0.0
-    cancelled = False
-    failure: BaseException | None = None
-    workers: list[asyncio.Task] = []
-    watcher: asyncio.Task | None = None
-    ticker: asyncio.Task | None = None
-    parallel = transport_factory is HttpTransport and process_count(config) > 1
-    execution = {
-        "execution_processes": process_count(config) if parallel else 1,
-        "execution_backend": "multiprocess" if parallel else "inline",
-    }
-    sink.start(run_id)
-    writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ip-export")
-    pending: deque[Future] = deque()
+    next_start: float = 0.0
 
-    def write_bucket(
-        bucket: int | None,
-        observations: dict[str, list[float | int]],
-        geo: dict[GeoKey, Counters] | None,
-    ) -> None:
-        # Bound temporary serialization memory for large distinct-IP sets.
-        rows: list[dict[str, Any]] = []
-        for address, (count, first, last) in observations.items():
-            rows.append(
-                {
-                    "schema_version": "1",
-                    "run_id": run_id,
-                    "ip": address,
-                    "bucket_start": iso(bucket),
-                    "count": count,
-                    "first_seen": iso(first),
-                    "last_seen": iso(last),
-                }
+    def __post_init__(self) -> None:
+        self.run_id = str(uuid.uuid4())
+        self.began_wall, self.began = self.wall_now(), time.perf_counter()
+        self.deadline_mono = (
+            self.began + self.deadline - self.began_wall if self.deadline is not None else None
+        )
+        self.answers = Answers(self.config, self.enricher if self.target.pool_eligible else None)
+        self.execution = {
+            "execution_processes": process_count(self.config) if self.parallel else 1,
+            "execution_backend": "multiprocess" if self.parallel else "inline",
+        }
+
+    @property
+    def limit(self) -> int | None:
+        return self.config.requests
+
+    def stopped(self) -> bool:
+        return bool(self.stop and self.stop.is_set())
+
+    def expired(self) -> bool:
+        return self.deadline is not None and (
+            self.wall_now() >= self.deadline or time.perf_counter() >= self.deadline_mono
+        )
+
+    def may_start(self) -> bool:
+        return (
+            not self.halted
+            and (self.limit is None or self.answers.started(self.started) < self.limit)
+            and not self.stopped()
+            and not self.expired()
+        )
+
+    def flush(self, *, final: bool = False) -> None:
+        geo = self.geo_rows if self.enricher is not None and (self.geo_rows or final) else None
+        if self.ip_rows or geo is not None:
+            self.pending.append(
+                self.writer.submit(_write_bucket, self, self.current_bucket, self.ip_rows, geo)
             )
-            if len(rows) == 1000:
-                sink.observations(rows)
-                rows = []
-        if rows:
-            sink.observations(rows)
-        if geo is None:
-            return
-        rows = []
-        for (location, network), counters in geo.items():
-            rows.append(
-                {
-                    "bucket_start": iso(bucket),
-                    "location": dict(zip(LOCATION_FIELDS, location, strict=True))
-                    if location
-                    else None,
-                    "network": dict(zip(NETWORK_FIELDS, network, strict=True)) if network else None,
-                    **counters.export_geo(),
-                }
-            )
-            if len(rows) == 1000:
-                sink.geo(rows)
-                rows = []
-        # Always called with an enricher, so a run without traffic still has the file.
-        sink.geo(rows)
+            self.ip_rows, self.geo_rows = {}, {}
 
-    def flush(*, final: bool = False) -> None:
-        nonlocal ip_rows, geo_rows
-        geo = geo_rows if enricher is not None and (geo_rows or final) else None
-        if ip_rows or geo is not None:
-            pending.append(writer.submit(write_bucket, current_bucket, ip_rows, geo))
-            ip_rows, geo_rows = {}, {}
-
-    def snapshot() -> dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         return (
             {
-                "requests": totals.completed,
-                "successes": totals.successes,
-                "unique_ips": len(unique),
-                **totals.verdicts(),
-                **execution,
+                "requests": self.totals.completed,
+                "successes": self.totals.successes,
+                "unique_ips": len(self.unique),
+                **self.totals.verdicts(),
+                **self.execution,
             }
-            | answers.progress(totals)
-            | ({"redirects": totals.redirects} if protocol == "mixed" else {})
+            | self.answers.progress(self.totals)
+            | ({"redirects": self.totals.redirects} if self.protocol == "mixed" else {})
         )
 
-    async def report() -> None:
-        assert progress is not None
-        try:
-            result = progress(snapshot())
-            if inspect.isawaitable(result):
-                await result
-        except Exception as exc:
-            # A lost progress post must not end a measurement; the final
-            # artifact carries the authoritative totals.
-            log.warning("Progress callback failed (%s)", type(exc).__name__)
 
-    async def tick() -> None:
-        while True:
-            await asyncio.sleep(progress_interval)
-            await report()
-
-    def may_start() -> bool:
-        return (
-            not halted
-            and (limit is None or answers.started(started) < limit)
-            and not (stop and stop.is_set())
-            and not expired()
+def _write_bucket(
+    state: _RunState,
+    bucket: int | None,
+    observations: dict[str, list[float | int]],
+    geo: dict[GeoKey, Counters] | None,
+) -> None:
+    # Bound temporary serialization memory for large distinct-IP sets.
+    rows: list[dict[str, Any]] = []
+    for address, (count, first, last) in observations.items():
+        rows.append(
+            {
+                "schema_version": "1",
+                "run_id": state.run_id,
+                "ip": address,
+                "bucket_start": iso(bucket),
+                "count": count,
+                "first_seen": iso(first),
+                "last_seen": iso(last),
+            }
         )
+        if len(rows) == 1000:
+            state.sink.observations(rows)
+            rows = []
+    if rows:
+        state.sink.observations(rows)
+    if geo is None:
+        return
+    rows = []
+    for (location, network), counters in geo.items():
+        rows.append(
+            {
+                "bucket_start": iso(bucket),
+                "location": dict(zip(LOCATION_FIELDS, location, strict=True)) if location else None,
+                "network": dict(zip(NETWORK_FIELDS, network, strict=True)) if network else None,
+                **counters.export_geo(),
+            }
+        )
+        if len(rows) == 1000:
+            state.sink.geo(rows)
+            rows = []
+    # Always called with an enricher, so a run without traffic still has the file.
+    state.sink.geo(rows)
 
-    async def worker(transport: Transport, worker_index: int) -> None:
-        nonlocal started, next_start, current_bucket, halted, last_success, last_success_wall
-        while may_start():
-            # Serialization never blocks the event loop or inflates in-flight
-            # request latency. Slow storage applies backpressure before a request.
-            while pending and pending[0].done():
-                pending[0].result()
-                pending.popleft()
-            if len(pending) >= 2:
-                await asyncio.shield(asyncio.wrap_future(pending[0]))
-            if config.requests_per_second:
-                now = time.perf_counter()
-                scheduled = max(now, next_start)
-                next_start = scheduled + 1 / config.requests_per_second
-                await asyncio.sleep(max(0, scheduled - now))
-            if not may_start():
-                break
-            context = RequestContext(run_id, started, worker_index)
-            started += 1
-            result = await transport.execute(target, context=context)
-            if expired():
-                raise asyncio.CancelledError
-            # Anchor UTC to the monotonic clock: a clock adjustment cannot
-            # reopen an already flushed bucket or reverse first/last seen.
-            completed_at = (
-                result.completed_at if result.completed_at is not None else time.perf_counter()
-            )
-            observed = began_wall + (completed_at - began)
-            # IPC from independent processes may arrive slightly out of order.
-            # Bucket by coordinator receipt; retain true observation timestamps.
-            bucket = bucket_of(began_wall + time.perf_counter() - began)
-            totals.add(result)
-            kind = answers.add(result, completed_at)
-            halted = halted or answers.halt(completed_at)
-            counted = kind == "answer" and result.ip and result.error is None
-            if result.error is None:
-                last_success = max(last_success or completed_at, completed_at)
-                last_success_wall = max(last_success_wall or observed, observed)
-            buckets.setdefault(bucket, Counters()).add(result)
-            if current_bucket != bucket:
-                flush()
-                current_bucket = bucket
-            if enricher is not None:
-                if result.ip and result.error is None:
-                    info = enricher.lookup(result.ip)
-                    key = (_part(info, LOCATION_FIELDS), _part(info, NETWORK_FIELDS))
-                else:
-                    key = (None, None)
-                if key not in geo_rows:
-                    geo_rows[key] = Counters()
-                geo_rows[key].add(result)
-            if target.pool_eligible and counted:
-                unique.add(result.ip)
-                if not aggregate_ips:
-                    pass
-                elif result.ip in ip_rows:
-                    row = ip_rows[result.ip]
-                    row[0] += 1
-                    row[1] = min(row[1], observed)
-                    row[2] = max(row[2], observed)
-                else:
-                    ip_rows[result.ip] = [1, observed, observed]
-            # Preserve every attempt, status, error and byte count. Answer classes (and the
-            # opt-in 469 policy) exclude rate limits from the sample and the request goal;
-            # this worker then issues a replacement through the normal loop.
-            if ratio_rule and not halted:
-                sample = answers.sample(totals)
-                if not totals.successes and (
-                    sample >= min(config.min_sample, NO_SUCCESS_REQUESTS)
-                    or time.perf_counter() - began >= NO_SUCCESS_SECONDS
-                ):
-                    halted = "no_success"
-                elif (
-                    last_success is not None
-                    and time.perf_counter() - last_success >= config.stall_seconds
-                ):
-                    halted = "stalled"
-                elif sample >= config.min_sample and sample > 2 * len(unique):
-                    halted = "unique_ratio"
-            if observation_consumer is not None and counted:
-                # A completed response must reach the writer even if a deadline
-                # cancels its worker during backpressure. The writer owns draining.
-                delivery = asyncio.ensure_future(observation_consumer(result.ip, observed))
-                try:
-                    await asyncio.shield(delivery)
-                except asyncio.CancelledError:
-                    await delivery
-                    raise
-            # Real I/O yields; injected fast transports must also be cancellable.
-            if totals.completed % 256 == 0:
-                await asyncio.sleep(0)
 
-    async def watch_stop() -> None:
-        while not expired() and not (stop and stop.is_set()):
-            if stop is not None:
-                try:
-                    await asyncio.wait_for(stop.wait(), 0.05)
-                except TimeoutError:
-                    pass
-            else:
-                await asyncio.sleep(0.05)
-        for task in workers:
+async def _report(state: _RunState) -> None:
+    assert state.progress is not None
+    try:
+        result = state.progress(state.snapshot())
+        if inspect.isawaitable(result):
+            await result
+    except Exception as exc:
+        # A lost progress post must not end a measurement; the final
+        # artifact carries the authoritative totals.
+        log.warning("Progress callback failed (%s)", type(exc).__name__)
+
+
+async def _tick(state: _RunState) -> None:
+    while True:
+        await asyncio.sleep(state.progress_interval)
+        await _report(state)
+
+
+def _census_halt(state: _RunState) -> str | None:
+    """The census stop rules: the reason the run halts now, or None."""
+    config, totals = state.config, state.totals
+    sample = state.answers.sample(totals)
+    if not totals.successes and (
+        sample >= min(config.min_sample, NO_SUCCESS_REQUESTS)
+        or time.perf_counter() - state.began >= NO_SUCCESS_SECONDS
+    ):
+        return "no_success"
+    if (
+        state.last_success is not None
+        and time.perf_counter() - state.last_success >= config.stall_seconds
+    ):
+        return "stalled"
+    if sample >= config.min_sample and sample > 2 * len(state.unique):
+        return "unique_ratio"
+    return None
+
+
+def _add_geo(state: _RunState, enricher: Enricher, result: Outcome) -> None:
+    if result.ip and result.error is None:
+        info = enricher.lookup(result.ip)
+        key = (_part(info, LOCATION_FIELDS), _part(info, NETWORK_FIELDS))
+    else:
+        key = (None, None)
+    if key not in state.geo_rows:
+        state.geo_rows[key] = Counters()
+    state.geo_rows[key].add(result)
+
+
+def _add_ip(state: _RunState, address: str, observed: float) -> None:
+    state.unique.add(address)
+    if not state.aggregate_ips:
+        return
+    if address in state.ip_rows:
+        row = state.ip_rows[address]
+        row[0] += 1
+        row[1] = min(row[1], observed)
+        row[2] = max(row[2], observed)
+    else:
+        state.ip_rows[address] = [1, observed, observed]
+
+
+def _record(state: _RunState, result: Outcome, completed_at: float, observed: float) -> bool:
+    """Count one completed request; True when it is an exit to count and deliver."""
+    # IPC from independent processes may arrive slightly out of order.
+    # Bucket by coordinator receipt; retain true observation timestamps.
+    bucket = bucket_of(state.began_wall + time.perf_counter() - state.began)
+    state.totals.add(result)
+    kind = state.answers.add(result, completed_at)
+    state.halted = state.halted or state.answers.halt(completed_at)
+    counted = kind == "answer" and result.ip and result.error is None
+    if result.error is None:
+        state.last_success = max(state.last_success or completed_at, completed_at)
+        state.last_success_wall = max(state.last_success_wall or observed, observed)
+    state.buckets.setdefault(bucket, Counters()).add(result)
+    if state.current_bucket != bucket:
+        state.flush()
+        state.current_bucket = bucket
+    if state.enricher is not None:
+        _add_geo(state, state.enricher, result)
+    if state.target.pool_eligible and counted:
+        _add_ip(state, result.ip, observed)
+    # Preserve every attempt, status, error and byte count. Answer classes (and the
+    # opt-in 469 policy) exclude rate limits from the sample and the request goal;
+    # this worker then issues a replacement through the normal loop.
+    if state.config.stop_rule == "unique_ratio" and not state.halted:
+        state.halted = _census_halt(state)
+    return bool(counted)
+
+
+async def _make_room(state: _RunState) -> None:
+    # Serialization never blocks the event loop or inflates in-flight
+    # request latency. Slow storage applies backpressure before a request.
+    pending = state.pending
+    while pending and pending[0].done():
+        pending[0].result()
+        pending.popleft()
+    if len(pending) >= 2:
+        await asyncio.shield(asyncio.wrap_future(pending[0]))
+
+
+async def _pace(state: _RunState) -> None:
+    rate = state.config.requests_per_second
+    if rate:
+        now = time.perf_counter()
+        scheduled = max(now, state.next_start)
+        state.next_start = scheduled + 1 / rate
+        await asyncio.sleep(max(0, scheduled - now))
+
+
+async def _deliver(
+    consumer: Callable[[str, float], Awaitable[None]], address: str, observed: float
+) -> None:
+    # A completed response must reach the writer even if a deadline
+    # cancels its worker during backpressure. The writer owns draining.
+    delivery = asyncio.ensure_future(consumer(address, observed))
+    try:
+        await asyncio.shield(delivery)
+    except asyncio.CancelledError:
+        await delivery
+        raise
+
+
+async def _worker(state: _RunState, transport: Transport, worker_index: int) -> None:
+    while state.may_start():
+        await _make_room(state)
+        await _pace(state)
+        if not state.may_start():
+            break
+        context = RequestContext(state.run_id, state.started, worker_index)
+        state.started += 1
+        result = await transport.execute(state.target, context=context)
+        if state.expired():
+            raise asyncio.CancelledError
+        # Anchor UTC to the monotonic clock: a clock adjustment cannot
+        # reopen an already flushed bucket or reverse first/last seen.
+        completed_at = (
+            result.completed_at if result.completed_at is not None else time.perf_counter()
+        )
+        observed = state.began_wall + (completed_at - state.began)
+        counted = _record(state, result, completed_at, observed)
+        if state.observation_consumer is not None and counted:
+            await _deliver(state.observation_consumer, result.ip, observed)
+        # Real I/O yields; injected fast transports must also be cancellable.
+        if state.totals.completed % 256 == 0:
+            await asyncio.sleep(0)
+
+
+async def _watch_stop(state: _RunState, workers: list[asyncio.Task], engine: Any) -> None:
+    stop = state.stop
+    while not state.expired() and not state.stopped():
+        if stop is not None:
+            try:
+                await asyncio.wait_for(stop.wait(), 0.05)
+            except TimeoutError:
+                pass
+        else:
+            await asyncio.sleep(0.05)
+    for task in workers:
+        task.cancel()
+    if state.parallel:
+        engine.abort()
+
+
+async def _drive(state: _RunState, engine: Any, transport: Transport) -> None:
+    limit = state.limit
+    workers = [
+        asyncio.create_task(_worker(state, transport, index))
+        for index in range(
+            state.config.concurrency if limit is None else min(state.config.concurrency, limit)
+        )
+    ]
+    helpers: list[asyncio.Task] = []
+    if state.stop or state.deadline is not None:
+        helpers.append(asyncio.create_task(_watch_stop(state, workers, engine)))
+    if state.progress is not None:
+        helpers.append(asyncio.create_task(_tick(state)))
+    try:
+        await asyncio.gather(*workers)
+    finally:
+        for task in (*workers, *helpers):
             task.cancel()
-        if parallel:
-            engine.abort()
+        await asyncio.gather(*workers, *helpers, return_exceptions=True)
 
+
+async def _execute(
+    state: _RunState, transport_factory: Callable[[RunConfig], Transport]
+) -> tuple[str, bool, BaseException | None]:
+    """Run the workers; the status, whether to re-raise cancellation, and any failure."""
     try:
         engine = (
-            ProcessTransport(config, target, deadline=deadline_mono)
-            if parallel
-            else transport_factory(config)
+            ProcessTransport(state.config, state.target, deadline=state.deadline_mono)
+            if state.parallel
+            else transport_factory(state.config)
         )
         async with engine as transport:
-            if parallel:
-                execution["worker_pids"] = list(transport.pids)
-            workers = [
-                asyncio.create_task(worker(transport, index))
-                for index in range(
-                    config.concurrency if limit is None else min(config.concurrency, limit)
-                )
-            ]
-            if stop or deadline is not None:
-                watcher = asyncio.create_task(watch_stop())
-            if progress is not None:
-                ticker = asyncio.create_task(tick())
-            try:
-                await asyncio.gather(*workers)
-            finally:
-                helpers = [task for task in (watcher, ticker) if task]
-                for task in (*workers, *helpers):
-                    task.cancel()
-                await asyncio.gather(*workers, *helpers, return_exceptions=True)
+            if state.parallel:
+                state.execution["worker_pids"] = list(transport.pids)
+            await _drive(state, engine, transport)
     except asyncio.CancelledError:
-        status = "cancelled"
-        cancelled = not (stop and stop.is_set()) and not expired()
+        return "cancelled", not state.stopped() and not state.expired(), None
     except Exception as exc:
-        status = "failed"
-        failure = exc
+        return "failed", False, exc
+    return "completed", False, None
+
+
+def _outcome(state: _RunState, status: str) -> tuple[str, str]:
+    """The final status and the stop reason."""
+    limit, answers, totals = state.limit, state.answers, state.totals
+    started, halted = state.started, state.halted
     reached = limit is not None and answers.started(totals.completed) >= limit
-    if stop and stop.is_set() and (started > totals.completed or not (reached or halted)):
+    if state.stopped() and (started > totals.completed or not (reached or halted)):
         status = "cancelled"
-    if expired() and status != "failed":
+    if state.expired() and status != "failed":
         status = "cancelled"
         stop_reason = "deadline"
     elif status == "failed":
@@ -377,9 +516,15 @@ async def run(
         stop_reason = "operator"
     else:
         stop_reason = "requests"
-    elapsed = time.perf_counter() - began
+    return status, stop_reason
+
+
+def _summary(state: _RunState, status: str, stop_reason: str, elapsed: float) -> RunSummary:
+    target, totals, answers, enricher = state.target, state.totals, state.answers, state.enricher
+    limit, started, unique, buckets = state.limit, state.started, state.unique, state.buckets
+    began_wall, last_success_wall = state.began_wall, state.last_success_wall
     summary = RunSummary(
-        run_id=run_id,
+        run_id=state.run_id,
         schema_version="1",
         framework_version=__version__,
         target={
@@ -388,7 +533,7 @@ async def run(
             "url": target.build_request().url,
             "engine": target.engine,
         },
-        config=config.public() | execution,
+        config=state.config.public() | state.execution,
         started_at=iso(began_wall),
         finished_at=iso(began_wall + elapsed),
         duration_seconds=elapsed,
@@ -420,27 +565,24 @@ async def run(
         outage_started_at=iso(last_success_wall)
         if stop_reason == "stalled" and last_success_wall is not None
         else None,
-        redirects=totals.redirects if protocol == "mixed" else None,
+        redirects=totals.redirects if state.protocol == "mixed" else None,
     )
     release = getattr(enricher, "release", None)
     if enricher is not None and isinstance(release, dict):
         # JsonSink adds file, rows and checksum to this entry.
         summary.artifacts = {"geo": {"release": release}}
+    return summary
+
+
+async def _finish(state: _RunState, summary: RunSummary) -> None:
     try:
-        if progress is not None:
-            await report()
-        flush(final=True)
-        for future in pending:
+        if state.progress is not None:
+            await _report(state)
+        state.flush(final=True)
+        for future in state.pending:
             await asyncio.shield(asyncio.wrap_future(future))
-        await asyncio.to_thread(sink.finish, summary)
+        await asyncio.to_thread(state.sink.finish, summary)
     finally:
         # No writer may outlive the stream it owns, including on disk failure.
-        writer.shutdown(wait=True)
-        sink.abort()
-    if cancelled:
-        raise asyncio.CancelledError
-    if failure:
-        # Preserve a useful error type without publishing arbitrary exception text.
-        message = f"Run failed ({type(failure).__name__}); partial results saved"
-        raise RuntimeError(message) from None
-    return summary
+        state.writer.shutdown(wait=True)
+        state.sink.abort()

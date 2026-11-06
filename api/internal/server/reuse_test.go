@@ -9,6 +9,7 @@ import (
 )
 
 func TestChangeSplitsDataFromEvents(t *testing.T) {
+	t.Parallel()
 	id := func(n int64) *int64 { return &n }
 	served := &Version{Result: &build.Result{Fingerprint: store.Fingerprint{SiteRevision: 1, MaxEventID: id(7)}}}
 	for _, c := range []struct {
@@ -40,6 +41,7 @@ func TestChangeSplitsDataFromEvents(t *testing.T) {
 // wherever the new bytes are the same, and renders only what changed.
 // /v1/version (LevelFast) is always rendered again.
 func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1, events: events(5), complete: true})
 	prev := s.Current()
 	same, err := renderVersion(2, prev.Result, s.opts, prev)
@@ -74,6 +76,7 @@ func TestRenderReusesBodiesWhoseBytesDidNotChange(t *testing.T) {
 // The reuse rule: same identity bytes (by SHA-256, then compared), same
 // Cache-Control and same status.
 func TestReuseNeedsTheSameBytesPolicyAndStatus(t *testing.T) {
+	t.Parallel()
 	old, err := Render(http.StatusOK, map[string]int{"a": 1}, CacheData, LevelBest)
 	if err != nil {
 		t.Fatal(err)
