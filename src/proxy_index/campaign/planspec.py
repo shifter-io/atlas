@@ -195,10 +195,8 @@ def _manifests(
     return found
 
 
-async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None = None) -> dict:
-    """Validate everything, then write `<output>/<campaign id>/`; returns a summary (no IPs)."""
-    now = now or datetime.now(UTC)
-    begins, current = parse_start(inputs.start, now)
+def checked_regions(inputs: PlanInputs) -> tuple[str, ...]:
+    """The planned regions in campaign order, after the region, size and slot checks."""
     regions = tuple(r for r in REGION_IDS if r in inputs.regions)
     if set(inputs.regions) - set(regions) or not regions:
         raise PlanError("--regions must be campaign regions")
@@ -206,6 +204,11 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         raise PlanError("--size must be a CPU-Optimized or Basic droplet slug")
     if inputs.slot_minutes not in SLOT_MINUTES or not 1 <= inputs.slots <= 24:
         raise PlanError(f"--slot-minutes must be one of {SLOT_MINUTES}; --slots 1 to 24")
+    return regions
+
+
+def checked_manager(inputs: PlanInputs) -> dict:
+    """The manager inventory: deployed, and holding every network's checked credentials."""
     manager = read_json(inputs.inventory)
     if not all(manager.get(key) for key in ("manager_id", "wheel_sha256", "framework_version")):
         raise PlanError("deploy the manager before planning (inventory incomplete)")
@@ -213,6 +216,15 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
     absent = [n for n in inputs.networks if n not in manager.get("credentials", [])]
     if absent:
         raise PlanError(f"the manager holds no credentials for {', '.join(absent)}; deploy them")
+    return manager
+
+
+async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None = None) -> dict:
+    """Validate everything, then write `<output>/<campaign id>/`; returns a summary (no IPs)."""
+    now = now or datetime.now(UTC)
+    begins, current = parse_start(inputs.start, now)
+    regions = checked_regions(inputs)
+    manager = checked_manager(inputs)
     key_name = inputs.ssh_key_name or manager.get("worker_key_name", "")
     found = await check_cloud(cloud, inputs, key_name)
     if (manager.get("account"), manager.get("project_id")) != (inputs.account, found["project_id"]):
@@ -251,8 +263,13 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         shutil.rmtree(root, ignore_errors=True)  # only the folder this plan just made
         raise
     atomic_bytes(spec_path(root), spec.to_json().encode())
+    return summary(spec, root, regions)
+
+
+def summary(spec: CampaignSpec, root: Path, regions: tuple[str, ...]) -> dict:
+    """What `plan` returns: the campaign, its folder and its settings (no IPs)."""
     return {
-        "campaign_id": cid,
+        "campaign_id": spec.campaign_id,
         "root": str(root),
         "starts_at": spec.starts_at,
         "networks": list(spec.networks),
