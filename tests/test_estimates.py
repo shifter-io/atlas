@@ -121,7 +121,6 @@ def test_window_unique_ips_count_an_ip_seen_on_several_days_once():
         window.window_unique("average", rows, 2)
 
 
-
 def test_place_flags_every_estimated_figure_with_its_formula_version():
     groups = {
         (1, "c"): {

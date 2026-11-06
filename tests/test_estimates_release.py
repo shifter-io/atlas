@@ -188,4 +188,3 @@ async def test_retention_deletes_estimated_hours_past_the_longest_window(tmp_pat
     result = await retention(db, T2 + timedelta(days=35))  # keeps day 2 onwards
     assert result["estimated_hours_deleted"] == 9  # day 1, hours 15..23
     assert {r["day"].day for r in stored(database)} == {2}
-
