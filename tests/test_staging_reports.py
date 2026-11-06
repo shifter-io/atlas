@@ -4,12 +4,12 @@ import json
 import os
 import shlex
 import stat
-import uuid
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 import psycopg
 import pytest
+from helpers import scratch_database_name
 from psycopg import sql
 from test_census_pulse import scenario
 from test_orchestrator import prepare, query
@@ -362,7 +362,7 @@ def test_staging_init_end_to_end(tmp_path, capsys):
     admin = read_credentials(admin_file, "postgres")
     secrets = tmp_path / "secrets"
     secrets.mkdir(mode=0o700)
-    name = "proxy_test_" + uuid.uuid4().hex + "_staging"
+    name = scratch_database_name()
     # The "production" dbname is another scratch name; the app user is the test admin.
     private(secrets / "database.toml", toml(admin | {"dbname": "proxy_test_never_created"}))
     private(secrets / "postgres-admin.toml", toml(admin))
@@ -592,7 +592,7 @@ def test_rate_limited_stop_reason_has_its_own_text():
 
 
 async def test_reports_job_writes_live_pages(database, db, tmp_path):
-    from proxy_index.orchestrator.admin import views
+    from proxy_index.orchestrator.admin import writers
 
     now = datetime.now(UTC)
     prepare(database, ("DE",), DE=now.time())
@@ -643,7 +643,7 @@ async def test_reports_job_writes_live_pages(database, db, tmp_path):
     assert "Running now (live)" in index and ">900<" in index
 
     # Once the batch closes, its page is rewritten from the final data, without the banner.
-    await views.stop_batch(db, batch_id, "killed")
+    await writers.stop_batch(db, batch_id, "killed")
     await db.drain()
     final = text(out / f"batch-{batch_id}.html")
     assert "live counters" not in final and "http-equiv" not in final

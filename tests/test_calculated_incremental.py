@@ -142,6 +142,7 @@ def lists_count(database):
         return conn.execute(query).fetchone()[0]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 @pytest.mark.parametrize("day", [0, 1, 2])
 async def test_incremental_equals_full_at_every_hourly_cutoff(day, database, tmp_path, monkeypatch):

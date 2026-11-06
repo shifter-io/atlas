@@ -14,6 +14,7 @@ import json
 import tracemalloc
 from datetime import UTC, datetime
 
+import pytest
 from test_calculated_incremental import first_difference, without
 from test_scale_gen import POLICY, run
 
@@ -38,6 +39,7 @@ def peak(database, mode):
         tracemalloc.stop()
 
 
+@pytest.mark.slow
 def test_missed_windows_keep_memory_under_a_bound(databases):
     config = databases()
     run(config, "1..2", networks="iproyal", countries="DE,US", scale=SCALE)

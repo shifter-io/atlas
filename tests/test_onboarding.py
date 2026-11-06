@@ -432,6 +432,7 @@ def test_runtime_git_and_package_exclusion():
     )
 
 
+@pytest.mark.slow
 @pytest.mark.scale
 async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
     writer = ObservationWriter(

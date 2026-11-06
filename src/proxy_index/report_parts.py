@@ -1,6 +1,6 @@
-"""The report pages' constants, formatters, rule text, page components and query text.
+"""The report pages' constants, formatters, rule text and page components.
 
-Everything here is pure: values in, text, HTML or SQL out, no database. report_html.py imports
+Everything here is pure: values in, text or HTML out, no database. report_html.py imports
 these names back, so `report_html.<name>` keeps working for its callers and tests.
 """
 
@@ -270,24 +270,3 @@ def timeline(buckets: list[dict[str, Any]]) -> str:
         f'<text x="{width}" y="{height - 4}" text-anchor="end">{last:%H:%M} UTC · peak '
         f"{top:,} requests</text></svg>"
     )
-
-
-# --- query text --------------------------------------------------------------------------
-
-
-def _percentiles(source: str, keys: list[str]) -> str:
-    """p50/p90/p99 per key over a source of (keys..., steps, counts) histogram rows, exactly
-    as stats.Histogram ranks them."""
-    k = ",".join(keys)
-    return (
-        f"WITH s AS ({source}), h AS (SELECT {k},x.ms,sum(x.n) AS n FROM s CROSS JOIN LATERAL "
-        f"histogram(s.steps,s.counts::bigint[]) x GROUP BY {k},x.ms), c AS (SELECT {k},ms,"
-        f"sum(n) OVER (PARTITION BY {k} ORDER BY ms) AS seen,sum(n) OVER (PARTITION BY {k}) "
-        f"AS total FROM h) SELECT {k},min(ms) FILTER (WHERE seen>=ceil(total*0.5)) AS p50,"
-        "min(ms) FILTER (WHERE seen>=ceil(total*0.9)) AS p90,"
-        f"min(ms) FILTER (WHERE seen>=ceil(total*0.99)) AS p99 FROM c GROUP BY {k}"
-    )
-
-
-def _keyed(rows: list[dict], keys: list[str]) -> dict[tuple, dict]:
-    return {tuple(row[k] for k in keys): row for row in rows}

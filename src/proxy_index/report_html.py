@@ -33,7 +33,9 @@ import psycopg
 from psycopg.rows import dict_row
 
 from . import storage
-from .orchestrator.control import read_setting
+from .report_data import _keyed as _keyed
+from .report_data import _percentiles as _percentiles
+from .report_data import batch_data as batch_data
 from .report_parts import CSS as CSS
 from .report_parts import INDEX as INDEX
 from .report_parts import INDEX_LIMIT as INDEX_LIMIT
@@ -45,8 +47,6 @@ from .report_parts import RUN_STATUS as RUN_STATUS
 from .report_parts import STOP_REASONS as STOP_REASONS
 from .report_parts import STOP_SHARE as STOP_SHARE
 from .report_parts import TOP as TOP
-from .report_parts import _keyed as _keyed
-from .report_parts import _percentiles as _percentiles
 from .report_parts import badge as badge
 from .report_parts import cards as cards
 from .report_parts import duration as duration
@@ -66,154 +66,6 @@ from .report_parts import timeline as timeline
 from .report_parts import when as when
 
 # --- queries -----------------------------------------------------------------------------
-
-
-def batch_data(conn: psycopg.Connection, batch_id: int) -> dict[str, Any] | None:
-    batch = conn.execute(
-        "SELECT b.batch_id,b.kind,b.country_code,c.name AS country,r.slug AS region,b.target_id,"
-        "t.label AS target_label,t.url AS target_url,b.scheduled_for,b.start_at,b.started_at,"
-        "b.finished_at,b.status FROM test_batches b JOIN runner_regions r "
-        "ON r.region_id=b.region_id JOIN countries c ON c.country_code=b.country_code "
-        "JOIN targets t ON t.target_id=b.target_id WHERE b.batch_id=%s",
-        (batch_id,),
-    ).fetchone()
-    if batch is None:
-        return None
-    params = {"batch": batch_id, "since": batch["scheduled_for"] - timedelta(days=1)}
-    runs = conn.execute(
-        "SELECT br.product_id,p.provider,p.name AS product,br.node_id,n.host,br.status,"
-        "br.stop_reason,br.error,br.started_at,br.finished_at,br.requests,br.successes,"
-        "br.unique_ips,br.challenges,br.blocks,br.timeouts,br.proxy_errors,br.bytes_up,"
-        "br.bytes_down,br.run_key,br.last_progress_at,n.version AS node_version,"
-        "tr.summary->'config_overrides'->>'census_rule_version' AS census_rule_version "
-        "FROM batch_runs br "
-        "JOIN products p USING(product_id) "
-        "LEFT JOIN nodes n ON n.node_id=br.node_id "
-        "LEFT JOIN test_runs tr ON tr.run_key=br.run_key WHERE br.batch_id=%(batch)s "
-        "ORDER BY p.provider,p.name",
-        params,
-    ).fetchall()
-    latency = _keyed(
-        conn.execute(
-            _percentiles(
-                "SELECT br.product_id,b.histogram_steps AS steps,b.histogram_counts AS counts "
-                "FROM batch_runs br JOIN run_buckets b ON b.run_key=br.run_key "
-                "AND b.bucket_start>=%(since)s WHERE br.batch_id=%(batch)s",
-                ["product_id"],
-            ),
-            params,
-        ).fetchall(),
-        ["product_id"],
-    )
-    new_ips = _keyed(
-        conn.execute(
-            "SELECT br.product_id,count(*)::bigint AS new_ips FROM batch_runs br "
-            "JOIN test_runs tr ON tr.run_key=br.run_key "
-            "CROSS JOIN LATERAL (SELECT DISTINCT o.ip_id FROM ip_observations o "
-            " WHERE o.run_key=br.run_key AND o.bucket_start>=%(since)s) o "
-            "JOIN product_ips pi ON pi.product_id=br.product_id AND pi.ip_id=o.ip_id "
-            "WHERE br.batch_id=%(batch)s AND pi.first_seen>=tr.started_at GROUP BY 1",
-            params,
-        ).fetchall(),
-        ["product_id"],
-    )
-    timelines: dict[int, list[dict]] = {}
-    for row in conn.execute(
-        "SELECT br.product_id,b.bucket_start,sum(b.completed)::bigint AS requests,"
-        "sum(b.successes)::bigint AS successes FROM batch_runs br JOIN run_buckets b "
-        "ON b.run_key=br.run_key AND b.bucket_start>=%(since)s WHERE br.batch_id=%(batch)s "
-        "GROUP BY 1,2 ORDER BY 1,2",
-        params,
-    ):
-        timelines.setdefault(row["product_id"], []).append(row)
-
-    geo = (
-        "FROM batch_runs br JOIN run_geo_buckets g ON g.run_key=br.run_key "
-        "AND g.bucket_start>=%(since)s "
-        "JOIN enrichment_location_fields l ON l.location_id=g.location_id "
-        "JOIN enrichment_network_fields n ON n.network_id=g.network_id WHERE br.batch_id=%(batch)s"
-    )
-    city_keys = ["product_id", "region", "city"]
-    cities = conn.execute(
-        "SELECT br.product_id,l.region,l.city,sum(g.completed)::bigint AS requests,"
-        f"sum(g.successes)::bigint AS successes {geo} GROUP BY 1,2,3 "
-        "ORDER BY 4 DESC,2,3",
-        params,
-    ).fetchall()
-    city_latency = _keyed(
-        conn.execute(
-            _percentiles(
-                "SELECT br.product_id,l.region,l.city,g.histogram_steps AS steps,"
-                f"g.histogram_counts AS counts {geo}",
-                city_keys,
-            ),
-            params,
-        ).fetchall(),
-        city_keys,
-    )
-    asn_keys = ["product_id", "asn"]
-    asns = conn.execute(
-        "SELECT br.product_id,n.asn,max(coalesce(n.asn_organization,n.organization)) AS org,"
-        "string_agg(DISTINCT n.usage_type,', ') AS usage_type,"
-        "sum(g.completed)::bigint AS requests,sum(g.successes)::bigint AS successes "
-        f"{geo} GROUP BY 1,2 ORDER BY 5 DESC,2",
-        params,
-    ).fetchall()
-    asn_latency = _keyed(
-        conn.execute(
-            _percentiles(
-                "SELECT br.product_id,n.asn,g.histogram_steps AS steps,"
-                f"g.histogram_counts AS counts {geo}",
-                asn_keys,
-            ),
-            params,
-        ).fetchall(),
-        asn_keys,
-    )
-    asn_ips = _keyed(
-        conn.execute(
-            "SELECT br.product_id,n.asn,count(DISTINCT o.ip_id)::bigint AS ips "
-            "FROM batch_runs br JOIN ip_observations o ON o.run_key=br.run_key "
-            "AND o.bucket_start>=%(since)s "
-            "JOIN LATERAL (SELECT max(release_id) AS release_id FROM run_enrichments re "
-            " WHERE re.run_key=br.run_key) re ON true "
-            "JOIN ip_enrichment e ON e.ip_id=o.ip_id AND e.release_id=re.release_id "
-            "JOIN enrichment_network_fields n ON n.network_id=e.network_id "
-            "WHERE br.batch_id=%(batch)s GROUP BY 1,2",
-            params,
-        ).fetchall(),
-        asn_keys,
-    )
-    for run in runs:
-        pid = run["product_id"]
-        run.update(latency.get((pid,), {"p50": None, "p90": None, "p99": None}))
-        run["new_ips"] = (
-            new_ips[(pid,)]["new_ips"] if (pid,) in new_ips else (0 if run["run_key"] else None)
-        )
-        run["timeline"] = timelines.get(pid, [])
-        run["cities"] = [
-            c | {"p50": city_latency.get(tuple(c[k] for k in city_keys), {}).get("p50")}
-            for c in cities
-            if c["product_id"] == pid
-        ][:TOP]
-        run["asns"] = [
-            a
-            | {
-                "p50": asn_latency.get((pid, a["asn"]), {}).get("p50"),
-                "ips": asn_ips.get((pid, a["asn"]), {}).get("ips"),
-            }
-            for a in asns
-            if a["product_id"] == pid
-        ][:TOP]
-    batch["runs"] = runs
-    batch["min_sample"] = int(read_setting(conn, "census.min_sample"))
-    batch["events"] = conn.execute(
-        "SELECT e.at,e.kind,p.provider,p.name AS product,e.signal,e.severity,e.data "
-        "FROM test_events e LEFT JOIN products p USING(product_id) "
-        "WHERE e.batch_id=%(batch)s AND e.at>=%(since)s ORDER BY e.at,e.event_id",
-        params,
-    ).fetchall()
-    return batch
 
 
 def index_data(conn: psycopg.Connection, now: datetime, limit: int = INDEX_LIMIT) -> dict[str, Any]:
