@@ -105,18 +105,18 @@ def merge(base, overrides):
     return result
 
 
-def validate(config):
-    def weights(values, keys):
-        if (
-            set(values) != set(keys)
-            or any(
-                type(v) not in (int, float) or not math.isfinite(v) or v < 0
-                for v in values.values()
-            )
-            or sum(values.values()) <= 0
-        ):
-            raise ValueError("Weights must cover known components and have a positive total")
+def _weights(values, keys):
+    if (
+        set(values) != set(keys)
+        or any(
+            type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in values.values()
+        )
+        or sum(values.values()) <= 0
+    ):
+        raise ValueError("Weights must cover known components and have a positive total")
 
+
+def validate(config):
     known = {
         "name",
         "status",
@@ -148,8 +148,8 @@ def validate(config):
         raise ValueError("Unknown methodology setting")
     if "balanced" not in config.get("profiles", {}):
         raise ValueError("The balanced profile is required")
-    weights(config["weights"], KEYS)
-    weights(config["target_weights"], ("reliability", "speed"))
+    _weights(config["weights"], KEYS)
+    _weights(config["target_weights"], ("reliability", "speed"))
     for name in ("minimum_requests", "score_valid_hours", "refresh_seconds", "sample_limit"):
         if type(config[name]) is not int or config[name] <= 0:
             raise ValueError(f"Invalid {name}")
@@ -161,10 +161,10 @@ def validate(config):
         config["required_targets"]
     ):
         raise ValueError("Required targets must be distinct and nonempty")
-    weights(config["benchmark_weights"], config["required_targets"])
+    _weights(config["benchmark_weights"], config["required_targets"])
     if set(config["peer"]) != {"diversity"}:
         raise ValueError("Unknown peer setting")
-    weights(config["peer"]["diversity"], DIMENSIONS)
+    _weights(config["peer"]["diversity"], DIMENSIONS)
     if abs(sum(config["peer"]["diversity"].values()) - 1) > 1e-9:
         raise ValueError("Diversity weights must sum to one")
     if set(config["grades"]) != {"A+", "A", "B+", "B", "C+", "C", "D"}:
@@ -177,7 +177,7 @@ def validate(config):
     ):
         raise ValueError("Invalid grade thresholds")
     for values in config.get("profiles", {}).values():
-        weights(values, KEYS)
+        _weights(values, KEYS)
     uptime = config.get("uptime", {})
     if set(uptime) - set(UPTIME) or any(type(v) is not int or v < 1 for v in uptime.values()):
         raise ValueError("Invalid uptime settings")
