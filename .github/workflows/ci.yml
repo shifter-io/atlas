@@ -1,7 +1,9 @@
 # The framework's Tier 1 (CAMP-1 PLAN §17), on every ready pull request, every
-# push to main and owner dispatches.
+# push to main, every night and on owner dispatches. Pull requests skip the tests
+# marked `slow` (over 60 s alone); the other events run every test. The nightly run
+# compares HEAD with itself, so it runs everything.
 #
-# Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-8cpu, with all
+# Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
 # pytest-xdist on every CPU, each worker with its own databases in one PostgreSQL
 # (CI-SPEED-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
@@ -20,6 +22,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  schedule:
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -42,7 +46,7 @@ jobs:
   tier1:
     name: tier1
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, ci-8cpu]
+    runs-on: [self-hosted, ci-32cpu]
     timeout-minutes: 15
     defaults:
       run:
@@ -58,7 +62,7 @@ jobs:
 
       - name: What changed
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'schedule' && 'HEAD' || github.event.before }}
         run: |
           # A dispatch has no "before": compare with the parent.
           case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
@@ -174,6 +178,8 @@ jobs:
         if: env.CODE == 'true'
         env:
           COVERAGE_FILE: ${{ runner.temp }}/ev/.coverage
+          # Pull requests skip the tests marked slow.
+          SKIP: ${{ github.event_name == 'pull_request' && 'not slow and ' || '' }}
         run: |
           # Each background check writes $EV/<name>.log and $EV/<name>.rc; after the tests,
           # every check with a non-zero status prints its log and fails the step.
@@ -192,19 +198,21 @@ jobs:
           background complexity complexity
           background limits uv run --no-editable python scripts/ci/limits_check.py . "$BASE" HEAD
           # CAMP-1 Tier 1 step 6: the campaign scope suite on its own.
+          scope=()
+          [ -z "$SKIP" ] || scope=(-m "not slow")
           background scope uv run --no-editable pytest -p no:xdist -p no:cacheprovider \
-            --basetemp="$RUNNER_TEMP/scope-tmp" tests/test_campaign_scope.py -q
+            --basetemp="$RUNNER_TEMP/scope-tmp" "${scope[@]}" tests/test_campaign_scope.py -q
           background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
 
           # Every test, database tests included, with branch coverage: one xdist worker per
           # CPU, then the `serial` set alone, appending to the same coverage.
           report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
+          uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "${SKIP}not serial" \
             --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
           serial=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
+          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m "${SKIP}serial" \
             --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
             --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
           # Exit status 5: no test is marked serial.
