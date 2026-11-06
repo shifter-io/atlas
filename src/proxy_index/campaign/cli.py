@@ -346,7 +346,7 @@ def _plan(args) -> int:
 
 
 async def _manager_step(args) -> dict:
-    from . import browser_hosts, deploy, manager_orch, teardown
+    from . import browser_hosts, deploy, manager_orch
 
     if args.manager_action in manager_orch.ACTIONS:  # MANAGER-ORCH-1
         return await manager_orch.run(args, _cloud)
@@ -367,38 +367,50 @@ async def _manager_step(args) -> dict:
     if account is None:
         raise deploy.DeployError("no manager is recorded")
     async with _cloud(account) as cloud:
-        if args.manager_action == "teardown":
-            return await teardown.teardown(
-                cloud,
-                args.inventory,
-                args.after_collect,
-                keep_worker_assets=args.keep_worker_assets,
-            )
-        address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
-        if args.manager_action == "allow-me":
-            return await deploy.allow_me(cloud, args.inventory, address)
-        from ..archive.spaces import manager_settings, push_settings
-        from .contracts import ACCOUNTS
-        from .do_api import keychain_token
-        from .image import ensure_mac_key
-        from .planspec import parse_networks
+        return await _manager_on_cloud(args, cloud)
 
-        job = deploy.DeployJob(
-            args.account,
-            args.wheel,
-            args.requirements,
-            ensure_mac_key(args.mac_key),
+
+async def _manager_on_cloud(args, cloud) -> dict:
+    """`manager teardown`, `allow-me` and `deploy` on the account's cloud."""
+    from . import deploy, teardown
+
+    if args.manager_action == "teardown":
+        return await teardown.teardown(
+            cloud,
             args.inventory,
-            deploy.credential_files(args.credentials_file, parse_networks(args.networks)),
-            address,
-            keychain_token(ACCOUNTS[args.account]),  # read only when streamed
-            args.size,
+            args.after_collect,
+            keep_worker_assets=args.keep_worker_assets,
         )
-        spaces = manager_settings(args.spaces_file) if args.spaces_file else None
-        result = await deploy.deploy(cloud, job)
-        if spaces:  # the raw-data archive's settings (ARCHIVE-1), after the manager is up
-            await push_settings(args.inventory, spaces)
-        return result
+    address = deploy.checked_ipv4(args.mac_ip) if args.mac_ip else deploy.mac_ipv4()
+    if args.manager_action == "allow-me":
+        return await deploy.allow_me(cloud, args.inventory, address)
+    return await _deploy(args, cloud, address)
+
+
+async def _deploy(args, cloud, address: str) -> dict:
+    from ..archive.spaces import manager_settings, push_settings
+    from . import deploy
+    from .contracts import ACCOUNTS
+    from .do_api import keychain_token
+    from .image import ensure_mac_key
+    from .planspec import parse_networks
+
+    job = deploy.DeployJob(
+        args.account,
+        args.wheel,
+        args.requirements,
+        ensure_mac_key(args.mac_key),
+        args.inventory,
+        deploy.credential_files(args.credentials_file, parse_networks(args.networks)),
+        address,
+        keychain_token(ACCOUNTS[args.account]),  # read only when streamed
+        args.size,
+    )
+    spaces = manager_settings(args.spaces_file) if args.spaces_file else None
+    result = await deploy.deploy(cloud, job)
+    if spaces:  # the raw-data archive's settings (ARCHIVE-1), after the manager is up
+        await push_settings(args.inventory, spaces)
+    return result
 
 
 def _manager(args) -> int:
@@ -552,46 +564,16 @@ def _shot_parsers(actions) -> None:
 
 def _shot(args) -> int:
     from .collector import MANAGER_ROOT
-    from .contracts import runtime_dir
-    from .do_api import DigitalOcean, file_token
-    from .fanout import OpenSSHRemote
-    from .planspec import PlanError, parse_networks
+    from .planspec import PlanError
     from .probe import ProbeError
-    from .shot import ShotInputs, recover, shot
 
-    secrets = MANAGER_ROOT / ".secrets"
-    regions = tuple(r.strip() for r in (args.regions or "").split(",") if r.strip())
     try:
-        if len(set(regions)) != len(regions):
-            raise ValueError("--regions must be distinct")
-        inputs = ShotInputs(
-            args.root,
-            args.output or MANAGER_ROOT / "shots",
-            parse_networks(args.networks) if args.networks else (),
-            regions,
-            args.requests,
-            args.size,
-            parse_pairs(args.size_by_network),
-            {n: c.upper() for n, c in parse_pairs(args.country_by_network).items()},
-            args.lead_minutes * 60,
-        )
+        inputs = _shot_inputs(args, MANAGER_ROOT)
     except (PlanError, ValueError) as exc:
         print(f"Not fired: {exc}", file=sys.stderr)
         return 3
-
-    async def run() -> dict:
-        cancel_on_signals()
-        async with DigitalOcean(file_token(secrets / "do-token")) as cloud:
-            if args.remove:
-                return await recover(cloud, args.remove)
-            return await shot(
-                cloud,
-                lambda folder: OpenSSHRemote(secrets / "worker-key", runtime_dir(folder), 0),
-                inputs,
-            )
-
     try:
-        result = asyncio.run(run())
+        result = asyncio.run(_shot_run(args, inputs, MANAGER_ROOT / ".secrets"))
     except ProbeError as exc:
         print(f"Not fired: {exc}", file=sys.stderr)
         return 3
@@ -606,6 +588,44 @@ def _shot(args) -> int:
         )
     )
     return 0 if result["workers_left"] == 0 and "error" not in result else 3
+
+
+def _shot_inputs(args, manager_root: Path):
+    """The shot's inputs from its command line (PlanError or ValueError when invalid)."""
+    from .planspec import parse_networks
+    from .shot import ShotInputs
+
+    regions = tuple(r.strip() for r in (args.regions or "").split(",") if r.strip())
+    if len(set(regions)) != len(regions):
+        raise ValueError("--regions must be distinct")
+    return ShotInputs(
+        args.root,
+        args.output or manager_root / "shots",
+        parse_networks(args.networks) if args.networks else (),
+        regions,
+        args.requests,
+        args.size,
+        parse_pairs(args.size_by_network),
+        {n: c.upper() for n, c in parse_pairs(args.country_by_network).items()},
+        args.lead_minutes * 60,
+    )
+
+
+async def _shot_run(args, inputs, secrets: Path) -> dict:
+    from .contracts import runtime_dir
+    from .do_api import DigitalOcean, file_token
+    from .fanout import OpenSSHRemote
+    from .shot import recover, shot
+
+    cancel_on_signals()
+    async with DigitalOcean(file_token(secrets / "do-token")) as cloud:
+        if args.remove:
+            return await recover(cloud, args.remove)
+        return await shot(
+            cloud,
+            lambda folder: OpenSSHRemote(secrets / "worker-key", runtime_dir(folder), 0),
+            inputs,
+        )
 
 
 def _outcomes(result: dict) -> dict[str, int]:
