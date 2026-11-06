@@ -24,7 +24,7 @@ from pathlib import Path
 
 from proxy_index import __version__, storage
 from proxy_index.enrichment import LocalEnricher
-from proxy_index.node import Active, NodeAgent, provider_factory
+from proxy_index.node import Active, NodeAgent, NodeSettings, provider_factory
 from proxy_index.orchestrator import nodework
 from proxy_index.orchestrator.control import write_settings
 from proxy_index.orchestrator.db import Database
@@ -164,16 +164,18 @@ async def collect(args, state, folder, stop):
     census_slot = datetime.fromisoformat(state["started_at"])
     with LocalEnricher() as enricher:
         agent = LocalAgent(
-            "",
-            "",
-            provider="shifter",
-            product="residential",
-            region="local-mac",
-            proxy_factory=factory,
-            work_dir=ROOT / "results/shifter-local",
-            enricher=enricher,
-            mmdb=enricher.path,
-            progress_interval=15,
+            NodeSettings(
+                "",
+                "",
+                provider="shifter",
+                product="residential",
+                region="local-mac",
+                proxy_factory=factory,
+                work_dir=ROOT / "results/shifter-local",
+                enricher=enricher,
+                mmdb=enricher.path,
+                progress_interval=15,
+            )
         )
         agent.db, agent.node_id = db, node
         agent.identity = {"node_id": node, "product_id": product}
