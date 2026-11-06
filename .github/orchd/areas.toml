@@ -68,7 +68,7 @@ onboarding = [
     "docs/onboarding.html",
 ]
 # the manager: the orchestrator package (admin API, nodes, staging, events), the node process and
-# its TLS, the staging config, the local overnight collection that drives them, and their tests
+# its TLS, the staging config and their tests
 orchestrator = [
     "src/proxy_index/orchestrator/**",
     "src/proxy_index/node.py",
@@ -83,7 +83,6 @@ orchestrator = [
     "tests/test_tape_events.py",
     "tests/test_outage_scenario.py",
     "configs/staging.toml",
-    "scripts/shifter_local_overnight.py",
 ]
 # the daily test and its inputs: the daily, DB-IP, enrichment, hour-estimate and hour-formula
 # packages, the formulas they publish, db-ip/ and their tests
