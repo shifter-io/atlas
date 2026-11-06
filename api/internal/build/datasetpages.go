@@ -14,9 +14,9 @@ import (
 // "/v1/networks/<slug>/chart?kind=<kind>&range=<r>" (the all-networks answer
 // under slug and kind "all"), and in a v4 build "/v1/countries" and
 // "/v1/countries/<CC>" (contract K11: the country pages are pages of the
-// site's design). The answers with q and page, and the region and city
-// pages, are regenerated from the dataset's lists (DatasetLists); search is
-// not a page.
+// site's design). The network lists' first pages are the dataset's lists
+// (DatasetLists); further pages, the answers with q and the region and city
+// pages are read from the API; search is not a page.
 type DatasetPages map[string]any
 
 // datasetPages is pg's page answers by request.

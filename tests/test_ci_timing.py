@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -362,6 +363,24 @@ def steps(workflow, job):
     return yaml.safe_load((WORKFLOWS / workflow).read_text())["jobs"][job]["steps"]
 
 
+def timing_inputs(script, *, serial):
+    """The results files the CI time step passes to timing.py, run with a stand-in python3."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "bin").mkdir()
+        stub = root / "bin" / "python3"
+        stub.write_text('#!/bin/sh\nfor a in "$@"; do echo "$a"; done\n')
+        stub.chmod(0o755)
+        (root / "junit.xml").touch()
+        if serial:
+            (root / "junit-serial.xml").touch()
+        env = {"PATH": f"{root / 'bin'}:{os.environ['PATH']}", "EV": str(root)}
+        out = subprocess.run(
+            ["bash", "-c", script], env=env, capture_output=True, text=True, check=True
+        ).stdout
+        return [Path(line).name for line in out.splitlines() if line.endswith(".xml")]
+
+
 def test_the_workflows_time_their_tests_and_keep_the_record():
     for workflow, job, name, artifact in (
         ("ci.yml", "tier1", "CI time (slowest tests, budgets)", "ci-timing"),
@@ -383,7 +402,10 @@ def test_the_workflows_time_their_tests_and_keep_the_record():
         assert upload["with"]["retention-days"] == 90, workflow
     ci = steps("ci.yml", "tier1")
     timed = next(s for s in ci if s.get("id") == "timing")
-    assert '"$EV/junit.xml" "$EV/junit-serial.xml"' in timed["run"]
+    # The serial results are read whenever the serial set ran (it runs only when a test is
+    # marked serial, CI-FAST-2); the parallel results always.
+    assert timing_inputs(timed["run"], serial=True) == ["junit.xml", "junit-serial.xml"]
+    assert timing_inputs(timed["run"], serial=False) == ["junit.xml"]
     api = steps("api.yml", "api")
     assert (
         '--go --log "$EV/go-latency.json"'
