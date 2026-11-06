@@ -75,6 +75,7 @@ func loadNet(t *testing.T, n *store.NetLists, tx pgx.Tx, ids ...int64) map[int64
 // The rows of a network list read through NetLists equal those read through
 // Lists, field by field, in every dimension it has.
 func TestNetListsReadTheListRows(t *testing.T) {
+	t.Parallel()
 	_, pool := networkLists(t)
 	within(t, pool, func(tx pgx.Tx) {
 		ids := []int64{1, 2, 3}
@@ -110,6 +111,7 @@ func TestNetListsReadTheListRows(t *testing.T) {
 // A second load reads only the new id and drops the lists it no longer names;
 // a list dropped and named again is read again.
 func TestNetListsReadOnlyNewLists(t *testing.T) {
+	t.Parallel()
 	_, pool := networkLists(t)
 	n := store.NewNetLists(pool)
 	within(t, pool, func(tx pgx.Tx) {
@@ -134,6 +136,7 @@ func TestNetListsReadOnlyNewLists(t *testing.T) {
 
 // A failed load keeps nothing: the next one reads every list again.
 func TestNetListsFailedLoadEmpties(t *testing.T) {
+	t.Parallel()
 	db, pool := networkLists(t)
 	n := store.NewNetLists(pool)
 	within(t, pool, func(tx pgx.Tx) { loadNet(t, n, tx, 1) })
@@ -171,6 +174,7 @@ func dim(t testing.TB, l *store.NetList, dimension string) *store.NetRows {
 // A list's rows are read from the database the first time a reader asks for
 // them, in a transaction of their own, then served from the row cache.
 func TestNetListRowsAreReadThenCached(t *testing.T) {
+	t.Parallel()
 	_, pool := networkLists(t)
 	n := store.NewNetLists(pool)
 	var lists map[int64]*store.NetList
@@ -195,6 +199,7 @@ func TestNetListRowsAreReadThenCached(t *testing.T) {
 // retained); once its rows are deleted, reading them fails instead of giving
 // another list's rows or none.
 func TestNetListOfAnEarlierBuild(t *testing.T) {
+	t.Parallel()
 	db, pool := networkLists(t)
 	n := store.NewNetLists(pool)
 	var before, after map[int64]*store.NetList

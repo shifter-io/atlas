@@ -73,6 +73,7 @@ var (
 )
 
 func TestNetListRowsAndOrder(t *testing.T) {
+	t.Parallel()
 	_, l := fakeList(t, testPlaces, testNetworks, []fake{
 		{'y', 2, 7, 5, 10, 9, 70},
 		{'y', 3, 8, 9, -1, -1, -1},
@@ -102,6 +103,7 @@ func TestNetListRowsAndOrder(t *testing.T) {
 
 // Rows naming the same place or ASN share one name entry.
 func TestNetListSharesNames(t *testing.T) {
+	t.Parallel()
 	n, l := fakeList(t, testPlaces, testNetworks, []fake{{'y', 2, 7, 1, 1, 1, 1}, {'g', 2, -1, 1, 1, 1, 1}, {'a', -1, 7, 1, 1, 1, 1}})
 	if len(n.names.places) != 1 || len(n.names.networks) != 1 || dim(t, l, "city").Row(0).Place != dim(t, l, "city_asn").Row(0).Place {
 		t.Errorf("names %d places, %d networks", len(n.names.places), len(n.names.networks))
@@ -109,6 +111,7 @@ func TestNetListSharesNames(t *testing.T) {
 }
 
 func TestNetListSearch(t *testing.T) {
+	t.Parallel()
 	_, l := fakeList(t, testPlaces, testNetworks, []fake{
 		{'y', 2, 7, 5, 1, 1, 1}, // United States, San Jose, AS64512
 		{'y', 3, 8, 9, 1, 1, 1}, // United Kingdom, London, AS64496
@@ -144,6 +147,7 @@ func TestNetListSearch(t *testing.T) {
 }
 
 func TestNetListCounterRange(t *testing.T) {
+	t.Parallel()
 	n := NewNetLists(nil)
 	s := &scannedRow{id: 5, code: 'c', place: -1, network: -1}
 	s.Ips, s.Completed = 1, null32-1
@@ -166,6 +170,7 @@ const propertySeed = 20261105
 // Over random rows and queries, Match and Totals equal a brute-force pass
 // over the rows' names.
 func TestNetListSearchAndTotalsProperty(t *testing.T) {
+	t.Parallel()
 	t.Logf("seed %d", propertySeed)
 	rng := rand.New(rand.NewPCG(propertySeed, 0))
 	words := strings.Fields("north south east west port lake hill river net link fast data")
@@ -249,6 +254,7 @@ func containsAll(text string, words []string) bool {
 // same tables (the first list leaves them spare capacity). Under -race this
 // fails if a load writes memory an earlier list reads.
 func TestNetListReadersBesideALoad(t *testing.T) {
+	t.Parallel()
 	n, l := fakeList(t, testPlaces, testNetworks, []fake{{'y', 2, 7, 5, 1, 1, 1}, {'y', 3, 8, 9, 1, 1, 1}, {'y', 4, 9, 7, 1, 1, 1}})
 	if cap(l.names.places) == len(l.names.places) {
 		t.Fatal("the fixture leaves no spare capacity: a later load would not share the tables")
@@ -287,6 +293,7 @@ func TestNetListReadersBesideALoad(t *testing.T) {
 // The row cache keeps the rows asked for last within its limit, and never
 // rows larger than the limit.
 func TestRowCacheKeepsTheRecentRowsWithinItsLimit(t *testing.T) {
+	t.Parallel()
 	rows := func(n int) *NetRows { return &NetRows{rows: make([]netRow, n)} }
 	c := rowCache{limit: 10 * netRowBytes}
 	a, b, d := rows(4), rows(4), rows(4)

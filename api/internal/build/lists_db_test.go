@@ -249,6 +249,7 @@ func datasetText(t *testing.T, res *build.Result) []byte {
 }
 
 func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
@@ -301,6 +302,7 @@ func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
 }
 
 func TestOnlyNewListsAreFetched(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())

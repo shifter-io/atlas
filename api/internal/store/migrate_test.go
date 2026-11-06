@@ -12,6 +12,7 @@ var appliedChecksums = map[string]string{
 }
 
 func TestAppliedMigrationsAreNeverEdited(t *testing.T) {
+	t.Parallel()
 	migrations, err := Migrations()
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +34,7 @@ func TestAppliedMigrationsAreNeverEdited(t *testing.T) {
 }
 
 func TestEarlierCommentOnlyChecksumsHaveTheSameSchema(t *testing.T) {
+	t.Parallel()
 	migrations, err := Migrations()
 	if err != nil {
 		t.Fatal(err)

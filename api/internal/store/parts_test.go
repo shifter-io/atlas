@@ -44,6 +44,7 @@ func group(windows ...string) string {
 }
 
 func TestDenseGivesASparseDaySeriesEveryBucketBack(t *testing.T) {
+	t.Parallel()
 	data := map[int]bool{0: true, 7: true, 287: true}
 	week := window(day.Add(-6*24*time.Hour), 168, `null`, `[`+point(day, 3)+`]`) // a 7d series is never refilled
 	for _, c := range []struct {
@@ -75,6 +76,7 @@ func TestDenseGivesASparseDaySeriesEveryBucketBack(t *testing.T) {
 }
 
 func TestEmptyPointIsWhatTheFrameworkWrites(t *testing.T) {
+	t.Parallel()
 	// proxy-index aggregate.series() for a bucket without rows, keys in jsonb order.
 	want := `{"at": "2026-11-01T00:05:00+00:00", "uptime": null, "completed": 0, "successes": 0, ` +
 		`"latency_ms": {"p50": null, "p90": null, "p95": null, "p99": null}, "unique_ips": null, "success_rate": null, ` +
@@ -88,6 +90,7 @@ func TestEmptyPointIsWhatTheFrameworkWrites(t *testing.T) {
 }
 
 func TestDenseLeavesWholeAndOtherSeriesAsTheyAre(t *testing.T) {
+	t.Parallel()
 	whole := window(day, 24, `{"target": "generic_http"}`, daySeries(day, map[int]bool{3: true}, true, false))
 	gappy := window(day, 168, `null`, `[`+point(day, 3)+`]`)
 	for name, product := range map[string]string{
@@ -109,6 +112,7 @@ func TestDenseLeavesWholeAndOtherSeriesAsTheyAre(t *testing.T) {
 }
 
 func TestDenseRefusesWhatItCannotRefill(t *testing.T) {
+	t.Parallel()
 	timed := `{"target": "generic_http"}`
 	off := window(day, 24, timed, `[`+point(day.Add(time.Minute), 3)+`]`)
 	twice := window(day, 24, timed, `[`+point(day, 3)+`, `+point(day, 4)+`]`)
@@ -131,6 +135,7 @@ func TestDenseRefusesWhatItCannotRefill(t *testing.T) {
 }
 
 func TestObjectFieldsSpanTheRawValues(t *testing.T) {
+	t.Parallel()
 	raw := []byte(` { "a" : [1, {"x": 2}] ,"b\"c":"d",  "e": null } `)
 	fields, err := objectFields(raw)
 	if err != nil {
@@ -151,6 +156,7 @@ func TestObjectFieldsSpanTheRawValues(t *testing.T) {
 }
 
 func TestWithProductsPutsTheGroupsWhereJsonbOrdersThem(t *testing.T) {
+	t.Parallel()
 	two := func(out *bytes.Buffer) error { out.WriteString(`{"id": 1}, {"id": 2}`); return nil }
 	none := func(*bytes.Buffer) error { return nil }
 	for head, want := range map[string]string{
@@ -182,6 +188,7 @@ func TestWithProductsPutsTheGroupsWhereJsonbOrdersThem(t *testing.T) {
 }
 
 func TestJsonbOrderAndPythonStamps(t *testing.T) {
+	t.Parallel()
 	for _, c := range [][2]string{{"runs", "parts"}, {"parts", "products"}, {"produces", "products"}, {"products", "protocol"}, {"products", "readiness"}} {
 		if !jsonbBefore(c[0], c[1]) || jsonbBefore(c[1], c[0]) {
 			t.Errorf("%s before %s", c[0], c[1])

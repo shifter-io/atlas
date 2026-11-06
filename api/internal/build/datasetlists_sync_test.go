@@ -17,6 +17,7 @@ import (
 // to the file's total. The expected answers are the build's (what the server
 // renders), asked for by the build's keys.
 func TestTheDatasetFileHoldsEveryListsFirstPage(t *testing.T) {
+	t.Parallel()
 	file, res := v4File(t)
 	at, lists := readLists(t, file)
 	pg := res.Pages
@@ -104,6 +105,7 @@ func everyPage(t *testing.T, what string, l fileList, rows func(int) int) int {
 // every network kind's ranges and dimensions, and each dimension's row
 // length and field types.
 func TestTheDatasetFileHoldsOnlyWhatThePagesShow(t *testing.T) {
+	t.Parallel()
 	file, _ := v4File(t)
 	var keys []string
 	for _, kv := range pairs(t, file) {

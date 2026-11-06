@@ -13,6 +13,7 @@ import (
 // Framework targets carry their engine, in sort order, and a changed engine
 // changes the fingerprint (so the answers are rebuilt).
 func TestFrameworkTargetsCarryTheirEngine(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	db.Exec(t, testscale.BrowserTargetsSQL())
 	in := load(t, db)
@@ -41,6 +42,7 @@ func TestFrameworkTargetsCarryTheirEngine(t *testing.T) {
 // it is refused (the server keeps serving its previous version), never read
 // as if every target were http.
 func TestADatabaseWithoutTheEngineColumnIsRefused(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	db.Exec(t, "ALTER TABLE targets DROP COLUMN engine CASCADE")
 	ctx := context.Background()
