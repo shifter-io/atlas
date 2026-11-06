@@ -151,8 +151,8 @@ func sameAsWhole(t *testing.T, expected, res *build.Result) {
 	// capped snapshot pages through the same rows as the whole one.
 	for _, r := range []string{"24h", "7d", "30d"} {
 		for _, d := range []string{"country", "region", "city", "asn"} {
-			w, _ := expected.Pages.List("", "shifter/residential", r, d, "", 1)
-			g, ok := res.Pages.List("", "shifter/residential", r, d, "", 1)
+			w, _, _ := expected.Pages.List(context.Background(), "", "shifter/residential", r, d, "", 1)
+			g, ok, _ := res.Pages.List(context.Background(), "", "shifter/residential", r, d, "", 1)
 			if !ok || !reflect.DeepEqual(generic(t, w), generic(t, g)) {
 				t.Errorf("%s %s: capped page %+v, whole page %+v", r, d, g, w)
 			}

@@ -209,28 +209,32 @@ class Collector:
         members = await self.cloud.project_droplet_ids(spec.project_id)
         self.unreachable = set()
         for droplet in found:
-            checks = role_checks(droplet, scope, "worker")
-            hour = int(droplet.name.split("-")[2][1:]) if checks["name"] else None
-            if hour in hours and hours[hour].state in LAUNCHABLE:
-                continue  # the tick owns a launching hour; its creates may not be recorded yet
-            entry = known.get(droplet.id)
-            stray = entry is not None and entry[1].assign_failed_at is not None
-            if (
-                hour not in hours
-                or not all(checks.values())
-                or (droplet.id not in members and not stray)
-            ):
-                self.log.add(
-                    self.clock(),
-                    "foreign_tagged",
-                    key=droplet.id,
-                    droplet_id=droplet.id,
-                    name=droplet.name,
-                )
-            elif entry is None:
-                await self._adopt(scope, hours[hour], droplet, hours)
-            elif self._retry(*entry) or (stray and self._own_retry(entry[1], droplet)):
-                await self._retire(scope, *entry, hours)
+            await self._reconcile_one(scope, hours, known, members, droplet)
+
+    async def _reconcile_one(self, scope, hours, known, members, droplet: Droplet) -> None:
+        """One tagged droplet: left to the tick, alerted as foreign, adopted or retired."""
+        checks = role_checks(droplet, scope, "worker")
+        hour = int(droplet.name.split("-")[2][1:]) if checks["name"] else None
+        if hour in hours and hours[hour].state in LAUNCHABLE:
+            return  # the tick owns a launching hour; its creates may not be recorded yet
+        entry = known.get(droplet.id)
+        stray = entry is not None and entry[1].assign_failed_at is not None
+        if (
+            hour not in hours
+            or not all(checks.values())
+            or (droplet.id not in members and not stray)
+        ):
+            self.log.add(
+                self.clock(),
+                "foreign_tagged",
+                key=droplet.id,
+                droplet_id=droplet.id,
+                name=droplet.name,
+            )
+        elif entry is None:
+            await self._adopt(scope, hours[hour], droplet, hours)
+        elif self._retry(*entry) or (stray and self._own_retry(entry[1], droplet)):
+            await self._retire(scope, *entry, hours)
 
     @staticmethod
     def _retry(record: HourRecord, drop: DropletRecord) -> bool:

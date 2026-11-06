@@ -82,7 +82,7 @@ func TestNetListsReadTheListRows(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		net := loadNet(t, store.NewNetLists(), tx, ids...)
+		net := loadNet(t, store.NewNetLists(pool), tx, ids...)
 		for _, id := range ids {
 			for _, name := range []string{"country", "region", "city", "asn", "city_asn"} {
 				want, l := full[id].Rows(name), net[id]
@@ -90,18 +90,18 @@ func TestNetListsReadTheListRows(t *testing.T) {
 					t.Fatalf("list %d %s: %d rows, want %d", id, name, l.Len(name), len(want))
 				}
 				for i, w := range want {
-					g := l.Row(name, i)
+					g := dim(t, l, name).Row(i)
 					if !reflect.DeepEqual(g.Place, w.Place) || !reflect.DeepEqual(g.Network, w.Network) ||
 						g.Ips != w.Ips || g.Completed != w.Completed || g.Successes != w.Successes || g.P50 != w.P50 {
 						t.Errorf("list %d %s row %d: %+v, want %+v", id, name, i, g, w)
 					}
 				}
 			}
-			if l := net[id]; l.Len("country_asn") != 0 || l.Row("asn", 2).Network.Asn != nil || l.Row("country", 1).Completed != -1 {
-				t.Errorf("list %d: country x ASN %d rows, NULL ASN %v", id, l.Len("country_asn"), l.Row("asn", 2).Network.Asn)
+			if l := net[id]; l.Len("country_asn") != 0 || dim(t, l, "asn").Row(2).Network.Asn != nil || dim(t, l, "country").Row(1).Completed != -1 {
+				t.Errorf("list %d: country x ASN %d rows, NULL ASN %v", id, l.Len("country_asn"), dim(t, l, "asn").Row(2).Network.Asn)
 			}
 		}
-		if m := net[2].Match("city_asn", "united st", net[2].ByIps("city_asn")); len(m) != 1 || *net[2].Row("city_asn", int(m[0])).Place.City != "San Jose" {
+		if m := dim(t, net[2], "city_asn").Match("united st", dim(t, net[2], "city_asn").ByIps()); len(m) != 1 || *dim(t, net[2], "city_asn").Row(int(m[0])).Place.City != "San Jose" {
 			t.Errorf("united st: %v", m)
 		}
 	})
@@ -111,7 +111,7 @@ func TestNetListsReadTheListRows(t *testing.T) {
 // a list dropped and named again is read again.
 func TestNetListsReadOnlyNewLists(t *testing.T) {
 	_, pool := networkLists(t)
-	n := store.NewNetLists()
+	n := store.NewNetLists(pool)
 	within(t, pool, func(tx pgx.Tx) {
 		first := loadNet(t, n, tx, 1, 2, 2)
 		if n.Fetched != 2 || len(first) != 2 {
@@ -126,7 +126,7 @@ func TestNetListsReadOnlyNewLists(t *testing.T) {
 		}
 		// Names are shared across loads: list 1's places are list 3's.
 		again := loadNet(t, n, tx, 1, 3)
-		if again[1].Row("city", 0).Place != again[3].Row("city", 0).Place || n.Fetched != 4 {
+		if dim(t, again[1], "city").Row(0).Place != dim(t, again[3], "city").Row(0).Place || n.Fetched != 4 {
 			t.Errorf("names not shared, or %d read", n.Fetched)
 		}
 	})
@@ -135,7 +135,7 @@ func TestNetListsReadOnlyNewLists(t *testing.T) {
 // A failed load keeps nothing: the next one reads every list again.
 func TestNetListsFailedLoadEmpties(t *testing.T) {
 	db, pool := networkLists(t)
-	n := store.NewNetLists()
+	n := store.NewNetLists(pool)
 	within(t, pool, func(tx pgx.Tx) { loadNet(t, n, tx, 1) })
 	within(t, pool, func(tx pgx.Tx) {
 		tx.Rollback(context.Background()) //nolint:errcheck
@@ -150,9 +150,67 @@ func TestNetListsFailedLoadEmpties(t *testing.T) {
 	})
 	db.Exec(t, `UPDATE calculated_list_rows SET ips = 4294967295 WHERE list_id = 3 AND dimension = 'c' AND position = 0`)
 	within(t, pool, func(tx pgx.Tx) {
-		_, err := n.Load(context.Background(), tx, []int64{3})
-		if err == nil || !strings.Contains(err.Error(), "list 3: counter 4294967295 does not fit") {
+		l := loadNet(t, n, tx, 3)[3]
+		_, err := l.Rows(context.Background(), "country")
+		if err == nil || !strings.Contains(err.Error(), "network list 3: list rows: counter 4294967295 does not fit") {
 			t.Errorf("a counter past the compact row: %v", err)
 		}
 	})
+}
+
+// dim is l's rows of a dimension, failing t when they cannot be read.
+func dim(t testing.TB, l *store.NetList, dimension string) *store.NetRows {
+	t.Helper()
+	v, err := l.Rows(context.Background(), dimension)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// A list's rows are read from the database the first time a reader asks for
+// them, in a transaction of their own, then served from the row cache.
+func TestNetListRowsAreReadThenCached(t *testing.T) {
+	_, pool := networkLists(t)
+	n := store.NewNetLists(pool)
+	var lists map[int64]*store.NetList
+	within(t, pool, func(tx pgx.Tx) { lists = loadNet(t, n, tx, 1, 2) })
+	l := lists[2]
+	if n.Reads != 0 || l.Len("city") != 2 || l.Len("city_asn") != 2 || l.Len("country_asn") != 0 {
+		t.Fatalf("after the load: %d reads, %d cities", n.Reads, l.Len("city"))
+	}
+	if r := dim(t, l, "city").Row(1); n.Reads != 1 || r.Ips != 40 || *r.Place.City != "San Jose" {
+		t.Errorf("first read: %d reads, row %+v", n.Reads, r)
+	}
+	if r := dim(t, l, "city").Row(0); n.Reads != 1 || r.Ips != 50 {
+		t.Errorf("second read: %d reads, row %+v", n.Reads, r)
+	}
+	if dim(t, lists[1], "city").Row(1).Ips != 20 || dim(t, l, "country_asn").Len() != 0 || n.Reads != 2 {
+		t.Errorf("list 1: %d reads", n.Reads)
+	}
+}
+
+// A list of the build being served still reads its own rows after the next
+// build's load dropped it (contract K2 keeps a list while its build is
+// retained); once its rows are deleted, reading them fails instead of giving
+// another list's rows or none.
+func TestNetListOfAnEarlierBuild(t *testing.T) {
+	db, pool := networkLists(t)
+	n := store.NewNetLists(pool)
+	var before, after map[int64]*store.NetList
+	within(t, pool, func(tx pgx.Tx) { before = loadNet(t, n, tx, 1, 3) })
+	within(t, pool, func(tx pgx.Tx) { after = loadNet(t, n, tx, 2, 3) })
+	if after[1] != nil || after[3] != before[3] {
+		t.Fatalf("the next load kept list 1 or read list 3 again: %v", after)
+	}
+	if r := dim(t, before[1], "region").Row(0); r.Ips != 30 || *r.Place.Region != "California" {
+		t.Errorf("the earlier build's list read %+v, want its own row (30 IPs)", r)
+	}
+	db.Exec(t, `DELETE FROM calculated_list_rows WHERE list_id = 3 AND dimension = 'g'`)
+	if _, err := before[3].Rows(context.Background(), "city"); err == nil || !strings.Contains(err.Error(), "network list 3: 0 g rows, 2 when it was loaded") {
+		t.Errorf("rows of a deleted list: %v", err)
+	}
+	if r := dim(t, before[3], "region").Row(0); r.Ips != 90 || *r.Place.Country != "United States" {
+		t.Errorf("after a failed read: %+v", r)
+	}
 }

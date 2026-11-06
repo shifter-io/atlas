@@ -146,10 +146,15 @@ def upload_hours(root, spaces: Spaces, now: datetime, keep_days: int = KEEP_DAYS
         if not new and hour + timedelta(days=keep_days, hours=1) <= now:
             shutil.rmtree(folder)
             removed.append(f"{hour:%Y-%m-%dT%H}")
-            for parent in folder.parents[:3]:
-                if parent.exists() and not any(parent.iterdir()):
-                    parent.rmdir()
+            _drop_empty_parents(folder)
     return {"uploaded": uploaded, "removed_hours": removed}
+
+
+def _drop_empty_parents(folder: Path) -> None:
+    """Remove the day, month and year folders a removed hour leaves empty."""
+    for parent in folder.parents[:3]:
+        if parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
 
 
 def _batch(database, batch: str | None) -> int | None:

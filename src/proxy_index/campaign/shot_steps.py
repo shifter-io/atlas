@@ -16,6 +16,7 @@ from typing import Any
 from ..onboarding.manifest import timestamp
 from ..providers.grammar import load_grammar
 from .contracts import (
+    PRODUCTION,
     SIZE_RE,
     CampaignSpec,
     Droplet,
@@ -219,6 +220,7 @@ class ShotSteps:
         problems = [
             (repeated, "regions or networks repeated"),
             (bool(unknown), "regions not planned"),
+            (self.spec.environment != PRODUCTION, "a shot runs on production's workers only"),
             (not set(self.networks) <= set(self.spec.networks), "networks not planned"),
             (any(r not in REGION_COUNTRY for r in self.regions), "region without a country"),
             (

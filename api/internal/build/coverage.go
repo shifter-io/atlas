@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -61,17 +62,19 @@ type CoveragePage struct {
 // addCoverage keeps, in a v4 build, the network's City x ASN list of each
 // range for its Coverage answer: its headline group's list, as the coverage
 // evidence reads it.
-func (pg *Pages) addCoverage(e *entry, kind string, row *store.SnapshotRow) {
+func (pg *Pages) addCoverage(e *entry, kind string, nr *netRead) {
 	p := e.Snap[kind]
-	if !pg.v4 || p == nil {
+	if !pg.v4 || p == nil || nr.err != nil {
 		return
 	}
 	for _, r := range Ranges {
 		w := p.Window(r.ID)
-		if l := netListOf(row, p, w); l != nil {
+		if l := netListOf(nr.row, p, w); l != nil {
 			k := listKey{e.P.Slug + "/" + kind, r.ID, "coverage"}
 			pg.coverage[k] = &coverageList{list: l, scale: breakdownScale(w), ranks: e.P.CountryLatencyRanks[kind][r.ID]}
-			pg.coverage[k].first, _ = pg.Coverage("", k.scope, k.rangeID, "", 1)
+			if pg.coverage[k].first, _, nr.err = pg.Coverage(nr.ctx, "", k.scope, k.rangeID, "", 1); nr.err != nil {
+				return
+			}
 		}
 	}
 }
@@ -79,46 +82,51 @@ func (pg *Pages) addCoverage(e *entry, kind string, row *store.SnapshotRow) {
 // Coverage is one page of a network's Coverage answer: its City x ASN rows
 // with IPs, most IPs first, those holding every word of the query; ok is
 // false when the build has no such list. The build holds the first page
-// without a query.
-func (pg *Pages) Coverage(generatedAt, scope, rangeID, query string, page int) (*CoveragePage, bool) {
+// without a query; another page reads the list's rows (from the database
+// unless cached).
+func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, query string, page int) (*CoveragePage, bool, error) {
 	c := pg.coverage[listKey{scope, rangeID, "coverage"}]
 	if c == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	tokens := Tokens(query)
 	if c.first != nil && page == 1 && len(tokens) == 0 {
 		out := *c.first
 		out.GeneratedAt = generatedAt
-		return &out, true
+		return &out, true, nil
+	}
+	rows, err := c.list.Rows(ctx, "city_asn")
+	if err != nil {
+		return nil, false, err
 	}
 	network, kind, _ := strings.Cut(scope, "/")
 	out := &CoveragePage{GeneratedAt: generatedAt, Network: network, Kind: kind, Range: rangeID, Query: strings.Join(tokens, " "),
 		Page: page, PageSize: PageSize, Rows: []CoverageRow{}}
 	matched := []int32{}
-	for _, i := range c.list.Match("city_asn", out.Query, c.list.ByIps("city_asn")) {
-		if c.list.Row("city_asn", int(i)).Ips > 0 {
+	for _, i := range rows.Match(out.Query, rows.ByIps()) {
+		if rows.Row(int(i)).Ips > 0 {
 			matched = append(matched, i)
 		}
 	}
 	out.Total, out.Pages = len(matched), (len(matched)+PageSize-1)/PageSize
 	if len(tokens) > 0 {
-		t := c.list.Totals("city_asn", matched)
+		t := rows.Totals(matched)
 		out.Totals = &CoverageTotals{Ips: 0, Countries: t.Countries, Cities: t.Cities, Asns: t.Asns}
 		for _, i := range matched {
-			out.Totals.Ips += c.row(i).Ips
+			out.Totals.Ips += c.row(rows, i).Ips
 		}
 	}
 	if start := (page - 1) * PageSize; start < len(matched) {
 		for _, i := range matched[start:min(len(matched), start+PageSize)] {
-			out.Rows = append(out.Rows, c.row(i))
+			out.Rows = append(out.Rows, c.row(rows, i))
 		}
 	}
-	return out, true
+	return out, true, nil
 }
 
-// row is the list's City x ASN row i as the answer writes it.
-func (c *coverageList) row(i int32) CoverageRow {
-	r := c.list.Row("city_asn", int(i))
+// row is City x ASN row i of the list's rows as the answer writes it.
+func (c *coverageList) row(rows *store.NetRows, i int32) CoverageRow {
+	r := rows.Row(int(i))
 	out := CoverageRow{CoverageRow: coverageRow(r, c.scale), Rank: nan}
 	if r.Place != nil {
 		if rank, ok := c.ranks[strings.ToUpper(strings.TrimSpace(model.SV(r.Place.CountryCode)))]; ok {

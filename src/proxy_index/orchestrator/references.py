@@ -61,6 +61,13 @@ async def _reference_latency(
     )
     flagged = {o["run_key"] for o in census_overlaps(census, pulses)}
     clean = {p["run_key"]: p for p in pulses if p["run_key"] not in flagged}
+    return await _latency_by_country(conn, clean, lo)
+
+
+async def _latency_by_country(
+    conn: psycopg.AsyncConnection, clean: dict[str, dict[str, Any]], lo: datetime
+) -> dict[str, dict[str, Any]]:
+    """Blend the clean pulses' run histograms per country into {"p50", "successes"}."""
     histograms: dict[str, dict[int, Counter]] = {}
     for row in await _rows(
         conn,
