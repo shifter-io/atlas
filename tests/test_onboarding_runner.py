@@ -1,10 +1,12 @@
 """Onboarding runner and stream simulations: no provider traffic or database."""
 
 import asyncio
+import contextlib
 import gzip
 import json
 import time
 
+import coverage
 import pytest
 from helpers import FakeTransport
 from test_onboarding import START
@@ -89,19 +91,40 @@ async def test_observation_failure_stops_shared_runner():
         )
 
 
+@contextlib.contextmanager
+def coverage_paused():
+    """Stop every running coverage measurement for the block, then restart it in order.
+
+    pytest-cov's `no_cover` stops only its own instance, and an xdist worker runs two.
+    """
+    stopped = []
+    while (current := coverage.Coverage.current()) is not None:
+        current.stop()
+        stopped.append(current)
+    try:
+        yield
+    finally:
+        for measurement in reversed(stopped):
+            measurement.start()
+
+
 @pytest.mark.scale
 async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
-    writer = ObservationWriter(
-        tmp_path,
-        country="US",
-        scheduled=campaign.timestamp(START),
-        started=campaign.timestamp(START),
-        deadline=START.timestamp() + 60,
-        bounds=WriterBounds(queue_size=4096),
-    )
-    for _ in range(2_000_000):
-        await writer.observe("2001:db8::1", START.timestamp() + 1)
-    await writer.close()
+    # Tracing two million writer rows doubled this test (47 s alone, 73 s under tier1's
+    # load). The same stream and bound are asserted; the next test covers backpressure.
+    with coverage_paused():
+        writer = ObservationWriter(
+            tmp_path,
+            country="US",
+            scheduled=campaign.timestamp(START),
+            started=campaign.timestamp(START),
+            deadline=START.timestamp() + 60,
+            bounds=WriterBounds(queue_size=4096),
+        )
+        observed = START.timestamp() + 1
+        for _ in range(2_000_000):
+            await writer.observe("2001:db8::1", observed)
+        await writer.close()
     assert writer.rows == 2_000_000 and writer.peak_queue <= 4096
     count = 0
     for path in sorted(tmp_path.glob("*.gz")):
@@ -111,6 +134,21 @@ async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
         for line in set(lines):
             assert json.loads(line)["ip"] == "2001:db8::1"
     assert count == 2_000_000
+
+
+async def test_full_intake_waits_for_the_writer(tmp_path):
+    writer = ObservationWriter(
+        tmp_path,
+        country="US",
+        scheduled=campaign.timestamp(START),
+        started=campaign.timestamp(START),
+        deadline=START.timestamp() + 60,
+        bounds=WriterBounds(queue_size=1),
+    )
+    for _ in range(100):
+        await writer.observe("2001:db8::1", START.timestamp() + 1)
+    await writer.close()
+    assert writer.rows == 100 and writer.peak_queue == 1
 
 
 async def test_exactly_half_unique_keeps_running_and_failure_crosses_threshold():
