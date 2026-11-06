@@ -5,8 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from calculated_cases import lenient_policy, payload_mismatches
 from census_pulse_cases import HOSTING, MUNICH, outage, scenario
-from test_calculated import lenient_policy, payload_mismatches
 from test_storage_v6 import BERLIN, NETWORK
 
 from proxy_index.calculated import store

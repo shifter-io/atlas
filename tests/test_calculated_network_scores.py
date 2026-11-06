@@ -9,7 +9,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_calculated import POLICY, lenient_policy
+from calculated_cases import POLICY, lenient_policy
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, PRODUCT_IPS, History, floor_hour
 from test_calculated_incremental import history
 from test_calculated_network import assert_one_group, by_provider, stable
