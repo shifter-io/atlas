@@ -117,10 +117,14 @@ async def test_raw_writes_never_reach_a_production_droplet_or_firewall(token):
 def test_tags_are_only_read_and_created_behind_the_token():
     """CAMP-1h: exactly these two tag calls, both needing the client's own token."""
     tag_calls = {key for key in do_api.ALLOWED if "/tags" in key[1]}
-    assert tag_calls == {("GET", f"/v2/tags/{do_api.TAG}"), ("POST", "/v2/tags")}
+    assert tag_calls == {("GET", f"/v2/tags/{do_api.ENSURED_TAG}"), ("POST", "/v2/tags")}
     assert all(
         do_api._lookup(do_api.OWNED_WRITES, m, p)
-        for m, p in (("GET", "/v2/tags/pi-camp-worker"), ("POST", "/v2/tags"))
+        for m, p in (
+            ("GET", "/v2/tags/pi-camp-worker"),
+            ("GET", "/v2/tags/pi-pulse-node"),
+            ("POST", "/v2/tags"),
+        )
     )
     for method, path in (
         ("GET", "/v2/tags"),
@@ -129,6 +133,9 @@ def test_tags_are_only_read_and_created_behind_the_token():
         ("POST", "/v2/tags/pi-camp-worker/resources"),
         ("DELETE", "/v2/tags/pi-camp-worker/resources"),
         ("DELETE", "/v2/tags/pi-camp-worker"),
+        ("DELETE", "/v2/tags/pi-pulse-node"),
+        ("POST", "/v2/tags/pi-pulse-node/resources"),
+        ("GET", "/v2/tags/pi-pulse-nodes"),
         ("PUT", "/v2/tags/pi-camp-x"),
     ):
         with pytest.raises(ScopeError):
