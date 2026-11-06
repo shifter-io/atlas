@@ -1000,7 +1000,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
     calls = []
 
     async def fake(argv, limit_s):
-        calls.append(argv[-1])
+        calls.append(argv[-2:])
         return {"snapshot_id": "s1", "as_of": "now"}
 
     # A stand-in for the subprocess (test_manager_orch runs the real one).
@@ -1017,7 +1017,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
         conn.execute("INSERT INTO job_runs(job,status,started_at) VALUES ('calculate','ok',now())")
         conn.execute("UPDATE test_batches SET finished_at=now()+interval '1 second'")
     assert (await calculate(db, database, "m.toml")) == {"skipped": "debounced"}
-    assert calls == ["--publish"]
+    assert calls == [["--publish", "--incremental"]]
 
 
 async def test_detect_job_is_optional(database, monkeypatch):

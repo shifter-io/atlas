@@ -65,6 +65,13 @@ Tier 1 is the CI check `tier1` (`.github/workflows/ci.yml`) on the exact head: e
 test, database tests included, in parallel on one self-hosted CI server, for every
 ready pull request, every merge-queue test and every owner dispatch. Tests
 outside CI run on a disposable test server, never on a workstation. See the HTML guide.
+CI time: every `tier1` and `api` run writes its 20 slowest tests and its test step's time
+to the job summary and keeps them for 90 days as the artifact `ci-timing` (`api-timing`);
+it warns when a test takes over 60 s or the step over 90 s, and fails when a test takes
+90 s or more or the step over 240 s (`scripts/ci/timing.py`). The history across runs:
+`python3 scripts/ci/timing_history.py [--workflow api] [--runs 30] [--event merge_group]
+[--branch BRANCH]` (one `gh` call per run; neither workflow runs on pushes to `main`, so
+`--event merge_group` shows what landed).
 
 Schema v5 stores each IP once and references it from product membership, history and
 versioned enrichment. Lifetime provider overlap is cached and deduplicated across products.
@@ -186,10 +193,10 @@ also stores its window's IPs per 5-minute bin of their product's first sighting
 (`figures.first_seen`, outside the content hash, for CALC-INC-2). The values
 that move with the cutoff are counted in the database (`calculated/hourly.py`, `fleetsql.py`,
 `rollups.py`), which still reads the window's observations for them until CALC-INC-2 and
-CALC-FLEET-1 keep them in the memo tables. Until then `calculate` (and `calculate --full`, the
-Python `calculate()`'s default) stays the full calculation, which reads and aggregates every
-observation as before and is the oracle the incremental tests compare with, byte for byte; the
-incremental one is `calculate --incremental`. Measured on scale-generator data (6 networks × 60
+CALC-FLEET-1 keep them in the memo tables. `calculate` is incremental by default (also
+`--incremental`; the orchestrator's hourly job passes it explicitly); `calculate --full` (the
+Python `calculate()`'s default) is the full calculation, which reads and aggregates every
+observation as before and is the oracle the incremental tests compare with, byte for byte. Measured on scale-generator data (6 networks × 60
 countries × 8 days): at 0.42 M observations incremental took 221 s against full's 187 s (more
 database time) with 2.9 GB peak against 5.0 GB; at 1.4 M full mode ran out of 8 GB, incremental
 took 362 s and 3.7 GB.
