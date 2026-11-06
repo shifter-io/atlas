@@ -163,6 +163,15 @@ class EnableInputs:
     daily_template: str | None = None
 
 
+async def _check_enable(cloud: DigitalOcean, inventory: dict[str, Any]) -> None:
+    """The account, the recorded manager size, and the hourly test off, before enable."""
+    await deploy.check_account(cloud, inventory, inventory.get("account", ""))
+    if inventory.get("manager_size") != WANTED_SIZE:
+        raise deploy.DeployError(f"record the manager's size first ({WANTED_SIZE}): resize")
+    if inventory.get("hourly", {}).get("on"):  # the formulas are never swapped under it
+        raise deploy.DeployError(manager_daily.BUSY)
+
+
 async def enable(
     cloud: DigitalOcean,
     inventory_path: Path,
@@ -175,11 +184,7 @@ async def enable(
     """Install and start the orchestrator on the manager, and install (never start) the hourly
     daily test with its checked inputs; the dry run changes nothing."""
     inputs, inventory = inputs or EnableInputs(), manager_daily.recorded(inventory_path)
-    await deploy.check_account(cloud, inventory, inventory.get("account", ""))
-    if inventory.get("manager_size") != WANTED_SIZE:
-        raise deploy.DeployError(f"record the manager's size first ({WANTED_SIZE}): resize")
-    if inventory.get("hourly", {}).get("on"):  # the formulas are never swapped under it
-        raise deploy.DeployError(manager_daily.BUSY)
+    await _check_enable(cloud, inventory)
     cid = manager_daily.template_id(inventory, inputs.daily_template)
     formulas = manager_daily.formula_files(inputs.formulas)
     sent = manager_daily.digests(formulas)
