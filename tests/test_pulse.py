@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from census_pulse_cases import batch, batch_run, product
-from test_daily import chunk, observation
+from daily_cases import chunk, observation
 from test_orchestrator import prepare, query
 from test_storage import measurement
 

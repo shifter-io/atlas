@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 from census_pulse_cases import product
+from daily_cases import daily_root
 from psycopg.rows import dict_row
-from test_daily import daily_root
 from test_onboarding import START
 from test_storage import measurement
 
