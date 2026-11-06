@@ -25,17 +25,15 @@ import json
 import os
 import tempfile
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import psycopg
 from psycopg.rows import dict_row
 
 from . import storage
-from .report_data import _keyed as _keyed
-from .report_data import _percentiles as _percentiles
 from .report_data import batch_data as batch_data
+from .report_data import index_data as index_data
 from .report_parts import CSS as CSS
 from .report_parts import INDEX as INDEX
 from .report_parts import INDEX_LIMIT as INDEX_LIMIT
@@ -64,135 +62,6 @@ from .report_parts import stop_reason as stop_reason
 from .report_parts import table as table
 from .report_parts import timeline as timeline
 from .report_parts import when as when
-
-# --- queries -----------------------------------------------------------------------------
-
-
-def index_data(conn: psycopg.Connection, now: datetime, limit: int = INDEX_LIMIT) -> dict[str, Any]:
-    from .orchestrator.batches import census_every, next_slot
-    from .orchestrator.control import state
-
-    counts = conn.execute(
-        "SELECT kind,status,count(*)::bigint AS n FROM test_batches GROUP BY 1,2 ORDER BY 1,2"
-    ).fetchall()
-    by_kind = conn.execute(
-        "SELECT b.kind,coalesce(sum(br.requests),0)::bigint AS requests,"
-        "coalesce(sum(br.successes),0)::bigint AS successes,"
-        "coalesce(sum(br.bytes_up),0)::bigint AS bytes_up,"
-        "coalesce(sum(br.bytes_down),0)::bigint AS bytes_down "
-        "FROM test_batches b JOIN batch_runs br USING(batch_id) GROUP BY 1 ORDER BY 1"
-    ).fetchall()
-    unique = conn.execute(
-        "SELECT b.country_code,p.provider,p.name AS product,"
-        "count(DISTINCT o.ip_id)::bigint AS ips FROM test_batches b "
-        "JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-        "JOIN ip_observations o ON o.run_key=br.run_key GROUP BY 1,2,3 ORDER BY 1,2,3"
-    ).fetchall()
-    batches = conn.execute(
-        "SELECT b.batch_id,b.kind,b.country_code,r.slug AS region,b.target_id,b.scheduled_for,"
-        "b.started_at,b.finished_at,b.status,count(br.product_id)::int AS runs,"
-        "coalesce(sum(br.requests),0)::bigint AS requests,"
-        "coalesce(sum(br.successes),0)::bigint AS successes,"
-        "coalesce(sum(br.unique_ips),0)::bigint AS unique_ips "
-        "FROM test_batches b JOIN runner_regions r ON r.region_id=b.region_id "
-        "LEFT JOIN batch_runs br USING(batch_id) GROUP BY b.batch_id,r.slug "
-        "ORDER BY b.scheduled_for DESC,b.batch_id DESC LIMIT %s",
-        (limit,),
-    ).fetchall()
-    if batches:
-        p50 = _keyed(
-            conn.execute(
-                _percentiles(
-                    "SELECT br.batch_id,b.histogram_steps AS steps,b.histogram_counts AS counts "
-                    "FROM batch_runs br JOIN run_buckets b ON b.run_key=br.run_key "
-                    "AND b.bucket_start>=%(since)s WHERE br.batch_id=ANY(%(ids)s)",
-                    ["batch_id"],
-                ),
-                {
-                    "ids": [b["batch_id"] for b in batches],
-                    "since": min(b["scheduled_for"] for b in batches) - timedelta(days=1),
-                },
-            ).fetchall(),
-            ["batch_id"],
-        )
-        for row in batches:
-            row["p50"] = p50.get((row["batch_id"],), {}).get("p50")
-    scheduler = state(conn)
-    every = census_every(scheduler["census_every_minutes"])
-    if every is not None:
-        census_next = conn.execute(
-            "SELECT c.country_code,r.slug AS region,%s::timestamptz AS next_at FROM countries c "
-            "JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled WHERE c.enabled "
-            "ORDER BY c.country_code LIMIT 20",
-            (next_slot(every, now),),
-        ).fetchall()
-    else:
-        census_next = conn.execute(
-            "SELECT c.country_code,r.slug AS region,CASE WHEN s.today>=%(now)s THEN s.today "
-            "ELSE s.today+interval '1 day' END AS next_at FROM countries c "
-            "JOIN runner_regions r ON r.region_id=c.region_id AND r.enabled "
-            "CROSS JOIN LATERAL (SELECT ((%(now)s AT TIME ZONE 'UTC')::date+c.census_time) "
-            " AT TIME ZONE 'UTC' AS today) s WHERE c.enabled ORDER BY 3,1 LIMIT 20",
-            {"now": now},
-        ).fetchall()
-    pulse_next = [
-        row | {"next_at": next_slot(timedelta(minutes=row["pulse_interval_minutes"]), now)}
-        for row in conn.execute(
-            "SELECT target_id,pulse_interval_minutes,pulse_requests FROM targets "
-            "WHERE pulse_enabled ORDER BY sort_order,target_id"
-        ).fetchall()
-    ]
-    live = conn.execute(
-        "SELECT count(DISTINCT b.batch_id)::int AS batches,"
-        "coalesce(sum(br.requests),0)::bigint AS requests,"
-        "coalesce(sum(br.successes),0)::bigint AS successes,"
-        "coalesce(sum(br.unique_ips),0)::bigint AS unique_ips,"
-        "max(br.last_progress_at) AS updated "
-        "FROM test_batches b JOIN batch_runs br USING(batch_id) WHERE b.status='running'"
-    ).fetchone()
-    live_unique = {
-        (row["country_code"], row["provider"], row["product"]): row["unique_ips"]
-        for row in conn.execute(
-            "SELECT b.country_code,p.provider,p.name AS product,"
-            "sum(br.unique_ips)::bigint AS unique_ips FROM test_batches b "
-            "JOIN batch_runs br USING(batch_id) JOIN products p USING(product_id) "
-            "WHERE b.status='running' GROUP BY 1,2,3"
-        )
-    }
-    stored = {(row["country_code"], row["provider"], row["product"]) for row in unique}
-    unique = sorted(
-        [
-            row | {"live": live_unique.get(key)}
-            for row in unique
-            for key in [(row["country_code"], row["provider"], row["product"])]
-        ]
-        + [
-            {"country_code": c, "provider": p, "product": n, "ips": None, "live": ips}
-            for (c, p, n), ips in live_unique.items()
-            if (c, p, n) not in stored
-        ],
-        key=lambda row: (row["country_code"], row["provider"], row["product"]),
-    )
-    nodes = conn.execute(
-        "SELECT n.node_id,r.slug AS region,n.provider,n.product,n.status,n.last_heartbeat "
-        "FROM nodes n JOIN runner_regions r ON r.region_id=n.region_id ORDER BY 3,4,2"
-    ).fetchall()
-    enabled = conn.execute("SELECT count(*)::int AS n FROM countries WHERE enabled").fetchone()["n"]
-    return {
-        "now": now,
-        "counts": counts,
-        "by_kind": by_kind,
-        "unique": unique,
-        "batches": batches,
-        "scheduler": scheduler,
-        "census_next": census_next,
-        "pulse_next": pulse_next,
-        "nodes": nodes,
-        "enabled_countries": enabled,
-        "live": live,
-        "limit": limit,
-    }
-
 
 # --- rendering ---------------------------------------------------------------------------
 
