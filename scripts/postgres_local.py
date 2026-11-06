@@ -28,32 +28,35 @@ def save_private(path, data):
             stream.write(f"{key} = {json.dumps(str(value))}\n")
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("init", "start", "stop", "status"))
     parser.add_argument("--bin-dir", type=Path)
     parser.add_argument("--port", type=int, default=55432)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def load_runtime(args):
+    """Return the saved runtime and binary directory, recording them on the first init."""
     runtime_path = STATE / "runtime.json"
     if runtime_path.exists():
         runtime = json.loads(runtime_path.read_text())
-        binary = Path(runtime["bin_dir"])
-    else:
-        if args.command != "init":
-            raise ValueError("Initialize the project cluster first")
-        binary = args.bin_dir or Path(shutil.which("postgres") or "").parent
-        binary = binary.resolve()
-        subprocess.run([str(binary / "postgres"), "--version"], check=True)
-        STATE.mkdir(parents=True, mode=0o700)
-        PRIVATE.mkdir(exist_ok=True, mode=0o700)
-        PRIVATE.chmod(0o700)
-        runtime = {"bin_dir": str(binary), "port": args.port}
-        runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
-    ctl = [str(binary / "pg_ctl"), "-D", str(DATA)]
-    if args.command in ("status", "stop"):
-        return subprocess.run(
-            ctl + (["status"] if args.command == "status" else ["stop", "-m", "fast", "-w"])
-        ).returncode
+        return runtime, Path(runtime["bin_dir"])
+    if args.command != "init":
+        raise ValueError("Initialize the project cluster first")
+    binary = args.bin_dir or Path(shutil.which("postgres") or "").parent
+    binary = binary.resolve()
+    subprocess.run([str(binary / "postgres"), "--version"], check=True)
+    STATE.mkdir(parents=True, mode=0o700)
+    PRIVATE.mkdir(exist_ok=True, mode=0o700)
+    PRIVATE.chmod(0o700)
+    runtime = {"bin_dir": str(binary), "port": args.port}
+    runtime_path.write_text(json.dumps(runtime, indent=2) + "\n")
+    return runtime, binary
+
+
+def load_credentials(runtime):
+    """Return the admin and app credentials, generating any that are missing."""
     admin_path = PRIVATE / "postgres-admin.toml"
     app_path = PRIVATE / "database.toml"
     base = {"host": "127.0.0.1", "port": runtime["port"]}
@@ -73,46 +76,47 @@ def main():
                 "password": secrets.token_urlsafe(32),
             },
         )
-    admin = read_credentials(admin_path, "postgres")
-    app = read_credentials(app_path, "postgres")
-    if not (DATA / "PG_VERSION").exists():
-        if args.command != "init":
-            raise ValueError("Initialize the project cluster first")
-        password_path = PRIVATE / ".initdb-password"
-        try:
-            with os.fdopen(
-                os.open(password_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w"
-            ) as stream:
-                stream.write(admin["password"] + "\n")
-            subprocess.run(
-                [
-                    str(binary / "initdb"),
-                    "-D",
-                    str(DATA),
-                    "-U",
-                    admin["user"],
-                    "--auth=scram-sha-256",
-                    "--encoding=UTF8",
-                    "--locale=C",
-                    "--data-checksums",
-                    f"--pwfile={password_path}",
-                ],
-                check=True,
-            )
-        finally:
-            password_path.unlink(missing_ok=True)
-        sockets = STATE / "sockets"
-        sockets.mkdir(mode=0o700, exist_ok=True)
-        socket_value = str(sockets).replace("'", "''")
-        with (DATA / "postgresql.conf").open("a") as stream:
-            stream.write(
-                f"\nlisten_addresses = '127.0.0.1'\nport = {runtime['port']}\n"
-                f"unix_socket_directories = '{socket_value}'\n"
-                "password_encryption = 'scram-sha-256'\n"
-            )
-    running = subprocess.run(ctl + ["status"], capture_output=True).returncode == 0
-    if not running:
-        subprocess.run(ctl + ["start", "-l", str(STATE / "server.log"), "-w"], check=True)
+    return read_credentials(admin_path, "postgres"), read_credentials(app_path, "postgres")
+
+
+def init_cluster(binary, admin, runtime):
+    """Create the data directory and point the server at its address and socket."""
+    password_path = PRIVATE / ".initdb-password"
+    try:
+        with os.fdopen(
+            os.open(password_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w"
+        ) as stream:
+            stream.write(admin["password"] + "\n")
+        subprocess.run(
+            [
+                str(binary / "initdb"),
+                "-D",
+                str(DATA),
+                "-U",
+                admin["user"],
+                "--auth=scram-sha-256",
+                "--encoding=UTF8",
+                "--locale=C",
+                "--data-checksums",
+                f"--pwfile={password_path}",
+            ],
+            check=True,
+        )
+    finally:
+        password_path.unlink(missing_ok=True)
+    sockets = STATE / "sockets"
+    sockets.mkdir(mode=0o700, exist_ok=True)
+    socket_value = str(sockets).replace("'", "''")
+    with (DATA / "postgresql.conf").open("a") as stream:
+        stream.write(
+            f"\nlisten_addresses = '127.0.0.1'\nport = {runtime['port']}\n"
+            f"unix_socket_directories = '{socket_value}'\n"
+            "password_encryption = 'scram-sha-256'\n"
+        )
+
+
+def ensure_database(admin, app):
+    """Create the app role and its database when they do not exist yet."""
     with psycopg.connect(**admin, autocommit=True, connect_timeout=5) as conn:
         if not conn.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (app["user"],)).fetchone():
             conn.execute(
@@ -128,6 +132,25 @@ def main():
                     sql.Identifier(app["dbname"]), sql.Identifier(app["user"])
                 )
             )
+
+
+def main():
+    args = parse_args()
+    runtime, binary = load_runtime(args)
+    ctl = [str(binary / "pg_ctl"), "-D", str(DATA)]
+    if args.command in ("status", "stop"):
+        return subprocess.run(
+            ctl + (["status"] if args.command == "status" else ["stop", "-m", "fast", "-w"])
+        ).returncode
+    admin, app = load_credentials(runtime)
+    if not (DATA / "PG_VERSION").exists():
+        if args.command != "init":
+            raise ValueError("Initialize the project cluster first")
+        init_cluster(binary, admin, runtime)
+    running = subprocess.run(ctl + ["status"], capture_output=True).returncode == 0
+    if not running:
+        subprocess.run(ctl + ["start", "-l", str(STATE / "server.log"), "-w"], check=True)
+    ensure_database(admin, app)
     print(f"Project PostgreSQL ready: 127.0.0.1:{runtime['port']}/{app['dbname']}")
     return 0
 
