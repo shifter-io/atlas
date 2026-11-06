@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from psycopg.rows import dict_row
 
+from . import scheduled
+
 # A product's batch-run buckets in [start, as_of), in the columns and order the calculator reads.
 SCHEDULED_ROWS = (
     "SELECT b.bucket_start,b.run_key,run_bucket_counters(b) AS counters,"
@@ -17,10 +19,8 @@ SCHEDULED_ROWS = (
 
 
 def scheduled_inputs(conn, as_of, timed_target):
-    """The census/pulse history of the 30-day window (calculator.scheduled_inputs())."""
-    from .calculator import scheduled_inputs as today  # calculator imports this module
-
-    return today(conn, as_of, timed_target)
+    """The census/pulse history of the 30-day window (scheduled.scheduled_inputs())."""
+    return scheduled.scheduled_inputs(conn, as_of, timed_target)
 
 
 def scheduled_rows(conn, product_id, start, as_of):
