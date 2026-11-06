@@ -8,7 +8,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from calculated_cases import EDGE, MINUTE, POLICY, spread
 from test_storage import measurement
 
-from proxy_index.calculated import store
+from proxy_index.calculated import store, store_retention
 from proxy_index.calculated.aggregate import metrics, target_score
 from proxy_index.calculated.api import app
 from proxy_index.calculated.calculator import calculate, retain
@@ -107,7 +107,7 @@ def test_retained_score_expiry():
 @pytest.mark.asyncio
 async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     # These assertions read older published builds; retention has its own tests.
-    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
+    monkeypatch.setattr(store_retention, "RETAIN_PER_DAY", 100)
     store.initialize(database)
     # Fixed clocks: both providers' runs in the 12:00 bucket, whenever the test runs.
     d = await spread(tmp_path, monkeypatch, EDGE - 4 * MINUTE, [0] * 10)
