@@ -85,7 +85,7 @@ def layer_start(start, layered, layers, current_layer):
             "Only an unmodified calculated v1 schema can be migrated in place"
             if start == 4
             else "The calculated schema differs from this release; only an unmodified "
-            "calculated v2 to v9 schema can be migrated in place"
+            "calculated v2 to v10 schema can be migrated in place"
         )
     return upgraded, later
 

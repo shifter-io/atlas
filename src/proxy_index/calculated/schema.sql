@@ -119,6 +119,23 @@ CREATE TABLE IF NOT EXISTS calculated_ip_last_seen (
  ip_id bigint PRIMARY KEY, last_seen timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calculated_ip_last_seen_time ON calculated_ip_last_seen(last_seen);
+-- Per-hour rollups of run_geo_buckets (CALC-PULSE-1a, calculated v11, rollups.py): each closed
+-- hour's network rows summed per product group (scope_id of a run outside a batch, else NULL),
+-- location, network, fallback country and target, with the light-load candidates' latency
+-- histogram (pulses and runs outside a batch; light_ms ascending). run_key is set only for a run
+-- outside a batch, so a run linked to a batch later is found. A calculation writes the hours it
+-- reads that calculated_geo_rollups lacks, and rewrites one holding a run newer than its
+-- through_run (a late run). Hours over a day older than the window read are collected.
+CREATE TABLE IF NOT EXISTS calculated_geo_hours (
+ hour timestamptz NOT NULL, scope_id integer, product_id integer NOT NULL,
+ location_id integer NOT NULL, network_id integer NOT NULL, fallback text, target text NOT NULL,
+ run_key bigint, completed bigint NOT NULL, successes bigint NOT NULL, challenges bigint NOT NULL,
+ blocks bigint NOT NULL, light_ms bigint[] NOT NULL, light_n bigint[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS calculated_geo_hours_hour ON calculated_geo_hours(hour);
+CREATE TABLE IF NOT EXISTS calculated_geo_rollups (
+ hour timestamptz PRIMARY KEY, through_run bigint NOT NULL
+);
 CREATE TABLE IF NOT EXISTS calculated_series (
  result_id bigint NOT NULL REFERENCES calculated_windows(result_id),
  bucket_start timestamptz NOT NULL,
