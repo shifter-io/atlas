@@ -31,6 +31,7 @@ rejected) and is never rerun this way.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -192,14 +193,11 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
         if not products:
             return {"created": 0, "skipped": 0, "reason": "no registered nodes"}
         due = await _census_due(conn, now, lead, every)
-        created, skipped, deferred = [], 0, 0
+        created, outcomes = [], Counter()
         for slot in due:
             status, batch_id = await _census_slot(conn, slot, lead, now)
-            if status == "deferred":
-                deferred += 1
-            elif status == "skipped":
-                skipped += 1
-            elif status == "scheduled":
+            outcomes[status] += 1
+            if status == "scheduled":
                 created.append(batch_id)
         gaps = await _create_runs(conn, created, now)
         await _report_no_node(conn, gaps, now)
@@ -207,8 +205,8 @@ async def census_plan(db: Database, now: datetime | None = None) -> dict[str, An
             await close_batch(conn, batch_id, now)
     return {
         "created": len(created),
-        "skipped": skipped,
-        "deferred": deferred,
+        "skipped": outcomes["skipped"],
+        "deferred": outcomes["deferred"],
         "no_node": len(gaps),
     }
 
