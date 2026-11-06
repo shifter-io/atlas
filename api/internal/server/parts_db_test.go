@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testscale"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // answers loads the database's current build, renders it and returns the

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 func TestChangeSplitsDataFromEvents(t *testing.T) {

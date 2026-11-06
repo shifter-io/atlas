@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
 // rankPlace is one row of a seeded place list.

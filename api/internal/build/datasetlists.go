@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // listChunk is how many rows the dataset's lists encode at once.

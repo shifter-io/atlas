@@ -20,8 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // Version is one immutable generation of responses.

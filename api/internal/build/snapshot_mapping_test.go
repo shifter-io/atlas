@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 // The committed fixture is a v1 snapshot without outages; this publishes it

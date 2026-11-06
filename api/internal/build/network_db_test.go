@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/server"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testscale"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/server"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 )
 

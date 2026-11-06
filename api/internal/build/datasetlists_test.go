@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/server"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testscale"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/server"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // v4Shape is a v4 build of three networks, each one summary over two

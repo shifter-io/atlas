@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
 )
 
 // A region or city page answers every network's row in that place; a bad

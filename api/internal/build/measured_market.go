@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 // measuredMarket is the public All market panel.

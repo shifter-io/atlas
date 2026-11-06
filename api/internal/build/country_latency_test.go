@@ -3,8 +3,8 @@ package build
 import (
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 func TestCountryLatencyRanks(t *testing.T) {

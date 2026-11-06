@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 var releaseHour = time.Date(2026, 11, 2, 16, 0, 30, 0, time.UTC)

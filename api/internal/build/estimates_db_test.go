@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/server"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/server"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
 // The hour formula's figures (proxy-index estimates/window.py, contract K8)

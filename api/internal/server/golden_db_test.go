@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/config"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/config"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
 // goldenFile holds, per committed fixture, the SHA-256 of every answer the

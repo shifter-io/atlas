@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testscale"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // browserBuild publishes the every-request fixture, with the nine browser

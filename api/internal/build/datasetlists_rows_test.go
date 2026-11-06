@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // rowsOf is n rows written by a rowWriter, and its error.

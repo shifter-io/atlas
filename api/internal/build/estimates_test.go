@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 // estimateProduct is a product group whose 24h and 30d windows have the hour

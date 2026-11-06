@@ -3,7 +3,7 @@ package build
 import (
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 // RankingsAnswer is /v1/rankings?range=: every network in its final order for

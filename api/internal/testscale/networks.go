@@ -6,8 +6,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // NetworkShape is a payload v4 build (proxy-index calculated contract K9):

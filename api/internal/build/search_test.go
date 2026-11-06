@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testscale"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // The search index covers networks, countries, pages, targets and actions

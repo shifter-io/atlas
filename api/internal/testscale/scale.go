@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // Shape is how large a synthetic build is.

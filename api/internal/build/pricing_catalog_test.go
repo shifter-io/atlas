@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
 func TestShifterPricingCatalog(t *testing.T) {

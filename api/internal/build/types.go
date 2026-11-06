@@ -4,8 +4,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 type Num = jsnum.Num

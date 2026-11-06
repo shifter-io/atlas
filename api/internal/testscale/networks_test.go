@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 // A small v3 build of two networks, one group each, with overlap rows,

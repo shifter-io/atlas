@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 )
 
 // tapeKinds is every kind the framework writes, with its live tape tab
