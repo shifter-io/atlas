@@ -9,16 +9,23 @@ import os
 from datetime import datetime, timedelta
 
 import dbip_fakes
+import pytest
 from calculated_cases import POLICY, OtherIP
 from test_archive_job import shift
 from test_storage import enrichment, measurement
 
-from proxy_index.calculated import store
 from proxy_index.calculated.calculator import calculate
 from proxy_index.enrichment import enrich_run
 from proxy_index.storage import connect, ingest
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
+
 
 US = {"country_code": "US", "asn": 15169, "isp": "Fixture"}
 DE = {"country_code": "DE", "asn": 3320, "isp": "Fixture"}
@@ -30,7 +37,6 @@ def located(snapshot) -> dict[str, int]:
 
 
 async def test_each_run_keeps_the_release_it_was_enriched_with(database, tmp_path):
-    store.initialize(database)
     older = await measurement(tmp_path, requests=3)
     enrichment(older, attributes=US, release="a" * 64)
     ingest(older, database)
@@ -94,7 +100,6 @@ def move(database, run, delta) -> None:
 
 
 async def test_the_snapshot_lists_every_release_its_runs_used(database, tmp_path):
-    store.initialize(database)
     with connect(database) as conn:  # recorded by the update before any run used it
         conn.execute("INSERT INTO dbip_releases(sha256,metadata) VALUES (%s,'{}')", ("c" * 64,))
     older = await measurement(tmp_path, requests=3)
@@ -128,7 +133,6 @@ async def test_an_ip_in_runs_of_two_releases_takes_its_lowest_run_key(database, 
     """Lowest run_key, not the newest or oldest release: release b is recorded first, so its id
     is the lower one. The first network's first run has the newer release (a), the second
     network's first run the older one (b); both first runs say US, the later runs DE."""
-    store.initialize(database)
     with connect(database) as conn:
         conn.execute("INSERT INTO dbip_releases(sha256,metadata) VALUES (%s,'{}')", ("b" * 64,))
     runs = []
@@ -155,7 +159,6 @@ async def test_a_file_replaced_under_its_name_is_a_new_release(database, tmp_pat
     """The update renames each new file over db-ip/dbip-full.mmdb: the release is the file's
     sha256, so the same name with new content is a new release, and the run enriched with the
     old file keeps its labels for the same IP."""
-    store.initialize(database)
     mmdb = tmp_path / "db-ip" / "dbip-full.mmdb"
     mmdb.parent.mkdir()
     contents = (
@@ -187,7 +190,6 @@ async def test_a_file_replaced_under_its_name_is_a_new_release(database, tmp_pat
 async def test_a_build_without_enriched_observations_names_no_release(database, tmp_path):
     """An enriched run after the cutoff is outside the build: with only a pulse run in its
     window, the snapshot names no release."""
-    store.initialize(database)
     enriched = await measurement(tmp_path, requests=2)
     enrichment(enriched, attributes=US, release="a" * 64)
     ingest(enriched, database)

@@ -14,7 +14,14 @@ from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.policy import digest
 from proxy_index.storage import connect, ingest
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
+
 
 LISTS = (
     "SELECT w.product_id,w.cohort,w.window_hours,w.list_id FROM calculated_windows w "
@@ -69,7 +76,6 @@ def by_country(build):
 
 @pytest.mark.asyncio
 async def test_identical_consecutive_builds_write_no_new_list_rows(database, tmp_path):
-    store.initialize(database)
     (us,), end = await runs(tmp_path, "us")
     enrichment(us)
     ingest(us, database)
@@ -88,7 +94,6 @@ async def test_identical_consecutive_builds_write_no_new_list_rows(database, tmp
 
 @pytest.mark.asyncio
 async def test_unchanged_country_shares_its_lists_and_a_new_test_gets_new_ones(database, tmp_path):
-    store.initialize(database)
     (us, de, again), end = await runs(tmp_path, "us", "de", "us")
     enrichment(us)
     ingest(us, database)
@@ -119,7 +124,6 @@ async def test_unchanged_country_shares_its_lists_and_a_new_test_gets_new_ones(d
 
 @pytest.mark.asyncio
 async def test_signature_v1_is_the_digest_of_its_frozen_inputs(database, tmp_path):
-    store.initialize(database)
     (us,), end = await runs(tmp_path, "us")
     enrichment(us, release="b" * 64)
     ingest(us, database)
@@ -162,7 +166,6 @@ async def test_verify_on_hit_fails_an_incomplete_signature(database, tmp_path, m
         return {key: digest(list(key)) for key in signatures(conn, payload, runs, buckets)}
 
     monkeypatch.setattr(lists, "signatures", without_runs)
-    store.initialize(database)
     (us, again), end = await runs(tmp_path, "us", "us")
     ingest(us, database)
     first = calculate(database, POLICY, as_of=end, publish=True)
@@ -186,7 +189,6 @@ async def test_a_window_edge_through_a_run_signs_its_clipped_buckets(
     +35 minutes. Each window signs only the buckets inside it, so a cutoff that clips the run
     gives a new list (a miss) and a later cutoff with the same clipped first and last bucket
     reuses it (a hit, verified)."""
-    store.initialize(database)
     w = datetime(2026, 10, 1, 12, tzinfo=UTC)
     minute = timedelta(minutes=1)
     ingest(await spread(tmp_path, monkeypatch, w + minute, [0, 300, 600, 1800, 2100]), database)

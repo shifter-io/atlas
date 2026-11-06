@@ -32,7 +32,7 @@ from proxy_index.calculated.policy import PAYLOAD
 from proxy_index.calculated.slim import POOL_LISTS, refer, slim
 from proxy_index.storage import connect, ingest
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
 
 # networks: a v4 head key, none in a v2 build (NET-SUM-1).
 VOLATILE = {"snapshot_id", "generated_at", "implementation_id", "schema_version", "networks"}
@@ -135,19 +135,20 @@ def assert_equal_builds(database, tmp_path, new, legacy, *, cut=True):
 @pytest.mark.asyncio
 async def test_v3_with_its_lists_equals_v2_on_seeded_random_observations(
     scenario,  # noqa: F811
-    database,
+    calculated_database,
     tmp_path,
     monkeypatch,
 ):
-    # The synthetic observations have no request counters (see test_sqlwindow).
+    # The scenario is test_sqlwindow's, in its calculated database; its synthetic observations
+    # have no request counters (see test_sqlwindow).
     monkeypatch.setattr(store, "validate_payload", lambda payload, products=None: None)
-    new, legacy = both(database, capped(tmp_path), scenario["as_of"], monkeypatch)
-    payload = assert_equal_builds(database, tmp_path, new, legacy)
+    new, legacy = both(calculated_database, capped(tmp_path), scenario["as_of"], monkeypatch)
+    payload = assert_equal_builds(calculated_database, tmp_path, new, legacy)
     # Empty-string labels come back as they were (the API and the export compare them above).
     windows = [w for p in payload["products"] for w in p["windows"].values()]
     rows = [r for w in windows for r in w["breakdowns"]["country"]]
     assert any(r["country_code"] == "" for r in rows)
-    v3, v2 = await served(database, (new, legacy))
+    v3, v2 = await served(calculated_database, (new, legacy))
     assert v3 == v2
 
 

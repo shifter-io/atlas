@@ -15,7 +15,14 @@ from proxy_index.calculated.calculator import calculate
 from proxy_index.cli import main
 from proxy_index.storage import connect, ingest
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
+
 
 DERIVED = (
     "calculated_series",
@@ -214,7 +221,6 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
 
 @pytest.mark.asyncio
 async def test_publication_expires_older_builds_of_the_day(database, tmp_path):
-    store.initialize(database)
     directory = await measurement(tmp_path, requests=4)
     ingest(directory, database)
     raw = json.loads((directory / "summary.json").read_text())
@@ -239,7 +245,6 @@ async def test_publication_expires_older_builds_of_the_day(database, tmp_path):
 
 
 def test_retention_without_current_build_or_known_schema(database, capsys):
-    store.initialize(database)
     with connect(database) as conn:
         conn.execute("INSERT INTO methodologies VALUES ('m','{}')")
         conn.execute(

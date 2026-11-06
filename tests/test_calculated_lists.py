@@ -27,7 +27,7 @@ from proxy_index.dbserver.check import check
 from proxy_index.providers.credentials import read_credentials
 from proxy_index.storage import connect, initialize, migrate
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
 
 CALCULATED_V8 = Path(__file__).parent / "fixtures/calculated_v8.sql"
 # Lists retention keeps no longer: group lists no window references, network lists (K10) whose
@@ -143,7 +143,7 @@ def downgrade_to_v8(database, empty):
 
 @pytest.mark.asyncio
 async def test_v8_breakdowns_migrate_into_lists_unchanged(
-    databases, database, tmp_path, monkeypatch
+    databases, database, calculated_template, tmp_path, monkeypatch
 ):
     # A v8 release stored payload v2: each part holds its rows, not a list id (SNAP-LISTREF-1).
     monkeypatch.setattr(calculator, "SCHEMA_VERSION", 2)
@@ -193,8 +193,7 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
         assert entries == (dict.fromkeys(BREAKDOWNS, 0), None)
         assert conn.execute("SELECT to_regclass('calculated_breakdowns')").fetchone() == (None,)
     assert migrate(database)["migrated"] is False
-    reference = databases()
-    store.initialize(reference)
+    reference = databases(template=calculated_template)
     assert catalog(database) == catalog(reference)
     # New lists follow the migrated ids, and every kept build still reads as it did.
     third = calculate(database, lenient_policy(tmp_path), as_of=cutoff + timedelta(hours=1))
