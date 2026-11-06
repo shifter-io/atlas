@@ -21,14 +21,16 @@ from proxy_index.onboarding.manifest import load, moment
 from proxy_index.onboarding.scheduler import job_directory, validate_state
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--round", type=int, default=0)
-    args = parser.parse_args()
-    manifest = load(args.manifest)
-    region = args.manifest.parent / "regions" / args.region
+    return parser.parse_args()
+
+
+def round_jobs(args, manifest, region):
+    """The round's jobs, one per configured country in order, all completed."""
     state = read_json(region / "state.json")
     validate_state(state, manifest, args.region)
     jobs = [j for j in state["jobs"] if j["round"] == args.round]
@@ -38,9 +40,59 @@ def main():
         or any(j["status"] != "completed" for j in jobs)
     ):
         raise ValueError("Round is incomplete")
-    output = args.manifest.parent / "export" / args.region / f"round-{args.round:02d}"
-    private_dir(output)
-    partial = output / "observations.jsonl.gz.partial"
+    return jobs
+
+
+def copy_chunks(folder, job, combined):
+    """Verify each chunk of one country and append it to the combined stream."""
+    count = chunks = 0
+    unique = set()
+    verified = set()
+    for meta_path in sorted(folder.glob("observations-*.jsonl.meta.json")):
+        meta = read_json(meta_path)
+        if Path(meta["file"]).name != meta["file"]:
+            raise ValueError("Invalid chunk filename")
+        chunk = folder / meta["file"]
+        count += verify_chunk(chunk, meta, job, job["finished_at"])
+        with gzip.open(chunk, "rt") as stream:
+            for line in stream:
+                unique.add(json.loads(line)["ip"])
+        with chunk.open("rb") as source:
+            shutil.copyfileobj(source, combined)
+        verified.add(chunk.name)
+        chunks += 1
+    if verified != {p.name for p in folder.glob("observations-*.jsonl.gz")}:
+        raise ValueError("Unverified country chunk")
+    return count, chunks, unique
+
+
+def country_result(folder, job, measured, combined):
+    """Combine one country's chunks and reconcile them with its summary."""
+    if list(folder.glob("*.partial")):
+        raise ValueError("Unfinished country chunk")
+    count, chunks, unique = copy_chunks(folder, job, combined)
+    if (
+        count != measured["successes"]
+        or count != job["observations"]
+        or len(unique) != measured["unique_ips"]
+        or measured["completed"] != measured["successes"] + measured["total_errors"]
+        or measured["cancelled"] != 0
+    ):
+        raise ValueError("Country measurements do not reconcile")
+    return {
+        "country": job["country"],
+        "observations": count,
+        "chunks": chunks,
+        "unique_ips": len(unique),
+        "requests": measured["completed"],
+        "errors": measured["total_errors"],
+        "stop_reason": measured["stop_reason"],
+        "duration_seconds": job["duration_seconds"],
+    }
+
+
+def combine_round(region, jobs, partial):
+    """Write every country's verified chunks, in order, to the partial combined file."""
     results = []
     previous_end = None
     with partial.open("wb") as combined:
@@ -52,56 +104,21 @@ def main():
             if previous_end and moment(job["started_at"]) < previous_end:
                 raise ValueError("Country runs overlap")
             previous_end = moment(job["finished_at"])
-            if list(folder.glob("*.partial")):
-                raise ValueError("Unfinished country chunk")
-            count = chunks = 0
-            unique = set()
-            verified = set()
-            for meta_path in sorted(folder.glob("observations-*.jsonl.meta.json")):
-                meta = read_json(meta_path)
-                if Path(meta["file"]).name != meta["file"]:
-                    raise ValueError("Invalid chunk filename")
-                chunk = folder / meta["file"]
-                count += verify_chunk(chunk, meta, job, job["finished_at"])
-                with gzip.open(chunk, "rt") as stream:
-                    for line in stream:
-                        unique.add(json.loads(line)["ip"])
-                with chunk.open("rb") as source:
-                    shutil.copyfileobj(source, combined)
-                verified.add(chunk.name)
-                chunks += 1
-            if verified != {p.name for p in folder.glob("observations-*.jsonl.gz")}:
-                raise ValueError("Unverified country chunk")
-            if (
-                count != measured["successes"]
-                or count != job["observations"]
-                or len(unique) != measured["unique_ips"]
-                or measured["completed"] != measured["successes"] + measured["total_errors"]
-                or measured["cancelled"] != 0
-            ):
-                raise ValueError("Country measurements do not reconcile")
-            results.append(
-                {
-                    "country": job["country"],
-                    "observations": count,
-                    "chunks": chunks,
-                    "unique_ips": len(unique),
-                    "requests": measured["completed"],
-                    "errors": measured["total_errors"],
-                    "stop_reason": measured["stop_reason"],
-                    "duration_seconds": job["duration_seconds"],
-                }
-            )
+            results.append(country_result(folder, job, measured, combined))
         if combined.tell() == 0:
             combined.write(gzip.compress(b"", mtime=0))
         combined.flush()
         os.fsync(combined.fileno())
-    partial.replace(output / "observations.jsonl.gz")
+    return results
+
+
+def round_manifest(args, manifest, jobs, results, output):
+    """The verification manifest of the combined file, after recounting its rows."""
     # Re-read the combined stream, including every gzip member, to validate its row total.
     with gzip.open(output / "observations.jsonl.gz", "rt") as stream:
         rows = sum(1 for _ in stream)
     assert rows == sum(r["observations"] for r in results)
-    result = {
+    return {
         "verified": True,
         "schema_version": 1,
         "region": args.region,
@@ -115,7 +132,11 @@ def main():
         "file": "observations.jsonl.gz",
         "sha256": digest(output / "observations.jsonl.gz"),
     }
-    atomic_json(output / "manifest.json", result)
+
+
+def report_page(region, result, results):
+    """The standalone HTML validation report of one round."""
+    rows = result["rows"]
     table = "".join(
         "<tr>"
         + "".join(
@@ -132,14 +153,14 @@ def main():
         + "</tr>"
         for r in results
     )
-    page = f"""<!doctype html><html lang="en"><meta charset="utf-8">
+    return f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Regional round validation</title>
 <style>body{{font:16px/1.6 system-ui;max-width:1100px;margin:40px auto;padding:0 24px;
 background:#f4f7fa;color:#203040}}table{{border-collapse:collapse;background:white;width:100%}}
 th,td{{padding:12px;text-align:left;border-bottom:1px solid #ccd8e0}}
 .scroll{{overflow:auto}}</style>
-<h1>{html.escape(args.region)} · regional round verified</h1>
+<h1>{html.escape(region)} · regional round verified</h1>
 <p>Duration: {result["duration_seconds"]:.2f} seconds · {rows:,} successful observations.</p>
 <div class="scroll"><table><tr><th>Country requested</th><th>Seconds</th><th>Requests</th>
 <th>Observations</th><th>Unique IPs</th><th>Errors</th></tr>{table}</table></div>
@@ -150,7 +171,21 @@ Duplicate observations remain intact.</p>
 <p>Country codes describe requested targeting; this format does not assert geolocated country.</p>
 <p><a href="manifest.json">Verification manifest and checksum</a> ·
 <a href="observations.jsonl.gz">Combined round observations</a></p></html>"""
-    atomic_bytes(output / "report.html", page.encode())
+
+
+def main():
+    args = parse_args()
+    manifest = load(args.manifest)
+    region = args.manifest.parent / "regions" / args.region
+    jobs = round_jobs(args, manifest, region)
+    output = args.manifest.parent / "export" / args.region / f"round-{args.round:02d}"
+    private_dir(output)
+    partial = output / "observations.jsonl.gz.partial"
+    results = combine_round(region, jobs, partial)
+    partial.replace(output / "observations.jsonl.gz")
+    result = round_manifest(args, manifest, jobs, results, output)
+    atomic_json(output / "manifest.json", result)
+    atomic_bytes(output / "report.html", report_page(args.region, result, results).encode())
     print(json.dumps(result))
 
 
