@@ -310,36 +310,62 @@ func Tokens(q string) []string {
 // query returns the palette's default sections (starting points, top networks).
 func (idx *SearchIndex) Search(q string) SearchResult {
 	tokens := Tokens(q)
-	res := SearchResult{Query: q, Tokens: tokens, Sections: []SearchSection{}}
+	res := SearchResult{Query: q, Tokens: tokens}
 	if len(tokens) == 0 {
-		for _, s := range []struct {
-			label string
-			ids   []string
-		}{{"Jump to", idx.StartingPointIDs}, {"Top networks", idx.TopNetworkIDs}} {
-			sec := SearchSection{Group: s.label, Items: []SearchItem{}}
-			for _, id := range s.ids {
-				if it, ok := idx.byID[id]; ok {
-					sec.Items = append(sec.Items, *it)
-				}
-			}
-			if len(sec.Items) > 0 {
-				res.Sections = append(res.Sections, sec)
-				res.Total += len(sec.Items)
-			}
+		res.Sections, res.Total = idx.defaultSections()
+	} else {
+		res.Sections, res.Total = groupHits(idx.rankedHits(tokens))
+	}
+	return res
+}
+
+// defaultSections are the non-empty sections of an empty query and their item count.
+func (idx *SearchIndex) defaultSections() ([]SearchSection, int) {
+	sections, total := []SearchSection{}, 0
+	for _, s := range []struct {
+		label string
+		ids   []string
+	}{{"Jump to", idx.StartingPointIDs}, {"Top networks", idx.TopNetworkIDs}} {
+		sec := SearchSection{Group: s.label, Items: idx.itemsByID(s.ids)}
+		if len(sec.Items) > 0 {
+			sections = append(sections, sec)
+			total += len(sec.Items)
 		}
-		return res
 	}
-	type hit struct {
-		it    *SearchItem
-		value int
+	return sections, total
+}
+
+// itemsByID are the items of ids in order, skipping ids not in the index.
+func (idx *SearchIndex) itemsByID(ids []string) []SearchItem {
+	items := []SearchItem{}
+	for _, id := range ids {
+		if it, ok := idx.byID[id]; ok {
+			items = append(items, *it)
+		}
 	}
-	hits := []hit{}
+	return items
+}
+
+type searchHit struct {
+	it    *SearchItem
+	value int
+}
+
+// rankedHits are the items matching every token, best first; ties keep index order.
+func (idx *SearchIndex) rankedHits(tokens []string) []searchHit {
+	hits := []searchHit{}
 	for i := range idx.Items {
 		if v := idx.Items[i].score(tokens); v > 0 {
-			hits = append(hits, hit{&idx.Items[i], v})
+			hits = append(hits, searchHit{&idx.Items[i], v})
 		}
 	}
 	sort.SliceStable(hits, func(i, j int) bool { return hits[i].value > hits[j].value })
+	return hits
+}
+
+// groupHits takes at most MaxResults hits, at most PerGroup per group, into
+// sections in the order their groups first appear, and returns their count.
+func groupHits(hits []searchHit) ([]SearchSection, int) {
 	groups := []string{}
 	byGroup := map[string][]SearchItem{}
 	taken := 0
@@ -357,9 +383,9 @@ func (idx *SearchIndex) Search(q string) SearchResult {
 		byGroup[g] = append(byGroup[g], *h.it)
 		taken++
 	}
+	sections := []SearchSection{}
 	for _, g := range groups {
-		res.Sections = append(res.Sections, SearchSection{Group: g, Items: byGroup[g]})
+		sections = append(sections, SearchSection{Group: g, Items: byGroup[g]})
 	}
-	res.Total = taken
-	return res
+	return sections, taken
 }
