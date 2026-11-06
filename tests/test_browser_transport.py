@@ -20,7 +20,7 @@ from proxy_index.browser.settings import BrowserOptions, TargetSettings
 from proxy_index.browser.targets.pages import GoogleSearch
 from proxy_index.browser.transport import CONSENT_ACCEPT, BrowserTransport, NullRecorder
 from proxy_index.models import ProxyConfig, RequestContext, RunConfig
-from proxy_index.runner import run
+from proxy_index.runner import RunOptions, run
 from proxy_index.sinks import JsonSink
 from proxy_index.targets import TargetRegistry
 
@@ -363,7 +363,9 @@ async def test_runs_through_the_runner_like_an_http_run(tmp_path):
         harness.pool, harness.recorder, browser=OPTIONS, settings=SETTINGS
     )
     config = replace(harness.config, requests=6, concurrency=3)
-    summary = await run(config, JsonSink(tmp_path), targets=registry, transport_factory=factory)
+    summary = await run(
+        config, JsonSink(tmp_path), RunOptions(targets=registry, transport_factory=factory)
+    )
     assert summary.completed == 6 and summary.successes == 0
     assert summary.errors == {"no_content": 6}
     assert sorted(t[0]["i"] for t in harness.recorder.tries) == list(range(6))

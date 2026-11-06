@@ -14,7 +14,7 @@ from helpers import Gateway, server
 from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
 from proxy_index.process_transport import ProcessTransport, process_count
 from proxy_index.providers import GrammarProxy
-from proxy_index.runner import run
+from proxy_index.runner import RunOptions, run
 from proxy_index.sinks import JsonSink
 from proxy_index.targets import registry
 
@@ -88,7 +88,7 @@ async def test_real_http_workers_share_count_concurrency_and_uniqueness(
         processes=processes,
         requests_per_second=rate,
     )
-    result = await run(config, JsonSink(tmp_path), observation_consumer=observe)
+    result = await run(config, JsonSink(tmp_path), RunOptions(observation_consumer=observe))
     assert result.completed == result.started == state["requests"] == requests
     assert result.successes == requests and result.unique_ips == 1
     assert len(observations) == requests and {ip for ip, _ in observations} == {"2001:db8::1"}
@@ -142,9 +142,11 @@ async def test_stop_and_deadline_cancel_all_processes(gateway, tmp_path, operato
     result = await run(
         RunConfig("generic_http", proxy, requests=1000, concurrency=6, processes=2),
         JsonSink(tmp_path),
-        stop=stop,
-        deadline=None if operator else time.time() + 3600,
-        wall_clock=lambda: time.time() + skew[0],
+        RunOptions(
+            stop=stop,
+            deadline=None if operator else time.time() + 3600,
+            wall_clock=lambda: time.time() + skew[0],
+        ),
     )
     await task
     assert result.status == "cancelled"

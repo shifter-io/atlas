@@ -40,7 +40,7 @@ import aiohttp
 from . import __version__
 from .models import ProxySource, RunConfig
 from .orchestrator.archive import pack
-from .runner import Enricher, run
+from .runner import Enricher, RunOptions, run
 from .sinks import JsonSink
 from .targets import EchoIpTarget, TargetRegistry, registry
 from .transport import HttpTransport
@@ -377,7 +377,7 @@ class NodeAgent:
         return {}
 
     def run_options(self, assignment: dict[str, Any]) -> dict[str, Any]:
-        """Extra keyword arguments for runner.run, such as `deadline` (a subclass hook)."""
+        """Extra RunOptions fields for runner.run, such as `deadline` (a subclass hook)."""
         return {}
 
     def result_sink(self, assignment: dict[str, Any]) -> JsonSink:
@@ -466,9 +466,7 @@ class NodeAgent:
             await self._progress(active, {"requests": 0})
             sink = self.result_sink(assignment)
             try:
-                summary = await run(
-                    config,
-                    sink,
+                options = RunOptions(
                     stop=active.stop,
                     progress=lambda counters: self._progress(active, counters),
                     progress_interval=self.progress_interval,
@@ -476,6 +474,7 @@ class NodeAgent:
                     targets=self.targets(assignment),
                     **{"transport_factory": self.transport_factory} | extra,
                 )
+                summary = await run(config, sink, options)
             finally:
                 directory = sink.directory
                 active.concurrency = 0

@@ -13,7 +13,7 @@ from datetime import datetime
 
 from aiohttp import web
 from campaign_fakes import CAMPAIGN_PROJECT, FakeDigitalOcean, Fault
-from test_campaign_hour import (
+from campaign_hour_cases import (
     NETWORKS,
     ended,
     harvest_setup,
