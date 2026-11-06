@@ -432,7 +432,6 @@ def test_runtime_git_and_package_exclusion():
     )
 
 
-@pytest.mark.slow
 @pytest.mark.scale
 async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
     writer = ObservationWriter(
@@ -449,11 +448,11 @@ async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
     assert writer.rows == 2_000_000 and writer.peak_queue <= 4096
     count = 0
     for path in sorted(tmp_path.glob("*.gz")):
-        with gzip.open(path, "rt") as stream:
-            for line in stream:
-                row = json.loads(line)
-                assert row["ip"] == "2001:db8::1"
-                count += 1
+        lines = gzip.decompress(path.read_bytes()).decode().splitlines()
+        count += len(lines)
+        # Every line is checked: identical lines need parsing only once.
+        for line in set(lines):
+            assert json.loads(line)["ip"] == "2001:db8::1"
     assert count == 2_000_000
 
 
