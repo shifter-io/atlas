@@ -126,23 +126,18 @@ def test_spread_with_more_slow_tests_than_a_chunk_holds():
 
 
 class Config:
-    def __init__(self, workerinput=None, dist="worksteal"):
+    def __init__(self, workerinput=None):
         if workerinput is not None:
             self.workerinput = workerinput
-        self.dist = dist
-
-    def getoption(self, name, default=None):
-        return self.dist
 
 
-def test_only_worksteal_workers_reorder(monkeypatch, tmp_path):
+def test_only_xdist_workers_reorder(monkeypatch, tmp_path):
     durations = tmp_path / "durations.json"
     durations.write_text(json.dumps({"b": 5.0}))
     monkeypatch.setattr(conftest, "DURATIONS", durations)
-    for config in (Config(), Config({"workercount": 2}, dist="load")):
-        items = [Item("a"), Item("b")]
-        conftest.pytest_collection_modifyitems(config, items)
-        assert [item.nodeid for item in items] == ["a", "b"]
+    items = [Item("a"), Item("b")]
+    conftest.pytest_collection_modifyitems(Config(), items)
+    assert [item.nodeid for item in items] == ["a", "b"]
     items = [Item("a"), Item("b")]
     conftest.pytest_collection_modifyitems(Config({"workercount": 2}), items)
     assert [item.nodeid for item in items] == ["b", "a"]

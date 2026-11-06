@@ -32,11 +32,11 @@ jobs:
         include:
           # name eph storage dist workers cov background timeline serial(run|skip) core
           - group: lpt-a
-            variants: "tmpl-tl,on,branch,worksteal,auto,1,1,1,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace lpt-tl,on,branch,worksteal,auto,1,1,1,run,ctrace lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace"
+            variants: "no-durations plain,on,branch,worksteal,auto,1,1,0,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace lpt-tl,on,branch,worksteal,auto,1,1,1,run,ctrace lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace"
           - group: lpt-b
-            variants: "main-exact,off,main,worksteal,auto,1,1,0,run,ctrace tmpl-tl,on,branch,worksteal,auto,1,1,1,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace"
-          - group: cov
-            variants: "tmpl,on,branch,worksteal,auto,1,1,0,run,ctrace sysmon,on,branch,worksteal,auto,1,1,0,run,sysmon covcmp:tmpl:sysmon"
+            variants: "use-durations lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace no-durations plain,on,branch,worksteal,auto,1,1,0,run,ctrace main-exact,off,main,worksteal,auto,1,1,0,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace"
+          - group: lpt-c
+            variants: "no-durations main-exact,off,main,worksteal,auto,1,1,0,run,ctrace use-durations lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace lpt-tl,on,branch,worksteal,auto,1,1,1,run,ctrace"
     defaults:
       run:
         shell: bash
@@ -205,7 +205,8 @@ jobs:
             case "$v" in
               collect) collect ;;
               covcmp:*) IFS=: read -r _ a b <<< "$v"; covcmp "$a" "$b" ;;
-              use-durations) cp "$M/durations.json" tests/durations.json; wc -l tests/durations.json ;;
+              use-durations) git checkout HEAD -- tests/durations.json; wc -l tests/durations.json ;;
+              no-durations) rm -f tests/durations.json ;;
               *) variant "$v" ;;
             esac
           done

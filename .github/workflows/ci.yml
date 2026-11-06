@@ -170,7 +170,8 @@ jobs:
         if: env.CODE == 'true'
         run: |
           port=$(uv run --no-editable python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port"
+          # A throwaway cluster: no crash safety (fsync and the rest off, CI-FAST-2).
+          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port" --ephemeral
           echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
 
       - name: Checks in the background, tests in parallel
@@ -199,19 +200,27 @@ jobs:
             --basetemp="$RUNNER_TEMP/scope-tmp" tests/test_campaign_scope.py -q
           background benchmark uv run --no-editable python scripts/benchmark.py --output "$RUNNER_TEMP/scale"
 
+          # Is any test marked serial? Collected alongside the tests (exit 5: none), so an empty
+          # serial set costs nothing; any other status runs the set, which then reports it.
+          ( rc=0; uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+              -m serial > "$EV/serial-collect.log" 2>&1 || rc=$?; echo "$rc" > "$EV/serial-collect" ) &
+          collecting=$!
+
           # Every test, database tests included, with branch coverage: one xdist worker per
-          # CPU, then the `serial` set alone, appending to the same coverage.
+          # CPU, each taking its share of the slow tests longest first (tests/conftest.py,
+          # tests/durations.json), then the `serial` set alone, appending to the same coverage.
           report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
           uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
             --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
           serial=0
-          uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-            --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
-            --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
-          # Exit status 5: no test is marked serial.
-          [ "$serial" -eq 5 ] && serial=0
+          wait "$collecting"
+          if [ "$(cat "$EV/serial-collect")" != 5 ]; then
+            uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
+              --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
+              --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
+          fi
           wait
 
           failed=0
