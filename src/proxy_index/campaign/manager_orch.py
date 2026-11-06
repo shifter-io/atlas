@@ -9,8 +9,10 @@ nightly `db-server analyze` timer, opens the node API port (NODE_API_PORT, HTTPS
 manager's cloud firewall to the pulse-node tag, and starts both units. The orchestrator reads the
 manager's database file in place (`/etc/proxy-index/database.toml`, never copied or printed).
 Its TLS key and admin password are made on the manager and never leave it; only the public
-certificate comes back, beside the inventory, with its SHA-256 recorded. It also installs the
-daily test's own inputs and its hourly timer, which stays OFF (`manager_daily`). Without
+certificate comes back, beside the inventory, with its SHA-256 recorded. The browser hosts'
+client CA is made there once too (`--new-browser-ca` replaces it: every host certificate must
+then be issued again with `browser-cert`). It also installs the daily test's own inputs and its
+hourly timer, which stays OFF (`manager_daily`). Without
 `--apply` every command prints what it would do and changes nothing; `--apply` of enable also
 needs the owner's recorded go (D13). `orchestrator-disable --apply` stops the units and the
 hourly timer, then closes the port.
@@ -31,7 +33,7 @@ from . import deploy, manager_daily, ops_api
 from .contracts import PULSE_TAG
 from .do_api import ApiError, DigitalOcean
 from .image import Shell, run_shell
-from .manager_rules import NODE_API_PORT, manager_rules
+from .manager_rules import BROWSER_PORT, NODE_API_PORT, manager_rules
 
 WANTED_SIZE = "s-8vcpu-16gb-amd"
 ORCHESTRATOR_UNIT = "proxy-index-orchestrator.service"
@@ -42,6 +44,7 @@ STARTED = (ORCHESTRATOR_UNIT, ANALYZE_TIMER)  # never the hourly timer (owner ru
 DATABASE_FILE = "/etc/proxy-index/database.toml"
 TLS_DIR = "/opt/proxy-index-campaign/.secrets/tls"
 CERT, KEY = f"{TLS_DIR}/orchestrator.crt", f"{TLS_DIR}/orchestrator.key"
+BROWSER_CA, BROWSER_CA_KEY = f"{TLS_DIR}/browser-ca.crt", f"{TLS_DIR}/browser-ca.key"
 ENV_FILE = "/opt/proxy-index-campaign/.secrets/orchestrator.env"
 DBIP_DIR = "/opt/proxy-index-campaign/db-ip"
 HEALTH_TRIES = 30  # two seconds apart
@@ -78,11 +81,27 @@ async def resize(
     return result | {"action": "none" if recorded == size else "record"}
 
 
-def enable_script(host: str, cid: str, port: int = NODE_API_PORT) -> str:
+def browser_ca_lines(new: bool = False) -> list[str]:
+    """Make the browser hosts' client CA once, root-only (with `new`, a fresh one)."""
+    return [
+        *([f"rm -f {BROWSER_CA} {BROWSER_CA_KEY}"] if new else []),
+        f"if [ ! -s {BROWSER_CA_KEY} ] || [ ! -s {BROWSER_CA} ]; then",
+        "  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes "
+        "-days 3650 -subj /CN=proxy-index-browser-ca "
+        "-addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign "
+        f"-keyout {BROWSER_CA_KEY}.partial -out {BROWSER_CA}.partial 2>/dev/null",
+        f"  mv -f {BROWSER_CA_KEY}.partial {BROWSER_CA_KEY} "
+        f"&& mv -f {BROWSER_CA}.partial {BROWSER_CA}",
+        "fi",
+    ]
+
+
+def enable_script(host: str, cid: str, port: int = NODE_API_PORT, new_ca: bool = False) -> str:
     """Root shell run on the manager with a tar on stdin (units/, formulas/): check and install
     the daily inputs, then the units; make the TLS key and certificate (for the manager's
-    address) and the admin password once, root-only; start the orchestrator and the analyze
-    timer (never the hourly one); wait for /health over HTTPS; print the certificate."""
+    address), the browser CA and the admin password once, root-only; start the orchestrator
+    and the analyze timer (never the hourly one); wait for /health over HTTPS; print the
+    certificate."""
     address = str(ipaddress.IPv4Address(host))
     url = f"https://{address}:{port}/health"
     curl = f"curl -fsS --max-time 5 --cacert {CERT} --connect-to ::127.0.0.1: {url}"
@@ -107,6 +126,7 @@ def enable_script(host: str, cid: str, port: int = NODE_API_PORT) -> str:
             f"-keyout {KEY}.partial -out {CERT}.partial 2>/dev/null",
             f"  mv -f {KEY}.partial {KEY} && mv -f {CERT}.partial {CERT}",
             "fi",
+            *browser_ca_lines(new_ca),
             f"if [ ! -s {ENV_FILE} ]; then",
             "  printf 'ADMIN_USER=admin\\nADMIN_PASSWORD=%s\\n' \"$(openssl rand -hex 24)\" "
             f"> {ENV_FILE}.partial && mv -f {ENV_FILE}.partial {ENV_FILE}",
@@ -161,6 +181,7 @@ class EnableInputs:
     owner_go: Path | None = None
     formulas: Path = Path("formulas")
     daily_template: str | None = None
+    new_browser_ca: bool = False
 
 
 async def _check_enable(cloud: DigitalOcean, inventory: dict[str, Any]) -> None:
@@ -188,7 +209,8 @@ async def enable(
     cid = manager_daily.template_id(inventory, inputs.daily_template)
     formulas = manager_daily.formula_files(inputs.formulas)
     sent = manager_daily.digests(formulas)
-    rules = manager_rules(inventory | {"node_api_port": NODE_API_PORT}, inventory["mac_ipv4"])
+    ports = {"node_api_port": NODE_API_PORT, "browser_port": BROWSER_PORT}
+    rules = manager_rules(inventory | ports, inventory["mac_ipv4"])
     result = {
         "applied": apply,
         "units": {name: hashlib.sha256(data).hexdigest() for name, data, _ in units()},
@@ -196,15 +218,17 @@ async def enable(
         "hourly_timer": "installed off: hourly-enable after the owner's go",
         "daily": {"template": cid, "formulas": len(formulas)},
         "node_api_port": NODE_API_PORT,
+        "browser_port": BROWSER_PORT,
+        "new_browser_ca": inputs.new_browser_ca,
         "firewall_inbound": rules["inbound_rules"],
     }
     if not apply:
         return result
     go = manager_daily.go_record(inputs.owner_go, now or datetime.now(UTC))
     await _firewall(cloud, inventory, rules)
-    deploy.save(inventory_path, inventory, node_api_port=NODE_API_PORT)
+    deploy.save(inventory_path, inventory, **ports)
     remote = deploy.Manager(inventory, inventory_path, shell)
-    script = remote.argv(enable_script(inventory["host"], cid))
+    script = remote.argv(enable_script(inventory["host"], cid, new_ca=inputs.new_browser_ca))
     code, out = await remote.shell(script, payload(formulas))
     check = manager_daily.verify(out, code, sent, "orchestrator-enable")
     pem = _certificate(out)
@@ -232,7 +256,7 @@ async def disable(
     """Stop the orchestrator, the analyze timer and the hourly timer, then close the port."""
     inventory = manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
-    closed = {key: value for key, value in inventory.items() if key != "node_api_port"}
+    closed = {k: v for k, v in inventory.items() if k not in ("node_api_port", "browser_port")}
     rules = manager_rules(closed, inventory["mac_ipv4"])
     result = {
         "applied": apply,
@@ -247,6 +271,7 @@ async def disable(
     )
     await _firewall(cloud, inventory, rules)
     inventory.pop("node_api_port", None)
+    inventory.pop("browser_port", None)
     stamp = (now or datetime.now(UTC)).isoformat()
     hourly = {"on": False, "at": stamp}  # off_lines took the hourly timer out too
     deploy.save(inventory_path, inventory, orchestrator_disabled_at=stamp, hourly=hourly)
@@ -261,6 +286,11 @@ def add_parsers(steps) -> None:
     on = steps.add_parser("orchestrator-enable", help="Run the orchestrator here (dry run)")
     on.add_argument("--formulas", type=Path, default=Path("formulas"), help="formulas/*.json")
     on.add_argument("--daily-template", help="the daily template's campaign id (once)")
+    on.add_argument(
+        "--new-browser-ca",
+        action="store_true",
+        help="replace the browser hosts' client CA (then reissue every browser-cert)",
+    )
     off = steps.add_parser("orchestrator-disable", help="Stop it and close its port (dry run)")
     hourly = steps.add_parser("hourly-enable", help="Start the hourly daily test (owner's go)")
     quiet = steps.add_parser("hourly-disable", help="Stop the hourly daily test (dry run)")
@@ -286,6 +316,8 @@ async def run(args, cloud_for) -> dict[str, Any]:
         if args.manager_action == "resize":
             return await resize(cloud, args.inventory, args.size, apply=args.apply)
         if args.manager_action == "orchestrator-enable":
-            inputs = EnableInputs(args.owner_go, args.formulas, args.daily_template)
+            inputs = EnableInputs(
+                args.owner_go, args.formulas, args.daily_template, args.new_browser_ca
+            )
             return await enable(cloud, args.inventory, inputs, apply=args.apply)
         return await disable(cloud, args.inventory, apply=args.apply)

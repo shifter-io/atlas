@@ -9,11 +9,11 @@ import ssl
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from helpers import self_signed
+from helpers import client_ca, self_signed
 
 from proxy_index.cli import main
 from proxy_index.orchestrator import app as app_module
-from proxy_index.orchestrator.api import CREDENTIALS_KEY, DB_KEY
+from proxy_index.orchestrator.api import BROWSER_TLS_KEY, CREDENTIALS_KEY, DB_KEY
 from proxy_index.orchestrator.app import SCHEDULER_KEY, build_app, serve
 
 pytest_plugins = ["test_storage"]
@@ -21,7 +21,7 @@ pytest_plugins = ["test_storage"]
 
 @pytest.fixture
 def credentials(tmp_path):
-    """A database file that is read, never connected to: aiohttp's run_app is stubbed."""
+    """A database file that is read, never connected to: serving (until_signal) is stubbed."""
     path = tmp_path / "database.toml"
     path.write_text(
         '[postgres]\nhost = "127.0.0.1"\nport = "5432"\ndbname = "d"\nuser = "u"\npassword = "p"\n'
@@ -33,7 +33,11 @@ def credentials(tmp_path):
 @pytest.fixture
 def run_app(monkeypatch):
     calls = []
-    monkeypatch.setattr(app_module.web, "run_app", lambda app, **kw: calls.append((app, kw)))
+
+    async def served(app, sites):
+        calls.append((app, sites))
+
+    monkeypatch.setattr(app_module, "until_signal", served)
     psycopg_log = logging.getLogger("psycopg")
     level = psycopg_log.level
     psycopg_log.setLevel(logging.DEBUG)
@@ -47,12 +51,12 @@ def test_serve_hands_the_app_address_and_tls_to_aiohttp(
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     cert, key = self_signed(tmp_path, "orchestrator")
     serve(credentials, host="::1", port=8443, dev=True, tls=(str(cert), str(key)))
-    ((app, options),) = run_app
-    assert isinstance(app, web.Application)
+    ((app, sites),) = run_app
+    assert isinstance(app, web.Application) and BROWSER_TLS_KEY not in app
     assert app[CREDENTIALS_KEY] == credentials and "census_plan" in app[SCHEDULER_KEY].tasks
-    assert (options["host"], options["port"], options["print"]) == ("::1", 8443, None)
-    context = options["ssl_context"]
-    assert isinstance(context, ssl.SSLContext)
+    ((host, port, context),) = sites
+    assert (host, port) == ("::1", 8443)
+    assert isinstance(context, ssl.SSLContext) and context.verify_mode == ssl.CERT_NONE
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     # Statement logs stay out even in dev.
     assert logging.getLogger("psycopg").level == logging.INFO
@@ -61,14 +65,32 @@ def test_serve_hands_the_app_address_and_tls_to_aiohttp(
 def test_serve_outside_dev_with_a_password_answers_plain_http(credentials, run_app, monkeypatch):
     monkeypatch.setenv("ADMIN_PASSWORD", "pw")
     serve(credentials, host="0.0.0.0", port=8080)
-    ((_, options),) = run_app
-    assert (options["host"], options["port"], options["ssl_context"]) == ("0.0.0.0", 8080, None)
+    ((_, sites),) = run_app
+    assert sites == [("0.0.0.0", 8080, None)]
 
 
 def test_serve_refuses_tls_with_half_a_pair_before_aiohttp(credentials, run_app):
     with pytest.raises(ValueError, match="go together"):
         serve(credentials, dev=True, tls=("cert.pem", None))
+    with pytest.raises(ValueError, match="--browser-port needs --tls-cert and --tls-key"):
+        serve(credentials, dev=True, browser=(8444, "ca.pem"))
     assert run_app == []
+
+
+def test_serve_adds_the_browser_port_with_client_certificates(
+    tmp_path, credentials, run_app, monkeypatch
+):
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    cert, key = self_signed(tmp_path, "orchestrator")
+    ca, _ = client_ca(tmp_path, "browser")
+    tls = (str(cert), str(key))
+    serve(credentials, port=8443, dev=True, tls=tls, browser=(8444, str(ca)))
+    ((app, sites),) = run_app
+    (_, node_port, node_tls), (host, port, browser) = sites
+    assert (node_port, node_tls.verify_mode) == (8443, ssl.CERT_NONE)
+    assert (host, port, browser.verify_mode) == ("127.0.0.1", 8444, ssl.CERT_REQUIRED)
+    assert app[BROWSER_TLS_KEY] is browser and browser.minimum_version == ssl.TLSVersion.TLSv1_2
+    assert [c["subject"] for c in browser.get_ca_certs()] == [((("commonName", "browser-ca"),),)]
 
 
 async def test_the_app_starts_its_scheduler_and_closes_the_pool_it_made(database):

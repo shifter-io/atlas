@@ -22,6 +22,10 @@ def register(commands) -> None:
     serve.add_argument("--methodology", help="Scoring methodology for the calculate job")
     serve.add_argument("--tls-cert", help="PEM certificate: answer HTTPS only (with --tls-key)")
     serve.add_argument("--tls-key", help="Owner-only PEM private key of --tls-cert")
+    serve.add_argument(
+        "--browser-port", type=int, help="Also serve the node API here to browser hosts (mTLS)"
+    )
+    serve.add_argument("--client-ca", help="PEM CA the browser hosts' certificates are signed by")
 
     node = commands.add_parser("node", help="Run a node agent for one provider product")
     node.add_argument("--orchestrator", required=True, help="Orchestrator base URL")
@@ -86,6 +90,8 @@ def dispatch(args) -> int:
             raise ValueError("--database-file or PROXY_INDEX_DATABASE_FILE is required")
         from .app import serve
 
+        if (args.browser_port is None) != (args.client_ca is None):
+            raise ValueError("--browser-port and --client-ca go together")
         serve(
             args.database_file,
             host=args.host,
@@ -93,6 +99,7 @@ def dispatch(args) -> int:
             dev=args.dev,
             methodology=args.methodology,
             tls=(args.tls_cert, args.tls_key),
+            browser=None if args.browser_port is None else (args.browser_port, args.client_ca),
         )
         return 0
     if args.command == "scheduler":

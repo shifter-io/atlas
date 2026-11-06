@@ -1,154 +1,122 @@
-"""BP-FIREWALL: the browser hosts' public IPv4s as sources of the manager's node API rule.
+"""BROWSER-MTLS-1: a browser host's client certificate for the manager's browser port.
 
-`campaign manager browser-hosts --ip A[,B...] [--apply]` (or `--clear`) sets exactly those
-addresses, as /32 sources beside the pulse-node tag, and records them in the inventory
-(`browser_host_ipv4s`). Every later firewall rebuild (`deploy`, `allow-me`,
-`orchestrator-enable`) reads them there through `manager_rules`, so it keeps them. Without
---apply it only prints the node API rule before and after.
+The home browser hosts have changing public addresses, so the manager's firewall opens the
+browser port (manager_rules.BROWSER_PORT) to every address and the orchestrator admits only a
+client certificate signed by the manager's browser CA whose CN is the host its token is bound
+to. `campaign manager browser-cert --host browser-<n> --out <dir>` makes, over SSH on the
+manager, a new key and a certificate for that host (clientAuth, valid CERT_DAYS days, signed by
+the CA `orchestrator-enable` made) and writes both into <dir> with mode 0600. The key is never
+printed and nothing stays on the manager. Rotating means issuing again; a compromised host means
+`orchestrator-enable --new-browser-ca`, then issuing every host again.
 """
 
 from __future__ import annotations
 
-import ipaddress
+import asyncio
+import hashlib
+import os
+import re
 from pathlib import Path
 from typing import Any
 
-from . import deploy, manager_daily, ops_api
-from .contracts import PULSE_TAG
-from .do_api import DigitalOcean
-from .manager_rules import BROWSER_HOSTS, manager_rules
+from ..browser.contracts import HOST_NAME_PATTERN
+from . import deploy, manager_daily, manager_orch
+from .image import Shell, run_shell
 
-MAX_HOSTS = 8
-DOCUMENTATION = tuple(
-    ipaddress.IPv4Network(block) for block in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
+CERT_DAYS = 90
+WORK = "/root/pi-bcert-XXXXXX"  # mktemp's template, root-only
+KEY_RE = re.compile(
+    r"-----BEGIN (?:EC )?PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+-----END (?:EC )?PRIVATE KEY-----\n"
+)
+CERT_RE = re.compile(r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n")
+EXTENSIONS = (
+    "basicConstraints=critical,CA:FALSE\\nkeyUsage=critical,digitalSignature\\n"
+    "extendedKeyUsage=clientAuth\\nsubjectKeyIdentifier=hash\\nauthorityKeyIdentifier=keyid\\n"
 )
 
 
-def _refusal(address: ipaddress.IPv4Address) -> str | None:
-    """Why `address` is not a public IPv4, or None."""
-    if address.is_loopback:
-        return "a loopback address"
-    if any(address in block for block in DOCUMENTATION):
-        return "a documentation address"
-    if address.is_private or address.is_multicast or not address.is_global:
-        return "a private or reserved address"
-    return None
+def issue_script(host: str) -> str:
+    """Root shell on the manager: a key and a CA-signed client certificate for `host` in a
+    temporary root-only directory, printed (key, then certificate) and removed."""
+    work, ca, ca_key = '"$work"', manager_orch.BROWSER_CA, manager_orch.BROWSER_CA_KEY
+    return "\n".join(
+        [
+            "set -eu",
+            f"test -s {ca}",
+            f"test -s {ca_key}",
+            "umask 077",
+            f"work=$(mktemp -d {WORK})",
+            f"trap 'rm -rf {work}' EXIT",
+            f"printf '{EXTENSIONS}' > {work}/ext",
+            "openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes "
+            f"-subj /CN={host} -keyout {work}/key -out {work}/csr 2>/dev/null",
+            f"openssl x509 -req -in {work}/csr -CA {ca} -CAkey {ca_key} "
+            f'-set_serial "0x$(openssl rand -hex 16)" -days {CERT_DAYS} -sha256 '
+            f"-extfile {work}/ext -out {work}/crt 2>/dev/null",
+            f"cat {work}/key {work}/crt",
+        ]
+    )
 
 
-def checked(values: list[str]) -> list[str]:
-    """The addresses, each a distinct public IPv4, at most MAX_HOSTS; refused otherwise."""
-    found: list[str] = []
-    for value in values:
-        try:
-            address = ipaddress.IPv4Address(value.strip())
-        except ValueError:
-            raise deploy.DeployError(f"{value!r} is not an IPv4 address") from None
-        reason = _refusal(address)
-        if reason:
-            raise deploy.DeployError(f"{address} is {reason}; give the host's public IPv4")
-        if str(address) in found:
-            raise deploy.DeployError(f"{address} is given twice")
-        found.append(str(address))
-    if len(found) > MAX_HOSTS:
-        raise deploy.DeployError(f"{len(found)} addresses: at most {MAX_HOSTS} browser hosts")
-    return found
+def _pair(out: str) -> tuple[str, str]:
+    """The one key and one certificate the script printed; refused otherwise (naming neither)."""
+    keys, certs = KEY_RE.findall(out), CERT_RE.findall(out)
+    if len(keys) != 1 or len(certs) != 1:
+        raise deploy.DeployError("the manager did not return one key and one certificate")
+    return keys[0], certs[0]
 
 
-def node_rules(rules: dict[str, Any], port: int | None) -> list[dict[str, Any]]:
-    """The inbound rules for the node API port (none while it is closed)."""
-    if not port:
-        return []
-    inbound = rules.get("inbound_rules") or []
-    return [r for r in inbound if r.get("ports") == str(port) and r.get("protocol") == "tcp"]
+def _write_private(path: Path, data: str) -> None:
+    """Replace `path` with `data`, owner-only (0600) from the start."""
+    partial = path.with_name(f"{path.name}.partial")
+    partial.unlink(missing_ok=True)
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        stream.write(data)
+    os.replace(partial, path)
 
 
-def holds(firewall: dict[str, Any] | None, port: int | None, wanted: list[str]) -> bool:
-    """True when the firewall read back has exactly one node API rule, with the pulse-node tag
-    and exactly `wanted` as single-address sources (DigitalOcean may answer "A" or "A/32").
-    With the port closed there is no such rule to check."""
-    if firewall is None:
-        return False
-    if not port:
-        return True
-    found = node_rules(firewall, port)
-    if len(found) != 1:
-        return False
-    sources = found[0].get("sources") or {}
-    try:
-        nets = [ipaddress.IPv4Network(a) for a in sources.get("addresses") or []]
-    except ValueError:
-        return False
-    if any(net.prefixlen != 32 for net in nets):
-        return False
-    hosts = sorted(str(net.network_address) for net in nets)
-    return sources.get("tags") == [PULSE_TAG] and hosts == sorted(wanted)
+def _save(out: Path, host: str, key: str, cert: str) -> tuple[Path, Path]:
+    """<host>.key and <host>.crt in `out` (made owner-only when missing)."""
+    out.mkdir(mode=0o700, parents=True, exist_ok=True)
+    key_path, cert_path = out / f"{host}.key", out / f"{host}.crt"
+    _write_private(key_path, key)
+    _write_private(cert_path, cert)
+    return key_path, cert_path
 
 
-async def set_browser_hosts(
-    cloud: DigitalOcean, inventory_path: Path, addresses: list[str], apply: bool = False
+async def issue(
+    inventory_path: Path, host: str, out: Path, *, shell: Shell = run_shell
 ) -> dict[str, Any]:
-    """Set exactly `addresses` (an empty list clears them) on the node API rule and record them;
-    the dry run changes nothing and prints the node API rule before and after."""
-    wanted = checked(addresses)
+    """Issue `host`'s client certificate on the recorded manager and write <host>.key and
+    <host>.crt into `out`; returns their paths and the certificate's SHA-256."""
+    if not re.fullmatch(HOST_NAME_PATTERN, host):
+        raise deploy.DeployError("--host must be a browser host's logical name, browser-<n>")
     inventory = manager_daily.recorded(inventory_path)
-    await deploy.check_account(cloud, inventory, inventory.get("account", ""))
-    if not inventory.get("manager_firewall_id") or not inventory.get("mac_ipv4"):
-        raise deploy.DeployError("the manager has no recorded firewall: deploy first")
-    port = inventory.get("node_api_port")
-    if wanted and not port:
-        raise deploy.DeployError("the node API port is closed: orchestrator-enable first")
-    path = f"/v2/firewalls/{inventory['manager_firewall_id']}"
-    current = await cloud.get_resource(path, "firewall")
-    if current is None:
-        raise deploy.DeployError("the recorded manager firewall is gone: deploy first")
-    rules = manager_rules(inventory | {BROWSER_HOSTS: wanted}, inventory["mac_ipv4"])
-    result = {
-        "applied": apply,
-        "node_api_rule_before": node_rules(current, port),
-        "node_api_rule_after": node_rules(rules, port),
-        BROWSER_HOSTS: wanted,
+    if not inventory.get("browser_port"):
+        raise deploy.DeployError("the manager has no browser port: orchestrator-enable first")
+    output = await deploy.Manager(inventory, inventory_path, shell).run(
+        issue_script(host), "browser-cert"
+    )
+    key, cert = _pair(output)
+    key_path, cert_path = await asyncio.to_thread(_save, out, host, key, cert)
+    return {
+        "host": host,
+        "key": str(key_path),
+        "cert": str(cert_path),
+        "cert_sha256": hashlib.sha256(cert.encode()).hexdigest(),
+        "valid_days": CERT_DAYS,
+        "orchestrator_url": f"https://{inventory['host']}:{inventory['browser_port']}",
     }
-    if not apply:
-        return result
-    scope = deploy.manager_scope(inventory)
-    await ops_api.apply_firewall(cloud, scope, rules, inventory["manager_firewall_id"])
-    if not holds(await cloud.get_resource(path, "firewall"), port, wanted):
-        raise deploy.DeployError(
-            "the manager firewall read back does not hold exactly the requested browser "
-            "sources; the inventory is unchanged: compare it with the DigitalOcean console"
-        )
-    deploy.save(inventory_path, inventory, **{BROWSER_HOSTS: wanted})
-    return result
 
 
 def add_parser(steps) -> None:
-    """`campaign manager browser-hosts --ip A[,B...] | --clear [--apply]`."""
+    """`campaign manager browser-cert --host browser-<n> --out <dir>`."""
     step = steps.add_parser(
-        "browser-hosts", help="Admit the browser hosts to the node API port (dry run)"
+        "browser-cert", help="Issue a browser host's client certificate (key stays private)"
     )
-    which = step.add_mutually_exclusive_group(required=True)
-    which.add_argument(
-        "--ip", action="append", help="the hosts' public IPv4s, comma-separated (repeatable)"
-    )
-    which.add_argument("--clear", action="store_true", help="remove every browser host")
-    step.add_argument("--apply", action="store_true", help="act; without it, only print")
+    step.add_argument("--host", required=True, help="the host's logical name, browser-<n>")
+    step.add_argument("--out", type=Path, required=True, help="directory for <host>.key/.crt")
     step.add_argument(
         "--inventory", type=Path, required=True, help="the proxy-index account's inventory"
     )
-
-
-def addresses(args) -> list[str]:
-    """The --ip values split on commas ([] for --clear). An empty entry is refused, so a failed
-    `--ip "$(...)"` never clears the hosts: only --clear does."""
-    found = [a.strip() for value in args.ip or [] for a in value.split(",")]
-    if "" in found:
-        raise deploy.DeployError("--ip has an empty address; use --clear to remove the hosts")
-    return found
-
-
-async def run(args, cloud_for) -> dict[str, Any]:
-    """The step on the account the inventory records (proxy-index only, as MANAGER-ORCH-1)."""
-    wanted = checked(addresses(args))  # refused before any call
-    manager_daily.recorded(args.inventory)
-    async with cloud_for(manager_daily.ACCOUNT) as cloud:
-        return await set_browser_hosts(cloud, args.inventory, wanted, apply=args.apply)

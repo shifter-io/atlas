@@ -154,6 +154,9 @@ def test_the_cli_parses_the_new_manager_steps(tmp_path):
     )
     assert (args.owner_go, args.apply, args.daily_template) == (go, True, CID)
     assert args.formulas == Path("formulas")
+    assert args.new_browser_ca is False
+    args = parse(["campaign", "manager", "orchestrator-enable", "--new-browser-ca", *inv])
+    assert args.new_browser_ca is True
     args = parse(["campaign", "manager", "orchestrator-disable", "--inventory", str(go)])
     assert (args.manager_action, args.inventory, args.apply) == ("orchestrator-disable", go, False)
     args = parse(["campaign", "manager", "hourly-enable", "--owner-go", str(go), *inv])
@@ -186,7 +189,11 @@ async def test_the_cli_runs_each_step_on_the_recorded_account(job, tmp_path, mon
             continue
         result = await campaign_cli._manager_step(args)
         assert result["applied"] is ("--apply" in argv)
-    assert accounts == ["proxy-index"] * 3
+    new_ca = ["orchestrator-enable", "--formulas", str(folder), "--new-browser-ca"]
+    new_ca += ["--daily-template", CID]
+    args = parse(["campaign", "manager", *new_ca, "--inventory", str(job.inventory)])
+    assert (await campaign_cli._manager_step(args))["new_browser_ca"] is True
+    assert accounts == ["proxy-index"] * 4
     assert inventory(job)["manager_size"] == WANTED
     with pytest.raises(deploy.DeployError, match="no manager is recorded"):
         await manager_orch.run(

@@ -1,5 +1,6 @@
 """The browser-node command: --check launches browsers and reports them, serving honours the
-settings' switch, pins the manager's certificate and stops on SIGTERM."""
+settings' switch, pins the manager's certificate, presents its client certificate and stops on
+SIGTERM."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pytest
 from browser_node_cases import CHEAP, SETTINGS, SHIFTER, Fleet, host_view, make_state, private
-from helpers import self_signed
+from helpers import client_ca, client_certificate, self_signed
 from test_browser_driver import UA, PWBrowser, fake_modules
 
 from proxy_index import cli
@@ -120,6 +121,32 @@ def test_the_host_pins_the_managers_certificate_and_refuses_plain_http(
     assert run_cli(state, "--orchestrator", "https://203.0.113.9:8443", "--ca-file", str(cert)) == 0
     (host,) = served
     assert all(isinstance(agent.tls, ssl.SSLContext) for agent in host.agents) and host.agents
+    host.log.close()
+
+
+def test_the_host_presents_its_client_certificate(tmp_path, monkeypatch, capsys):
+    state = make_state(tmp_path)
+    install_fake_release(state)
+    served = []
+
+    async def fake_serve(host):
+        served.append(host)
+
+    monkeypatch.setattr(host_module, "serve", fake_serve)
+    cert, _ = self_signed(tmp_path, "manager")
+    _, ca = client_ca(tmp_path, "browser")
+    mine, key = client_certificate(tmp_path, ca, "browser-1")
+    pinned = ["--orchestrator", "https://203.0.113.9:8444", "--ca-file", str(cert)]
+    assert run_cli(state, *pinned, "--client-cert", str(mine)) == 2
+    assert "--client-cert and --client-key go together" in capsys.readouterr().err
+    key.chmod(0o640)
+    assert run_cli(state, *pinned, "--client-cert", str(mine), "--client-key", str(key)) == 2
+    assert "client key file must be owned" in capsys.readouterr().err and served == []
+    key.chmod(0o600)
+    assert run_cli(state, *pinned, "--client-cert", str(mine), "--client-key", str(key)) == 0
+    (host,) = served
+    contexts = {id(agent.tls) for agent in host.agents}
+    assert len(contexts) == 1 and isinstance(host.agents[0].tls, ssl.SSLContext)
     host.log.close()
 
 
