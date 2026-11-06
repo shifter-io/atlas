@@ -2,7 +2,6 @@ package build
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,8 +15,8 @@ import (
 // HTML-escaped strings, no trailing newline), one top-level field at a time and
 // the providers one by one, so the whole encoded dataset is never in memory:
 // at most one provider's encoding is; the pages (DatasetPages) are written
-// one answer at a time and the lists (DatasetLists) a chunk of rows at a time,
-// each list's rows read from the database while it is written. Every Dataset field must be a plain
+// one answer at a time and the lists (DatasetLists) one list's first page at
+// a time, from the pages the build keeps. Every Dataset field must be a plain
 // `json:"name"` field (no omitempty, no "-"), which is what keeps the output
 // equal to encoding the struct whole; anything else is an error.
 func WriteDataset(w io.Writer, d *model.Dataset) error {
@@ -44,7 +43,7 @@ func WriteDataset(w io.Writer, d *model.Dataset) error {
 		case f.Name == "Providers":
 			err = writeProviders(bw, d.Providers)
 		case f.Name == "Lists" && isLists && lists != nil:
-			err = lists.write(context.Background(), bw)
+			err = lists.write(bw)
 		case f.Name == "Pages" && isPages && pages != nil:
 			err = pages.write(bw)
 		default:
