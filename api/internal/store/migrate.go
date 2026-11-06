@@ -103,62 +103,7 @@ func Migrate(ctx context.Context, conn *pgx.Conn) (MigrateResult, error) {
 	}
 	var res MigrateResult
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS site`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS site.schema_versions (
- version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
- applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
-			return err
-		}
-		applied := map[int]string{}
-		rows, err := tx.Query(ctx, "SELECT version, checksum FROM site.schema_versions")
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var v int
-			var c string
-			if err := rows.Scan(&v, &c); err != nil {
-				return err
-			}
-			applied[v] = c
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		known := map[int]bool{}
-		for _, m := range migrations {
-			known[m.Version] = true
-			if sum, ok := applied[m.Version]; ok {
-				if !m.SameSchema(sum) {
-					return fmt.Errorf("site schema migration %s was applied with checksum %s but the embedded file is %s; write a new migration instead of editing an applied one", m.Name, sum, m.Checksum)
-				}
-				if sum != m.Checksum {
-					if _, err := tx.Exec(ctx, "UPDATE site.schema_versions SET checksum=$1 WHERE version=$2", m.Checksum, m.Version); err != nil {
-						return err
-					}
-					res.Rechecked = append(res.Rechecked, m.Name)
-				}
-				continue
-			}
-			if _, err := tx.Exec(ctx, m.SQL); err != nil {
-				return fmt.Errorf("apply %s: %w", m.Name, err)
-			}
-			if _, err := tx.Exec(ctx, "INSERT INTO site.schema_versions(version,name,checksum) VALUES ($1,$2,$3)", m.Version, m.Name, m.Checksum); err != nil {
-				return err
-			}
-			res.Applied = append(res.Applied, m.Name)
-		}
-		for v := range applied {
-			if !known[v] {
-				return fmt.Errorf("database has site schema version %d that this binary does not know; upgrade siteapi", v)
-			}
-		}
-		return nil
+		return migrateTx(ctx, tx, migrations, &res)
 	})
 	if err != nil {
 		return res, err
@@ -170,6 +115,92 @@ func Migrate(ctx context.Context, conn *pgx.Conn) (MigrateResult, error) {
 		res.Applied = []string{}
 	}
 	return res, nil
+}
+
+// migrateTx is Migrate's transaction: it takes the lock, creates the version
+// table, then checks or applies each migration in order, recording it in res.
+func migrateTx(ctx context.Context, tx pgx.Tx, migrations []Migration, res *MigrateResult) error {
+	if err := prepareVersions(ctx, tx); err != nil {
+		return err
+	}
+	applied, err := appliedVersions(ctx, tx)
+	if err != nil {
+		return err
+	}
+	known := map[int]bool{}
+	for _, m := range migrations {
+		known[m.Version] = true
+		if err := migrateOne(ctx, tx, m, applied, res); err != nil {
+			return err
+		}
+	}
+	for v := range applied {
+		if !known[v] {
+			return fmt.Errorf("database has site schema version %d that this binary does not know; upgrade siteapi", v)
+		}
+	}
+	return nil
+}
+
+// prepareVersions takes the advisory lock and creates the site schema and its
+// version table when they are missing.
+func prepareVersions(ctx context.Context, tx pgx.Tx) error {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", lockKey); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `CREATE SCHEMA IF NOT EXISTS site`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS site.schema_versions (
+ version integer PRIMARY KEY, name text NOT NULL, checksum text NOT NULL,
+ applied_at timestamptz NOT NULL DEFAULT now())`)
+	return err
+}
+
+// appliedVersions maps each applied migration version to its stored checksum.
+func appliedVersions(ctx context.Context, tx pgx.Tx) (map[int]string, error) {
+	rows, err := tx.Query(ctx, "SELECT version, checksum FROM site.schema_versions")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	applied := map[int]string{}
+	for rows.Next() {
+		var v int
+		var c string
+		if err := rows.Scan(&v, &c); err != nil {
+			return nil, err
+		}
+		applied[v] = c
+	}
+	return applied, rows.Err()
+}
+
+// migrateOne applies m when it is not in applied. An applied m must have the
+// same schema; a comment-only earlier checksum is rewritten to the current one.
+func migrateOne(ctx context.Context, tx pgx.Tx, m Migration, applied map[int]string, res *MigrateResult) error {
+	sum, ok := applied[m.Version]
+	if !ok {
+		if _, err := tx.Exec(ctx, m.SQL); err != nil {
+			return fmt.Errorf("apply %s: %w", m.Name, err)
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO site.schema_versions(version,name,checksum) VALUES ($1,$2,$3)", m.Version, m.Name, m.Checksum); err != nil {
+			return err
+		}
+		res.Applied = append(res.Applied, m.Name)
+		return nil
+	}
+	if !m.SameSchema(sum) {
+		return fmt.Errorf("site schema migration %s was applied with checksum %s but the embedded file is %s; write a new migration instead of editing an applied one", m.Name, sum, m.Checksum)
+	}
+	if sum == m.Checksum {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, "UPDATE site.schema_versions SET checksum=$1 WHERE version=$2", m.Checksum, m.Version); err != nil {
+		return err
+	}
+	res.Rechecked = append(res.Rechecked, m.Name)
+	return nil
 }
 
 // Querier is satisfied by pgx.Conn, pgx.Tx and pgxpool.Pool.
