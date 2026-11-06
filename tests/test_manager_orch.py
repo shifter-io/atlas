@@ -392,9 +392,11 @@ async def test_a_missing_pulse_tag_is_created_empty_and_a_refusal_names_the_erro
     assert "browser_port" not in inventory(job)
     assert len(manager_firewall(fake, job)["inbound_rules"]) == 1
     async with running(fake) as cloud:
-        await manager_orch.enable(cloud, job.inventory, go_inputs(tmp_path), apply=True, shell=shell)
+        inputs = go_inputs(tmp_path)
+        await manager_orch.enable(cloud, job.inventory, inputs, apply=True, shell=shell)
     assert manager_firewall(fake, job)["inbound_rules"][-2] == manager_rules.node_api_rule()
-    assert PULSE_TAG in fake.tags and not any(PULSE_TAG in d["tags"] for d in fake.droplets.values())
+    assert PULSE_TAG in fake.tags  # created, and put on no droplet
+    assert not any(PULSE_TAG in droplet["tags"] for droplet in fake.droplets.values())
 
 
 async def test_disable_stops_the_units_and_the_hourly_timer_then_closes_the_port(job, tmp_path):
