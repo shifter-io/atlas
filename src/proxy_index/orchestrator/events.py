@@ -17,36 +17,39 @@ from psycopg.types.json import Jsonb
 SEVERITIES = ("info", "minor", "major", "critical")
 
 
-async def emit(
-    conn: psycopg.AsyncConnection,
-    kind: str,
-    at: datetime,
-    *,
-    batch_id: int | None = None,
-    product_id: int | None = None,
-    country_code: str | None = None,
-    target_id: str | None = None,
-    region_id: int | None = None,
-    signal: int = 0,
-    severity: str = "info",
-    data: dict[str, Any] | None = None,
-) -> int:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EventRow:
+    """One test_events row: its kind, time and the columns it sets."""
+
+    kind: str
+    at: datetime
+    batch_id: int | None = None
+    product_id: int | None = None
+    country_code: str | None = None
+    target_id: str | None = None
+    region_id: int | None = None
+    signal: int = 0
+    severity: str = "info"
+    data: dict[str, Any] | None = None
+
+
+async def emit(conn: psycopg.AsyncConnection, event: EventRow) -> int:
     row = await (
         await conn.execute(
             "INSERT INTO test_events(at,kind,batch_id,product_id,country_code,target_id,"
             "region_id,signal,severity,data) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             "RETURNING event_id",
             (
-                at,
-                kind,
-                batch_id,
-                product_id,
-                country_code,
-                target_id,
-                region_id,
-                signal,
-                severity,
-                Jsonb(data or {}),
+                event.at,
+                event.kind,
+                event.batch_id,
+                event.product_id,
+                event.country_code,
+                event.target_id,
+                event.region_id,
+                event.signal,
+                event.severity,
+                Jsonb(event.data or {}),
             ),
         )
     ).fetchone()
@@ -247,10 +250,12 @@ async def emit_daily_test_started(
     """data: {"region": "fra1", "countries": ["DE", "FR"]}. Signal 0."""
     return await emit(
         conn,
-        DAILY_TEST_STARTED,
-        at,
-        **_daily_columns(test),
-        data={"region": test.region, "countries": list(test.countries)},
+        EventRow(
+            kind=DAILY_TEST_STARTED,
+            at=at,
+            **_daily_columns(test),
+            data={"region": test.region, "countries": list(test.countries)},
+        ),
     )
 
 
@@ -265,13 +270,15 @@ async def emit_daily_test_finished(
     failed = result.status == "failed"
     return await emit(
         conn,
-        DAILY_TEST_FINISHED,
-        at,
-        **_daily_columns(test),
-        signal=-1 if failed else 1,
-        severity="minor" if failed else "info",
-        data={"region": test.region, "countries": list(test.countries), "status": result.status}
-        | result.counters(),
+        EventRow(
+            kind=DAILY_TEST_FINISHED,
+            at=at,
+            **_daily_columns(test),
+            signal=-1 if failed else 1,
+            severity="minor" if failed else "info",
+            data={"region": test.region, "countries": list(test.countries), "status": result.status}
+            | result.counters(),
+        ),
     )
 
 
@@ -284,15 +291,17 @@ async def emit_estimate_hour_released(
     """
     return await emit(
         conn,
-        ESTIMATE_HOUR_RELEASED,
-        at,
-        product_id=estimate.product_id,
-        data={
-            "day": estimate.day.isoformat(),
-            "hour": estimate.hour,
-            "formula_version": estimate.formula_version,
-        }
-        | _counts(unique_ips=estimate.unique_ips, countries=estimate.countries),
+        EventRow(
+            kind=ESTIMATE_HOUR_RELEASED,
+            at=at,
+            product_id=estimate.product_id,
+            data={
+                "day": estimate.day.isoformat(),
+                "hour": estimate.hour,
+                "formula_version": estimate.formula_version,
+            }
+            | _counts(unique_ips=estimate.unique_ips, countries=estimate.countries),
+        ),
     )
 
 
@@ -311,17 +320,19 @@ async def emit_pulse_down(
     """
     return await emit(
         conn,
-        PULSE_DOWN,
-        at,
-        product_id=window.product_id,
-        signal=-1,
-        severity="major",
-        data={
-            "window_start": window.window_start.astimezone(UTC).isoformat(),
-            "threshold": window.threshold,
-            "outage_ids": list(outage_ids),
-        }
-        | window.counters(),
+        EventRow(
+            kind=PULSE_DOWN,
+            at=at,
+            product_id=window.product_id,
+            signal=-1,
+            severity="major",
+            data={
+                "window_start": window.window_start.astimezone(UTC).isoformat(),
+                "threshold": window.threshold,
+                "outage_ids": list(outage_ids),
+            }
+            | window.counters(),
+        ),
     )
 
 
@@ -343,15 +354,17 @@ async def emit_pulse_recovered(
         raise ValueError("down_since is after the recovery")
     return await emit(
         conn,
-        PULSE_RECOVERED,
-        at,
-        product_id=product_id,
-        signal=1,
-        data={
-            "down_since": down_since.astimezone(UTC).isoformat(),
-            "duration_s": duration,
-            "outage_ids": list(outage_ids),
-        },
+        EventRow(
+            kind=PULSE_RECOVERED,
+            at=at,
+            product_id=product_id,
+            signal=1,
+            data={
+                "down_since": down_since.astimezone(UTC).isoformat(),
+                "duration_s": duration,
+                "outage_ids": list(outage_ids),
+            },
+        ),
     )
 
 
@@ -364,16 +377,18 @@ async def emit_latency_rise(conn: psycopg.AsyncConnection, at: datetime, rise: L
     """
     return await emit(
         conn,
-        LATENCY_RISE,
-        at,
-        product_id=rise.product_id,
-        country_code=rise.country_code,
-        region_id=rise.region_id,
-        signal=-1,
-        severity="minor",
-        data={
-            "p50": rise.p50,
-            "baseline": rise.baseline,
-            "baseline_source": rise.baseline_source,
-        },
+        EventRow(
+            kind=LATENCY_RISE,
+            at=at,
+            product_id=rise.product_id,
+            country_code=rise.country_code,
+            region_id=rise.region_id,
+            signal=-1,
+            severity="minor",
+            data={
+                "p50": rise.p50,
+                "baseline": rise.baseline,
+                "baseline_source": rise.baseline_source,
+            },
+        ),
     )
