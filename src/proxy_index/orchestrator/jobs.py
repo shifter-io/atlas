@@ -32,8 +32,9 @@ browser_plan              every minute, on the minute, while `browser.enabled` a
                           file at `browser.settings_file` say so: open each browser target's
                           slot in the browser region (browser.py)
 
-Besides the job, when a batch closes and `reports.dir` is set, the HTML report of that batch
-and the index are written there (report_html.write, in a thread; install_reports).
+job_table.register_jobs adds them to the scheduler. Besides the job, when a batch closes and
+`reports.dir` is set, the HTML report of that batch and the index are written there
+(report_html.write, in a thread; install_reports).
 """
 
 from __future__ import annotations
@@ -54,10 +55,8 @@ from psycopg import sql
 
 from .. import storage
 from ..regions import CONFIGS
-from . import batches, nodework, pulse
-from .browser import browser_plan
 from .db import Database, setting
-from .scheduler import Scheduler
+from .job_table import register_jobs  # noqa: F401 (callers keep importing it from here)
 
 log = logging.getLogger(__name__)
 # One report writer per pool: the close hook and the reports job share it.
@@ -361,79 +360,3 @@ def install_reports(db: Database) -> None:
         await write_reports(db, batch_ids)
 
     db.on_close["reports"] = hook
-
-
-def register_jobs(
-    scheduler: Scheduler, db: Database, credentials_file: str, methodology: Path | None = None
-) -> None:
-    methodology = methodology or METHODOLOGY
-    install_reports(db)
-    _register_planners(scheduler, db)
-    _register_data_jobs(scheduler, db, credentials_file, methodology)
-
-    async def browser_plan_job() -> dict[str, Any]:
-        return await browser_plan(db)
-
-    scheduler.add("browser_plan", browser_plan_job, every_s=60, aligned=True)
-
-
-def _register_planners(scheduler: Scheduler, db: Database) -> None:
-    async def census_plan() -> dict[str, Any]:
-        return await batches.census_plan(db)
-
-    async def pulse_plan() -> dict[str, Any]:
-        return await batches.pulse_plan(db)
-
-    async def pulse_evaluate() -> dict[str, Any]:
-        return await pulse.evaluate(db)
-
-    async def reap() -> dict[str, Any]:
-        return await nodework.reap(db)
-
-    async def offline() -> dict[str, Any]:
-        return await nodework.mark_offline(db)
-
-    scheduler.add("census_plan", census_plan, every_s=60, aligned=True)
-    scheduler.add("pulse_plan", pulse_plan, every_s=60, aligned=True)
-    scheduler.add("pulse_evaluate", pulse_evaluate, every_s=60)
-    scheduler.add("reap", reap, every_s=60)
-    scheduler.add("offline", offline, every_s=15)
-
-
-def _register_data_jobs(
-    scheduler: Scheduler, db: Database, credentials_file: str, methodology: Path
-) -> None:
-    async def calculate_job() -> dict[str, Any]:
-        return await calculate(db, credentials_file, methodology)
-
-    async def estimates_release_job() -> dict[str, Any]:
-        from ..estimates.release import release_due
-
-        return {"released": len(await release_due(db))}
-
-    async def detect_job() -> dict[str, Any]:
-        return await detect(credentials_file)
-
-    async def retention_job() -> dict[str, Any]:
-        return await retention(db)
-
-    async def archive_job() -> dict[str, Any]:
-        return await archive(db, credentials_file)
-
-    async def raw_upload_job() -> dict[str, Any]:
-        return await raw_upload(db)
-
-    async def reports_job() -> dict[str, Any]:
-        return await live_reports(db)
-
-    async def dbip_job() -> dict[str, Any]:
-        return await dbip_update(db, credentials_file)
-
-    scheduler.add("calculate", calculate_job, every_s=60)
-    scheduler.add("estimates_release", estimates_release_job, every_s=RELEASE_EVERY_S)
-    scheduler.add("detect", detect_job, every_s=60)
-    scheduler.add("retention", retention_job, at_utc_minute=3 * 60 + 17)
-    scheduler.add("archive", archive_job, at_utc_minute=40)
-    scheduler.add("raw_upload", raw_upload_job, every_s=300)
-    scheduler.add("reports", reports_job, every_s=30)
-    scheduler.add("dbip_update", dbip_job, at_utc_minute=5 * 60 + 23)
