@@ -13,8 +13,8 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from census_pulse_cases import product
 from psycopg.rows import dict_row
-from test_census_pulse import product
 from test_daily import daily_root
 from test_onboarding import START
 from test_storage import measurement
@@ -502,7 +502,7 @@ async def test_an_hourly_offset_too_short_for_the_release_is_raised(database, db
 async def test_calculate_follows_the_trigger_setting(database, db, monkeypatch):
     from proxy_index.orchestrator import jobs
 
-    async def run_calculation(argv, limit_s):  # the subprocess (test_manager_orch runs it)
+    async def run_calculation(argv, limit_s):  # the subprocess (test_manager_orch_serve runs it)
         return {"snapshot_id": "s1", "as_of": "now"}
 
     monkeypatch.setattr(jobs, "run_calculation", run_calculation)

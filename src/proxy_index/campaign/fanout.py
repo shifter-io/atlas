@@ -16,6 +16,7 @@ import shutil
 import tarfile
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -153,6 +154,23 @@ def safe_extract(archive: Path, destination: Path, top: str) -> None:
         stream.extractall(destination, filter=only_data)
 
 
+async def _exchange(
+    process: asyncio.subprocess.Process, stdin: bytes | None, sink: BinaryIO, limit: int
+) -> int:
+    """Write `stdin`, then stream at most `limit` stdout bytes to `sink`; 254 when longer."""
+    with contextlib.suppress(ConnectionError):
+        process.stdin.write(stdin or b"")
+        await process.stdin.drain()
+        process.stdin.close()
+    size = 0
+    while chunk := await process.stdout.read(1 << 16):
+        size += len(chunk)
+        if size > limit:
+            return 254
+        sink.write(chunk)
+    return await process.wait()
+
+
 async def run_process(
     argv: list[str], stdin: bytes | None, seconds: float, sink: BinaryIO, limit: int
 ) -> int:
@@ -165,17 +183,7 @@ async def run_process(
     )
     try:
         async with asyncio.timeout(seconds):
-            with contextlib.suppress(ConnectionError):
-                process.stdin.write(stdin or b"")
-                await process.stdin.drain()
-                process.stdin.close()
-            size = 0
-            while chunk := await process.stdout.read(1 << 16):
-                size += len(chunk)
-                if size > limit:
-                    return 254
-                sink.write(chunk)
-            return await process.wait()
+            return await _exchange(process, stdin, sink, limit)
     except TimeoutError:
         return 255
     finally:
@@ -193,6 +201,16 @@ def owned_dir(path: Path) -> None:
     if path.exists() and path.lstat().st_uid != os.getuid():
         raise RemoteError("control directory belongs to another user")
     private_dir(path)
+
+
+@dataclass(frozen=True)
+class _Call:
+    """One remote command's input, time limit, and where its output goes and how much of it."""
+
+    stdin: bytes | None = None
+    seconds: float = 120
+    sink: BinaryIO | None = None
+    limit: int = OUTPUT_BYTES
 
 
 class OpenSSHRemote:
@@ -225,24 +243,18 @@ class OpenSSHRemote:
         ]
 
     async def _call(
-        self,
-        droplet: Droplet,
-        command: list[str],
-        what: str,
-        *,
-        stdin: bytes | None = None,
-        seconds: float = 120,
-        sink: BinaryIO | None = None,
-        limit: int = OUTPUT_BYTES,
+        self, droplet: Droplet, command: list[str], what: str, call: _Call | None = None
     ) -> bytes:
         """Run one remote command; its output goes to `sink`, or is returned when none."""
+        call = call or _Call()
         owned_dir(self.runtime)
         owned_dir(control_dir(self.runtime))
-        buffer = sink or io.BytesIO()
-        code = await self._run(self.argv(droplet, command), stdin, seconds, buffer, limit)
+        buffer = call.sink or io.BytesIO()
+        argv = self.argv(droplet, command)
+        code = await self._run(argv, call.stdin, call.seconds, buffer, call.limit)
         if code != 0:
             raise RemoteError(f"{what} failed (exit {code})")
-        return b"" if sink else buffer.getvalue()
+        return b"" if call.sink else buffer.getvalue()
 
     async def run(
         self,
@@ -254,13 +266,13 @@ class OpenSSHRemote:
         seconds: float = 120,
     ) -> bytes:
         """Run one fixed command (inputs on stdin only) and return its output."""
-        return await self._call(droplet, command, what, stdin=stdin, seconds=seconds)
+        return await self._call(droplet, command, what, _Call(stdin=stdin, seconds=seconds))
 
     async def wait_ready(self, droplet: Droplet, limit_seconds: float) -> bool:
         deadline = self._clock() + limit_seconds
         while True:
             try:
-                await self._call(droplet, ["true"], "ready check", seconds=15)
+                await self._call(droplet, ["true"], "ready check", _Call(seconds=15))
                 return True
             except RemoteError:
                 if self._clock() + READY_POLL_SECONDS >= deadline:
@@ -268,11 +280,11 @@ class OpenSSHRemote:
                 await self._sleep(READY_POLL_SECONDS)
 
     async def push_start(self, droplet: Droplet, payload: bytes, command: list[str]) -> None:
-        await self._call(droplet, command, "push and start", stdin=payload, seconds=300)
+        await self._call(droplet, command, "push and start", _Call(stdin=payload, seconds=300))
 
     async def inspect(self, droplet: Droplet) -> dict[str, Any]:
         out = await self._call(
-            droplet, ["python3", "-c", REMOTE_INSPECT, WORKER_ROOT], "inspect", seconds=30
+            droplet, ["python3", "-c", REMOTE_INSPECT, WORKER_ROOT], "inspect", _Call(seconds=30)
         )
         return json.loads(out)
 
@@ -296,9 +308,7 @@ class OpenSSHRemote:
                     droplet,
                     ["sh", "-c", command],
                     "pull",
-                    seconds=1800,
-                    sink=sink,
-                    limit=PULL_BYTES,
+                    _Call(seconds=1800, sink=sink, limit=PULL_BYTES),
                 )
             safe_extract(archive, staging, name)
             shutil.rmtree(local, ignore_errors=True)
@@ -319,7 +329,5 @@ class OpenSSHRemote:
                 droplet,
                 ["sh", "-c", command],
                 "journal",
-                seconds=120,
-                sink=sink,
-                limit=JOURNAL_BYTES,
+                _Call(seconds=120, sink=sink, limit=JOURNAL_BYTES),
             )

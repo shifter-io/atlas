@@ -23,6 +23,14 @@ from proxy_index.calculated.aggregate import (
     timed,
     under_load,
 )
+from proxy_index.calculated.latency import (
+    KEYS,
+    LATENCY,
+    averaged,
+    blend_mean,
+    load_factor,
+    under_load_values,
+)
 from proxy_index.calculated.policy import events, load, slot_settings
 from proxy_index.stats import Histogram
 
@@ -81,6 +89,15 @@ def test_blend_normalises_each_slot_and_never_averages_percentiles():
     assert blend([]) == dict.fromkeys(("p50", "p90", "p95", "p99"))
 
 
+def test_blend_mean_weighs_each_histogram_the_same():
+    one = Counter({100: 99, 1000: 1})
+    assert blend_mean([one]) == Histogram(one).mean() == 109.0
+    # Means 100, 900 and 300 ms, whatever their volumes: (100 + 900 + 300) / 3.
+    three = [Counter({100: 1000}), Counter({900: 40}), Counter({200: 1, 400: 1})]
+    assert blend_mean(three) == 433.3
+    assert blend_mean([]) is None and blend_mean([Counter()]) is None
+
+
 def test_success_rate_is_the_mean_of_time_slots():
     rows = [
         row(T, 100, n=1000, successes=1000),  # a census-sized slot, all good
@@ -121,6 +138,7 @@ def test_light_load_latency_is_per_target_and_equal_weight():
     both = timed(rows, 24, 30)
     assert both["time_slots"]["latency_targets"] == ["generic_http", "generic_https"]
     assert both["latency_ms"]["p50"] == 800 and both["latency_ms"]["p90"] == 1600
+    assert both["latency_ms"]["mean"] == 1200.0  # equal weight, not 1,028.6 by request
     assert timed(rows[:1], 24, 30)["latency_ms"]["p50"] == 800
     assert timed(rows[1:], 24, 30)["latency_ms"]["p50"] == 1600
 
@@ -146,8 +164,8 @@ def test_latency_under_load_worked_example():
     }
     assert excluded == {}
     assert factors == {
-        "fra1": {T: dict.fromkeys(("p50", "p90", "p95", "p99"), 1.5)},
-        "nyc3": {T: dict.fromkeys(("p50", "p90", "p95", "p99"), 2.0)},
+        "fra1": {T: dict.fromkeys(KEYS, 1.5)},
+        "nyc3": {T: dict.fromkeys(KEYS, 2.0)},
     }
     choices = [
         {
@@ -165,6 +183,7 @@ def test_latency_under_load_worked_example():
     assert countries["BG"]["region"] == "fra1"
     assert countries["BG"]["latency_ms"]["p50"] == 800
     assert countries["BG"]["latency_under_load_ms"]["p50"] == 1200
+    assert countries["BG"]["latency_under_load_ms"]["mean"] == 1200
     assert countries["RO"]["latency_under_load_ms"]["p50"] == 900
     assert countries["MX"]["latency_under_load_ms"]["p50"] == 1400
     regions = {r["region"]: r for r in detail["regions"]}
@@ -186,7 +205,31 @@ def test_latency_under_load_worked_example():
     # The product's under-load latency: the mean over slots and countries.
     result = under_load(rows, factors, 30, excluded)
     assert result["ms"]["p50"] == pytest.approx((1200 + 900 + 1000 + 1400) / 4)
+    assert result["ms"]["mean"] == pytest.approx((1200 + 900 + 1000 + 1400) / 4)
     assert result["own_factor"] == 4
+
+
+def test_the_mean_under_load_is_the_slot_mean_times_the_mean_factor():
+    """Pulse 600 ms (p50) with a slow tail, mean 690 ms; load wave mean 1,380 ms: a mean
+    factor of 2 (the p50 factor is 1.5). A Bulgarian pulse with mean 500 ms is 1,000 ms."""
+    pulse, load = Counter({600: 90, 1500: 10}), Counter({900: 80, 3300: 20})
+    factor = load_factor(load, pulse)
+    assert factor["p50"] == 1.5 and factor["mean"] == pytest.approx(2.0)
+    bulgaria = under_load_values(Counter({400: 75, 800: 25}), factor)
+    assert bulgaria["p50"] == 600 and bulgaria["mean"] == pytest.approx(1000)
+    assert load_factor(load, Counter()) is None
+    # A factor without the mean (as tests and older inputs give) leaves the mean out.
+    old = under_load_values(Counter({400: 1}), dict.fromkeys(LATENCY, 2.0))
+    assert old == dict.fromkeys(LATENCY, 800) | {"mean": None}
+    assert averaged({"p50": [600, 800], "mean": [700, None], "p99": []}) == {
+        "p50": 700,
+        "mean": None,
+        "p99": None,
+    }
+    rows = [row(T, 600, country="BG"), row(T, 900, n=1000, test="load", country="BG")]
+    factors, *_ = load_factors(rows, 30)
+    assert under_load(rows[:1], factors, 30)["ms"] == dict.fromkeys(KEYS, 900)
+    assert under_load(rows[:1], {}, 30)["ms"] == dict.fromkeys(KEYS)
 
 
 def test_under_load_carries_the_newest_earlier_factor_and_says_why_when_none():

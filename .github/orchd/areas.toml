@@ -34,7 +34,7 @@ calculated = [
     "src/proxy_index/calculated/**",
     "tests/test_calculated*.py",
     "tests/test_calc_*.py",
-    "tests/test_census_pulse.py",
+    "tests/census_pulse_cases.py",
     "tests/test_latency_history.py",
     "tests/test_retention.py",
     "tests/test_scoring.py",
@@ -68,7 +68,7 @@ onboarding = [
     "docs/onboarding.html",
 ]
 # the manager: the orchestrator package (admin API, nodes, staging, events), the node process and
-# its TLS, the staging config, the local overnight collection that drives them, and their tests
+# its TLS, the staging config and their tests
 orchestrator = [
     "src/proxy_index/orchestrator/**",
     "src/proxy_index/node.py",
@@ -77,6 +77,7 @@ orchestrator = [
     "tests/orchestrator_cases.py",
     "tests/test_admin.py",
     "tests/test_manager_*.py",
+    "tests/manager_orch_cases.py",
     "tests/test_node.py",
     "tests/test_node_tls.py",
     "tests/test_db_drain.py",
@@ -84,7 +85,6 @@ orchestrator = [
     "tests/test_tape_events.py",
     "tests/test_outage_scenario.py",
     "configs/staging.toml",
-    "scripts/shifter_local_overnight.py",
 ]
 # the daily test and its inputs: the daily, DB-IP, enrichment, hour-estimate and hour-formula
 # packages, the formulas they publish, db-ip/ and their tests
@@ -153,6 +153,7 @@ storage = [
     "src/proxy_index/migrate_*.sql",
     "tests/test_storage*.py",
     "tests/test_migration*.py",
+    "tests/migration_cases.py",
     "tests/test_breakdown_view.py",
     "tests/fixtures/schema_v*.sql",
     "tests/fixtures/database_v*.sql.gz",

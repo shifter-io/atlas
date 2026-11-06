@@ -1,0 +1,45 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fixture · Live measurement</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fafbf8;color:#192b34;
+font:16px/1.65 system-ui,sans-serif}main{max-width:1080px;margin:auto;padding:40px 28px 70px}
+h1{font-size:28px;line-height:1.2}h2{font-size:20px;margin:30px 0 12px}
+.label{font:12px ui-monospace,monospace;letter-spacing:.1em;
+text-transform:uppercase;color:#086e62}
+.metrics{display:flex;flex-wrap:wrap;gap:24px 40px;padding:22px 0;
+border-block:1px solid #d7dfdf;margin:24px 0}
+.metrics strong{display:block;font-size:25px;color:#086e62}
+.metrics span,.caption{font-size:13px;color:#556772}
+.columns{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:9px 8px;border-bottom:1px solid #d7dfdf;text-align:left;overflow-wrap:anywhere}
+th{background:#eef3ee}a{color:#086e62}.note{background:#eef4ef;padding:15px 18px}
+@media(max-width:680px){main{padding:24px 16px}.columns{grid-template-columns:1fr}}
+</style><main><header><div class="label">Live measurement / fixture</div>
+<h1>10 requests · generic_http</h1>
+<p>2026-11-06T10:00:00+00:00 → 2026-11-06T10:00:02+00:00 (UTC)</p></header>
+<div class="metrics"><div><strong>90.00%</strong><span>Success</span></div><div><strong>9 / 10</strong><span>Successful / requested</span></div><div><strong>4</strong><span>Unique exit IPs</span></div><div><strong>2.00 s</strong><span>Run duration</span></div></div>
+<p class="note">Real network requests with fresh connections; retries and redirects disabled.
+Username parameters: {&quot;country&quot;: &quot;us&quot;}.
+Session policy: rotate.
+Success requires HTTP 200 and a single valid IP address.</p>
+<div class="columns"><section><h2>Successful-request latency</h2><table><thead><tr><th>Percentile</th><th>Milliseconds</th></tr></thead><tbody><tr><td>P50</td><td>110</td></tr><tr><td>P90</td><td>1,200</td></tr><tr><td>P95</td><td>1,300</td></tr><tr><td>P99</td><td>1,500</td></tr><tr><td>Mean</td><td>207.3</td></tr></tbody></table>
+<p class="caption">Connection setup through complete response body; successful requests
+only. Nearest-rank percentiles and the mean from the 1 ms ceiling histogram.</p></section>
+<section><h2>Failures</h2><table><thead><tr><th>Error category</th><th>Requests</th></tr></thead><tbody><tr><td>timeout</td><td>1</td></tr><tr><td>invalid_body</td><td>2</td></tr></tbody></table><p class="caption">Raw response bodies were not retained,
+so the invalid-body response cannot be diagnosed further from this run.</p></section></div>
+<h2>HTTP statuses</h2><table><thead><tr><th>HTTP status received</th><th>Requests</th></tr></thead><tbody><tr><td>200</td><td>9</td></tr></tbody></table><p class="caption">A 200 response can still fail body
+validation. Requests without a received status, including connection timeouts, have no
+status-code entry. Redirects are counted as failures and are not followed.</p>
+<h2>Offline geography</h2>
+<p>2 distinct ASNs and 2 ISP names across successful exit IPs.</p>
+<table><thead><tr><th>MMDB country</th><th>Successful requests</th><th>Unique IPs</th><th>Request share</th></tr></thead><tbody><tr><td>US</td><td>7</td><td>2</td><td>77.78%</td></tr><tr><td>DE</td><td>1</td><td>1</td><td>11.11%</td></tr><tr><td>Unknown</td><td>1</td><td>1</td><td>11.11%</td></tr></tbody></table>
+<p class="caption">Source: local geo-2026-11.mmdb.
+No geolocation requests were sent through the proxies. Country labels reflect this MMDB
+release; they are not independent proof of physical location. No strict flag was requested, so broader-pool fallback was permitted. 
+Differences can also reflect database disagreement.</p><h2>Run settings and evidence</h2><table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Run ID</td><td>run-1</td></tr><tr><td>Run status</td><td>completed</td></tr><tr><td>Framework / adapter</td><td>0.0.0 / 1.2</td></tr><tr><td>Target</td><td>generic_http</td></tr><tr><td>URL</td><td>http://example.test/</td></tr><tr><td>Gateway</td><td>{&quot;host&quot;: &quot;gateway.example.test&quot;, &quot;port&quot;: 8080}</td></tr><tr><td>Username parameters</td><td>{&quot;country&quot;: &quot;us&quot;}</td></tr><tr><td>Session policy</td><td>rotate</td></tr><tr><td>Concurrency</td><td>4</td></tr><tr><td>Timeout</td><td>10 s</td></tr><tr><td>Started / completed</td><td>10 / 10</td></tr><tr><td>Throughput</td><td>5.00 completed requests/s</td></tr><tr><td>Response body bytes</td><td>90 (not billed traffic)</td></tr></tbody></table>
+<p><a href="summary.json">Summary JSON</a> · <a href="ips.jsonl.gz">IP observations</a></p>
+<p class="caption">Credentials are stored separately in an owner-only local file and
+are absent from this report and run metadata. Results describe this run and are not a
+long-term provider ranking.</p></main></html>

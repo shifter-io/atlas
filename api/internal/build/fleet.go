@@ -65,59 +65,78 @@ func ref(p *model.Provider) *ProviderRef {
 	return &ProviderRef{Slug: p.Slug, Name: p.Name, Source: p.Source}
 }
 
+// providerStats is one network with its stats over one range.
+type providerStats struct {
+	p *model.Provider
+	s *WindowStats
+}
+
 // fleetViews ports overview.ts fleetViews.
 func fleetViews(fleet []*entry, stats map[string]map[string]*WindowStats, totals model.FleetTotals, basis string) []FleetView {
 	out := []FleetView{}
 	for _, r := range Ranges {
-		fw := fleetWindow(fleet, stats, totals, r.ID, basis)
-		type ps struct {
-			p *model.Provider
-			s *WindowStats
-		}
-		all := make([]ps, 0, len(fleet))
-		for _, e := range fleet {
-			all = append(all, ps{e.P, stats[e.P.Slug][r.ID]})
-		}
-		byCost := append([]ps{}, all...)
-		sort.SliceStable(byCost, func(i, j int) bool { return byCost[i].s.CostPer1kSuccess-byCost[j].s.CostPer1kSuccess < 0 })
-		byGb := append([]ps{}, all...)
-		// By the `$ / GB` shown (the lowest list rate), unpriced networks last.
-		sort.SliceStable(byGb, func(i, j int) bool { return missingLast(listRate(byGb[i].p.Pricing), listRate(byGb[j].p.Pricing)) < 0 })
-		bills := Bills{All: []Bill{}, SpreadX: nan}
-		for _, x := range byCost {
-			if x.p.PrimaryKind == "residential" {
-				bills.All = append(bills.All, Bill{Provider: *ref(x.p), Bill: x.s.CostPer1kSuccess * 1000})
-			}
-		}
-		if len(bills.All) > 0 {
-			best, worst := bills.All[0], bills.All[len(bills.All)-1]
-			bills.Best, bills.Worst = &best, &worst
-			bills.SpreadX = worst.Bill / best.Bill
-		}
-		headlineCount := len(fw.Success)
-		if r.Days == 1 {
-			headlineCount = 110
-		}
-		latencyVals := make([]model.SeriesPoint, len(fw.Latency))
-		copy(latencyVals, fw.Latency)
-		v := FleetView{Range: r, Fleet: fw,
-			LatencySpark: sparkSeries(latencyVals, 24), SuccessSpark: sparkSeries(fw.Success, 24),
-			HeadlineSpark: sparkSeries(fw.Success, headlineCount),
-			Cheapest:      CostPick{Cost: nan}, Dearest: CostPick{Cost: nan}, Bills: bills}
-		if len(all) > 0 {
-			fast := append([]ps{}, all...)
-			sort.SliceStable(fast, func(i, j int) bool { return fast[i].s.LatencyP50-fast[j].s.LatencyP50 < 0 })
-			rel := append([]ps{}, all...)
-			sort.SliceStable(rel, func(i, j int) bool { return rel[j].s.SuccessRate-rel[i].s.SuccessRate < 0 })
-			v.Fastest = StatPick{Provider: ref(fast[0].p), Stats: fast[0].s}
-			v.MostReliable = StatPick{Provider: ref(rel[0].p), Stats: rel[0].s}
-			v.Cheapest = CostPick{Provider: ref(byGb[0].p), Cost: listRate(byGb[0].p.Pricing)}
-			last := byGb[len(byGb)-1]
-			v.Dearest = CostPick{Provider: ref(last.p), Cost: listRate(last.p.Pricing)}
-		}
-		out = append(out, v)
+		out = append(out, fleetView(fleet, stats, totals, r, basis))
 	}
 	return out
+}
+
+// fleetView is the fleet view of one range.
+func fleetView(fleet []*entry, stats map[string]map[string]*WindowStats, totals model.FleetTotals, r RangeMeta, basis string) FleetView {
+	fw := fleetWindow(fleet, stats, totals, r.ID, basis)
+	all := make([]providerStats, 0, len(fleet))
+	for _, e := range fleet {
+		all = append(all, providerStats{e.P, stats[e.P.Slug][r.ID]})
+	}
+	headlineCount := len(fw.Success)
+	if r.Days == 1 {
+		headlineCount = 110
+	}
+	latencyVals := make([]model.SeriesPoint, len(fw.Latency))
+	copy(latencyVals, fw.Latency)
+	v := FleetView{Range: r, Fleet: fw,
+		LatencySpark: sparkSeries(latencyVals, 24), SuccessSpark: sparkSeries(fw.Success, 24),
+		HeadlineSpark: sparkSeries(fw.Success, headlineCount),
+		Cheapest:      CostPick{Cost: nan}, Dearest: CostPick{Cost: nan}, Bills: residentialBills(all)}
+	if len(all) > 0 {
+		setPicks(&v, all)
+	}
+	return v
+}
+
+// residentialBills are the residential networks' bills per 1k successes,
+// cheapest first, and the spread between the dearest and the cheapest.
+func residentialBills(all []providerStats) Bills {
+	byCost := append([]providerStats{}, all...)
+	sort.SliceStable(byCost, func(i, j int) bool { return byCost[i].s.CostPer1kSuccess-byCost[j].s.CostPer1kSuccess < 0 })
+	bills := Bills{All: []Bill{}, SpreadX: nan}
+	for _, x := range byCost {
+		if x.p.PrimaryKind == "residential" {
+			bills.All = append(bills.All, Bill{Provider: *ref(x.p), Bill: x.s.CostPer1kSuccess * 1000})
+		}
+	}
+	if len(bills.All) > 0 {
+		best, worst := bills.All[0], bills.All[len(bills.All)-1]
+		bills.Best, bills.Worst = &best, &worst
+		bills.SpreadX = worst.Bill / best.Bill
+	}
+	return bills
+}
+
+// setPicks sets v's fastest, most reliable, cheapest and dearest networks of
+// all, which is not empty.
+func setPicks(v *FleetView, all []providerStats) {
+	fast := append([]providerStats{}, all...)
+	sort.SliceStable(fast, func(i, j int) bool { return fast[i].s.LatencyP50-fast[j].s.LatencyP50 < 0 })
+	rel := append([]providerStats{}, all...)
+	sort.SliceStable(rel, func(i, j int) bool { return rel[j].s.SuccessRate-rel[i].s.SuccessRate < 0 })
+	byGb := append([]providerStats{}, all...)
+	// By the `$ / GB` shown (the lowest list rate), unpriced networks last.
+	sort.SliceStable(byGb, func(i, j int) bool { return missingLast(listRate(byGb[i].p.Pricing), listRate(byGb[j].p.Pricing)) < 0 })
+	v.Fastest = StatPick{Provider: ref(fast[0].p), Stats: fast[0].s}
+	v.MostReliable = StatPick{Provider: ref(rel[0].p), Stats: rel[0].s}
+	v.Cheapest = CostPick{Provider: ref(byGb[0].p), Cost: listRate(byGb[0].p.Pricing)}
+	last := byGb[len(byGb)-1]
+	v.Dearest = CostPick{Provider: ref(last.p), Cost: listRate(last.p.Pricing)}
 }
 
 // missingLast is format.ts missingLast (ascending): missing values after every
