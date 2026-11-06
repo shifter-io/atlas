@@ -96,22 +96,59 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 	t.Requests24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.Requests24h.F() }))
 	ips := sum(func(p *model.Provider) float64 { return p.Pool.UniqueIps24h.F() })
 	t.UniqueIps24h = Num(ips)
-	countries := map[string]bool{}
-	costs, resCosts, lat, sr := []float64{}, []float64{}, []float64{}, []float64{}
+	s := scanFleet(fleet)
+	distinct := math.Max(1, ips-s.shared)
+	if len(fleet) == 0 {
+		distinct = math.NaN()
+	}
+	t.Countries = Num(len(s.countries))
+	t.MedianLatency = Num(prepareMedian(s.lat))
+	t.MedianSuccessRate = Num(prepareMedian(s.sr))
+	t.CheapestCostPer1kSuccess = Num(jsMin(s.costs))
+	t.DearestCostPer1kSuccess = Num(jsMax(s.costs))
+	t.PriceSpreadX = Num(jsMax(s.costs) / jsMin(s.costs))
+	t.ResidentialSpreadX = Num(jsMax(s.resCosts) / jsMin(s.resCosts))
+	t.Incidents24h = Num(s.incidents)
+	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1024)
+	t.MisclassifiedShare = Num(sum(func(p *model.Provider) float64 {
+		return float64(p.Pool.UniqueIps24h.F() * p.Trust.DatacenterAsnShare.F())
+	}) / ips)
+	t.DistinctIpsAcrossFleet = Num(distinct)
+	t.FleetDuplicationShare = Num(1 - distinct/ips)
+	t.LikelyResellers = Num(s.resellers)
+	if len(fleet) == 0 {
+		t.Requests24h, t.UniqueIps24h, t.Countries, t.Incidents24h, t.LikelyResellers, t.BandwidthGb24h = nan, nan, nan, nan, nan, nan
+	}
+	recordCounts(&t, reviews, runs)
+	return t
+}
+
+// fleetScan is what fleetTotals gathers in one pass over the fleet.
+type fleetScan struct {
+	countries                map[string]bool
+	costs, resCosts, lat, sr []float64
+	// shared is the shared IPs of every overlapping pair, each pair once.
+	shared               float64
+	incidents, resellers int
+}
+
+// scanFleet is the per-provider loop of the prepare-design-demo.mjs totals
+// block.
+func scanFleet(fleet []*entry) fleetScan {
+	s := fleetScan{countries: map[string]bool{}, costs: []float64{}, resCosts: []float64{}, lat: []float64{}, sr: []float64{}}
 	pairs := map[string]float64{}
 	pairOrder := []string{}
-	incidents, resellers := 0, 0
 	for _, e := range fleet {
 		p := e.P
 		for _, g := range p.Geo {
-			countries[g.CountryCode] = true
+			s.countries[g.CountryCode] = true
 		}
-		costs = append(costs, p.Pricing.CostPer1kSuccess.F())
+		s.costs = append(s.costs, p.Pricing.CostPer1kSuccess.F())
 		if p.PrimaryKind == "residential" {
-			resCosts = append(resCosts, p.Pricing.CostPer1kSuccess.F())
+			s.resCosts = append(s.resCosts, p.Pricing.CostPer1kSuccess.F())
 		}
-		lat = append(lat, p.Performance.LatencyP50.F())
-		sr = append(sr, p.Performance.SuccessRate.F())
+		s.lat = append(s.lat, p.Performance.LatencyP50.F())
+		s.sr = append(s.sr, p.Performance.SuccessRate.F())
 		for _, o := range p.Overlap.Overlaps {
 			k := []string{p.Slug, o.Slug}
 			sort.Strings(k)
@@ -123,39 +160,21 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 		}
 		for _, inc := range p.Incidents {
 			if inc.StartedAgoSeconds <= 86400 {
-				incidents++
+				s.incidents++
 			}
 		}
 		if p.Overlap.LikelyUpstream != nil {
-			resellers++
+			s.resellers++
 		}
 	}
-	shared := 0.0
 	for _, k := range pairOrder {
-		shared += pairs[k]
+		s.shared += pairs[k]
 	}
-	distinct := math.Max(1, ips-shared)
-	if len(fleet) == 0 {
-		distinct = math.NaN()
-	}
-	t.Countries = Num(len(countries))
-	t.MedianLatency = Num(prepareMedian(lat))
-	t.MedianSuccessRate = Num(prepareMedian(sr))
-	t.CheapestCostPer1kSuccess = Num(jsMin(costs))
-	t.DearestCostPer1kSuccess = Num(jsMax(costs))
-	t.PriceSpreadX = Num(jsMax(costs) / jsMin(costs))
-	t.ResidentialSpreadX = Num(jsMax(resCosts) / jsMin(resCosts))
-	t.Incidents24h = Num(incidents)
-	t.BandwidthGb24h = Num(sum(func(p *model.Provider) float64 { return p.Performance.BandwidthMb24h.F() }) / 1024)
-	t.MisclassifiedShare = Num(sum(func(p *model.Provider) float64 {
-		return float64(p.Pool.UniqueIps24h.F() * p.Trust.DatacenterAsnShare.F())
-	}) / ips)
-	t.DistinctIpsAcrossFleet = Num(distinct)
-	t.FleetDuplicationShare = Num(1 - distinct/ips)
-	t.LikelyResellers = Num(resellers)
-	if len(fleet) == 0 {
-		t.Requests24h, t.UniqueIps24h, t.Countries, t.Incidents24h, t.LikelyResellers, t.BandwidthGb24h = nan, nan, nan, nan, nan, nan
-	}
+	return s
+}
+
+// recordCounts sets the review and run counts of t.
+func recordCounts(t *model.FleetTotals, reviews []model.UserReview, runs []model.CommunityRun) {
 	published, verified, accepted := 0, 0, 0
 	for _, r := range reviews {
 		if r.Verification != "pending" {
@@ -171,7 +190,6 @@ func fleetTotals(all, fleet []*entry, reviews []model.UserReview, runs []model.C
 		}
 	}
 	t.Reviews, t.VerifiedReviews, t.CommunityRuns = Num(published), Num(verified), Num(accepted)
-	return t
 }
 
 func jsRound2(x float64) Num { return Num(jsnum.Round(x*100) / 100) }
