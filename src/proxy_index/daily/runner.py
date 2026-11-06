@@ -193,6 +193,64 @@ async def clean_up(
     return left, skipped
 
 
+async def _work(root: Path, spec: CampaignSpec, services: tuple, pacing: Pacing | None) -> None:
+    """Launch the hour's slot and harvest it until done."""
+    cloud, remote_factory, launcher, harvester = services
+    await run_tick(root, launcher=launcher, now_mode=True, slot=0)
+    await run_collector(
+        root,
+        harvester=harvester,
+        cloud=cloud,
+        remote_factory=remote_factory,
+        until_done=True,
+        pacing=pacing,
+    )
+
+
+async def _bounded(
+    root: Path, spec: CampaignSpec, services: tuple, pacing: Pacing | None, limit: float, outcome
+) -> BaseException | None:
+    """Run the hour within the limit, writing its state or error into `outcome`; returns the
+    failure to raise once the workers are removed (none for the limit or a signal)."""
+    error = None
+    bound = asyncio.timeout(limit)
+    try:
+        async with bound:
+            await _work(root, spec, services, pacing)
+        outcome["state"] = load_hour(root, spec, 0).state
+    except TimeoutError as caught:
+        if bound.expired():
+            outcome["error"] = f"stopped at the time limit ({limit:.0f} s)"
+        else:  # raised inside the run (a socket, say): a failure like any other
+            error = caught
+            outcome["error"] = type(caught).__name__
+    except asyncio.CancelledError:
+        outcome["error"] = "cancelled by a signal"
+    except BaseException as caught:  # an interrupt too: the workers still go
+        error = caught
+        outcome["error"] = type(caught).__name__
+    return error
+
+
+async def _remove_shielded(root: Path, spec: CampaignSpec, cloud, clock, outcome) -> None:
+    """Remove the hour's workers (`clean_up`) to its end, then close the cloud and write
+    `<root>/daily.json`, whatever happens."""
+    cleanup = asyncio.ensure_future(clean_up(root, spec, cloud, clock))
+    try:
+        while not cleanup.done():  # a signal during the removal never interrupts it
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                outcome["error"] = "cancelled by a signal"
+        outcome["leftover"], skipped = cleanup.result()
+        if skipped:
+            outcome["cleanup"] = skipped
+    finally:
+        if cloud is not None:
+            await cloud.close()
+        atomic_json(root / "daily.json", outcome)
+
+
 async def run_hour(
     inputs: RunInputs,
     *,
@@ -220,49 +278,9 @@ async def run_hour(
         "state": "failed",
         "leftover": None,  # unknown until the clean-up has checked
     }
-    error = None
-
-    async def work() -> None:
-        await run_tick(root, launcher=launcher, now_mode=True, slot=0)
-        await run_collector(
-            root,
-            harvester=harvester,
-            cloud=cloud,
-            remote_factory=remote_factory,
-            until_done=True,
-            pacing=pacing,
-        )
-
-    bound = asyncio.timeout(limit)
-    try:
-        async with bound:
-            await work()
-        outcome["state"] = load_hour(root, spec, 0).state
-    except TimeoutError as caught:
-        if bound.expired():
-            outcome["error"] = f"stopped at the time limit ({limit:.0f} s)"
-        else:  # raised inside the run (a socket, say): a failure like any other
-            error = caught
-            outcome["error"] = type(caught).__name__
-    except asyncio.CancelledError:
-        outcome["error"] = "cancelled by a signal"
-    except BaseException as caught:  # an interrupt too: the workers still go
-        error = caught
-        outcome["error"] = type(caught).__name__
-    cleanup = asyncio.ensure_future(clean_up(root, spec, cloud, clock))
-    try:
-        while not cleanup.done():  # a signal during the removal never interrupts it
-            try:
-                await asyncio.shield(cleanup)
-            except asyncio.CancelledError:
-                outcome["error"] = "cancelled by a signal"
-        outcome["leftover"], skipped = cleanup.result()
-        if skipped:
-            outcome["cleanup"] = skipped
-    finally:
-        if cloud is not None:
-            await cloud.close()
-        atomic_json(root / "daily.json", outcome)
+    built = (cloud, remote_factory, launcher, harvester)
+    error = await _bounded(root, spec, built, pacing, limit, outcome)
+    await _remove_shielded(root, spec, cloud, clock, outcome)
     if error is not None:
         raise error
     return outcome
