@@ -15,6 +15,7 @@ import (
 // dimension as an empty list; a published group whose provider has no
 // network has no lists; a build before v4 has none at all.
 func TestDatasetListsOfNetworksWithoutRows(t *testing.T) {
+	t.Parallel()
 	d := &DatasetLists{networks: []*datasetNetwork{{slug: "net", kinds: []*datasetKind{{kind: "residential"}}}}}
 	b, err := json.Marshal(d)
 	none := `{"total":0,"pages":0,"rows":[]}`
@@ -37,6 +38,7 @@ func TestDatasetListsOfNetworksWithoutRows(t *testing.T) {
 // list of 51 rows is two pages, of which the file holds the 50 the build
 // keeps.
 func TestADatasetListHoldsItsFirstPage(t *testing.T) {
+	t.Parallel()
 	first := make([]PlaceRow, PageSize)
 	for i := range first {
 		first[i] = PlaceRow{CountryCode: model.S("AA"), Country: model.S("Aa"), IpsSum: Num(100 - i), Requests: nan, Successes: 1, LatencyP50: nan}
@@ -66,6 +68,7 @@ var errDiskFull = errors.New("disk full")
 
 // A write that fails while the lists are written is an error naming them.
 func TestWriteDatasetReportsAListsWriteError(t *testing.T) {
+	t.Parallel()
 	d := &model.Dataset{Lists: &DatasetLists{}}
 	for range 40 {
 		k := &datasetKind{kind: "residential"}

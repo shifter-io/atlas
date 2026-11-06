@@ -46,6 +46,7 @@ func jsonOf(t *testing.T, v any) string {
 // of "AI answers" carry their group, so the cards (group null) are the two
 // Generic targets and six browser cards, and no "Ticketing queue".
 func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
+	t.Parallel()
 	res := browserBuild(t, true)
 	want := []string{"generic_http", "generic_https"}
 	for _, b := range testscale.BrowserTargets {
@@ -100,6 +101,7 @@ func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
 // and (AI answers) its three sources, while the Generic targets' entries keep
 // exactly their fields and values.
 func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
+	t.Parallel()
 	res := browserBuild(t, true)
 	plain := browserBuild(t, false)
 	targets := res.Pages.Network["shifter/residential"].Profile.Targets
@@ -191,6 +193,7 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 // Browser targets are per target only: rankings, fleet figures, the network
 // list and every network-level figure are the same with and without them.
 func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
+	t.Parallel()
 	with, without := browserBuild(t, true), browserBuild(t, false)
 	for name, pick := range map[string]func(*build.Result) any{
 		"rankings":       func(r *build.Result) any { return r.Pages.Rankings },
@@ -214,6 +217,7 @@ func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 // The snapshot methodology's target_groups marks the sources even before a
 // browser run is measured: no browser entry, yet the cards stay eight.
 func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
+	t.Parallel()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)

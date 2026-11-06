@@ -15,6 +15,7 @@ import (
 // list row is gone (contract K2 deleted the lists) is the file written
 // before, and its lists hold rows.
 func TestTheDatasetFileReadsNoListRows(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())

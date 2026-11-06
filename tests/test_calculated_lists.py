@@ -127,7 +127,10 @@ def downgrade_to_v8(database, empty):
             "DROP TABLE calculated_run_ranges,calculated_slot_figures,calculated_distinct,"
             "calculated_bucket_ips,calculated_ip_last_seen"
         )
-        conn.execute("DROP TABLE calculated_geo_hours,calculated_geo_rollups")  # calculated v11
+        conn.execute(
+            "DROP TABLE calculated_geo_hours,calculated_geo_rollups,calculated_pulse_buckets,"
+            "calculated_pulse_rollups"
+        )  # calculated v11 and v12
         conn.execute(CALCULATED_V8.read_text())
         builds = conn.execute("SELECT DISTINCT build_id FROM v9_rows").fetchall()
         assert builds
@@ -172,9 +175,10 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         8,
-        11,
+        12,
     )
-    assert result["verified"] == [*store.V8_CHECKS, *store.V9_CHECKS, *store.V10_CHECKS]
+    verified = [*store.V8_CHECKS, *store.V9_CHECKS, *store.V10_CHECKS, *store.V11_CHECKS]
+    assert result["verified"] == verified
     with connect(database) as conn:
         assert views(conn) == before
         # One list per target-free window, numbered with its result_id; the rest have none.
@@ -304,7 +308,7 @@ def owned(databases, tmp_path):
 def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
     # The admin role migrates; the new tables and views get the default privileges only.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 11
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 12
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
     country = {"country_code": "XA", "country": "Example"} | counters

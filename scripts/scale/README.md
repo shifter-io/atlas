@@ -110,8 +110,8 @@ guards refuse, and that the calculator reads the result.
 
 # The hourly cycle (SCALE-GEN-1b)
 
-`cycle.py` runs simulated hours of the real hourly cycle on the data set and measures them
-(`measure.py`). Generate one day less than the data set holds; the cycle drives the last day (and
+`cycle.py` runs simulated hours of the real hourly cycle on the data set (its steps are in
+`cycle_steps.py`) and measures them (`measure.py`). Generate one day less than the data set holds; the cycle drives the last day (and
 any later one) hour by hour through the same code the orchestrator runs:
 
 ```sh

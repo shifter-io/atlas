@@ -39,6 +39,7 @@ func decodeProduct(t *testing.T, body string) *snap.Product {
 }
 
 func TestTheMappingTakesTheFormulasFigures(t *testing.T) {
+	t.Parallel()
 	p := decodeProduct(t, estimateProduct)
 	day, month, week := p.Window("24h"), p.Window("30d"), p.Window("7d")
 	if ipsOf(day) != 251 || ipsOf(week) != 100 {
@@ -89,6 +90,7 @@ func TestTheMappingTakesTheFormulasFigures(t *testing.T) {
 // range, unknown fields null, each row's IPs scaled half up like any
 // breakdown row's; a range without the list has no rows.
 func TestCoverageEvidenceFollowsTheMapping(t *testing.T) {
+	t.Parallel()
 	p := decodeProduct(t, `{"id":"1:x","kind":"residential","windows":{
 "24h":{"breakdowns":{"city_asn":[{"country_code":"US","country":"United States","region_code":"CA","region":"California",
   "city":"Los Angeles","asn":7922,"name":"Comcast","usage_type":"isp","ips":3,"p50":420},{"ips":1}]},

@@ -273,7 +273,7 @@ class _Steps:
                 continue
             try:
                 await ops_api.release(self.cloud, kind, resource_id, self.scope, self.audit)
-            except Exception as error:  # audited by the guard; the other resource still goes
+            except Exception as error:  # boundary: audited by the guard; the other one still goes
                 left.append(f"{kind} {resource_id}: {type(error).__name__}")
         self.note(leftovers=left)
         if left and self.build.state == "built":
