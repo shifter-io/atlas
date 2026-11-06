@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from helpers import FakeTransport
 from test_storage import measurement
 
-from proxy_index.orchestrator import batches, jobs
+from proxy_index.orchestrator import batches, jobs, nodework
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.archive import ArchiveError, pack, unpack
 from proxy_index.orchestrator.db import Database, put_setting
@@ -357,7 +357,7 @@ async def finish_pulse(db, node, batch_id, successes, now):
         "successes": successes,
         "stop_reason": "requests",
     }
-    return await batches.finish_run(db, node, batch_id, summary, None, now)
+    return await nodework.finish_run(db, node, batch_id, summary, None, now)
 
 
 @pytest.mark.parametrize("spoiled", ["no_success", "stalled", "failed"])
@@ -408,7 +408,7 @@ async def test_a_spoiled_census_reruns_once_a_day_when_a_pulse_gets_through(data
                 (at,),
             )[0][0]
         )
-        await batches.assignments(db, node, at + timedelta(minutes=1))
+        await nodework.assignments(db, node, at + timedelta(minutes=1))
     # Still down: no rerun. Then up: one rerun for alpha alone. Up again: nothing more.
     await finish_pulse(db, node, pulses[0], 0, day + timedelta(hours=1, minutes=1))
     assert query(database, "SELECT count(*) FROM test_batches WHERE retry_of IS NOT NULL") == [(0,)]
@@ -456,20 +456,20 @@ async def test_barrier_waits_for_every_product(database, db):
     node_a = {"node_id": a["node_id"]}
     node_b = {"node_id": b["node_id"]}
     start = NOW + timedelta(seconds=60)
-    work = await batches.assignments(db, node_a, start)
+    work = await nodework.assignments(db, node_a, start)
     assert [w["batch_id"] for w in work["assignments"]] == [batch_id]
-    await batches.assignments(db, node_b, start)
-    assert await batches.progress(db, node_a, batch_id, {"requests": 0}, start) == {"stop": False}
+    await nodework.assignments(db, node_b, start)
+    assert await nodework.progress(db, node_a, batch_id, {"requests": 0}, start) == {"stop": False}
     assert query(database, "SELECT status,started_at FROM test_batches") == [("running", start)]
     # census_started is per product, written when that product's run starts.
     alpha, beta = product_id(database, "alpha"), product_id(database, "beta")
     assert query(database, "SELECT kind,product_id,data FROM test_events") == [
         ("census_started", alpha, {"region": "fra1", "start_at": "2026-10-01T12:00:30+00:00"})
     ]
-    await batches.progress(
+    await nodework.progress(
         db, node_a, batch_id, {"requests": 40, "successes": 30, "unique_ips": 20}, start
     )
-    assert await batches.fail_run(db, node_a, batch_id, "boom", start) == "failed"
+    assert await nodework.fail_run(db, node_a, batch_id, "boom", start) == "failed"
     assert query(database, "SELECT status FROM test_batches") == [("running",)]
     assert query(
         database,
@@ -496,13 +496,13 @@ async def test_barrier_waits_for_every_product(database, db):
         "error": "boom",
     }
     # Every run is terminal: the batch closes as failed; beta never started.
-    await batches.fail_run(db, node_b, batch_id, "boom", start)
+    await nodework.fail_run(db, node_b, batch_id, "boom", start)
     assert query(database, "SELECT status,finished_at FROM test_batches") == [("failed", start)]
     rows = query(database, finished)
     assert [(r[0], r[1], r[3]["duration_s"]) for r in rows] == [(alpha, -1, 0.0), (beta, -1, None)]
     assert query(database, "SELECT count(*) FROM test_events") == [(3,)]
     # A terminal run cannot be failed twice.
-    assert await batches.fail_run(db, node_b, batch_id, "again", start) == "failed"
+    assert await nodework.fail_run(db, node_b, batch_id, "again", start) == "failed"
 
 
 async def test_reaper_fails_unstarted_and_silent_runs(database, db):
@@ -512,11 +512,11 @@ async def test_reaper_fails_unstarted_and_silent_runs(database, db):
     await batches.census_plan(db, NOW)
     batch_id = query(database, "SELECT batch_id FROM test_batches")[0][0]
     start = NOW + timedelta(seconds=30)
-    await batches.assignments(db, {"node_id": a["node_id"]}, start)
-    await batches.progress(db, {"node_id": a["node_id"]}, batch_id, {"requests": 1}, start)
-    assert (await batches.reap(db, start + timedelta(seconds=60)))["failed"] == {}
+    await nodework.assignments(db, {"node_id": a["node_id"]}, start)
+    await nodework.progress(db, {"node_id": a["node_id"]}, batch_id, {"requests": 1}, start)
+    assert (await nodework.reap(db, start + timedelta(seconds=60)))["failed"] == {}
     # Beta never started; alpha went silent.
-    result = await batches.reap(db, start + timedelta(hours=1))
+    result = await nodework.reap(db, start + timedelta(hours=1))
     assert result == {"failed": {"not_started": 1, "stale": 1}, "closed": 1}
     reaped = query(
         database, "SELECT kind,signal,data->>'status' FROM test_events WHERE kind='census_finished'"
@@ -541,8 +541,8 @@ async def test_nodes_go_offline_and_come_back(database, db, client):
     assert query(database, "SELECT status,open_conns,req_per_s,rss_mb FROM nodes") == [
         ("online", 3, 1.5, 80)
     ]
-    assert (await batches.mark_offline(db))["offline"] == []
-    gone = await batches.mark_offline(db, datetime.now(UTC) + timedelta(seconds=61))
+    assert (await nodework.mark_offline(db))["offline"] == []
+    gone = await nodework.mark_offline(db, datetime.now(UTC) + timedelta(seconds=61))
     assert gone == {"offline": [a["node_id"]]}
     assert query(database, "SELECT kind,signal FROM test_events") == [("node_offline", -1)]
     assert query(database, "SELECT acknowledged_at IS NULL FROM alerts") == [(True,)]
@@ -799,9 +799,9 @@ async def test_stalled_census_opens_an_outage_and_a_census_with_successes_closes
     down_at = began + timedelta(minutes=5)
     summary = census_summary(began, successes=120, stalled_at=down_at)
     finished = began + timedelta(minutes=15)
-    assert await batches.finish_run(db, node, batch_id, summary, None, finished) == "done"
+    assert await nodework.finish_run(db, node, batch_id, summary, None, finished) == "done"
     # Replaying the upload changes nothing.
-    assert await batches.finish_run(db, node, batch_id, summary, None, finished) == "done"
+    assert await nodework.finish_run(db, node, batch_id, summary, None, finished) == "done"
     assert query(
         database,
         "SELECT o.product_id,o.country_code,r.slug,o.source,o.batch_id,o.started_at,o.ended_at "
@@ -831,11 +831,11 @@ async def test_stalled_census_opens_an_outage_and_a_census_with_successes_closes
     await batches.census_plan(db, tomorrow)
     ((second,),) = query(database, "SELECT max(batch_id) FROM test_batches")
     assert second != batch_id
-    await batches.assignments(db, node, tomorrow)
+    await nodework.assignments(db, node, tomorrow)
     restart = tomorrow + timedelta(minutes=1)
     healthy = census_summary(restart, successes=400)
     for _ in range(2):
-        await batches.finish_run(db, node, second, healthy, None, tomorrow + timedelta(hours=1))
+        await nodework.finish_run(db, node, second, healthy, None, tomorrow + timedelta(hours=1))
     assert query(database, "SELECT started_at,ended_at FROM outages") == [(down_at, restart)]
     recovered = query(
         database,
@@ -1060,10 +1060,10 @@ async def test_reaper_gives_uploads_longer(database, db):
     batch_id = query(database, "SELECT batch_id FROM test_batches")[0][0]
     node = {"node_id": a["node_id"]}
     start = NOW + timedelta(seconds=30)
-    await batches.assignments(db, node, start)
-    assert (await batches.begin_upload(db, node, batch_id, start))["status"] == "running"
-    assert (await batches.reap(db, start + timedelta(minutes=20)))["failed"] == {}
-    assert (await batches.reap(db, start + timedelta(minutes=46)))["failed"] == {"stale": 1}
+    await nodework.assignments(db, node, start)
+    assert (await nodework.begin_upload(db, node, batch_id, start))["status"] == "running"
+    assert (await nodework.reap(db, start + timedelta(minutes=20)))["failed"] == {}
+    assert (await nodework.reap(db, start + timedelta(minutes=46)))["failed"] == {"stale": 1}
 
 
 def test_cli_node_token_and_dev_bind(database, capsys):

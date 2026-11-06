@@ -33,7 +33,7 @@ from ..archive import ArchiveError as StoreError
 from ..archive.export import file_digests
 from ..archive.spaces import ArchiveChanged, Spaces
 from ..browser import contracts as bc
-from . import batches
+from . import nodework
 from .api import (
     DB_KEY,
     NODE_KEY,
@@ -137,7 +137,7 @@ async def _settings(db: Database, node: dict) -> dict[str, Any]:
 
 
 async def ingest_bundle(request: web.Request, run: dict, node: dict) -> web.Response:
-    """K-BP7 steps 1-8 for one browser bundle (`run` is batches.begin_upload's row)."""
+    """K-BP7 steps 1-8 for one browser bundle (`run` is nodework.begin_upload's row)."""
     db = request.app[DB_KEY]
     sent = _sent_sha256(request, required=True)
     try:
@@ -222,7 +222,7 @@ async def _process(
         run_key = imported["run_key"]
         if late:
             await _reopen(request.app[DB_KEY], batch_id, node)
-        status = await batches.finish_run(request.app[DB_KEY], node, batch_id, summary, run_key)
+        status = await nodework.finish_run(request.app[DB_KEY], node, batch_id, summary, run_key)
     return web.json_response(
         {"ok": True, "ingested": True, "status": status, "run_key": run_key, "archived": archived}
     )
