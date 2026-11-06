@@ -15,9 +15,9 @@ from statistics import mean
 
 import pytest
 from calculated_cases import lenient_policy
+from census_pulse_cases import batch, batch_run, product
 from helpers import FakeTransport
 from psycopg.rows import dict_row
-from test_census_pulse import batch, batch_run, product
 from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 from test_storage_v6 import census, load, save, write_geo
 

@@ -58,6 +58,18 @@ func New(t testing.TB) *DB {
 // migrate` first runs. Skips when PG_TEST_ADMIN_FILE is unset.
 func NewFramework(t testing.TB) *DB {
 	t.Helper()
+	db := create(t, adminConfig(t))
+	db.loadFramework(t, "schema.sql")
+	db.loadCalculated(t)
+	db.loadReference(t)
+	return db
+}
+
+// adminConfig is the admin role PG_TEST_ADMIN_FILE names. It skips the test
+// when that is unset (fails it under PG_TEST_REQUIRED) and fails it when
+// there is no framework tree to read the schema from.
+func adminConfig(t testing.TB) config.Postgres {
+	t.Helper()
 	file := os.Getenv("PG_TEST_ADMIN_FILE")
 	if file == "" && os.Getenv("PG_TEST_REQUIRED") != "" {
 		t.Fatal("PG_TEST_REQUIRED is set and PG_TEST_ADMIN_FILE is not: the database tests must run")
@@ -69,10 +81,16 @@ func NewFramework(t testing.TB) *DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fw := FrameworkDir()
-	if fw == "" {
+	if FrameworkDir() == "" {
 		t.Fatal("cannot find src/proxy_index for the framework schema: run the tests inside the repository")
 	}
+	return admin
+}
+
+// create makes an empty database with a random name and drops it when the
+// test ends.
+func create(t testing.TB, admin config.Postgres) *DB {
+	t.Helper()
 	buf := make([]byte, 6)
 	rand.Read(buf) //nolint:errcheck
 	name := "siteapi_test_" + hex.EncodeToString(buf)
@@ -88,25 +106,33 @@ func NewFramework(t testing.TB) *DB {
 	}
 	conn.Close(ctx)
 	db := &DB{Name: name, DSN: admin.WithDB(name).DSN(), Admin: admin}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		c, err := pgx.Connect(ctx, admin.DSN())
-		if err != nil {
-			t.Logf("drop %s: %v", name, err)
-			return
-		}
-		defer c.Close(ctx)
-		if _, err := c.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)"); err != nil {
-			t.Logf("drop %s: %v", name, err)
-		}
-	})
-	db.loadFramework(t, "schema.sql")
-	db.loadCalculated(t)
-	w := db.Conn(t)
+	t.Cleanup(func() { db.drop(t) })
+	return db
+}
+
+// drop removes the database, logging a failure.
+func (d *DB) drop(t testing.TB) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c, err := pgx.Connect(ctx, d.Admin.DSN())
+	if err != nil {
+		t.Logf("drop %s: %v", d.Name, err)
+		return
+	}
+	defer c.Close(ctx)
+	if _, err := c.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{d.Name}.Sanitize()+" WITH (FORCE)"); err != nil {
+		t.Logf("drop %s: %v", d.Name, err)
+	}
+}
+
+// loadReference creates the scratch partitions (the framework creates
+// monthly ones on demand) and the reference rows the real database has.
+func (d *DB) loadReference(t testing.TB) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	w := d.Conn(t)
 	defer w.Close(context.Background())
-	// Scratch partitions (the framework creates monthly ones on demand) and the
-	// reference rows the real database has.
 	if _, err := w.Exec(ctx, `CREATE TABLE test_events_default PARTITION OF test_events DEFAULT;
 INSERT INTO targets(target_id,label,url,pass_condition,sort_order) VALUES
  ('generic_http','Generic HTTP','http://checkip.amazonaws.com/','Response body is the exit address the target saw, and it parses as an IP.',10),
@@ -115,7 +141,6 @@ INSERT INTO runner_regions(region_id,slug,pattern) VALUES (1,'fra1','fra1-*');
 INSERT INTO countries(country_code,name,region_id,census_time) VALUES ('US','United States',1,'06:00'),('DE','Germany',1,'07:00');`); err != nil {
 		t.Fatalf("scratch reference rows: %v", err)
 	}
-	return db
 }
 
 // loadFramework runs one of the framework's schema files (relative to

@@ -65,6 +65,20 @@ UNIT_FILES = tuple(
 )
 
 
+# What `deploy` returns from the inventory.
+DEPLOY_KEYS = (
+    "manager_id",
+    "manager_name",
+    "manager_size",
+    "manager_firewall_id",
+    "worker_firewall_id",
+    "worker_key_id",
+    "worker_key_name",
+    "wheel_sha256",
+    "credentials",
+)
+
+
 class DeployError(RuntimeError):
     """A manager step that failed or was refused; fixed text, never a host, token or secret."""
 
@@ -303,26 +317,7 @@ async def deploy(
 
     Run again with a new wheel to update a recorded manager; it is never created twice."""
     now, path = now or datetime.now(UTC), job.inventory
-    inventory = load_inventory(path)
-    project_id = await check_account(cloud, inventory, job.account)  # before any write
-    size = await manager_size(cloud, inventory, job.size)
-    if inventory.get("host") and inventory.get("campaigns"):
-        await _refuse_while_running(Manager(inventory, path, shell), inventory["campaigns"])
-    public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
-    mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
-    save(
-        path,
-        inventory,
-        account=job.account,
-        project_id=project_id,
-        mac_key_id=mac_key_id,
-        manager_size=size,
-        user="root",
-        identity=str(job.mac_key),
-        identity_file=str(job.mac_key),
-        known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
-        campaigns_root=f"{BASE}/campaigns",
-    )
+    inventory = await _record_mac_key(cloud, job, shell, now)
     await _ensure_manager(cloud, job, inventory, now, sleep)
     scope = manager_scope(inventory)
     rules = manager_rules.manager_rules(inventory, job.mac_ipv4)
@@ -356,18 +351,35 @@ async def deploy(
         credentials=sorted({*inventory.get("credentials", []), *job.credentials}),
         deployed_at=now.isoformat(),
     )
-    keys = (
-        "manager_id",
-        "manager_name",
-        "manager_size",
-        "manager_firewall_id",
-        "worker_firewall_id",
-        "worker_key_id",
-        "worker_key_name",
-        "wheel_sha256",
-        "credentials",
+    return {key: inventory[key] for key in DEPLOY_KEYS}
+
+
+async def _record_mac_key(
+    cloud: DigitalOcean, job: DeployJob, shell: Shell, now: datetime
+) -> dict[str, Any]:
+    """The checked inventory with the account, the Mac key and the manager size recorded,
+    before any manager is created (never while a campaign runs)."""
+    path = job.inventory
+    inventory = load_inventory(path)
+    project_id = await check_account(cloud, inventory, job.account)  # before any write
+    size = await manager_size(cloud, inventory, job.size)
+    if inventory.get("host") and inventory.get("campaigns"):
+        await _refuse_while_running(Manager(inventory, path, shell), inventory["campaigns"])
+    public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
+    mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
+    return save(
+        path,
+        inventory,
+        account=job.account,
+        project_id=project_id,
+        mac_key_id=mac_key_id,
+        manager_size=size,
+        user="root",
+        identity=str(job.mac_key),
+        identity_file=str(job.mac_key),
+        known_hosts=str(path.with_name(f"{path.stem}.known_hosts")),  # one per inventory
+        campaigns_root=f"{BASE}/campaigns",
     )
-    return {key: inventory[key] for key in keys}
 
 
 async def manager_size(cloud: DigitalOcean, inventory: dict[str, Any], wanted: str | None) -> str:
