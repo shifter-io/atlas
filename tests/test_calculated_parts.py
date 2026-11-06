@@ -20,7 +20,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 from test_storage import measurement
 
-from proxy_index.calculated import calculator, parts, store
+from proxy_index.calculated import calculator, parts, product_windows, store
 from proxy_index.calculated.aggregate import series
 from proxy_index.calculated.api import CACHE, RESOURCES, app
 from proxy_index.calculated.calculator import calculate
@@ -207,7 +207,7 @@ async def test_sparse_daily_series_serve_the_full_series_of_the_same_inputs(
     sparse = calculate(database, POLICY, as_of=as_of, publish=True)
     # The same inputs with the old full series (another implementation id, so another build).
     monkeypatch.setattr(calculator, "IMPLEMENTATION_ID", "full-series")
-    monkeypatch.setattr(calculator, "sparse", lambda points, every=False: points)
+    monkeypatch.setattr(product_windows, "sparse", lambda points, every=False: points)
     full = calculate(database, POLICY, as_of=as_of)
     assert full["snapshot_id"] != sparse["snapshot_id"]
     sparse = store.read(database, sparse["snapshot_id"])
