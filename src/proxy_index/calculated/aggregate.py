@@ -10,7 +10,15 @@ from datetime import UTC, datetime, timedelta
 
 from ..names import NETWORK, PLACE
 from ..stats import Histogram
-from .latency import KEYS, LATENCY, blended
+from .latency import (
+    KEYS,
+    LATENCY,
+    averaged,
+    blended,
+    load_factor,
+    under_load_values,
+    without_mean,
+)
 from .latency import blend as blend
 from .policy import DIMENSIONS, HOSTING_USAGE_TYPES
 from .poolfig import entry_inputs, pool_figures
@@ -547,10 +555,9 @@ def load_factors(rows, minimum):
             if key in tainted:
                 excluded[region].add(slot)
             continue
-        high = Histogram(load[0]).percentiles()
-        low = Histogram(base[0]).percentiles()
-        if all(high[p] and low[p] for p in LATENCY):
-            factors[region][slot] = {p: high[p] / low[p] for p in LATENCY}
+        found = load_factor(load[0], base[0])
+        if found:
+            factors[region][slot] = found
     factors = {region: slots for region, slots in factors.items() if slots}
     return (
         factors,
@@ -565,16 +572,16 @@ def load_factors(rows, minimum):
 
 def under_load(rows, factors, minimum, excluded=None):
     """Latency under load: per time slot and requested country, the country's light-load
-    percentile × the slot's factor of the country's runner region (load_factors()), or the
-    region's newest earlier factor in the window when the slot has none; the window value is the
-    mean of those values (equal weight per slot and country). Counts are of those values.
+    percentile (and mean) × the slot's factor of the country's runner region (load_factors()),
+    or the region's newest earlier factor in the window when the slot has none; the window value
+    is the mean of those values (equal weight per slot and country). Counts are of those values.
     excluded: load slots load_factors() left without a factor because of a census (the reason).
     """
     excluded = excluded or {}
     groups = defaultdict(list)
     for r in rows:
         groups[(r.get("region") or "", r.get("country") or "")].append(r)
-    values = {p: [] for p in LATENCY}
+    values = {k: [] for k in KEYS}
     own = carried = missing = 0
     voting = False
     for (region, _), own_rows in sorted(groups.items()):
@@ -590,9 +597,8 @@ def under_load(rows, factors, minimum, excluded=None):
                     missing += 1
                     continue
                 factor, carried = region_factors[known[i - 1]], carried + 1
-            percentiles = Histogram(histogram).percentiles()
-            for p in LATENCY:
-                values[p].append(percentiles[p] * factor[p])
+            for k, value in under_load_values(histogram, factor).items():
+                values[k].append(value)
     n = own + carried
     reason = None
     if not n:
@@ -607,7 +613,7 @@ def under_load(rows, factors, minimum, excluded=None):
             else UNDER_LOAD_NONE
         )
     return {
-        "ms": {p: round(sum(v) / n, 3) if n else None for p, v in values.items()},
+        "ms": averaged(values),
         "slots": n,
         "own_factor": own,
         "carried_factor": carried,
@@ -895,12 +901,12 @@ def series(
                 "completed": m["completed"],
                 "successes": m["successes"],
                 "success_rate": m["success_rate"],
-                "latency_ms": {p: timing["latency_ms"][p] for p in LATENCY},
+                "latency_ms": without_mean(timing["latency_ms"]),
                 **(
                     {
-                        "latency_under_load_ms": under_load(
-                            latency_rows, factors or {}, minimum, excluded
-                        )["ms"]
+                        "latency_under_load_ms": without_mean(
+                            under_load(latency_rows, factors or {}, minimum, excluded)["ms"]
+                        )
                     }
                     if latency_target
                     else {}

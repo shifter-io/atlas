@@ -32,7 +32,6 @@ from datetime import timedelta
 from . import browser, fleetsql, hourly, netlists, network_scores, parts
 from .aggregate import (
     KEYS,
-    LATENCY,
     NOT_LATENCY_TARGET,
     floor_time,
     load_factors,
@@ -214,7 +213,7 @@ class Network:
             with_under_load(tm, own, latency[0], self.minimum, latency[1])
             if target != self.target:
                 tm["latency_ms"] = dict.fromkeys(KEYS)
-                tm["latency_under_load_ms"] = dict.fromkeys(LATENCY)
+                tm["latency_under_load_ms"] = dict.fromkeys(KEYS)
                 tm["latency_reason"] = NOT_LATENCY_TARGET
                 tm["under_load"] = {"reason": NOT_LATENCY_TARGET}
             tm["uptime"] = uptime(batches, since, end, self.threshold)["value"]
