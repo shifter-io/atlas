@@ -1,0 +1,152 @@
+# TEMPORARY (issue #536): repeated full tier1 pytest runs on ci-32cpu servers to find
+# flaky tests. Removed from the branch before the pull request is marked ready.
+name: flake-hunt
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: 0.12.10
+  UV_SHA256: 173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b
+  PYTHON_VERSION: 3.12.14
+  PG_VERSION: 17.11.1
+  PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
+
+jobs:
+  hunt:
+    name: hunt ${{ matrix.job }} (n=${{ matrix.workers }} seed=${{ matrix.seed }})
+    runs-on: [self-hosted, ci-32cpu]
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {job: A, workers: auto, seed: none}
+          - {job: B, workers: "16", seed: none}
+          - {job: C, workers: "48", seed: none}
+          - {job: D, workers: auto, seed: "1101"}
+          - {job: E, workers: "48", seed: "2202"}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Pinned uv, CPython and PostgreSQL in the server cache
+        run: |
+          tools=$CI_CACHE_DIR/proxy-index/tools
+          mkdir -p "$tools"
+          fetch() {
+            [ -e "$3/.complete" ] && return 0
+            tmp=$(mktemp -d "$tools/.tmp.XXXXXX")
+            if curl -fsSL --retry 3 -o "$tmp/a.tgz" "$1" \
+                && echo "$2  $tmp/a.tgz" | sha256sum -c --quiet - \
+                && mkdir "$tmp/x" && tar -C "$tmp/x" --strip-components=1 -xzf "$tmp/a.tgz" \
+                && touch "$tmp/x/.complete"; then
+              mv -T "$tmp/x" "$3" 2>/dev/null || true
+              rm -rf "$tmp"
+            else
+              rm -rf "$tmp"
+              return 1
+            fi
+          }
+          fetch "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-x86_64-unknown-linux-gnu.tar.gz" "$UV_SHA256" "$tools/uv-$UV_VERSION"
+          fetch "https://github.com/theseus-rs/postgresql-binaries/releases/download/$PG_VERSION/postgresql-$PG_VERSION-x86_64-unknown-linux-gnu.tar.gz" "$PG_SHA256" "$tools/postgresql-$PG_VERSION"
+          echo "$tools/uv-$UV_VERSION" >> "$GITHUB_PATH"
+          mkdir -p "$RUNNER_TEMP/ev"
+          {
+            echo "EV=$RUNNER_TEMP/ev"
+            echo "PG_BIN=$tools/postgresql-$PG_VERSION/bin"
+            echo "UV_CACHE_DIR=$CI_CACHE_DIR/proxy-index/uv-cache"
+            echo "UV_PYTHON_INSTALL_DIR=$tools/python"
+            echo "UV_PROJECT_ENVIRONMENT=$CI_CACHE_DIR/proxy-index/venv/tier1"
+          } >> "$GITHUB_ENV"
+
+      - name: uv sync (locked)
+        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
+
+      - name: Start a PostgreSQL for this job
+        run: |
+          port=$(uv run --no-editable python -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+          uv run --no-editable python scripts/postgres_local.py init --bin-dir "$PG_BIN" --port "$port" --ephemeral
+          echo "PG_TEST_ADMIN_FILE=$PWD/.secrets/postgres-admin.toml" >> "$GITHUB_ENV"
+
+      - name: Two full runs (without, then with tests/durations.json)
+        env:
+          WORKERS: ${{ matrix.workers }}
+          SEED: ${{ matrix.seed }}
+          JOB: ${{ matrix.job }}
+        run: |
+          # A seeded shuffle of the collection (the same in every xdist worker); the
+          # durations order of tests/conftest.py still applies on top of it.
+          plugins=()
+          if [ "$SEED" != none ]; then
+            mkdir -p "$RUNNER_TEMP/plug"
+            cat > "$RUNNER_TEMP/plug/flake_shuffle.py" <<'EOF'
+          import os
+          import random
+
+
+          def pytest_collection_modifyitems(config, items):
+              random.Random(int(os.environ["FLAKE_SEED"])).shuffle(items)
+          EOF
+            export PYTHONPATH="$RUNNER_TEMP/plug" FLAKE_SEED="$SEED"
+            plugins=(-p flake_shuffle)
+          fi
+          echo "FLAKE-COLLECT $JOB $(uv run --no-editable pytest -p no:cacheprovider --collect-only -q | tail -1)"
+          one() {
+            local run=$1
+            rc=0
+            start=$(date +%s)
+            uv run --no-editable pytest -p no:cacheprovider "${plugins[@]}" -rs -n "$WORKERS" \
+              --dist worksteal -m "not serial" --cov=proxy_index --cov-branch \
+              --cov-report= --junitxml="$EV/junit-$run.xml" > "$EV/pytest-$run.log" 2>&1 || rc=$?
+            tail -3 "$EV/pytest-$run.log"
+            python3 - "$EV/junit-$run.xml" "$run" "$rc" "$(( $(date +%s) - start ))" <<'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+          path, run, rc, secs = sys.argv[1:]
+          failed = []
+          try:
+              for case in ET.parse(path).getroot().iter("testcase"):
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      failed.append(f"{case.get('classname')}::{case.get('name')}")
+          except (OSError, ET.ParseError) as exc:
+              failed.append(f"<no junit: {exc}>")
+          print(f"FLAKE-RUN {run} rc={rc} secs={secs} failed={len(failed)}")
+          for name in failed:
+              print(f"FLAKE-FAIL {run} {name}")
+          EOF
+            grep -E '^(FAILED|ERROR) ' "$EV/pytest-$run.log" | sed "s/^/FLAKE-LINE $run /" || true
+          }
+          export CI_TIMELINE=1
+          rm -f tests/durations.json
+          one "$JOB-1-nodur"
+          python3 scripts/ci/timeline.py "$EV" --top 5 --durations "$RUNNER_TEMP/durations.json"
+          rm -f "$EV"/timeline-*.jsonl
+          cp "$RUNNER_TEMP/durations.json" tests/durations.json
+          one "$JOB-2-dur"
+          rm -f tests/durations.json
+
+      - name: Failure details
+        if: always()
+        run: |
+          for f in "$EV"/pytest-*.log; do
+            echo "::group::$f"
+            sed -n '/= FAILURES =/,/short test summary/p' "$f" | head -400
+            echo "::endgroup::"
+          done
+
+      - name: Stop PostgreSQL
+        if: always() && env.PG_BIN != ''
+        run: |
+          data=.state/postgres/data
+          [ -f "$data/postmaster.pid" ] || exit 0
+          "$PG_BIN/pg_ctl" -D "$data" stop -m fast
