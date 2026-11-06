@@ -14,12 +14,11 @@ import pytest
 import test_scale_cycle as scale
 
 from proxy_index import storage
-from proxy_index.calculated import store
 from proxy_index.storage import connect
 
 generate, cycle, measure = scale.generate, scale.cycle, scale.measure
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
 
 SCHEMA_ONLY = "-c search_path=proxy_scale"
 TABLES = (
@@ -70,9 +69,8 @@ def scratch_schema(config):
         conn.execute("CREATE SCHEMA proxy_scale")
 
 
-def test_initialize_and_migrate_use_the_session_schema(databases, pgoptions):
-    config = databases()
-    storage.initialize(config)  # public.schema_versions, as in production
+def test_initialize_and_migrate_use_the_session_schema(database, pgoptions):
+    config = database  # public.schema_versions, as in production, from the template
     scratch_schema(config)
     pgoptions(SCHEMA_ONLY)
     with pytest.raises(ValueError, match="No schema to migrate"):
@@ -89,10 +87,11 @@ def test_initialize_and_migrate_use_the_session_schema(databases, pgoptions):
     assert storage.migrate(config)["migrated"] is False
 
 
-def test_generate_cycle_and_measure_write_only_the_scratch_schema(databases, tmp_path, pgoptions):
-    config = databases()
+def test_generate_cycle_and_measure_write_only_the_scratch_schema(
+    calculated_database, tmp_path, pgoptions
+):
+    config = calculated_database  # the calculated layer, from its template
     scale.dataset(config, "1")  # the production stand-in, in public (old mode, by name)
-    store.initialize(config)
     with connect(config) as conn:
         conn.execute("UPDATE test_runs SET summary=summary-'scale_generator' WHERE run_key=1")
         conn.execute("CREATE TABLE production_only(note text)")

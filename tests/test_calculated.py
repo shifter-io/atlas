@@ -15,7 +15,14 @@ from proxy_index.calculated.calculator import calculate, retain
 from proxy_index.calculated.policy import composite, digest, effective, load, ratio
 from proxy_index.storage import connect, ingest
 
-pytest_plugins = ["test_storage"]
+pytest_plugins = ["test_storage", "calculated_template"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
+
 
 LIVE = Path("results/live-shifter/ef3b5883-bf12-48dc-9759-43b79f937276")
 
@@ -108,7 +115,6 @@ def test_retained_score_expiry():
 async def test_calculation_publication_and_api(database, tmp_path, monkeypatch):
     # These assertions read older published builds; retention has its own tests.
     monkeypatch.setattr(store_retention, "RETAIN_PER_DAY", 100)
-    store.initialize(database)
     # Fixed clocks: both providers' runs in the 12:00 bucket, whenever the test runs.
     d = await spread(tmp_path, monkeypatch, EDGE - 4 * MINUTE, [0] * 10)
     ingest(d, database)
@@ -208,7 +214,6 @@ async def test_a_late_provider_in_the_cutoff_bucket_is_in_the_revised_build(
     bucket, as when the test crossed a bucket edge on the real clock), is in the revised build
     at the same cutoff and shares the first's exit IP: that bucket closes (its run had ended by
     the cutoff), so the cutoff moves to its end."""
-    store.initialize(database)
     start = EDGE - timedelta(seconds=30)
     ingest(await spread(tmp_path, monkeypatch, start, [0] * 10), database)
     end = start + 5 * MINUTE
@@ -225,7 +230,6 @@ async def test_a_late_provider_in_the_cutoff_bucket_is_in_the_revised_build(
 
 @pytest.mark.asyncio
 async def test_a_calculation_right_after_a_run_includes_it_once(database, tmp_path):
-    store.initialize(database)
     d = await measurement(tmp_path, requests=10)
     ingest(d, database)
     finished = datetime.fromisoformat(json.loads((d / "summary.json").read_text())["finished_at"])
@@ -247,7 +251,6 @@ async def test_a_calculation_right_after_a_run_includes_it_once(database, tmp_pa
 def test_saved_shifter_reconciliation(database):
     if not LIVE.exists():
         pytest.skip("Private saved Shifter artifact is not in community checkout")
-    store.initialize(database)
     ingest(LIVE, database)
     store.assign_role(database, "ef3b5883-bf12-48dc-9759-43b79f937276", "pool_sampling")
     snap = calculate(database, POLICY, as_of="2026-09-25T15:25:00+00:00", publish=True)

@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from test_archive import SLOT, day_of_data
 
 from proxy_index.archive.spaces import sign
+from proxy_index.calculated import store
 from proxy_index.partitions import partition
 from proxy_index.storage import connect
 
@@ -136,6 +137,7 @@ def spaces_settings(path):
 
 async def census_day(database, tmp_path):
     """day_of_data with the census run moved onto DAY (its rows in DAY's partitions)."""
+    store.initialize(database)
     key = await day_of_data(database, tmp_path)
     with connect(database) as conn:
         shift(conn, key, SLOT + timedelta(minutes=5))

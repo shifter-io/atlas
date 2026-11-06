@@ -12,7 +12,6 @@ from census_pulse_cases import product
 from estimates_cases import POLICY, T1, T2, formula, imported, product_window, stored
 from psycopg.rows import dict_row
 
-from proxy_index.calculated import store
 from proxy_index.calculated.calculator import calculate as calculate_snapshot
 from proxy_index.detect import list_events
 from proxy_index.estimates import compute, release, window
@@ -21,7 +20,13 @@ from proxy_index.orchestrator.db import DEFAULTS
 from proxy_index.orchestrator.jobs import retention
 from proxy_index.storage import connect, seed
 
-pytest_plugins = ["test_storage", "estimates_cases"]
+pytest_plugins = ["test_storage", "calculated_template", "estimates_cases"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
 
 
 async def test_stored_hours_are_released_in_order_and_never_rewritten(tmp_path, database, db):
@@ -105,7 +110,6 @@ def pulse_window(product_id):
 
 
 async def test_week_unique_ips_are_distinct_measured_ips_not_a_sum_of_days(tmp_path, database, db):
-    store.initialize(database)  # distinct() keeps its counts in calculated_distinct
     seed(database)
     for at in (T1, T2):
         compute.estimate_run(database, await imported(tmp_path, database, at), "DE", formula(DE={}))
@@ -124,7 +128,6 @@ async def test_week_unique_ips_are_distinct_measured_ips_not_a_sum_of_days(tmp_p
 
 
 async def test_the_snapshot_carries_released_estimates_with_their_flags(tmp_path, database, db):
-    store.initialize(database)
     run_id = await imported(tmp_path, database)
     with connect(database) as conn:
         started = conn.execute(
@@ -152,7 +155,6 @@ async def test_the_snapshot_carries_released_estimates_with_their_flags(tmp_path
 async def test_distinct_ips_count_only_each_windows_own_tests(tmp_path, database, db):
     # One product's tests in two cohorts; the second test also saw a second IP. Each cohort's
     # window counts its own test's IPs, never the union of both.
-    store.initialize(database)  # distinct() keeps its counts in calculated_distinct
     seed(database)
     runs = [await imported(tmp_path, database, at) for at in (T1, T2)]
     for run_id in runs:

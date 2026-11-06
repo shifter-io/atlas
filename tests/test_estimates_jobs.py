@@ -11,7 +11,6 @@ from daily_cases import daily_root
 from estimates_cases import POLICY, formula, imported, stored
 from test_onboarding import START
 
-from proxy_index.calculated import store
 from proxy_index.calculated.calculator import calculate as calculate_snapshot
 from proxy_index.daily import ingest as daily_ingest
 from proxy_index.estimates import compute, release
@@ -26,7 +25,13 @@ from proxy_index.orchestrator.jobs import (
 from proxy_index.orchestrator.scheduler import Scheduler
 from proxy_index.storage import connect, seed
 
-pytest_plugins = ["test_storage", "test_enrichment_cli", "estimates_cases"]
+pytest_plugins = ["test_storage", "calculated_template", "test_enrichment_cli", "estimates_cases"]
+
+
+@pytest.fixture
+def database(calculated_database):
+    """Every test here works on the current calculated schema, copied from its template."""
+    return calculated_database
 
 
 async def test_ingest_stores_each_imported_countrys_hours_and_releases_them(
@@ -82,7 +87,6 @@ def test_the_hourly_trigger_runs_once_per_hour_after_the_release():
 async def test_the_hourly_calculation_includes_the_hour_just_released(tmp_path, database, db):
     # The real cadence: the release job runs every minute, so hour H is released by about
     # H+1:00:30; the hourly calculation runs at the default offset and floors as_of to 5 minutes.
-    store.initialize(database)
     run_id = await imported(tmp_path, database)
     with connect(database) as conn:
         started = conn.execute(
