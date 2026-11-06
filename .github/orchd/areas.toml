@@ -34,7 +34,7 @@ calculated = [
     "src/proxy_index/calculated/**",
     "tests/test_calculated*.py",
     "tests/test_calc_*.py",
-    "tests/test_census_pulse.py",
+    "tests/census_pulse_cases.py",
     "tests/test_latency_history.py",
     "tests/test_retention.py",
     "tests/test_scoring.py",

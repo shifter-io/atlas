@@ -14,9 +14,9 @@ from pathlib import Path
 import psycopg
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from census_pulse_cases import outage, scenario
 from psycopg import sql
 from psycopg.types.json import Jsonb
-from test_census_pulse import outage, scenario
 from test_migration import catalog
 from test_storage import measurement
 

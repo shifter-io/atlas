@@ -9,9 +9,9 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from census_pulse_cases import scenario
 from helpers import scratch_database_name
 from psycopg import sql
-from test_census_pulse import scenario
 from test_orchestrator import prepare, query
 
 from proxy_index import report_html
