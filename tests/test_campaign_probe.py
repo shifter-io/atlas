@@ -33,6 +33,7 @@ from proxy_index import cli as main_cli
 from proxy_index.campaign import cli as campaign_cli
 from proxy_index.campaign import fanout
 from proxy_index.campaign import probe as probing
+from proxy_index.campaign import recover as recovering
 from proxy_index.campaign.contracts import WORKER_TAG, audit_path, spec_path
 from proxy_index.campaign.deploy import toml_table
 from proxy_index.campaign.fanout import RemoteError
@@ -587,7 +588,7 @@ async def test_an_assignment_error_is_retried_by_the_removal_then_recovered(tmp_
     assert result["recover"] == f"campaign probe --remove {folder}"
     monkeypatch.setattr(probing.scope, "assign_and_verify_project", real)
     async with running(fake) as cloud:  # a later process: a new client, nothing in memory
-        assert await probing.recover(cloud, folder, sleep=no_sleep) == {
+        assert await recovering.recover(cloud, folder, sleep=no_sleep) == {
             "probe_id": result["probe_id"],
             "worker_status": "destroyed",
         }
@@ -846,12 +847,12 @@ async def test_s1_a_create_still_unlisted_is_reported_and_recovered_later(tmp_pa
     assert result["recover"] == f"campaign probe --remove {folder}"
     [left] = set(fake.droplets) - production  # the droplet the lost answer created
     async with running(fake) as cloud:
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroyed"
         )
     assert fake.deleted == [("droplet", left)] and set(fake.droplets) == production
     async with running(fake) as cloud:  # a rerun finds it removed and does nothing
-        assert (await probing.recover(cloud, folder))["worker_status"] == "destroyed"
+        assert (await recovering.recover(cloud, folder))["worker_status"] == "destroyed"
     assert len(fake.deleted) == 1
 
 
@@ -867,7 +868,7 @@ async def test_s1_an_unreadable_listing_or_a_create_that_never_landed(tmp_path):
     inputs, _ = world(tmp_path / "b")
     result = await probed(fake, FakeProbeRemote({}), inputs)
     async with running(fake) as cloud:
-        found = await probing.recover(cloud, inputs.output / result["probe_id"])
+        found = await recovering.recover(cloud, inputs.output / result["probe_id"])
     assert found["worker_status"] == "absent" and fake.deleted == []
 
 
@@ -898,7 +899,7 @@ async def test_s1_a_dead_probe_is_recovered_through_the_guard(tmp_path, monkeypa
     worker = json.loads((folder / "probe-result.json").read_text())["worker"]
     assert worker["droplet_id"] and bool(worker["assigned_at"]) == (stage == "after_assignment")
     async with running(fake) as cloud:  # nothing in memory: the record is all it has
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroyed"
         )
     assert fake.deleted == [("droplet", worker["droplet_id"])] and set(fake.droplets) == (
@@ -929,7 +930,7 @@ async def test_s1_a_marked_worker_whose_removal_failed_takes_the_own_unassigned_
     assert result["worker"]["assign_failed_at"] and result["worker_status"] == "destroy_failed"
     fake.faults.clear()
     async with running(fake) as cloud:
-        assert (await probing.recover(cloud, inputs.output / run.probe_id))[
+        assert (await recovering.recover(cloud, inputs.output / run.probe_id))[
             "worker_status"
         ] == "destroyed"
     audit = [
@@ -969,7 +970,7 @@ async def test_a_crash_between_the_mark_and_the_delete_keeps_the_mark_on_disk(
     assert (worker["status"], worker["assigned_at"]) == ("assign_failed", None)
     assert worker["assign_failed_at"] and worker["droplet_id"] in fake.droplets
     async with running(fake) as cloud:  # nothing in memory: the record is all it has
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroyed"
         )
     assert fake.deleted == [("droplet", worker["droplet_id"])]
@@ -988,13 +989,13 @@ async def test_s1_recovery_never_touches_a_droplet_the_record_does_not_own(tmp_p
     record["worker"].update(droplet_id=victim, status="destroy_failed", assigned_at=None)
     (folder / "probe-result.json").write_text(json.dumps(record))
     async with running(fake) as cloud:
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroy_refused"
         )
     assert victim in fake.droplets and fake.deleted[-1] != ("droplet", victim)
     with pytest.raises(ProbeError, match="no probe record"):
         async with running(fake) as cloud:
-            await probing.recover(cloud, tmp_path)
+            await recovering.recover(cloud, tmp_path)
 
 
 async def test_s1_a_signal_cancels_the_probe_and_the_worker_is_still_removed(tmp_path, monkeypatch):
@@ -1049,13 +1050,13 @@ def test_s1_the_cli_cancels_on_sigterm_and_wires_remove(tmp_path, monkeypatch, c
     async def removed(cloud, folder):
         return {"probe_id": "p", "worker_status": "absent"}
 
-    monkeypatch.setattr(probing, "recover", removed)
+    monkeypatch.setattr(recovering, "recover", removed)
     assert main_cli.main(["campaign", "probe", "--remove", str(tmp_path)]) == 0
 
     async def interrupted(cloud, folder):
         raise asyncio.CancelledError
 
-    monkeypatch.setattr(probing, "recover", interrupted)
+    monkeypatch.setattr(recovering, "recover", interrupted)
     assert main_cli.main(["campaign", "probe", "--remove", str(tmp_path)]) == 3
     assert "Interrupted" in capsys.readouterr().err
     with pytest.raises(SystemExit):
@@ -1070,7 +1071,7 @@ async def test_s1_a_recovered_worker_the_project_never_confirms_is_removed_fail_
     folder = await died(fake, inputs, monkeypatch, "before_assignment")
     fake.faults.append(Fault("POST", f"/v2/projects/{CAMPAIGN_PROJECT}/resources", 400, times=3))
     async with running(fake) as cloud:
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroyed"
         )
     audit = [json.loads(line) for line in audit_path(folder).read_text().splitlines()]
@@ -1182,10 +1183,10 @@ async def test_s1r_a_listing_error_during_remove_changes_nothing_and_a_rerun_rem
             fake.faults.append(Fault("GET", "/v2/droplets", 400, times=1))
         async with running(fake) as cloud:
             with pytest.raises(ProbeError, match="could not read the probe's droplets.*again"):
-                await probing.recover(cloud, folder, sleep=no_sleep)
+                await recovering.recover(cloud, folder, sleep=no_sleep)
         assert (folder / "probe-result.json").read_bytes() == record and fake.deleted == []
         async with running(fake) as cloud:  # the outage is over
-            assert (await probing.recover(cloud, folder, sleep=no_sleep))[
+            assert (await recovering.recover(cloud, folder, sleep=no_sleep))[
                 "worker_status"
             ] == "destroyed", case
         assert len(fake.deleted) == 1
@@ -1236,7 +1237,7 @@ async def test_s1r_a_signal_during_the_create_still_reports_the_worker(tmp_path,
     assert result["worker"]["error_class"] == "create_uncertain"
     assert result["recover"] == f"campaign probe --remove {folder}" and fake.deleted == []
     async with running(fake) as cloud:
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))["worker_status"] == (
             "destroyed"
         )
     assert len(fake.deleted) == 1
@@ -1250,7 +1251,7 @@ async def test_s1r_remove_releases_every_droplet_with_the_name_when_no_id_is_rec
     [(rid, first)] = [(i, d) for i, d in fake.droplets.items() if d["name"].startswith("pic-")]
     fake.add(first["name"], first["tags"], project=None)  # DigitalOcean made one too many
     async with running(fake) as cloud:
-        assert (await probing.recover(cloud, folder, sleep=no_sleep))[
+        assert (await recovering.recover(cloud, folder, sleep=no_sleep))[
             "worker_status"
         ] == "destroyed"
     assert not [d for d in fake.droplets.values() if d["name"].startswith("pic-")]
