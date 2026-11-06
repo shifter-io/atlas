@@ -724,6 +724,7 @@ def test_scope_for_builds_the_campaign_scope():
             "project_id": CAMPAIGN_PROJECT,
             "manager_droplet_id": int(MANAGER_ID),
             "created_at": SPEC_TIME,
+            "environment": "production",
         },
     )
     assert scope.scope_for(spec) == SCOPE

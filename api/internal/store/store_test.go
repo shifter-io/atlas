@@ -28,7 +28,8 @@ func load(t *testing.T, db *testdb.DB) *store.Inputs {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// A v4 build's lists read their rows through the pool while it is built.
+	t.Cleanup(pool.Close)
 	in, err := store.Load(ctx, pool)
 	if err != nil {
 		t.Fatal(err)

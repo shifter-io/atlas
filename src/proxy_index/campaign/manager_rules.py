@@ -32,7 +32,8 @@ def manager_rules(inventory: dict[str, Any], mac_ipv4: str) -> dict[str, Any]:
     """The manager firewall: SSH from the Mac, all outbound, and the node API rule while the
     inventory records the orchestrator's port (deploy and allow-me keep it, and its browser
     hosts)."""
-    rules = ops_api.manager_firewall(mac_ipv4, str(inventory["manager_id"]))
+    environment = ops_api.inventory_environment(inventory)
+    rules = ops_api.manager_firewall(mac_ipv4, str(inventory["manager_id"]), environment)
     if inventory.get("node_api_port"):
         port, hosts = int(inventory["node_api_port"]), inventory.get(BROWSER_HOSTS)
         rules["inbound_rules"].append(node_api_rule(port, hosts))

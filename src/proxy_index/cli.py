@@ -9,7 +9,7 @@ import sys
 from contextlib import nullcontext
 
 from .errors import UserError
-from .models import NETWORK_PROTOCOLS, ProxyConfig, RunConfig
+from .models import NETWORK_PROTOCOLS, ProxyConfig, ProxySource, RunConfig
 from .providers import load_provider
 from .providers import registry as providers
 from .providers.grammar import answer_classes, grammar_ids_by_protocol
@@ -22,30 +22,52 @@ async def _run(args: argparse.Namespace) -> int:
     if args.answer_classes and not args.provider_config:
         print("Run refused: --answer-classes needs --provider-config.", file=sys.stderr)
         return 2
+    config = _run_config(args, _proxy(args))
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    installed = _stop_on_signals(loop, stop)
+    sink = JsonSink(args.output)
+    try:
+        return await _record(args, config, sink, stop)
+    finally:
+        for sig in installed:
+            loop.remove_signal_handler(sig)
+
+
+def _parameters(items: list[str]) -> dict:
+    """The --param overrides by name; a value that is not JSON stays a string."""
+    params = {}
+    for item in items:
+        key, separator, value = item.partition("=")
+        if not separator or not key or key in params:
+            raise ValueError("Each provider parameter must appear once as name=value")
+        try:
+            params[key] = json.loads(value)
+        except json.JSONDecodeError:
+            params[key] = value
+    return params
+
+
+def _proxy(args: argparse.Namespace) -> ProxySource:
+    """The run's proxy: the provider config's, or the URL in the proxy environment variable."""
     if args.provider_config:
-        params = {}
-        for item in args.param:
-            key, separator, value = item.partition("=")
-            if not separator or not key or key in params:
-                raise ValueError("Each provider parameter must appear once as name=value")
-            try:
-                params[key] = json.loads(value)
-            except json.JSONDecodeError:
-                params[key] = value
-        proxy = load_provider(
+        params = _parameters(args.param)
+        return load_provider(
             args.provider_config,
             parameters=params,
             session_policy=args.session_policy,
             credentials_file=args.credentials_file,
         )
-    else:
-        if args.param or args.session_policy or args.credentials_file:
-            raise ValueError("Provider parameters require --provider-config")
-        raw_proxy = os.environ.get(args.proxy_env or "PROXY_URL")
-        if not raw_proxy:
-            raise ValueError("Proxy environment variable is missing")
-        proxy = ProxyConfig.from_url(raw_proxy)
-    config = RunConfig(
+    if args.param or args.session_policy or args.credentials_file:
+        raise ValueError("Provider parameters require --provider-config")
+    raw_proxy = os.environ.get(args.proxy_env or "PROXY_URL")
+    if not raw_proxy:
+        raise ValueError("Proxy environment variable is missing")
+    return ProxyConfig.from_url(raw_proxy)
+
+
+def _run_config(args: argparse.Namespace, proxy: ProxySource) -> RunConfig:
+    return RunConfig(
         target=args.target,
         proxy=proxy,
         requests=args.requests,
@@ -61,8 +83,10 @@ async def _run(args: argparse.Namespace) -> int:
         # The network's answer classes come from the grammar of the configured provider.
         answer_classes=answer_classes(proxy.public()["provider"]) if args.answer_classes else None,
     )
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
+
+
+def _stop_on_signals(loop: asyncio.AbstractEventLoop, stop: asyncio.Event) -> list:
+    """Set stop on SIGINT and SIGTERM where the loop supports it; returns the signals installed."""
     installed = []
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -70,23 +94,23 @@ async def _run(args: argparse.Namespace) -> int:
             installed.append(sig)
         except NotImplementedError:
             pass
-    sink = JsonSink(args.output)
-    try:
-        from .enrichment import LocalEnricher
+    return installed
 
-        with LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
-            summary = await run(config, sink, RunOptions(stop=stop, enricher=enricher))
-        print(f"Results: {sink.directory}", file=sys.stderr)
-        if args.database_file:
-            from .storage import ingest
 
-            imported = await asyncio.to_thread(ingest, sink.directory, args.database_file)
-            print(json.dumps({"database_import": imported}), file=sys.stderr)
-        print(json.dumps(summary.to_dict(), allow_nan=False))
-        return 130 if summary.status == "cancelled" else 0
-    finally:
-        for sig in installed:
-            loop.remove_signal_handler(sig)
+async def _record(args: argparse.Namespace, config: RunConfig, sink: JsonSink, stop) -> int:
+    """Run into sink, print where the results are and their summary; import them when asked."""
+    from .enrichment import LocalEnricher
+
+    with LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
+        summary = await run(config, sink, RunOptions(stop=stop, enricher=enricher))
+    print(f"Results: {sink.directory}", file=sys.stderr)
+    if args.database_file:
+        from .storage import ingest
+
+        imported = await asyncio.to_thread(ingest, sink.directory, args.database_file)
+        print(json.dumps({"database_import": imported}), file=sys.stderr)
+    print(json.dumps(summary.to_dict(), allow_nan=False))
+    return 130 if summary.status == "cancelled" else 0
 
 
 def _operator_groups(commands) -> dict:

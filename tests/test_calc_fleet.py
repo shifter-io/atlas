@@ -15,7 +15,7 @@ from functools import partial
 
 import psycopg
 import pytest
-from test_calculated import lenient_policy
+from calculated_cases import lenient_policy
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal, replay
 

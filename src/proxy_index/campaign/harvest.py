@@ -9,6 +9,7 @@ alerted, never removed. Rounds are never stopped here (D4), only alerted when lo
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..onboarding.files import atomic_json, lock, read_json
@@ -75,14 +76,24 @@ async def harvest_hour(
 ) -> HourRecord:
     """One pass over the live workers of a launched hour; safe to repeat every 30 s."""
     with lock(hour_path(root, record.hour).parent / ".lock"):
-        await _Harvest(spec, record, root, cloud, remote_factory, clock or Clock()).run()
+        clients = _Clients(cloud, remote_factory, clock or Clock())
+        await _Harvest(spec, record, root, clients).run()
     return record
 
 
+@dataclass(frozen=True)
+class _Clients:
+    """The cloud, the per-hour SSH remote factory and the clock of one harvest pass."""
+
+    cloud: DigitalOcean | None
+    remote_factory: RemoteFactory | None
+    clock: Clock
+
+
 class _Harvest(HourWork):
-    def __init__(self, spec, record, root, cloud, remote_factory, clock):
-        super().__init__(spec, record, root, cloud, clock)
-        self.remote = None if spec.synthetic else remote_factory(record.hour)
+    def __init__(self, spec: CampaignSpec, record: HourRecord, root: Path, clients: _Clients):
+        super().__init__(spec, record, root, clients.cloud, clients.clock)
+        self.remote = None if spec.synthetic else clients.remote_factory(record.hour)
         self.hosts = read_hosts(root, record.hour)
         path = harvest_state_path(root, record.hour)
         self.memo = read_json(path) if path.exists() else {}

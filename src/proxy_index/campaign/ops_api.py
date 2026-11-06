@@ -12,7 +12,16 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .contracts import WORKER_TAG, Droplet, DropletRecord, Scope
+from .contracts import (
+    PRODUCTION,
+    Droplet,
+    DropletRecord,
+    Scope,
+    check_environment,
+    environment_of,
+    names,
+    tags,
+)
 from .do_api import DigitalOcean
 from .scope import Kind, Ledger, Role, assign_and_verify_project, guarded_delete
 
@@ -29,18 +38,29 @@ class OpsError(RuntimeError):
     """A cloud operation that did not reach its expected state."""
 
 
-def ops_scope(project_id: str, since: datetime, manager_id: str = "") -> Scope:
+def inventory_environment(inventory: dict[str, Any]) -> str:
+    """A manager inventory's environment; one written before environments is production's."""
+    return check_environment(inventory.get("environment", PRODUCTION))
+
+
+def ops_scope(
+    project_id: str, since: datetime, manager_id: str = "", environment: str = PRODUCTION
+) -> Scope:
     """The scope of a builder or manager: no campaign; `since` is its inventory time."""
-    return Scope("", "", project_id, manager_id, since - CLOCK_SKEW)
+    return Scope("", "", project_id, manager_id, since - CLOCK_SKEW, environment)
 
 
 async def ensure_ssh_key(cloud: DigitalOcean, name: str, public_key: str) -> tuple[str, str, bool]:
     """(key id, its registered name, created now): reuse our registered key with this public
-    part (it keeps the name it was added with, perhaps on an earlier day), or add it."""
+    part (it keeps the name it was added with, perhaps on an earlier day), or add it. A key
+    registered under another environment's name is never reused (CAMP-STAGING-1)."""
     wanted = public_key.split()[:2]
     for key in await cloud.ssh_keys():
-        if str(key.get("public_key", "")).split()[:2] == wanted:
-            return str(key["id"]), str(key["name"]), False
+        if str(key.get("public_key", "")).split()[:2] != wanted:
+            continue
+        if environment_of(str(key["name"])) != environment_of(name):
+            raise OpsError(f"this public key is registered as {key['name']}; use another key")
+        return str(key["id"]), str(key["name"]), False
     added = await cloud.create_ssh_key(name, " ".join(wanted))
     return str(added["id"]), name, True
 
@@ -160,21 +180,23 @@ def outbound_all() -> list[dict[str, Any]]:
     ]
 
 
-def worker_firewall(manager_ipv4: str) -> dict[str, Any]:
-    """Workers (by tag): SSH only from the manager; all outbound."""
+def worker_firewall(manager_ipv4: str, environment: str = PRODUCTION) -> dict[str, Any]:
+    """The environment's workers (by its worker tag): SSH only from the manager; all outbound."""
     return {
-        "name": "pi-camp-worker-fw",
+        "name": names(environment).firewall("worker"),
         "inbound_rules": [ssh_from(manager_ipv4)],
         "outbound_rules": outbound_all(),
-        "tags": [WORKER_TAG],
+        "tags": [tags(environment)["worker"]],
         "droplet_ids": [],
     }
 
 
-def manager_firewall(mac_ipv4: str, manager_id: str) -> dict[str, Any]:
+def manager_firewall(
+    mac_ipv4: str, manager_id: str, environment: str = PRODUCTION
+) -> dict[str, Any]:
     """The manager (by droplet id): SSH only from the Mac's public IPv4; all outbound."""
     return {
-        "name": "pi-camp-manager-fw",
+        "name": names(environment).firewall("manager"),
         "inbound_rules": [ssh_from(mac_ipv4)],
         "outbound_rules": outbound_all(),
         "tags": [],

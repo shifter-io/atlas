@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import math
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from itertools import combinations
 from pathlib import Path
@@ -28,7 +28,6 @@ from .aggregate import (
     metrics,
     outage_list,
     outage_uptime,
-    peer_scores,
     product_inputs,
     series,
     slot_coverage,
@@ -40,12 +39,10 @@ from .aggregate import (
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
 from .latency import KEYS
-from .lists import CRITERIA
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .parts import sparse
 from .policy import (
-    digest,
     effective,
     hosting_usage_types,
     latency_target,
@@ -57,85 +54,50 @@ from .releases import snapshot_fields
 from .scheduled import EVENTS_IN_SNAPSHOT as EVENTS_IN_SNAPSHOT
 from .scheduled import scheduled_inputs as scheduled_inputs
 from .store import discard, expire, prune
+from .window_scoring import cohort_for as cohort_for
+from .window_scoring import fresh as fresh
+from .window_scoring import pricing as pricing
+from .window_scoring import rank as rank
+from .window_scoring import retain as retain
+from .window_scoring import score_window as score_window
+from .window_scoring import slot_length as slot_length
 
 SCHEMA_VERSION = 4
 # The calculation's modules (and detect, traffic, browser): a change to any changes the id, so the
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists incremental hourly fleetsql rollups "
-SOURCES += "sqlwindow poolfig network network_scores scheduled scores"
+SOURCES += "sqlwindow poolfig network network_scores scheduled scores window_scoring"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
 ).hexdigest()
-# Census and pulse runs (linked to a test batch) of a product share one cohort, whatever the
-# country, target, node or concurrency: every provider runs them at the same moment, so they are
-# comparable as a whole, and the breakdowns, uptime and census summary span all countries.
-SCHEDULED = "census_pulse"
 # A run's role label, when no calculation_roles row assigns one, follows its batch kind. Roles
 # are display labels: every request counts for every metric whatever its role.
 BATCH_ROLES = {"census": "pool_sampling", "pulse": "monitor", "load": "benchmark"} | browser.ROLES
-# The resolution of stored buckets: a time slot is a whole number of them (and of the pulse
-# interval), so no stored request is ever placed in the wrong slot.
-BUCKET_MINUTES = 5
 
 
-def cohort_for(scope, kind, scheduled=False):
-    if scheduled:
-        criteria = dict.fromkeys(CRITERIA) | {"kind": kind, "schedule": SCHEDULED}
-        return digest(criteria)[:20], criteria
-    c = scope["config"]
-    adapter = c.get("provider_config") or {}
-    # Exclude provider implementation credentials/gateways; include all semantic parameters.
-    # Custom URLs/version changes form distinct cohorts, never silently join the default target.
-    target = scope["target"]
-    known = registry.get(target["id"])
-    variant = (
-        None
-        if (
-            target["url"] == known.build_request().url
-            and str(target["version"]) == str(known.version)
-        )
-        else target
-    )
-    criteria = {
-        "kind": kind,
-        "country": c.get("requested_country"),
-        "runner_location": c.get("runner_location"),
-        "concurrency": c["concurrency"],
-        "timeout_seconds": c["timeout_seconds"],
-        "rate": c.get("requests_per_second"),
-        "proxy_protocol": c.get("proxy_protocol"),
-        "session_policy": adapter.get("session_policy", "unspecified"),
-        "parameters": adapter.get("parameters", {}),
-        "flags": adapter.get("extra_flags", {}),
-        "ttl_seconds": adapter.get("effective_ttl_seconds"),
-        "target_variant": variant,
-    }
-    return digest(criteria)[:20], criteria
+@dataclass(frozen=True)
+class _Build:
+    """What build() hands its fleet and payload steps: its inputs, its settings and its groups
+    (by_product: build()'s scheduled group, pulse batch runs, outages, tested countries and
+    monitored spans of each product, as network.summaries() reads them)."""
 
-
-def retain(score, previous, as_of, valid_hours, observed, method_id=None):
-    score["previous_rank"] = previous.get("rank") if previous else None
-    score["methodology_id"] = method_id
-    expires = (observed or as_of) + timedelta(hours=valid_hours)
-    if score["score"] is not None and expires <= as_of:
-        score.update(score=None, grade=None, state="expired", valid_until=expires)
-        score.setdefault("reasons", []).append("Required measurement freshness deadline expired")
-    if score["score"] is not None:
-        # Validity follows the last measurement, not the time a calculation was rerun.
-        score["scored_at"] = as_of
-        score["valid_until"] = expires
-    elif previous and previous["score"] is not None:
-        score.update({k: previous[k] for k in ("score", "grade", "scored_at", "valid_until")})
-        score["previous_components"] = previous.get("previous_components", previous["components"])
-        score["state"] = (
-            "retained" if datetime.fromisoformat(previous["valid_until"]) > as_of else "expired"
-        )
-    if previous and score["state"] in ("retained", "expired"):
-        score["methodology_id"] = previous.get("methodology_id", method_id)
-        if score["state"] == "retained" and score["methodology_id"] != method_id:
-            score["state"] = "historical"
-    return score
+    runs: list
+    config: dict
+    method_id: str
+    as_of: datetime
+    build_id: int
+    release: object
+    events: object
+    traffic: dict | None
+    minimum: int
+    slot_minutes: int
+    timed_target: str
+    groups: dict
+    fleet_groups: dict
+    bucket_groups: dict
+    by_product: tuple
+    flagged_batches: dict
 
 
 def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
@@ -438,7 +400,7 @@ def build(
                     "readiness": "measured" if tm["completed"] else "unavailable",
                     **extra,  # browser targets: K-BP6 outcomes, page loads, group and sources
                 }
-            member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], up, values)
+            member["inputs"] = product_inputs(ps, p["pricing"], cfg, p["kind"], (up, values))
             member["observed"] = m["last_observed"]
             previous_rows = [
                 r for r in raw if since - timedelta(hours=hours) <= r["bucket_start"] < since
@@ -529,6 +491,36 @@ def build(
             p["windows"][label] = w
             sets[(key, label)] = set(ips)
             fleet_groups[(p["cohort"], label)].append((p, rows, seen, member))
+    step = _Build(
+        runs=runs,
+        config=config,
+        method_id=method_id,
+        as_of=as_of,
+        build_id=build_id,
+        release=release,
+        events=events,
+        traffic=traffic,
+        minimum=minimum,
+        slot_minutes=slot_minutes,
+        timed_target=timed_target,
+        groups=groups,
+        fleet_groups=fleet_groups,
+        bucket_groups=bucket_groups,
+        by_product=(scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
+        flagged_batches=flagged_batches,
+    )
+    fleets, overlaps = _fleet_rows(step, sets)
+    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
+    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
+    return _payload(step, fleets, overlaps)
+
+
+def _fleet_rows(step, sets):
+    """Score and rank every window of each peer group of build(), set its overlap with its
+    peers, and return the fleet entries (with the fleet totals) and the overlap pairs. sets are
+    the IPs of each (group key, window label)."""
+    config, as_of, fleet_groups = step.config, step.as_of, step.fleet_groups
+    minimum, slot_minutes, method_id = step.minimum, step.slot_minutes, step.method_id
     overlaps = []
     fleets = []
     for (cohort, label), members in fleet_groups.items():
@@ -579,16 +571,21 @@ def build(
                     if target in p["windows"][label]["targets"]
                 ]
             )
-    fleets += fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target)
-    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
-    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
+    fleets += fleet_totals(fleet_groups, as_of, minimum, slot_minutes, step.timed_target)
+    return fleets, overlaps
+
+
+def _payload(step, fleets, overlaps):
+    """The payload build() returns: its products, fleet entries and overlap pairs, the
+    networks, the release, targets, events, traffic and the unscheduled runs."""
+    as_of, config, groups = step.as_of, step.config, step.groups
     return {
         "schema_version": SCHEMA_VERSION,
         "implementation_id": IMPLEMENTATION_ID,
-        "snapshot_id": str(build_id),
+        "snapshot_id": str(step.build_id),
         "as_of": as_of,
         "generated_at": datetime.now(UTC),
-        "methodology": {"id": method_id, "settings": config},
+        "methodology": {"id": step.method_id, "settings": config},
         "readiness": (
             "ready"
             if groups and all(p["windows"]["30d"]["readiness"] == "ready" for p in groups.values())
@@ -607,14 +604,14 @@ def build(
         "overlap": overlaps,
         # Payload v4: one summary per network over all its groups (network.py, contract K9).
         "networks": network.summaries(
-            fleet_groups,
-            bucket_groups,
-            (scheduled_groups, pulse_groups, outage_groups, tested_groups, monitored_groups),
-            flagged_batches,
+            step.fleet_groups,
+            step.bucket_groups,
+            step.by_product,
+            step.flagged_batches,
             as_of,
             config,
         ),
-        **snapshot_fields(release),
+        **snapshot_fields(step.release),
         "targets": [
             {
                 "id": t.id,
@@ -626,8 +623,8 @@ def build(
             }
             for t in registry.all()
         ],
-        "events": list(events),
-        "traffic": traffic
+        "events": list(step.events),
+        "traffic": step.traffic
         or {
             "period": {"start": as_of - timedelta(hours=720), "end": as_of},
             "by_test": {
@@ -651,115 +648,7 @@ def build(
                     for k in ("completed", "successes", "unique_ips", "latency_ms", "total_errors")
                 },
             }
-            for r in runs
+            for r in step.runs
             if r.get("batch_id") is None
         ],
     }
-
-
-def slot_length(pulse_minutes):
-    """Minutes in a time slot: the pulse interval, made a whole multiple of the 5-minute stored
-    bucket (the least common multiple: 30 stays 30; staging's 2 becomes 10), so a slot always
-    holds whole pulse intervals and whole buckets and a census request is never placed in a
-    slot it did not run in. Without a pulse interval, the 5-minute bucket."""
-    if not pulse_minutes:
-        return BUCKET_MINUTES
-    return math.lcm(max(1, round(pulse_minutes)), BUCKET_MINUTES)
-
-
-def pricing(evidence_rows, product_id, cohort, as_of):
-    """The product's list prices in effect at as_of (USD per GB of the pool that is tested).
-
-    Prices are effective-dated metric_evidence (price_per_gb_lowest, price_per_gb_entry): per
-    metric the newest record for the product (its cohort or "*") that started by as_of and is
-    still valid. lowest_per_gb scores value; entry_per_gb is the smallest plan's rate.
-    Returns (the published pricing, the evidence rows it used).
-    """
-    chosen = {}
-    for e in sorted(
-        evidence_rows, key=lambda e: (e["period_start"], e["valid_until"], e.get("evidence_id", 0))
-    ):
-        if (
-            e["metric"] in PRICES
-            and e["product_id"] == product_id
-            and e["cohort"] in (cohort, "*")
-            and e["period_start"] <= as_of < e["valid_until"]
-        ):
-            chosen[e["metric"]] = e
-    return {
-        "currency": "USD",
-        **{
-            name: chosen[metric]["value"] if metric in chosen else None
-            for metric, name in PRICES.items()
-        },
-        "effective_from": max((e["period_start"] for e in chosen.values()), default=None),
-        "valid_until": min((e["valid_until"] for e in chosen.values()), default=None),
-        "sources": sorted({e["source"] for e in chosen.values()}),
-    }, [chosen[m] for m in PRICES if m in chosen]
-
-
-def fresh(observed, as_of, valid_hours):
-    """Whether measurements last observed then are recent enough for a new score (retain())."""
-    return (observed or as_of) + timedelta(hours=valid_hours) > as_of
-
-
-def score_window(members, label, config, as_of, method_id):
-    """Score one window of a peer group by ratio to the leader, then retain and cap validity.
-
-    members are (product, rows, observations, member) of one cohort; member holds the raw inputs
-    peer_scores() needs and what retain() needs: the previous window ("old"), the evidence used
-    and the observation times.
-    """
-    results = peer_scores([m for *_, m in members], config)
-    for (p, *_, member), result in zip(members, results, strict=True):
-        w = p["windows"][label]
-        old = member["old"]
-        for target, score in result["targets"].items():
-            raw = member["targets"][target]
-            retain(
-                score,
-                old.get("targets", {}).get(target, {}).get("score"),
-                as_of,
-                raw["valid_hours"],
-                raw["observed"],
-                method_id,
-            )
-            w["targets"][target]["score"] = score
-        cfg = member["config"]
-        for profile, score in result["scores"].items():
-            retain(
-                score,
-                old.get("scores", {}).get(profile),
-                as_of,
-                cfg["score_valid_hours"],
-                member["observed"],
-                method_id,
-            )
-            if score["state"] == "ready" and member["evidence"]:
-                score["valid_until"] = min(
-                    score["valid_until"], *(e["valid_until"] for e in member["evidence"])
-                )
-            if score["state"] == "ready":
-                target_expiries = [
-                    w["targets"][t]["score"]["valid_until"] for t in cfg["required_targets"]
-                ]
-                score["valid_until"] = min(score["valid_until"], *target_expiries)
-        w["scores"] = result["scores"]
-        w["readiness"] = (
-            "ready"
-            if w["scores"]["balanced"]["state"] == "ready"
-            else "partial"
-            if w["metrics"]["completed"]
-            else "unavailable"
-        )
-
-
-def rank(scores):
-    eligible = sorted(
-        (s for s in scores if s["state"] in ("ready", "retained")), key=lambda s: -s["score"]
-    )
-    # A single eligible product isn't a meaningful competitive ranking.
-    if len(eligible) < 2:
-        return
-    for s in eligible:
-        s["rank"] = 1 + sum(other["score"] > s["score"] for other in eligible)

@@ -78,6 +78,26 @@ def _traffic_alerts(region: str, progress: dict, active) -> list:
     return alerts
 
 
+def _region_row(region: str, window: dict, server: dict, workers: list, complete: int) -> dict:
+    """One region's line of the campaign audit."""
+    state = server["state"]
+    active = state.get("active")
+    progress = state.get("progress") or {}
+    jobs = state["jobs"]
+    return {
+        "region": region,
+        **window,
+        "status": state["status"],
+        "completed_jobs": complete,
+        "expected_jobs": len(jobs),
+        "requests": server.get("requests", 0),
+        "observations": sum(j.get("observations", 0) for j in jobs)
+        + (progress.get("observations_saved", 0) if active else 0),
+        "active": active,
+        "worker_count": len(workers),
+    }
+
+
 def audit(manifest: dict, snapshot: dict, now: float) -> dict:
     alerts = []
     regions = []
@@ -108,20 +128,7 @@ def audit(manifest: dict, snapshot: dict, now: float) -> dict:
         alerts += _job_alerts(region, state, complete, now, end)
         progress = state.get("progress") or {}
         alerts += _traffic_alerts(region, progress, active)
-        regions.append(
-            {
-                "region": region,
-                **window,
-                "status": state["status"],
-                "completed_jobs": complete,
-                "expected_jobs": len(jobs),
-                "requests": server.get("requests", 0),
-                "observations": sum(j.get("observations", 0) for j in jobs)
-                + (progress.get("observations_saved", 0) if active else 0),
-                "active": active,
-                "worker_count": len(workers),
-            }
-        )
+        regions.append(_region_row(region, window, server, workers, complete))
     if manifest.get("execution_mode") == "sequential" and len(measuring) > 1:
         alerts.append({"issue": "overlapping_regions", "regions": measuring})
     return {

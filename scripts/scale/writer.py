@@ -225,7 +225,8 @@ class Writer:
         extra |= {"artifacts": {"ips": artifact}, "test_kind": "daily"}
         summary = self.summary(test.successes, test.errors, histogram, duration, extra, overrides)
         finished = test.started_at + timedelta(seconds=duration)
-        self.run(test.run_key, 2 * lane.position + 1, test.started_at, finished, summary, None)
+        span = (test.started_at, finished)
+        self.run(test.run_key, 2 * lane.position + 1, span, summary, None)
         self.conn.cursor().executemany(BUCKET_INSERT, buckets)
         artifact_sha = digest(["enriched", release, test.run_key])
         self.conn.execute(
@@ -315,7 +316,7 @@ class Writer:
         overrides = {"requests": requests}
         summary = self.summary(successes, errors, histogram, duration, extra, overrides)
         finished = started + timedelta(seconds=duration)
-        run = self.run_row(run_key, 2 * lane.position + 2, started, finished, summary, batch)
+        run = self.run_row(run_key, 2 * lane.position + 2, (started, finished), summary, batch)
         counters = (requests, successes, successes, 0, 0, errors, 0, requests * UP)
         member = (batch, lane.network + 1, "done", started, finished, finished, *counters)
         member += (successes * DOWN, "requests", run_key)
@@ -353,7 +354,9 @@ class Writer:
         )
         return body | zero | extra
 
-    def run_row(self, run_key, scope_id, started, finished, summary, batch) -> tuple:
+    def run_row(self, run_key, scope_id, span, summary, batch) -> tuple:
+        """A test_runs row; span: (started, finished)."""
+        started, finished = span
         run_id = uuid.uuid5(uuid.NAMESPACE_URL, f"scale-gen:{self.settings.seed}:{run_key}")
         stored = (digest(summary), Jsonb(summary), finished + timedelta(minutes=1), batch)
         return (run_key, run_id, scope_id, started, finished, "completed", *stored)

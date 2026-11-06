@@ -17,6 +17,7 @@ import hashlib
 import json
 import time
 from collections import OrderedDict
+from functools import partial
 
 from aiohttp import web
 
@@ -70,9 +71,10 @@ class Unavailable(LookupError):
     """The build has no snapshot any more (pruned or expired since its id was looked up)."""
 
 
-def needed(database, snapshot, kind, product, cohort, keys):
-    """The parts an answer needs (store.read_parts()), each group's series with every bucket;
-    None when the build has no snapshot."""
+def needed(database, snapshot, need):
+    """The parts an answer needs (store.read_parts() with the needs() arguments), each group's
+    series with every bucket; None when the build has no snapshot."""
+    kind, product, cohort, keys = need
     rows = store.read_parts(database, snapshot, kind, product=product, cohort=cohort, keys=keys)
     if rows is None or kind == "runs" or keys:
         return rows
@@ -102,47 +104,56 @@ def project(payload, resource, query):
     envelope = {k: payload[k] for k in ("snapshot_id", "as_of", "methodology", "readiness")}
     envelope["methodology"] = {"id": payload["methodology"]["id"]}
     envelope["measurement_period"] = payload["periods"][window]
-    if resource == "products":
-        data = [
-            {k: v for k, v in p.items() if k != "windows"} | {"result": p["windows"][window]}
-            for p in products
-        ]
-    elif resource in ("scores", "series", "targets", "breakdowns"):
-        key = "pool" if resource == "breakdowns" else resource
-        data = [
-            {
-                "product_id": p["product_id"],
-                "cohort": p["cohort"],
-                "readiness": p["windows"][window]["readiness"],
-                resource: p["windows"][window][key],
-            }
-            # v2: success, latency and outcomes per country, region, city, ASN, country x ASN,
-            # each capped to its top rows with the full row count in dimension_entries.
-            | (
-                {
-                    "dimensions": p["windows"][window]["breakdowns"],
-                    "dimension_entries": p["windows"][window].get("breakdown_entries"),
-                }
-                if resource == "breakdowns" and "breakdowns" in p["windows"][window]
-                else {}
-            )
-            for p in products
-        ]
-    elif resource in ("fleet", "overlap"):
-        data = [
-            r
-            for r in payload[resource]
-            if r["window"] == window and (not query.get("cohort") or r["cohort"] == query["cohort"])
-        ]
-        if query.get("product") and resource == "overlap":
-            data = [
-                r for r in data if query["product"] in (str(r["product_a"]), str(r["product_b"]))
-            ]
-    else:
-        data = payload[resource]
+    data = _data(payload, resource, query, window, products)
     if isinstance(data, list):
         return paged(envelope, data, page)
     return envelope | {"data": data}
+
+
+def _data(payload, resource, query, window, products):
+    """A resource's data in a window: its rows of the chosen products, or the payload's own."""
+    if resource == "products":
+        return [
+            {k: v for k, v in p.items() if k != "windows"} | {"result": p["windows"][window]}
+            for p in products
+        ]
+    if resource in ("scores", "series", "targets", "breakdowns"):
+        return [_group(p, resource, window) for p in products]
+    if resource in ("fleet", "overlap"):
+        return _rows(payload, resource, query, window)
+    return payload[resource]
+
+
+def _group(product, resource, window):
+    """One product's row of a group resource in a window."""
+    result = product["windows"][window]
+    key = "pool" if resource == "breakdowns" else resource
+    row = {
+        "product_id": product["product_id"],
+        "cohort": product["cohort"],
+        "readiness": result["readiness"],
+        resource: result[key],
+    }
+    # v2: success, latency and outcomes per country, region, city, ASN, country x ASN,
+    # each capped to its top rows with the full row count in dimension_entries.
+    if resource == "breakdowns" and "breakdowns" in result:
+        row |= {
+            "dimensions": result["breakdowns"],
+            "dimension_entries": result.get("breakdown_entries"),
+        }
+    return row
+
+
+def _rows(payload, resource, query, window):
+    """The fleet or overlap rows of a window, of the chosen cohort (and product, for overlap)."""
+    data = [
+        r
+        for r in payload[resource]
+        if r["window"] == window and (not query.get("cohort") or r["cohort"] == query["cohort"])
+    ]
+    if query.get("product") and resource == "overlap":
+        data = [r for r in data if query["product"] in (str(r["product_a"]), str(r["product_b"]))]
+    return data
 
 
 class Cache:
@@ -173,10 +184,12 @@ class Cache:
         if key in self.answers:
             self.answers.move_to_end(key)
             return self.answers[key]
-        payload = await self.load(self.payloads, build_id, store.read_head, database, build_id)
+        read = partial(store.read_head, database)
+        payload = await self.load(self.payloads, build_id, read, build_id)
         need = needs(resource, query)
         if need:
-            rows = await self.load(self.parts, (build_id, need), needed, database, build_id, *need)
+            read = partial(needed, database, need=need)
+            rows = await self.load(self.parts, (build_id, need), read, build_id)
             payload = payload | {need[0]: rows}
         result = project(payload, resource, query)
         body = json.dumps(result, separators=(",", ":"), allow_nan=False).encode()
@@ -185,14 +198,14 @@ class Cache:
             self.answers.popitem(last=False)
         return body
 
-    async def load(self, cache, key, read, database, build_id, *args):
-        """cache[key], read into it (read(database, str(build_id), *args)) unless present.
+    async def load(self, cache, key, read, build_id):
+        """cache[key], read into it (read(str(build_id))) unless present.
 
         A read that finds no snapshot (None) raises Unavailable and caches nothing, so a build
         expired after its head was cached never answers with no groups.
         """
         if key not in cache:
-            found = await asyncio.to_thread(read, database, str(build_id), *args)
+            found = await asyncio.to_thread(read, str(build_id))
             if found is None:
                 raise Unavailable(build_id)
             cache[key] = found

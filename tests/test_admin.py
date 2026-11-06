@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from test_orchestrator import bearer, prepare, product_id, query
+from orchestrator_cases import bearer, prepare, product_id, query
 
 from proxy_index.orchestrator import app as app_module
 from proxy_index.orchestrator import batches, nodework

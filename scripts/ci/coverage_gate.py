@@ -33,42 +33,49 @@ def spans(source):
     return found
 
 
+def target_ranges(repo, path, names):
+    """Name -> (first, last) line range of each target, and the count of unknown functions."""
+    if not names:
+        return {"<file>": (1, 10**9)}, 0
+    known = spans((repo / path).read_text())
+    ranges, failures = {}, 0
+    for name in names.split(","):
+        if name not in known:
+            print(f"FAIL {path}:{name}: function not found")
+            failures += 1
+            continue
+        ranges[name] = known[name]
+    return ranges, failures
+
+
+def check_target(files, repo, target):
+    """Print the verdict for each range of one target; return its count of failures."""
+    path, _, names = target.partition(":")
+    record = next((v for k, v in files.items() if k.endswith(path)), None)
+    if record is None:
+        print(f"FAIL {path}: not in coverage data")
+        return 1
+    missing_lines = set(record["missing_lines"])
+    missing_branches = {start for start, _ in record.get("missing_branches", [])}
+    ranges, failures = target_ranges(repo, path, names)
+    for name, (first, last) in ranges.items():
+        lines = sorted(n for n in missing_lines if first <= n <= last)
+        branches = sorted(n for n in missing_branches if first <= n <= last)
+        if lines or branches:
+            print(f"FAIL {path}:{name}: missing lines {lines} missing branches from {branches}")
+            failures += 1
+        else:
+            print(f"OK   {path}:{name}: 100% lines and branches")
+    return failures
+
+
 def main():
     data = json.loads(Path(sys.argv[1]).read_text())
     if not data.get("meta", {}).get("branch_coverage"):
         print("FAIL coverage data has no branch coverage (run pytest with --cov-branch)")
         return 1
     repo = Path(sys.argv[2])
-    files = data["files"]
-    failures = 0
-    for target in sys.argv[3:]:
-        path, _, names = target.partition(":")
-        record = next((v for k, v in files.items() if k.endswith(path)), None)
-        if record is None:
-            print(f"FAIL {path}: not in coverage data")
-            failures += 1
-            continue
-        missing_lines = set(record["missing_lines"])
-        missing_branches = {start for start, _ in record.get("missing_branches", [])}
-        if not names:
-            ranges = {"<file>": (1, 10**9)}
-        else:
-            known = spans((repo / path).read_text())
-            ranges = {}
-            for name in names.split(","):
-                if name not in known:
-                    print(f"FAIL {path}:{name}: function not found")
-                    failures += 1
-                    continue
-                ranges[name] = known[name]
-        for name, (first, last) in ranges.items():
-            lines = sorted(n for n in missing_lines if first <= n <= last)
-            branches = sorted(n for n in missing_branches if first <= n <= last)
-            if lines or branches:
-                print(f"FAIL {path}:{name}: missing lines {lines} missing branches from {branches}")
-                failures += 1
-            else:
-                print(f"OK   {path}:{name}: 100% lines and branches")
+    failures = sum(check_target(data["files"], repo, target) for target in sys.argv[3:])
     print(f"RESULT {'FAIL' if failures else 'PASS'} ({failures} failing targets)")
     return 1 if failures else 0
 

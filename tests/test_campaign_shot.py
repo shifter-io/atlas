@@ -30,7 +30,8 @@ from campaign_probe_cases import (
 from proxy_index import cli as main_cli
 from proxy_index.campaign import probe as probing
 from proxy_index.campaign import shot as shooting
-from proxy_index.campaign.contracts import WORKER_TAG, audit_path
+from proxy_index.campaign import shot_steps
+from proxy_index.campaign.contracts import WORKER_TAG, audit_path, spec_path
 from proxy_index.campaign.fanout import RemoteError
 from proxy_index.campaign.probe import ProbeError
 from proxy_index.campaign.shot import ShotInputs
@@ -269,6 +270,16 @@ async def test_bad_inputs_are_refused_before_any_call(tmp_path):
         )
 
 
+async def test_a_staging_campaign_is_refused(tmp_path):
+    """CAMP-STAGING-1: a shot creates production's workers only."""
+    fake, clock = FakeDigitalOcean(), FakeClock(NOW.timestamp())
+    inputs, spec = shot_world(tmp_path)
+    spec_path(inputs.root).write_text(replace(spec, environment="staging").to_json())
+    with pytest.raises(ProbeError, match="production's workers only"):
+        await fired(fake, ShotRemote(clock), inputs, clock)
+    assert fake.requests == [] and not inputs.output.exists()
+
+
 async def test_a_size_not_offered_stops_before_any_create(tmp_path):
     fake, clock = Recording(), FakeClock(NOW.timestamp())
     fake.keep_sizes = True  # the fake offers c-2 in lon1 only
@@ -448,7 +459,7 @@ async def test_m3_a_list_country_network_needs_its_country(tmp_path, monkeypatch
     data = tomllib.loads(GRAMMARS.joinpath("proxy-seller.toml").read_text())
     data["flags"]["country"] = {"kind": "country", "preset": True}
     preset = Grammar.parse(data)
-    monkeypatch.setattr(shooting, "load_grammar", lambda network: preset)
+    monkeypatch.setattr(shot_steps, "load_grammar", lambda network: preset)
     probe_inputs, _ = world(tmp_path, ("proxy-seller",))
     inputs = ShotInputs(probe_inputs.root, tmp_path / "shots", regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
@@ -546,7 +557,7 @@ async def test_m4_remove_settles_a_create_that_never_landed(tmp_path):
 
 
 async def test_s1_worker_names_must_be_unique(tmp_path, monkeypatch):
-    monkeypatch.setattr(shooting, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
+    monkeypatch.setattr(shot_steps, "droplet_name", lambda *args: "pic-00000000-h00-lon1-x")
     inputs, _ = shot_world(tmp_path, regions=("lon1",))
     clock = FakeClock(NOW.timestamp())
     with pytest.raises(ProbeError, match="worker names repeated"):

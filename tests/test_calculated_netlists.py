@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 
 import pytest
-from test_calculated import lenient_policy, payload_mismatches
+from calculated_cases import lenient_policy, payload_mismatches
 from test_calculated_hourly_reads import HOUR, daily_history, floor_hour
 from test_calculated_incremental import history
 from test_calculated_listref import served, without
