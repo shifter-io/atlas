@@ -39,6 +39,8 @@ type fakeSource struct {
 	notableCut bool
 	dbQueries  atomic.Int64
 	slowLoad   time.Duration
+	// loaded, when set, receives each revision Load returns.
+	loaded chan int64
 }
 
 func (f *fakeSource) Fingerprint(context.Context) (store.Fingerprint, error) {
@@ -65,6 +67,9 @@ func (f *fakeSource) Load(context.Context) (*store.Inputs, error) {
 	}
 	in := fixture(f.rev, f.events, f.complete)
 	in.Notable, in.NotableComplete = f.notable, !f.notableCut
+	if f.loaded != nil {
+		f.loaded <- f.rev
+	}
 	return in, nil
 }
 
@@ -234,17 +239,25 @@ func TestRefreshRebuildsOnlyOnChange(t *testing.T) {
 	if second.Header().Get("ETag") == first || !strings.Contains(second.Body.String(), "Alpha r2") {
 		t.Fatal("rebuild did not change the served body")
 	}
-	// The background loop notices a change by itself.
+	// The background loop notices a change by itself. It loads revision 3
+	// inside its Refresh, which holds refreshMu until the new version serves,
+	// so the test waits for that load and then for the lock, not for a time
+	// (a build under -race beside the other tests takes seconds).
+	loaded := make(chan int64, 1)
+	src.mu.Lock()
+	src.loaded = loaded
+	src.mu.Unlock()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go s.Run(ctx)
 	src.set(3, nil)
-	deadline := time.Now().Add(3 * time.Second)
-	for !strings.Contains(get(h, "/v1/dataset").Body.String(), "Alpha r3") {
-		if time.Now().After(deadline) {
-			t.Fatal("refresh loop did not pick up the change")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if rev := <-loaded; rev != 3 {
+		t.Fatalf("refresh loop loaded revision %d, want 3", rev)
+	}
+	s.refreshMu.Lock()
+	s.refreshMu.Unlock() //nolint:staticcheck // waits for the loop's Refresh to finish
+	if !strings.Contains(get(h, "/v1/dataset").Body.String(), "Alpha r3") {
+		t.Fatal("refresh loop did not pick up the change")
 	}
 }
 
