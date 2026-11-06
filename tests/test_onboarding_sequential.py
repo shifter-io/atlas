@@ -1,5 +1,6 @@
 """Both schedules share the same census, with disjoint regional deadlines."""
 
+import os
 from copy import deepcopy
 from datetime import timedelta
 
@@ -35,9 +36,8 @@ def test_parallel_remains_legacy_and_same_window(tmp_path):
     assert windows[0]["ends_at"] == m["ends_at"]
 
 
-@pytest.mark.slow
-async def test_all_eight_days_hourly_no_overlap_retry_and_complete_export(tmp_path):
-    path = make(
+def make_eight_days(tmp_path):
+    return make(
         tmp_path,
         execution_mode="sequential",
         region_order=ORDER,
@@ -45,35 +45,63 @@ async def test_all_eight_days_hourly_no_overlap_retry_and_complete_export(tmp_pa
         target_url="http://example.test/",
         run_settings={"concurrency": 1500, "processes": 4},
     )
-    m = campaign.load(path)
+
+
+@pytest.fixture
+def no_fsync(monkeypatch):
+    # Durability is not under test here, and the eight days' ~37,000 fsync calls were
+    # most of their time (#282). Every write, rename and read still happens.
+    monkeypatch.setattr(os, "fsync", lambda fd: None)
+
+
+async def run_day(path, m, day, region):
+    """Run one region's day; assert it ran hourly, only in its own window, and closed."""
+    # Every server can be armed together; each must wait until its own day.
+    clock = Clock((START - timedelta(hours=1)).timestamp())
+    window = campaign.regional_window(m, region)
+    calls = []
+
+    async def run(config, sink, **kw):
+        now = clock.now()
+        assert config.retry_http_469 and config.concurrency == 1500 and config.processes == 4
+        assert config.target_url == "http://example.test/"
+        assert campaign.moment(window["starts_at"]).timestamp() <= now < kw["deadline"]
+        assert kw["deadline"] == campaign.moment(window["ends_at"]).timestamp()
+        calls.append((config.proxy.country, now))
+        return fake_measurement(completed=0)
+
+    result = await execute(path, region, Proxy, clock=clock, run_country=run)
+    assert result["status"] == "closed" and result["unfinished_countries"] == 0
+    size = len(m["regions"][region])
+    assert len(calls) == 24 * size
+    for hour in range(24):
+        group = calls[hour * size : (hour + 1) * size]
+        assert [c for c, _ in group] == [c.lower() for c in m["regions"][region]]
+        assert all(t == (START + timedelta(days=day, hours=hour)).timestamp() for _, t in group)
+    assert clock.now() == (START + timedelta(days=day + 1)).timestamp()
+    return calls
+
+
+def test_eight_days_manifest_and_total_calls(tmp_path):
+    m = campaign.load(make_eight_days(tmp_path))
     assert m["schema_version"] == 2 and m["census_rule_version"] == 3
     assert campaign.moment(m["ends_at"]) - START == timedelta(days=8)
+    # run_day asserts 24 calls per country for each region; together they make 5,976.
+    assert sum(24 * len(m["regions"][region]) for region in ORDER) == 5976
+
+
+@pytest.mark.parametrize("day, region", enumerate(ORDER), ids=ORDER)
+async def test_each_day_hourly_in_its_own_window_and_closed(tmp_path, no_fsync, day, region):
+    path = make_eight_days(tmp_path)
+    await run_day(path, campaign.load(path), day, region)
+
+
+async def test_complete_export_after_all_eight_days(tmp_path, no_fsync):
+    path = make_eight_days(tmp_path)
+    m = campaign.load(path)
     all_calls = []
     for day, region in enumerate(ORDER):
-        # Every server can be armed together; each must wait until its own day.
-        clock = Clock((START - timedelta(hours=1)).timestamp())
-        window = campaign.regional_window(m, region)
-        calls = []
-
-        async def run(config, sink, clock=clock, window=window, calls=calls, **kw):
-            now = clock.now()
-            assert config.retry_http_469 and config.concurrency == 1500 and config.processes == 4
-            assert config.target_url == "http://example.test/"
-            assert campaign.moment(window["starts_at"]).timestamp() <= now < kw["deadline"]
-            assert kw["deadline"] == campaign.moment(window["ends_at"]).timestamp()
-            calls.append((config.proxy.country, now))
-            return fake_measurement(completed=0)
-
-        result = await execute(path, region, Proxy, clock=clock, run_country=run)
-        assert result["status"] == "closed" and result["unfinished_countries"] == 0
-        assert len(calls) == 24 * len(m["regions"][region])
-        size = len(m["regions"][region])
-        for hour in range(24):
-            group = calls[hour * size : (hour + 1) * size]
-            assert [c for c, _ in group] == [c.lower() for c in m["regions"][region]]
-            assert all(t == (START + timedelta(days=day, hours=hour)).timestamp() for _, t in group)
-        assert clock.now() == (START + timedelta(days=day + 1)).timestamp()
-        all_calls.extend(calls)
+        all_calls.extend(await run_day(path, m, day, region))
     assert len(all_calls) == 5976
     report = export_campaign(path)
     assert report["complete"] and len(report["regions"]) == 8 and not report["issues"]
