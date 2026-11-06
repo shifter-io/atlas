@@ -29,7 +29,6 @@ def database(calculated_database):
     return calculated_database
 
 
-
 async def test_stored_hours_are_released_in_order_and_never_rewritten(tmp_path, database, db):
     seed(database)
     first = await imported(tmp_path, database, T1)

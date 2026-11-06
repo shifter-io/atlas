@@ -34,7 +34,6 @@ def database(calculated_database):
     return calculated_database
 
 
-
 async def test_ingest_stores_each_imported_countrys_hours_and_releases_them(
     tmp_path, monkeypatch, database, fake_database
 ):
