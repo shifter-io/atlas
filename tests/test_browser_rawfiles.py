@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from browser_contracts_cases import try_fields
 from browser_rawfiles_cases import (
     CAMOUFOX,
     MEMBERS,
@@ -23,7 +24,6 @@ from browser_rawfiles_cases import (
     members,
     seal_dir,
 )
-from test_browser_contracts import try_fields
 from test_browser_node import SHIFTER
 
 from proxy_index.browser import contracts as bc
