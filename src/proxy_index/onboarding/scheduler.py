@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import resource
 import sys
@@ -38,6 +39,14 @@ class Clock:
 def peak_memory_mb() -> float:
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return round(value / (1024 * 1024 if sys.platform == "darwin" else 1024), 2)
+
+
+def save_checkpoint(path: Path, state: dict, clock) -> None:
+    state["pid"] = os.getpid()
+    state["updated_at"] = timestamp(clock.now())
+    state["peak_memory_mb"] = peak_memory_mb()
+    # Rewritten after every country, so it skips the slow indented encoder.
+    atomic_json(path, state, indent=None)
 
 
 def job_directory(directory: Path, job: dict) -> Path:
@@ -196,9 +205,23 @@ def _census_config(context: JobContext, proxy) -> RunConfig:
     )
 
 
+def _checked_proxy(context: JobContext, job: dict):
+    """The country's proxy, refused unless it targets and labels the configured country."""
+    manifest = context.manifest
+    proxy = context.proxy_factory(job["country"])
+    metadata = proxy.public()
+    if (
+        metadata.get("provider") != manifest["provider"]
+        or metadata.get("product") != manifest["product"]
+        or str(metadata.get("requested_country", "")).lower() != job["country"].lower()
+    ):
+        raise ValueError("Provider must target and label the configured country")
+    return proxy
+
+
 async def _measure(context: JobContext, job: dict, writer: ObservationWriter, sink: SummarySink):
     """Run one country; return ``(summary, error)`` after the writer has been closed."""
-    clock, stop, end, manifest = context.clock, context.stop, context.end, context.manifest
+    clock, stop, end = context.clock, context.stop, context.end
     country_stop = asyncio.Event()
     checkpoint_error = [None]
 
@@ -220,15 +243,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
     summary = None
     error = None
     try:
-        proxy = context.proxy_factory(job["country"])
-        metadata = proxy.public()
-        if (
-            metadata.get("provider") != manifest["provider"]
-            or metadata.get("product") != manifest["product"]
-            or str(metadata.get("requested_country", "")).lower() != job["country"].lower()
-        ):
-            raise ValueError("Provider must target and label the configured country")
-        config = _census_config(context, proxy)
+        config = _census_config(context, _checked_proxy(context, job))
         options = RunOptions(
             stop=country_stop,
             deadline=context.deadline,
@@ -369,6 +384,22 @@ def _region_settings(effective: dict, state: dict | None, overrides: tuple) -> d
     return effective
 
 
+def _open_region(
+    state_path: Path, manifest: dict, region: str, options: RegionOptions, effective: dict
+) -> tuple[dict, dict]:
+    """The region's ``(state, settings)``: its checkpoint on resume, else a new state."""
+    state = _read_checkpoint(state_path, manifest, region, options.resume)
+    overrides = (
+        ("concurrency", options.concurrency),
+        ("timeout_seconds", options.request_timeout),
+        ("processes", options.processes),
+    )
+    effective = _region_settings(effective, state, overrides)
+    if state is None:
+        state = new_state(manifest, region, effective)
+    return state, effective
+
+
 async def _run_queue(context: JobContext) -> None:
     """Run each unfinished job at its hour until the region's end or a stop."""
     state, clock, stop, end = context.state, context.clock, context.stop, context.end
@@ -419,6 +450,16 @@ async def _drive(context: JobContext) -> dict:
     return result
 
 
+def _regional_manifest(manifest_path: Path, region: str) -> dict:
+    """The campaign manifest, refused unless it is a continuous one that has ``region``."""
+    manifest = load(manifest_path)
+    if manifest["schema_version"] == 3:
+        raise ValueError("Ephemeral campaigns run one round per node; use 'onboarding round'")
+    if region not in manifest["regions"]:
+        raise ValueError("Unknown campaign region")
+    return manifest
+
+
 @dataclass(frozen=True)
 class RegionOptions:
     """execute()'s command-line choices; a ``None`` setting keeps the campaign's (or checkpoint's).
@@ -443,11 +484,7 @@ async def execute(
     run_country=run,
 ) -> dict:
     options = options or RegionOptions()
-    manifest = load(manifest_path)
-    if manifest["schema_version"] == 3:
-        raise ValueError("Ephemeral campaigns run one round per node; use 'onboarding round'")
-    if region not in manifest["regions"]:
-        raise ValueError("Unknown campaign region")
+    manifest = _regional_manifest(manifest_path, region)
     effective = settings(manifest["settings"])
     directory = manifest_path.parent / "regions" / region
     state_path = directory / "state.json"
@@ -455,25 +492,10 @@ async def execute(
     stop = stop if stop is not None else asyncio.Event()
     end = moment(regional_window(manifest, region)["ends_at"]).timestamp()
     with lock(directory / ".lock"):
-        state = _read_checkpoint(state_path, manifest, region, options.resume)
-        overrides = (
-            ("concurrency", options.concurrency),
-            ("timeout_seconds", options.request_timeout),
-            ("processes", options.processes),
-        )
-        effective = _region_settings(effective, state, overrides)
-        if state is None:
-            state = new_state(manifest, region, effective)
+        state, effective = _open_region(state_path, manifest, region, options, effective)
         if state["status"] in ("completed", "closed"):
             return status(state, clock.now())
-
-        def save():
-            state["pid"] = os.getpid()
-            state["updated_at"] = timestamp(clock.now())
-            state["peak_memory_mb"] = peak_memory_mb()
-            # Rewritten after every country, so it skips the slow indented encoder.
-            atomic_json(state_path, state, indent=None)
-
+        save = functools.partial(save_checkpoint, state_path, state, clock)
         _recover_running(state, directory, clock.now())
         state["active"] = None
         state["status"] = "armed"

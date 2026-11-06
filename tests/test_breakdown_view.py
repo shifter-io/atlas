@@ -5,7 +5,7 @@ the place and ASN names behind it."""
 import json
 
 import pytest
-from test_calculated import benchmark_scenario, payload_mismatches
+from calculated_cases import benchmark_scenario, payload_mismatches
 
 from proxy_index.storage import connect
 

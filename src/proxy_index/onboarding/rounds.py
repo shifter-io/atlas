@@ -12,15 +12,14 @@ import functools
 import gzip
 import json
 import math
-import os
 from collections.abc import Callable
 from pathlib import Path
 
 from ..runner import run
 from .export import verify_chunk
-from .files import atomic_json, fingerprint, lock, read_json
-from .manifest import load, moment, region_countries, settings, timestamp
-from .scheduler import Clock, JobContext, job_directory, peak_memory_mb, run_job
+from .files import fingerprint, lock, read_json
+from .manifest import load, moment, region_countries, settings
+from .scheduler import Clock, JobContext, job_directory, run_job, save_checkpoint
 
 EARLY_START_SECONDS = 300
 # "no_list": the provider has no login or no exits for the country; complete with that reason.
@@ -90,13 +89,6 @@ def validate_round(state: dict, manifest: dict, region: str, index: int) -> None
         raise RoundRefused("Round checkpoint country queue differs from the campaign")
 
 
-def _save(path: Path, state: dict, clock) -> None:
-    state["pid"] = os.getpid()
-    state["updated_at"] = timestamp(clock.now())
-    state["peak_memory_mb"] = peak_memory_mb()
-    atomic_json(path, state, indent=None)
-
-
 def _close(state: dict) -> None:
     """Leave every job terminal: queued ones never started, a stray active one failed."""
     for job in state["jobs"]:
@@ -112,6 +104,28 @@ async def _wait_until(state: dict, save: Callable, scheduled: float, clock, stop
         await clock.sleep(min(0.25, scheduled - clock.now()))
         if clock.now() - moment(state["updated_at"]).timestamp() >= 5:
             save()
+
+
+async def _run_round(context: JobContext, scheduled: float) -> None:
+    """Wait for the round's hour, run its countries in order, then leave every job terminal."""
+    state, save, stop = context.state, context.save, context.stop
+    try:
+        await _wait_until(state, save, scheduled, context.clock, stop)
+        for job in state["jobs"]:
+            if stop.is_set():
+                break
+            if context.proxy_factory(job["country"]) is None:
+                job.update(status="no_list", stop_reason="no_list")
+                save()
+                continue
+            await run_job(context, job)
+        state["status"] = "stopped" if stop.is_set() else "completed"
+    except BaseException:
+        state["status"] = "failed"
+        raise
+    finally:
+        _close(state)
+        save()
 
 
 async def execute_round(
@@ -144,7 +158,7 @@ async def execute_round(
         if clock.now() < scheduled - EARLY_START_SECONDS:
             raise RoundRefused("A round may be armed at most 300 seconds before it is scheduled")
         state = new_round(manifest, region, round_index)
-        save = functools.partial(_save, path, state, clock)
+        save = functools.partial(save_checkpoint, path, state, clock)
         save()
         context = JobContext(
             manifest,
@@ -160,23 +174,7 @@ async def execute_round(
             math.inf,
             None,
         )
-        try:
-            await _wait_until(state, save, scheduled, clock, stop)
-            for job in state["jobs"]:
-                if stop.is_set():
-                    break
-                if proxy_factory(job["country"]) is None:
-                    job.update(status="no_list", stop_reason="no_list")
-                    save()
-                    continue
-                await run_job(context, job)
-            state["status"] = "stopped" if stop.is_set() else "completed"
-        except BaseException:
-            state["status"] = "failed"
-            raise
-        finally:
-            _close(state)
-            save()
+        await _run_round(context, scheduled)
     return state
 
 

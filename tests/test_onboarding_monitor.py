@@ -105,6 +105,24 @@ def test_monitor_detects_older_round_backlog():
     assert result["health"] == "behind" and result["queue_depth"] == 1
 
 
+def test_monitor_reports_an_assigned_node_without_state_as_starting_or_failed():
+    data = {"installed": True, "assignment": {"kind": "probe"}}
+    running = data | {"service": {"ActiveState": "activating"}}
+    assert classify(running, 0)["health"] == "starting"
+    assert classify(data | {"service": {"ActiveState": "inactive"}}, 0)["health"] == "failed"
+    assert classify(data, 0)["health"] == "failed"
+    assert classify({"installed": True}, 0)["health"] == "idle"
+
+
+def test_monitor_counts_a_finished_run_until_its_finish_from_live_progress():
+    now = float(int(time.time()))
+    state = probe_state(now, status="completed", finished_at=timestamp(now - 30))
+    result = classify({"state": state, "server_time": now}, now)
+    assert result["health"] == "completed" and result["elapsed_seconds"] == 30
+    assert (result["requests"], result["unique_ips"], result["errors"]) == (1000, 600, 200)
+    assert result["country"] == "us" and result["lifecycle"] == "completed"
+
+
 def test_dashboard_is_standalone_and_escapes_errors():
     page = render(
         {
