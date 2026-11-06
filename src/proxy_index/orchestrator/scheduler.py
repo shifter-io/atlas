@@ -121,7 +121,7 @@ class Scheduler:
             job_run_id = row["id"]
             try:
                 stats = await task.job()
-            except Exception as exc:  # noqa: BLE001 - one job must not stop the clock
+            except Exception as exc:  # boundary: one job must not stop the clock
                 await self._record_failure(task, exc, began, job_run_id)
                 return None
             await self._record_finish(task, stats, began, job_run_id)
@@ -172,7 +172,7 @@ class Scheduler:
     async def _fire(self, task: Task) -> None:
         try:
             await self._execute(task)
-        except Exception:  # noqa: BLE001 - the database may be down; the clock keeps going
+        except Exception:  # boundary: the database may be down; the clock keeps going
             log.exception("could not record job %s", task.name)
 
     async def _loop(self) -> None:

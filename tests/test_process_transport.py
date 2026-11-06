@@ -15,6 +15,7 @@ from helpers import Gateway, server
 from proxy_index.models import Outcome, ProxyConfig, RequestContext, RunConfig
 from proxy_index.process_transport import (
     ProcessTransport,
+    _entry,
     _serve,
     process_count,
     receive,
@@ -280,6 +281,36 @@ async def test_worker_answers_results_errors_and_expiry():
     await asyncio.wait_for(serving, 5)
     assert await reader.read() == b""
     writer.close()
+
+
+async def test_a_failed_request_logs_its_type_but_not_its_message(caplog):
+    serving, reader, writer = await serve_in_process(None)
+    send(writer, RequestContext("fail", 0, 0))
+    await writer.drain()
+    assert await asyncio.wait_for(receive(reader), 5) == ("error", 0)
+    assert "HTTP worker request failed (ValueError)" in caplog.text
+    assert "secret" not in caplog.text
+    send(writer, None)
+    await writer.drain()
+    await asyncio.wait_for(serving, 5)
+    writer.close()
+
+
+def refusing_factory(config):
+    raise ValueError("secret")
+
+
+def test_a_worker_that_cannot_serve_exits_1_without_a_traceback(monkeypatch, caplog):
+    # In this process: _entry would otherwise ignore SIGINT for the whole test run.
+    monkeypatch.setattr("proxy_index.process_transport.signal.signal", lambda *args: None)
+    parent, child = socket.socketpair()
+    config = RunConfig("generic_http", ProxyConfig("http", "localhost", 1), processes=1)
+    with pytest.raises(SystemExit) as stopped:
+        _entry(child, config, registry.get("generic_http"), refusing_factory, None)
+    assert stopped.value.code == 1 and stopped.value.__suppress_context__
+    assert child.fileno() == -1
+    assert "HTTP worker stopped (ValueError)" in caplog.text and "secret" not in caplog.text
+    parent.close()
 
 
 async def test_worker_stops_when_the_coordinator_leaves():

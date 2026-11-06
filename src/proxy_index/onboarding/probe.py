@@ -69,7 +69,8 @@ def _new_state(
 
 
 def _reporter(probe: _Probe, writer: ObservationWriter, began: float, failure: list):
-    """The runner's progress callback; a checkpoint error stops the run into ``failure[0]``."""
+    """The runner's progress callback; a checkpoint error stops the run into ``failure[0]``:
+    the writer's failure, or ``state.json`` not written or not serialisable."""
     previous = [time.monotonic(), 0]
 
     async def progress(counters):
@@ -84,7 +85,7 @@ def _reporter(probe: _Probe, writer: ObservationWriter, began: float, failure: l
                 "elapsed_seconds": probe.clock.now() - began,
             }
             probe.save()
-        except Exception as exc:
+        except (OSError, TypeError, ValueError) as exc:
             failure[0] = exc
             probe.stop.set()
 
@@ -119,12 +120,12 @@ async def _measure(
                 progress_interval=5,
             ),
         )
-    except BaseException as exc:
-        error = exc
+    except BaseException as exc:  # boundary: saved with the partial results; _run re-raises
+        error = exc  # an interrupt or a cancellation once they are saved
     finally:
         try:
             await writer.close()
-        except Exception as exc:
+        except OSError as exc:  # the writer failed (``check``)
             error = error or exc
     return summary, error or failure[0]
 
@@ -163,6 +164,8 @@ async def _run(probe: _Probe, max_seconds: float) -> dict:
     )
     probe.save()
     atomic_json(probe.directory / "summary.json", state)
+    if error is not None and not isinstance(error, Exception):
+        raise error  # an interrupt or a cancellation goes on, the partial results saved
     if error:
         raise RuntimeError(
             f"Probe failed ({type(error).__name__}); partial results saved"

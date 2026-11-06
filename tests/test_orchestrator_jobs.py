@@ -1,9 +1,11 @@
 """Orchestrator jobs and the scheduler: runs, schedules, calculate, detect, retention, the CLI."""
 
 import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime, time, timedelta
 
+import psycopg
 import pytest
 from orchestrator_cases import NOW, prepare, query, set_setting
 
@@ -56,6 +58,28 @@ async def test_scheduler_records_runs_failures_and_skips(database, db):
         ("job_failed", "job_failed:broken", 2)
     ]
     assert [t["job"] for t in scheduler.upcoming()] == ["broken", "idle", "ok"]
+
+
+class DownDatabase:
+    @contextlib.asynccontextmanager
+    async def connection(self):
+        raise psycopg.OperationalError("connection refused")
+        yield
+
+
+async def test_a_job_that_cannot_be_recorded_is_logged_and_the_clock_keeps_going(caplog):
+    scheduler = Scheduler(DownDatabase())
+    calls = []
+
+    async def job():
+        calls.append("ran")
+
+    scheduler.add("job", job, every_s=60)
+    await scheduler._fire(scheduler.tasks["job"])
+    assert calls == [] and scheduler.tasks["job"].running is False
+    [record] = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert record.getMessage() == "could not record job job"
+    assert record.exc_info[0] is psycopg.OperationalError
 
 
 def test_task_schedules():
