@@ -1,6 +1,7 @@
 package build
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -51,23 +52,23 @@ func TestANetworkAnswerSumsItsProductGroups(t *testing.T) {
 
 func TestPlaceListsPageAndSearch(t *testing.T) {
 	pg := smallPages(t)
-	first, ok := pg.List("", "net00/residential", "30d", "city", "", 1)
+	first, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
 	if !ok || first.Total != 60 || first.Pages != 2 || len(first.Rows) != PageSize || first.Rows[0].IpsSum != 2000 {
 		t.Fatalf("page 1: %+v", first)
 	}
-	second, _ := pg.List("", "net00/residential", "30d", "city", "", 2)
-	beyond, _ := pg.List("", "net00/residential", "30d", "city", "", 3)
+	second, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 2)
+	beyond, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 3)
 	if len(second.Rows) != 10 || len(beyond.Rows) != 0 || second.Rows[0].IpsSum >= first.Rows[PageSize-1].IpsSum {
 		t.Fatalf("page 2: %d rows, page 3: %d rows", len(second.Rows), len(beyond.Rows))
 	}
-	found, _ := pg.List("", "net00/residential", "30d", "asn", "AS64513", 1)
+	found, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "asn", "AS64513", 1)
 	if found.Total != 1 || *found.Rows[0].Asn != 64513 || model.SV(found.Rows[0].AsnName) != "Example Networks 1" {
 		t.Fatalf("asn search: %+v", found)
 	}
-	if _, ok := pg.List("", "nobody/residential", "30d", "city", "", 1); ok {
+	if _, ok, _ := pg.List(context.Background(), "", "nobody/residential", "30d", "city", "", 1); ok {
 		t.Fatal("an unknown network has no list")
 	}
-	if _, ok := pg.List("", "net00/residential", "30d", "street", "", 1); ok {
+	if _, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "street", "", 1); ok {
 		t.Fatal("an unknown dimension has no list")
 	}
 }
@@ -86,7 +87,7 @@ func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
 	if pg.Countries.Countries[0].CountryCode != "AB" || pg.Countries.Countries[0].Networks != 2 || pg.Countries.Countries[0].IpsSum != 2*1999 {
 		t.Fatalf("index %+v", pg.Countries.Countries)
 	}
-	cities, ok := pg.List("", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", "", 1)
+	cities, ok, _ := pg.List(context.Background(), "", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", "", 1)
 	if !ok {
 		t.Fatal("no city list")
 	}
