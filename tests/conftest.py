@@ -16,6 +16,11 @@ database (`helpers.scratch_database`) or initialise a schema (`storage.initializ
 `calculated.store.initialize`). The xdist controller and a pytest a test starts do not
 record. `scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is
 recorded or wrapped.
+
+No coverage: a test marked `no_cover` runs without a tracer. pytest-cov's marker alone only
+stops its own coverage, and in an xdist worker that hands tracing back to the coverage it
+started before it, so the test stayed traced (and slower) there. Only for a test whose every
+covered line and branch other tests also cover.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from __future__ import annotations
 import functools
 import json
 import os
+import sys
+import threading
 from pathlib import Path
 
 import helpers
@@ -76,6 +83,21 @@ def pytest_collection_modifyitems(config, items):
     if not workers or not DURATIONS.exists():
         return
     items[:] = spread(items, json.loads(DURATIONS.read_text()), workers)
+
+
+@pytest.hookimpl(wrapper=True, trylast=True)
+def pytest_runtest_call(item):
+    # trylast: inside pytest-cov's own no_cover wrapper, so after its pause, before its resume.
+    if not item.get_closest_marker("no_cover"):
+        return (yield)
+    traces = sys.gettrace(), threading.gettrace()
+    sys.settrace(None)
+    threading.settrace(None)
+    try:
+        return (yield)
+    finally:
+        sys.settrace(traces[0])
+        threading.settrace(traces[1])
 
 
 if helpers.TIMELINE:

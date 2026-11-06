@@ -378,11 +378,16 @@ def test_week_and_month_estimates_are_summed_per_utc_day():
     }
 
 
+# Not split per network or window (SPLIT-7): a network's head holds peer rows and scores of
+# the other network, and one build makes every window. No coverage: tracing took a third of its
+# time and the other calculated and scale tests cover every line and branch it does. Two
+# generator jobs write the same rows as one (test_scale_gen).
+@pytest.mark.no_cover
 def test_the_scale_fixture_head_stays_small(databases):
     """The scripts/scale fixture at --scale 0.0625 (two networks, five countries, two days):
     at most 0.2 MB of head per network."""
     config = databases()
-    generate_scale(config, "1..2", countries="AQ,BR,DE,FR,US", scale=0.0625)
+    generate_scale(config, "1..2", countries="AQ,BR,DE,FR,US", scale=0.0625, jobs=2)
     store.initialize(config)
     payload = calculate(config, SCALE_POLICY, as_of=datetime(2026, 10, 3, tzinfo=UTC))
     head = store.read_head(config, payload["snapshot_id"])
