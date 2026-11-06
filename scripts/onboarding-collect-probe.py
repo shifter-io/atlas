@@ -13,12 +13,16 @@ from proxy_index.onboarding.export import verify_chunk
 from proxy_index.onboarding.files import atomic_json, private_dir
 
 
-def main():
+def _parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--launch", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=Path("onboarding-networks"))
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def _retrieve(args):
+    """Copy the probe's remote directory next to the local output root; return its path."""
     launch = json.loads(args.launch.read_text())
     server = json.loads(args.inventory.read_text())["servers"][launch["region"]]
     remote = PurePosixPath(launch["remote_output"])
@@ -43,7 +47,11 @@ def main():
         ["scp", "-pr", *options, target + ":" + shlex.quote(str(remote)), str(destination.parent)],
         check=True,
     )
-    summary = json.loads((destination / "summary.json").read_text())
+    return destination
+
+
+def _verify_chunks(destination, summary):
+    """Verify every observation chunk; return (chunks, rows, unique IPs)."""
     job = {
         "country": summary["country"],
         "scheduled_at": summary["scheduled_at"],
@@ -65,6 +73,14 @@ def main():
             for line in stream:
                 unique.add(json.loads(line)["ip"])
         chunks += 1
+    return chunks, rows, unique
+
+
+def main():
+    args = _parse_args()
+    destination = _retrieve(args)
+    summary = json.loads((destination / "summary.json").read_text())
+    chunks, rows, unique = _verify_chunks(destination, summary)
     measurement = summary["measurement"]
     if rows != summary["observations"] or rows != measurement["successes"]:
         raise ValueError("Observation count does not reconcile")
