@@ -20,7 +20,7 @@ from test_storage import enrichment, measurement
 from proxy_index.calculated import store
 from proxy_index.calculated.calculator import calculate
 from proxy_index.detect import detect
-from proxy_index.orchestrator import batches
+from proxy_index.orchestrator import nodework
 from proxy_index.orchestrator.db import Database
 from proxy_index.orchestrator.nodes import issue_token
 from proxy_index.storage import connect, ingest, seed
@@ -166,7 +166,7 @@ async def test_two_hour_outage_keeps_the_score_and_reruns_the_census(database, t
                     "successes": 100,
                     "stop_reason": "requests",
                 }
-                await batches.finish_run(
+                await nodework.finish_run(
                     db,
                     {"node_id": node["node_id"]},
                     running[i],

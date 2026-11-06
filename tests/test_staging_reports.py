@@ -16,7 +16,7 @@ from test_orchestrator import prepare, query
 
 from proxy_index import report_html
 from proxy_index.cli import main
-from proxy_index.orchestrator import batches
+from proxy_index.orchestrator import batches, nodework
 from proxy_index.orchestrator.db import DEFAULTS, Database, put_setting
 from proxy_index.orchestrator.jobs import install_reports, register_jobs
 from proxy_index.orchestrator.nodes import issue_token, token_hash
@@ -472,7 +472,7 @@ async def test_barrier_hook_writes_reports_and_never_fails(database, db, tmp_pat
     await db.drain()
     assert not out.exists()
 
-    assert await batches.fail_run(db, node, batch_id, "boom", now) == "failed"
+    assert await nodework.fail_run(db, node, batch_id, "boom", now) == "failed"
     await db.drain()
     assert query(database, "SELECT status FROM test_batches") == [("failed",)]
     assert f'href="batch-{batch_id}.html"' in text(out / "index.html")
@@ -502,7 +502,7 @@ async def test_barrier_hook_writes_reports_and_never_fails(database, db, tmp_pat
             "SELECT %s,product_id,%s,'running' FROM products",
             (skipped, node["node_id"]),
         )
-    assert await batches.fail_run(db, node, skipped, "again") == "failed"
+    assert await nodework.fail_run(db, node, skipped, "again") == "failed"
     await db.drain()
     assert query(database, "SELECT status FROM test_batches WHERE batch_id=%s", (skipped,)) == [
         ("failed",)
@@ -567,8 +567,8 @@ async def test_reports_job_writes_live_pages(database, db, tmp_path):
     issue_token(database, provider="beta", product="res", region="fra1")
     await batches.census_plan(db, now)
     batch_id = query(database, "SELECT batch_id FROM test_batches")[0][0]
-    await batches.assignments(db, alpha, now + timedelta(minutes=1))
-    await batches.progress(
+    await nodework.assignments(db, alpha, now + timedelta(minutes=1))
+    await nodework.progress(
         db,
         alpha,
         batch_id,

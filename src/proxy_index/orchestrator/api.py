@@ -23,7 +23,7 @@ from aiohttp import web
 from .. import storage
 from ..browser.contracts import BROWSER_KIND, BROWSER_REGION, ERROR_CHECKSUM_MISMATCH, HEADER_SHA256
 from ..regions import resolve_region
-from . import batches
+from . import nodework
 from .archive import ArchiveError, unpack
 from .db import Database, setting
 from .events import raise_alert
@@ -130,7 +130,7 @@ async def register(request: web.Request) -> web.Response:
     if isinstance(body.get("version"), str):
         values["version"] = body["version"][:64]
     async with request.app[DB_KEY].transaction() as conn:
-        await batches.online(conn, node["node_id"], values)
+        await nodework.online(conn, node["node_id"], values)
     return web.json_response({"node_id": node["node_id"], "region": node["region"]})
 
 
@@ -145,12 +145,12 @@ async def heartbeat(request: web.Request) -> web.Response:
     if isinstance(body.get("version"), str):
         values["version"] = body["version"][:64]
     async with request.app[DB_KEY].transaction() as conn:
-        await batches.online(conn, node["node_id"], values)
+        await nodework.online(conn, node["node_id"], values)
     return web.json_response({"ok": True})
 
 
 async def work(request: web.Request) -> web.Response:
-    return web.json_response(await batches.assignments(request.app[DB_KEY], request[NODE_KEY]))
+    return web.json_response(await nodework.assignments(request.app[DB_KEY], request[NODE_KEY]))
 
 
 async def progress(request: web.Request) -> web.Response:
@@ -159,7 +159,7 @@ async def progress(request: web.Request) -> web.Response:
     if not isinstance(counters, dict):
         raise _error(web.HTTPBadRequest, "counters must be an object")
     try:
-        result = await batches.progress(
+        result = await nodework.progress(
             request.app[DB_KEY], request[NODE_KEY], _batch_id(body.get("batch_id")), counters
         )
     except ValueError as exc:
@@ -174,7 +174,7 @@ async def failed(request: web.Request) -> web.Response:
     error = body.get("error")
     if not isinstance(error, str) or not error:
         raise _error(web.HTTPBadRequest, "error must be a non-empty string")
-    status = await batches.fail_run(
+    status = await nodework.fail_run(
         request.app[DB_KEY], request[NODE_KEY], _batch_id(body.get("batch_id")), error
     )
     if status is None:
@@ -228,7 +228,7 @@ def _open_upload(archive: Path, directory: Path, limit: int) -> Any:
 async def _reject(request: web.Request, batch_id: int, reason: str, kind: str) -> None:
     """A run whose upload cannot be ingested fails now rather than waiting for the reaper."""
     db, node = request.app[DB_KEY], request[NODE_KEY]
-    await batches.fail_run(db, node, batch_id, reason)
+    await nodework.fail_run(db, node, batch_id, reason)
     async with db.transaction() as conn:
         await raise_alert(
             conn,
@@ -244,7 +244,7 @@ async def results(request: web.Request) -> web.Response:
     """A finished run directory (tar.gz): extract, ingest, link run_key, then the barrier."""
     db, node = request.app[DB_KEY], request[NODE_KEY]
     batch_id = _batch_id(request.query.get("batch_id"))
-    run = await batches.begin_upload(db, node, batch_id)
+    run = await nodework.begin_upload(db, node, batch_id)
     if run is None:
         raise _error(web.HTTPNotFound, "no such run for this node")
     if run["kind"] == BROWSER_KIND:  # K-BP7: archived per run, so no generic raw spool
@@ -288,7 +288,7 @@ async def results(request: web.Request) -> web.Response:
         imported = await _ingest(request, batch_id, directory, ip_rows=run["kind"] != "pulse")
         if spool_dir:  # the raw file this update used (ARCHIVE-1: 30 days here, then Spaces)
             await _spool(db, spool_dir, run["kind"], batch_id, summary, archive)
-    status = await batches.finish_run(db, node, batch_id, summary, imported["run_key"])
+    status = await nodework.finish_run(db, node, batch_id, summary, imported["run_key"])
     return web.json_response(
         {
             "ok": True,

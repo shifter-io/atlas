@@ -1,7 +1,7 @@
 """The orchestrator's scheduled jobs.
 
 census_plan / pulse_plan  every minute, on the minute: open due batches (batches.py)
-reap                      every minute: fail runs that never started or went silent
+reap                      every minute: fail runs that never started or went silent (nodework.py)
 offline                   every 15 s: nodes without a heartbeat go offline
 calculate                 every minute, due by calculate.trigger: "hourly" (default) once per
                           UTC hour, calculate.hour_offset_seconds past it (at least
@@ -54,7 +54,7 @@ from psycopg import sql
 
 from .. import storage
 from ..regions import CONFIGS
-from . import batches, pulse
+from . import batches, nodework, pulse
 from .browser import browser_plan
 from .db import Database, setting
 from .scheduler import Scheduler
@@ -378,10 +378,10 @@ def register_jobs(
         return await pulse.evaluate(db)
 
     async def reap() -> dict[str, Any]:
-        return await batches.reap(db)
+        return await nodework.reap(db)
 
     async def offline() -> dict[str, Any]:
-        return await batches.mark_offline(db)
+        return await nodework.mark_offline(db)
 
     async def calculate_job() -> dict[str, Any]:
         return await calculate(db, credentials_file, methodology)

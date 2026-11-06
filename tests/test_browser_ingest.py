@@ -471,20 +471,20 @@ async def test_a_database_failure_after_the_archive_is_retried_idempotently(
 ):
     import psycopg
 
-    from proxy_index.orchestrator import batches
+    from proxy_index.orchestrator import nodework
 
     batch_id = browser_run(database, "alpha")
     args = (world["tokens"]["alpha"], batch_id, *await make_bundle(world["tmp"], batch_id))
-    finish = batches.finish_run
+    finish = nodework.finish_run
 
     async def unreachable(*a, **k):
         raise psycopg.OperationalError("connection refused")
 
-    monkeypatch.setattr(batches, "finish_run", unreachable)
+    monkeypatch.setattr(nodework, "finish_run", unreachable)
     status, body, _ = await upload(client, *args)
     assert (status, body) == (503, {"error": "database unavailable; retry"})
     assert len(world["bucket"].objects) == 1
-    monkeypatch.setattr(batches, "finish_run", finish)
+    monkeypatch.setattr(nodework, "finish_run", finish)
     status, body, _ = await upload(client, *args)
     assert status == 200 and body["status"] == "done"
     assert query(database, "SELECT count(*) FROM test_runs") == [(1,)]
