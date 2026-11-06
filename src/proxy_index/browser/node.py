@@ -319,7 +319,7 @@ class BrowserHost:
             self._wake.clear()
             try:
                 await self.flush()
-            except Exception as exc:  # noqa: BLE001 - the next pass retries; type only
+            except Exception as exc:  # boundary: the next pass retries; type only
                 log.warning("outbox pass failed (%s)", type(exc).__name__)
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), self.outbox_interval)

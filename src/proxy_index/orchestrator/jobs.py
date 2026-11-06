@@ -176,7 +176,7 @@ async def run_calculation(argv: list[str], limit_s: float) -> dict[str, Any]:
     )
     try:
         out, err = await asyncio.wait_for(process.communicate(), limit_s)
-    except BaseException as exc:  # the timeout, or the orchestrator stopping
+    except BaseException as exc:  # boundary: a timeout or a stop kills the group; re-raised
         _kill_group(process.pid)
         await process.wait()
         if isinstance(exc, TimeoutError):
@@ -290,7 +290,7 @@ async def raw_upload(db: Database) -> dict[str, Any]:
 
 async def write_reports(db: Database, batch_ids: list[int]) -> dict[str, Any] | None:
     """The HTML reports for batches that just closed, and the index; None when reports.dir is
-    unset. Errors are logged, never raised: a report must not fail the barrier."""
+    unset. Errors are logged by type, never raised: a report must not fail the barrier."""
     try:
         async with db.connection() as conn:
             out = await setting(conn, "reports.dir")
@@ -300,8 +300,9 @@ async def write_reports(db: Database, batch_ids: list[int]) -> dict[str, Any] | 
 
         async with _report_lock(db):
             return await asyncio.to_thread(report_html.write, db.credentials_file, out, batch_ids)
-    except Exception:  # noqa: BLE001
-        log.exception("could not write the HTML reports for batches %s", batch_ids)
+    except Exception as exc:  # boundary: a report must not fail the barrier; type only (DSN)
+        error = type(exc).__name__
+        log.warning("could not write the HTML reports for batches %s (%s)", batch_ids, error)
         return None
 
 
