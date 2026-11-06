@@ -242,9 +242,7 @@ async def _open_loads(
     return created
 
 
-async def _close_unmanned(
-    conn: psycopg.AsyncConnection, created: list[int], now: datetime
-) -> None:
+async def _close_unmanned(conn: psycopg.AsyncConnection, created: list[int], now: datetime) -> None:
     """Batches whose every run failed (no node in the region) close at once."""
     for row in await _rows(
         conn,
