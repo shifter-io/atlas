@@ -91,8 +91,7 @@ def dispatch(args):
 
         with connect(db) as conn:
             conn.execute("SET TRANSACTION READ ONLY")
-            report = traffic.summary(
-                conn,
+            inputs = traffic.TrafficInputs(
                 test=args.test,
                 provider=args.provider,
                 country=args.country,
@@ -100,6 +99,7 @@ def dispatch(args):
                 start=traffic.parse_time(args.start),
                 end=traffic.parse_time(args.end),
             )
+            report = traffic.summary(conn, inputs)
         print(json.dumps(report, indent=2, default=iso) if args.json else traffic.table(report))
         return 0
     if args.command == "calculate-expire":

@@ -918,10 +918,11 @@ async def test_events_api_filters_and_shape(database):
 async def test_traffic_api_cli_and_sums(database, tmp_path, capsys):
     as_of, _ = await scenario(database, tmp_path)
     with connect(database) as conn:
-        report = traffic.summary(conn)
-        pulse_only = traffic.summary(conn, test="pulse", provider="alpha/residential")
-        none = traffic.summary(conn, country="FR")
-        windowed = traffic.summary(conn, end=as_of - timedelta(minutes=60))
+        inputs = traffic.TrafficInputs
+        report = traffic.summary(conn, inputs())
+        pulse_only = traffic.summary(conn, inputs(test="pulse", provider="alpha/residential"))
+        none = traffic.summary(conn, inputs(country="FR"))
+        windowed = traffic.summary(conn, inputs(end=as_of - timedelta(minutes=60)))
     assert report["total"]["requests"] == 312 and report["total"]["bytes_total"] == 18600
     assert {r["provider"]: r["requests"] for r in report["by_provider"]} == {
         "alpha": 308,

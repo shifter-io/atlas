@@ -257,7 +257,7 @@ def test_traffic_snapshot_keeps_the_browser_flag():
         },
     }
     with pytest.raises(ValueError, match="census, pulse, load or browser"):
-        traffic.summary(None, test="other")
+        traffic.summary(None, traffic.TrafficInputs(test="other"))
 
 
 # --- PostgreSQL: the equality gate ------------------------------------------------------------

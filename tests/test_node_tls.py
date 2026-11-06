@@ -21,7 +21,7 @@ from proxy_index import enrichment
 from proxy_index import node as node_module
 from proxy_index.cli import main
 from proxy_index.errors import UserError
-from proxy_index.node import NodeAgent
+from proxy_index.node import NodeAgent, NodeSettings
 from proxy_index.node_tls import client_tls, pinned_context
 from proxy_index.orchestrator.app import server_tls
 
@@ -54,15 +54,17 @@ async def manager(cert: Path, key: Path) -> AsyncIterator[tuple[str, list[str]]]
 async def serve_briefly(tmp_path: Path, url: str, tls: ssl.SSLContext | bool) -> NodeAgent:
     """Run a node against `url` for half a second: long enough to register or be refused."""
     agent = NodeAgent(
-        url,
-        "token-for-tests-only",
-        provider="shifter",
-        product="residential",
-        region="fra1",
-        proxy_factory=lambda country: None,
-        work_dir=tmp_path / "runs",
-        poll_interval=0.05,
-        heartbeat_interval=60,
+        NodeSettings(
+            url,
+            "token-for-tests-only",
+            provider="shifter",
+            product="residential",
+            region="fra1",
+            proxy_factory=lambda country: None,
+            work_dir=tmp_path / "runs",
+            poll_interval=0.05,
+            heartbeat_interval=60,
+        )
     )
     agent.tls = tls
     stop = asyncio.Event()

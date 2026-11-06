@@ -271,7 +271,8 @@ def pulse_minutes(conn, start, as_of):
 
 def traffic_by_test(conn, start, as_of):
     """The window's wire bytes per test kind."""
-    report = traffic.summary(conn, start=start, end=as_of, finished_before=as_of)
+    inputs = traffic.TrafficInputs(start=start, end=as_of, finished_before=as_of)
+    report = traffic.summary(conn, inputs)
     return {
         "period": {"start": start, "end": as_of},
         "by_test": traffic.snapshot(report["by_test"]),

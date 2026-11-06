@@ -25,7 +25,7 @@ from proxy_index.browser import contracts as bc
 from proxy_index.browser import rawfiles
 from proxy_index.browser.rawfiles import Batch, DiskGuard, FileRecorder, Outbox, recover, seal
 from proxy_index.errors import UserError
-from proxy_index.node import NodeAgent
+from proxy_index.node import NodeAgent, NodeSettings
 from proxy_index.orchestrator import browser_ingest
 
 SLOT = datetime(2026, 11, 4, 12, tzinfo=UTC)
@@ -258,13 +258,15 @@ async def agent_for(tmp_path):
         await server.start_server()
         servers.append(server)
         agent = NodeAgent(
-            str(server.make_url("")),
-            "token-shifter",
-            provider="shifter",
-            product="residential",
-            proxy_factory=lambda country: None,
-            work_dir=tmp_path / "work",
-            region="browser",
+            NodeSettings(
+                str(server.make_url("")),
+                "token-shifter",
+                provider="shifter",
+                product="residential",
+                proxy_factory=lambda country: None,
+                work_dir=tmp_path / "work",
+                region="browser",
+            )
         )
         agent.session = aiohttp.ClientSession()
         sessions.append(agent.session)

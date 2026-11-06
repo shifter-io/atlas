@@ -12,6 +12,7 @@ browser runs.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from psycopg.rows import dict_row
@@ -50,50 +51,59 @@ def totals(rows):
     }
 
 
-def summary(
-    conn,
-    *,
-    test=None,
-    provider=None,
-    country=None,
-    region=None,
-    start=None,
-    end=None,
-    finished_before=None,
-):
-    """Traffic per test and provider product, per provider, per test and in total.
+@dataclass(frozen=True)
+class TrafficInputs:
+    """summary()'s filters, each None for all: test kind, provider ("provider" or
+    "provider/product"), country, region slug, the scheduled-slot window [start, end), and
+    finished_before, which keeps only runs that ended before that moment (the snapshot uses it,
+    so a calculation does not see live counters)."""
 
-    provider is "provider" or "provider/product"; finished_before keeps only runs that ended
-    before that moment (the snapshot uses it, so a calculation does not see live counters).
-    """
+    test: str | None = None
+    provider: str | None = None
+    country: str | None = None
+    region: str | None = None
+    start: datetime | None = None
+    end: datetime | None = None
+    finished_before: datetime | None = None
+
+
+def where(inputs):
+    """The WHERE clauses and their parameters for summary()'s filters."""
     clauses, params = ["br.status<>'queued'"], []
-    if test:
-        if test not in (*TESTS, BROWSER):
+    if inputs.test:
+        if inputs.test not in (*TESTS, BROWSER):
             raise ValueError("test must be census, pulse, load or browser")
         clauses.append("b.kind=%s")
-        params.append(test)
-    if provider:
-        name, _, product = provider.partition("/")
+        params.append(inputs.test)
+    if inputs.provider:
+        name, _, product = inputs.provider.partition("/")
         clauses.append("p.provider=%s")
         params.append(name)
         if product:
             clauses.append("p.name=%s")
             params.append(product)
-    if country:
+    if inputs.country:
         clauses.append("b.country_code=%s")
-        params.append(country.upper())
-    if region:
+        params.append(inputs.country.upper())
+    if inputs.region:
         clauses.append("r.slug=%s")
-        params.append(region)
-    if start is not None:
+        params.append(inputs.region)
+    if inputs.start is not None:
         clauses.append("b.scheduled_for>=%s")
-        params.append(start)
-    if end is not None:
+        params.append(inputs.start)
+    if inputs.end is not None:
         clauses.append("b.scheduled_for<%s")
-        params.append(end)
-    if finished_before is not None:
+        params.append(inputs.end)
+    if inputs.finished_before is not None:
         clauses.append("br.status=ANY(%s) AND br.finished_at<%s")
-        params += [list(TERMINAL), finished_before]
+        params += [list(TERMINAL), inputs.finished_before]
+    return clauses, params
+
+
+def summary(conn, inputs):
+    """Traffic per test and provider product, per provider, per test and in total, for the
+    runs `inputs` (a TrafficInputs) selects."""
+    clauses, params = where(inputs)
     rows = (
         conn.cursor(row_factory=dict_row)
         .execute(
@@ -120,8 +130,13 @@ def summary(
         by_test[BROWSER] = totals(browser) | {"bytes_exact": False}
     return {
         "unit": "GB = 10^9 bytes",
-        "period": {"from": start, "to": end},
-        "filters": {"test": test, "provider": provider, "country": country, "region": region},
+        "period": {"from": inputs.start, "to": inputs.end},
+        "filters": {
+            "test": inputs.test,
+            "provider": inputs.provider,
+            "country": inputs.country,
+            "region": inputs.region,
+        },
         "rows": detail,
         "by_provider": [
             {"provider": name} | totals([r for r in rows if r["provider"] == name])

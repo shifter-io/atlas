@@ -128,7 +128,7 @@ def dispatch(args) -> int:
     import logging
 
     from ..enrichment import LocalEnricher
-    from ..node import NodeAgent, provider_factory, read_token, serve
+    from ..node import NodeAgent, NodeSettings, provider_factory, read_token, serve
     from ..node_tls import client_tls
 
     tls = client_tls(args.orchestrator, args.ca_file)  # refuses a URL the node must not use
@@ -142,7 +142,7 @@ def dispatch(args) -> int:
     factory = provider_factory(args.provider_config, args.credentials_file)
     factory("us")  # Fail on a broken provider configuration before registering.
     with LocalEnricher(args.mmdb) as enricher:
-        agent = NodeAgent(
+        settings = NodeSettings(
             args.orchestrator,
             read_token(args.token_file),
             provider=args.provider,
@@ -155,6 +155,7 @@ def dispatch(args) -> int:
             # The configured path as given: a link is followed again for every run.
             mmdb=enricher.source,
         )
+        agent = NodeAgent(settings)
         agent.tls = tls
         asyncio.run(serve(agent))
     return 0
