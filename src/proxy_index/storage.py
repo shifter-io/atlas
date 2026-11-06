@@ -749,7 +749,8 @@ def migrate(credentials_file):
     names into the shared lists, v10 adds the batch kind browser, v11 swaps an index). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
-    v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables); each is verified.
+    v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables), v10 → v11 (geo
+    rollups); each is verified.
     A v6 or later database with an older calculated layer starts at its step. Every rebuilt pool,
     scope, bucket and run summary, every test batch, location, network and per-IP enrichment, and
     every calculated window, breakdown and score, must equal its original.
@@ -791,7 +792,7 @@ def migrate(credentials_file):
                 "Only an unmodified calculated v1 schema can be migrated in place"
                 if start == 4
                 else "The calculated schema differs from this release; only an unmodified "
-                "calculated v2 to v9 schema can be migrated in place"
+                "calculated v2 to v10 schema can be migrated in place"
             )
         checks = {}
         if start == 4:

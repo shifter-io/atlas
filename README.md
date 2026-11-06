@@ -216,6 +216,17 @@ whatever their window, so a run backfilled more than 30 days back is too; a run 
 commits after a build that already recorded a newer run, and that no window holds, is not.
 This module's memos unused for 2 days and the ranges of runs started over 31 days ago are deleted
 once per build transaction.
+Calculated schema v11 (`calculated/migrate_v10_v11.sql`, CALC-PULSE-1a) adds per-hour rollups of
+`run_geo_buckets` (`calculated_geo_hours`, `calculated_geo_rollups`): the incremental calculation
+reads its census-pulse geo rows (geo totals and light-load histograms) from them instead of
+scanning the 30-day window (`calculated/rollups.py`); the full calculation keeps the 30-day query
+as the oracle. Each rollup row sums one hour per product group, location, network, fallback country
+and target. A build writes the hours it reads that have no rollup, and rewrites an hour holding a
+run newer than its rollup (a late run) or a run outside a batch that a batch now owns. An hour a
+window edge falls inside (a cutoff off the hour) is read from `run_geo_buckets`, and pulses that
+ran during a census are subtracted from the rollups when read, so the rows equal the full mode's at
+every cutoff. Rollups of hours over a day older than the window read are deleted. The first
+incremental build after the migration fills the 30 days once, at about the cost of one full read.
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and
