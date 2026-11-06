@@ -128,9 +128,7 @@ async def test_scheduler_records_a_writer_failure_on_close(tmp_path, monkeypatch
 # --- runner.py -------------------------------------------------------------------------------
 
 
-async def test_a_progress_error_of_any_type_is_logged_by_type_and_the_run_goes_on(
-    tmp_path, caplog
-):
+async def test_a_progress_error_of_any_type_is_logged_by_type_and_the_run_goes_on(tmp_path, caplog):
     def progress(counters):
         raise LookupError(SECRET)
 
@@ -184,9 +182,7 @@ async def test_a_failed_database_reopen_of_any_type_keeps_the_release(tmp_path, 
 
 
 @pytest.mark.parametrize("failure", [LookupError, asyncio.CancelledError])
-async def test_a_batch_error_fails_only_that_batch_and_a_cancel_goes_on(
-    tmp_path, caplog, failure
-):
+async def test_a_batch_error_fails_only_that_batch_and_a_cancel_goes_on(tmp_path, caplog, failure):
     caplog.set_level(logging.WARNING)
     node, failed = agent(tmp_path), []
 
