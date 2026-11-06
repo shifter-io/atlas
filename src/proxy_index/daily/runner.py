@@ -172,7 +172,7 @@ async def _retire_recorded(root: Path, spec: CampaignSpec, record, cloud, clock)
     skipped = None
     try:
         await take_in_flight(spec, record, root, cloud, clock)
-    except Exception as error:  # the recorded workers still go
+    except Exception as error:  # boundary: a clean-up guard; the recorded workers still go
         skipped = f"in-flight workers not taken ({type(error).__name__}); recorded ones retired"
     work = HourWork(spec, record, root, cloud, clock)
     for worker in record.droplets:
@@ -241,7 +241,7 @@ async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
             outcome["error"] = type(caught).__name__
     except asyncio.CancelledError:
         outcome["error"] = "cancelled by a signal"
-    except BaseException as caught:  # an interrupt too: the workers still go
+    except BaseException as caught:  # boundary: an interrupt too; re-raised after the clean-up
         error = caught
         outcome["error"] = type(caught).__name__
     return error

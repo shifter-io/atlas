@@ -15,22 +15,24 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from campaign_fakes import CAMPAIGN_PROJECT, CID, FakeDigitalOcean, running
-from campaign_hour_cases import (
-    PRE_CREATE,
-    SCHEDULED,
-    FakeClock,
-    FakeRemote,
-    make_root,
-    make_spec,
+from campaign_hour_cases import PRE_CREATE, FakeClock, FakeRemote, make_root, make_spec
+from daily_cases import (
+    NOW,
+    Borrowed,
+    formulas,
+    hanging_run,
+    hours,
+    in_flight,
+    inputs,
+    removed,
+    template,
 )
-from daily_cases import formulas, hours, template
 from onboarding_round_cases import make
 
 from proxy_index.campaign import launch
 from proxy_index.campaign.collector import Pacing
 from proxy_index.campaign.contracts import (
     WORKER_TAG,
-    HourRecord,
     campaign_tag,
     droplet_name,
     hour_path,
@@ -43,26 +45,6 @@ from proxy_index.cli import main
 from proxy_index.daily.runner import RunError, RunInputs, clean_up, run_hour, time_limit
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.files import lock, read_json
-
-
-def inputs(tmp_path, root, **schedule):
-    return RunInputs(root, formulas(tmp_path, {"shifter": schedule}), start="next-hour")
-
-
-NOW = datetime.fromtimestamp(PRE_CREATE, UTC)
-
-
-class Borrowed:
-    """The test owns the client; run_hour's close is a no-op here."""
-
-    def __init__(self, cloud):
-        self.cloud = cloud
-
-    def __getattr__(self, name):
-        return getattr(self.cloud, name)
-
-    async def close(self):
-        pass
 
 
 async def test_a_failure_after_the_launch_still_removes_every_worker(tmp_path):
@@ -108,18 +90,6 @@ async def test_a_worker_still_tagged_for_the_hour_is_reported_left_over(tmp_path
     async with running(fake) as cloud:
         assert await clean_up(root, spec, cloud, FakeClock(PRE_CREATE)) == ([str(stray)], None)
         assert await clean_up(root, make_spec(synthetic=True), cloud) == ([], None)
-
-
-def in_flight(root, fake, spec):
-    """A recorded worker whose create answered after a crash: its name, but no id yet."""
-    record = HourRecord(CID, 0, SCHEDULED, state="launching")
-    record.traffic[spec.networks[0]] = dict.fromkeys(launch.TRAFFIC_KEYS, 0)
-    name = droplet_name(CID, 0, "lon1", spec.networks[0])
-    record.droplets.append(
-        launch.DropletRecord(spec.networks[0], "lon1", 0, name, attempts=1, requested_at=SCHEDULED)
-    )
-    save_hour(root, record)
-    return fake.add(name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)])
 
 
 async def test_a_worker_whose_create_was_in_flight_is_taken_by_name_and_removed(tmp_path):
@@ -171,24 +141,6 @@ async def test_a_failed_take_of_in_flight_workers_still_retires_the_recorded_one
         left, skipped = await clean_up(root, spec, cloud, FakeClock(PRE_CREATE))
     assert ("droplet", str(recorded)) in fake.deleted and str(recorded) not in left
     assert type(fault).__name__ in skipped and "locked" not in skipped
-
-
-def hanging_run(tmp_path, cloud, clock, after_launch):
-    """Services whose launcher records the hour's workers, then calls `after_launch`."""
-    remote = FakeRemote(clock)
-
-    async def launcher(spec, record, hour_root):
-        await launch.launch_hour(
-            spec, record, hour_root, cloud=cloud, remote_factory=lambda h: remote, clock=clock
-        )
-        await after_launch()
-
-    return lambda hour_root, spec: (Borrowed(cloud), None, launcher, None)
-
-
-def removed(fake, hour_root):
-    ids = [d["droplet_id"] for d in read_json(hour_path(hour_root, 0))["droplets"]]
-    return len(ids) == 2 and all(("droplet", str(i)) in fake.deleted for i in ids)
 
 
 async def test_the_time_limit_stops_a_run_that_never_settles_and_removes_its_workers(tmp_path):

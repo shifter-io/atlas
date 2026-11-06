@@ -1,6 +1,6 @@
 """Shared helpers of the daily test (DAILY-1): formulas, the template campaign and its hours,
-observation chunks and a collected daily test. Offline; no droplet, request or database outside
-the test is touched.
+the runner's inputs and fake services, observation chunks and a collected daily test. Offline;
+no droplet, request or database outside the test is touched.
 """
 
 from __future__ import annotations
@@ -9,16 +9,29 @@ import gzip
 import json
 import shutil
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from campaign_hour_cases import make_root, make_spec
+from campaign_fakes import CID
+from campaign_hour_cases import PRE_CREATE, SCHEDULED, FakeRemote, make_root, make_spec
 from helpers import FakeTransport
 from onboarding_round_cases import make
 from test_onboarding import ROOT, START, Clock, Proxy
 
 from proxy_index import RunConfig, run
-from proxy_index.campaign.contracts import spec_path
+from proxy_index.campaign import launch
+from proxy_index.campaign.contracts import (
+    WORKER_TAG,
+    HourRecord,
+    campaign_tag,
+    droplet_name,
+    hour_path,
+    hour_tag,
+    spec_path,
+)
+from proxy_index.campaign.tick import save_hour
+from proxy_index.daily.runner import RunInputs
 from proxy_index.onboarding import manifest as campaign
+from proxy_index.onboarding.files import read_json
 from proxy_index.onboarding.rounds import execute_round
 
 SCHEDULES = {
@@ -86,3 +99,53 @@ async def daily_root(tmp_path):
 
     await execute_round(path, "tor1", 0, Proxy, clock=clock, run_country=measure)
     return root
+
+
+def inputs(tmp_path, root, **schedule):
+    return RunInputs(root, formulas(tmp_path, {"shifter": schedule}), start="next-hour")
+
+
+NOW = datetime.fromtimestamp(PRE_CREATE, UTC)
+
+
+class Borrowed:
+    """The test owns the client; run_hour's close is a no-op here."""
+
+    def __init__(self, cloud):
+        self.cloud = cloud
+
+    def __getattr__(self, name):
+        return getattr(self.cloud, name)
+
+    async def close(self):
+        pass
+
+
+def in_flight(root, fake, spec):
+    """A recorded worker whose create answered after a crash: its name, but no id yet."""
+    record = HourRecord(CID, 0, SCHEDULED, state="launching")
+    record.traffic[spec.networks[0]] = dict.fromkeys(launch.TRAFFIC_KEYS, 0)
+    name = droplet_name(CID, 0, "lon1", spec.networks[0])
+    record.droplets.append(
+        launch.DropletRecord(spec.networks[0], "lon1", 0, name, attempts=1, requested_at=SCHEDULED)
+    )
+    save_hour(root, record)
+    return fake.add(name, [WORKER_TAG, campaign_tag(CID), hour_tag(CID, 0)])
+
+
+def hanging_run(tmp_path, cloud, clock, after_launch):
+    """Services whose launcher records the hour's workers, then calls `after_launch`."""
+    remote = FakeRemote(clock)
+
+    async def launcher(spec, record, hour_root):
+        await launch.launch_hour(
+            spec, record, hour_root, cloud=cloud, remote_factory=lambda h: remote, clock=clock
+        )
+        await after_launch()
+
+    return lambda hour_root, spec: (Borrowed(cloud), None, launcher, None)
+
+
+def removed(fake, hour_root):
+    ids = [d["droplet_id"] for d in read_json(hour_path(hour_root, 0))["droplets"]]
+    return len(ids) == 2 and all(("droplet", str(i)) in fake.deleted for i in ids)

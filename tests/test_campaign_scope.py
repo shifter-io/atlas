@@ -2,7 +2,7 @@
 
 The fake account is seeded like the real one: 1,125 production droplets in other projects, plus
 every near-miss of our ownership markers. Every destructive path runs against it. This file and
-tests/test_campaign_api.py must keep scope.py and do_api.py at 100% line and branch coverage
+tests/test_campaign_api*.py must keep scope.py and do_api.py at 100% line and branch coverage
 (`test_scope_coverage_gate`).
 """
 
@@ -1031,7 +1031,7 @@ def test_scope_coverage_gate(tmp_path):
             "no:cacheprovider",
             "-q",
             __file__,
-            str(Path(__file__).with_name("test_campaign_api.py")),
+            *map(str, sorted(Path(__file__).parent.glob("test_campaign_api*.py"))),
             str(Path(__file__).with_name("test_campaign_unassigned.py")),
             str(Path(__file__).with_name("test_campaign_assign_race.py")),
             str(Path(__file__).with_name("test_campaign_pulse_role.py")),
