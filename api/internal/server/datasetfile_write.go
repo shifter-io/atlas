@@ -24,7 +24,8 @@ import (
 // window. Its encoder state is about 110 MB whatever the file's size; the
 // 16 MB window the in-memory dataset used needs about 330 MB and gave no
 // smaller file on the QA-1 dataset. Quality 10 would take minutes of CPU
-// every hour at the 0.5 GB a v4 file reaches (contract K11).
+// every hour at the 0.5 GB a v4 file reached with every list row (contract
+// K11, before DATASET-SIZE-2).
 var datasetBrotli = brotli.WriterOptions{Quality: 5, LGWin: 22}
 
 // datasetGzipLevel is the dataset file's gzip level, for the same reason.

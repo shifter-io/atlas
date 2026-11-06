@@ -379,7 +379,7 @@ func (b *builder) assemble() error {
 	}
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	ds.Pages = datasetPages(res.Pages)
-	ds.Lists = datasetLists(res.Pages, s, b.entries, in.Snapshot)
+	ds.Lists = datasetLists(res.Pages, s, b.entries)
 	res.Search = buildSearchIndex(b.leader, ds.Targets, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, b.records)
 	return nil
