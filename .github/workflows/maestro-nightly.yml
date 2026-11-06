@@ -16,7 +16,7 @@ env:
   PIP_AUDIT_VERSION: 2.9.0
 jobs:
   audit:
-    runs-on: [self-hosted, ci-2cpu]
+    runs-on: [self-hosted, ci-32cpu]
     timeout-minutes: 15
     defaults:
       run:
