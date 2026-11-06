@@ -105,6 +105,23 @@ def load_inventory(path: Path) -> dict:
     return data["servers"]
 
 
+def _health(state: dict, service: dict, age: float, lagging: bool, elapsed: float) -> str:
+    """A node's lifecycle, unless an unfinished one has a dead service, an old heartbeat, an
+    unfinished earlier round or a probe running past an hour."""
+    lifecycle = state["status"]
+    if lifecycle in ("completed", "closed", "cancelled", "stopped", "failed"):
+        return lifecycle
+    if service and service.get("ActiveState") not in ("active", "activating"):
+        return "failed"
+    if age > 20:
+        return "stale"
+    if lagging:
+        return "behind"
+    if state.get("kind") == "probe" and elapsed > 3600:
+        return "over_hour"
+    return lifecycle
+
+
 def classify(data: dict, now: float) -> dict:
     if data.get("error"):
         return data | {"health": "unreachable"}
@@ -139,20 +156,8 @@ def classify(data: dict, now: float) -> dict:
         jobs
         and any(j["status"] in ("pending", "running") and j["round"] < eligible_round for j in jobs)
     )
-    health = lifecycle
-    terminal = lifecycle in ("completed", "closed", "cancelled", "stopped", "failed")
-    service = data.get("service", {})
-    if not terminal:
-        if service and service.get("ActiveState") not in ("active", "activating"):
-            health = "failed"
-        elif age > 20:
-            health = "stale"
-        elif lagging:
-            health = "behind"
-        elif state.get("kind") == "probe" and elapsed > 3600:
-            health = "over_hour"
     data.update(
-        health=health,
+        health=_health(state, data.get("service", {}), age, lagging, elapsed),
         heartbeat_age_seconds=round(age, 1),
         elapsed_seconds=round(elapsed, 2),
         behind=lagging,

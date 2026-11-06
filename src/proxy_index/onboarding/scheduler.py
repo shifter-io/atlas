@@ -419,19 +419,30 @@ async def _drive(context: JobContext) -> dict:
     return result
 
 
+@dataclass(frozen=True)
+class RegionOptions:
+    """execute()'s command-line choices; a ``None`` setting keeps the campaign's (or checkpoint's).
+
+    ``resume`` continues an existing region checkpoint; without it one must not exist.
+    """
+
+    concurrency: int | None = None
+    processes: int | None = None
+    request_timeout: float | None = None
+    resume: bool = False
+
+
 async def execute(
     manifest_path: Path,
     region: str,
     proxy_factory: Callable,
+    options: RegionOptions | None = None,
     *,
-    concurrency: int | None = None,
-    processes: int | None = None,
-    request_timeout: float | None = None,
-    resume: bool = False,
     stop: asyncio.Event | None = None,
     clock=None,
     run_country=run,
 ) -> dict:
+    options = options or RegionOptions()
     manifest = load(manifest_path)
     if manifest["schema_version"] == 3:
         raise ValueError("Ephemeral campaigns run one round per node; use 'onboarding round'")
@@ -444,11 +455,11 @@ async def execute(
     stop = stop if stop is not None else asyncio.Event()
     end = moment(regional_window(manifest, region)["ends_at"]).timestamp()
     with lock(directory / ".lock"):
-        state = _read_checkpoint(state_path, manifest, region, resume)
+        state = _read_checkpoint(state_path, manifest, region, options.resume)
         overrides = (
-            ("concurrency", concurrency),
-            ("timeout_seconds", request_timeout),
-            ("processes", processes),
+            ("concurrency", options.concurrency),
+            ("timeout_seconds", options.request_timeout),
+            ("processes", options.processes),
         )
         effective = _region_settings(effective, state, overrides)
         if state is None:

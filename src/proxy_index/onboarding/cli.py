@@ -18,7 +18,7 @@ from .export import export_campaign
 from .files import digest, read_json
 from .manifest import create, load
 from .rounds import RoundRefused, execute_round, verify_round
-from .scheduler import execute, status, validate_state
+from .scheduler import RegionOptions, execute, status, validate_state
 
 
 def register(commands):
@@ -161,10 +161,12 @@ async def _run(args):
             args.manifest,
             args.region,
             proxies.__getitem__,
-            concurrency=args.concurrency,
-            processes=args.processes,
-            request_timeout=args.timeout,
-            resume=args.resume,
+            RegionOptions(
+                concurrency=args.concurrency,
+                processes=args.processes,
+                request_timeout=args.timeout,
+                resume=args.resume,
+            ),
             stop=stop,
         )
         print(json.dumps(result, allow_nan=False))
@@ -211,7 +213,7 @@ def _verify_round(args) -> int:
 
 
 async def _probe(args):
-    from .probe import execute_probe
+    from .probe import ProbeOptions, execute_probe
 
     proxy = load_provider(
         args.provider_config,
@@ -225,11 +227,13 @@ async def _probe(args):
             proxy,
             args.region,
             args.country,
-            concurrency=args.concurrency,
-            processes=args.processes,
-            request_timeout=args.timeout,
-            start=args.start,
-            max_seconds=args.max_seconds,
+            ProbeOptions(
+                concurrency=args.concurrency,
+                processes=args.processes,
+                request_timeout=args.timeout,
+                start=args.start,
+                max_seconds=args.max_seconds,
+            ),
             stop=stop,
         )
         print(json.dumps(result, allow_nan=False))

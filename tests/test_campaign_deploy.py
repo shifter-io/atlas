@@ -43,7 +43,7 @@ from campaign_deploy_fakes import (
 from campaign_fakes import CAMPAIGN_PROJECT, TOKEN, FakeDigitalOcean, Fault, running
 
 from proxy_index.campaign import cli as campaign_cli
-from proxy_index.campaign import deploy, ops_api, planspec
+from proxy_index.campaign import deploy, ops_api, planspec, teardown
 from proxy_index.campaign.contracts import (
     MANAGER_TAG,
     WORKER_TAG,
@@ -973,8 +973,9 @@ def test_the_manager_cli_routes_each_step(monkeypatch, capsys, tmp_path, argv, c
 
         return step
 
-    for name in ("upload_spec", "enable", "disable", "allow_me", "teardown", "deploy"):
-        monkeypatch.setattr(deploy, name, stub(name, {"clean": name != "teardown"}))
+    for name in ("upload_spec", "enable", "disable", "allow_me", "deploy"):
+        monkeypatch.setattr(deploy, name, stub(name, {"clean": True}))
+    monkeypatch.setattr(teardown, "teardown", stub("teardown", {"clean": False}))
     monkeypatch.setattr(deploy, "mac_ipv4", lambda: OTHER_IP)
     monkeypatch.setattr(deploy, "credential_files", lambda path, nets: {n: b"" for n in nets})
     monkeypatch.setattr("proxy_index.campaign.image.ensure_mac_key", lambda path: path)
