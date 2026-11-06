@@ -23,6 +23,7 @@ from proxy_index.calculated.aggregate import (
     timed,
     under_load,
 )
+from proxy_index.calculated.latency import blend_mean
 from proxy_index.calculated.policy import events, load, slot_settings
 from proxy_index.stats import Histogram
 
@@ -81,6 +82,15 @@ def test_blend_normalises_each_slot_and_never_averages_percentiles():
     assert blend([]) == dict.fromkeys(("p50", "p90", "p95", "p99"))
 
 
+def test_blend_mean_weighs_each_histogram_the_same():
+    one = Counter({100: 99, 1000: 1})
+    assert blend_mean([one]) == Histogram(one).mean() == 109.0
+    # Means 100, 900 and 300 ms, whatever their volumes: (100 + 900 + 300) / 3.
+    three = [Counter({100: 1000}), Counter({900: 40}), Counter({200: 1, 400: 1})]
+    assert blend_mean(three) == 433.3
+    assert blend_mean([]) is None and blend_mean([Counter()]) is None
+
+
 def test_success_rate_is_the_mean_of_time_slots():
     rows = [
         row(T, 100, n=1000, successes=1000),  # a census-sized slot, all good
@@ -121,6 +131,7 @@ def test_light_load_latency_is_per_target_and_equal_weight():
     both = timed(rows, 24, 30)
     assert both["time_slots"]["latency_targets"] == ["generic_http", "generic_https"]
     assert both["latency_ms"]["p50"] == 800 and both["latency_ms"]["p90"] == 1600
+    assert both["latency_ms"]["mean"] == 1200.0  # equal weight, not 1,028.6 by request
     assert timed(rows[:1], 24, 30)["latency_ms"]["p50"] == 800
     assert timed(rows[1:], 24, 30)["latency_ms"]["p50"] == 1600
 
