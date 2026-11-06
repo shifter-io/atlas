@@ -11,6 +11,7 @@ from test_storage import ALL_ATTRIBUTES, enrichment, measurement
 from proxy_index.calculated import store
 from proxy_index.calculated.aggregate import pool_lists
 from proxy_index.calculated.calculator import calculate
+from proxy_index.calculated.incremental import Inputs
 from proxy_index.calculated.policy import load
 from proxy_index.models import Outcome
 from proxy_index.storage import connect, ingest
@@ -19,6 +20,19 @@ POLICY = Path("configs/methodology.toml")
 # A 5-minute bucket edge for runs on fixed clocks (spread()).
 EDGE = datetime(2026, 10, 1, 12, 5, tzinfo=UTC)
 MINUTE = timedelta(minutes=1)
+
+
+def build_inputs(runs, buckets, observations, evidence, as_of):
+    """build()'s Inputs of these rows at as_of: no release and no scheduled inputs."""
+    return Inputs(
+        runs=runs,
+        buckets=buckets,
+        source=observations,
+        evidence=evidence,
+        as_of=as_of,
+        release=None,
+        scheduled={},
+    )
 
 
 def ready_inputs(products=(1, 2)):

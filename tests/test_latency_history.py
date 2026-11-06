@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from calculated_cases import ready_inputs
+from calculated_cases import build_inputs, ready_inputs
 
 from proxy_index.calculated.calculator import build
 from proxy_index.calculated.latency import LATENCY, without_mean
@@ -14,7 +14,7 @@ def test_history_uses_only_http_pulses_and_measured_load_factors():
     config, now, runs, buckets, observations, evidence = ready_inputs(products=(1,))
     # The same-slot fixture has a factor of one. HTTPS must not affect either curve.
     result = build(
-        runs, buckets, observations, evidence, config, digest(config), now, 1, None, None
+        build_inputs(runs, buckets, observations, evidence, now), config, digest(config), 1, None
     )
     window = result["products"][0]["windows"]["24h"]
     measured = [p for p in window["series"] if p["latency_ms"]["p50"] is not None]
@@ -37,15 +37,10 @@ def test_history_uses_only_http_pulses_and_measured_load_factors():
     keys = {r["run_key"] for r in pulse_runs}
     pulse_buckets = [deepcopy(b) for b in buckets if b["run_key"] in keys]
     result = build(
-        pulse_runs,
-        pulse_buckets,
-        observations,
-        evidence,
+        build_inputs(pulse_runs, pulse_buckets, observations, evidence, now),
         config,
         digest(config),
-        now,
         2,
-        None,
         None,
     )
     points = result["products"][0]["windows"]["24h"]["series"]
