@@ -35,6 +35,7 @@ func smallNetBuild(t *testing.T) (*Result, *store.Inputs) {
 // the summary's groups, requested countries and totals, and its provider
 // lists every ASN with IPs, more than 50.
 func TestAV4NetworkAnswerIsItsSummary(t *testing.T) {
+	t.Parallel()
 	res, in := smallNetBuild(t)
 	ans := res.Pages.Network["net00/residential"]
 	if ans == nil || ans.ProductGroups != 3 || strings.Join(ans.RequestedCountries, ",") != "AA,AB,AC" {
@@ -89,6 +90,7 @@ func coverageText(r store.NetRow) string {
 // Case 2: the Coverage answer pages every row with IPs, most first, and a
 // search's total and totals equal a brute-force pass (seed recorded).
 func TestTheCoverageAnswer(t *testing.T) {
+	t.Parallel()
 	res, _ := smallNetBuild(t)
 	pg, scope := res.Pages, "net01/residential"
 	c := pg.coverage[listKey{scope, "30d", "coverage"}]
@@ -174,6 +176,7 @@ func same(a, b CoverageRow) bool {
 
 // A Coverage row's IPs follow K8 and a row without IPs is left out.
 func TestCoverageRowsScaleAndSkipEmptyRows(t *testing.T) {
+	t.Parallel()
 	berlin := &store.Place{CountryCode: ptr("DE"), Country: ptr("Germany"), Region: ptr("Berlin"), City: ptr("Berlin")}
 	asn := int64(3320)
 	l, err := store.NewNetList(map[string][]store.NetRow{"city_asn": {
@@ -216,6 +219,7 @@ func netSource(t *testing.T, slug string, cities map[string][2]int64) placeSourc
 // Case 3: a city seen by three networks has their three rows, ranked by IPs
 // and by p50 among networks of the same kind; an unknown key has no page.
 func TestACityPageRanksTheNetworksInIt(t *testing.T) {
+	t.Parallel()
 	pg := &Pages{v4: true, sources: map[placeList][]placeSource{{"30d", "city"}: {
 		netSource(t, "a", map[string][2]int64{"Berlin": {10, 300}, "Potsdam": {99, 10}}),
 		netSource(t, "b", map[string][2]int64{"Berlin": {30, 100}}),
@@ -246,6 +250,7 @@ func TestACityPageRanksTheNetworksInIt(t *testing.T) {
 // Case 4: a country's region list holds every region row of every network
 // in that country, in the order of its city list.
 func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
+	t.Parallel()
 	res, _ := smallNetBuild(t)
 	pg := res.Pages
 	for _, d := range []string{"region", "city"} {
@@ -290,6 +295,7 @@ func TestACountryRegionListHoldsEveryNetworksRows(t *testing.T) {
 // Review N1: a v4 build keeps each list's first page in its own array, never
 // the merged list it was cut from.
 func TestAV4BuildKeepsOnlyItsFirstPages(t *testing.T) {
+	t.Parallel()
 	res, _ := smallNetBuild(t)
 	n := 0
 	for k, l := range res.Pages.lists {

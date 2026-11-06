@@ -232,3 +232,56 @@ def test_cli_node_token_and_dev_bind(database, capsys):
         )
         == 2
     )
+
+
+class _Recorder:
+    def __init__(self):
+        self.schedules = {}
+
+    def add(self, name, job, **schedule):
+        self.schedules[name] = schedule
+
+
+def test_job_table_registers_every_job_with_its_schedule():
+    from types import SimpleNamespace
+
+    from proxy_index.orchestrator import job_table
+
+    scheduler, db = _Recorder(), SimpleNamespace(on_close={})
+    assert jobs.register_jobs is job_table.register_jobs
+    jobs.register_jobs(scheduler, db, "db.toml")
+    minute, aligned = {"every_s": 60}, {"every_s": 60, "aligned": True}
+    assert scheduler.schedules == {
+        "census_plan": aligned,
+        "pulse_plan": aligned,
+        "pulse_evaluate": minute,
+        "reap": minute,
+        "offline": {"every_s": 15},
+        "calculate": minute,
+        "estimates_release": {"every_s": jobs.RELEASE_EVERY_S},
+        "detect": minute,
+        "retention": {"at_utc_minute": 3 * 60 + 17},
+        "archive": {"at_utc_minute": 40},
+        "raw_upload": {"every_s": 300},
+        "reports": {"every_s": 30},
+        "dbip_update": {"at_utc_minute": 5 * 60 + 23},
+        "browser_plan": aligned,
+    }
+    assert list(db.on_close) == ["reports"]
+
+
+@pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])
+def test_the_split_modules_import_in_any_order(first):
+    import subprocess
+    import sys
+
+    code = (
+        f"import proxy_index.orchestrator.{first}\n"
+        "from proxy_index.orchestrator.jobs import register_jobs\n"
+        "from proxy_index.orchestrator.pulse import GRACE, MIN_GAP, open_slot, spread\n"
+        "from proxy_index.orchestrator import job_table, pulse_slots\n"
+        "assert register_jobs is job_table.register_jobs\n"
+        "assert (GRACE, MIN_GAP, open_slot, spread) == (pulse_slots.GRACE, pulse_slots.MIN_GAP,"
+        " pulse_slots.open_slot, pulse_slots.spread)\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=60)

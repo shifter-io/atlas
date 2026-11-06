@@ -1,5 +1,6 @@
 """Shared campaign data for the merge, completeness and collect tests: a built campaign of
-2 networks × 2 regions × 3 collected rounds and its ledger helpers. RFC 5737 addresses only.
+2 networks × 2 regions × 3 collected rounds, its ledger helpers and the helpers that remove or
+kill a pulled round. RFC 5737 addresses only.
 
 The test modules load it with `pytest_plugins` after importing its names, so pytest cannot
 rewrite it; it holds no asserts (PYTEST_DONT_REWRITE).
@@ -14,6 +15,7 @@ import pytest
 from test_onboarding import ROOT, START, Clock
 from test_onboarding_round import census, measurement
 
+from proxy_index.campaign import merge
 from proxy_index.campaign.contracts import (
     CampaignSpec,
     DropletRecord,
@@ -24,8 +26,8 @@ from proxy_index.campaign.contracts import (
 )
 from proxy_index.models import ProxyConfig
 from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.files import atomic_json
-from proxy_index.onboarding.rounds import execute_round
+from proxy_index.onboarding.files import atomic_json, read_json
+from proxy_index.onboarding.rounds import execute_round, round_directory
 
 CID = "20270101t220000z-0123456789ab"
 NETWORKS = ("geonode", "shifter")
@@ -142,7 +144,7 @@ def _cells(status):
     return {(n, r): status for n in NETWORKS for r in REGIONS}
 
 
-# Session scope: both test modules share one build per worker, as before the split.
+# Session scope: the test modules share one build per worker, as before the split.
 @pytest.fixture(scope="session")
 def built(tmp_path_factory):
     """2 networks × 2 regions × 3 collected rounds, one stopped and one failed_ours cell."""
@@ -180,3 +182,33 @@ def finish_day(root: Path) -> None:
     """The rest of the day failed on our side, so every cell is finished."""
     for hour in range(3, 24):
         write_hour(root, hour, _cells("create_failed"))
+
+
+def unpull(root: Path, network: str, region: str, hour: int) -> Path:
+    """Remove a cell's pulled round, as if the harvest never brought it home."""
+    path = merge.manifest_path(root, network)
+    shutil.rmtree(round_directory(path, region, hour))
+    return path
+
+
+def kill_round(root: Path, network: str, region: str, hour: int) -> None:
+    """A round killed during its last country: the 5-second checkpoint still says running."""
+    folder = round_directory(merge.manifest_path(root, network), region, hour)
+    state = read_json(folder / "round.json")
+    last = state["jobs"][-1]
+    for key in (
+        "finished_at",
+        "observations",
+        "duration_seconds",
+        "requests",
+        "errors",
+        "stop_reason",
+    ):
+        last.pop(key)
+    last["status"] = "running"
+    state.update(
+        status="running",
+        active={"round": hour, "country": last["country"], "started_at": last["started_at"]},
+    )
+    atomic_json(folder / "round.json", state)
+    (folder / last["country"].lower() / "summary.json").unlink()

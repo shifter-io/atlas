@@ -126,6 +126,7 @@ func storeTypedRows(t *testing.T, db *testdb.DB, buildID int64, products []map[s
 }
 
 func TestCappedSnapshotServesTheSameProviderAsTheWholeOne(t *testing.T) {
+	t.Parallel()
 	whole, capped, products := snapshotVariants(t)
 	expected := measuredOnly(t, whole)
 	for _, k2 := range []bool{false, true} {

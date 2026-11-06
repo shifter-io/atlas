@@ -9,6 +9,7 @@ import (
 )
 
 func TestMeasuredMarketCombinesLiveNetworksAndKeepsHistoryGaps(t *testing.T) {
+	t.Parallel()
 	fleet := []*entry{
 		{P: &model.Provider{Slug: "first", Source: model.SourceMeasured, PrimaryKind: "residential", Pool: model.PoolStats{UniqueIps24h: 10}, Trust: model.TrustSignals{ResidentialAuthenticity: 0.9}}},
 		{P: &model.Provider{Slug: "second", Source: model.SourceMeasured, PrimaryKind: "residential", Pool: model.PoolStats{UniqueIps24h: 30}, Trust: model.TrustSignals{ResidentialAuthenticity: 1}}},
@@ -48,6 +49,7 @@ func TestMeasuredMarketCombinesLiveNetworksAndKeepsHistoryGaps(t *testing.T) {
 }
 
 func TestMiniChartObservedPeriod(t *testing.T) {
+	t.Parallel()
 	points := []model.SeriesPoint{{T: 100, V: nan}, {T: 20, V: 100}, {T: 15, V: nan}, {T: 10, V: 200}, {T: 0, V: nan}}
 	got := trimUnobserved(points)
 	if len(got) != 3 || got[0].T != 20 || got[2].T != 10 || got[1].V.OK() {

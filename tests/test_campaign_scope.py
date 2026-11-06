@@ -2,7 +2,7 @@
 
 The fake account is seeded like the real one: 1,125 production droplets in other projects, plus
 every near-miss of our ownership markers. Every destructive path runs against it. The scope
-suite (`tests/test_campaign_scope*.py`) and tests/test_campaign_api.py must keep scope.py and
+suite (`tests/test_campaign_scope*.py`) and tests/test_campaign_api*.py must keep scope.py and
 do_api.py at 100% line and branch coverage (`test_scope_coverage_gate`). This file covers
 `guarded_delete`; the client's allowlist, project assignment and the static scans have their own.
 """
@@ -302,7 +302,7 @@ def test_scope_coverage_gate(tmp_path):
             "no:cacheprovider",
             "-q",
             *map(str, sorted(Path(__file__).parent.glob("test_campaign_scope*.py"))),
-            str(Path(__file__).with_name("test_campaign_api.py")),
+            *map(str, sorted(Path(__file__).parent.glob("test_campaign_api*.py"))),
             str(Path(__file__).with_name("test_campaign_unassigned.py")),
             str(Path(__file__).with_name("test_campaign_assign_race.py")),
             str(Path(__file__).with_name("test_campaign_pulse_role.py")),

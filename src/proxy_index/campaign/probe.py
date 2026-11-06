@@ -285,7 +285,7 @@ class Probe:
             await self.measure_all(droplet)
         except asyncio.CancelledError:
             self.result["error"] = "cancelled by a signal"
-        except Exception as error:
+        except Exception as error:  # boundary: any failure is reported; the finally removes
             message = scope.SECRETS.sub("[removed]", str(error))
             self.result["error"] = f"{type(error).__name__}: {message}"[: scope.MESSAGE_LIMIT]
         finally:
@@ -478,7 +478,7 @@ async def release(
         worker.status, worker.destroyed_at = "destroyed", timestamp(datetime.now(UTC).timestamp())
     except scope.OwnershipError:
         worker.status = "destroy_refused"
-    except Exception as error:  # audited by the guard; `campaign probe --remove` retries
+    except Exception as error:  # boundary: audited by the guard; `probe --remove` retries
         worker.status, worker.error_class = "destroy_failed", type(error).__name__
 
 

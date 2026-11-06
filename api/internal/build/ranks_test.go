@@ -72,6 +72,7 @@ func sameRank(a, b model.Rank) bool {
 }
 
 func TestTileRanksMatchADirectRanking(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(2))
 	var entries []*entry
 	for i := 0; i < 10; i++ {
@@ -105,6 +106,7 @@ func TestTileRanksMatchADirectRanking(t *testing.T) {
 }
 
 func TestRankJSON(t *testing.T) {
+	t.Parallel()
 	b, err := json.Marshal(model.TileRanks{Latency: model.Rank{Rank: 2, Peers: 5}})
 	if err != nil {
 		t.Fatal(err)

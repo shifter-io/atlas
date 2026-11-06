@@ -40,7 +40,7 @@ from .contracts import (
     tags,
 )
 from .do_api import CreateError, DigitalOcean
-from .fanout import READY_POLL_SECONDS, start_command
+from .fanout import READY_POLL_SECONDS, RemoteError, start_command
 
 READY_LIMIT_SECONDS = 180
 CREATE_RETRY_SECONDS = 15
@@ -145,7 +145,7 @@ class HourWork:
             worker.status = "destroy_refused"
             self.alert("high", "destroy_refused", worker.name)
             return
-        except Exception as error:  # audited by the guard; the next pass tries again
+        except Exception as error:  # boundary: audited by the guard; the next pass tries again
             worker.status = "destroy_failed"
             worker.error_class = worker.error_class or type(error).__name__
             return
@@ -320,7 +320,7 @@ class _Launch(HourWork):
         try:
             await self._create(workers)
             unassigned = await self._assign(workers)
-        except Exception as error:
+        except Exception as error:  # boundary: an error stays in its region (B1)
             cause = type(error).__name__
             detail = scope.error_detail(
                 self.cloud, [w.droplet_id for w in workers if w.droplet_id], error
@@ -417,7 +417,7 @@ class _Launch(HourWork):
         """Ready, push and arm one confirmed worker; any error fails only this worker."""
         try:
             await self._start(worker)
-        except Exception as error:
+        except Exception as error:  # boundary: an error fails only this worker
             if worker.armed_at is None:  # an armed worker is never start_failed (m10)
                 worker.error_detail = scope.error_detail(self.cloud, [worker.droplet_id], error)
                 await self._fail(worker, "start_failed", type(error).__name__)
@@ -476,7 +476,7 @@ class _Launch(HourWork):
             try:
                 await self.remote.push_start(droplet, payload, command)
                 return True
-            except Exception:
+            except (RemoteError, OSError):  # ssh or its process
                 started = await self._started(droplet)
                 if started is not False:
                     worker.error_class = None if started else "start_unconfirmed"
@@ -487,7 +487,7 @@ class _Launch(HourWork):
         """Whether the round unit was ever started; None when the worker cannot be read."""
         try:
             info = await self.remote.inspect(droplet)
-        except Exception:
+        except (RemoteError, OSError, ValueError):  # ssh, its process, or a reply not JSON
             return None
         unit = (info.get("service") or {}).get("ActiveState", "inactive")
         return "assignment" in info or unit != "inactive"  # the fleet marker, or any unit (m9)

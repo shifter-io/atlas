@@ -55,6 +55,7 @@ func setScore(doc map[string]any, provider, window string, score float64) {
 }
 
 func TestRankingsListEveryNetworkInScoreOrderPerRange(t *testing.T) {
+	t.Parallel()
 	pg := shapePages(t, testscale.Shape{Networks: 3, Countries: 1, Exits: 3, Tail: 5, Unmeasured: 1}, func(doc map[string]any) {
 		setScore(doc, "net01", "24h", 90)
 		setScore(doc, "net02", "24h", 70)
@@ -97,6 +98,7 @@ func TestRankingsListEveryNetworkInScoreOrderPerRange(t *testing.T) {
 }
 
 func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
+	t.Parallel()
 	pg := shapePages(t, testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60}, nil)
 	ans := pg.Network[AllNetworks+"/"+AllNetworks]
 	if ans == nil || pg.Primary[AllNetworks] != AllNetworks || ans.Networks != 2 || ans.ProductGroups != 4 || ans.Network.Slug != AllNetworks {
@@ -135,6 +137,7 @@ func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
 }
 
 func TestWithoutAnEveryGroupFleetTheDistinctFiguresAreNA(t *testing.T) {
+	t.Parallel()
 	pg := shapePages(t, testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 5, NoFleetAll: true}, nil)
 	ans := pg.Network[AllNetworks+"/"+AllNetworks]
 	for _, r := range Ranges {
@@ -159,6 +162,7 @@ func TestWithoutAnEveryGroupFleetTheDistinctFiguresAreNA(t *testing.T) {
 }
 
 func TestANetworkNamedAllHidesTheAggregate(t *testing.T) {
+	t.Parallel()
 	pg := shapePages(t, testscale.Shape{Networks: 1, Countries: 1, Exits: 3, Tail: 5}, nil)
 	if pg.Network["all/all"] == nil {
 		t.Fatal("no aggregate")

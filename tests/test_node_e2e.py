@@ -1,0 +1,281 @@
+"""Node agent: the in-process census + pulse end-to-end run and the operator kill."""
+
+import asyncio
+import os
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from aiohttp.test_utils import TestServer
+from helpers import server
+from node_cases import RotatingGateway
+from orchestrator_cases import prepare, query
+
+from proxy_index import __version__
+from proxy_index.models import ProxyConfig
+from proxy_index.node import NodeAgent
+from proxy_index.orchestrator import batches
+from proxy_index.orchestrator.app import build_app
+from proxy_index.orchestrator.db import Database, put_setting
+from proxy_index.orchestrator.nodes import issue_token
+from proxy_index.storage import connect
+
+pytest_plugins = ["test_storage"]
+
+BERLIN = {
+    "matched": True,
+    "country_code": "DE",
+    "country": "Germany",
+    "region_code": "BE",
+    "region": "Berlin",
+    "city": "Berlin",
+    "latitude": 52.52,
+    "longitude": 13.4,
+    "isp": "Telekom",
+    "organization": None,
+    "asn": 3320,
+    "asn_organization": "DTAG",
+    "connection_type": "Cable/DSL",
+    "usage_type": "residential",
+}
+
+
+class GeoEnricher:
+    release = {
+        "file": "fixture.mmdb",
+        "sha256": "cd" * 32,
+        "database_type": "DBIP-Full",
+        "build_epoch": 1000,
+        "built_at": "1970-01-01T00:16:40+00:00",
+    }
+
+    def lookup(self, address):
+        return dict(BERLIN)
+
+
+async def wait_for(predicate, limit=60.0):
+    deadline = asyncio.get_running_loop().time() + limit
+    while not predicate():
+        if asyncio.get_running_loop().time() > deadline:
+            raise TimeoutError("condition not reached")
+        await asyncio.sleep(0.1)
+
+
+@pytest.fixture
+async def orchestrator(database):
+    db = Database(database)
+    test_server = TestServer(build_app(database, with_scheduler=False, db=db))
+    await test_server.start_server()
+    yield db, str(test_server.make_url(""))
+    await test_server.close()
+    await db.close()
+
+
+def agents_for(base, tokens, port, tmp_path, **options):
+    return [
+        NodeAgent(
+            base,
+            token["token"],
+            provider="fixture",
+            product=token["product"],
+            region="fra1",
+            proxy_factory=lambda cc: ProxyConfig("http", "127.0.0.1", port),
+            work_dir=tmp_path / token["product"],
+            enricher=GeoEnricher(),
+            poll_interval=0.1,
+            heartbeat_interval=0.2,
+            progress_interval=0.05,
+            upload_backoff=0.05,
+            **options,
+        )
+        for token in tokens
+    ]
+
+
+async def test_census_and_pulse_end_to_end(database, orchestrator, tmp_path):
+    db, base = orchestrator
+    now = datetime.now(UTC)
+    prepare(database, ("DE",), DE=(now + timedelta(seconds=1)).time())
+    with connect(database) as conn:
+        conn.execute(
+            "UPDATE targets SET census_concurrency=4,pulse_requests=12,pulse_concurrency=3,"
+            "pulse_enabled=(target_id='generic_http')"
+        )
+    async with db.connection() as conn:
+        for key, value in (
+            ("census.lead_seconds", 1),
+            ("pulse.lead_seconds", 1),
+            ("census.min_sample", 30),
+            ("load.delay_seconds", 1),
+        ):
+            await put_setting(conn, key, value)
+    tokens = [
+        issue_token(database, provider="fixture", product=product, region="fra1")
+        for product in ("alpha", "beta")
+    ]
+    # Ten exits: the census stops once successes reach 30 > 2 x 10 unique addresses.
+    gateway = RotatingGateway(lambda n: f"10.0.0.{n % 10 + 1}")
+    async with server(gateway) as port:
+        assert (await batches.census_plan(db, now))["created"] == 1
+        assert (await batches.pulse_plan(db, now))["created"] == 1
+        stop = asyncio.Event()
+        agents = agents_for(base, tokens, port, tmp_path)
+        tasks = [asyncio.create_task(agent.run(stop)) for agent in agents]
+        try:
+            await wait_for(
+                lambda: (
+                    query(
+                        database,
+                        "SELECT count(*) FROM test_batches WHERE status IN ('scheduled','running')",
+                    )[0][0]
+                    == 0
+                )
+            )
+        finally:
+            stop.set()
+            await asyncio.gather(*tasks)
+
+    batches_ = query(database, "SELECT kind,status,start_at FROM test_batches ORDER BY kind")
+    # The pulse slot of the census target adds the load wave in fra1's reference country (DE).
+    assert [b[:2] for b in batches_] == [("census", "done"), ("load", "done"), ("pulse", "done")]
+    runs = query(
+        database,
+        "SELECT b.kind,p.name,r.status,r.stop_reason,r.requests,r.successes,r.unique_ips,"
+        "r.started_at>=b.start_at,r.run_key,r.bytes_down>0 FROM batch_runs r "
+        "JOIN test_batches b USING(batch_id) JOIN products p USING(product_id) ORDER BY 1,2",
+    )
+    census = [run for run in runs if run[0] == "census"]
+    pulse = [run for run in runs if run[0] == "pulse"]
+    load = [run for run in runs if run[0] == "load"]
+    # census_concurrency requests at once, counted like a pulse.
+    assert [(r[1], r[2], r[3], r[4]) for r in load] == [
+        ("alpha", "done", "requests", 4),
+        ("beta", "done", "requests", 4),
+    ]
+    assert [(r[1], r[2], r[3], r[6], r[7]) for r in census] == [
+        ("alpha", "done", "unique_ratio", 10, True),
+        ("beta", "done", "unique_ratio", 10, True),
+    ]
+    # Stopped at the first success past the 30-success sample; in-flight requests finish.
+    assert all(30 <= r[5] <= 33 and r[4] == r[5] for r in census)
+    assert [(r[1], r[2], r[3], r[4], r[7]) for r in pulse] == [
+        ("alpha", "done", "requests", 12, True),
+        ("beta", "done", "requests", 12, True),
+    ]
+    census_keys = sorted(r[8] for r in census)
+    geo = query(
+        database,
+        "SELECT g.run_key,sum(g.completed),min(l.city),min(n.asn) FROM run_geo_buckets g "
+        "JOIN enrichment_location_fields l USING(location_id) JOIN enrichment_network_fields n "
+        "USING(network_id) WHERE g.run_key=ANY(%s) GROUP BY 1 ORDER BY 1",
+        (census_keys,),
+    )
+    assert [(row[0], row[2], row[3]) for row in geo] == [(k, "Berlin", 3320) for k in census_keys]
+    assert [row[1] for row in geo] == [r[4] for r in sorted(census, key=lambda r: r[8])]
+    linked = query(database, "SELECT count(*) FROM test_runs WHERE batch_id IS NOT NULL")
+    assert linked == [(6,)]
+    # Both products started the same census at the same scheduled instant.
+    started = query(
+        database,
+        "SELECT r.started_at FROM batch_runs r JOIN test_batches b "
+        "USING(batch_id) WHERE b.kind='census'",
+    )
+    assert abs((started[0][0] - started[1][0]).total_seconds()) < 1.0
+    events = query(
+        database,
+        "SELECT e.kind,p.name,e.country_code,e.signal,e.data "
+        "FROM test_events e JOIN products p USING(product_id) "
+        "ORDER BY e.kind,p.name",
+    )
+    assert [e[:4] for e in events] == [
+        ("census_finished", "alpha", "DE", 1),
+        ("census_finished", "beta", "DE", 1),
+        ("census_started", "alpha", "DE", 0),
+        ("census_started", "beta", "DE", 0),
+    ]
+    for _, _, _, _, data in events[:2]:
+        assert data["unique_ips"] == 10 and data["region"] == "fra1"
+        assert data["stop_reason"] == "unique_ratio" and data["status"] == "done"
+        assert data["bytes_down"] > 0 and data["duration_s"] > 0
+    assert query(database, "SELECT count(*) FROM test_events") == [(4,)]
+    nodes = query(database, "SELECT status,version,rss_mb IS NOT NULL FROM nodes")
+    assert nodes == [("online", __version__, True)] * 2
+    # Uploaded directories are gone.
+    assert os.listdir(tmp_path / "alpha") == os.listdir(tmp_path / "beta") == []
+
+
+async def kill_open_runs(db):
+    """The operator kill these tests use: every batch and run becomes 'killed'.
+
+    It writes through the async pool. The orchestrator under test shares this event loop, and
+    its transactions hold row locks across awaits (a progress post holds its batch_runs row
+    until its coroutine gets the loop back to commit). A blocking connection waiting for such
+    a lock blocks the loop, so the holder never commits and the wait never ends.
+    """
+    async with db.transaction() as conn:
+        await conn.execute("UPDATE test_batches SET status='killed',finished_at=now()")
+        await conn.execute("UPDATE batch_runs SET status='killed',finished_at=now()")
+
+
+async def test_operator_kill_waits_for_a_transaction_on_the_same_loop(
+    database, orchestrator, monkeypatch
+):
+    db, _ = orchestrator
+    now = datetime.now(UTC)
+    prepare(database, ("DE",), DE=now.time())
+    async with db.connection() as conn:
+        await put_setting(conn, "census.lead_seconds", 0)
+    issue_token(database, provider="fixture", product="alpha", region="fra1")
+    await batches.census_plan(db, now)
+    assert query(database, "SELECT count(*) FROM test_batches") == [(1,)]
+    # A kill that blocks the loop fails with LockNotAvailable after 5 s instead of hanging
+    # until the pytest timeout.
+    monkeypatch.setenv("PGOPTIONS", "-c lock_timeout=5s")
+    locked = asyncio.Event()
+
+    async def orchestrator_transaction():
+        async with db.transaction() as conn:
+            await conn.execute("SELECT 1 FROM test_batches FOR UPDATE")
+            locked.set()
+            # The lock is released only when this coroutine runs again.
+            await asyncio.sleep(0.2)
+
+    holder = asyncio.create_task(orchestrator_transaction())
+    await asyncio.wait_for(locked.wait(), 10)
+    await asyncio.wait_for(kill_open_runs(db), 10)
+    await holder
+    statuses = query(database, "SELECT DISTINCT status FROM test_batches")
+    assert statuses == [("killed",)]
+
+
+async def test_operator_kill_stops_and_discards_the_run(database, orchestrator, tmp_path):
+    db, base = orchestrator
+    now = datetime.now(UTC)
+    prepare(database, ("DE",), DE=now.time())
+    with connect(database) as conn:
+        conn.execute("UPDATE targets SET census_concurrency=2,pulse_enabled=false")
+    async with db.connection() as conn:
+        await put_setting(conn, "census.lead_seconds", 0)
+    token = issue_token(database, provider="fixture", product="alpha", region="fra1")
+    # Every exit is new, so the census would never stop by itself.
+    gateway = RotatingGateway(lambda n: f"10.{n // 65536 % 256}.{n // 256 % 256}.{n % 256}")
+    async with server(gateway) as port:
+        await batches.census_plan(db, now)
+        stop = asyncio.Event()
+        (agent,) = agents_for(base, [token], port, tmp_path)
+        task = asyncio.create_task(agent.run(stop))
+        try:
+            # Kill only once a progress post has recorded requests for the run.
+            await wait_for(
+                lambda: (
+                    gateway.served > 20
+                    and query(database, "SELECT requests>0 FROM batch_runs") == [(True,)]
+                )
+            )
+            await kill_open_runs(db)
+            await wait_for(lambda: not agent.active)
+        finally:
+            stop.set()
+            await task
+    assert query(database, "SELECT count(*) FROM test_runs") == [(0,)]
+    assert query(database, "SELECT status,requests>0 FROM batch_runs") == [("killed", True)]
+    assert os.listdir(tmp_path / "alpha") == []

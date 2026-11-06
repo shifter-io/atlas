@@ -10,7 +10,7 @@ from orchestrator_cases import bearer, prepare, product_id, query
 
 from proxy_index.orchestrator import app as app_module
 from proxy_index.orchestrator import batches, nodework
-from proxy_index.orchestrator.admin import routes, views, writers
+from proxy_index.orchestrator.admin import routes, views_dashboard, writers
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.db import Database
 from proxy_index.orchestrator.nodes import issue_token
@@ -91,7 +91,9 @@ async def plan_pulses(db, monkeypatch=None):
     step = 30 * 60  # the targets' default pulse_interval_minutes
     await batches.pulse_plan(db, datetime.fromtimestamp(now.timestamp() // step * step, UTC))
     if monkeypatch is not None:
-        monkeypatch.setattr(views, "_now", lambda value=None: (value or now).astimezone(UTC))
+        monkeypatch.setattr(
+            views_dashboard, "_now", lambda value=None: (value or now).astimezone(UTC)
+        )
     return now
 
 
