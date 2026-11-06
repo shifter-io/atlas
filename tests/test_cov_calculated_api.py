@@ -135,8 +135,8 @@ def test_serve_runs_the_app_of_the_database(monkeypatch):
     monkeypatch.setattr(
         api.web, "run_app", lambda application, **options: calls.append((application, options))
     )
-    api.serve("db.toml", "127.0.0.2", 9000)
+    api.serve("db.toml", "192.0.2.10", 9000)
     ((application, options),) = calls
     assert application[api.DATABASE] == "db.toml"
     assert isinstance(application[api.CACHE], Cache)
-    assert options == {"host": "127.0.0.2", "port": 9000, "print": None}
+    assert options == {"host": "192.0.2.10", "port": 9000, "print": None}
