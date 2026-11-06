@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 

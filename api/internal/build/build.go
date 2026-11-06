@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // DatasetSchemaVersion is the Dataset contract version this API implements

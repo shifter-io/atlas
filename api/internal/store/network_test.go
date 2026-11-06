@@ -7,7 +7,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
 func ptr(s string) *string { return &s }

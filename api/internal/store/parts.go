@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/snap"
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/jackc/pgx/v5"
 )
 

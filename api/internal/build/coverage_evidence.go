@@ -1,8 +1,8 @@
 package build
 
 import (
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // addCoverageEvidence gives every measured provider of a build before

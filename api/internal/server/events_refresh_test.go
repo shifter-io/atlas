@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // eventSource is fakeSource with the real fingerprint's events part: the

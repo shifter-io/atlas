@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // Review findings F1 and F2 of API-DATASET-FILE-1. These use only what the

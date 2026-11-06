@@ -1,7 +1,7 @@
 package build
 
 import (
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // EventWindow is one build's events in memory: the newest store.EventWindow rows

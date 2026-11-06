@@ -1,4 +1,4 @@
-module github.com/Zeus-Development/proxy-index-website/api
+module github.com/Zeus-Development/proxy-index/api
 
 go 1.27.1
 

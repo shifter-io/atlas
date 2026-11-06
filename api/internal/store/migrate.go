@@ -30,14 +30,15 @@ type Migration struct {
 
 // commentOnlyEdits lists the earlier checksums of applied migrations whose
 // files later changed in comments only: 0001's header names the Go module path,
-// which moved twice (2026-10-24 and 2026-10-27). A database migrated by an
-// older siteapi carries one of these checksums for the same schema, so it is
-// accepted, and `siteapi migrate` rewrites it to the current one. Never add a
-// checksum here for an SQL change: write a new migration.
+// which moved three times (2026-10-24, 2026-10-27 and 2026-11-06). A database
+// migrated by an older siteapi carries one of these checksums for the same
+// schema, so it is accepted, and `siteapi migrate` rewrites it to the current
+// one. Never add a checksum here for an SQL change: write a new migration.
 var commentOnlyEdits = map[string][]string{
 	"0001_site_schema.sql": {
 		"78404cdaea81a0e58379d7ce47132b8b098f0f6df9c091ce50c7915b57ae8916", // header names ice-zeus/milf-website
 		"8127cc64a2088bbd3667a4a55dee6f66e79b1d0c271354469aadc8e9c84741ec", // header names ice-zeus/proxy-index-website
+		"38700174a7bea7a14b1b8e72351e60ddd010f67987ffbff8ff4871954175f469", // header names Zeus-Development/proxy-index-website
 	},
 }
 

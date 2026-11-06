@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/jsnum"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/model"
+	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 // SearchItem is src/lib/search.ts SearchItem; every field is always written.

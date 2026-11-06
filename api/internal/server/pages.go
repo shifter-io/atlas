@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
 )
 
 // PagesLRU bounds the rendered pages of long place lists kept per version.

@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index-website/api/internal/build"
-	"github.com/Zeus-Development/proxy-index-website/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // versionPath is /v1/version, rendered per Version at LevelFast.
