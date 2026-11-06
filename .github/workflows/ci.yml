@@ -1,5 +1,7 @@
 # The framework's Tier 1 (CAMP-1 PLAN §17), on every ready pull request, every
-# push to main and on owner dispatches. Every event runs every test (CI-ALL-1).
+# merge-queue test and on owner dispatches. main only ever gets what the queue
+# tested, so pushes to main run nothing. Every event runs every test (CI-ALL-1). A
+# queue test compares its merge commit with the queue's base.
 #
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
 # its work in parallel there: the build and lint checks in the background and
@@ -7,7 +9,7 @@
 # (CI-SPEED-1). Pinned tools (uv, CPython, PostgreSQL), the uv cache and the
 # virtualenv persist under $CI_CACHE_DIR/proxy-index/; the checkout is cleaned each
 # run. A job-started hook on the servers refuses every job except the owner's pull
-# requests from this repository's own branches, pushes to main and owner dispatches.
+# requests from this repository's own branches, merge-queue tests and owner dispatches.
 # Draft pull requests run nothing until they are marked ready. A change only to
 # docs/ (except docs/onboarding.html, which a test reads), LICENSE, Markdown outside
 # src/, tests/, scripts/ and configs/ (where Markdown can be a golden) or the API
@@ -18,12 +20,13 @@ name: ci
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches: [main]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  # One group per queue entry (its merge commit), never cancelled.
+  group: ci-${{ github.event_name == 'merge_group' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -50,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The exact head that merges (merges are up to date and head-pinned),
+          # The pull request's exact head, or the queue's merge commit (github.sha),
           # with full history for the diff-based checks.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
@@ -58,7 +61,7 @@ jobs:
 
       - name: What changed
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
         run: |
           # A dispatch has no "before": compare with the parent.
           case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac

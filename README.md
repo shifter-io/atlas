@@ -63,7 +63,7 @@ real database tests: `PG_TEST_ADMIN_FILE=.secrets/postgres-admin.toml uv run --n
 scale benchmark: `uv run --no-editable python scripts/benchmark.py`.
 Tier 1 is the CI check `tier1` (`.github/workflows/ci.yml`) on the exact head: every
 test, database tests included, in parallel on one self-hosted CI server, for every
-ready pull request, every push to `main` and every owner dispatch. Tests
+ready pull request, every merge-queue test and every owner dispatch. Tests
 outside CI run on a disposable test server, never on a workstation. See the HTML guide.
 
 Schema v5 stores each IP once and references it from product membership, history and
