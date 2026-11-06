@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import math
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Protocol
 from urllib.parse import unquote, urlsplit
 
 from .errors import UserError
+from .models_validate import check_limits, normalized_target_url
 from .outcome import from_error
 
 ErrorCode = Literal[
@@ -225,32 +225,6 @@ class RunConfig:
         if self.answer_classes is not None and self.retry_http_469:
             raise ValueError("Answer classes replace retry_http_469; set only one")
 
-    def _check_target_url(self) -> None:
-        if self.target_url is None:
-            return
-        try:
-            expected = {"generic_http": "http", "generic_https": "https"}[self.target]
-            if not isinstance(self.target_url, str) or any(
-                char.isspace() or ord(char) < 32 for char in self.target_url
-            ):
-                raise ValueError
-            url = urlsplit(self.target_url)
-            if (
-                url.scheme != expected
-                or not url.hostname
-                or url.username is not None
-                or url.password is not None
-                or url.fragment
-                or (url.port is not None and not 1 <= url.port <= 65535)
-            ):
-                raise ValueError
-            object.__setattr__(self, "target_url", url.geturl())
-        except (KeyError, ValueError):
-            raise ValueError(
-                "Target URL must match the generic target protocol, "
-                "without credentials or a fragment"
-            ) from None
-
     def _apply_labels(self) -> None:
         metadata = self.proxy.public()
         protocol_of(self.proxy)  # Reject an unknown network test protocol before any traffic.
@@ -262,33 +236,15 @@ class RunConfig:
             if name in metadata:
                 object.__setattr__(self, name, effective)
 
-    def _check_limits(self) -> None:
-        if self.stop_rule not in ("count", "unique_ratio"):
-            raise ValueError("stop_rule must be 'count' or 'unique_ratio'")
-        if self.requests is None and self.stop_rule == "count":
-            raise ValueError("A count stop rule requires a request count")
-        for name in ("requests", "concurrency", "min_sample"):
-            value = getattr(self, name)
-            if value is None and name == "requests":
-                continue
-            if type(value) is not int or value <= 0:
-                raise ValueError(f"{name} must be a positive integer")
-        for name in ("timeout_seconds", "requests_per_second", "stall_seconds"):
-            value = getattr(self, name)
-            if value is None and name in ("timeout_seconds", "stall_seconds"):
-                raise ValueError(f"{name} must be finite and positive")
-            if value is not None and (
-                type(value) not in (float, int) or not math.isfinite(value) or value <= 0
-            ):
-                raise ValueError(f"{name} must be finite and positive")
-
     def __post_init__(self) -> None:
         self._check_policies()
         if type(self.processes) is not int or self.processes < 0:
             raise ValueError("processes must be a nonnegative integer (0 means automatic)")
-        self._check_target_url()
+        if self.target_url is not None:
+            url = normalized_target_url(self.target, self.target_url)
+            object.__setattr__(self, "target_url", url)
         self._apply_labels()
-        self._check_limits()
+        check_limits(self)
 
     def public(self) -> dict[str, Any]:
         # The stop-rule fields are omitted for count runs, so they keep the
