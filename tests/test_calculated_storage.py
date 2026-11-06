@@ -11,7 +11,7 @@ from calculated_cases import POLICY, benchmark_scenario, payload_mismatches
 from psycopg.rows import dict_row
 from test_storage import measurement
 
-from proxy_index.calculated import store
+from proxy_index.calculated import store, store_retention
 from proxy_index.calculated.api import app
 from proxy_index.calculated.calculator import calculate
 from proxy_index.storage import connect, ingest
@@ -174,7 +174,7 @@ def test_score_reasons_split_around_derived_block():
 @pytest.mark.asyncio
 async def test_typed_rows_rebuild_scores_breakdowns_and_cohorts(database, tmp_path, monkeypatch):
     # These assertions read older published builds; retention has its own tests.
-    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
+    monkeypatch.setattr(store_retention, "RETAIN_PER_DAY", 100)
     policy, last, first = await benchmark_scenario(database, tmp_path)
     ready = calculate(database, policy, as_of=last + timedelta(minutes=10), publish=True)
     later = calculate(database, policy, as_of=last + timedelta(days=2), publish=True)
@@ -241,7 +241,7 @@ def test_cohort_criteria_keep_unusual_values(database):
 @pytest.mark.asyncio
 async def test_unpublished_payloads_are_pruned(database, tmp_path, monkeypatch):
     # These assertions read older published builds; retention has its own tests.
-    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
+    monkeypatch.setattr(store_retention, "RETAIN_PER_DAY", 100)
     store.initialize(database)
     d = await measurement(tmp_path, requests=4)
     ingest(d, database)

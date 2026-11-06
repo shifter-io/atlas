@@ -24,7 +24,7 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
   which is a precompressed file on disk (`--files-dir`). Requests never touch the
   database (except an uncommon `/v1/events` filter, see below).
 
-Module: `github.com/Zeus-Development/proxy-index/api`, Go 1.27.
+Module: `github.com/Zeus-Development/proxy-index/api`, Go 1.27.3.
 
 ## Commands
 
