@@ -79,7 +79,9 @@ func answers(t *testing.T, db *testdb.DB, id int64, pages []string) map[string][
 // every-request case and store's TestPartsReadAsTheSinglePayload show those
 // read as the single row does. Each form is stored in its own database and
 // read in its own subtest, both at once (form/whole and form/parts); then
-// the case compares their answers.
+// the case compares their answers. Both databases are made first, so without
+// a database the case skips (testdb.New) before it builds a payload, and never
+// compares the answers of forms that did not run.
 func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -105,6 +107,7 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 			if c.name == "QA-1" && testing.Short() {
 				t.Skip("stores a QA-1-sized build twice")
 			}
+			wholeDB, partsDB := testdb.New(t), testdb.New(t)
 			payload, err := c.payload()
 			if err != nil {
 				t.Fatal(err)
@@ -113,11 +116,11 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 			t.Run("form", func(t *testing.T) {
 				t.Run("whole", func(t *testing.T) {
 					t.Parallel()
-					whole = formAnswers(t, payload, c.single, false, c.pages)
+					whole = formAnswers(t, wholeDB, payload, c.single, false, c.pages)
 				})
 				t.Run("parts", func(t *testing.T) {
 					t.Parallel()
-					parts = formAnswers(t, payload, false, true, c.pages)
+					parts = formAnswers(t, partsDB, payload, false, true, c.pages)
 				})
 			})
 			if t.Failed() {
@@ -135,12 +138,11 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 	}
 }
 
-// formAnswers stores the payload in a database of its own, as one row
+// formAnswers stores the payload in db, a database of its own, as one row
 // (single) or in parts (with sparse, the daily groups' 24-hour series
 // sparse), and returns its answers.
-func formAnswers(t *testing.T, payload []byte, single, sparse bool, pages []string) map[string][32]byte {
+func formAnswers(t *testing.T, db *testdb.DB, payload []byte, single, sparse bool, pages []string) map[string][32]byte {
 	t.Helper()
-	db := testdb.New(t)
 	if single {
 		return answers(t, db, db.Publish(t, payload), pages)
 	}
