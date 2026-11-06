@@ -5,7 +5,9 @@ import os
 import runpy
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import conftest
 import pytest
@@ -204,3 +206,23 @@ def test_tier1_keeps_the_junit_and_reports_each_worker_s_end():
     assert "CI_TIMELINE=1 uv run --no-editable pytest" in tests["run"]
     assert 'scripts/ci/timeline.py "$EV"' in timed["run"]
     assert "${{ runner.temp }}/ev/junit*.xml" in upload["with"]["path"].splitlines()
+
+
+@pytest.mark.no_cover
+def test_a_no_cover_test_runs_without_a_tracer():
+    # In tier1's xdist workers pytest-cov's marker alone left a tracer here (conftest.py).
+    assert sys.gettrace() is None and threading.gettrace() is None
+
+
+def test_conftest_gives_the_tracers_back_after_a_no_cover_call():
+    before = sys.gettrace(), threading.gettrace()
+    call = conftest.pytest_runtest_call(SimpleNamespace(get_closest_marker={"no_cover": 1}.get))
+    next(call)
+    inside = sys.gettrace(), threading.gettrace()
+    with pytest.raises(StopIteration) as done:
+        call.send("outcome")
+    assert inside == (None, None) and done.value.value == "outcome"
+    assert (sys.gettrace(), threading.gettrace()) == before
+    plain = conftest.pytest_runtest_call(SimpleNamespace(get_closest_marker={}.get))
+    next(plain)
+    assert (sys.gettrace(), threading.gettrace()) == before
