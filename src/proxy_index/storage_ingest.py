@@ -1,19 +1,88 @@
-"""The database steps of storage.ingest: each runs inside the one transaction ingest opens."""
+"""The steps of storage.ingest: each database step runs inside the one transaction ingest opens."""
 
 from __future__ import annotations
 
 import gzip
 import ipaddress
 import json
+import math
 import re
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 from psycopg.types.json import Jsonb
 
 from . import names
 from .partitions import partition
 from .storage_read import ENRICHMENT_FIELDS, OUTCOME_KEYS, _digest, _time
+
+ADAPTER = {
+    "adapter": ("adapter", "text"),
+    "version": ("adapter_version", "text"),
+    "pool": ("account_pool", "text"),
+    "parameters": ("parameters", "json"),
+    "session_policy": ("session_policy", "text"),
+    "effective_ttl_seconds": ("ttl_seconds", "integer"),
+    "extra_flags": ("extra_flags", "json"),
+}
+
+
+def column(kind, value):
+    """Return a column value that rebuilds exactly this JSON value, or raise TypeError."""
+    if kind == "json" or value is None:
+        return None if value is None else Jsonb(value)
+    if kind == "text" and type(value) is str:
+        return value
+    if kind == "integer" and type(value) is int and -(2**31) <= value < 2**31:
+        return value
+    # numeric keeps 15 and 15.0 apart; floats printed with a positive exponent would not survive.
+    if kind == "number" and type(value) in (int, float) and math.isfinite(value):
+        if type(value) is int or "e+" not in repr(value):
+            return value if type(value) is int else Decimal(repr(value))
+    raise TypeError(kind)
+
+
+def _take(source, key, kind, row, name):
+    try:
+        row[name] = column(kind, source[key])
+        del source[key]
+    except (KeyError, TypeError):
+        row[name] = None
+
+
+def _profile(definition, provider, product):
+    """Typed pool columns; anything they cannot reproduce stays verbatim in extra."""
+    target, config = dict(definition["target"]), dict(definition["config"])
+    row = {"target_id": target.pop("id")}
+    for key in ("url", "engine", "version"):
+        _take(target, key, "text", row, "target_" + key)
+    for key, value in (("provider", provider), ("product", product), ("target", row["target_id"])):
+        if key in config and config[key] == value:
+            del config[key]
+    for key in ("requested_country", "runner_location"):
+        _take(config, key, "text", row, key)
+    # NULL means absent here; an explicit null stays in extra.
+    row["proxy_protocol"] = (
+        config.pop("proxy_protocol") if type(config.get("proxy_protocol")) is str else None
+    )
+    adapter = config.get("provider_config")
+    typed = {}
+    try:
+        if set(adapter) != {*ADAPTER, "gateway"} or type(adapter["adapter"]) is not str:
+            raise TypeError
+        gateway = adapter["gateway"]
+        if set(gateway) != {"host", "port"}:
+            raise TypeError
+        typed["gateway_host"] = column("text", gateway["host"])
+        typed["gateway_port"] = column("integer", gateway["port"])
+        for key, (name, kind) in ADAPTER.items():
+            typed[name] = column(kind, adapter[key])
+        del config["provider_config"]
+    except (TypeError, AttributeError):
+        typed = dict.fromkeys(["gateway_host", "gateway_port", *(n for n, _ in ADAPTER.values())])
+    extra = {key: value for key, value in (("config", config), ("target", target)) if value}
+    return row | typed | {"extra": Jsonb(extra) if extra else None}
 
 
 def _canonical(value):
