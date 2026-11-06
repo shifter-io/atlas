@@ -45,9 +45,11 @@ keeps running untouched. Details: "Deploy and operating guide" in
 section 6).
 
 - Test servers: Maestro's `maestro-run "<cmd>"` creates a disposable server, syncs the
-  checkout, runs the command and destroys the server. For more than one command, use
-  `do_test_server.py` (Maestro's tools) directly: `create`, `run`, `destroy`, `extend`;
-  `list --project proxy-index` shows what is still up.
+  checkout, runs the command and destroys the server. A server lives for one job:
+  chain every step (the PostgreSQL below, then the tests) in that one command.
+  `do_test_server.py` (Maestro's tools) is what it runs: `exec` is the same job with
+  more options (`--fetch`, `--timeout-minutes`), `destroy` removes a server left by
+  `--keep-on-fail`, and `list --project proxy-index` shows what is still up.
 - A staging manager: `proxy-index campaign manager deploy --environment staging
   --inventory .secrets/campaign-manager-staging.json --mac-key
   ~/.ssh/proxy-index-campaign-staging …`. Staging has its own inventory, its own Mac
