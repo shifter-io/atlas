@@ -8,8 +8,8 @@ artifact (`ci-timing` from ci.yml's tier1, `api-timing` from api.yml) with `gh r
 and prints one line per run: date, commit, test step seconds, suite seconds (pytest, or the
 slowest Go package), test count and the slowest test. Then the tests that appear most often
 in the runs' 20 slowest. A run without the artifact (a docs-only change, a run from before
-CI-TIME-1) is skipped and counted. tier1 runs on pull requests and in the merge queue, never on
-pushes to main: `--event merge_group` shows what landed. Each run costs one `gh` call.
+CI-TIME-1) is skipped and counted. Both workflows run on pull requests and in the merge queue,
+never on pushes to main: `--event merge_group` shows what landed. Each run costs one `gh` call.
 """
 
 import argparse

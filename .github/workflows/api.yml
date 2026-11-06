@@ -1,44 +1,48 @@
-# The API's Tier 1 (api/), on every ready pull request and every push to main
-# that touches api/, the framework's SQL (src/proxy_index/**/*.sql, the schema
-# the database tests load) or this file, and on owner dispatches: gofmt, go vet and the
-# Go tests, database tests included. The commit-message, identity, secret and
-# privacy checks run for every change in ci.yml's tier1.
+# The API's Tier 1 (api/), on every ready pull request that touches api/, the
+# framework's SQL (src/proxy_index/**/*.sql, the schema the database tests load) or
+# this file, on every merge-queue test, nightly and on owner dispatches: gofmt, go vet
+# and the Go tests, database tests included. main only ever gets what the queue
+# tested, so pushes to main run nothing. GitHub ignores paths: for merge_group, so a
+# queue test compares its merge commit with the queue's base and runs the build and
+# tests only when the entry changes those files. The commit-message, identity, secret
+# and privacy checks run for every change in ci.yml's tier1.
 #
-# One job on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu,
-# with all its work in parallel there (CI-SPEED-2): gofmt, go vet and, on main,
-# go test -race without the database in the background, while the Go tests run
-# every package at once (-p = the CPU count) against a throwaway PostgreSQL 17
+# One job on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with
+# all its work in parallel there (CI-SPEED-2): gofmt, go vet and, nightly and on
+# dispatches, go test -race without the database in the background, while the Go tests
+# run every package at once (-p = the CPU count) against a throwaway PostgreSQL 17
 # (the framework CI's pinned build, kept in the server cache) loaded with the
-# framework schema from the same checkout (src/proxy_index). The slowest test runs
-# in its own process beside them, so the rest of its package does not wait for it.
-# When all of that has finished, the cached-answer latency test
-# (TestServeFromDatabase, p99 within 2 ms) runs alone, so no other test shares the
-# CPUs while it measures. Every go test run writes go test -json; then
-# scripts/ci/timing.py writes the 20 slowest tests and subtests and the test steps'
-# time to the job summary and the api-timing artifact (90 days), and fails the job
-# when a test takes 90 s or more or the steps over 240 s (CI-TIME-1). Go, the Go
-# build cache and the module cache live under $CI_CACHE_DIR/<repository name>/,
-# beside tier1's tools (both fill the same
-# PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A
-# job-started hook on the servers refuses every job except the owner's pull
-# requests from this repository's own branches, pushes to main and owner
-# dispatches. Draft pull requests run nothing until they are marked ready; a change
-# whose only API files are Markdown outside api/fixtures/ and no framework SQL
-# skips the build and tests.
+# framework schema from the same checkout (src/proxy_index). The slowest test runs in
+# its own process beside them, so the rest of its package does not wait for it. When
+# all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
+# within 2 ms) runs alone, so no other test shares the CPUs while it measures. Every go
+# test run writes go test -json; then scripts/ci/timing.py writes the 20 slowest tests
+# and subtests and the test steps' time to the job summary and the api-timing artifact
+# (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
+# (CI-TIME-1). Go, the Go build cache and the module cache live under
+# $CI_CACHE_DIR/<repository name>/, beside tier1's tools (both fill the same
+# PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A job-started hook on the servers refuses
+# every job except the owner's pull requests from this repository's own branches,
+# merge-queue tests, schedules on main and owner dispatches. Draft pull requests run
+# nothing until they are marked ready; a change whose only API files are Markdown
+# outside api/fixtures/ and no framework SQL skips the build and tests.
 name: api
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
-  push:
-    branches: [main]
-    paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    # The race run (not a merge gate).
+    - cron: '30 1 * * *'
   workflow_dispatch:
 
 # Its own group: ci.yml's `ci-` group would cancel tier1 in the same repository.
+# One group per queue entry (its merge commit), never cancelled.
 concurrency:
-  group: api-${{ github.event_name == 'push' && github.sha || github.ref }}
+  group: api-${{ github.event_name == 'merge_group' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -75,9 +79,9 @@ jobs:
         name: Changed files
         working-directory: .
         env:
-          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
         run: |
-          # A dispatch has no "before": compare with the parent.
+          # A dispatch or schedule has no "before": compare with the parent.
           case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=HEAD~1 ;; esac
           files=$(git diff --name-only --no-renames "$BASE...HEAD")
           code=false
@@ -93,6 +97,8 @@ jobs:
             esac
           done <<< "$files"
           [ -n "$files" ] || code=true
+          # The nightly race run tests main whatever its last commit changed.
+          [ "$GITHUB_EVENT_NAME" != schedule ] || code=true
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
       - name: Docs-only change
         if: steps.diff.outputs.code != 'true'
@@ -160,8 +166,8 @@ jobs:
         id: tests
         if: steps.diff.outputs.code == 'true'
         env:
-          # The race run, without the database: main only, not a merge gate.
-          RACE: ${{ github.event_name != 'pull_request' }}
+          # The race run, without the database: nightly and on dispatches, not a merge gate.
+          RACE: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         run: |
           EV=$RUNNER_TEMP/ev
           mkdir -p "$EV"

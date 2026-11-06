@@ -21,76 +21,97 @@ async def check(args):
     results = []
     with LocalEnricher(args.mmdb) as enricher:
         for target in ("generic_http", "generic_https"):
-            for country, count in args.country:
-                provider = load_provider(
-                    args.config, credentials_file=args.credentials, parameters={"country": country}
-                )
-                observations = []
-
-                async def observe(ip, timestamp, observations=observations, country=country):
-                    observations.append(
-                        {
-                            "ip": ip,
-                            "requested_country": country,
-                            "observed_at": datetime.fromtimestamp(timestamp, UTC).isoformat(),
-                            "geo": enricher.lookup(ip),
-                        }
-                    )
-
-                sink = JsonSink(output)
-                result = await run(
-                    RunConfig(
-                        target,
-                        provider,
-                        requests=int(count),
-                        concurrency=10,
-                        processes=4,
-                        timeout_seconds=15,
-                    ),
-                    sink,
-                    RunOptions(enricher=enricher, observation_consumer=observe),
-                )
-                path = sink.directory / "observations.jsonl.gz"
-                with gzip.open(path, "wt") as stream:
-                    for row in observations:
-                        stream.write(json.dumps(row, separators=(",", ":")) + "\n")
-                summary = result.to_dict()
-                for artifact in summary["artifacts"].values():
-                    raw = (sink.directory / artifact["file"]).read_bytes()
-                    assert hashlib.sha256(raw).hexdigest() == artifact["sha256"]
-                    assert len(gzip.decompress(raw).splitlines()) == artifact["rows"]
-                assert len(observations) == result.successes
-                countries = Counter(row["geo"]["country_code"] or "unknown" for row in observations)
-                row = {
-                    "run_id": result.run_id,
-                    "target": target,
-                    "requested_country": country,
-                    "port": provider.port,
-                    "requests": summary["completed"],
-                    "successes": result.successes,
-                    "unique_ips": result.unique_ips,
-                    "geo_countries": dict(countries),
-                    "geo_matches": countries[country.upper()],
-                    "errors": result.errors,
-                    "status_codes": result.status_codes,
-                    "directory": str(sink.directory),
-                    "observations_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                }
+            for spec in args.country:
+                row = await check_one(args, output, enricher, target, spec)
                 results.append(row)
-                (output / "validation.json").write_text(
-                    json.dumps(
-                        {
-                            "checked_at": datetime.now(UTC).isoformat(),
-                            "local_only": True,
-                            "config": args.config,
-                            "geolocation_release": enricher.release,
-                            "results": results,
-                        },
-                        indent=2,
-                    )
-                    + "\n"
-                )
+                write_validation(output, args, enricher, results)
                 print(json.dumps(row), flush=True)
+
+
+async def check_one(args, output, enricher, target, spec):
+    """Run one target for one (country, count) pair and return its summary row."""
+    country, count = spec
+    provider = load_provider(
+        args.config, credentials_file=args.credentials, parameters={"country": country}
+    )
+    observations = []
+
+    async def observe(ip, timestamp):
+        observations.append(observation(enricher, ip, timestamp, country))
+
+    sink = JsonSink(output)
+    result = await run(
+        RunConfig(
+            target,
+            provider,
+            requests=int(count),
+            concurrency=10,
+            processes=4,
+            timeout_seconds=15,
+        ),
+        sink,
+        RunOptions(enricher=enricher, observation_consumer=observe),
+    )
+    path = write_observations(sink.directory, observations)
+    summary = result.to_dict()
+    verify_artifacts(sink.directory, summary)
+    assert len(observations) == result.successes
+    countries = Counter(row["geo"]["country_code"] or "unknown" for row in observations)
+    return {
+        "run_id": result.run_id,
+        "target": target,
+        "requested_country": country,
+        "port": provider.port,
+        "requests": summary["completed"],
+        "successes": result.successes,
+        "unique_ips": result.unique_ips,
+        "geo_countries": dict(countries),
+        "geo_matches": countries[country.upper()],
+        "errors": result.errors,
+        "status_codes": result.status_codes,
+        "directory": str(sink.directory),
+        "observations_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def observation(enricher, ip, timestamp, country):
+    return {
+        "ip": ip,
+        "requested_country": country,
+        "observed_at": datetime.fromtimestamp(timestamp, UTC).isoformat(),
+        "geo": enricher.lookup(ip),
+    }
+
+
+def write_observations(directory, observations):
+    path = directory / "observations.jsonl.gz"
+    with gzip.open(path, "wt") as stream:
+        for row in observations:
+            stream.write(json.dumps(row, separators=(",", ":")) + "\n")
+    return path
+
+
+def verify_artifacts(directory, summary):
+    for artifact in summary["artifacts"].values():
+        raw = (directory / artifact["file"]).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == artifact["sha256"]
+        assert len(gzip.decompress(raw).splitlines()) == artifact["rows"]
+
+
+def write_validation(output, args, enricher, results):
+    (output / "validation.json").write_text(
+        json.dumps(
+            {
+                "checked_at": datetime.now(UTC).isoformat(),
+                "local_only": True,
+                "config": args.config,
+                "geolocation_release": enricher.release,
+                "results": results,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 if __name__ == "__main__":

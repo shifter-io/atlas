@@ -70,7 +70,8 @@ to the job summary and keeps them for 90 days as the artifact `ci-timing` (`api-
 it warns when a test takes over 60 s or the step over 90 s, and fails when a test takes
 90 s or more or the step over 240 s (`scripts/ci/timing.py`). The history across runs:
 `python3 scripts/ci/timing_history.py [--workflow api] [--runs 30] [--event merge_group]
-[--branch main]` (one `gh` call per run; `tier1` runs in the queue, not on `main`).
+[--branch BRANCH]` (one `gh` call per run; neither workflow runs on pushes to `main`, so
+`--event merge_group` shows what landed).
 
 Schema v5 stores each IP once and references it from product membership, history and
 versioned enrichment. Lifetime provider overlap is cached and deduplicated across products.
