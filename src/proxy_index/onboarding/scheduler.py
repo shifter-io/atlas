@@ -344,6 +344,82 @@ def _recover_running(state: dict, directory: Path, now: float) -> None:
         )
 
 
+def _read_checkpoint(state_path: Path, manifest: dict, region: str, resume: bool) -> dict | None:
+    """The saved state to resume, or ``None`` for a new region."""
+    if state_path.exists():
+        if not resume:
+            raise ValueError("Region already exists; use --resume")
+        state = read_json(state_path)
+        validate_state(state, manifest, region)
+        return state
+    if resume:
+        raise ValueError("No region checkpoint exists to resume")
+    return None
+
+
+def _region_settings(effective: dict, state: dict | None, overrides: tuple) -> dict:
+    """The checkpoint's settings on resume (else ``effective``) with the command-line overrides."""
+    if state is not None:
+        effective = settings(state["settings"])
+    for key, override in overrides:
+        if override is not None:
+            if state is not None and override != effective[key]:
+                raise ValueError("Resume must preserve the original regional settings")
+            effective[key] = override
+    settings(effective)
+    return effective
+
+
+async def _run_queue(context: JobContext) -> None:
+    """Run each unfinished job at its hour until the region's end or a stop."""
+    state, clock, stop, end = context.state, context.clock, context.stop, context.end
+    for job in state["jobs"]:
+        if job["status"] in TERMINAL:
+            continue
+        scheduled = moment(job["scheduled_at"]).timestamp()
+        while clock.now() < scheduled and clock.now() < end and not stop.is_set():
+            await clock.sleep(min(0.25, scheduled - clock.now(), end - clock.now()))
+            if clock.now() - moment(state["updated_at"]).timestamp() >= 5:
+                context.save()
+        if stop.is_set() or clock.now() >= end:
+            break
+        await run_job(context, job)
+
+
+async def _close_queue(context: JobContext) -> None:
+    """Wait for the region's end once every job is done, then set the final status."""
+    state, clock, stop, end = context.state, context.clock, context.stop, context.end
+    if not stop.is_set() and all(j["status"] in TERMINAL for j in state["jobs"]):
+        state["status"] = "waiting_for_deadline"
+        context.save()
+        while clock.now() < end and not stop.is_set():
+            await clock.sleep(min(0.25, end - clock.now()))
+            if clock.now() - moment(state["updated_at"]).timestamp() >= 5:
+                context.save()
+    expired = clock.now() >= end
+    if expired:
+        for job in state["jobs"]:
+            if job["status"] == "pending":
+                job["status"] = "not_started_deadline"
+    state["status"] = "closed" if expired else "stopped" if stop.is_set() else "completed"
+
+
+async def _drive(context: JobContext) -> dict:
+    """Run the queue to its end; save the region's ``summary.json`` and return its status."""
+    try:
+        await _run_queue(context)
+        await _close_queue(context)
+    except BaseException:
+        context.state["status"] = "failed"
+        context.save()
+        raise
+    context.state["active"] = None
+    context.save()
+    result = status(context.state, context.clock.now())
+    atomic_json(context.directory / "summary.json", result)
+    return result
+
+
 async def execute(
     manifest_path: Path,
     region: str,
@@ -369,26 +445,13 @@ async def execute(
     stop = stop if stop is not None else asyncio.Event()
     end = moment(regional_window(manifest, region)["ends_at"]).timestamp()
     with lock(directory / ".lock"):
-        if state_path.exists():
-            if not resume:
-                raise ValueError("Region already exists; use --resume")
-            state = read_json(state_path)
-            validate_state(state, manifest, region)
-            effective = settings(state["settings"])
-        else:
-            if resume:
-                raise ValueError("No region checkpoint exists to resume")
-            state = None
-        for key, override in (
+        state = _read_checkpoint(state_path, manifest, region, resume)
+        overrides = (
             ("concurrency", concurrency),
             ("timeout_seconds", request_timeout),
             ("processes", processes),
-        ):
-            if override is not None:
-                if state is not None and override != effective[key]:
-                    raise ValueError("Resume must preserve the original regional settings")
-                effective[key] = override
-        settings(effective)
+        )
+        effective = _region_settings(effective, state, overrides)
         if state is None:
             state = new_state(manifest, region, effective)
         if state["status"] in ("completed", "closed"):
@@ -419,37 +482,4 @@ async def execute(
             end,
             end,
         )
-        try:
-            for job in state["jobs"]:
-                if job["status"] in TERMINAL:
-                    continue
-                scheduled = moment(job["scheduled_at"]).timestamp()
-                while clock.now() < scheduled and clock.now() < end and not stop.is_set():
-                    await clock.sleep(min(0.25, scheduled - clock.now(), end - clock.now()))
-                    if clock.now() - moment(state["updated_at"]).timestamp() >= 5:
-                        save()
-                if stop.is_set() or clock.now() >= end:
-                    break
-                await run_job(context, job)
-            if not stop.is_set() and all(j["status"] in TERMINAL for j in state["jobs"]):
-                state["status"] = "waiting_for_deadline"
-                save()
-                while clock.now() < end and not stop.is_set():
-                    await clock.sleep(min(0.25, end - clock.now()))
-                    if clock.now() - moment(state["updated_at"]).timestamp() >= 5:
-                        save()
-            expired = clock.now() >= end
-            if expired:
-                for job in state["jobs"]:
-                    if job["status"] == "pending":
-                        job["status"] = "not_started_deadline"
-            state["status"] = "closed" if expired else "stopped" if stop.is_set() else "completed"
-        except BaseException:
-            state["status"] = "failed"
-            save()
-            raise
-        state["active"] = None
-        save()
-        result = status(state, clock.now())
-        atomic_json(directory / "summary.json", result)
-        return result
+        return await _drive(context)
