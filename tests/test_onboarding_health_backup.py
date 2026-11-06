@@ -1,13 +1,18 @@
+import json
+import shutil
+import subprocess
 from copy import deepcopy
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from test_onboarding import START
 from test_onboarding_sequential import ORDER, make
 
+from proxy_index.onboarding import backup
 from proxy_index.onboarding import manifest as campaign
-from proxy_index.onboarding.backup import tree_inventory, verify_region
-from proxy_index.onboarding.files import atomic_json
+from proxy_index.onboarding.backup import collect_region, tree_inventory, verify_region
+from proxy_index.onboarding.files import atomic_json, read_json
 from proxy_index.onboarding.health import audit
 from proxy_index.onboarding.scheduler import job_directory, new_state
 
@@ -44,6 +49,47 @@ def test_audit_missed_jobs_and_dead_heartbeat(tmp_path):
     issues = {a["issue"] for a in audit(m, snap, now)["alerts"]}
     assert {"region_not_complete_at_deadline", "stale_heartbeat", "scheduler_not_running"} <= issues
     assert not audit(m, snap, now)["measurement_complete"]
+
+
+def test_audit_reports_each_regional_alert_in_order(tmp_path):
+    m = campaign.load(make(tmp_path, execution_mode="sequential", region_order=ORDER))
+    now = (START + timedelta(hours=3)).timestamp()
+    snap = snapshot(m, now)
+    server = snap["servers"][0]
+    state = server["state"]
+    state["status"] = "failed"
+    state["active"] = {"country": "us"}
+    state["progress"] = {"requests": 2000, "http_469_responses": 100, "successes": 1000}
+    state["jobs"][0]["status"] = "interrupted"
+    server.update(server_time=now + 60, disk_free_gb=1, memory_used_pct=95)
+    snap["servers"][1] = {"region": "tor1", "error": "timeout"}
+    snap["servers"][2]["state"]["campaign_id"] = "another"
+    alerts = audit(m, snap, now)["alerts"]
+
+    def issues(region):
+        return [a for a in alerts if a.get("region") == region]
+
+    assert [a["issue"] for a in issues("nyc3")] == [
+        "scheduler_failed",
+        "clock_offset",
+        "low_disk",
+        "high_memory",
+        "incomplete_jobs",
+        "round_backlog",
+        "http_469_observed",
+        "high_other_error_rate",
+    ]
+    assert issues("nyc3")[6:] == [
+        {"region": "nyc3", "issue": "http_469_observed", "count": 100, "completed_attempts": 2000},
+        {
+            "region": "nyc3",
+            "issue": "high_other_error_rate",
+            "other_errors": 900,
+            "non_469_attempts": 1900,
+        },
+    ]
+    assert [a["issue"] for a in issues("tor1")] == ["unreachable_or_missing_state"]
+    assert [a["issue"] for a in issues(ORDER[2])] == ["campaign_checkpoint_mismatch"]
 
 
 def closed_empty_region(tmp_path):
@@ -102,3 +148,106 @@ def test_remote_tree_checks_only_the_current_unit_name():
         in REMOTE_TREE
     )
     assert REMOTE_TREE.count(".service") == 1
+
+
+INVENTORY = {"servers": {"tor1": {"host": "tor1.test", "root": "/srv", "identity_file": "key"}}}
+
+
+class Transfer:
+    """A fake rsync that copies the fake remote tree into staging, or hangs."""
+
+    calls: list = []
+    source: Path
+    hang = False
+
+    def __init__(self, command, **kwargs):
+        Transfer.calls.append(command)
+        self.staging = command[-1]
+        self.pid, self.returncode = 4242, None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def wait(self, timeout=None):
+        if Transfer.hang and timeout is not None:
+            raise subprocess.TimeoutExpired("rsync", timeout)
+        shutil.copytree(Transfer.source, self.staging, dirs_exist_ok=True)
+        self.returncode = 0
+        return 0
+
+
+def collecting(tmp_path, monkeypatch, returncode=0):
+    """A closed tor1 region kept on a fake remote server, with ssh and rsync replaced."""
+    m, _, directory = closed_empty_region(tmp_path)
+    manifest_path = directory.parent.parent / "campaign.json"
+    remote = Path("/srv/onboarding-networks", m["provider"], m["product"], m["campaign_id"])
+    source = tmp_path / "remote"
+    directory.rename(source)
+    calls = []
+
+    def ssh(command, **kwargs):
+        calls.append(command)
+        stdout = json.dumps(tree_inventory(source))
+        return subprocess.CompletedProcess(command, returncode, stdout, "remote stderr")
+
+    Transfer.calls, Transfer.source, Transfer.hang = [], source, False
+    monkeypatch.setattr(backup.subprocess, "run", ssh)
+    monkeypatch.setattr(backup.subprocess, "Popen", Transfer)
+    atomic_json(tmp_path / "inventory.json", INVENTORY)
+    return manifest_path, directory, remote / "regions" / "tor1", calls
+
+
+def test_collect_region_transfers_verifies_and_publishes(tmp_path, monkeypatch):
+    manifest_path, directory, remote, calls = collecting(tmp_path, monkeypatch)
+    receipt = collect_region(manifest_path, tmp_path / "inventory.json", "tor1")
+    assert receipt["verified_backup"] and receipt["completed_jobs"] == 72
+    assert receipt["directory"] == str(directory) and receipt["remote_originals_preserved"]
+    assert directory.is_dir() and not (manifest_path.parent / "backup/tor1.staging").exists()
+    assert read_json(manifest_path.parent / "backup/tor1.json") == receipt
+    ssh = calls[0]
+    assert ssh[:2] == ["ssh", "-o"] and ssh[-2] == "root@tor1.test"
+    assert ssh[-1].endswith(str(remote))
+    rsync = Transfer.calls[0]
+    assert rsync[-2] == "root@tor1.test:" + str(remote) + "/"
+    assert rsync[-1] == str(manifest_path.parent / "backup/tor1.staging") + "/"
+    log = manifest_path.parent / "backup/tor1-remote.log"
+    assert log.read_text() == "remote stderr"
+    # A second run verifies the published directory and transfers nothing.
+    assert collect_region(manifest_path, tmp_path / "inventory.json", "tor1") == receipt
+    assert len(Transfer.calls) == 1
+
+
+def test_collect_region_refuses_unknown_region_and_failed_remote_check(tmp_path, monkeypatch):
+    manifest_path, *_ = collecting(tmp_path, monkeypatch, returncode=1)
+    with pytest.raises(ValueError, match="Unknown campaign region"):
+        collect_region(manifest_path, tmp_path / "inventory.json", "mars")
+    with pytest.raises(RuntimeError, match="Remote tree check failed"):
+        collect_region(manifest_path, tmp_path / "inventory.json", "tor1")
+    assert not Transfer.calls
+
+
+def test_collect_region_kills_a_hung_transfer_and_keeps_staging(tmp_path, monkeypatch):
+    manifest_path, directory, *_ = collecting(tmp_path, monkeypatch)
+    Transfer.hang = True
+    killed = []
+    monkeypatch.setattr(backup.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    with pytest.raises(RuntimeError, match="Transfer timed out"):
+        collect_region(manifest_path, tmp_path / "inventory.json", "tor1")
+    assert killed == [(4242, backup.signal.SIGTERM), (4242, backup.signal.SIGKILL)]
+    assert (manifest_path.parent / "backup/tor1.staging").is_dir() and not directory.exists()
+
+
+def test_collect_region_keeps_staging_after_an_incomplete_transfer(tmp_path, monkeypatch):
+    manifest_path, directory, *_ = collecting(tmp_path, monkeypatch)
+
+    def wait(self, timeout=None):
+        self.returncode = 23
+        return 23
+
+    monkeypatch.setattr(Transfer, "wait", wait)
+    with pytest.raises(RuntimeError, match="Transfer incomplete"):
+        collect_region(manifest_path, tmp_path / "inventory.json", "tor1")
+    assert (manifest_path.parent / "backup/tor1.staging").is_dir() and not directory.exists()
