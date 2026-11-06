@@ -1003,7 +1003,7 @@ async def test_calculate_is_debounced_until_a_batch_finishes(database, db, monke
         calls.append(argv[-2:])
         return {"snapshot_id": "s1", "as_of": "now"}
 
-    # A stand-in for the subprocess (test_manager_orch runs the real one).
+    # A stand-in for the subprocess (test_manager_orch_serve runs the real one).
     monkeypatch.setattr(jobs, "run_calculation", fake)
     await set_setting(db, "calculate.trigger", "batch")  # the old schedule; hourly is the default
     assert (await calculate(db, database, "m.toml"))["skipped"].startswith("no batch")
