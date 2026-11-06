@@ -8,7 +8,7 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, bytes_io, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, bytes_io, run
 from proxy_index.models import Outcome
 from proxy_index.outcome import (
     CHALLENGE_MARKERS,
@@ -254,8 +254,9 @@ async def test_bytes_counted_for_every_proxy_and_target(tmp_path, scheme, tls):
         result = await run(
             RunConfig(name, proxy, requests=2),
             JsonSink(tmp_path),
-            targets=targets,
-            transport_factory=partial(HttpTransport, ssl_context=tls_client),
+            RunOptions(
+                targets=targets, transport_factory=partial(HttpTransport, ssl_context=tls_client)
+            ),
         )
     assert result.successes == 2
     # Request line + headers up; status line + headers + body down, per request.

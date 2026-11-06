@@ -15,6 +15,7 @@ import os
 import shutil
 import signal
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -541,10 +542,10 @@ async def daily_root(tmp_path):
     spec_path(root).write_text(spec.to_json())
     clock = Clock(START.timestamp())
 
-    async def measure(config, sink, **kwargs):
-        kwargs.pop("deadline")
+    async def measure(config, sink, options):
         config = RunConfig("generic_http", config.proxy, requests=3, concurrency=1)
-        result = await run(config, sink, transport_factory=FakeTransport, **kwargs)
+        options = replace(options, deadline=None, transport_factory=FakeTransport)
+        result = await run(config, sink, options)
         clock.value += 30
         return result
 

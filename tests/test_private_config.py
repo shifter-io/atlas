@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, load_provider, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, load_provider, run
 from proxy_index.cli import main
 from proxy_index.providers.credentials import read_credentials
 from proxy_index.targets import registry
@@ -99,7 +99,7 @@ async def test_url_override_is_per_run_and_recorded(tmp_path, target, scheme):
             "EXAMPLE.TEST/CUSTOM?FORMAT=PLAIN", "example.test/custom?format=plain"
         ),
     )
-    summary = await run(config, JsonSink(tmp_path), transport_factory=InspectTransport)
+    summary = await run(config, JsonSink(tmp_path), RunOptions(transport_factory=InspectTransport))
     assert received == [url, url]
     assert summary.target["url"] == summary.config["target_url"] == url
     assert registry.get(target).url == original

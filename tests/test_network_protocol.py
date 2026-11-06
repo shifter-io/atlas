@@ -11,7 +11,7 @@ import pytest
 import trustme
 from helpers import Gateway, Network, server
 
-from proxy_index import GrammarProxy, JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import GrammarProxy, JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.cli import main
 from proxy_index.providers.grammar import (
     Grammar,
@@ -177,8 +177,9 @@ async def measure(tmp_path, gateway, origin, protocol, url, *, tls_client, **kwa
         return await run(
             RunConfig("generic_http", proxy, **kwargs),
             JsonSink(tmp_path),
-            targets=targets,
-            transport_factory=partial(HttpTransport, ssl_context=tls_client),
+            RunOptions(
+                targets=targets, transport_factory=partial(HttpTransport, ssl_context=tls_client)
+            ),
         )
 
 

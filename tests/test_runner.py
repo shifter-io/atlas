@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 from helpers import FakeTransport
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.models import Outcome
 from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
 from proxy_index.targets import EchoIpTarget, TargetRegistry
@@ -20,7 +20,7 @@ def config(**kwargs):
 async def test_summary_artifacts_and_exact_ip_counts(tmp_path):
     sink = JsonSink(tmp_path)
     result = await run(
-        config(requests=10000, concurrency=31), sink, transport_factory=FakeTransport
+        config(requests=10000, concurrency=31), sink, RunOptions(transport_factory=FakeTransport)
     )
     assert result.status == "completed"
     assert result.completed == result.started == result.successes == 10000
@@ -47,7 +47,7 @@ async def test_failed_requests_are_not_in_latency_or_ips(tmp_path):
                 return Outcome(15000, error="timeout")
             return Outcome(1.2, ip="8.8.8.8", status=200)
 
-    result = await run(config(requests=10), JsonSink(tmp_path), transport_factory=Mixed)
+    result = await run(config(requests=10), JsonSink(tmp_path), RunOptions(transport_factory=Mixed))
     assert result.errors == {"timeout": 5}
     assert result.success_rate == 0.5
     assert result.latency_ms["p99"] == 2
@@ -64,7 +64,7 @@ async def test_task_cancellation_persists_partial_then_propagates(tmp_path):
             await asyncio.sleep(10)
 
     sink = JsonSink(tmp_path)
-    task = asyncio.create_task(run(config(), sink, transport_factory=Slow))
+    task = asyncio.create_task(run(config(), sink, RunOptions(transport_factory=Slow)))
     await entered.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -78,7 +78,9 @@ async def test_task_cancellation_persists_partial_then_propagates(tmp_path):
 async def test_stop_before_first_request(tmp_path):
     stop = asyncio.Event()
     stop.set()
-    result = await run(config(), JsonSink(tmp_path), stop=stop, transport_factory=FakeTransport)
+    result = await run(
+        config(), JsonSink(tmp_path), RunOptions(stop=stop, transport_factory=FakeTransport)
+    )
     assert result.status == "cancelled"
     assert result.started == 0 and result.not_started == 100
     assert result.success_rate is None
@@ -91,7 +93,7 @@ async def test_programming_errors_fail_run_without_leaking_secrets(tmp_path):
 
     sink = JsonSink(tmp_path)
     with pytest.raises(RuntimeError) as exc:
-        await run(config(requests=3), sink, transport_factory=Broken)
+        await run(config(requests=3), sink, RunOptions(transport_factory=Broken))
     assert "secret" not in str(exc.value)
     saved = (sink.directory / "summary.json").read_text()
     assert "secret" not in saved
@@ -109,7 +111,7 @@ async def test_rate_pacing(tmp_path):
     await run(
         config(requests=5, concurrency=3, requests_per_second=20),
         JsonSink(tmp_path),
-        transport_factory=Timed,
+        RunOptions(transport_factory=Timed),
     )
     assert len(starts) == 5
     assert starts[-1] - starts[0] >= 0.18
@@ -130,7 +132,9 @@ async def test_bucket_boundary_is_not_run_start_time(tmp_path, monkeypatch):
             return Outcome(2, ip="8.8.8.8", status=200)
 
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=2, concurrency=1), sink, transport_factory=Advancing)
+    result = await run(
+        config(requests=2, concurrency=1), sink, RunOptions(transport_factory=Advancing)
+    )
     assert result.unique_ips == 1
     assert len(result.buckets) == 2
     with gzip.open(sink.directory / "ips.jsonl.gz", "rt") as stream:
@@ -150,7 +154,7 @@ def test_existing_output_is_not_overwritten(tmp_path):
 async def test_sink_can_be_reused_serially(tmp_path):
     sink = JsonSink(tmp_path)
     for _ in range(2):
-        result = await run(config(requests=2), sink, transport_factory=FakeTransport)
+        result = await run(config(requests=2), sink, RunOptions(transport_factory=FakeTransport))
         assert result.artifacts["ips"]["rows"] == 1
 
 
@@ -161,7 +165,7 @@ async def test_disk_failure_never_publishes_a_complete_summary(tmp_path):
 
     sink = FailingSink(tmp_path)
     with pytest.raises(OSError):
-        await run(config(requests=2), sink, transport_factory=FakeTransport)
+        await run(config(requests=2), sink, RunOptions(transport_factory=FakeTransport))
     assert not (sink.directory / "summary.json").exists()
 
 
@@ -190,7 +194,9 @@ async def test_bucket_export_does_not_block_request_execution(tmp_path, monkeypa
             return Outcome(2, ip="8.8.8.8", status=200)
 
     result = await run(
-        config(requests=3, concurrency=1), WaitingSink(tmp_path), transport_factory=Advancing
+        config(requests=3, concurrency=1),
+        WaitingSink(tmp_path),
+        RunOptions(transport_factory=Advancing),
     )
     assert result.successes == 3
 
@@ -302,7 +308,7 @@ async def test_unique_ratio_after_the_warm_up_sample(tmp_path, scenario, address
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=50),
         JsonSink(tmp_path),
-        transport_factory=factory,
+        RunOptions(transport_factory=factory),
     )
     trace = transports[0].trace
     first = next(
@@ -347,7 +353,7 @@ async def test_min_sample_is_configurable(tmp_path):
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=1, min_sample=10),
         JsonSink(tmp_path),
-        transport_factory=factory,
+        RunOptions(transport_factory=factory),
     )
     assert result.completed == 10 and result.stop_reason == "unique_ratio"
 
@@ -361,7 +367,7 @@ async def test_census_without_any_success_stops_after_1000_completions(tmp_path)
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=10),
         JsonSink(tmp_path),
-        transport_factory=Failing,
+        RunOptions(transport_factory=Failing),
     )
     assert result.stop_reason == "no_success" and result.status == "completed"
     assert 1000 <= result.completed < 1010 and result.completed == result.started
@@ -384,7 +390,7 @@ async def test_census_without_any_success_stops_after_ten_minutes(tmp_path, monk
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=1),
         sink,
-        transport_factory=Hanging,
+        RunOptions(transport_factory=Hanging),
     )
     assert result.stop_reason == "no_success" and result.completed == 40
     # No success, no latency sample: the mean is unknown, never 0.
@@ -408,7 +414,7 @@ async def test_one_success_disarms_the_no_success_guard(tmp_path, monkeypatch):
     result = await run(
         config(requests=60, stop_rule="unique_ratio", concurrency=1),
         JsonSink(tmp_path),
-        transport_factory=LateStart,
+        RunOptions(transport_factory=LateStart),
     )
     # 37 distinct successes, then failures only: neither the ratio nor the
     # guard fires, so the request cap ends the run.
@@ -440,7 +446,7 @@ async def test_census_that_goes_down_stops_as_stalled(tmp_path, monkeypatch):
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=1),
         sink,
-        transport_factory=clocked(monkeypatch, 10),
+        RunOptions(transport_factory=clocked(monkeypatch, 10)),
     )
     # Ten successes (the last at 150 s), then failures until 600 s passed without one.
     assert result.stop_reason == "stalled" and result.status == "completed"
@@ -464,7 +470,7 @@ async def test_stall_seconds_is_configurable(tmp_path, monkeypatch):
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=1, stall_seconds=60),
         JsonSink(tmp_path),
-        transport_factory=clocked(monkeypatch, 10),
+        RunOptions(transport_factory=clocked(monkeypatch, 10)),
     )
     assert result.stop_reason == "stalled" and result.completed == 10 + 4
 
@@ -474,7 +480,7 @@ async def test_no_stall_before_the_first_success(tmp_path, monkeypatch):
     result = await run(
         config(requests=None, stop_rule="unique_ratio", concurrency=1, stall_seconds=30),
         JsonSink(tmp_path),
-        transport_factory=clocked(monkeypatch, 0),
+        RunOptions(transport_factory=clocked(monkeypatch, 0)),
     )
     assert result.stop_reason == "no_success" and result.completed == 40
     assert result.outage_started_at is None
@@ -483,7 +489,9 @@ async def test_no_stall_before_the_first_success(tmp_path, monkeypatch):
 async def test_count_runs_never_stall(tmp_path, monkeypatch):
     sink = JsonSink(tmp_path)
     result = await run(
-        config(requests=60, concurrency=1), sink, transport_factory=clocked(monkeypatch, 1)
+        config(requests=60, concurrency=1),
+        sink,
+        RunOptions(transport_factory=clocked(monkeypatch, 1)),
     )
     assert result.stop_reason == "requests" and result.completed == 60
     saved = json.loads((sink.directory / "summary.json").read_text())
@@ -501,7 +509,7 @@ async def test_unique_ratio_still_honours_a_request_cap(tmp_path):
     result = await run(
         config(requests=30, stop_rule="unique_ratio", concurrency=5),
         JsonSink(tmp_path),
-        transport_factory=lambda cfg: PoolTransport(cfg, address=random_pool(10_000)),
+        RunOptions(transport_factory=lambda cfg: PoolTransport(cfg, address=random_pool(10_000))),
     )
     assert result.completed == 30 and result.stop_reason == "requests"
     assert result.requested == 30 and result.not_started == 0
@@ -515,7 +523,9 @@ async def test_count_rule_stops_at_n(tmp_path):
         return transports[0]
 
     result = await run(
-        config(requests=100, concurrency=25), JsonSink(tmp_path), transport_factory=factory
+        config(requests=100, concurrency=25),
+        JsonSink(tmp_path),
+        RunOptions(transport_factory=factory),
     )
     assert result.completed == result.started == transports[0].count == 100
     assert result.stop_reason == "requests" and result.status == "completed"
@@ -542,7 +552,9 @@ async def test_unique_ratio_requires_a_pool_target(tmp_path):
         "no_ips", ProxyConfig("http", "localhost", 8080), requests=None, stop_rule="unique_ratio"
     )
     with pytest.raises(ValueError, match="pool-eligible"):
-        await run(cfg, JsonSink(tmp_path), targets=targets, transport_factory=FakeTransport)
+        await run(
+            cfg, JsonSink(tmp_path), RunOptions(targets=targets, transport_factory=FakeTransport)
+        )
 
 
 async def test_operator_stop_reason(tmp_path):
@@ -551,8 +563,7 @@ async def test_operator_stop_reason(tmp_path):
     result = await run(
         config(requests=None, stop_rule="unique_ratio"),
         JsonSink(tmp_path),
-        stop=stop,
-        transport_factory=FakeTransport,
+        RunOptions(stop=stop, transport_factory=FakeTransport),
     )
     assert result.stop_reason == "operator" and result.status == "cancelled"
     assert result.requested is None and result.not_started == 0
@@ -565,7 +576,7 @@ async def test_failed_run_stop_reason(tmp_path):
 
     sink = JsonSink(tmp_path)
     with pytest.raises(RuntimeError):
-        await run(config(requests=3), sink, transport_factory=Broken)
+        await run(config(requests=3), sink, RunOptions(transport_factory=Broken))
     assert json.loads((sink.directory / "summary.json").read_text())["stop_reason"] == "error"
 
 
@@ -583,7 +594,9 @@ async def test_summary_keeps_old_keys_and_adds_counters(tmp_path):
             ][(self.count - 1) % 6]
 
     sink = JsonSink(tmp_path)
-    result = await run(config(requests=12, concurrency=1), sink, transport_factory=Mixed)
+    result = await run(
+        config(requests=12, concurrency=1), sink, RunOptions(transport_factory=Mixed)
+    )
     saved = json.loads((sink.directory / "summary.json").read_text())
     assert OLD_SUMMARY_KEYS | NEW_COUNTERS | {"stop_reason", "latency_mean_ms"} == set(saved)
     assert set(saved["latency_ms"]) == {"p50", "p90", "p95", "p99"}
@@ -616,9 +629,7 @@ async def test_progress_is_throttled_and_final(tmp_path):
     result = await run(
         config(requests=60, concurrency=2),
         JsonSink(tmp_path),
-        transport_factory=Slow,
-        progress=progress,
-        progress_interval=0.03,
+        RunOptions(transport_factory=Slow, progress=progress, progress_interval=0.03),
     )
     assert len(calls) >= 3
     assert set(calls[0][1]) == {
@@ -656,18 +667,14 @@ async def test_progress_failure_does_not_end_the_run(tmp_path):
     result = await run(
         config(requests=5),
         JsonSink(tmp_path),
-        transport_factory=FakeTransport,
-        progress=progress,
-        progress_interval=0.001,
+        RunOptions(transport_factory=FakeTransport, progress=progress, progress_interval=0.001),
     )
     assert result.completed == 5 and result.status == "completed"
     with pytest.raises(ValueError):
         await run(
             config(requests=5),
             JsonSink(tmp_path),
-            transport_factory=FakeTransport,
-            progress=progress,
-            progress_interval=0,
+            RunOptions(transport_factory=FakeTransport, progress=progress, progress_interval=0),
         )
 
 
@@ -729,7 +736,9 @@ async def test_geo_rows_per_bucket_location_and_network(tmp_path, monkeypatch):
     enricher = Enricher()
     sink = JsonSink(tmp_path)
     result = await run(
-        config(requests=12, concurrency=1), sink, transport_factory=Script, enricher=enricher
+        config(requests=12, concurrency=1),
+        sink,
+        RunOptions(transport_factory=Script, enricher=enricher),
     )
     artifact = result.artifacts["geo"]
     path = sink.directory / artifact["file"]
@@ -791,7 +800,7 @@ async def test_geo_artifact_exists_without_traffic(tmp_path):
     stop.set()
     sink = JsonSink(tmp_path)
     result = await run(
-        config(), sink, stop=stop, transport_factory=FakeTransport, enricher=Enricher()
+        config(), sink, RunOptions(stop=stop, transport_factory=FakeTransport, enricher=Enricher())
     )
     assert result.artifacts["geo"]["rows"] == 0
     assert (sink.directory / "geo.jsonl.gz").exists()
@@ -809,8 +818,7 @@ async def test_geo_with_the_local_dbip_database(tmp_path):
         result = await run(
             config(requests=3),
             JsonSink(tmp_path),
-            transport_factory=FakeTransport,
-            enricher=enricher,
+            RunOptions(transport_factory=FakeTransport, enricher=enricher),
         )
     assert result.artifacts["geo"]["rows"] == 1
     assert result.artifacts["geo"]["release"]["sha256"] == enricher.release["sha256"]

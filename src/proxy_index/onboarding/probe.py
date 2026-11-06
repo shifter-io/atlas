@@ -13,7 +13,7 @@ from typing import Any
 
 from ..models import RunConfig
 from ..regions import load_regions
-from ..runner import run
+from ..runner import RunOptions, run
 from .files import atomic_json, lock, private_dir
 from .manifest import DEFAULTS, moment, settings, timestamp
 from .scheduler import Clock, peak_memory_mb
@@ -109,13 +109,15 @@ async def _measure(
                 **probe.effective,
             ),
             sink,
-            stop=probe.stop,
-            deadline=deadline,
-            aggregate_ips=False,
-            wall_clock=probe.clock.now,
-            observation_consumer=writer.observe,
-            progress=_reporter(probe, writer, began, failure),
-            progress_interval=5,
+            RunOptions(
+                stop=probe.stop,
+                deadline=deadline,
+                aggregate_ips=False,
+                wall_clock=probe.clock.now,
+                observation_consumer=writer.observe,
+                progress=_reporter(probe, writer, began, failure),
+                progress_interval=5,
+            ),
         )
     except BaseException as exc:
         error = exc
