@@ -436,9 +436,21 @@ async def set_scheduler(conn: psycopg.AsyncConnection, values: dict[str, bool]) 
     return await scheduler_state(conn)
 
 
-async def node_grid(conn: psycopg.AsyncConnection, now: datetime | None = None) -> dict:
-    """Every product with a node against every region, including the cells with none."""
-    now = _now(now)
+_NODE_FIELDS = (
+    "node_id",
+    "status",
+    "host",
+    "last_heartbeat",
+    "version",
+    "open_conns",
+    "req_per_s",
+    "rss_mb",
+    "runs_open",
+)
+
+
+async def _grid_rows(conn: psycopg.AsyncConnection) -> tuple[list[dict], list[dict], list[dict]]:
+    """The regions, provider products and nodes the node grid is built from."""
     regions = await _rows(
         conn,
         "SELECT region_id,slug,enabled FROM runner_regions WHERE enabled "
@@ -456,46 +468,49 @@ async def node_grid(conn: psycopg.AsyncConnection, now: datetime | None = None) 
         " AND br.status IN ('running','uploading'))::int AS runs_open "
         "FROM nodes n",
     )
+    return regions, products, nodes
+
+
+def _grid_key(row: dict, region_id: int) -> tuple[str, str, int]:
+    return row["provider"], row["product"], region_id
+
+
+def _grid_cell(product: dict, region: dict, node: dict | None, now: datetime) -> dict[str, Any]:
+    """One product/region cell of the node grid; 'missing' when no node serves it."""
+    cell = {
+        "provider": product["provider"],
+        "product": product["product"],
+        "label": f"{product['provider']}/{product['product']}",
+        "region": region["slug"],
+        "node_id": None,
+        "status": "missing",
+        "host": None,
+        "last_heartbeat": None,
+        "heartbeat_age_s": None,
+        "version": None,
+        "open_conns": None,
+        "req_per_s": None,
+        "rss_mb": None,
+        "runs_open": 0,
+    }
+    if node is not None:
+        beat = node["last_heartbeat"]
+        cell |= {key: node[key] for key in _NODE_FIELDS}
+        cell["heartbeat_age_s"] = int((now - beat).total_seconds()) if beat else None
+    return cell
+
+
+async def node_grid(conn: psycopg.AsyncConnection, now: datetime | None = None) -> dict:
+    """Every product with a node against every region, including the cells with none."""
+    now = _now(now)
+    regions, products, nodes = await _grid_rows(conn)
     offline_after = int(await setting(conn, "node.offline_seconds"))
-    index = {(n["provider"], n["product"], n["region_id"]): n for n in nodes}
-    cells = []
-    for product in products:
-        for region in regions:
-            node = index.get((product["provider"], product["product"], region["region_id"]))
-            cell = {
-                "provider": product["provider"],
-                "product": product["product"],
-                "label": f"{product['provider']}/{product['product']}",
-                "region": region["slug"],
-                "node_id": None,
-                "status": "missing",
-                "host": None,
-                "last_heartbeat": None,
-                "heartbeat_age_s": None,
-                "version": None,
-                "open_conns": None,
-                "req_per_s": None,
-                "rss_mb": None,
-                "runs_open": 0,
-            }
-            if node is not None:
-                beat = node["last_heartbeat"]
-                cell |= {
-                    key: node[key]
-                    for key in (
-                        "node_id",
-                        "status",
-                        "host",
-                        "last_heartbeat",
-                        "version",
-                        "open_conns",
-                        "req_per_s",
-                        "rss_mb",
-                        "runs_open",
-                    )
-                }
-                cell["heartbeat_age_s"] = int((now - beat).total_seconds()) if beat else None
-            cells.append(cell)
+    index = {_grid_key(n, n["region_id"]): n for n in nodes}
+    cells = [
+        _grid_cell(product, region, index.get(_grid_key(product, region["region_id"])), now)
+        for product in products
+        for region in regions
+    ]
     return {
         "now": now,
         "offline_after_s": offline_after,
@@ -505,21 +520,14 @@ async def node_grid(conn: psycopg.AsyncConnection, now: datetime | None = None) 
     }
 
 
-async def traffic(
-    conn: psycopg.AsyncConnection,
-    *,
-    start: datetime | None = None,
-    end: datetime | None = None,
-    test: str | None = None,
-    provider: str | None = None,
-    region: str | None = None,
-) -> dict[str, Any]:
-    """Wire bytes per test and provider product, from the batch_runs counters.
-
-    Batches are selected by their scheduled slot in [start, end). A run counts its final
-    counters once it is terminal and its latest progress while it is still going; queued runs
-    have sent nothing and are left out. GB are decimal (10^9 bytes), like the traffic report.
-    """
+def _traffic_filters(
+    start: datetime | None,
+    end: datetime | None,
+    test: str | None,
+    provider: str | None,
+    region: str | None,
+) -> tuple[list[str], list[Any]]:
+    """The WHERE clauses and their parameters for the traffic filters."""
     clauses, params = ["br.status<>'queued'"], []
     if start is not None:
         clauses.append("b.scheduled_for>=%s")
@@ -540,7 +548,14 @@ async def traffic(
     if region:
         clauses.append("r.slug=%s")
         params.append(region)
-    rows = await _rows(
+    return clauses, params
+
+
+async def _traffic_rows(
+    conn: psycopg.AsyncConnection, clauses: list[str], params: list[Any]
+) -> list[dict]:
+    """Requests and wire bytes per test and provider product for the selected runs."""
+    return await _rows(
         conn,
         "SELECT b.kind AS test,p.provider,p.name AS product,"
         "count(DISTINCT b.batch_id)::int AS batches,count(*)::int AS runs,"
@@ -552,6 +567,25 @@ async def traffic(
         "WHERE " + " AND ".join(clauses) + " GROUP BY 1,2,3 ORDER BY 1,2,3",
         params,
     )
+
+
+async def traffic(
+    conn: psycopg.AsyncConnection,
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    test: str | None = None,
+    provider: str | None = None,
+    region: str | None = None,
+) -> dict[str, Any]:
+    """Wire bytes per test and provider product, from the batch_runs counters.
+
+    Batches are selected by their scheduled slot in [start, end). A run counts its final
+    counters once it is terminal and its latest progress while it is still going; queued runs
+    have sent nothing and are left out. GB are decimal (10^9 bytes), like the traffic report.
+    """
+    clauses, params = _traffic_filters(start, end, test, provider, region)
+    rows = await _traffic_rows(conn, clauses, params)
     for row in rows:
         row["label"] = f"{row['provider']}/{row['product']}"
         row |= _traffic_totals([row])
