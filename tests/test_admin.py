@@ -9,7 +9,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from test_orchestrator import bearer, prepare, product_id, query
 
 from proxy_index.orchestrator import app as app_module
-from proxy_index.orchestrator import batches
+from proxy_index.orchestrator import batches, nodework
 from proxy_index.orchestrator.admin import routes, views, writers
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.db import Database
@@ -66,7 +66,7 @@ async def census(database, db, *countries, providers=("alpha", "beta")):
     await batches.census_plan(db, now)
     batch_id = query(database, "SELECT batch_id FROM test_batches WHERE kind='census'")[0][0]
     alpha = {"node_id": tokens["alpha"]["node_id"]}
-    await batches.assignments(db, alpha, now + timedelta(minutes=1))
+    await nodework.assignments(db, alpha, now + timedelta(minutes=1))
     counters = {
         "requests": 120,
         "successes": 100,
@@ -74,7 +74,7 @@ async def census(database, db, *countries, providers=("alpha", "beta")):
         "bytes_up": 1000,
         "bytes_down": 9000,
     }
-    await batches.progress(db, alpha, batch_id, counters)
+    await nodework.progress(db, alpha, batch_id, counters)
     return batch_id, tokens
 
 

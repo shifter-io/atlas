@@ -25,7 +25,7 @@ from pathlib import Path
 from proxy_index import __version__, storage
 from proxy_index.enrichment import LocalEnricher
 from proxy_index.node import Active, NodeAgent, provider_factory
-from proxy_index.orchestrator import batches
+from proxy_index.orchestrator import nodework
 from proxy_index.orchestrator.control import write_settings
 from proxy_index.orchestrator.db import Database
 from proxy_index.orchestrator.jobs import register_jobs
@@ -51,12 +51,12 @@ class LocalAgent(NodeAgent):
     async def _call(self, method, path, **options):
         body = options.get("json", {})
         if path == "/v1/progress":
-            return await batches.progress(
+            return await nodework.progress(
                 self.db, self.identity, body["batch_id"], body["counters"]
             ) or {"stop": True}
         if path == "/v1/failed":
             return {
-                "status": await batches.fail_run(
+                "status": await nodework.fail_run(
                     self.db, self.identity, body["batch_id"], body["error"]
                 )
             }
@@ -77,7 +77,7 @@ class LocalAgent(NodeAgent):
         raise ValueError("Unsupported local node operation")
 
     async def upload(self, batch_id, directory):
-        await batches.begin_upload(self.db, self.identity, batch_id)
+        await nodework.begin_upload(self.db, self.identity, batch_id)
         # Keep portable artifacts, including unsuccessful provider measurements.
         summary = json.loads((directory / "summary.json").read_text())
         for attempt in range(8):
@@ -85,7 +85,7 @@ class LocalAgent(NodeAgent):
                 imported = await asyncio.to_thread(
                     storage.ingest, directory, self.db.credentials_file, batch_id=batch_id
                 )
-                status = await batches.finish_run(
+                status = await nodework.finish_run(
                     self.db, self.identity, batch_id, summary, imported["run_key"]
                 )
                 LOG.info(

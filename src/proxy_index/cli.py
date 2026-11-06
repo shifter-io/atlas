@@ -111,16 +111,12 @@ def _operator_groups(commands) -> dict:
     return {name: group.dispatch for name, group in groups.items()}
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="proxy-index")
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("targets", help="List available target definitions")
-    provider_list = commands.add_parser("providers", help="List available provider adapters")
-    provider_list.add_argument(
-        "--protocol",
-        choices=NETWORK_PROTOCOLS,
-        help="Only networks whose echo test uses this protocol (e.g. https-only: no HTTP test)",
-    )
+def _database_option(parser, required: bool = False, help_text: str | None = None) -> None:
+    """Add the shared --database-file option."""
+    parser.add_argument("--database-file", required=required, help=help_text)
+
+
+def _add_run_parser(commands) -> None:
     measure = commands.add_parser("run", help="Run a target through a supplied proxy")
     measure.add_argument("--target", choices=[t.id for t in registry.all()], required=True)
     measure.add_argument(
@@ -150,9 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     measure.add_argument("--session-policy", help="Override provider session policy")
     measure.add_argument("--output", default="results")
-    measure.add_argument(
-        "--database-file", help="Import saved results using private PostgreSQL config"
-    )
+    _database_option(measure, help_text="Import saved results using private PostgreSQL config")
     measure.add_argument("--provider")
     measure.add_argument("--product")
     measure.add_argument("--country", help="Requested geography label; does not change credentials")
@@ -163,26 +157,27 @@ def main(argv: list[str] | None = None) -> int:
         help="Replace rate-limited answers (needs --provider-config)",
     )
     measure.add_argument("--mmdb", help="Local MMDB: geo rows and the country check")
+
+
+def _add_data_parsers(commands) -> None:
+    """Register enrich, ingest and the db-* commands."""
     enrich = commands.add_parser("enrich", help="Enrich an existing HTTP result using local MMDB")
     enrich.add_argument("directory")
     enrich.add_argument("--mmdb")
-    enrich.add_argument(
-        "--database-file", help="Import measurements and new enrichment after saving"
-    )
+    _database_option(enrich, help_text="Import measurements and new enrichment after saving")
     ingest_parser = commands.add_parser("ingest", help="Import a saved run into PostgreSQL")
     ingest_parser.add_argument("directory")
-    ingest_parser.add_argument("--database-file", required=True)
+    _database_option(ingest_parser, required=True)
     for name, help_text in (
         ("db-init", "Apply the PostgreSQL schema"),
         ("db-migrate", "Upgrade a v4 to v7 database in place to the current schema"),
         ("db-status", "Inspect stored runs and cached totals"),
     ):
-        command = commands.add_parser(name, help=help_text)
-        command.add_argument("--database-file", required=True)
+        _database_option(commands.add_parser(name, help=help_text), required=True)
     seed = commands.add_parser(
         "db-seed", help="Upsert runner regions, countries and targets from configs/"
     )
-    seed.add_argument("--database-file", required=True)
+    _database_option(seed, required=True)
     seed.add_argument("--regions", help="Region patterns YAML (default configs/regions.yaml)")
     seed.add_argument("--targets", help="Targets TOML (default configs/targets.toml)")
     seed.add_argument("--countries", help="Country names JSON (default configs/countries.json)")
@@ -193,9 +188,132 @@ def main(argv: list[str] | None = None) -> int:
     )
     database = commands.add_parser("db-info", help="Identify the local MMDB and show its checksum")
     database.add_argument("--mmdb")
-    from .calculated.cli import register
 
-    register(commands)
+
+def _measure(args: argparse.Namespace) -> int:
+    return asyncio.run(_run(args))
+
+
+def _targets(args: argparse.Namespace) -> int:
+    print(
+        json.dumps(
+            [
+                {
+                    "id": t.id,
+                    "version": t.version,
+                    "url": t.build_request().url,
+                    "engine": t.engine,
+                    "pool_eligible": t.pool_eligible,
+                }
+                for t in registry.all()
+            ],
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _providers(args: argparse.Namespace) -> int:
+    if args.protocol is None:
+        print(json.dumps(providers.all()))
+    else:
+        print(json.dumps(grammar_ids_by_protocol(args.protocol)))
+    return 0
+
+
+def _enrich(args: argparse.Namespace) -> int:
+    from .enrichment import enrich_run
+
+    print(json.dumps(enrich_run(args.directory, args.mmdb), indent=2))
+    if args.database_file:
+        from .storage import ingest
+
+        print(json.dumps({"database_import": ingest(args.directory, args.database_file)}))
+    return 0
+
+
+def _db_seed(args: argparse.Namespace) -> int:
+    from .storage import seed
+
+    result = seed(
+        args.database_file,
+        args.regions,
+        args.targets,
+        countries_path=args.countries,
+        reset_times=args.reset_times,
+    )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _database(args: argparse.Namespace) -> int:
+    """ingest, db-init, db-migrate and db-status."""
+    from .calculated.store import initialize as initialize_all
+    from .storage import ingest, initialize, migrate, status
+
+    if args.command == "db-init":
+        # The orchestrator calculates on the same database: create both layers.
+        result = initialize(args.database_file) | initialize_all(args.database_file)
+    else:
+        result = (
+            ingest(args.directory, args.database_file)
+            if args.command == "ingest"
+            else {"db-migrate": migrate, "db-status": status}[args.command](args.database_file)
+        )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _db_info(args: argparse.Namespace) -> int:
+    from .enrichment import LocalEnricher
+
+    with LocalEnricher(args.mmdb) as enricher:
+        print(json.dumps(enricher.release, indent=2))
+    return 0
+
+
+# Each command of this module, by name, with its handler(args) -> exit code.
+_HANDLERS = {
+    "run": _measure,
+    "targets": _targets,
+    "providers": _providers,
+    "enrich": _enrich,
+    "db-seed": _db_seed,
+    "ingest": _database,
+    "db-init": _database,
+    "db-migrate": _database,
+    "db-status": _database,
+    "db-info": _db_info,
+}
+_CALCULATED = (
+    "calculate-init",
+    "calculate",
+    "snapshot-publish",
+    "snapshot-export",
+    "calculate-expire",
+    "run-role",
+    "metric-evidence",
+    "serve",
+    "report",
+)
+
+
+def _build_parser() -> tuple[argparse.ArgumentParser, dict]:
+    """The parser and each command's handler, in the order commands appear in --help."""
+    parser = argparse.ArgumentParser(prog="proxy-index")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("targets", help="List available target definitions")
+    provider_list = commands.add_parser("providers", help="List available provider adapters")
+    provider_list.add_argument(
+        "--protocol",
+        choices=NETWORK_PROTOCOLS,
+        help="Only networks whose echo test uses this protocol (e.g. https-only: no HTTP test)",
+    )
+    _add_run_parser(commands)
+    _add_data_parsers(commands)
+    from .calculated import cli as calculated
+
+    calculated.register(commands)
     from .orchestrator import cli as fleet
 
     fleet.register(commands)
@@ -205,95 +323,17 @@ def main(argv: list[str] | None = None) -> int:
     from .browser import node as browser_node
 
     browser_node.register(commands)
-    private = _operator_groups(commands)
+    handlers = _HANDLERS | dict.fromkeys(_CALCULATED, calculated.dispatch)
+    handlers |= {"browser": browser_release.dispatch, "browser-node": browser_node.dispatch}
+    handlers |= dict.fromkeys(fleet.COMMANDS, fleet.dispatch)
+    return parser, handlers | _operator_groups(commands)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser, handlers = _build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.command in private:
-            return private[args.command](args)
-        if args.command in fleet.COMMANDS:
-            return fleet.dispatch(args)
-        if args.command == "browser":
-            return browser_release.dispatch(args)
-        if args.command == "browser-node":
-            return browser_node.dispatch(args)
-        if args.command in {
-            "calculate-init",
-            "calculate",
-            "snapshot-publish",
-            "snapshot-export",
-            "calculate-expire",
-            "run-role",
-            "metric-evidence",
-            "serve",
-            "report",
-        }:
-            from .calculated.cli import dispatch
-
-            return dispatch(args)
-        if args.command == "run":
-            return asyncio.run(_run(args))
-        if args.command == "targets":
-            print(
-                json.dumps(
-                    [
-                        {
-                            "id": t.id,
-                            "version": t.version,
-                            "url": t.build_request().url,
-                            "engine": t.engine,
-                            "pool_eligible": t.pool_eligible,
-                        }
-                        for t in registry.all()
-                    ],
-                    indent=2,
-                )
-            )
-        elif args.command == "providers":
-            if args.protocol is None:
-                print(json.dumps(providers.all()))
-            else:
-                print(json.dumps(grammar_ids_by_protocol(args.protocol)))
-        elif args.command == "enrich":
-            from .enrichment import enrich_run
-
-            print(json.dumps(enrich_run(args.directory, args.mmdb), indent=2))
-            if args.database_file:
-                from .storage import ingest
-
-                print(json.dumps({"database_import": ingest(args.directory, args.database_file)}))
-        elif args.command == "db-seed":
-            from .storage import seed
-
-            result = seed(
-                args.database_file,
-                args.regions,
-                args.targets,
-                countries_path=args.countries,
-                reset_times=args.reset_times,
-            )
-            print(json.dumps(result, indent=2))
-        elif args.command in ("ingest", "db-init", "db-migrate", "db-status"):
-            from .calculated.store import initialize as initialize_all
-            from .storage import ingest, initialize, migrate, status
-
-            if args.command == "db-init":
-                # The orchestrator calculates on the same database: create both layers.
-                result = initialize(args.database_file) | initialize_all(args.database_file)
-            else:
-                result = (
-                    ingest(args.directory, args.database_file)
-                    if args.command == "ingest"
-                    else {"db-migrate": migrate, "db-status": status}[args.command](
-                        args.database_file
-                    )
-                )
-            print(json.dumps(result, indent=2))
-        else:
-            from .enrichment import LocalEnricher
-
-            with LocalEnricher(args.mmdb) as enricher:
-                print(json.dumps(enricher.release, indent=2))
-        return 0
+        return handlers[args.command](args)
     except KeyboardInterrupt:
         return 130
     except UserError as exc:

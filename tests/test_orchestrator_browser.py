@@ -19,7 +19,7 @@ from proxy_index.browser.contracts import (
     RUN_TARGETS,
 )
 from proxy_index.cli import main
-from proxy_index.orchestrator import batches, browser
+from proxy_index.orchestrator import batches, browser, nodework
 from proxy_index.orchestrator.app import build_app
 from proxy_index.orchestrator.browser import ALERT, LATE_END, browser_plan, slot_starts
 from proxy_index.orchestrator.db import Database, put_setting
@@ -438,7 +438,7 @@ async def test_browser_runs_are_assigned_reaped_and_reported(database, db, tmp_p
     await browser_plan(db, HOUR)
     first = browser_batches(database)[0]
     node = {"node_id": nodes["alpha"]["node_id"]}
-    work = await batches.assignments(db, node, HOUR)
+    work = await nodework.assignments(db, node, HOUR)
     assert [a["batch_id"] for a in work["assignments"]] == [first[0]]
     handed = work["assignments"][0]
     assert (handed["kind"], handed["region"], handed["country_code"]) == (
@@ -450,7 +450,7 @@ async def test_browser_runs_are_assigned_reaped_and_reported(database, db, tmp_p
 
     # A run that never starts is failed not_started like any run.
     grace = timedelta(seconds=180)
-    reaped = await batches.reap(db, first[5] + grace + timedelta(seconds=1))
+    reaped = await nodework.reap(db, first[5] + grace + timedelta(seconds=1))
     assert reaped["failed"]["not_started"] == 2 and reaped["closed"] >= 1
     assert query(
         database, "SELECT status,error FROM batch_runs WHERE batch_id=%s", (first[0],)

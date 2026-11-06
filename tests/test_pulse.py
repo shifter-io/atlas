@@ -14,7 +14,7 @@ from test_storage import measurement
 from proxy_index import detect
 from proxy_index.daily import DAILY, MARKER
 from proxy_index.daily import ingest as daily_ingest
-from proxy_index.orchestrator import batches, pulse
+from proxy_index.orchestrator import batches, nodework, pulse
 from proxy_index.orchestrator.db import Database, put_setting
 from proxy_index.orchestrator.nodes import issue_token
 from proxy_index.storage import connect, ingest, partition
@@ -403,6 +403,6 @@ async def test_pulse_assignments_use_the_pulse_timeout(database, db):
     }
     now = datetime.now(UTC)
     await batches.pulse_plan(db, now)
-    work = await batches.assignments(db, node, now + timedelta(hours=1))
+    work = await nodework.assignments(db, node, now + timedelta(hours=1))
     pulses = [w for w in work["assignments"] if w["kind"] == "pulse"]
     assert pulses and {w["timeout_ms"] for w in pulses} == {10000}
