@@ -25,11 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {job: A, workers: auto, seed: none}
-          - {job: B, workers: "16", seed: none}
-          - {job: C, workers: "48", seed: none}
-          - {job: D, workers: auto, seed: "1101"}
-          - {job: E, workers: "48", seed: "2202"}
+          - {job: F, workers: auto, seed: "1101"}
+          - {job: G, workers: "48", seed: "3303"}
+          - {job: H, workers: "16", seed: none}
     defaults:
       run:
         shell: bash
@@ -37,6 +35,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Pinned uv, CPython and PostgreSQL in the server cache
@@ -100,7 +99,11 @@ jobs:
             export PYTHONPATH="$RUNNER_TEMP/plug" FLAKE_SEED="$SEED"
             plugins=(-p flake_shuffle)
           fi
-          echo "FLAKE-COLLECT $JOB $(uv run --no-editable pytest -p no:cacheprovider --collect-only -q | tail -1)"
+          count() { uv run --no-editable pytest -p no:cacheprovider --collect-only -q | grep -E '^[0-9]+ tests? collected'; }
+          echo "FLAKE-COLLECT $JOB head $(count)"
+          git show origin/main:tests/test_archive_job.py > tests/test_archive_job.py
+          echo "FLAKE-COLLECT $JOB main $(count)"
+          git checkout -- tests/test_archive_job.py
           one() {
             local run=$1
             rc=0
