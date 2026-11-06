@@ -170,35 +170,51 @@ async def _run(probe: _Probe, max_seconds: float) -> dict:
     return state
 
 
+@dataclass(frozen=True)
+class ProbeOptions:
+    """execute_probe()'s run settings, each with its default.
+
+    ``start`` is a future whole UTC hour to wait for (``None`` starts now); the probe
+    measures for at most ``max_seconds``.
+    """
+
+    concurrency: int = 1000
+    processes: int = 0
+    request_timeout: float = 10
+    start: str | None = None
+    max_seconds: float = 86400
+
+
 async def execute_probe(
     directory: Path,
     proxy,
     region: str,
     country: str,
+    options: ProbeOptions | None = None,
     *,
-    concurrency: int = 1000,
-    processes: int = 0,
-    request_timeout: float = 10,
-    start: str | None = None,
-    max_seconds: float = 86400,
     stop: asyncio.Event | None = None,
     run_country=run,
 ) -> dict:
+    options = options or ProbeOptions()
     mapping = load_regions()
     country = country.upper()
     if mapping.region_of(country) != region:
         raise ValueError("Country does not belong to the requested runner region")
     effective = settings(
         DEFAULTS
-        | {"concurrency": concurrency, "timeout_seconds": request_timeout, "processes": processes}
+        | {
+            "concurrency": options.concurrency,
+            "timeout_seconds": options.request_timeout,
+            "processes": options.processes,
+        }
     )
-    if not math.isfinite(max_seconds) or max_seconds <= 0:
+    if not math.isfinite(options.max_seconds) or options.max_seconds <= 0:
         raise ValueError("max_seconds must be finite and positive")
     metadata = proxy.public()
     if str(metadata.get("requested_country", "")).lower() != country.lower():
         raise ValueError("Provider must target the requested country")
     clock = Clock()
-    scheduled = _scheduled_start(start, clock)
+    scheduled = _scheduled_start(options.start, clock)
     stop = stop if stop is not None else asyncio.Event()
     private_dir(directory)
     with lock(directory / ".lock"):
@@ -216,4 +232,4 @@ async def execute_probe(
             state["status"] = "stopped"
             probe.save()
             return state
-        return await _run(probe, max_seconds)
+        return await _run(probe, options.max_seconds)

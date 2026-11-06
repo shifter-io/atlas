@@ -20,8 +20,8 @@ from proxy_index.models import Outcome
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.onboarding.export import export_campaign
 from proxy_index.onboarding.files import atomic_json, lock, read_json
-from proxy_index.onboarding.scheduler import execute, new_state
-from proxy_index.onboarding.writer import ObservationWriter, SummarySink
+from proxy_index.onboarding.scheduler import RegionOptions, execute, new_state
+from proxy_index.onboarding.writer import ObservationWriter, SummarySink, WriterBounds
 
 ROOT = Path(__file__).resolve().parents[1]
 START = datetime(2027, 1, 1, 22, tzinfo=UTC)
@@ -136,10 +136,9 @@ async def test_fifo_overruns_preserve_all_rounds_and_country_order(manifest):
         manifest,
         "tor1",
         Proxy,
+        RegionOptions(concurrency=37, request_timeout=3.5),
         clock=clock,
         run_country=measure,
-        concurrency=37,
-        request_timeout=3.5,
     )
     state = read_json(manifest.parent / "regions/tor1/state.json")
     assert result["status"] == "closed"
@@ -185,14 +184,18 @@ async def test_restart_preserves_settings_skips_interrupted_and_completed(manife
         clock.value = START.timestamp() + 86400
         return fake_measurement(status="cancelled", stop_reason="deadline")
 
-    await execute(manifest, "tor1", Proxy, clock=clock, run_country=measure, resume=True)
+    await execute(
+        manifest, "tor1", Proxy, RegionOptions(resume=True), clock=clock, run_country=measure
+    )
     assert calls == [("pm", 7, 4)]
     saved = read_json(path)
     assert saved["jobs"][1]["status"] == "interrupted"
     with pytest.raises(ValueError, match="preserve"):
-        await execute(manifest, "tor1", Proxy, resume=True, concurrency=8)
+        await execute(manifest, "tor1", Proxy, RegionOptions(resume=True, concurrency=8))
     # A closed campaign is inert even when explicitly resumed.
-    await execute(manifest, "tor1", Proxy, clock=clock, run_country=measure, resume=True)
+    await execute(
+        manifest, "tor1", Proxy, RegionOptions(resume=True), clock=clock, run_country=measure
+    )
     assert len(calls) == 1
 
 
@@ -221,8 +224,7 @@ async def test_writer_duplicates_ipv6_rotation_and_deadline(tmp_path):
         scheduled=campaign.timestamp(start),
         started=campaign.timestamp(start + 2),
         deadline=start + 60,
-        chunk_rows=2,
-        queue_size=2,
+        bounds=WriterBounds(chunk_rows=2, queue_size=2),
     )
     for address in ("203.0.113.1", "203.0.113.1", "2001:db8::1"):
         await writer.observe(address, start + 3)
@@ -245,7 +247,7 @@ async def test_writer_rotates_idle_pending_records(tmp_path):
         scheduled=campaign.timestamp(START),
         started=campaign.timestamp(START),
         deadline=START.timestamp() + 60,
-        chunk_seconds=0.02,
+        bounds=WriterBounds(chunk_seconds=0.02),
     )
     await writer.observe("203.0.113.1", START.timestamp() + 1)
     for _ in range(100):
@@ -285,8 +287,7 @@ async def test_writer_failure_is_fatal_not_a_deadlock(tmp_path, monkeypatch):
         scheduled=campaign.timestamp(START),
         started=campaign.timestamp(START),
         deadline=START.timestamp() + 60,
-        chunk_rows=1,
-        queue_size=1,
+        bounds=WriterBounds(chunk_rows=1, queue_size=1),
     )
     await writer.observe("203.0.113.1", START.timestamp() + 1)
     with pytest.raises(OSError, match="writer failed"):
@@ -307,7 +308,7 @@ async def test_export_verifies_chunks_and_reports_missing_regions(manifest):
         scheduled=data["starts_at"],
         started=data["starts_at"],
         deadline=START.timestamp() + 86400,
-        chunk_rows=1,
+        bounds=WriterBounds(chunk_rows=1),
     )
     for _ in range(2):
         await writer.observe("203.0.113.1", START.timestamp() + 1)
@@ -440,7 +441,7 @@ async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
         scheduled=campaign.timestamp(START),
         started=campaign.timestamp(START),
         deadline=START.timestamp() + 60,
-        queue_size=4096,
+        bounds=WriterBounds(queue_size=4096),
     )
     for _ in range(2_000_000):
         await writer.observe("2001:db8::1", START.timestamp() + 1)
@@ -550,7 +551,9 @@ async def test_partial_country_is_exportable_after_crash_without_replay(manifest
     )
     await writer.observe("203.0.113.1", START.timestamp() + 1)
     await writer.close()
-    await execute(manifest, "tor1", Proxy, resume=True, clock=Clock(START.timestamp() + 86400))
+    await execute(
+        manifest, "tor1", Proxy, RegionOptions(resume=True), clock=Clock(START.timestamp() + 86400)
+    )
     result = export_campaign(manifest)
     assert result["rows"] == 1 and not result["complete"]
     assert result["regions"][0]["observations"] == 1
@@ -597,7 +600,7 @@ async def test_reordered_checkpoint_cannot_change_execution_order(manifest):
     state["jobs"][0], state["jobs"][1] = state["jobs"][1], state["jobs"][0]
     atomic_json(manifest.parent / "regions/tor1/state.json", state)
     with pytest.raises(ValueError, match="queue differs"):
-        await execute(manifest, "tor1", Proxy, resume=True)
+        await execute(manifest, "tor1", Proxy, RegionOptions(resume=True))
 
 
 async def test_runner_uses_campaign_clock_for_observation_timestamp():
