@@ -76,6 +76,7 @@ func netSnapshot(t *testing.T) (*SnapshotRow, *snap.Snapshot) {
 }
 
 func TestSetNetworksGivesEachNetworkAsOneGroup(t *testing.T) {
+	t.Parallel()
 	s, doc := netSnapshot(t)
 	if string(s.Payload) != netHead || !bytes.Contains(s.Full(), []byte(`"products": [{"id": "a:residential:network"`)) {
 		t.Errorf("the head changed, or the payload the build reads has no products:\n%.300s", s.Full())
@@ -117,6 +118,7 @@ func TestSetNetworksGivesEachNetworkAsOneGroup(t *testing.T) {
 // A network window's list is the snapshot's compact list, as loaded; a
 // window naming a list not loaded has none.
 func TestSetNetworksKeepsTheCompactLists(t *testing.T) {
+	t.Parallel()
 	s, _ := netSnapshot(t)
 	if len(s.Networks) != 2 || s.Networks[PlaceWindow{1, NetworkCohort, 24}] != nil || s.Places != nil {
 		t.Fatalf("networks %v, places %v", s.Networks, s.Places)
@@ -136,6 +138,7 @@ func TestSetNetworksKeepsTheCompactLists(t *testing.T) {
 }
 
 func TestSetNetworksRefusesAHeadWithoutNetworks(t *testing.T) {
+	t.Parallel()
 	for _, head := range []string{`{"schema_version": 4}`, `{"networks": {}}`, `{"networks": [1]}`, `[]`, `{"networks": [null]}`,
 		`{"networks": [{"product_id": 1, "windows": {"30d": {"lists": {"id": 1}, "pool": 3}}}]}`,
 		`{"networks": [{"product_id": 1, "criteria": {"requested_countries": ["DE"]}, "windows": 2}]}`,
@@ -159,6 +162,7 @@ func TestSetNetworksRefusesAHeadWithoutNetworks(t *testing.T) {
 }
 
 func TestNewNetListRefusesWhatAListCannotHold(t *testing.T) {
+	t.Parallel()
 	for name, rows := range map[string][]NetRow{"country_asn": {{}}, "nonsense": {{}}, "asn": {{Ips: 1 << 32}}} {
 		if _, err := NewNetList(map[string][]NetRow{name: rows}); err == nil {
 			t.Errorf("%s: no error", name)
@@ -168,6 +172,7 @@ func TestNewNetListRefusesWhatAListCannotHold(t *testing.T) {
 
 // A v4 read drops the group lists a cache holds, a v3 read its network lists.
 func TestListsHoldOneKindOfList(t *testing.T) {
+	t.Parallel()
 	var none *Lists
 	none.dropNetworks()
 	c := NewLists()

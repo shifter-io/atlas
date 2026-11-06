@@ -432,27 +432,32 @@ async def _shown(
 
 async def _assign(
     cloud: DigitalOcean, project_id: str, missing: set[str], retry: Retry, name: str
-) -> None:
+) -> str | None:
     """Assign and re-read the project until `missing` is empty or the attempts run out. A failed
-    call leaves its ids unconfirmed; only a project that is not `name` raises."""
+    call leaves its ids unconfirmed; only a project that is not `name` raises. Returns the class
+    of the latest error a call raised, or None."""
+    raised: list[str] = []
 
     async def attempt() -> bool:
         try:
             named = await _project_named(cloud, project_id, name)
-        except Exception:  # unconfirmed this time: retried, then fail closed
+        except Exception as error:  # boundary: unconfirmed; retried, then removed (fail closed)
+            raised.append(type(error).__name__)
             return False
         if not named:
             raise OwnershipError("project", project_id, ["project_id"])
         try:
             await cloud.assign_project(project_id, sorted(missing), guard=_GUARD)
             members = await cloud.project_droplet_ids(project_id)
-        except Exception:  # unconfirmed this time: retried, then fail closed
+        except Exception as error:  # boundary: unconfirmed; retried, then removed (fail closed)
+            raised.append(type(error).__name__)
             return False
         _projects.setdefault(cloud, {})[project_id] = (monotonic(), members)
         missing.difference_update(members)
         return not missing
 
     await _retrying(retry, attempt)
+    return raised[-1] if raised else None
 
 
 async def assign_and_verify_project(
@@ -480,24 +485,22 @@ async def assign_and_verify_project(
     if not ids:
         return frozenset(), frozenset()
     reads = await _shown(_Claim(cloud, scope, role), ids, records, retry)
-    missing = {rid for rid in ids if not reads[rid]}
+    missing, raised = {rid for rid in ids if not reads[rid]}, None
     if missing:
         name = PULSE_PROJECT_NAME if role == "pulse" else PROJECT_NAME
-        await _assign(cloud, scope.project_id, missing, retry, name)
+        raised = await _assign(cloud, scope.project_id, missing, retry, name)
     unconfirmed = sorted(missing | {rid for rid in ids if reads[rid]})
     _require_own(cloud, unconfirmed, records)
     now = utcnow().isoformat()
     for rid in set(ids) - set(unconfirmed):
         records[rid].status, records[rid].assigned_at = "assigned", now
-    await remove_unassigned(
-        cloud,
-        scope,
-        records,
-        audit_path,
-        {rid: error_detail(cloud, [rid], failed=reads[rid] or ["project"]) for rid in unconfirmed},
-        role,
-        retry.save,
-    )
+    causes = {
+        rid: error_detail(cloud, [rid], failed=reads[rid] or ["project"]) for rid in unconfirmed
+    }
+    if raised:  # what a swallowed call raised: its class only, never its message
+        for rid in missing:
+            causes[rid]["assign_error"] = raised
+    await remove_unassigned(cloud, scope, records, audit_path, causes, role, retry.save)
     return frozenset(ids) - set(unconfirmed), frozenset(unconfirmed)
 
 
@@ -542,8 +545,9 @@ async def remove_unassigned(
         record.error_detail = causes[rid]
     try:
         save()
-    except Exception:  # never keep the delete from running; the caller's own save re-raises
-        pass
+    except Exception as error:  # boundary: the delete still runs; the caller's own save re-raises
+        for rid in ids:
+            records[rid].error_detail = causes[rid] | {"save_error": type(error).__name__}
     if role == "pulse":  # never deleted here, whatever its membership shows by now
         for rid in ids:
             records[rid].status = "destroy_refused"
@@ -555,5 +559,5 @@ async def remove_unassigned(
             records[rid].status, records[rid].destroyed_at = "destroyed", utcnow().isoformat()
         except OwnershipError:
             records[rid].status = "destroy_refused"
-        except Exception:  # audited by guarded_delete; never stop before the other ids
+        except Exception:  # boundary: audited by guarded_delete; the other ids still go
             records[rid].status = "destroy_failed"

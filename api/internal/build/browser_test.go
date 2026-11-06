@@ -11,6 +11,7 @@ import (
 // Without a methodology target_groups, the group and sources come from the
 // windows' targets.<id>.browser objects (K-BP6).
 func TestTargetGroupsFromTheWindows(t *testing.T) {
+	t.Parallel()
 	var s snap.Snapshot
 	if err := json.Unmarshal([]byte(`{"methodology": {"id": "m", "settings": {}}, "products": [{"id": "1:x", "windows": {
  "24h": {"targets": {"generic_http": {"metrics": {}},

@@ -89,6 +89,7 @@ func datasetFile(t *testing.T, shape testscale.Shape) ([]byte, *build.Result) {
 // them. goldenShape is a build before v4, so its `lists` is {}. Its snapshot
 // has no latency mean, so what LAT-MEAN-API adds for it is left out too.
 func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
+	t.Parallel()
 	file, _ := datasetFile(t, goldenShape)
 	file = testscale.WithoutLatencyMean(file)
 	top := []pair{}
@@ -140,6 +141,7 @@ const preV4File = "557cf8117404a621f49101125b055769e293f90bf08480f74accbb5e8b032
 // "lists":{} (regression case 3 of API-DATASET-2), and what LAT-MEAN-API
 // adds without a latency mean.
 func TestAPreV4FileIsTheEarlierFileWithEmptyLists(t *testing.T) {
+	t.Parallel()
 	file, _ := datasetFile(t, goldenShape)
 	file = testscale.WithoutLatencyMean(file)
 	i := bytes.Index(file, []byte(`,"lists":{},"snapshot":`))

@@ -1,6 +1,7 @@
 """Pulse planning and the network-wide pulse evaluator.
 
-Planning: a region's countries are spread over a slot (interval / N apart), one at a time.
+Planning (pulse_slots.py): a region's countries are spread over a slot (interval / N apart), one
+at a time.
 
 Evaluation (job pulse_evaluate): pulse runs keep only their 5-minute run_buckets, no per-IP
 rows. Each complete window sums a network's connection errors (timeouts + proxy errors) over
@@ -39,81 +40,10 @@ from .events import (
     emit_pulse_down,
     emit_pulse_recovered,
 )
+from .pulse_slots import GRACE, MIN_GAP, open_slot, spread  # noqa: F401 (callers import them here)
 
 WINDOW = timedelta(minutes=5)
 MAX_WINDOWS = 12  # windows evaluated per tick; a backlog continues on the next ticks
-GRACE = timedelta(seconds=60)  # a slot opened this late still uses its whole interval
-MIN_GAP = timedelta(seconds=60)  # pulse starts of one region never closer: 10 s timeout + margin
-
-
-def spread(
-    countries: list[tuple[str, int]],
-    base: datetime,
-    window: timedelta,
-    offset: float = 0.0,
-    min_step: timedelta = timedelta(0),
-) -> dict[tuple[str, int], datetime]:
-    """Start times for (country, region_id) pairs: each region's countries, in code order,
-    window / N apart from base (at least min_step), shifted by offset (0..1) of a step.
-    Countries whose start would fall outside the window get none."""
-    by_region: dict[int, list[str]] = {}
-    for country, region in sorted(countries):
-        by_region.setdefault(region, []).append(country)
-    starts = {}
-    for region, codes in by_region.items():
-        step = max(window / len(codes), min_step)
-        for i, country in enumerate(codes):
-            if step * (i + offset) < window:
-                starts[(country, region)] = base + step * (i + offset)
-    return starts
-
-
-async def open_slot(
-    conn: psycopg.AsyncConnection,
-    target_id: str,
-    slot: datetime,
-    every: timedelta,
-    begin: datetime,
-    offset: float = 0.0,
-) -> list[int]:
-    """Insert a pulse batch per enabled country, each region's countries every / N apart from
-    pulse.lead_seconds after the slot start; offset (0..1 of a step) keeps the targets of one
-    slot apart; no start is before begin + lead. A slot opened later than GRACE (a restart)
-    spreads over its rest from begin, never closer than MIN_GAP, so pulses never overlap;
-    countries that no longer fit wait for the next slot.
-
-    Returns the new batch ids.
-    """
-    lead = timedelta(seconds=float(await setting(conn, "pulse.lead_seconds")))
-    rows = await (
-        await conn.execute(
-            "SELECT c.country_code,c.region_id FROM countries c JOIN runner_regions r "
-            "ON r.region_id=c.region_id AND r.enabled WHERE c.enabled"
-        )
-    ).fetchall()
-    origin = slot if begin - slot <= GRACE else min(begin, slot + every)
-    countries = [(r["country_code"].strip(), r["region_id"]) for r in rows]
-    starts = spread(countries, origin + lead, slot + every - origin, offset, MIN_GAP)
-    starts = {key: max(start, begin + lead) for key, start in starts.items()}
-    keys = sorted(starts)
-    inserted = await (
-        await conn.execute(
-            "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
-            "start_at) SELECT 'pulse',u.c,u.r,%s,%s,u.s FROM unnest(%s::text[],%s::int[],"
-            "%s::timestamptz[]) u(c,r,s) ORDER BY u.c ON CONFLICT DO NOTHING RETURNING batch_id",
-            (
-                target_id,
-                slot,
-                [k[0] for k in keys],
-                [k[1] for k in keys],
-                [starts[k] for k in keys],
-            ),
-        )
-    ).fetchall()
-    return [row["batch_id"] for row in inserted]
-
-
-# --- evaluation --------------------------------------------------------------------------
 
 # Pulse batches that started in [%(lo)s, %(hi)s). A batch starts within one interval (plus the
 # lead) of its slot, so the targets join turns the range into an index range on

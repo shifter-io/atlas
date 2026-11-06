@@ -27,6 +27,7 @@ func smallPages(t *testing.T) *Pages {
 }
 
 func TestANetworkAnswerSumsItsProductGroups(t *testing.T) {
+	t.Parallel()
 	pg := smallPages(t)
 	if len(pg.Networks.Networks) != 2 || pg.Primary["net00"] != "residential" {
 		t.Fatalf("networks %+v, primary %v", pg.Networks.Networks, pg.Primary)
@@ -51,6 +52,7 @@ func TestANetworkAnswerSumsItsProductGroups(t *testing.T) {
 }
 
 func TestPlaceListsPageAndSearch(t *testing.T) {
+	t.Parallel()
 	pg := smallPages(t)
 	first, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
 	if !ok || first.Total != 60 || first.Pages != 2 || len(first.Rows) != PageSize || first.Rows[0].IpsSum != 2000 {
@@ -74,6 +76,7 @@ func TestPlaceListsPageAndSearch(t *testing.T) {
 }
 
 func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
+	t.Parallel()
 	pg := smallPages(t)
 	ans := pg.Country["AB"]
 	if ans == nil || len(ans.Ranges["30d"]) != 2 {
@@ -99,6 +102,7 @@ func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
 }
 
 func TestTheCoverageIndexKeepsOnlyAnEntryPerProvider(t *testing.T) {
+	t.Parallel()
 	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 30, Unmeasured: 1, Events: 5})
 	if err != nil {
 		t.Fatal(err)

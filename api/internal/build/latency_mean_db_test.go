@@ -44,6 +44,7 @@ func everyRequestWithMean(t *testing.T, mean any) []byte {
 // the under-load one and never the light-load latency_ms mean; a snapshot
 // without the key gives null with latencyP50's N/A reason.
 func TestTheHeadLatencyMeanIsServedAsLatencyMean(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		mean any
