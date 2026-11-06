@@ -20,10 +20,11 @@ NOT_PRODUCTION = ("*.md", "*.rst", "*.txt", "docs/*", "*/docs/*", "test/*", "tes
                   "test_*", "*/test_*", "*_test.*", "*.test.*", "*.spec.*", "testdata/*", "*/testdata/*",
                   "*/fixtures/*", "*/golden/*", "*/generated/*", "vendor/*", "*.snap", "*.lock", "go.sum",
                   "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "LICENSE*")
-PRIVATE = (("an absolute home path", re.compile(r"/(Users|home)/[A-Za-z][\w.-]*/")),
+PRIVATE = (("an absolute home path", re.compile(r"/(Users|home)/(?!(runner|ubuntu|runneradmin)/)[A-Za-z][\w.-]*/")),
            ("a private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
            ("a token", re.compile(r"\b(gh[pousr]_[A-Za-z0-9_.-]{20,}|github_[p]at_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}"
                                   r"|AKIA[0-9A-Z]{16}|xox[abp]-[A-Za-z0-9-]{10,}|dop_v[1]_[a-f0-9]{20,})")))
+PLACEHOLDER = re.compile(r"FAKE|EXAMPLE", re.I)  # test fixtures and documentation keys
 AI = r"(claude|anthropic|openai|chatgpt|copilot|cursor|gemini|codex)"
 ATTRIBUTION = (re.compile(r"^[ \t]*co-authored-by:[^\n]*\b" + AI + r"\b", re.I | re.M),
                re.compile(r"noreply@anthropic\.com", re.I),
@@ -57,7 +58,8 @@ def privacy(diff):
         if line.startswith("+++ "):
             current = line[6:] if line.startswith("+++ b/") else line[4:]
         elif line.startswith("+") and not line.startswith("+++"):
-            found += ["%s: %s" % (current, what) for what, rx in PRIVATE if rx.search(line)]
+            if not PLACEHOLDER.search(line):
+                found += ["%s: %s" % (current, what) for what, rx in PRIVATE if rx.search(line)]
     return sorted(set(found))
 
 
