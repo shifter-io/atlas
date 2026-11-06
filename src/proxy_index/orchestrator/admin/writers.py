@@ -13,7 +13,7 @@ import psycopg
 
 from ..batches import run_finished
 from ..db import Database, mark_closed
-from ..events import emit
+from ..events import EventRow, emit
 from .views import _hhmm, _now, _row, _rows
 
 OPEN_BATCHES = ("scheduled", "running")
@@ -86,20 +86,22 @@ async def stop_batch(
             )
             await emit(
                 conn,
-                "census_skipped" if batch["kind"] == "census" else "pulse_finished",
-                now,
-                batch_id=batch_id,
-                country_code=batch["country_code"],
-                target_id=batch["target_id"],
-                region_id=batch["region_id"],
-                severity="minor",
-                data={
-                    "region": batch["region"],
-                    "reason": "operator",
-                    "status": status,
-                    "runs_killed": len(killed),
-                    **totals,
-                },
+                EventRow(
+                    kind="census_skipped" if batch["kind"] == "census" else "pulse_finished",
+                    at=now,
+                    batch_id=batch_id,
+                    country_code=batch["country_code"],
+                    target_id=batch["target_id"],
+                    region_id=batch["region_id"],
+                    severity="minor",
+                    data={
+                        "region": batch["region"],
+                        "reason": "operator",
+                        "status": status,
+                        "runs_killed": len(killed),
+                        **totals,
+                    },
+                ),
             )
     return {"batch_id": batch_id, "status": status, "runs_killed": len(killed)}
 

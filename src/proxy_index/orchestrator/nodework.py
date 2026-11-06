@@ -20,7 +20,7 @@ from .batches import (
     run_finished,
 )
 from .db import Database, setting
-from .events import emit, raise_alert
+from .events import EventRow, emit, raise_alert
 from .sqlrows import _now, _row, _rows
 
 COUNTERS = (
@@ -353,13 +353,15 @@ async def mark_offline(db: Database, now: datetime | None = None) -> dict[str, A
             )
             await emit(
                 conn,
-                "node_offline",
-                now,
-                product_id=node["product_id"],
-                region_id=node["region_id"],
-                signal=-1,
-                severity="major",
-                data=data,
+                EventRow(
+                    kind="node_offline",
+                    at=now,
+                    product_id=node["product_id"],
+                    region_id=node["region_id"],
+                    signal=-1,
+                    severity="major",
+                    data=data,
+                ),
             )
     return {"offline": [node["node_id"] for node in gone]}
 
