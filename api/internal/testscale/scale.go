@@ -14,8 +14,9 @@
 // empty, so Inputs has no catalog or demo rows either. QA1 also carries the
 // nine browser pulse targets in every window, so size bounds hold with them.
 //
-// Current and Parts give a payload as the framework stores it since
-// calculated v8: in parts, the daily groups' 24-hour series sparse.
+// Current and Parts (or, for a large shape, CurrentGroups) give a payload as
+// the framework stores it since calculated v8: in parts, the daily groups'
+// 24-hour series sparse.
 package testscale
 
 import (
@@ -72,21 +73,11 @@ var capped = map[string]int{"region": 25, "city": 25, "asn": 25, "country_asn": 
 
 // Inputs is a store.Inputs holding only a published snapshot of the shape.
 func Inputs(shape Shape) (*store.Inputs, error) {
-	raw, err := fixture()
+	doc, places, err := shapeDoc(shape, func(map[string]any) {})
 	if err != nil {
 		return nil, err
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, err
-	}
-	template := doc["products"].([]any)[0].(map[string]any)
-	products, places, err := productGroups(template, shape)
-	if err != nil {
-		return nil, err
-	}
-	doc["products"] = products
-	payload, err := snapshotPayload(doc, template, shape)
+	payload, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +85,30 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 		Events: events(shape), EventsComplete: true, NotableComplete: true}
 	frameworkRows(in, doc, shape)
 	return in, nil
+}
+
+// shapeDoc is the shape's snapshot payload, decoded but for its product
+// groups, which are each encoded alone after edit (marshalGroups), and the
+// typed tails of all their windows.
+func shapeDoc(shape Shape, edit func(map[string]any)) (map[string]any, map[store.PlaceWindow]*store.List, error) {
+	raw, err := fixture()
+	if err != nil {
+		return nil, nil, err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, nil, err
+	}
+	template := doc["products"].([]any)[0].(map[string]any)
+	products, places, err := productGroups(template, shape)
+	if err != nil {
+		return nil, nil, err
+	}
+	doc["products"] = products
+	if err := snapshotDoc(doc, template, shape); err != nil {
+		return nil, nil, err
+	}
+	return doc, places, marshalGroups(doc, edit)
 }
 
 // productGroups is every product group of the shape, built in parallel, and
@@ -117,25 +132,22 @@ func productGroups(template map[string]any, shape Shape) ([]any, map[store.Place
 	return products, places, nil
 }
 
-// snapshotPayload adds the shape's browser targets and every-group fleet
-// entries to doc and marshals it as the framework publishes it.
-func snapshotPayload(doc, template map[string]any, shape Shape) ([]byte, error) {
+// snapshotDoc adds the shape's browser targets and every-group fleet
+// entries to doc, as the framework publishes them.
+func snapshotDoc(doc, template map[string]any, shape Shape) error {
 	if shape.Browser {
 		if err := AddBrowser(doc); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if !shape.NoFleetAll {
 		fleet, err := fleetAll(doc["fleet"], template, shape)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		doc["fleet"] = fleet
 	}
-	if err := marshalGroups(doc); err != nil {
-		return nil, err
-	}
-	return json.Marshal(doc)
+	return nil
 }
 
 // frameworkRows gives in the framework providers, products and targets.
@@ -438,25 +450,7 @@ func Parts(payload []byte, sparse bool) (head []byte, products, runs [][]byte, e
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	var all []json.RawMessage
-	if doc["runs"] != nil {
-		if err := json.Unmarshal(doc["runs"], &all); err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	for i := 0; i < len(all); i += RunsPerPart {
-		b, err := json.Marshal(all[i:min(i+RunsPerPart, len(all))])
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		runs = append(runs, b)
-	}
-	delete(doc, "products")
-	delete(doc, "runs")
-	if doc["parts"], err = json.Marshal(map[string]int{"products": len(products), "runs": len(runs)}); err != nil {
-		return nil, nil, nil, err
-	}
-	head, err = json.Marshal(doc)
+	head, runs, err = headAndRuns(doc, len(products))
 	return head, products, runs, err
 }
 

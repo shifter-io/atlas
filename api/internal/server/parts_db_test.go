@@ -75,7 +75,8 @@ func answers(t *testing.T, db *testdb.DB, id int64, pages []string) map[string][
 // fixture (a census/pulse group and a daily copy) and a QA-1-sized build
 // (18 networks x 40 requested countries, every group daily). A QA-1-sized
 // payload is more than one jsonb row holds (why builds are stored in parts),
-// so its whole form is the same parts with every point kept; the
+// so its whole form is the same parts with every point kept (both from
+// testscale.CurrentGroups, which splits the payload as it builds it); the
 // every-request case and store's TestPartsReadAsTheSinglePayload show those
 // read as the single row does. Each form is stored in its own database and
 // read in its own subtest, both at once (form/whole and form/parts); then
@@ -85,20 +86,24 @@ func answers(t *testing.T, db *testdb.DB, id int64, pages []string) map[string][
 func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
-		name    string
-		payload func() ([]byte, error)
-		single  bool     // the whole form is one payload row
-		pages   []string // answers rendered on request
+		name  string
+		form  func() (storedForm, error)
+		pages []string // answers rendered on request
 	}{
-		{"every-request", testscale.EveryRequest, true, []string{"/v1/networks/shifter/places?dimension=city", "/v1/networks/shifter/places?dimension=asn&range=7d",
+		{"every-request", func() (storedForm, error) {
+			payload, err := testscale.EveryRequest()
+			return storedForm{single: payload, parts: func(sparse bool) ([]byte, [][]byte, [][]byte, error) {
+				return testscale.Parts(payload, sparse)
+			}}, err
+		}, []string{"/v1/networks/shifter/places?dimension=city", "/v1/networks/shifter/places?dimension=asn&range=7d",
 			"/v1/countries/US/cities", "/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=shift", "/v1/events"}},
-		{"QA-1", func() ([]byte, error) {
-			in, err := testscale.Inputs(testscale.QA1)
+		{"QA-1", func() (storedForm, error) {
+			g, err := testscale.CurrentGroups(testscale.QA1)
 			if err != nil {
-				return nil, err
+				return storedForm{}, err
 			}
-			return testscale.Current(in.Snapshot.Payload)
-		}, false, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
+			return storedForm{parts: g.Parts}, nil
+		}, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
 			"/v1/networks/net03/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
 			"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}},
 	} {
@@ -108,7 +113,7 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 				t.Skip("stores a QA-1-sized build twice")
 			}
 			wholeDB, partsDB := testdb.New(t), testdb.New(t)
-			payload, err := c.payload()
+			form, err := c.form()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,11 +121,11 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 			t.Run("form", func(t *testing.T) {
 				t.Run("whole", func(t *testing.T) {
 					t.Parallel()
-					whole = formAnswers(t, wholeDB, payload, c.single, false, c.pages)
+					whole = formAnswers(t, wholeDB, form, false, c.pages)
 				})
 				t.Run("parts", func(t *testing.T) {
 					t.Parallel()
-					parts = formAnswers(t, partsDB, payload, false, true, c.pages)
+					parts = formAnswers(t, partsDB, form, true, c.pages)
 				})
 			})
 			if t.Failed() {
@@ -138,15 +143,22 @@ func TestEveryAnswerIsTheSameFromParts(t *testing.T) {
 	}
 }
 
-// formAnswers stores the payload in db, a database of its own, as one row
-// (single) or in parts (with sparse, the daily groups' 24-hour series
-// sparse), and returns its answers.
-func formAnswers(t *testing.T, db *testdb.DB, payload []byte, single, sparse bool, pages []string) map[string][32]byte {
+// storedForm is a case's payload as each form stores it: single, when set,
+// is its whole form as one payload row; parts is it in parts, with sparse
+// the daily groups' 24-hour series sparse (testscale.Parts).
+type storedForm struct {
+	single []byte
+	parts  func(sparse bool) (head []byte, products, runs [][]byte, err error)
+}
+
+// formAnswers stores the form in db, a database of its own, whole (as one
+// row when f.single is set) or with sparse in parts, and returns its answers.
+func formAnswers(t *testing.T, db *testdb.DB, f storedForm, sparse bool, pages []string) map[string][32]byte {
 	t.Helper()
-	if single {
-		return answers(t, db, db.Publish(t, payload), pages)
+	if f.single != nil && !sparse {
+		return answers(t, db, db.Publish(t, f.single), pages)
 	}
-	head, products, runs, err := testscale.Parts(payload, sparse)
+	head, products, runs, err := f.parts(sparse)
 	if err != nil {
 		t.Fatal(err)
 	}
