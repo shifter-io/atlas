@@ -15,7 +15,14 @@ from psycopg.types.json import Jsonb
 
 from . import names
 from .partitions import partition
-from .storage_read import ENRICHMENT_FIELDS, OUTCOME_KEYS, _digest, _time
+from .storage_read import (
+    ENRICHMENT_FIELDS,
+    LOCATION_FIELDS,
+    NETWORK_FIELDS,
+    OUTCOME_KEYS,
+    _digest,
+    _time,
+)
 
 ADAPTER = {
     "adapter": ("adapter", "text"),
@@ -185,6 +192,36 @@ def insert_buckets(conn, run, run_key):
             + ")",
             (bucket, run_key, *values),
         )
+
+
+def store_geo(conn, run_key, rows):
+    """Resolve each location and network to its enrichment id and add the geo buckets."""
+    if not rows:
+        return
+    types = ",".join(
+        f"{field} {ENRICHMENT_FIELDS[field]}" for field in (*LOCATION_FIELDS, *NETWORK_FIELDS)
+    )
+    conn.execute(
+        f"CREATE TEMP TABLE incoming_geo_buckets (bucket timestamptz, {types}, "
+        "completed bigint, successes bigint, challenges bigint, blocks bigint, timeouts bigint, "
+        "bytes_up bigint, bytes_down bigint, histogram_steps integer[], "
+        "histogram_counts integer[]) ON COMMIT DROP"
+    )
+    with conn.cursor().copy("COPY incoming_geo_buckets FROM STDIN") as copy:
+        for row in rows:
+            copy.write_row(row)
+    for bucket in {row[0] for row in rows}:
+        partition(conn, "run_geo_buckets", bucket)
+    # The same lists as _enrich: the all-NULL rows are the unknown member.
+    joins = names.resolve(conn, "incoming_geo_buckets g", lambda field: f"g.{field}")
+    conn.execute(
+        "INSERT INTO run_geo_buckets(bucket_start,run_key,location_id,network_id,completed,"
+        "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
+        "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
+        "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
+        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + joins,
+        (run_key,),
+    )
 
 
 def check_stored(conn, run, run_key):

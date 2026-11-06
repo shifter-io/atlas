@@ -11,18 +11,18 @@ from pathlib import Path
 import psycopg as psycopg  # re-exported: scripts catch storage.psycopg errors
 from psycopg.types.json import Jsonb
 
-from . import names, storage_ingest, storage_migrate
+from . import storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
-from .partitions import partition
+from .partitions import partition as partition
 from .stats import Histogram
 from .storage_ingest import _profile, column
 from .storage_migrate import MIGRATION_CHECKS as MIGRATION_CHECKS
 from .storage_migrate import V6_CHECKS as V6_CHECKS
 from .storage_read import ENRICHMENT_FIELDS as ENRICHMENT_FIELDS
 from .storage_read import GEO_COUNTERS as GEO_COUNTERS
-from .storage_read import LOCATION_FIELDS, NETWORK_FIELDS, _read_run, _steps
 from .storage_read import OUTCOME_KEYS as OUTCOME_KEYS
 from .storage_read import _bucket as _bucket
+from .storage_read import _read_run, _steps
 from .storage_read import connect as connect
 from .storage_read import read_summary as read_summary
 from .storage_seed import seed as seed
@@ -96,36 +96,6 @@ def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     metrics["latency_mean_ms"] = histogram.mean()
     metrics["success_rate"] = (
         metrics["successes"] / metrics["completed"] if metrics["completed"] else None
-    )
-
-
-def _store_geo(conn, run_key, rows):
-    """Resolve each location and network to its enrichment id and add the geo buckets."""
-    if not rows:
-        return
-    types = ",".join(
-        f"{field} {ENRICHMENT_FIELDS[field]}" for field in (*LOCATION_FIELDS, *NETWORK_FIELDS)
-    )
-    conn.execute(
-        f"CREATE TEMP TABLE incoming_geo_buckets (bucket timestamptz, {types}, "
-        "completed bigint, successes bigint, challenges bigint, blocks bigint, timeouts bigint, "
-        "bytes_up bigint, bytes_down bigint, histogram_steps integer[], "
-        "histogram_counts integer[]) ON COMMIT DROP"
-    )
-    with conn.cursor().copy("COPY incoming_geo_buckets FROM STDIN") as copy:
-        for row in rows:
-            copy.write_row(row)
-    for bucket in {row[0] for row in rows}:
-        partition(conn, "run_geo_buckets", bucket)
-    # The same lists as _enrich: the all-NULL rows are the unknown member.
-    joins = names.resolve(conn, "incoming_geo_buckets g", lambda field: f"g.{field}")
-    conn.execute(
-        "INSERT INTO run_geo_buckets(bucket_start,run_key,location_id,network_id,completed,"
-        "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
-        "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
-        "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
-        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + joins,
-        (run_key,),
     )
 
 
@@ -240,7 +210,7 @@ def _store_run(conn, run, performance, batch_id):
     scope_id, metrics, histogram_steps, histogram_counts = scope_row
     run_key = storage_ingest.insert_run(conn, run, scope_id, batch_id)
     storage_ingest.insert_buckets(conn, run, run_key)
-    _store_geo(conn, run_key, run.geo_rows)
+    storage_ingest.store_geo(conn, run_key, run.geo_rows)
     storage_ingest.check_stored(conn, run, run_key)
     new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
     storage_ingest.add_observations(conn, run_key, pool_id)
