@@ -47,7 +47,9 @@ def test_histogram_merge_and_gaps():
     assert m["latency_ms"]["p50"] == 200  # averaging medians would incorrectly return 105
     assert m["completed"] == 112 and m["errors"] == 2
     assert m["coverage"] == 1 / 288
+    assert m["latency_ms"]["mean"] == 191.7  # (9 × 10 + 1000 + 100 × 200) / 110
     assert metrics([], 24)["latency_ms"]["p50"] is None
+    assert metrics([], 24)["latency_ms"]["mean"] is None
 
 
 def test_policy_and_eligibility():
@@ -259,6 +261,7 @@ def test_saved_shifter_reconciliation(database):
     assert w["metrics"]["completed"] == 5000
     assert w["metrics"]["successes"] == 4997
     assert w["pool"]["unique_ips"] == 4967
+    assert w["metrics"]["latency_ms"].pop("mean") is not None
     assert w["metrics"]["latency_ms"] == {"p50": 1113, "p90": 1395, "p95": 1644, "p99": 3292}
     # Every request counts whatever the run's role: the benchmark is every request.
     assert w["benchmark"]["completed"] == 5000 and w["roles"]["pool_sampling"] == 5000
