@@ -53,7 +53,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # The pull request's exact head, or the queue's merge commit (github.sha),
           # with full history for the diff-based checks.
@@ -265,7 +265,7 @@ jobs:
 
       - name: Keep the CI time record (scripts/ci/timing_history.py reads it)
         if: always() && steps.timing.outcome != 'skipped'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ci-timing
           path: ${{ runner.temp }}/ev/timing.json
