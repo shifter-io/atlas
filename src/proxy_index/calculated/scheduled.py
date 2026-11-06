@@ -49,7 +49,7 @@ RUN_TIMES = (
 )
 
 
-def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None):
+def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None, runs=None):
     """The census/pulse history a v2 payload adds, read in the calculation's snapshot.
 
     geo: run_geo_buckets of the 30-day window summed per product group (scope_id for runs
@@ -65,7 +65,8 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None):
     while a census of the same product was running (census_overlaps()), from stored run start
     and finish times (the ingested run's, else the orchestrator's); their histograms stay out of
     the breakdowns' (light-load) latency, which is the latency target's (timed_target) only.
-    geo, if given, replaces geo_rows() (same arguments and rows: rollups.geo_rows()).
+    geo, if given, replaces geo_rows() (same arguments and rows: rollups.geo_rows()), and runs
+    batch_inputs() (rollups.batch_inputs()).
     """
     start = as_of - timedelta(hours=720)
     bounds = {
@@ -75,12 +76,10 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None):
         "d7": as_of - timedelta(hours=168),
         "margin": start - timedelta(days=1),
     }
-    overlaps = overlap_runs(conn, bounds)
+    overlaps, pulses, tested = (runs or batch_inputs)(conn, bounds)
     geo = (geo or geo_rows)(conn, bounds, overlaps, timed_target)
-    pulses = pulse_runs(conn, start, as_of)
     census = latest_census(conn, as_of)
     outages = window_outages(conn, start, as_of)
-    tested = tested_spans(conn, start, as_of)
     minutes = pulse_minutes(conn, start, as_of)
     by_test = traffic_by_test(conn, start, as_of)
     return {
@@ -96,6 +95,13 @@ def scheduled_inputs(conn, as_of, timed_target="generic_http", geo=None):
         "events": recent_events(conn, as_of),
         "traffic": by_test,
     }
+
+
+def batch_inputs(conn, bounds):
+    """The census overlaps (overlap_runs()), done pulse runs (pulse_runs()) and tested spans
+    (tested_spans()) of the window in bounds: three reads of the batch runs."""
+    start, end = bounds["start"], bounds["end"]
+    return overlap_runs(conn, bounds), pulse_runs(conn, start, end), tested_spans(conn, start, end)
 
 
 def overlap_runs(conn, bounds):

@@ -1,13 +1,18 @@
-"""CALC-PULSE-1a: the census-pulse geo rows of the incremental calculation come from per-hour
-rollups (calculated/rollups.py) and equal the full mode's 30-day query (scheduled.py) exactly.
+"""CALC-PULSE-1a and 1b: the census-pulse geo rows of the incremental calculation come from
+per-hour rollups (calculated/rollups.py) and equal the full mode's 30-day query (scheduled.py)
+exactly; its batch runs' buckets come from per-hour copies and equal the full mode's rows less the
+counters nothing reads, and its census overlaps, pulse slots and tested spans come from one read of
+the batch runs and equal the full mode's three.
 
 The 3-day fixture (test_calculated_hourly_reads.History, on a real PostgreSQL) holds daily tests,
-census and pulse batches, a pulse that ran during a census (the census overlap), a browser batch
-and outages, each run with seeded random run_geo_buckets rows (known and unknown exit locations,
-several networks, latency histograms). Swept over every hour of the 3 days and at cutoffs inside
-an hour, the inputs read through the rollups equal the full mode's, for the latency target and
-another one; halfway a late run lands in hours already rolled up, and a run outside a batch is
-linked to one. Each later cutoff counts only the hours that changed.
+census and pulse batches, a pulse that ran during a census (the census overlap), a browser batch and
+outages, each run with seeded random run_geo_buckets rows (known and unknown exit locations, several
+networks, latency histograms), an older browser bucket, and batch runs without an artifact: a
+skipped pulse slot, a failed pulse, a load wave and a census still running. Swept over every hour of
+the 3 days and at cutoffs inside an hour, the inputs read through the rollups equal the full mode's,
+for the latency target and another one, and so do the batch runs' buckets read through their copies;
+halfway a late run lands in hours already rolled up and copied, and a run outside a batch is linked
+to one. Each later cutoff counts and copies only the hours that changed.
 """
 
 import random
@@ -18,14 +23,17 @@ from psycopg.rows import dict_row
 from test_calculated import lenient_policy
 from test_calculated_hourly_reads import DAY, HOUR, History, floor_hour
 from test_calculated_incremental import assert_equal
+from test_census_pulse import batch, batch_run
 
 from proxy_index.calculated import rollups, scheduled, store
+from proxy_index.calculated.incremental import BUCKETS
 from proxy_index.partitions import partition
 from proxy_index.storage import connect, migrate
 
 pytest_plugins = ["test_storage"]
 
 ROLLUPS = ("calculated_geo_hours", "calculated_geo_rollups")
+COPIES = ("calculated_pulse_buckets", "calculated_pulse_rollups")
 MINUTES = timedelta(minutes=1)
 
 
@@ -81,12 +89,35 @@ async def fixture(database, tmp_path, end):
             "VALUES (%s,'DE','pulse',%s,%s),(%s,'DE','census',%s,NULL)",
             (alpha[0], end - 80 * HOUR, end - 78 * HOUR, alpha[0], end - 3 * HOUR),
         )
+        unrecorded(conn, alpha[0], end)
+        conn.execute(  # an older browser bucket: its outcome counters and label stay in extra
+            "UPDATE run_buckets SET outcome_counters=false,"
+            """extra='{"challenges":2,"bucket_start":"label"}' WHERE run_key=%s""",
+            (keys[6],),
+        )
     return h, rng, keys[0]
 
 
+def unrecorded(conn, product_id, end):
+    """Batch runs without an artifact: a skipped pulse slot, a failed pulse, a load wave during
+    the census, and a census of another country still running."""
+    runs = (("pulse", 40, "skipped", "done"), ("pulse", 20, "done", "failed"))
+    runs += (("load", 30, "done", "done"), ("census", 5, "running", "running"))
+    for kind, back, status, run_status in runs:
+        at = end - back * HOUR + 7 * MINUTES
+        batch_id = batch(conn, kind, at, country="FR", status=status)
+        batch_run(conn, batch_id, product_id, at + MINUTES)
+        conn.execute(
+            "UPDATE batch_runs SET status=%s,finished_at=CASE WHEN %s='running' THEN NULL "
+            "ELSE finished_at END WHERE batch_id=%s",
+            (run_status, run_status, batch_id),
+        )
+
+
 def compare(database, as_of):
-    """The inputs through the rollups equal the full mode's, for two latency targets; the hours
-    the rollups counted, and the latency target's inputs."""
+    """The inputs through the rollups equal the full mode's, for two latency targets, and so do
+    the batch runs' buckets through their copies; the hours the rollups counted (the copies the
+    same ones), and the latency target's inputs."""
     with connect(database) as conn:
         conn.row_factory = dict_row
         counted, found = [], []
@@ -97,7 +128,26 @@ def compare(database, as_of):
             assert rollups.scheduled_inputs(conn, as_of, target) == full, (as_of, target)
             found.append(full)
         assert not any(g["histogram"] for g in found[1]["geo"])  # no request of that target
+        start = as_of - 720 * HOUR
+        copied = rollups.refresh_buckets(conn, rollups.spans((start, as_of))[0])
+        assert rollups.scheduled_rows(conn, start, as_of) == batch_rows(conn, start, as_of), as_of
+        assert copied == counted, (as_of, copied, counted)
         return counted, found[0]
+
+
+def batch_rows(conn, start, as_of):
+    """The full mode's buckets of the batch runs (incremental.BUCKETS), less the bucket label, the
+    status codes and the histogram format the copies leave out."""
+    query = BUCKETS.format(
+        join=" JOIN test_runs r USING(run_key)", daily=" AND r.batch_id IS NOT NULL"
+    )
+    rows = conn.execute(query, (start, as_of)).fetchall()
+    for row in rows:
+        counters = row["counters"]
+        assert counters.pop("bucket_start") and counters.pop("status_codes") is not None
+        bins = counters.pop("latency_histogram")["bins"]
+        counters["latency_histogram"] = {"bins": [tuple(b) for b in bins]}
+    return rows
 
 
 def bounds(as_of):
@@ -109,7 +159,7 @@ def bounds(as_of):
 async def test_rollups_equal_the_full_mode_over_three_days(database, tmp_path):
     end = floor_hour(datetime.now(UTC)) + HOUR
     h, rng, loose = await fixture(database, tmp_path, end)
-    seen = {"overlap": False, "light": False, "fallback": False, "scope": False}
+    seen = {"overlap": False, "light": False, "fallback": False, "scope": False, "skipped": False}
     for hours in range(72, -1, -1):
         as_of = end - hours * HOUR
         counted, full = compare(database, as_of)
@@ -130,6 +180,7 @@ async def test_rollups_equal_the_full_mode_over_three_days(database, tmp_path):
         seen["light"] |= any(g["histogram"] for g in full["geo"])
         seen["fallback"] |= any(g["fallback"] for g in full["geo"])
         seen["scope"] |= any(g["scope_id"] for g in full["geo"])
+        seen["skipped"] |= any(s["country"] == "FR" for s in full["tested"])
         assert full["outages"]
     assert all(seen.values()), seen
 
@@ -137,13 +188,21 @@ async def test_rollups_equal_the_full_mode_over_three_days(database, tmp_path):
 @pytest.mark.asyncio
 async def test_incremental_build_inside_an_hour_equals_the_full_build(database, tmp_path):
     end = floor_hour(datetime.now(UTC)) + HOUR
-    await fixture(database, tmp_path, end)
+    h, rng, loose = await fixture(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
     for as_of in (end - 30 * HOUR, end - 29 * HOUR + 35 * MINUTES):
         payload = assert_equal(database, policy, as_of)
         assert any(p["criteria"].get("schedule") for p in payload["products"])
     with connect(database) as conn:
-        assert conn.execute("SELECT count(*) FROM calculated_geo_rollups").fetchone()[0] >= 719
+        for table in ("calculated_geo_rollups", "calculated_pulse_rollups"):
+            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] >= 719, table
+    # A late pulse lands in an hour copied already, and a run outside a batch is linked to one.
+    late = await h.scheduled("pulse", "alpha", 40 * HOUR)
+    with connect(database) as conn:
+        seed_geo(conn, rng, late)
+        last = conn.execute("SELECT max(batch_id) FROM test_batches").fetchone()[0]
+        conn.execute("UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (last, loose))
+    assert_equal(database, policy, end - 29 * HOUR)
 
 
 def test_spans_cut_the_window_at_its_edges():
@@ -173,7 +232,7 @@ def test_spans_cut_the_window_at_its_edges():
 
 
 @pytest.mark.asyncio
-async def test_old_rollups_are_collected(database, tmp_path):
+async def test_old_rollups_and_copies_are_collected(database, tmp_path):
     end = floor_hour(datetime.now(UTC)) + HOUR
     await fixture(database, tmp_path, end)
     old = end - 40 * DAY
@@ -185,31 +244,43 @@ async def test_old_rollups_are_collected(database, tmp_path):
             "VALUES (%s,1,1,1,'t',1,1,0,0,'{}','{}')",
             (old,),
         )
+        conn.execute("INSERT INTO calculated_pulse_rollups VALUES (%s,1,'{}')", (old,))
+        conn.execute(
+            "INSERT INTO calculated_pulse_buckets SELECT %s,b.* FROM (SELECT "
+            f"{rollups.BUCKET} FROM run_buckets b LIMIT 1) b",
+            (old,),
+        )
     compare(database, end)
     with connect(database) as conn:
-        for table in ROLLUPS:
+        for table in ROLLUPS + COPIES:
             query = f"SELECT count(*) FROM {table} WHERE hour<%s"
             assert conn.execute(query, (end - 31 * DAY,)).fetchone() == (0,), table
 
 
 @pytest.mark.asyncio
-async def test_v10_layer_migrates_to_the_geo_rollups_keeping_its_lists(database, tmp_path):
+@pytest.mark.parametrize("version", [10, 11])
+async def test_v10_and_v11_layers_migrate_to_the_rollups_keeping_their_lists(
+    database, tmp_path, version
+):
     end = floor_hour(datetime.now(UTC)) + HOUR
     await fixture(database, tmp_path, end)
     assert_equal(database, lenient_policy(tmp_path), end)
+    dropped = COPIES + (ROLLUPS if version == 10 else ())
     with connect(database) as conn:
         before = conn.execute("SELECT * FROM calculated_lists ORDER BY list_id").fetchall()
-        conn.execute("DROP TABLE calculated_geo_hours,calculated_geo_rollups")
-        conn.execute("UPDATE calculation_schema SET version=10,checksum=%s", (store.V10_CHECKSUM,))
+        conn.execute(f"DROP TABLE {','.join(dropped)}")
+        checksum = getattr(store, f"V{version}_CHECKSUM")
+        conn.execute("UPDATE calculation_schema SET version=%s,checksum=%s", (version, checksum))
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
-        10,
-        11,
+        version,
+        12,
     )
-    assert set(store.V10_CHECKS) <= set(result["verified"])
+    assert result["verified"][-len(store.V11_CHECKS) :] == list(store.V11_CHECKS)
+    assert set(store.V10_CHECKS) <= set(result["verified"]) or version == 11
     with connect(database) as conn:
         assert conn.execute("SELECT * FROM calculated_lists ORDER BY list_id").fetchall() == before
-        for table in ROLLUPS:
+        for table in dropped:
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (0,)
     # The next incremental build fills them again and still equals the full one.
     assert_equal(database, lenient_policy(tmp_path), end)

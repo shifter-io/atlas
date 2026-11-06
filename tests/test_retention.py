@@ -177,7 +177,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
     argv = ["calculate-expire", "--database-file", str(database)]
     estimate = output(capsys, [*argv, "--dry-run"])
     assert (estimate["schema"], estimate["kept_builds"], estimate["expired_builds"]) == (
-        "v11",
+        "v12",
         kept,
         expired,
     )
@@ -192,7 +192,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
     with connect(database) as conn:
         assert rows_by_build(conn) == before  # the dry run changed nothing
     assert output(capsys, argv) == {
-        "schema": "v11",
+        "schema": "v12",
         "kept_builds": kept,
         "expired_builds": expired,
     }
@@ -209,7 +209,7 @@ async def test_expire_keeps_current_and_newest_published_per_utc_day(database, t
         listed = conn.execute(query, (base,)).fetchone()
         referenced = conn.execute("SELECT count(DISTINCT list_id) FROM calculated_windows")
         assert listed == (referenced.fetchone()[0], True) and listed[0]
-    assert output(capsys, argv) == {"schema": "v11", "kept_builds": kept, "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v12", "kept_builds": kept, "expired_builds": []}
 
 
 @pytest.mark.asyncio
@@ -248,7 +248,7 @@ def test_retention_without_current_build_or_known_schema(database, capsys):
         )
     argv = ["calculate-expire", "--database-file", str(database)]
     # Nothing is current, so nothing can be dated: nothing expires.
-    assert output(capsys, argv) == {"schema": "v11", "kept_builds": [], "expired_builds": []}
+    assert output(capsys, argv) == {"schema": "v12", "kept_builds": [], "expired_builds": []}
     with connect(database) as conn:
         conn.execute("UPDATE calculation_schema SET checksum='edited'")
     # The dry run checks the layer exactly like the real run: unknown fails both.

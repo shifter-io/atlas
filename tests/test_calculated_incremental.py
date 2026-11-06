@@ -284,12 +284,15 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
         # Back to calculated v9: the same schema without the memo tables.
         for table in MEMOS:
             conn.execute(f"DROP TABLE {table}")
-        conn.execute("DROP TABLE calculated_geo_hours,calculated_geo_rollups")  # calculated v11
+        conn.execute(
+            "DROP TABLE calculated_geo_hours,calculated_geo_rollups,calculated_pulse_buckets,"
+            "calculated_pulse_rollups"
+        )  # calculated v11 and v12
         conn.execute("UPDATE calculation_schema SET version=9,checksum=%s", (store.V9_CHECKSUM,))
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         9,
-        11,
+        12,
     )
     assert set(store.V9_CHECKS) <= set(result["verified"])
     with connect(database) as conn:
@@ -308,8 +311,8 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
 
 def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noqa: F811
     roles, files = owned.roles, owned.files
-    # The admin role migrates (v8 → v11); the memo tables and rollups get the default privileges.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 11
+    # The admin role migrates (v8 → v12); the memo tables and rollups get the default privileges.
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 12
     now = datetime.now(UTC)
     rows = {
         "calculated_run_ranges": (1, 0, now, now, "{}", now),
@@ -319,6 +322,9 @@ def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noq
         "calculated_ip_last_seen": (1, now),
         "calculated_geo_hours": (now, None, 1, 1, 1, None, "t", None, 1, 1, 0, 0, [1], [1]),
         "calculated_geo_rollups": (now, 1),
+        "calculated_pulse_buckets": (now, now, 1, 1, 1, 0, "{}", [1], [1], True)
+        + (0, 0, 0, 0, 0, 0, None),
+        "calculated_pulse_rollups": (now, 1, [1]),
     }
     with connect(files[roles.runtime]) as conn:
         for table, row in rows.items():
