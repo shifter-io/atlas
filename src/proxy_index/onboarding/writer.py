@@ -9,10 +9,21 @@ import os
 import queue
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .files import atomic_json, digest, private_dir, sync_dir
 from .manifest import timestamp
+
+
+@dataclass(frozen=True)
+class WriterBounds:
+    """A chunk closes at ``chunk_rows`` rows or ``chunk_seconds`` seconds; the intake holds
+    at most ``queue_size`` observations."""
+
+    chunk_rows: int = 100_000
+    chunk_seconds: float = 5.0
+    queue_size: int = 8192
 
 
 class ObservationWriter:
@@ -24,11 +35,10 @@ class ObservationWriter:
         scheduled: str,
         started: str,
         deadline: float,
-        chunk_rows: int = 100_000,
-        chunk_seconds: float = 5.0,
-        queue_size: int = 8192,
+        bounds: WriterBounds | None = None,
     ):
-        if chunk_rows <= 0 or chunk_seconds <= 0 or queue_size <= 0:
+        bounds = bounds or WriterBounds()
+        if bounds.chunk_rows <= 0 or bounds.chunk_seconds <= 0 or bounds.queue_size <= 0:
             raise ValueError("Writer bounds must be positive")
         self.directory = directory
         self.context = {
@@ -37,8 +47,8 @@ class ObservationWriter:
             "country_started_at": started,
         }
         self.deadline = deadline
-        self.chunk_rows, self.chunk_seconds = chunk_rows, chunk_seconds
-        self.queue: queue.Queue = queue.Queue(maxsize=queue_size)
+        self.chunk_rows, self.chunk_seconds = bounds.chunk_rows, bounds.chunk_seconds
+        self.queue: queue.Queue = queue.Queue(maxsize=bounds.queue_size)
         self.error: BaseException | None = None
         self.rows = 0
         self.chunks = 0

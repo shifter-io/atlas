@@ -10,7 +10,7 @@ from helpers import FakeTransport
 from proxy_index.onboarding.files import read_json
 from proxy_index.onboarding.fleet import classify, cpu_usage, render
 from proxy_index.onboarding.manifest import timestamp
-from proxy_index.onboarding.probe import execute_probe
+from proxy_index.onboarding.probe import ProbeOptions, execute_probe
 from proxy_index.providers import load_provider
 from proxy_index.runner import run
 
@@ -121,7 +121,12 @@ async def test_probe_uses_shared_census_and_writes_live_and_final_status(tmp_pat
         return await run(config, sink, replace(options, transport_factory=FakeTransport))
 
     result = await execute_probe(
-        tmp_path, proxy, "nyc3", "us", concurrency=7, request_timeout=2, run_country=measured
+        tmp_path,
+        proxy,
+        "nyc3",
+        "us",
+        ProbeOptions(concurrency=7, request_timeout=2),
+        run_country=measured,
     )
     assert result["status"] == "completed"
     assert result["measurement"]["completed"] >= 1000
@@ -155,7 +160,7 @@ def shifter(country="us"):
 )
 async def test_probe_rejects_bad_requests_before_creating_state(tmp_path, country, kwargs, message):
     with pytest.raises(ValueError, match=message):
-        await execute_probe(tmp_path, shifter(country), "nyc3", "us", **kwargs)
+        await execute_probe(tmp_path, shifter(country), "nyc3", "us", ProbeOptions(**kwargs))
     assert not (tmp_path / "state.json").exists()
 
 
@@ -168,7 +173,7 @@ async def test_probe_armed_for_a_later_hour_stops_before_measuring(tmp_path):
         raise AssertionError("A stopped probe must not measure")
 
     result = await execute_probe(
-        tmp_path, shifter(), "nyc3", "us", start=start, stop=stop, run_country=never
+        tmp_path, shifter(), "nyc3", "us", ProbeOptions(start=start), stop=stop, run_country=never
     )
     assert result["status"] == "stopped" and result["scheduled_at"] == start
     assert read_json(tmp_path / "state.json")["status"] == "stopped"

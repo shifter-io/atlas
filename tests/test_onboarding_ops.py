@@ -7,7 +7,7 @@ from test_onboarding import START, Clock, Proxy, fake_measurement
 
 from proxy_index.onboarding import manifest
 from proxy_index.onboarding.files import read_json
-from proxy_index.onboarding.scheduler import execute
+from proxy_index.onboarding.scheduler import RegionOptions, execute
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -63,7 +63,7 @@ async def test_region_checkpoint_is_refused_unless_resumed_and_a_crash_fails_it(
         now=START - timedelta(hours=1),
     )
     with pytest.raises(ValueError, match="No region checkpoint"):
-        await execute(path, "tor1", Proxy, resume=True)
+        await execute(path, "tor1", Proxy, RegionOptions(resume=True))
 
     async def crashed(config, sink, options):
         raise OSError("disk full")
