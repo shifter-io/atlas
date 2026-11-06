@@ -30,13 +30,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # name eph storage dist workers cov background timeline serial(run|skip) core
-          - group: lpt-a
-            variants: "no-durations plain,on,branch,worksteal,auto,1,1,0,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace lpt-tl,on,branch,worksteal,auto,1,1,1,run,ctrace lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace"
-          - group: lpt-b
-            variants: "use-durations lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace no-durations plain,on,branch,worksteal,auto,1,1,0,run,ctrace main-exact,off,main,worksteal,auto,1,1,0,run,ctrace use-durations lpt,on,branch,worksteal,auto,1,1,0,run,ctrace"
-          - group: lpt-c
-            variants: "no-durations main-exact,off,main,worksteal,auto,1,1,0,run,ctrace use-durations lpt-skip,on,branch,worksteal,auto,1,1,0,skip,ctrace lpt-tl,on,branch,worksteal,auto,1,1,1,run,ctrace"
+          # name eph storage dist workers cov background timeline serial(run|skip) core(ctrace|rep: reports by the coverage CLI)
+          - group: over-a
+            variants: "lpt,on,branch,worksteal,auto,1,1,0,skip,ctrace lpt-rep,on,branch,worksteal,auto,1,1,0,skip,rep covcmp:lpt:lpt-rep lpt-n28,on,branch,worksteal,28,1,1,0,skip,ctrace"
+          - group: over-b
+            variants: "lpt-rep,on,branch,worksteal,auto,1,1,0,skip,rep lpt,on,branch,worksteal,auto,1,1,0,skip,ctrace covcmp:lpt:lpt-rep lpt-n28,on,branch,worksteal,28,1,1,0,skip,ctrace"
+          - group: over-c
+            variants: "lpt-n28,on,branch,worksteal,28,1,1,0,skip,ctrace lpt,on,branch,worksteal,auto,1,1,0,skip,ctrace lpt-rep,on,branch,worksteal,auto,1,1,0,skip,rep"
     defaults:
       run:
         shell: bash
@@ -150,9 +150,25 @@ jobs:
                 --basetemp="$EV/scope-tmp" tests/test_campaign_scope.py -q
               background benchmark uv run --no-editable python scripts/benchmark.py --output "$EV/scale"
             fi
+            if [ "$core" = rep ]; then
+              covargs=(--cov=proxy_index --cov-branch --cov-report=)
+            fi
             uv run --no-editable pytest -p no:cacheprovider -rs -n "$workers" --dist "$dist" -m "not serial" \
-              "${covargs[@]}" --junitxml="$EV/junit.xml" --durations=25 > "$EV/pytest.log" 2>&1 || echo "pytest exit $?"
+              "${covargs[@]}" --junitxml="$EV/junit.xml" --durations=25 2>&1 \
+              | python3 -u -c 'import sys, time
+          t = time.time()
+          for line in sys.stdin: print(f"{time.time() - t:7.2f} {line}", end="", flush=True)' > "$EV/pytest.log" || echo "pytest exit $?"
+            tp=$(now)
+            if [ "$core" = rep ]; then
+              printf '[run]\nsource = proxy_index\nbranch = True\n' > "$EV/rc"
+              ( uv run --no-editable coverage xml --rcfile "$EV/rc" -o "$EV/coverage.xml" > "$EV/xml.log" 2>&1 & \
+                uv run --no-editable coverage json --rcfile "$EV/rc" -o "$EV/coverage.json" > "$EV/json.log" 2>&1 & wait )
+              cat "$EV/xml.log" "$EV/json.log"
+            fi
             t1=$(now)
+            echo "pytest $(dt "$t0" "$tp") s, reports after it $(dt "$tp" "$t1") s"
+            grep -E "created:|workers \[|passed|Coverage|written|^ *[0-9.]+ \[|%\]" "$EV/pytest.log" | grep -vE "^ *[0-9.]+ \.+ *\[ *[1-9]" | head -20
+            awk '$2 ~ /^[.sFE]+$/ {print "first progress at", $1; exit}' "$EV/pytest.log"
             if [ "$serial" = run ]; then
               uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
                 "${covappend[@]}" --junitxml="$EV/junit-serial.xml" --durations=25 >> "$EV/pytest.log" 2>&1 || echo "serial exit $?"
@@ -204,7 +220,9 @@ jobs:
           for v in $VARIANTS; do
             case "$v" in
               collect) collect ;;
-              covcmp:*) IFS=: read -r _ a b <<< "$v"; covcmp "$a" "$b" ;;
+              covcmp:*) IFS=: read -r _ a b <<< "$v"; covcmp "$a" "$b"
+                python3 -c 'import json, sys; [print(p, json.load(open(p))["totals"]) for p in sys.argv[1:]]' "$M/$a/coverage.json" "$M/$b/coverage.json"
+                grep -c "<class " "$M/$a/coverage.xml" "$M/$b/coverage.xml" ;;
               use-durations) git checkout HEAD -- tests/durations.json; wc -l tests/durations.json ;;
               no-durations) rm -f tests/durations.json ;;
               *) variant "$v" ;;
