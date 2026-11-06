@@ -33,13 +33,15 @@ from typing import Any
 from ..onboarding.files import atomic_json, digest, read_json
 from . import manager_rules, ops_api
 from .contracts import (
-    MANAGER_TAG,
     NETWORK_RE,
+    PRODUCTION,
     PROJECT_NAME,
     CampaignSpec,
     Droplet,
+    names,
     short_id,
     spec_path,
+    tags,
 )
 from .do_api import CreateError, DigitalOcean, TokenSource
 from .hostkeys import known_hosts, known_hosts_option
@@ -154,8 +156,22 @@ def audit_path(inventory: Path) -> Path:
 
 
 def manager_scope(inventory: dict[str, Any]):
-    since = datetime.fromisoformat(inventory["manager_since"])
-    return ops_api.ops_scope(inventory["project_id"], since, str(inventory["manager_id"]))
+    since, environment = (
+        datetime.fromisoformat(inventory["manager_since"]),
+        ops_api.inventory_environment(inventory),
+    )
+    return ops_api.ops_scope(
+        inventory["project_id"], since, str(inventory["manager_id"]), environment
+    )
+
+
+def bound_environment(inventory: dict[str, Any], wanted: str) -> str:
+    """`wanted`, which must be the inventory's environment (production for one written before
+    environments); a new, empty inventory takes it. Each environment has its own inventory."""
+    recorded = ops_api.inventory_environment(inventory) if inventory else wanted
+    if recorded != wanted:
+        raise DeployError(f"this inventory is the {recorded} manager's, not {wanted}")
+    return recorded
 
 
 def checked_ipv4(value: str) -> str:
@@ -286,6 +302,7 @@ class DeployJob:
     mac_ipv4: str
     token: TokenSource
     size: str | None = None  # a new manager's size; None: the recorded one, else MANAGER_SIZE
+    environment: str = PRODUCTION  # CAMP-STAGING-1: staging runs beside it on its own names
 
     def payload(self) -> bytes:
         assets = files("proxy_index.campaign").joinpath("assets")
@@ -318,6 +335,7 @@ async def deploy(
     Run again with a new wheel to update a recorded manager; it is never created twice."""
     now, path = now or datetime.now(UTC), job.inventory
     inventory = await _record_mac_key(cloud, job, shell, now)
+    environment = ops_api.inventory_environment(inventory)
     await _ensure_manager(cloud, job, inventory, now, sleep)
     scope = manager_scope(inventory)
     rules = manager_rules.manager_rules(inventory, job.mac_ipv4)
@@ -334,10 +352,9 @@ async def deploy(
     await remote.put_secret("do-token", job.token().encode())
     for network, data in job.credentials.items():
         await remote.put_secret(f"credentials/{network}.toml", data)
-    key_id, key_name, _ = await ops_api.ensure_ssh_key(
-        cloud, await _worker_key_name(cloud, now, worker_public), worker_public
-    )
-    rules = ops_api.worker_firewall(inventory["host"])
+    worker_key = await _worker_key_name(cloud, environment, now, worker_public)
+    key_id, key_name, _ = await ops_api.ensure_ssh_key(cloud, worker_key, worker_public)
+    rules = ops_api.worker_firewall(inventory["host"], environment)
     save(
         path,
         inventory,
@@ -362,14 +379,17 @@ async def _record_mac_key(
     path = job.inventory
     inventory = load_inventory(path)
     project_id = await check_account(cloud, inventory, job.account)  # before any write
+    environment = bound_environment(inventory, job.environment)
     size = await manager_size(cloud, inventory, job.size)
     if inventory.get("host") and inventory.get("campaigns"):
         await _refuse_while_running(Manager(inventory, path, shell), inventory["campaigns"])
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
-    mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, f"pi-camp-mac-{now:%Y%m%d}", public)
+    mac_key = names(environment).dated("mac", now)
+    mac_key_id, _, _ = await ops_api.ensure_ssh_key(cloud, mac_key, public)
     return save(
         path,
         inventory,
+        environment=environment,
         account=job.account,
         project_id=project_id,
         mac_key_id=mac_key_id,
@@ -399,10 +419,12 @@ async def manager_size(cloud: DigitalOcean, inventory: dict[str, Any], wanted: s
     return size
 
 
-async def _worker_key_name(cloud: DigitalOcean, now: datetime, public: str) -> str:
-    """The dated worker key name, with a suffix when a kept key of a retired manager already
-    holds it (the plan finds the worker key by its unique name)."""
-    name, wanted = f"pi-camp-worker-{now:%Y%m%d}", public.split()[:2]
+async def _worker_key_name(
+    cloud: DigitalOcean, environment: str, now: datetime, public: str
+) -> str:
+    """The environment's dated worker key name, with a suffix when a kept key of a retired
+    manager already holds it (the plan finds the worker key by its unique name)."""
+    name, wanted = names(environment).dated("worker", now), public.split()[:2]
     taken = {
         str(k.get("name"))
         for k in await cloud.ssh_keys()
@@ -433,7 +455,9 @@ async def _ensure_manager(
     """The recorded manager, or a new one of the recorded size: created, moved into Proxy
     Index, then active."""
     if not inventory.get("manager_id"):
-        name = f"pi-camp-manager-{now:%Y%m%d}-{secrets.token_hex(2)}"
+        environment = ops_api.inventory_environment(inventory)
+        name = names(environment).dated("manager", now, secrets.token_hex(2))
+        tag = tags(environment)["manager"]
         save(job.inventory, inventory, manager_name=name, manager_since=now.isoformat())
         try:
             [droplet] = await cloud.create(
@@ -441,14 +465,14 @@ async def _ensure_manager(
                 region=MANAGER_REGION,
                 size=inventory["manager_size"],
                 image=BASE_IMAGE,
-                tags=[MANAGER_TAG],
+                tags=[tag],
                 ssh_keys=[inventory["mac_key_id"]],
                 with_droplet_agent=False,
                 monitoring=False,
                 ipv6=False,
             )
         except CreateError as error:
-            adopted = await cloud.adopt_uncertain([name], MANAGER_TAG) if error.uncertain else []
+            adopted = await cloud.adopt_uncertain([name], tag) if error.uncertain else []
             if not adopted:
                 raise
             droplet = adopted[0]
@@ -504,11 +528,13 @@ async def upload_spec(inventory_path: Path, root: Path, *, shell: Shell = run_sh
         spec.wheel_sha256,
         spec.account,
         spec.project_id,
+        spec.environment,
     ) != (
         str(inventory["manager_id"]),
         inventory.get("wheel_sha256"),
         inventory.get("account"),
         inventory.get("project_id"),
+        ops_api.inventory_environment(inventory),
     ):
         raise DeployError("the spec does not name the deployed manager, wheel and account")
     target = f"{BASE}/campaigns/{spec.campaign_id}"

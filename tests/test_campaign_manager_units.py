@@ -224,6 +224,20 @@ async def test_upload_spec_sends_the_root_and_records_the_campaign(deployed, tmp
         await deploy.upload_spec(deployed, root, shell=Shell(fail=("test ! -e",)))
 
 
+async def test_upload_spec_refuses_a_spec_of_the_other_environment(deployed, tmp_path):
+    """CAMP-STAGING-1: an inventory without `environment` is production's."""
+    saved, shell = json.loads(deployed.read_text()), Shell()
+    with pytest.raises(deploy.DeployError, match="deployed manager, wheel and account"):
+        await deploy.upload_spec(
+            deployed, planned_root(tmp_path / "s", environment="staging"), shell=shell
+        )
+    deploy.save(deployed, saved, environment="staging", campaigns=[])
+    with pytest.raises(deploy.DeployError, match="deployed manager, wheel and account"):
+        await deploy.upload_spec(deployed, planned_root(tmp_path / "p"), shell=shell)
+    root = planned_root(tmp_path / "t", environment="staging")
+    assert (await deploy.upload_spec(deployed, root, shell=shell))["campaigns"] == [CID]
+
+
 class NoCloud:
     """Stands in for the client the CLI builds; records the account it was built for."""
 

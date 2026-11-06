@@ -80,7 +80,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
-| `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), each provider's `coverageEvidence` (the network page's City × ASN rows, whole; builds before payload v4 only) and `pages`, the body of every page answer the site draws by its request (FIELDS.md, "Page answers in the dataset file"). A v4 build's file also has the country answers in `pages` and `lists`, every row of every network list as compact arrays (country, region, city, ASN and City × ASN), from which every list answer and place page is regenerated (FIELDS.md, "The dataset file of a v4 build"); it is about 27 MB per network, so about 0.5 GB at 18 networks × 249 countries (contract K11, derived), gzip and brotli far smaller. A build before v4 writes `"lists":{}`. The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
+| `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), each provider's `coverageEvidence` (the network page's City × ASN rows, whole; builds before payload v4 only) and `pages`, the body of every page answer the site draws by its request (FIELDS.md, "Page answers in the dataset file"). A v4 build's file also has the country answers in `pages` and `lists`: of every network list (country, region, city, ASN and City × ASN) its first page as compact arrays, its exact `total` and its page count; every further page, search and cross-network list is read from the API (DATASET-SIZE-2; FIELDS.md, "The dataset file of a v4 build"). At 18 networks × 249 countries it is about 9.2 MB, gzip 0.5 MB (at most 15 MB, `TestTheRunADatasetFileIsSmallAndQuickToWrite`). A build before v4 writes `"lists":{}`. The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
 | `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex` without its articles: networks, pages, targets, actions, plus a new `Countries` group) and the palette's constants (`groupBonus` has no `Guides` group). Guides and network reviews are not searched, and the pages only the old website had (`/guides`, `/contribute`, `/disclosure`) are not listed, nor its "Download the raw dataset" action (`/data/design-preview.json`, the old site's demo file). |
@@ -150,8 +150,8 @@ summary per provider and proxy kind over all its product groups) is read from tw
 things only (`internal/store/network.go`): its head, through a SQL projection that
 leaves out the `parts` count, every `overlap` row and the per-cohort `fleet` rows (it
 keeps the every-group `*` entries), and the network lists its windows name (contract
-K10, `store.NetLists`, held between rebuilds like the group lists, which a v4 read
-drops). No product part and no group list is read. Each network is then given to the
+K10, `store.NetLists`: each list's row counts, held between rebuilds like the group
+lists, which a v4 read drops; the rows stay in the database). No product part and no group list is read. Each network is then given to the
 build as one product group (`cohort` `network`, `id` `<provider>:<kind>:network`),
 so every answer is made by the code that serves a v3 build: a network of one product
 group answers byte for byte as that group did, but for those two strings (and the
@@ -246,11 +246,18 @@ editorial ones.
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version (a new event starts a new one).
-- **Network lists** (contracts K10, K11; read for a payload v4 build). `store.NetLists`
-  holds each network window's whole list as 24-byte rows (IPs, completed, successes,
-  p50 and indexes into place and ASN names shared by every list), at most 40 MB per
-  million rows (`TestNetListsMemory`), reads only list ids it does not hold, and
-  answers most-IPs-first order, every-word search and totals from memory.
+- **Network lists** (contracts K10, K11; read for a payload v4 build; API-MEM-1).
+  `store.NetLists` holds only each network window's list id and row count per
+  dimension, reading the counts only of list ids it does not hold. A dimension's rows
+  are read from `calculated_list_rows` (by list id, in position order, in a read-only
+  transaction of their own) when the build, a page or a search needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
+  and ASN names shared by every list; at most 40 MB per million rows,
+  `TestNetListsMemory`), and the rows read last stay in a 64 MB cache (least recently
+  used first out). Most-IPs-first order, every-word search and totals run over those
+  rows, so answers are as before. A list keeps its rows while its build is retained
+  (contract K2 deletes lists, never changes them), so a page of the build being served
+  during a rebuild reads its own rows; a read that finds fewer rows than the list had
+  at its load fails, and the page answers 500.
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
   published build's `created_at`, the site tables' newest `updated_at`,
@@ -260,9 +267,10 @@ editorial ones.
   revision. The marker is part of the fingerprint, so it is checked every poll. The
   file is never held whole in memory: its JSON is written one provider at a time
   (`build.WriteDataset`, byte for byte what encoding the whole `Dataset` gives; a v4
-  build's `lists` one dimension and 1,000 rows at a time), then compressed from disk
-  (gzip level 6, brotli quality 5 with a 4 MB window, in parallel: at a v4 file's
-  0.5 GB, gzip 9 and brotli 10 would take minutes of CPU every hour). Each file is written as a `.tmp` (mode 0644), fsynced and renamed. A
+  build's `lists` one list's first page at a time, from the pages the build keeps,
+  so no list row is read), then compressed from disk (gzip level 6, brotli quality 5
+  with a 4 MB window, in parallel; at 18 networks × 249 countries the whole write
+  takes about 0.3 s, at most 2 s). Each file is written as a `.tmp` (mode 0644), fsynced and renamed. A
   replaced file is still served for 10 minutes after its replacement, then deleted
   (checked every poll). `dataset.meta.json` records the marker, the code that wrote
   the file (the binary's git revision) and the files, so a restart reuses a file whose
@@ -359,7 +367,7 @@ PG_TEST_ADMIN_FILE=... go test -race ./...
 go test -bench . -run XXX ./internal/server/
 ```
 
-CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow; `go test -race` without the database runs on `main`. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
+CI's `api` workflow (`.github/workflows/api.yml`) runs `gofmt` and `go vet`, and `go test` with the database tests against a PostgreSQL 17 container and the framework schema of the same checkout, on every ready pull request that changes `api/`, the framework's SQL (`src/proxy_index/**/*.sql`) or the workflow, and again on every merge-queue test (the `merge_group` event; it skips the build and tests when the entry changes none of those files). It is one job on its own fresh 32-CPU CI server with all its work in parallel; nothing runs on pushes to `main`, which only ever gets what the merge queue tested ("How a change reaches main" in `AGENTS.md`). `go test -race` without the database runs nightly on `main` and on dispatches, not as a merge gate. `PG_TEST_REQUIRED=1` makes a missing `PG_TEST_ADMIN_FILE` fail the database tests instead of skipping them. Its tests run with `go test -json`; the job summary lists the 20 slowest tests and subtests (QA-1's included) with the test steps' time, the `api-timing` artifact keeps them 90 days (`python3 scripts/ci/timing_history.py --workflow api`), a test over 60 s or test steps over 90 s warn, and a test of 90 s or more or test steps over 240 s fail the job (`scripts/ci/timing.py`).
 
 Database tests create a throwaway `siteapi_test_<random>` database with the admin
 credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -252,8 +253,8 @@ func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 				for _, q := range []struct {
 					page  int
 					query string
-				}{{1, ""}, {2, ""}, {1, "de"}, {1, "be Berlin"}, {1, "telekom"}, {1, "as3209"}, {1, "zz"}} {
-					page, _ := res.Pages.List("", scope, r, d, q.query, q.page)
+				}{{1, ""}, {2, ""}, {3, ""}, {1, "de"}, {1, "be Berlin"}, {1, "telekom"}, {1, "as3209"}, {1, "zz"}, {1, "zyx"}, {2, "tail"}} {
+					page, _, _ := res.Pages.List(context.Background(), "", scope, r, d, q.query, q.page)
 					if out[fmt.Sprintf("places %s %s %s %d %q", scope, r, d, q.page, q.query)], err = json.Marshal(page); err != nil {
 						t.Fatal(err)
 					}
@@ -297,7 +298,8 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 	db.PublishParts(t, v4, groups, nil)
 	same()
 	fromV4, log4 := loadLogged(t, db, cache)
-	if log4.reads("calculated_snapshot_parts") || !subset(log4.listIDs, nc.netLists) || len(log4.listIDs) != 9 || cache.Fetched != 9 {
+	if read := slices.Compact(slices.Sorted(slices.Values(log4.listIDs))); log4.reads("calculated_snapshot_parts") ||
+		!subset(log4.listIDs, nc.netLists) || len(read) != 9 || cache.Fetched != 9 {
 		t.Errorf("the v4 build: parts read %v, list ids %v (want the 9 network lists only), group lists fetched %d more",
 			log4.reads("calculated_snapshot_parts"), log4.listIDs, cache.Fetched-9)
 	}
@@ -383,14 +385,17 @@ func withoutV4Dataset(t *testing.T, b []byte) []byte {
 	return out
 }
 
-// checkCoverageRows: the v4 file's City x ASN rows of each network, kind and
-// range are the v3 build's coverage evidence rows with IPs, as the evidence
-// writes them (the v4 rows add the country latency rank and peers, and are
-// most IPs first).
+// checkCoverageRows: the v4 file's City x ASN list of each network, kind and
+// range is the v3 build's coverage evidence rows with IPs, as the evidence
+// writes them (the v4 rows add the country latency rank and peers): their
+// count, and the first page of them, most IPs first (ties in list order).
 func checkCoverageRows(t *testing.T, v3, v4 *build.Result) {
 	t.Helper()
 	var doc struct {
-		Lists map[string]map[string]map[string]map[string][][]json.RawMessage `json:"lists"`
+		Lists map[string]map[string]map[string]map[string]struct {
+			Total int                 `json:"total"`
+			Rows  [][]json.RawMessage `json:"rows"`
+		} `json:"lists"`
 	}
 	b, err := server.Marshal(v4.Dataset)
 	if err == nil {
@@ -403,19 +408,23 @@ func checkCoverageRows(t *testing.T, v3, v4 *build.Result) {
 	for _, p := range v3.Dataset.Providers {
 		for kind, byRange := range p.CoverageEvidence {
 			for rangeID, rows := range byRange {
-				var want, got []string
+				var with []model.CoverageRow
 				for _, r := range rows {
 					if r.Ips.OK() && r.Ips > 0 {
-						want = append(want, string(must(json.Marshal(r))))
+						with = append(with, r)
 					}
 				}
-				for _, r := range doc.Lists[p.Slug][kind][rangeID]["city_asn"] {
+				sort.SliceStable(with, func(i, j int) bool { return with[i].Ips > with[j].Ips })
+				var want, got []string
+				for _, r := range with[:min(len(with), build.PageSize)] {
+					want = append(want, string(must(json.Marshal(r))))
+				}
+				l := doc.Lists[p.Slug][kind][rangeID]["city_asn"]
+				for _, r := range l.Rows {
 					got = append(got, string(must(json.Marshal(r[:9]))))
 				}
-				sort.Strings(want)
-				sort.Strings(got)
-				if !slices.Equal(got, want) {
-					t.Errorf("%s %s %s: v4 City x ASN rows %v, v3 evidence %v", p.Slug, kind, rangeID, got, want)
+				if !slices.Equal(got, want) || l.Total != len(with) {
+					t.Errorf("%s %s %s: v4 City x ASN rows %v of %d, v3 evidence %v of %d", p.Slug, kind, rangeID, got, l.Total, want, len(with))
 				}
 				n += len(got)
 			}

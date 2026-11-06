@@ -448,3 +448,14 @@ async def test_plan_refuses_manifests_with_another_slot_interval(plan_world, mon
     with pytest.raises(PlanError, match="slot_minutes differs"):
         await run_plan(fake, replace(inputs, slot_minutes=15, slots=4))
     assert not inputs.output.exists() or not list(inputs.output.iterdir())
+
+
+async def test_a_plan_for_a_staging_manager_records_its_environment(plan_world):
+    """CAMP-STAGING-1: the spec takes the manager's environment; production's has no field."""
+    fake, inputs = plan_world
+    root = Path((await run_plan(fake, inputs))["root"])
+    assert "environment" not in json.loads(spec_path(root).read_text())
+    data = json.loads(inputs.inventory.read_text())
+    inputs.inventory.write_text(json.dumps(data | {"environment": "staging"}))
+    root = Path((await run_plan(fake, inputs))["root"])
+    assert CampaignSpec.from_json(spec_path(root).read_text()).environment == "staging"

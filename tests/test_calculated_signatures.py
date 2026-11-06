@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from test_calculated import POLICY, payload_mismatches, spread
+from calculated_cases import POLICY, payload_mismatches, spread
 from test_storage import enrichment, measurement
 
 from proxy_index.calculated import calculator, lists, store

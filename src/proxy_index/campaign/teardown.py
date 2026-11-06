@@ -2,7 +2,9 @@
 and no worker lives, stop the units, shred the secrets, remove every recorded resource through
 the guard, remove the Mac agent and prove it. `teardown --keep-worker-assets` removes only the
 manager and its firewall and retires it in the inventory, so the next `deploy` creates a new
-manager and reuses the worker snapshot and firewall.
+manager and reuses the worker snapshot and firewall. A staging inventory (CAMP-STAGING-1) counts
+and removes only its own pi-camp-stg- resources, never a snapshot, and keeps the Mac agent,
+which watches production.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..onboarding.files import read_json
-from .contracts import CAMPAIGN_ROLES, WORKER_TAG, campaign_tag
+from .contracts import PRODUCTION, campaign_tag, tags
 from .deploy import (
     BASE,
     DeployError,
@@ -26,6 +28,7 @@ from .deploy import (
 from .do_api import DigitalOcean
 from .hostkeys import known_hosts
 from .image import Shell, run_shell
+from .ops_api import inventory_environment
 from .scope import Ledger, guarded_delete
 
 GONE = ("deleted", "absent")  # guarded_delete results that leave nothing behind
@@ -91,8 +94,9 @@ def _owned(
     inventory: dict, images: dict, keep_worker_assets: bool = False
 ) -> list[tuple[str, str]]:
     """(kind, id) in teardown order: manager, firewalls, the worker keys (the current one and
-    those kept from retired managers), the Mac key, snapshots. Keeping the worker assets
-    leaves only the manager and its firewall."""
+    those kept from retired managers), the Mac key, snapshots (production only: staging uses
+    production's image read only). Keeping the worker assets leaves the manager and its
+    firewall."""
     found = [
         ("droplet", inventory.get("manager_id")),
         ("firewall", inventory.get("manager_firewall_id")),
@@ -104,7 +108,8 @@ def _owned(
         ]
         found += [("ssh_key", key) for key in inventory.get("kept_worker_key_ids", [])]
         found += [("ssh_key", inventory.get("mac_key_id"))]
-        found += [("snapshot", b.get("snapshot_id")) for b in images.get("builds", [])]
+        if inventory_environment(inventory) == PRODUCTION:
+            found += [("snapshot", b.get("snapshot_id")) for b in images.get("builds", [])]
     return [(kind, str(rid)) for kind, rid in found if rid]
 
 
@@ -209,20 +214,20 @@ async def teardown(
         raise DeployError("no manager is recorded")
     await check_account(cloud, inventory, inventory.get("account", ""))
     check_reports(inventory, reports)
-    if await cloud.list_tag(WORKER_TAG):
+    environment = inventory_environment(inventory)
+    roles = tags(environment)
+    if await cloud.list_tag(roles["worker"]):
         raise DeployError("campaign workers are still alive")
     secrets = await _silence(cloud, inventory, inventory_path, shell)
     released = await _release(cloud, inventory, inventory_path, keep_worker_assets)
-    tags = [tag for tag, _ in CAMPAIGN_ROLES.values()] + [
-        campaign_tag(c) for c in inventory.get("campaigns", [])
-    ]
-    proof = {tag: len(await cloud.list_tag(tag)) for tag in tags}
+    counted = [*roles.values(), *(campaign_tag(c) for c in inventory.get("campaigns", []))]
+    proof = {tag: len(await cloud.list_tag(tag)) for tag in counted}
     stray = [i for i in inventory.get("unassigned_managers", []) if await cloud.get(str(i))]
     clean = all(r["result"] in GONE for r in released) and not any(proof.values()) and not (stray)
     done = {
         "secrets": secrets,
         "released": released,
-        "agent_removed": (remove_agent or _remove_agent)(),
+        "agent_removed": environment == PRODUCTION and (remove_agent or _remove_agent)(),
         "tag_counts": proof,
         "unassigned_managers": stray,
         "clean": clean,

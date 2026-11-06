@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gzip
-import html
 import ipaddress
 import json
 import os
@@ -12,6 +11,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from .files import atomic_bytes, atomic_json, digest, fingerprint, lock, private_dir, read_json
+from .fleet import esc
 from .manifest import load, moment, regional_window
 from .scheduler import job_directory, status, validate_state
 
@@ -48,33 +48,35 @@ def verify_chunk(path: Path, metadata: dict, job: dict, end: str) -> int:
     return count
 
 
+def _round_status(round_info: dict) -> str:
+    duration = round_info["duration_seconds"]
+    if duration is not None and duration > 2400:
+        return "Over 40 min"
+    return "Complete" if round_info["completed"] else "Incomplete"
+
+
+def _round_row(region: str, round_info: dict) -> str:
+    """One hourly round's table row in the onboarding report."""
+    duration = round_info["duration_seconds"]
+    minutes = f"{duration / 60:.1f}" if duration is not None else "Incomplete"
+    delay = round_info["delay_seconds"]
+    cells = (
+        region,
+        round_info["round"],
+        round_info["scheduled_at"],
+        minutes,
+        f"{delay:.1f}" if delay is not None else "Not started",
+        _round_status(round_info),
+    )
+    return "<tr>" + "".join(f"<td>{esc(v)}</td>" for v in cells) + "</tr>"
+
+
 def render_report(manifest: dict, result: dict) -> bytes:
-    esc = lambda value: html.escape(str(value))  # noqa: E731
-    rows = []
-    for region in result["regions"]:
-        for round_info in region["rounds"]:
-            duration = round_info["duration_seconds"]
-            minutes = f"{duration / 60:.1f}" if duration is not None else "Incomplete"
-            delay = round_info["delay_seconds"]
-            rows.append(
-                "<tr>"
-                + "".join(
-                    f"<td>{esc(v)}</td>"
-                    for v in (
-                        region["region"],
-                        round_info["round"],
-                        round_info["scheduled_at"],
-                        minutes,
-                        f"{delay:.1f}" if delay is not None else "Not started",
-                        "Over 40 min"
-                        if duration is not None and duration > 2400
-                        else "Complete"
-                        if round_info["completed"]
-                        else "Incomplete",
-                    )
-                )
-                + "</tr>"
-            )
+    rows = [
+        _round_row(region["region"], round_info)
+        for region in result["regions"]
+        for round_info in region["rounds"]
+    ]
     issues = "".join(f"<li>{esc(issue)}</li>" for issue in result["issues"])
     details = "".join(
         f"<li><b>{esc(r['region'])}</b>: {r['requests']:,} requests; {r['errors']:,} errors; "
@@ -161,6 +163,19 @@ def _export_region(manifest: dict, root: Path, region: str, destination, result:
         result["issues"].append(f"{region}: regional state is {state['status']}")
 
 
+def _write_observations(partial: Path, manifest: dict, root: Path, result: dict) -> None:
+    """Stream every region's verified chunks into the partial export file."""
+    # A previous failed export is not a published export; it can be rebuilt from chunks.
+    fd = os.open(partial, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as destination:
+        for region in manifest["regions"]:
+            _export_region(manifest, root, region, destination, result)
+        if result["chunks"] == 0:
+            destination.write(gzip.compress(b"", mtime=0))
+        destination.flush()
+        os.fsync(destination.fileno())
+
+
 def export_campaign(manifest_path: Path) -> dict:
     manifest = load(manifest_path)
     root = manifest_path.parent
@@ -182,16 +197,8 @@ def export_campaign(manifest_path: Path) -> dict:
             if directory.exists():
                 locks.enter_context(lock(directory / ".lock"))
         partial = output / "observations.jsonl.gz.partial"
-        # A previous failed export is not a published export; it can be rebuilt from chunks.
-        fd = os.open(partial, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
         try:
-            with os.fdopen(fd, "wb") as destination:
-                for region in manifest["regions"]:
-                    _export_region(manifest, root, region, destination, result)
-                if result["chunks"] == 0:
-                    destination.write(gzip.compress(b"", mtime=0))
-                destination.flush()
-                os.fsync(destination.fileno())
+            _write_observations(partial, manifest, root, result)
             result["complete"] = not result["issues"]
             result["file"] = "observations.jsonl.gz"
             result["sha256"] = digest(partial)

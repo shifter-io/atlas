@@ -21,7 +21,7 @@ from ..onboarding.manifest import SLOT_MINUTES
 from ..providers import load_provider
 from ..providers.grammar import load_grammar
 from ..regions import REGION_IDS
-from .contracts import NETWORK_RE, PROJECT_NAME, SIZE_RE, CampaignSpec, spec_path
+from .contracts import NETWORK_RE, PRODUCTION, PROJECT_NAME, SIZE_RE, CampaignSpec, spec_path
 from .do_api import DigitalOcean
 
 ALL16 = (
@@ -255,6 +255,7 @@ async def plan(cloud: DigitalOcean, inputs: PlanInputs, *, now: datetime | None 
         hours=inputs.slots,
         slot_minutes=inputs.slot_minutes,
         replace_until_minutes=min(15, inputs.slot_minutes),
+        environment=manager.get("environment", PRODUCTION),  # CAMP-STAGING-1: the manager's
     ).validate()
     try:
         spec = replace(spec, manifests=_manifests(inputs, begins, current, root, now)).validate()

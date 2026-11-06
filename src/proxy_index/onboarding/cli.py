@@ -287,18 +287,23 @@ def dispatch(args: argparse.Namespace) -> int:
         return _round_command(lambda: asyncio.run(_round(args)))
     if args.onboarding_action == "verify-round":
         return _round_command(_verify_round, args)
+    if args.onboarding_action == "run":
+        return asyncio.run(_run(args))
     if args.onboarding_action == "plan":
         print(_plan(args))
-    elif args.onboarding_action == "run":
-        return asyncio.run(_run(args))
     elif args.onboarding_action == "status":
-        manifest = load(args.manifest)
-        if args.region not in manifest["regions"]:
-            raise ValueError("Unknown campaign region")
-        path = args.manifest.parent / "regions" / args.region / "state.json"
-        state = read_json(path)
-        validate_state(state, manifest, args.region)
-        print(json.dumps(status(state), allow_nan=False))
+        print(json.dumps(status(_region_state(args)), allow_nan=False))
     else:
         print(json.dumps(export_campaign(args.manifest), allow_nan=False))
     return 0
+
+
+def _region_state(args: argparse.Namespace) -> dict:
+    """The validated state of one region of the campaign (`onboarding status`)."""
+    manifest = load(args.manifest)
+    if args.region not in manifest["regions"]:
+        raise ValueError("Unknown campaign region")
+    path = args.manifest.parent / "regions" / args.region / "state.json"
+    state = read_json(path)
+    validate_state(state, manifest, args.region)
+    return state

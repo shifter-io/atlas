@@ -9,7 +9,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from helpers import Gateway, server
-from test_orchestrator import prepare, query
+from orchestrator_cases import prepare, query
 
 from proxy_index import __version__
 from proxy_index.models import ProxyConfig

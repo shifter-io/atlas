@@ -82,12 +82,33 @@ def hour_plan(inputs: RunInputs, now: datetime) -> tuple[CampaignSpec, HourPlan,
     return base, plan, begins, current
 
 
-def _manifest(
-    template: Path, base: CampaignSpec, root: Path, network: str, plan: HourPlan, hour: tuple
-) -> str:
+@dataclass(frozen=True)
+class HourSetup:
+    """What `prepare` writes the hour's campaign from: the template's root and spec, the
+    hour's cells, the hour, whether it is the current one and the time now."""
+
+    template: Path
+    base: CampaignSpec
+    plan: HourPlan
+    begins: datetime
+    current: bool
+    now: datetime
+
+
+@dataclass(frozen=True)
+class _Slot:
+    """The hour's one-slot campaign and what runs it: (cloud, remote_factory, launcher,
+    harvester) and the collector's pacing."""
+
+    root: Path
+    spec: CampaignSpec
+    services: tuple
+    pacing: Pacing | None
+
+
+def _manifest(hour: HourSetup, root: Path, network: str) -> str:
     """The network's manifest for this hour: the template's settings, the countries due."""
-    begins, current, now = hour
-    source = template / base.manifests[network]
+    source = hour.template / hour.base.manifests[network]
     old = manifest.load(source)
     if old.get("execution_mode") != "ephemeral":
         raise RunError(f"{network}: the template manifest is not an ephemeral campaign")
@@ -98,18 +119,18 @@ def _manifest(
     path = manifest.create(
         config,
         old["product"],
-        begins.isoformat(),
+        hour.begins.isoformat(),
         root / "networks",
-        now=now,
+        now=hour.now,
         execution_mode="ephemeral",
         grace_hours=old["grace_hours"],
-        allow_current_hour=current,
+        allow_current_hour=hour.current,
         run_settings=run_settings,
         retry_http_469=retry,
         answer_classes=classes,
         target_url=old["target_url"],
         slot_minutes=manifest.slot_minutes(old),
-        due_countries=plan.due(network),
+        due_countries=hour.plan.due(network),
     )
     if manifest.load(path)["settings"] != old["settings"]:
         raise RunError(f"{network}: the hour's settings differ from the template's")
@@ -117,19 +138,15 @@ def _manifest(
     return path.relative_to(root).as_posix()
 
 
-def prepare(
-    template: Path, base: CampaignSpec, plan: HourPlan, begins: datetime, current: bool, now
-) -> Path:
+def prepare(hour: HourSetup) -> Path:
     """Write the hour's one-slot campaign beside the template; returns its root."""
+    base, plan, begins, now = hour.base, hour.plan, hour.begins, hour.now
     cid = f"{begins:%Y%m%dt%H%M%S}z-{secrets.token_hex(6)}"
-    root = template.parent / cid
+    root = hour.template.parent / cid
     root.mkdir(mode=0o700)
     try:
         regions = plan.regions()
-        manifests = {
-            n: _manifest(template, base, root, n, plan, (begins, current, now))
-            for n in plan.networks()
-        }
+        manifests = {n: _manifest(hour, root, n) for n in plan.networks()}
         spec = replace(
             base,
             campaign_id=cid,
@@ -155,7 +172,7 @@ async def _retire_recorded(root: Path, spec: CampaignSpec, record, cloud, clock)
     skipped = None
     try:
         await take_in_flight(spec, record, root, cloud, clock)
-    except Exception as error:  # the recorded workers still go
+    except Exception as error:  # boundary: a clean-up guard; the recorded workers still go
         skipped = f"in-flight workers not taken ({type(error).__name__}); recorded ones retired"
     work = HourWork(spec, record, root, cloud, clock)
     for worker in record.droplets:
@@ -193,31 +210,29 @@ async def clean_up(
     return left, skipped
 
 
-async def _work(root: Path, spec: CampaignSpec, services: tuple, pacing: Pacing | None) -> None:
+async def _work(slot: _Slot) -> None:
     """Launch the hour's slot and harvest it until done."""
-    cloud, remote_factory, launcher, harvester = services
-    await run_tick(root, launcher=launcher, now_mode=True, slot=0)
+    cloud, remote_factory, launcher, harvester = slot.services
+    await run_tick(slot.root, launcher=launcher, now_mode=True, slot=0)
     await run_collector(
-        root,
+        slot.root,
         harvester=harvester,
         cloud=cloud,
         remote_factory=remote_factory,
         until_done=True,
-        pacing=pacing,
+        pacing=slot.pacing,
     )
 
 
-async def _bounded(
-    root: Path, spec: CampaignSpec, services: tuple, pacing: Pacing | None, limit: float, outcome
-) -> BaseException | None:
+async def _bounded(slot: _Slot, limit: float, outcome) -> BaseException | None:
     """Run the hour within the limit, writing its state or error into `outcome`; returns the
     failure to raise once the workers are removed (none for the limit or a signal)."""
     error = None
     bound = asyncio.timeout(limit)
     try:
         async with bound:
-            await _work(root, spec, services, pacing)
-        outcome["state"] = load_hour(root, spec, 0).state
+            await _work(slot)
+        outcome["state"] = load_hour(slot.root, slot.spec, 0).state
     except TimeoutError as caught:
         if bound.expired():
             outcome["error"] = f"stopped at the time limit ({limit:.0f} s)"
@@ -226,7 +241,7 @@ async def _bounded(
             outcome["error"] = type(caught).__name__
     except asyncio.CancelledError:
         outcome["error"] = "cancelled by a signal"
-    except BaseException as caught:  # an interrupt too: the workers still go
+    except BaseException as caught:  # boundary: an interrupt too; re-raised after the clean-up
         error = caught
         outcome["error"] = type(caught).__name__
     return error
@@ -268,7 +283,7 @@ async def run_hour(
     base, plan, begins, current = hour_plan(inputs, now)
     if not plan.cells:
         return {"state": "nothing_due", "plan": plan.to_dict()}
-    root = prepare(inputs.template, base, plan, begins, current, now)
+    root = prepare(HourSetup(inputs.template, base, plan, begins, current, now))
     spec = load_spec(root)
     limit = time_limit(begins, now, spec.slot_minutes) if limit is None else limit
     cloud, remote_factory, launcher, harvester = services(root, spec)
@@ -279,7 +294,7 @@ async def run_hour(
         "leftover": None,  # unknown until the clean-up has checked
     }
     built = (cloud, remote_factory, launcher, harvester)
-    error = await _bounded(root, spec, built, pacing, limit, outcome)
+    error = await _bounded(_Slot(root, spec, built, pacing), limit, outcome)
     await _remove_shielded(root, spec, cloud, clock, outcome)
     if error is not None:
         raise error

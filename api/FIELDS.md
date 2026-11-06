@@ -647,8 +647,8 @@ The gaps recorded above are closed for a v4 build:
   most IPs first (then Python's `str()` order), as a v3 build reads a group's ASN
   pool list whole.
 
-A v4 build reads every list answer from the compact network lists in place: it
-keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
+A v4 build reads every list answer from the compact network lists, their rows read
+from the database when needed (API-MEM-1): it keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
 and `/regions`, `/v1/networks/all/places`) is its networks' compact lists, merged
 and ordered as before (rows of one place key add up; most IPs first, then key,
 then network and kind) only when a page is asked for. The build keeps each list's
@@ -668,74 +668,64 @@ New answers (contract K11), of a v4 build only (404 before v4):
 | `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, `CC\|region_code\|region` or `CC\|region_code\|region\|city`, URL-escaped), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range. |
 
-## The dataset file of a v4 build (API-DATASET-2)
+## The dataset file of a v4 build (API-DATASET-2, DATASET-SIZE-2)
 
 A v4 build's dataset file holds what the pages use (contract K11, the owner's
-rule on DATASET-SIZE-1), so a download alone regenerates every page answer and
-every list answer. A build before v4 writes the file as before, plus
-`"lists":{}`.
+rule on DATASET-SIZE-1): every page answer, and of every network list its first
+page, its exact total and its page count (owner decision on DATASET-SIZE-2,
+2026-11-06: option 1). Every further page, a search and the lists built across
+networks are read from the API, which still serves every page. A build before
+v4 writes the file as before, plus `"lists":{}`.
 
 - **`providers`:** as before, from the network summaries, without
-  `coverageEvidence`: its City × ASN rows are `lists.*.city_asn`.
+  `coverageEvidence`: its City × ASN rows are the Coverage answer's
+  (`lists.*.city_asn` holds its first page).
 - **`pages`:** as before (see "Page answers in the dataset file"), plus
   `/v1/countries` and every `/v1/countries/<CC>`, byte for byte.
-- **`lists`:** new, between `pages` and `snapshot`:
+- **`lists`:** between `pages` and `snapshot`:
   `lists[slug][kind][range][dimension]`, ranges `24h`, `7d` and `30d`, dimensions
-  `country`, `region`, `city`, `asn` and `city_asn` in that order. Each dimension is
-  an array of rows, each row an array:
+  `country`, `region`, `city`, `asn` and `city_asn` in that order. Each is one
+  list, `{"total": <rows>, "pages": <pages>, "rows": [<row>, ...]}`: `total` and
+  `pages` are the list answer's own (`pages` = `total` ÷ 50, rounded up, 0 for an
+  empty list) and `rows` its first page (at most 50 rows), each row an array:
 
-| Dimension | Row | Rows |
+| Dimension | Row | List |
 |---|---|---|
-| `country` | `[countryCode, country, ipsSum, requests, successes, latencyP50]` | Every row of the network's lists of that range, list by list, each in stored position order |
+| `country` | `[countryCode, country, ipsSum, requests, successes, latencyP50]` | `/v1/networks/{slug}/places?kind=&dimension=&range=` without `q` |
 | `region` | `[countryCode, country, regionCode, region, ipsSum, requests, successes, latencyP50]` | The same |
 | `city` | `[countryCode, country, regionCode, region, city, ipsSum, requests, successes, latencyP50]` | The same |
 | `asn` | `[asn, asnName, ipsSum, requests, successes, latencyP50]` | The same |
-| `city_asn` | `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]` | The Coverage rows: every City × ASN row with IPs of the network's headline list, most IPs first (ties in list order), as `/v1/networks/{slug}/coverage` writes them |
+| `city_asn` | `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]` | `/v1/networks/{slug}/coverage?kind=&range=` without `q`: the City × ASN rows with IPs of the network's headline list, most IPs first (ties in list order) |
 
-The place fields are those the place rows of `/places` show, in that answer's
-key order, without the derived `key` and `successRate` and without the fields a
-dimension never has. IPs are the served values (K8: × the window's
+A place row is the answer's row (merged across the network kind's lists, in
+the answer's order: most IPs first, then key) with the fields the place rows of
+`/places` show, in that answer's key order, without the derived `key` and
+`successRate` and without the fields a dimension never has. Its `countryCode`
+is the upper-case code of the key; IPs are the served values (K8: × the window's
 `breakdown_scale`, rounded half up); `requests` is the row's completed requests;
-a missing number or name is `null`. Country codes are as stored (a reader upper-cases
-and trims them, as the key does). Networks (by slug) and their kinds are in the
-order the all-networks list merges them, the snapshot's; a published group of a
-provider kept off the site (`listed = false`) has no network and so no rows here,
-although the all-networks list counts it.
+a missing number or name is `null`. Networks (by slug) and their kinds are in
+the order the all-networks list merges them, the snapshot's; a published group
+of a provider kept off the site (`listed = false`) has no network and so no
+lists here, although the all-networks list counts it.
 
-How a reader regenerates the list answers (`TestTheDatasetFileRegeneratesEveryListAnswer`
-does exactly this, from the file alone):
+How a reader regenerates a list's first page (`TestTheDatasetFileHoldsEveryListsFirstPage`
+does exactly this, from the file alone, and reads every further page from the
+answers):
 
 - **Place key:** `country`: the country code; `region`: `CC|regionCode|region`;
-  `city`: `CC|regionCode|region|city`; `asn`: the number. Rows without a country
-  code (an ASN row without a number) are dropped.
-- **Merging** a list's rows (in order) by key: `ipsSum`, `requests` and `successes`
-  add up (a null adds nothing; null only when every row's is); `latencyP50` is the
-  first row's with the most successes among rows with a latency of at least 0 and
-  successes above 0, else null; the other fields are the first row's, with the
-  upper-case code as `countryCode` (or the number as `asn`). `successRate` is
-  `successes ÷ requests` when both are known and requests are above 0.
-- **Order:** most `ipsSum` first (null counts as -1), then key, then network and
-  kind.
-- **`/v1/networks/{slug}/places?kind=&dimension=&range=`:** the network kind's rows
-  of that dimension and range merged. **`/v1/networks/all/places`:** every
-  network's rows merged together, in file order.
-- **`/v1/countries/{cc}/cities` and `/regions`:** each network kind's city (or
-  region) rows of that country merged apart and tagged with `network` (the slug),
-  `networkName` (the provider's `name`) and `kind`, then all of them ordered.
-- **`q` and pages:** `q` keeps rows whose key, country, region, city, ASN name,
-  network name, network or `as<n>` hold every word (lower case); pages hold 50
-  rows; `total` and `pages` count the kept rows.
-- **Coverage:** the `city_asn` rows are the answer's rows; `q` matches the country
-  code, country, region, city, `as<n>` (so the bare number too) and ASN name;
-  `totals` sums their `ips` and
-  counts distinct country codes, cities and ASN numbers.
-- **`/v1/places/region/{key}` and `/city/{key}`:** the rows with that key in the
-  country's tagged list, ranked among the rows of the same kind: `ipsSumRank` is 1
-  plus the rows with more IPs, among rows with IPs above 0 (`peers`); `latencyRank`
-  1 plus the rows with a lower latency, among rows with a latency.
+  `city`: `CC|regionCode|region|city`; `asn`: the number.
+- **`successRate`:** `successes ÷ requests` when both are known and requests are
+  above 0, else null.
+- **The page:** `scope` `<slug>/<kind>`, `query` `""`, `page` 1, `pageSize` 50,
+  and the list's `total`, `pages` and rows; a Coverage page has `network` and
+  `kind` instead of `scope`.
+- **Page 2 and on, searches (`q`), `/v1/networks/all/places`,
+  `/v1/countries/{cc}/cities` and `/regions` and `/v1/places/{dimension}/{key}`:**
+  from the API. The file no longer holds every row, so it cannot regenerate them.
 
-The file is written one dimension at a time, 1,000 rows at a time
-(`build.DatasetLists`, read in place from the compact lists), and compressed at
-gzip level 6 and brotli quality 5 (4 MB window): at the 0.5 GB a v4 file reaches
-at 18 × 249 (K11, derived), quality 10 and gzip 9 would take minutes of CPU every
-hour.
+The file's lists are the first pages the build keeps (`build.DatasetLists`), so
+writing it reads no list row from the database. It is compressed at gzip level 6
+and brotli quality 5 (4 MB window). At SUM-MEM-1's run A shape (18 networks ×
+249 countries, `TestTheRunADatasetFileIsSmallAndQuickToWrite`) the file is about
+9.2 MB (gzip 0.5 MB) and is written, with its `.gz` and `.br`, in about 0.3 s; the
+test fails above 15 MB or 2 s. With every list row it was about 0.5 GB.

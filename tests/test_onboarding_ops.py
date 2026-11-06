@@ -74,3 +74,26 @@ async def test_region_checkpoint_is_refused_unless_resumed_and_a_crash_fails_it(
     assert state["status"] == "failed" and state["jobs"][0]["status"] == "failed"
     with pytest.raises(ValueError, match="use --resume"):
         await execute(path, "tor1", Proxy)
+
+
+async def test_unknown_region_and_a_mislabelled_proxy_are_refused(tmp_path):
+    path = manifest.create(
+        ROOT / "configs/shifter.toml",
+        "residential",
+        manifest.timestamp(START),
+        tmp_path,
+        now=START - timedelta(hours=1),
+    )
+    with pytest.raises(ValueError, match="Unknown campaign region"):
+        await execute(path, "xx1", Proxy)
+
+    async def measured(config, sink, options):
+        return fake_measurement()
+
+    mislabelled = lambda _: Proxy("gl")  # noqa: E731
+    with pytest.raises(ValueError, match="Provider must target"):
+        await execute(
+            path, "tor1", mislabelled, clock=Clock(START.timestamp()), run_country=measured
+        )
+    state = read_json(path.parent / "regions/tor1/state.json")
+    assert state["status"] == "failed" and state["jobs"][0]["status"] == "failed"

@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import pytest
-from test_calculated import ready_inputs
+from calculated_cases import ready_inputs
 
 from proxy_index.calculated.calculator import build
 from proxy_index.calculated.latency import LATENCY, without_mean
