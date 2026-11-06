@@ -256,8 +256,11 @@ jobs:
           fi
           if [ "$API" = true ]; then
             # Beside pytest, two Go packages at a time; alone, one per CPU (go's default).
+            # Measured once beside pytest on ci-32cpu: -p 2 and -p 4 both took 132 s, bound
+            # by internal/server, whose tests run one after another; -p 2 leaves pytest
+            # more CPUs.
             packages=()
-            [ "$CODE" = true ] && packages=(-p 4)
+            [ "$CODE" = true ] && packages=(-p 2)
             background gofmt gofmt_check
             background go-vet go -C api vet ./...
             background go-test go -C api test -count=1 "${packages[@]}" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
