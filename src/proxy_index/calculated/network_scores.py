@@ -201,7 +201,7 @@ def member(entry, window, old, config, as_of):
         }
     values = lead.get("evidence", {})
     inputs = product_inputs(
-        window["pool"], entry["pricing"], cfg, entry["kind"], window["uptime"], values
+        window["pool"], entry["pricing"], cfg, entry["kind"], (window["uptime"], values)
     )
     counts = inputs["diversity"]["inputs"]
     if any(counts[k] is None for k in DIMENSIONS):  # no K10 list: diversity unavailable

@@ -1,13 +1,14 @@
 """Time slots and latency under load: the slots of a window's rows (time_slots), a slot's
 success vote (slot_rate), the light-load votes of its slots and targets (light_votes), and the
-latency under load those votes make with the load factors (under_load, with_under_load)."""
+latency under load those votes make with the load factors (under_load, with_under_load), the
+factors themselves (load_factors) and the window's latency block (latency_detail)."""
 
 from __future__ import annotations
 
 from bisect import bisect_left
 from collections import Counter, defaultdict
 
-from .latency import KEYS, averaged, under_load_values
+from .latency import KEYS, LATENCY, averaged, blended, load_factor, under_load_values
 from .scores import UNDER_LOAD_NONE
 
 UNDER_LOAD_LATE = "No load test before this window's light-load slots"
@@ -146,3 +147,132 @@ def with_under_load(m, rows, factors, minimum, excluded=None):
     m["latency_under_load_ms"] = result.pop("ms")
     m["under_load"] = result
     return m
+
+
+def load_factors(rows, minimum):
+    """Per runner region and time slot, the factor of each percentile: the latency of the
+    product's load runs (census concurrency) in the region's reference country ÷ the latency of
+    its pulses in that country, on the same target, in the same slot. Both need `minimum`
+    successes. Census runs never make a factor, and neither do load runs or reference pulses that
+    ran during a census of the product: they are left out, and a slot left without a usable
+    clean pair carries the region's newest earlier factor forward (under_load()). Rows carry
+    "region" (the batch's runner region slug).
+
+    Returns (factors {region: {slot: {percentile: factor}}}, references {region: {"country",
+    "target", "concurrency"} of its newest load run}, excluded {region: load slots left without
+    a factor because of a census}).
+    """
+    loads, pulses = {}, {}
+    references = {}
+    tainted = set()
+
+    def key_of(r):
+        return (r.get("region") or "", r["slot"], r["country"] or "", r["target"])
+
+    for r in sorted(rows, key=lambda r: (r["slot"], r["target"])):
+        if r.get("test") not in ("load", "pulse"):
+            continue
+        key = key_of(r)
+        if r.get("during_census"):
+            tainted.add(key)
+            if r["test"] == "load":
+                loads.setdefault(key, [Counter(), 0])
+            continue
+        if r["test"] == "load":
+            into = loads.setdefault(key, [Counter(), 0])
+            references[key[0]] = {
+                "country": r["country"],
+                "target": r["target"],
+                "concurrency": r.get("concurrency"),
+            }
+        else:
+            into = pulses.setdefault(key, [Counter(), 0])
+        for ms, n in r["counters"]["latency_histogram"]["bins"]:
+            into[0][ms] += n
+        into[1] += r["counters"]["successes"]
+    factors = defaultdict(dict)
+    excluded = defaultdict(set)
+    for key in sorted(loads):
+        region, slot = key[0], key[1]
+        load, base = loads[key], pulses.get(key)
+        if slot in factors[region]:
+            continue
+        if base is None or min(load[1], base[1]) < minimum:
+            if key in tainted:
+                excluded[region].add(slot)
+            continue
+        found = load_factor(load[0], base[0])
+        if found:
+            factors[region][slot] = found
+    factors = {region: slots for region, slots in factors.items() if slots}
+    return (
+        factors,
+        references,
+        {
+            region: len(slots - set(factors.get(region, {})))
+            for region, slots in excluded.items()
+            if slots - set(factors.get(region, {}))
+        },
+    )
+
+
+def latency_detail(rows, factors, references, minimum, excluded=None, choices=()):
+    """The window's latency block. regions: per runner region its load wave's reference country
+    (the newest load run's), the daily choices that named it (choices: load_references rows
+    {"day", "region", "country", "basis", "p50_ms", "successes", "candidates"}) and its factors
+    (excluded_during_census: load slots without one because the load run or its reference pulse
+    ran during a census). countries: per requested country (and its region) the light-load and
+    under-load latency of its pulses."""
+    excluded = excluded or {}
+    pulses = defaultdict(list)
+    for r in rows:
+        if r.get("test") == "pulse":
+            pulses[(r.get("region") or "", r["country"] or "")].append(r)
+    countries = []
+    for region, country in sorted(pulses):
+        own = pulses[(region, country)]
+        result = under_load(own, factors, minimum, excluded)
+        countries.append(
+            {
+                "country": country or None,
+                "region": region or None,
+                "latency_ms": blended(h for *_, h in light_votes(time_slots(own), minimum)),
+                "latency_under_load_ms": result.pop("ms"),
+                **result,
+            }
+        )
+    chosen = defaultdict(list)
+    for c in sorted(choices, key=lambda c: (c["region"], c["day"])):
+        chosen[c["region"]].append({k: c[k] for k in c if k != "region"})
+    regions = []
+    for region in sorted(
+        {r for r, _ in pulses} | set(factors) | set(references) | set(excluded) | set(chosen)
+    ):
+        own = factors.get(region, {})
+        latest = max(own) if own else None
+        regions.append(
+            {
+                "region": region or None,
+                "reference": references.get(region),
+                "chosen": chosen.get(region, []),
+                "factors": {
+                    "slots": len(own),
+                    "excluded_during_census": excluded.get(region, 0),
+                    "mean": {
+                        p: round(sum(f[p] for f in own.values()) / len(own), 6) for p in LATENCY
+                    }
+                    if own
+                    else None,
+                    "latest": {"at": latest} | {p: round(own[latest][p], 6) for p in LATENCY}
+                    if latest
+                    else None,
+                },
+            }
+        )
+    return {
+        "regions": regions,
+        "basis": "under load = light-load (pulse) latency x (load run ÷ pulse in the region's "
+        "reference country) of the same slot, else the region's newest earlier factor; mean "
+        "of slot and country values",
+        "countries": countries,
+    }
