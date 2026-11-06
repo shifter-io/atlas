@@ -135,7 +135,7 @@ class _Harvest(HourWork):
             ):
                 return
             await self.retire(worker)
-        except Exception as error:
+        except Exception as error:  # boundary: per-worker isolation; recorded and alerted
             worker.error_class = worker.error_class or type(error).__name__
             self.alert("high", "harvest_error", worker.name)
         finally:
@@ -158,12 +158,14 @@ class _Harvest(HourWork):
         memo = self.memo.setdefault(str(worker.droplet_id), {})
         try:
             info = await self.remote.inspect(droplet)
-        except Exception:
+        except Exception as error:  # boundary: an inspect retry; the worker is kept
+            memo["unreachable_error"] = type(error).__name__
             since = memo.setdefault("unreachable_since", self.clock.now())
             if self.clock.now() - since >= KEEP_ALERT_SECONDS:
                 self.alert("high", "worker_unreachable", worker.name)
             return False
         memo.pop("unreachable_since", None)
+        memo.pop("unreachable_error", None)
         self._progress(worker, info.get("state") or {})
         ended, code = round_ended(info)
         if ended:
@@ -202,8 +204,9 @@ class _Harvest(HourWork):
         try:
             await self.remote.pull(droplet, remote, local)
             result = self._verify(manifest, worker)
-        except Exception:
+        except Exception as error:  # boundary: a pull retry; data first, the worker is kept
             worker.status, worker.error_class = "collect_failed", "collect_failed"
+            memo["collect_error"] = type(error).__name__
             if now - memo.setdefault("collect_failed_since", now) >= KEEP_ALERT_SECONDS:
                 self.alert("high", "collect_failed", worker.name)
             return False
@@ -212,7 +215,8 @@ class _Harvest(HourWork):
                 droplet,
                 logs_dir(self.root, worker.hour) / f"{worker.network}-{worker.region}.journal.txt",
             )
-        except Exception:
+        except Exception as error:  # boundary: best effort, never blocks the removal
+            memo["journal_error"] = type(error).__name__
             self.alert("info", "journal_failed", worker.name)
         self._account(worker, result, local)
         worker.status, worker.collected_at = "collected", self.now()
