@@ -25,7 +25,7 @@ from campaign_fakes import (
     Fault,
     running,
 )
-from test_campaign_hour import NETWORKS, launched, make_spec
+from campaign_hour_cases import NETWORKS, launched, make_spec
 
 from proxy_index.campaign import collector as collector_module
 from proxy_index.campaign import harvest, launch, scope

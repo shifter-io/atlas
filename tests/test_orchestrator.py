@@ -914,6 +914,13 @@ def test_archive_limits(tmp_path):
     (tmp_path / "ns").mkdir()
     with pytest.raises(ArchiveError, match="no summary"):
         unpack(tmp_path / "nosummary.tar.gz", tmp_path / "ns", max_bytes=100)
+    link = tarfile.TarInfo("summary.json")
+    link.type, link.linkname = tarfile.SYMTYPE, "../outside"
+    (tmp_path / "link.tar.gz").write_bytes(archive_bytes([(link, None)]))
+    (tmp_path / "ln").mkdir()
+    with pytest.raises(ArchiveError, match="only regular files"):
+        unpack(tmp_path / "link.tar.gz", tmp_path / "ln", max_bytes=100)
+    assert not list((tmp_path / "ln").iterdir())
 
 
 # --- jobs and scheduler ---------------------------------------------------------------------

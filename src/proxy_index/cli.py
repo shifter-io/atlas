@@ -13,7 +13,7 @@ from .models import NETWORK_PROTOCOLS, ProxyConfig, RunConfig
 from .providers import load_provider
 from .providers import registry as providers
 from .providers.grammar import answer_classes, grammar_ids_by_protocol
-from .runner import run
+from .runner import RunOptions, run
 from .sinks import JsonSink
 from .targets import registry
 
@@ -75,7 +75,7 @@ async def _run(args: argparse.Namespace) -> int:
         from .enrichment import LocalEnricher
 
         with LocalEnricher(args.mmdb) if args.mmdb else nullcontext() as enricher:
-            summary = await run(config, sink, stop=stop, enricher=enricher)
+            summary = await run(config, sink, RunOptions(stop=stop, enricher=enricher))
         print(f"Results: {sink.directory}", file=sys.stderr)
         if args.database_file:
             from .storage import ingest

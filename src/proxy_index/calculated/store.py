@@ -17,8 +17,9 @@ from . import netlists, network, parts
 from .aggregate import EVIDENCE_RANGES, iso
 from .policy import digest
 from .slim import refer, slim
+from .store_steps import V10_CHECKS, V10_CHECKSUM, V10_SNAPSHOT  # noqa: F401 (migrate())
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"

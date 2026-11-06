@@ -27,9 +27,10 @@ workstation.
   (`src/proxy_index/**/*.sql`) or that file changes: `gofmt`, `go vet` and `go test`
   with the database tests against a throwaway PostgreSQL 17 and the framework schema
   read from `src/proxy_index/` of the same checkout. A framework schema change that
-  breaks the API's database tests fixes them in the same pull request. The latency test
-  `TestServeFromDatabase` (p99 < 2 ms) runs alone in its own process, after the slowest
-  test; every other test runs in a second part. See "Tests" in `api/README.md`.
+  breaks the API's database tests fixes them in the same pull request. It is one job on
+  a 32-CPU server: `gofmt` and `go vet` in the background while every package's tests
+  run in parallel, then the latency test `TestServeFromDatabase` (p99 < 2 ms) alone in
+  its own process, after everything else. See "Tests" in `api/README.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
   ./cmd/siteapi`); `api/bin/` is ignored and never committed. An old binary serves
   only the routes it was built with and writes its own migration checksums.

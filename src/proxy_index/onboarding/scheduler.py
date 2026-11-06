@@ -14,7 +14,7 @@ from typing import Any
 
 from ..models import RunConfig
 from ..providers.grammar import answer_classes
-from ..runner import run
+from ..runner import RunOptions, run
 from .files import atomic_json, fingerprint, lock, read_json
 from .manifest import load, moment, regional_window, settings, timestamp
 from .writer import ObservationWriter, SummarySink
@@ -229,9 +229,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
         ):
             raise ValueError("Provider must target and label the configured country")
         config = _census_config(context, proxy)
-        summary = await context.run_country(
-            config,
-            sink,
+        options = RunOptions(
             stop=country_stop,
             deadline=context.deadline,
             aggregate_ips=False,
@@ -240,6 +238,7 @@ async def _measure(context: JobContext, job: dict, writer: ObservationWriter, si
             progress=progress,
             progress_interval=5,
         )
+        summary = await context.run_country(config, sink, options)
     except BaseException as exc:
         error = exc
     finally:
