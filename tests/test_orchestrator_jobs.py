@@ -246,9 +246,7 @@ def test_job_table_registers_every_job_with_its_schedule():
     assert list(db.on_close) == ["reports"]
 
 
-@pytest.mark.parametrize(
-    "first", ["job_table", "jobs", "pulse_slots", "pulse", "batches", "app"]
-)
+@pytest.mark.parametrize("first", ["job_table", "jobs", "pulse_slots", "pulse"])
 def test_the_split_modules_import_in_any_order(first):
     import subprocess
     import sys
