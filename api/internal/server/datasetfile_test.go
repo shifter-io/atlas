@@ -96,6 +96,7 @@ func stat(t *testing.T, f *DatasetFile) os.FileInfo {
 // The file's bytes are today's dataset encoding (Marshal of the whole
 // Dataset), its codings decode to them, and nothing else is left behind.
 func TestTheDatasetFileHasTheDatasetsBytes(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &fakeSource{rev: 1, events: events(5), complete: true})
 	v := s.Current()
 	want, err := Marshal(v.Result.Dataset)
@@ -129,6 +130,7 @@ func TestTheDatasetFileHasTheDatasetsBytes(t *testing.T) {
 // deletes) and the framework's products and targets the dataset shows; events
 // and which site tables exist are not part of it.
 func TestTheMarkerIsTheBuildAndTheSiteTables(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	later := at.Add(time.Hour)
 	id, digest := int64(7), "d"
@@ -157,6 +159,7 @@ func TestTheMarkerIsTheBuildAndTheSiteTables(t *testing.T) {
 // refreshes the events answers) keeps the file as it is on disk; a new marker
 // writes a new one.
 func TestTheDatasetFileIsWrittenOnlyWhenTheMarkerChanges(t *testing.T) {
+	t.Parallel()
 	src := &fakeSource{rev: 1, complete: true}
 	s := newTestServer(t, src)
 	first := s.Current().Dataset
@@ -183,6 +186,7 @@ func TestTheDatasetFileIsWrittenOnlyWhenTheMarkerChanges(t *testing.T) {
 // replacement, each file counted from its own; then its name redirects to the
 // current file and its files are deleted.
 func TestAReplacedFileAnswersUntilItsGraceEnds(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	src := &fakeSource{rev: 1}
 	s := clockServer(t, src, t.TempDir(), &now)
@@ -229,6 +233,7 @@ func TestAReplacedFileAnswersUntilItsGraceEnds(t *testing.T) {
 // still in their grace) and removes what an interrupted write left; a damaged
 // file or another marker is written again.
 func TestARestartReusesTheFileWhoseMarkerMatches(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
 	src := &fakeSource{rev: 1}
@@ -274,6 +279,7 @@ func TestARestartReusesTheFileWhoseMarkerMatches(t *testing.T) {
 // code, or code whose revision is unknown or modified (CodeID ""), writes it
 // again (here with the same bytes, so the same name and a new file on disk).
 func TestARestartReusesOnlyTheSameCodesFile(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC)
 	dir := t.TempDir()
 	src := &fakeSource{rev: 1}
@@ -301,6 +307,7 @@ func TestARestartReusesOnlyTheSameCodesFile(t *testing.T) {
 // fails and the serving version (if any) stays; a file gone from disk answers
 // 503 instead of a broken body.
 func TestDatasetFileFailures(t *testing.T) {
+	t.Parallel()
 	if _, err := New(&fakeSource{rev: 1}, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}).Refresh(context.Background(), true); err == nil ||
 		!strings.Contains(err.Error(), "FilesDir") {
 		t.Fatalf("no files directory: %v", err)
@@ -394,6 +401,10 @@ func heapPeak(fn func()) uint64 {
 func TestWritingTheDatasetFileHasBoundedMemory(t *testing.T) {
 	if testing.Short() || underRace {
 		t.Skip("writes a 90 MB dataset file")
+	}
+	// In a process of its own: heapPeak sets GOGC and measures the whole heap.
+	if !alone(t) {
+		return
 	}
 	in, err := testscale.Inputs(memoryShape)
 	if err != nil {

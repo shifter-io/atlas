@@ -95,22 +95,9 @@ func PageLoad(id string) (p50, p90 float64) {
 // the nine targets. Network
 // metrics are untouched, as the framework keeps browser runs out of them.
 func AddBrowser(doc map[string]any) error {
-	for _, p := range doc["products"].([]any) {
-		for _, w := range p.(map[string]any)["windows"].(map[string]any) {
-			targets := w.(map[string]any)["targets"].(map[string]any)
-			template, ok := targets["generic_https"].(map[string]any)
-			if !ok {
-				return fmt.Errorf("a window has no generic_https target to copy")
-			}
-			for _, t := range BrowserTargets {
-				entry, err := clone(template)
-				if err != nil {
-					return err
-				}
-				browserEntry(entry, t)
-				targets[t.ID] = entry
-			}
-		}
+	products := doc["products"].([]any)
+	if err := each(len(products), func(i int) error { return addBrowser(products[i].(map[string]any)) }); err != nil {
+		return err
 	}
 	if m, ok := doc["methodology"].(map[string]any); ok {
 		if settings, ok := m["settings"].(map[string]any); ok {
@@ -122,6 +109,26 @@ func AddBrowser(doc map[string]any) error {
 		list = append(list, map[string]any{"id": t.ID, "url": t.URL, "label": t.Label, "version": "1", "engine": "browser"})
 	}
 	doc["targets"] = list
+	return nil
+}
+
+// addBrowser is AddBrowser for one product group.
+func addBrowser(p map[string]any) error {
+	for _, w := range p["windows"].(map[string]any) {
+		targets := w.(map[string]any)["targets"].(map[string]any)
+		template, ok := targets["generic_https"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("a window has no generic_https target to copy")
+		}
+		for _, t := range BrowserTargets {
+			entry, err := clone(template)
+			if err != nil {
+				return err
+			}
+			browserEntry(entry, t)
+			targets[t.ID] = entry
+		}
+	}
 	return nil
 }
 

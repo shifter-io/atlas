@@ -105,6 +105,7 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
 // target gains in the dataset's target list (engine "http", group null): the
 // committed fixtures, published to a database with the framework's targets.
 func TestWithoutBrowserEntriesEveryAnswerIsAsBefore(t *testing.T) {
+	t.Parallel()
 	got := golden{Main: os.Getenv("GOLDEN_MAIN"), Answers: map[string]map[string]string{}}
 	for name, file := range map[string]string{"v1": "snapshot.json", "every-request": "snapshot-every-request.json"} {
 		snapshot, err := os.ReadFile(config.FindUp("fixtures/measured/" + file))
