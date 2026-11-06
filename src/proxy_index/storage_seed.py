@@ -67,6 +67,7 @@ def seed(
     definitions, but keeps each country's census_time and enabled flag and each target's schedule
     as operators left them. reset_times puts every census_time back on the staggered default.
     """
+    # Late: storage imports this module; its connect and _lock are read at call time.
     from . import storage
     from .regions import load_regions, load_targets
 

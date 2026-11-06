@@ -15,7 +15,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import psycopg
-from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from .providers.credentials import read_credentials
