@@ -9,7 +9,15 @@ import pytest
 import trustme
 from helpers import Gateway, server
 
-from proxy_index import GrammarProxy, JsonSink, RequestContext, RunConfig, load_provider, run
+from proxy_index import (
+    GrammarProxy,
+    JsonSink,
+    RequestContext,
+    RunConfig,
+    RunOptions,
+    load_provider,
+    run,
+)
 from proxy_index.onboarding import manifest as campaign
 from proxy_index.targets import EchoIpTarget, TargetRegistry
 from proxy_index.transport import HttpTransport
@@ -149,9 +157,11 @@ async def test_http_and_https_auth_and_timestamped_observations(tmp_path, tls):
         result = await run(
             config,
             sink,
-            targets=targets,
-            observation_consumer=observe,
-            transport_factory=lambda cfg: HttpTransport(cfg, ssl_context=client_tls),
+            RunOptions(
+                targets=targets,
+                observation_consumer=observe,
+                transport_factory=lambda cfg: HttpTransport(cfg, ssl_context=client_tls),
+            ),
         )
     assert result.successes == 12 and result.unique_ips == 1
     assert len(observations) == 12 and all(t > 0 for _, t in observations)

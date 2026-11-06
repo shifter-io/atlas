@@ -47,22 +47,9 @@ def _part(info: dict[str, Any], fields: tuple[str, ...]) -> tuple[Any, ...] | No
     return values if any(value is not None for value in values) else None
 
 
-async def run(
-    config: RunConfig,
-    result_sink: ResultSink | None = None,
-    *,
-    stop: asyncio.Event | None = None,
-    targets: TargetRegistry = registry,
-    transport_factory: Callable[[RunConfig], Transport] = HttpTransport,
-    progress: Callable[[dict[str, Any]], Any] | None = None,
-    progress_interval: float = 30.0,
-    enricher: Enricher | None = None,
-    observation_consumer: Callable[[str, float], Awaitable[None]] | None = None,
-    deadline: float | None = None,
-    aggregate_ips: bool = True,
-    wall_clock: Callable[[], float] | None = None,
-) -> RunSummary:
-    """Keep `concurrency` requests in flight until the stop rule ends the run.
+@dataclass(frozen=True)
+class RunOptions:
+    """run()'s optional inputs, each with its default.
 
     `progress` receives cumulative counters at most every `progress_interval`
     seconds and once at the end; it may be a coroutine function. `enricher`
@@ -72,21 +59,45 @@ async def run(
     absolute Unix timestamp: no new requests or observations at/after it.
     Disabling `aggregate_ips` leaves exact uniqueness and all counters intact.
     """
-    target, protocol = _resolve_target(config, targets, transport_factory)
-    _check_timing(progress, progress_interval, deadline)
+
+    stop: asyncio.Event | None = None
+    targets: TargetRegistry = registry
+    transport_factory: Callable[[RunConfig], Transport] = HttpTransport
+    progress: Callable[[dict[str, Any]], Any] | None = None
+    progress_interval: float = 30.0
+    enricher: Enricher | None = None
+    observation_consumer: Callable[[str, float], Awaitable[None]] | None = None
+    deadline: float | None = None
+    aggregate_ips: bool = True
+    wall_clock: Callable[[], float] | None = None
+
+
+async def run(
+    config: RunConfig,
+    result_sink: ResultSink | None = None,
+    options: RunOptions | None = None,
+) -> RunSummary:
+    """Keep `concurrency` requests in flight until the stop rule ends the run.
+
+    `options` (RunOptions) holds the optional inputs; None means all defaults.
+    """
+    options = options or RunOptions()
+    transport_factory = options.transport_factory
+    target, protocol = _resolve_target(config, options.targets, transport_factory)
+    _check_timing(options.progress, options.progress_interval, options.deadline)
     state = _RunState(
         config=config,
         target=target,
         protocol=protocol,
         sink=result_sink if result_sink is not None else JsonSink(),
-        wall_now=wall_clock if wall_clock is not None else time.time,
-        deadline=deadline,
-        stop=stop,
-        progress=progress,
-        progress_interval=progress_interval,
-        enricher=enricher,
-        observation_consumer=observation_consumer,
-        aggregate_ips=aggregate_ips,
+        wall_now=options.wall_clock if options.wall_clock is not None else time.time,
+        deadline=options.deadline,
+        stop=options.stop,
+        progress=options.progress,
+        progress_interval=options.progress_interval,
+        enricher=options.enricher,
+        observation_consumer=options.observation_consumer,
+        aggregate_ips=options.aggregate_ips,
         parallel=transport_factory is HttpTransport and process_count(config) > 1,
     )
     state.sink.start(state.run_id)

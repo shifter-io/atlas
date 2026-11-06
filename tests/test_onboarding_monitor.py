@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -115,9 +116,9 @@ async def test_probe_uses_shared_census_and_writes_live_and_final_status(tmp_pat
         environ={"SHIFTER_ACCOUNT": "fixture", "SHIFTER_PASSWORD": "fixture"},
     )
 
-    async def measured(config, sink, **kwargs):
+    async def measured(config, sink, options):
         assert config.concurrency == 7 and config.timeout_seconds == 2
-        return await run(config, sink, transport_factory=FakeTransport, **kwargs)
+        return await run(config, sink, replace(options, transport_factory=FakeTransport))
 
     result = await execute_probe(
         tmp_path, proxy, "nyc3", "us", concurrency=7, request_timeout=2, run_country=measured
@@ -175,7 +176,7 @@ async def test_probe_armed_for_a_later_hour_stops_before_measuring(tmp_path):
 
 
 async def test_probe_failure_is_saved_and_reported_without_details(tmp_path):
-    async def broken(config, sink, **kwargs):
+    async def broken(config, sink, options):
         raise ConnectionError("private detail")
 
     with pytest.raises(RuntimeError, match=r"Probe failed \(ConnectionError\)") as raised:
@@ -187,10 +188,10 @@ async def test_probe_failure_is_saved_and_reported_without_details(tmp_path):
 
 
 async def test_probe_checkpoint_error_stops_the_run_and_fails_it(tmp_path):
-    async def measured(config, sink, *, stop, progress, **kwargs):
-        await progress({"requests": 1, "unsaved": object()})
-        assert stop.is_set()
-        await progress({"requests": 2})
+    async def measured(config, sink, options):
+        await options.progress({"requests": 1, "unsaved": object()})
+        assert options.stop.is_set()
+        await options.progress({"requests": 2})
 
     with pytest.raises(RuntimeError, match=r"Probe failed \(TypeError\)"):
         await execute_probe(tmp_path, shifter(), "nyc3", "us", run_country=measured)

@@ -15,6 +15,7 @@ from proxy_index import (
     ProxyConfig,
     RequestContext,
     RunConfig,
+    RunOptions,
     load_provider,
     run,
 )
@@ -243,7 +244,7 @@ def test_cli_provider_overrides_and_secret_redaction(monkeypatch, capsys):
         monkeypatch.setenv(key, value)
     observed = []
 
-    async def fake_run(config, sink, **kwargs):
+    async def fake_run(config, sink, options):
         observed.append(config)
 
         class Summary:
@@ -372,7 +373,9 @@ async def test_provider_auth_on_both_targets_with_concurrent_sessions(
         sink = JsonSink(tmp_path)
         config = RunConfig(target, proxy, requests=12, concurrency=3)
         transport = TrackedTransport(config, ssl_context=tls_client)
-        result = await run(config, sink, targets=targets, transport_factory=lambda _: transport)
+        result = await run(
+            config, sink, RunOptions(targets=targets, transport_factory=lambda _: transport)
+        )
     assert result.successes == 12 and gateway.connections == 12
     # TLS close_notify can leave completed server tunnels draining while the
     # next request starts. Bound live request execution, not server teardown.
@@ -420,7 +423,7 @@ async def test_dynamic_socks_sessions_close_on_cancellation(tmp_path, monkeypatc
         proxy = LoopbackProvider(shifter(scheme="socks5", session_policy="per_request"), port)
         # This inspects in-process session objects; multiprocess cancellation has its own tests.
         config = RunConfig("generic_http", proxy, requests=100, concurrency=3, processes=1)
-        task = asyncio.create_task(run(config, JsonSink(tmp_path), stop=stop))
+        task = asyncio.create_task(run(config, JsonSink(tmp_path), RunOptions(stop=stop)))
         await asyncio.wait_for(gateway.accepted.wait(), 2)
         stop.set()
         result = await task

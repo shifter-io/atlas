@@ -371,7 +371,7 @@ async def test_runner_geo_artifact_ingests(database, tmp_path, stop_rule):
     """Whatever the runner writes today (pulse and census) must ingest and rebuild exactly."""
     from helpers import FakeTransport
 
-    from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+    from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 
     sink = JsonSink(tmp_path / "results")
     census = stop_rule == "unique_ratio"
@@ -386,8 +386,7 @@ async def test_runner_geo_artifact_ingests(database, tmp_path, stop_rule):
             stop_rule=stop_rule,
         ),
         sink,
-        transport_factory=FakeTransport,
-        enricher=FakeEnricher(),
+        RunOptions(transport_factory=FakeTransport, enricher=FakeEnricher()),
     )
     summary = load(sink.directory)
     assert "geo" in summary["artifacts"] and "release" in summary["artifacts"]["geo"]

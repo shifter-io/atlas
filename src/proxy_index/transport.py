@@ -174,35 +174,37 @@ class HttpTransport:
         started = time.perf_counter()
         try:
             # Outer timeout also bounds SOCKS negotiation and all body reads.
-            async with asyncio.timeout(budget):
-                async with session.request(
+            async with (
+                asyncio.timeout(budget),
+                session.request(
                     spec.method,
                     spec.url,
                     data=spec.body,
                     allow_redirects=False,
                     **kwargs,
-                ) as response:
-                    status = response.status
-                    location = response.headers.get("Location")
-                    sock = slot[-1] if slot else None
+                ) as response,
+            ):
+                status = response.status
+                location = response.headers.get("Location")
+                sock = slot[-1] if slot else None
 
-                    def measure() -> ByteCount:
-                        # Kernel counters are read before any await can let the
-                        # connector close the socket; the estimate is the fallback.
-                        exact = bytes_io.from_socket(sock)
-                        if exact is not None:
-                            return exact
-                        return _estimate(spec, response, proxy, len(raw), tls)
+                def measure() -> ByteCount:
+                    # Kernel counters are read before any await can let the
+                    # connector close the socket; the estimate is the fallback.
+                    exact = bytes_io.from_socket(sock)
+                    if exact is not None:
+                        return exact
+                    return _estimate(spec, response, proxy, len(raw), tls)
 
+                counted = measure()
+                # read(n) may return a partial chunk; continue through EOF.
+                while len(raw) <= spec.max_body_bytes:
+                    part = await response.content.read(spec.max_body_bytes + 1 - len(raw))
                     counted = measure()
-                    # read(n) may return a partial chunk; continue through EOF.
-                    while len(raw) <= spec.max_body_bytes:
-                        part = await response.content.read(spec.max_body_bytes + 1 - len(raw))
-                        counted = measure()
-                        if not part:
-                            break
-                        raw.extend(part)
-                    error, exit_ip, verdict = _assess(target, spec, status, bytes(raw))
+                    if not part:
+                        break
+                    raw.extend(part)
+                error, exit_ip, verdict = _assess(target, spec, status, bytes(raw))
         except Exception as exc:
             classified = _classify(exc)
             if classified is None:

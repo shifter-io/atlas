@@ -6,6 +6,7 @@ import json
 import os
 import signal
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from proxy_index.onboarding.files import read_json
 from proxy_index.onboarding.rounds import execute_round, round_directory, verify_round
 from proxy_index.onboarding.scheduler import execute
 from proxy_index.providers import NoCountryList
+from proxy_index.runner import RunOptions
 
 TOR1 = ["CA", "GL", "PM"]
 
@@ -61,23 +63,21 @@ def measurement(rows, **extra):
 def census(clock, calls, *, rows=2, seconds=30.0, special=None):
     """A fake runner that writes ``rows`` observations and takes ``seconds`` per country."""
 
-    async def run_country(
-        config, sink, *, stop, deadline, observation_consumer, wall_clock, **kwargs
-    ):
+    async def run_country(config, sink, options):
         country = config.proxy.public()["requested_country"].upper()
         calls.append(
             SimpleNamespace(
                 country=country,
                 at=clock.now(),
-                deadline=deadline,
+                deadline=options.deadline,
                 concurrency=config.concurrency,
                 requests=config.requests,
             )
         )
         if special and country in special:
-            return await special[country](stop)
+            return await special[country](options.stop)
         for index in range(rows):
-            await observation_consumer(f"203.0.113.{index + 1}", wall_clock())
+            await options.observation_consumer(f"203.0.113.{index + 1}", options.wall_clock())
         clock.value += seconds
         return measurement(rows)
 
@@ -586,10 +586,10 @@ async def test_verify_round_reconciles_other_country_successes(ephemeral):
     scheduled = campaign.moment(campaign.load(ephemeral)["rounds"][13]).timestamp()
     clock = Clock(scheduled)
 
-    async def run_country(config, sink, *, observation_consumer, wall_clock, **kwargs):
+    async def run_country(config, sink, options):
         classes.append(config.answer_classes)
         for index in range(2):  # two in-country exits; three more exits were in other countries
-            await observation_consumer(f"203.0.113.{index + 1}", wall_clock())
+            await options.observation_consumer(f"203.0.113.{index + 1}", options.wall_clock())
         clock.value += 30.0
         return measurement(
             2,
@@ -612,6 +612,20 @@ async def test_verify_round_reconciles_other_country_successes(ephemeral):
     clock.value = campaign.moment(campaign.load(ephemeral)["rounds"][14]).timestamp()
     await execute_round(ephemeral, "tor1", 14, Proxy, clock=clock, run_country=run_country)
     assert "CA: measurements do not reconcile" in verify_round(ephemeral, "tor1", 14)["issues"]
+
+
+async def test_round_enricher_joins_the_scheduler_options(monkeypatch):
+    calls = []
+
+    async def fake_run(config, sink, options):
+        calls.append((config, sink, options))
+        return "summary"
+
+    monkeypatch.setattr(onboarding_cli, "run", fake_run)
+    options = RunOptions(deadline=5.0, aggregate_ips=False, progress_interval=5)
+    run_country = functools.partial(onboarding_cli._enriched, enricher="geo")
+    assert await run_country("config", "sink", options) == "summary"
+    assert calls == [("config", "sink", replace(options, enricher="geo"))]
 
 
 def test_round_cli_mmdb_gives_the_census_an_enricher(live, monkeypatch):

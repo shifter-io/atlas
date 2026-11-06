@@ -4,23 +4,23 @@
 # Go tests, database tests included. The commit-message, identity, secret and
 # privacy checks run for every change in ci.yml's tier1.
 #
-# One job in three parts, all starting at once, so no dependency level is
-# spent on gating; each part runs on a fresh one-job CI-SelfHosted runner
-# labelled ci-2cpu. `lint`: gofmt, go vet and, on main, go test -race without
-# the database. The two test parts run the Go tests
-# against a throwaway PostgreSQL 17 (the framework CI's pinned build, kept in
-# the server cache) loaded with the framework schema from the same checkout
-# (src/proxy_index): `tests-parts` the slowest test alone, then the
-# cached-answer latency test (TestServeFromDatabase, p99 within 2 ms) alone in
-# its own process, so no other package's tests share the two CPUs while it
-# measures; `tests-rest` every other test. Go, the Go build cache
-# and the module cache live under $CI_CACHE_DIR/<repository name>/, beside
-# tier1's tools (both fill the same PostgreSQL folder, each by an atomic
-# rename); the checkout is cleaned each run. A job-started hook on the servers refuses every
-# job except the owner's pull requests from this repository's own branches,
-# pushes to main and owner dispatches. Draft pull requests run nothing until
-# they are marked ready; a change whose only API files are Markdown outside
-# api/fixtures/ and no framework SQL skips the build and tests.
+# One job on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu,
+# with all its work in parallel there (CI-SPEED-2): gofmt, go vet and, on main,
+# go test -race without the database in the background, while the Go tests run
+# every package at once (-p = the CPU count) against a throwaway PostgreSQL 17
+# (the framework CI's pinned build, kept in the server cache) loaded with the
+# framework schema from the same checkout (src/proxy_index). The slowest test runs
+# in its own process beside them, so the rest of its package does not wait for it.
+# When all of that has finished, the cached-answer latency test
+# (TestServeFromDatabase, p99 within 2 ms) runs alone, so no other test shares the
+# CPUs while it measures. Go, the Go build cache and the module cache live under
+# $CI_CACHE_DIR/<repository name>/, beside tier1's tools (both fill the same
+# PostgreSQL folder, each by an atomic rename); the checkout is cleaned each run. A
+# job-started hook on the servers refuses every job except the owner's pull
+# requests from this repository's own branches, pushes to main and owner
+# dispatches. Draft pull requests run nothing until they are marked ready; a change
+# whose only API files are Markdown outside api/fixtures/ and no framework SQL
+# skips the build and tests.
 name: api
 
 on:
@@ -46,21 +46,17 @@ env:
   # The framework CI's PostgreSQL (theseus-rs/postgresql-binaries).
   PG_VERSION: 17.11.1
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
-  # The slowest test, run alone in its own part.
+  # The slowest test, in its own process beside the others.
   SLOW_TEST: ^TestEveryAnswerIsTheSameFromParts$
-  # The latency test, run alone after it in the same part (API-SUM-FIX-1).
+  # The latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
 
 jobs:
   api:
-    name: api (${{ matrix.part }})
+    name: api
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, ci-2cpu]
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [lint, tests-parts, tests-rest]
-    timeout-minutes: 20
+    runs-on: [self-hosted, ci-32cpu]
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash
@@ -123,18 +119,8 @@ jobs:
             echo "GOFLAGS=-mod=readonly"
             echo "GOTELEMETRY=off"
           } >> "$GITHUB_ENV"
-      - name: gofmt
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'lint'
-        run: |
-          unformatted=$(gofmt -l .)
-          [ -z "$unformatted" ] || { echo "$unformatted"; exit 1; }
-      - if: steps.diff.outputs.code == 'true' && matrix.part == 'lint'
-        run: go vet ./...
-      - name: go test -race without the database (main only; not a merge gate)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'lint' && github.event_name != 'pull_request'
-        run: go test -count=1 -race ./...
       - name: PostgreSQL 17
-        if: steps.diff.outputs.code == 'true' && matrix.part != 'lint'
+        if: steps.diff.outputs.code == 'true'
         working-directory: .
         run: |
           cache=$CI_CACHE_DIR/${GITHUB_REPOSITORY#*/}
@@ -166,16 +152,53 @@ jobs:
             echo "PG_TEST_ADMIN_FILE=$admin"
             echo "PG_TEST_REQUIRED=1"
           } >> "$GITHUB_ENV"
-      - name: go test, the slowest test (database)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'tests-parts'
+      - name: Checks in the background, tests in parallel (database)
+        if: steps.diff.outputs.code == 'true'
+        env:
+          # The race run, without the database: main only, not a merge gate.
+          RACE: ${{ github.event_name != 'pull_request' }}
         run: |
-          log=$RUNNER_TEMP/slow.log
-          if ! go test -count=1 -v -run "$SLOW_TEST" ./internal/server/ > "$log" 2>&1; then tail -n 200 "$log"; exit 1; fi
-          grep -E '^(--- |ok)' "$log"
-          # Never an empty pass: the test ran and passed.
-          grep -qE '^--- PASS: TestEveryAnswerIsTheSameFromParts ' "$log"
+          ev=$RUNNER_TEMP/ev
+          mkdir -p "$ev"
+          # Each background job writes $ev/<name>.log and $ev/<name>.rc; once all have
+          # finished, every one with a non-zero status prints its log and fails the step.
+          background() {
+            local name=$1
+            shift
+            ( rc=0; "$@" > "$ev/$name.log" 2>&1 || rc=$?; echo "$rc" > "$ev/$name.rc" ) &
+          }
+          gofmt_check() {
+            local unformatted
+            unformatted=$(gofmt -l .) || return 1
+            [ -z "$unformatted" ] || { echo "$unformatted"; return 1; }
+          }
+          background gofmt gofmt_check
+          background vet go vet ./...
+          if [ "$RACE" = true ]; then
+            background race env -u PG_TEST_ADMIN_FILE -u PG_TEST_REQUIRED go test -count=1 -race ./...
+          fi
+          background slow go test -count=1 -v -run "$SLOW_TEST" ./internal/server/
+          background tests go test -count=1 -p "$(nproc)" -skip "$SLOW_TEST|$LATENCY_TEST" ./...
+          wait
+
+          failed=0
+          for rc in "$ev"/*.rc; do
+            name=$(basename "$rc" .rc)
+            [ "$(cat "$rc")" = 0 ] && continue
+            echo "::group::$name failed (exit $(cat "$rc"))"
+            cat "$ev/$name.log"
+            echo "::endgroup::"
+            echo "$name failed"
+            failed=1
+          done
+          grep -E '^(--- |ok|FAIL)' "$ev/tests.log" || true
+          grep -E '^(--- |ok)' "$ev/slow.log" || true
+          # Never an empty pass: the slowest test ran and passed.
+          grep -qE '^--- PASS: TestEveryAnswerIsTheSameFromParts ' "$ev/slow.log" \
+            || { echo "TestEveryAnswerIsTheSameFromParts did not pass"; failed=1; }
+          exit "$failed"
       - name: go test, the latency test alone (database)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'tests-parts'
+        if: steps.diff.outputs.code == 'true'
         run: |
           log=$RUNNER_TEMP/latency.log
           if ! go test -count=1 -v -run "$LATENCY_TEST" ./internal/server/ > "$log" 2>&1; then tail -n 200 "$log"; exit 1; fi
@@ -183,9 +206,6 @@ jobs:
           # Never an empty pass: the test ran, measured and passed.
           grep -qE '^--- PASS: TestServeFromDatabase ' "$log"
           grep -qE 'p50 .* p99' "$log"
-      - name: go test, every other test (database)
-        if: steps.diff.outputs.code == 'true' && matrix.part == 'tests-rest'
-        run: go test -count=1 -skip "$SLOW_TEST|$LATENCY_TEST" ./...
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''
         working-directory: .

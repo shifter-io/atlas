@@ -96,12 +96,13 @@ uv run --no-editable proxy-index enrich results/RUN_ID --mmdb /path/to/release.m
 </section>
 
 <section id="extend"><h2>5. Add or change a target</h2>
-<p>Targets expose an ID, version, engine, pool eligibility, <code>build_request()</code> and <code>assess(status, body)</code>. Register a new implementation in a <code>TargetRegistry</code> and pass it to <code>run(..., targets=registry)</code>. Adding a built-in also registers it in the default registry; the CLI automatically lists it. Change the target version whenever measurement semantics change.</p>
-<pre>from proxy_index.targets import EchoIpTarget, TargetRegistry
+<p>Targets expose an ID, version, engine, pool eligibility, <code>build_request()</code> and <code>assess(status, body)</code>. Register a new implementation in a <code>TargetRegistry</code> and pass it as <code>run(config, sink, RunOptions(targets=registry))</code>; every optional input of <code>run</code> is a <code>RunOptions</code> field. Adding a built-in also registers it in the default registry; the CLI automatically lists it. Change the target version whenever measurement semantics change.</p>
+<pre>from proxy_index import RunOptions
+from proxy_index.targets import EchoIpTarget, TargetRegistry
 
 targets = TargetRegistry()
 targets.register(EchoIpTarget("my_ip_target", "https://example.test/ip"))
-# await run(config_for_my_ip_target, sink, targets=targets)</pre>
+# await run(config_for_my_ip_target, sink, RunOptions(targets=targets))</pre>
 <p><code>Transport.execute(target, *, context=None)</code> returns a normalized outcome. Since v0.2 the runner supplies a <code>RequestContext</code> with run, request and worker identities for provider sessions; custom transports must accept this keyword. A future browser adapter can implement the same execution protocol through <code>transport_factory</code>; browser targets can carry additional settings in their own implementation. Playwright is not needed or installed for baseline targets. Custom sinks implement <code>start</code>, <code>observations</code>, <code>finish</code> and <code>abort</code>. Observation writes are serialized on one background thread; finish runs only after they complete.</p>
 </section>
 

@@ -61,12 +61,12 @@ async def run_day(path, m, day, region):
     window = campaign.regional_window(m, region)
     calls = []
 
-    async def run(config, sink, **kw):
+    async def run(config, sink, options):
         now = clock.now()
         assert config.retry_http_469 and config.concurrency == 1500 and config.processes == 4
         assert config.target_url == "http://example.test/"
-        assert campaign.moment(window["starts_at"]).timestamp() <= now < kw["deadline"]
-        assert kw["deadline"] == campaign.moment(window["ends_at"]).timestamp()
+        assert campaign.moment(window["starts_at"]).timestamp() <= now < options.deadline
+        assert options.deadline == campaign.moment(window["ends_at"]).timestamp()
         calls.append((config.proxy.country, now))
         return fake_measurement(completed=0)
 

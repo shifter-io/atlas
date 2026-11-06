@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import hashlib
 import json
 import os
 import signal
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from helpers import FakeTransport, Gateway, server
 
-from proxy_index import JsonSink, ProxyConfig, RunConfig, run
+from proxy_index import JsonSink, ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.browser.contracts import RUN_TARGETS
 from proxy_index.cli import main
 from proxy_index.enrichment import LocalEnricher, enrich_run, find_database
@@ -75,7 +76,7 @@ async def test_enrichment_preserves_original_and_versions_output(tmp_path, fake_
     await run(
         RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
         sink,
-        transport_factory=FakeTransport,
+        RunOptions(transport_factory=FakeTransport),
     )
     summary_before = (sink.directory / "summary.json").read_bytes()
     report = enrich_run(sink.directory, database)
@@ -90,6 +91,32 @@ async def test_enrichment_preserves_original_and_versions_output(tmp_path, fake_
         stream.write(b"tampered")
     with pytest.raises(ValueError, match="checksum"):
         enrich_run(sink.directory, database)
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ([{"run_id": "other", "ip": "192.0.2.1"}], "different run ID"),
+        ([], "row count"),
+    ],
+)
+async def test_enrichment_rejects_a_mismatched_ip_artifact(tmp_path, fake_database, rows, message):
+    database, _ = fake_database
+    sink = JsonSink(tmp_path / "runs")
+    await run(
+        RunConfig("generic_http", ProxyConfig("http", "localhost", 8080), requests=2),
+        sink,
+        transport_factory=FakeTransport,
+    )
+    source = sink.directory / "ips.jsonl.gz"
+    with gzip.open(source, "wt", encoding="utf-8") as stream:
+        stream.writelines(json.dumps(row) + "\n" for row in rows)
+    summary = json.loads((sink.directory / "summary.json").read_text())
+    summary["artifacts"]["ips"]["sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    (sink.directory / "summary.json").write_text(json.dumps(summary))
+    with pytest.raises(ValueError, match=message):
+        enrich_run(sink.directory, database)
+    assert not list(sink.directory.glob("enrichment-*.json"))
 
 
 def test_database_discovery_is_explicit_when_ambiguous(tmp_path, monkeypatch):
