@@ -21,9 +21,8 @@ from .store_retention import RETAIN_DAYS as RETAIN_DAYS
 from .store_retention import RETAIN_PER_DAY as RETAIN_PER_DAY
 from .store_retention import collect as collect
 from .store_retention import discard as discard
-from .store_retention import drop
+from .store_retention import drop, expire
 from .store_retention import estimate as estimate
-from .store_retention import expire
 from .store_retention import layer as layer
 from .store_retention import lists as lists
 from .store_retention import retained as retained
@@ -169,7 +168,6 @@ V9_CHECKS = {
 
 def jsonable(value):
     return json.loads(json.dumps(value, default=iso, allow_nan=False))
-
 
 
 def initialize(database):
