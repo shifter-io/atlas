@@ -208,6 +208,38 @@ def _scheduler_parsers(actions) -> None:
 PARSERS.append(_scheduler_parsers)
 
 
+def _deploy_parser(steps, accounts: list[str]):
+    """`manager deploy`; the loop in `_plan_parsers` adds `--mac-ip` and `--inventory`."""
+    deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
+    deploy.add_argument("--account", choices=accounts, required=True)
+    deploy.add_argument("--wheel", type=Path, required=True)
+    deploy.add_argument("--requirements", type=Path, required=True)
+    deploy.add_argument(
+        "--size",
+        help="a new manager's droplet size slug, offered in lon1 "
+        "(default: the recorded manager's, else s-8vcpu-16gb)",
+    )
+    deploy.add_argument(
+        "--environment",
+        choices=["production", "staging"],
+        default="production",
+        help="staging: a manager beside production with its own pi-camp-stg- tags, firewalls "
+        "and keys; give it its own --inventory and --mac-key (CAMP-STAGING-1)",
+    )
+    deploy.add_argument("--networks", default="all16")
+    deploy.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
+    deploy.add_argument(
+        "--spaces-file",
+        type=Path,
+        help="[spaces] settings of the raw-data archive (secret from the keychain); written "
+        "to the manager's .secrets/spaces.toml",
+    )
+    deploy.add_argument(
+        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
+    )
+    return deploy
+
+
 def _plan_parsers(actions) -> None:
     """CAMP-1g: the campaign plan and the manager's deploy, enable, allow-me and teardown."""
     from . import browser_hosts, manager_orch
@@ -238,33 +270,7 @@ def _plan_parsers(actions) -> None:
     plan.add_argument("--images", type=Path, default=SECRETS / "campaign-images.json")
     manager = actions.add_parser("manager", help="Deploy and operate the campaign manager")
     steps = manager.add_subparsers(dest="manager_action", required=True)
-    deploy = steps.add_parser("deploy", help="Create or update the hardened manager")
-    deploy.add_argument("--account", choices=sorted(ACCOUNTS), required=True)
-    deploy.add_argument("--wheel", type=Path, required=True)
-    deploy.add_argument("--requirements", type=Path, required=True)
-    deploy.add_argument(
-        "--size",
-        help="a new manager's droplet size slug, offered in lon1 "
-        "(default: the recorded manager's, else s-8vcpu-16gb)",
-    )
-    deploy.add_argument(
-        "--environment",
-        choices=["production", "staging"],
-        default="production",
-        help="staging: a manager beside production with its own pi-camp-stg- tags, firewalls "
-        "and keys; give it its own --inventory and --mac-key (CAMP-STAGING-1)",
-    )
-    deploy.add_argument("--networks", default="all16")
-    deploy.add_argument("--credentials-file", type=Path, default=SECRETS / "credentials.toml")
-    deploy.add_argument(
-        "--spaces-file",
-        type=Path,
-        help="[spaces] settings of the raw-data archive (secret from the keychain); written "
-        "to the manager's .secrets/spaces.toml",
-    )
-    deploy.add_argument(
-        "--mac-key", type=Path, default=Path("~/.ssh/proxy-index-campaign").expanduser()
-    )
+    deploy = _deploy_parser(steps, sorted(ACCOUNTS))
     upload = steps.add_parser("upload-spec", help="Copy a planned campaign to the manager")
     upload.add_argument("root", type=Path)
     enable = steps.add_parser("enable", help="Start a campaign's timers (owner's go only)")
