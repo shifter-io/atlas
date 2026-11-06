@@ -13,8 +13,15 @@ from datetime import datetime
 
 import pytest
 from campaign_deploy_fakes import Shell, clean_report, fast_assign, make_job, owned_world
-from campaign_fakes import CAMPAIGN_PROJECT, CID, MANAGER_ID, SID, SPEC_TIME, FakeDigitalOcean
-from campaign_fakes import running
+from campaign_fakes import (
+    CAMPAIGN_PROJECT,
+    CID,
+    MANAGER_ID,
+    SID,
+    SPEC_TIME,
+    FakeDigitalOcean,
+    running,
+)
 from campaign_probe_cases import FakeProbeRemote, probed, world
 from test_campaign_image import PUBLIC_KEY, inventory, run_build
 
@@ -178,9 +185,7 @@ async def test_a_build_cleanup_error_of_any_type_still_removes_the_other_resourc
     assert not fake.resources["ssh_key"] and SECRET not in job.inventory.read_text()
 
 
-async def test_a_teardown_release_error_of_any_type_never_stops_the_others(
-    tmp_path, monkeypatch
-):
+async def test_a_teardown_release_error_of_any_type_never_stops_the_others(tmp_path, monkeypatch):
     fast_assign(monkeypatch)
     job = make_job(tmp_path)
     fake, saved, _ = await owned_world(job)

@@ -93,7 +93,7 @@ def orphan_world(tmp_path):
 
 async def test_an_orphan_inspect_catches_only_what_an_ssh_inspect_raises(tmp_path):
     root, clock, fake, names = orphan_world(tmp_path)
-    remote = FakeRemote(dict(zip(names, [RemoteError("inspect failed"), ValueError("not json")])))
+    remote = FakeRemote({names[0]: RemoteError("inspect failed"), names[1]: ValueError("not json")})
     async with running(fake) as cloud:
         collector = collector_module.Collector(
             root, None, cloud, lambda hour: remote, clock, pacing(clock)
