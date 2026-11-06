@@ -17,7 +17,15 @@ from helpers import FakeTransport
 
 from proxy_index import node as node_module
 from proxy_index.models import ProxyConfig
-from proxy_index.node import Active, NodeAgent, Rejected, read_token, resident_mb, serve
+from proxy_index.node import (
+    Active,
+    NodeAgent,
+    NodeSettings,
+    Rejected,
+    read_token,
+    resident_mb,
+    serve,
+)
 
 
 class Orchestrator:
@@ -42,14 +50,16 @@ class Orchestrator:
 
 def make_agent(tmp_path, replies=None, **options):
     agent = NodeAgent(
-        "http://orchestrator",
-        "tok",
-        provider="p",
-        product="q",
-        region="fra1",
-        proxy_factory=lambda country: ProxyConfig("http", "127.0.0.1", 9),
-        work_dir=tmp_path,
-        **{"transport_factory": FakeTransport} | options,
+        NodeSettings(
+            "http://orchestrator",
+            "tok",
+            provider="p",
+            product="q",
+            region="fra1",
+            proxy_factory=lambda country: ProxyConfig("http", "127.0.0.1", 9),
+            work_dir=tmp_path,
+            **{"transport_factory": FakeTransport} | options,
+        )
     )
     agent._call = Orchestrator(replies or {})
     return agent
