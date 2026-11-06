@@ -12,7 +12,7 @@ from migration_cases import catalog
 from psycopg.types.json import Jsonb
 from test_calculated_parts import POLICY, two_providers, whole_payload_build, without
 
-from proxy_index.calculated import parts, store
+from proxy_index.calculated import parts, store, store_retention
 from proxy_index.calculated.api import RESOURCES, app
 from proxy_index.calculated.calculator import calculate
 from proxy_index.storage import connect, migrate
@@ -31,7 +31,7 @@ async def test_a_build_stored_whole_before_v8_still_reads_publishes_and_serves(
     database, tmp_path, monkeypatch
 ):
     # Both builds stay after the second publication (retention has its own tests).
-    monkeypatch.setattr(store, "RETAIN_PER_DAY", 100)
+    monkeypatch.setattr(store_retention, "RETAIN_PER_DAY", 100)
     end = await two_providers(database, tmp_path)
     payload = calculate(database, POLICY, as_of=end, publish=True)
     with connect(database) as conn:
