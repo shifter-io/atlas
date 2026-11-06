@@ -7,7 +7,8 @@
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //
 // The database comes from DATABASE_URL, --database-file, or
-// proxy-index/.secrets/database.toml found above the working directory.
+// .secrets/database.toml in the repository root (the working directory or its
+// nearest parent holding src/proxy_index).
 // serve and dump need only the framework's schema: site tables that are
 // missing (before the first `siteapi migrate`) are served empty.
 package main
@@ -55,7 +56,7 @@ type common struct {
 }
 
 func (c *common) register(fs *flag.FlagSet) {
-	fs.StringVar(&c.databaseFile, "database-file", os.Getenv("SITEAPI_DATABASE_FILE"), "framework credentials TOML with a [postgres] section (default: proxy-index/.secrets/database.toml above the working directory); DATABASE_URL wins")
+	fs.StringVar(&c.databaseFile, "database-file", os.Getenv("SITEAPI_DATABASE_FILE"), "framework credentials TOML with a [postgres] section (default: .secrets/database.toml in the repository root); DATABASE_URL wins")
 }
 
 func (c *common) dsn() (string, error) {

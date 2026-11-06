@@ -1,11 +1,11 @@
 // Package testdb creates throwaway Postgres databases for integration tests.
 //
 // Tests that need a database call New, which skips the test unless
-// PG_TEST_ADMIN_FILE names a credentials TOML (e.g. proxy-index/.secrets/postgres-admin.toml)
+// PG_TEST_ADMIN_FILE names a credentials TOML (e.g. .secrets/postgres-admin.toml)
 // for a role allowed to CREATE DATABASE; with PG_TEST_REQUIRED set (CI) a
 // missing PG_TEST_ADMIN_FILE fails the test instead. Each test gets its own database named
-// siteapi_test_<random>, loaded with the framework schema read from the proxy-index/
-// checkout (PG_TEST_FRAMEWORK_DIR overrides), and dropped afterwards. The real
+// siteapi_test_<random>, loaded with the framework schema read from the
+// repository's own framework tree (src/proxy_index), and dropped afterwards. The real
 // proxy_reviews database is never touched.
 package testdb
 
@@ -32,12 +32,10 @@ type DB struct {
 	Admin config.Postgres
 }
 
-// FrameworkDir locates proxy-index/src/proxy_index.
+// FrameworkDir locates the framework tree, src/proxy_index in the repository
+// root, or returns "" when there is none.
 func FrameworkDir() string {
-	if d := os.Getenv("PG_TEST_FRAMEWORK_DIR"); d != "" {
-		return d
-	}
-	return config.FrameworkPath("src", "proxy_index")
+	return config.RepoPath(config.FrameworkTree)
 }
 
 // New creates a scratch database with the framework schema and the site
@@ -65,7 +63,7 @@ func NewFramework(t testing.TB) *DB {
 		t.Fatal("PG_TEST_REQUIRED is set and PG_TEST_ADMIN_FILE is not: the database tests must run")
 	}
 	if file == "" {
-		t.Skip("database tests skipped: set PG_TEST_ADMIN_FILE=<path to proxy-index/.secrets/postgres-admin.toml> to run them against a scratch database")
+		t.Skip("database tests skipped: set PG_TEST_ADMIN_FILE=<path to .secrets/postgres-admin.toml> to run them against a scratch database")
 	}
 	admin, err := config.ReadDatabaseFile(file)
 	if err != nil {
@@ -73,7 +71,7 @@ func NewFramework(t testing.TB) *DB {
 	}
 	fw := FrameworkDir()
 	if fw == "" {
-		t.Fatal("cannot find proxy-index/src/proxy_index for the framework schema; set PG_TEST_FRAMEWORK_DIR")
+		t.Fatal("cannot find src/proxy_index for the framework schema: run the tests inside the repository")
 	}
 	buf := make([]byte, 6)
 	rand.Read(buf) //nolint:errcheck

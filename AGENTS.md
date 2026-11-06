@@ -23,9 +23,11 @@ workstation.
   privacy, commit-message, commit-identity and secret checks for every change, then
   for framework code `uv sync --locked`, ruff, the source limits, pytest with a
   PostgreSQL (database tests must not skip) and changed-line coverage of at least 85%.
-- API: `.github/workflows/api.yml` runs when `api/` or that file changes: `gofmt`,
-  `go vet` and `go test` with the database tests against a throwaway PostgreSQL 17 and
-  the framework schema pinned in `api/fixtures/framework/` (`PIN`). The latency test
+- API: `.github/workflows/api.yml` runs when `api/`, the framework's SQL
+  (`src/proxy_index/**/*.sql`) or that file changes: `gofmt`, `go vet` and `go test`
+  with the database tests against a throwaway PostgreSQL 17 and the framework schema
+  read from `src/proxy_index/` of the same checkout. A framework schema change that
+  breaks the API's database tests fixes them in the same pull request. The latency test
   `TestServeFromDatabase` (p99 < 2 ms) runs alone in its own process, after the slowest
   test; every other test runs in a second part. See "Tests" in `api/README.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
