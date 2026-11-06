@@ -27,7 +27,8 @@ from ..models import (
     RequestContext,
 )
 from .flags import MAX_CONCURRENCY as MAX_CONCURRENCY
-from .flags import Flag, NoCountryList, _range, _testing
+from .flags import Flag, _range, _testing
+from .flags import NoCountryList as NoCountryList
 from .flags import _statuses as _statuses
 
 POLICIES = ("rotate", "gateway", "fixed", "per_request", "per_worker", "per_run")
