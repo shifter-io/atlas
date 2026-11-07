@@ -8,6 +8,8 @@ byte-identical. An older cutoff counts its window directly and changes no memo; 
 collected by age.
 """
 
+import hashlib
+import json
 import random
 from collections import Counter
 from datetime import UTC, datetime, timedelta
@@ -31,11 +33,13 @@ MEMOS = ("calculated_bucket_ips", "calculated_ip_last_seen", "calculated_distinc
 MINUTE = timedelta(minutes=1)
 COUNTRIES = {"us": 3, "de": 3, "fr": 3, "jp": 2, "gb": 1}  # groups (networks) per country
 # The sweep's cutoffs (hours before the fixture's end, oldest first), its late run's cutoff, and
-# its chunks of CHUNK cutoffs, each its own case (they run in parallel), which copies the sweep's
-# prefix at its start (sweep_prefix) instead of replaying the cutoffs before it.
+# its chunks' starts: each chunk is its own case (they run in parallel), which copies the sweep's
+# prefix at its start (sweep_prefix) instead of replaying the cutoffs before it. The first has
+# 1 cutoff (from no memo), the others 2 (the last 1). Each counts some cohort set: the builds at
+# 20 h, 18 h and 6 h count none, so none of them is a chunk alone.
 CUTOFFS = range(24, 0, -2)
 LATE = 12
-CHUNK = 3
+STARTS = (0, *range(1, len(CUTOFFS), 2))
 
 
 async def fleet_history(database, tmp_path, end):
@@ -128,9 +132,11 @@ async def late_run(h):
     await h.daily("beta", "jp", 40 * HOUR - 30 * MINUTE)  # late: before folded buckets
 
 
-SWEEP = Chain("fleet", 0, fleet_history, CUTOFFS, range(0, len(CUTOFFS), CHUNK), (LATE, late_run))
+SWEEP = Chain("fleet", 0, fleet_history, CUTOFFS, STARTS, (LATE, late_run))
 
 
+# No coverage (tests/conftest.py): other tests cover every line and branch it does (CI-90-5).
+@pytest.mark.no_cover
 @pytest.mark.asyncio
 @pytest.mark.parametrize("start", SWEEP.starts)
 async def test_fleet_counts_from_memos_equal_full_at_every_hourly_cutoff(
@@ -171,9 +177,19 @@ def assert_last_memos(database, policy, end, calls):
     assert calls == [0]
 
 
+# The older cutoffs, in two cases. The second stays traced: only it covers fleet_entries()'s
+# direct count of an older cutoff (tests/conftest.py, "No coverage"); 3 h back, no bucket after
+# the cutoff is folded yet, so that build counts as the latest.
+OLDER = [
+    pytest.param((3 * HOUR,), id="3h", marks=pytest.mark.no_cover),
+    pytest.param((30 * HOUR, 3 * DAY), id="30h-3d"),
+]
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("backs", OLDER)
 async def test_an_older_cutoff_counts_directly_and_keeps_the_memos(
-    database_template, databases, tmp_path
+    backs, database_template, databases, tmp_path
 ):
     end = floor_hour(datetime.now(UTC)) + HOUR
     policy = lenient_policy(tmp_path)
@@ -181,11 +197,22 @@ async def test_an_older_cutoff_counts_directly_and_keeps_the_memos(
     assert_equal(database, policy, end)
     before = memo_rows(database)
     assert before["calculated_ip_last_seen"]
-    for back in (3 * HOUR, 30 * HOUR, 3 * DAY):  # older than folded buckets: no last-seen count
+    for back in backs:  # older than folded buckets: no last-seen count
         assert_equal(database, policy, end - back)
     after = memo_rows(database)
     for table in ("calculated_bucket_ips", "calculated_ip_last_seen"):
         assert after[table] == before[table], table
+
+
+def test_no_span_and_no_run_are_answered_without_a_query():
+    """No span to count, and a cohort whose members have no run in the window: answered without
+    a connection. Traced: only the untraced sweeps reach these otherwise."""
+    assert fleetsql.count_spans(None, []) == {}
+    as_of = datetime(2026, 11, 1, tzinfo=UTC)
+    members = [({"provider": "alpha"}, []), ({"provider": "beta"}, [])]
+    key = json.dumps([["alpha", []], ["beta", []]])
+    digest = fleetsql.MEMO + hashlib.sha256(key.encode()).hexdigest()
+    assert fleetsql._digests(None, as_of, {0: (as_of - DAY, members)}) == {0: digest}
 
 
 @pytest.mark.asyncio

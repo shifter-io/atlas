@@ -167,12 +167,15 @@ def count_windows(monkeypatch):
 
 
 # Each day's cutoffs in chunks, each its own case (they run in parallel), which copies the day's
-# prefix at its start (sweep_prefix) instead of replaying the cutoffs before it: STARTS. The first
-# chunk, from no stored list, has the day's first runs and enough hits; the others CHUNK cutoffs.
+# prefix at its start (sweep_prefix) instead of replaying the cutoffs before it. The first chunk
+# starts from no stored list, so its first build misses every window: it has the day's first runs
+# and the fewest cutoffs whose builds hit more windows than they miss, FIRST[day] (day 2's late
+# run misses more). The second has 2, as it builds the first prefix; the others CHUNK (the last
+# of day 2 one).
 # tests/durations.json lists the cases of later starts as shorter than they take, so they run
 # after other slow tests, once the earlier cases have built their prefixes.
+FIRST = (5, 5, 6)
 CHUNK = 3
-STARTS = (0, *range(6, 24, CHUNK))
 
 
 def chain(day):
@@ -180,7 +183,8 @@ def chain(day):
     on day 0)."""
     hours = cutoffs(day)
     late = min(36, hours[0]), lambda h: h.daily("beta", "us", 60 * HOUR)
-    return Chain("incremental", day, history, hours, STARTS, late)
+    starts = (0, FIRST[day], *range(FIRST[day] + 2, len(hours), CHUNK))
+    return Chain("incremental", day, history, hours, starts, late)
 
 
 def chunks():
@@ -196,6 +200,8 @@ def chunks():
 SINGLE_PEER = range(10, 55)
 
 
+# No coverage (tests/conftest.py): other tests cover every line and branch it does (CI-90-5).
+@pytest.mark.no_cover
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("day", "start"), list(chunks()))
 async def test_incremental_equals_full_at_every_hourly_cutoff(
