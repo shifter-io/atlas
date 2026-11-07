@@ -45,7 +45,12 @@ from proxy_index.campaign.do_api import ApiError
 from proxy_index.campaign.scope import Ledger, OwnershipError, guarded_delete
 
 
-async def test_every_destructive_path_over_the_whole_account_deletes_only_ours(tmp_path):
+async def test_every_destructive_path_over_the_whole_account_deletes_only_ours(
+    tmp_path, monkeypatch
+):
+    # Durability is not under test here, and the audit's ~3,400 fsync calls were most of its
+    # time (CI-90-3). Every audit line is still written and read back below.
+    monkeypatch.setattr(os, "fsync", lambda fd: None)
     fake, near, owned = seeded()
     everything = set(fake.droplets)  # worst case: a corrupted ledger lists every droplet
     audit = tmp_path / "ledger" / "delete-audit.jsonl"
@@ -293,6 +298,9 @@ def test_scope_coverage_gate(tmp_path):
         pytest.skip("inside the gate run")
     env = {k: v for k, v in os.environ.items() if not k.startswith(("COV_CORE", "COVERAGE"))}
     env.update(CAMPAIGN_SCOPE_GATE="inner", COVERAGE_FILE=str(tmp_path / ".coverage"))
+    # Three xdist workers, longest test first as in CI (tests/conftest.py): the run takes
+    # about as long as its longest test (CI-90-3); pytest-cov combines the workers' data
+    # before the 100% check.
     run = subprocess.run(
         [
             sys.executable,
@@ -301,6 +309,10 @@ def test_scope_coverage_gate(tmp_path):
             "-p",
             "no:cacheprovider",
             "-q",
+            "-n",
+            "3",
+            "--dist",
+            "worksteal",
             *map(str, sorted(Path(__file__).parent.glob("test_campaign_scope*.py"))),
             *map(str, sorted(Path(__file__).parent.glob("test_campaign_api*.py"))),
             str(Path(__file__).with_name("test_campaign_unassigned.py")),

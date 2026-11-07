@@ -1,6 +1,9 @@
 """Both schedules share the same census, with disjoint regional deadlines."""
 
+import asyncio
+import multiprocessing
 import os
+from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 from datetime import timedelta
 
@@ -107,12 +110,22 @@ async def test_each_day_hourly_in_its_own_window_and_closed(tmp_path, no_fsync, 
     await run_day(path, campaign.load(path), day, region)
 
 
-async def test_complete_export_after_all_eight_days(tmp_path, no_fsync):
+def run_region(path, day, region):
+    """run_day() in a process of its own, as each region runs on its own server; fsync off as
+    in `no_fsync`."""
+    os.fsync = lambda fd: None
+    return asyncio.run(run_day(path, campaign.load(path), day, region))
+
+
+def test_complete_export_after_all_eight_days(tmp_path, no_fsync):
+    """The eight regions' days, each in its own process (their state, lock and files are
+    per region), then the campaign's export. Run one after another they took a minute: the
+    scheduler rewrites a region's whole state after each of its jobs."""
     path = make_eight_days(tmp_path)
-    m = campaign.load(path)
-    all_calls = []
-    for day, region in enumerate(ORDER):
-        all_calls.extend(await run_day(path, m, day, region))
+    spawn = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(len(ORDER), mp_context=spawn) as pool:
+        days = pool.map(run_region, [path] * len(ORDER), range(len(ORDER)), ORDER)
+        all_calls = [call for calls in days for call in calls]
     assert len(all_calls) == 5976
     report = export_campaign(path)
     assert report["complete"] and len(report["regions"]) == 8 and not report["issues"]

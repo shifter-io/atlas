@@ -108,8 +108,17 @@ def coverage_paused():
             measurement.start()
 
 
+# Two million rows in four writers of half a million each, one per param, so each takes a
+# quarter of the time. Each writer still fills its queue to the bound (the producer never yields
+# until the queue is full, and the writer thread is far slower than it) and commits at least
+# five 100,000-row chunks.
+STREAM_PARTS = 4
+STREAM_ROWS = 2_000_000 // STREAM_PARTS
+
+
 @pytest.mark.scale
-async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
+@pytest.mark.parametrize("part", range(STREAM_PARTS))
+async def test_two_million_observations_stream_with_bounded_queue(tmp_path, part):
     # Tracing two million writer rows doubled this test (47 s alone, 73 s under tier1's
     # load). The same stream and bound are asserted; the next test covers backpressure.
     with coverage_paused():
@@ -122,10 +131,10 @@ async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
             bounds=WriterBounds(queue_size=4096),
         )
         observed = START.timestamp() + 1
-        for _ in range(2_000_000):
+        for _ in range(STREAM_ROWS):
             await writer.observe("2001:db8::1", observed)
         await writer.close()
-    assert writer.rows == 2_000_000 and writer.peak_queue <= 4096
+    assert writer.rows == STREAM_ROWS and writer.peak_queue == 4096 and writer.chunks >= 5
     count = 0
     for path in sorted(tmp_path.glob("*.gz")):
         lines = gzip.decompress(path.read_bytes()).decode().splitlines()
@@ -133,7 +142,7 @@ async def test_two_million_observations_stream_with_bounded_queue(tmp_path):
         # Every line is checked: identical lines need parsing only once.
         for line in set(lines):
             assert json.loads(line)["ip"] == "2001:db8::1"
-    assert count == 2_000_000
+    assert count == STREAM_ROWS
 
 
 async def test_full_intake_waits_for_the_writer(tmp_path):
