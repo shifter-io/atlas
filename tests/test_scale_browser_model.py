@@ -123,7 +123,9 @@ def test_one_hour_writes_the_rows_of_two_networks(database, tmp_path):
     assert (completed, down) == (1200, part["bytes"])
     assert abs(part["bytes"] - 2 * 1.674e9) <= 0.01 * 2 * 1.674e9
     assert (challenges, blocks, timeouts) == (2 * 82, 2 * 20, 2 * 17)
-    hosts = query(database, "SELECT DISTINCT host FROM nodes WHERE region_id=%s", (bc.BROWSER_REGION_ID,))
+    hosts = query(
+        database, "SELECT DISTINCT host FROM nodes WHERE region_id=%s", (bc.BROWSER_REGION_ID,)
+    )
     assert hosts == [(model.HOST,)]
     assert query(database, settings_rows) == before  # no settings row, browser.enabled as it was
     assert len(state["uploaded"]) == 16

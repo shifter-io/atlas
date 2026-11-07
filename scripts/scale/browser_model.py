@@ -351,4 +351,3 @@ class Hour:
         if reply.status != 200 or not json.loads(text).get("ingested"):
             raise Failed(f"{reply.status} {text[:200]}")
         self.done.append(self.key(row))
-
