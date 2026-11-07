@@ -1,6 +1,7 @@
 """REPLAY-STATS-1: pg_stat_statements' detection on the test database, whichever state it is in,
 and the windows' delta and merge on recorded snapshots (synthetic documentation addresses only)."""
 
+import contextlib
 import importlib
 import sys
 import uuid
@@ -79,6 +80,31 @@ def test_a_snapshot_keys_other_roles_by_role():
         "7": ("SELECT 7", 1, 3.0, 1, 3.0),
         "other:10": ("other role", 2, 4.0, 2, 3.5),
     }
+
+
+def test_detection_reads_the_view_inside_a_savepoint():
+    class Loaded:
+        """A connection where the extension exists and its view is readable."""
+
+        def __init__(self):
+            self.ran = []
+
+        def execute(self, query, params=None):
+            self.ran.append(query)
+            return self
+
+        def fetchone(self):
+            return (1,)
+
+        @contextlib.contextmanager
+        def transaction(self):
+            self.ran.append("SAVEPOINT")
+            yield
+
+    conn = Loaded()
+    assert measure.has_statements(conn) is True
+    assert conn.ran == [measure.EXTENSION, "SAVEPOINT", measure.LOADED]
+    assert "shared_preload_libraries" not in measure.EXTENSION + measure.LOADED
 
 
 def installed(conn) -> bool:
