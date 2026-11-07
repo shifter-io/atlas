@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""REPLAY-1: replay simulated days of real-data hours back to back, in production's database.
+"""REPLAY-1: replay simulated days of real-data hours back to back, in the staging database.
 
 Usage:
   replay.py --database <toml> --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --slices <dir>
@@ -72,7 +72,8 @@ def guard(conn, args) -> dict:
     if found:
         raise Refused(found)
     if conn.execute(LIVE).fetchone()[0]:
-        raise Refused("a job_runs row started in the last 5 minutes: the orchestrator runs")
+        found = "a job_runs row started in the last 5 minutes"
+        raise Refused(f"{found}: an orchestrator runs against this database")
     last = first_start(args) + timedelta(days=args.days - 1, hours=args.hours_per_day)
     if last > datetime.now(UTC):
         raise Refused(f"the last simulated hour ends at {last.isoformat()}, not before now")
@@ -276,7 +277,9 @@ def arguments(argv=None):
     parser.add_argument("--first-day", required=True, help="date of simulated day 0 (UTC)")
     parser.add_argument("--out", required=True, help="directory of the state and the events")
     parser.add_argument("--hour-timeout", type=float, default=3000.0, help="seconds")
-    parser.add_argument("--siteapi", help="production's siteapi base URL, to wait for builds")
+    parser.add_argument(
+        "--siteapi", help="base URL of a siteapi reading the target database, to wait for builds"
+    )
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
     parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
     parser.add_argument("--methodology", default=str(cycle.METHODOLOGY))

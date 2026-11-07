@@ -13,7 +13,8 @@ public on it, a name the scratch schema lacks would reach production's table. Th
 create or drop a schema; the admin role does, with the SQL `target.py sql` prints.
 
 The one exception is the owner's go for REPLAY-RUN-1 (#614): with it, the replay alone may write
-to production's own database while it holds no test run but the replay's (owner_go_refusal).
+to the staging database proxy_reviews_staging (same server as production, created empty) while it
+holds no test run but the replay's (owner_go_refusal). Production's proxy_reviews stays refused.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ DROP SCHEMA {SCRATCH} CASCADE;
 SELECT count(*) FROM pg_namespace WHERE nspname='{SCRATCH}';
 """
 PRODUCTION = "proxy_reviews"
+STAGING = "proxy_reviews_staging"
 REPLAY_MARKER = "scale_replay"
 GO = re.compile(r"owner-go REPLAY-RUN-1 (\d{4}-\d{2}-\d{2})")
 GO_FORM = "'owner-go REPLAY-RUN-1 <YYYY-MM-DD>'"
@@ -59,12 +61,14 @@ def go_date_refusal(owner_go: str, today: date, pattern=GO, form=GO_FORM) -> str
 
 def owner_go_refusal(conn, owner_go: str) -> tuple[str | None, dict | None]:
     """(refusal, None), or (None, the accepted go's record) when the go is the owner's, the
-    database is production's and it holds no test run without the replay's marker. The record is
+    database is staging's and it holds no test run without the replay's marker. The record is
     printed to stderr and kept in the replay's state and report."""
     now = datetime.now(UTC)
     database, role, has_runs = conn.execute(IDENTITY).fetchone()
-    if database != PRODUCTION:
-        return f"the owner's go is for {PRODUCTION!r}, not the database {database!r}", None
+    if database == PRODUCTION:
+        return f"{database!r} is production's: the replay runs only in {STAGING!r}", None
+    if database != STAGING:
+        return f"the owner's go is for {STAGING!r}, not the database {database!r}", None
     found = go_date_refusal(owner_go, now.date())
     if found:
         return found, None
@@ -79,7 +83,7 @@ def owner_go_refusal(conn, owner_go: str) -> tuple[str | None, dict | None]:
 def refusal(conn, expected: str = SCRATCH, owner_go: str | None = None) -> str | None:
     """None when the session may be written to: the database `expected`, or the schema
     proxy_scale alone on the search path; otherwise what the session is, for the refusal.
-    With the owner's go (the replay only), production's database instead (owner_go_refusal)."""
+    With the owner's go (the replay only), the staging database instead (owner_go_refusal)."""
     if owner_go is not None:
         return owner_go_refusal(conn, owner_go)[0]
     database, schema, path = conn.execute(STATE).fetchone()

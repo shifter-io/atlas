@@ -1,6 +1,6 @@
-"""REPLAY-1: the replay of simulated days in production's database, on a fixture slice set.
+"""REPLAY-1: the replay of simulated days in the staging database, on a fixture slice set.
 
-The test database stands in for production (target.PRODUCTION is its name); --no-scope keeps
+The test database stands in for staging (target.STAGING is its name); --no-scope keeps
 the calculation out of a systemd scope and --pause makes the retry delays short.
 """
 
@@ -82,12 +82,12 @@ def write_slices(directory, hours=(0, 1, 2), ips=6):
 
 
 @pytest.fixture
-def production(database, monkeypatch):
-    """The test database as production: seeded, US and DE enabled, the calculated layer."""
+def staging(database, monkeypatch):
+    """The test database as staging: seeded, US and DE enabled, the calculated layer."""
     prepare(database, COUNTRIES)
     store.initialize(database)
     (name,) = query(database, "SELECT current_database()")[0]
-    monkeypatch.setattr(target, "PRODUCTION", name)
+    monkeypatch.setattr(target, "STAGING", name)
     return database
 
 
@@ -113,11 +113,9 @@ def moment(text):
     return datetime.fromisoformat(text)
 
 
-def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(
-    production, tmp_path, capsys
-):
-    settings = query(production, SETTINGS)
-    assert replay.main(argv(production, tmp_path)) == 0
+def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(staging, tmp_path, capsys):
+    settings = query(staging, SETTINGS)
+    assert replay.main(argv(staging, tmp_path)) == 0
     assert json.loads(capsys.readouterr().out)["hours_done"] == 6
     found = state(tmp_path)
     hours = found["hours"]
@@ -162,9 +160,9 @@ def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(
     assert "public.test_runs.run_key" in baseline["identities"]
     assert {"providers", "nodes", "targets", "place_names"} <= set(baseline["keys"])
     marked = "SELECT count(*) FILTER (WHERE summary->>'scale_replay'=%s),count(*) FROM test_runs"
-    (mine, total) = query(production, marked, (found["replay_id"],))[0]
+    (mine, total) = query(staging, marked, (found["replay_id"],))[0]
     assert mine == total > 6 * 2
-    nodes = query(production, "SELECT node_id,host,status,token_hash FROM nodes ORDER BY 1")
+    nodes = query(staging, "SELECT node_id,host,status,token_hash FROM nodes ORDER BY 1")
     assert sorted(found["nodes"]) == [node[0] for node in nodes]
     for _, host, status, token in nodes:
         assert host.startswith(replay_steps.NODE_HOST) or host == browser_model.HOST
@@ -173,13 +171,13 @@ def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(
     day = found["days_counted"]["1"]
     assert day["replay"]["public.test_runs"] == day["counts"]["public.test_runs"] == total
     assert day["other"]["public.test_runs"] == 0 and day["other"]["public.job_runs"] == 0
-    assert query(production, SETTINGS) == settings  # no settings row written
-    assert found["go"]["go"] == GO and found["database"] == target.PRODUCTION
+    assert query(staging, SETTINGS) == settings  # no settings row written
+    assert found["go"]["go"] == GO and found["database"] == target.STAGING
     assert found["started_at"] == found["go"]["at"] and found["resumed"] == []
 
 
 def test_a_failed_calculation_pauses_doubling_and_retries_the_same_hour(
-    production, tmp_path, monkeypatch, capsys
+    staging, tmp_path, monkeypatch, capsys
 ):
     real, calls = replay.measure.run_child, []
 
@@ -192,7 +190,7 @@ def test_a_failed_calculation_pauses_doubling_and_retries_the_same_hour(
         return real(command, poll, 120, stop)  # the real calculation, not held to 0.3 s
 
     monkeypatch.setattr(replay.measure, "run_child", failing)
-    assert replay.main(argv(production, tmp_path, 1, 1, "--hour-timeout", "0.3")) == 0
+    assert replay.main(argv(staging, tmp_path, 1, 1, "--hour-timeout", "0.3")) == 0
     found = events(tmp_path)
     assert [e["step"] for e in found] == ["calculate"] * 4
     assert [e["reason"] for e in found] == ["over 0.3 s"] + ["exit 3"] * 3
@@ -205,10 +203,10 @@ def test_a_failed_calculation_pauses_doubling_and_retries_the_same_hour(
     assert counts["retries"] == 4 and counts["calculate"] == 4
     assert counts["pause_seconds"] == pytest.approx(0.15)
     assert "retried 4 times (calculate)" in capsys.readouterr().err
-    assert query(production, "SELECT count(*) FROM current_calculation")[0][0] == 1
+    assert query(staging, "SELECT count(*) FROM current_calculation")[0][0] == 1
 
 
-def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, monkeypatch, capsys):
+def test_an_ingest_failure_keeps_the_runs_already_stored(staging, tmp_path, monkeypatch, capsys):
     real, calls = replay_steps.storage.ingest, []
 
     def unwritable(out):
@@ -224,20 +222,20 @@ def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, m
         return real(directory, database, **options)
 
     monkeypatch.setattr(replay_steps.storage, "ingest", flaky)
-    assert replay.main(argv(production, tmp_path, 1, 1)) == 0
+    assert replay.main(argv(staging, tmp_path, 1, 1)) == 0
     [event] = events(tmp_path)
     assert event["step"] == "daily" and "forced" in event["reason"] and event["pause"] == 0.01
     parts = state(tmp_path)["hours"][0]["ingest"]["steps"]["daily"]["parts"]
     assert [(p["stored"], p["failed"]) for p in parts] == [(1, 1), (2, 0)]
     assert len(calls) == 3  # the retry ingests only the missing run
-    stored = query(production, DAILY)
+    stored = query(staging, DAILY)
     daily = state(tmp_path)["hours"][0]["ingest"]["steps"]["daily"]
     assert len(stored) == 2 and sorted(run_id for _, run_id in stored) == sorted(daily["ingested"])
     assert "no report after hour" in capsys.readouterr().err
 
 
 def test_a_failed_estimate_and_browser_hour_are_retried_and_their_nodes_kept(
-    production, tmp_path, monkeypatch
+    staging, tmp_path, monkeypatch
 ):
     estimate, drive, calls = replay_steps.compute.estimate_run, browser_model.Hour.drive, []
 
@@ -255,7 +253,7 @@ def test_a_failed_estimate_and_browser_hour_are_retried_and_their_nodes_kept(
 
     monkeypatch.setattr(replay_steps.compute, "estimate_run", flaky_estimate)
     monkeypatch.setattr(browser_model.Hour, "drive", flaky_drive)
-    assert replay.main(argv(production, tmp_path, 1, 1)) == 0
+    assert replay.main(argv(staging, tmp_path, 1, 1)) == 0
     assert [e["step"] for e in events(tmp_path)] == ["daily", "browser"]
     assert calls[0] in calls[1:]  # the retry estimates the run again
     found = state(tmp_path)
@@ -264,11 +262,11 @@ def test_a_failed_estimate_and_browser_hour_are_retried_and_their_nodes_kept(
     browser = steps["browser"]["parts"][-1]
     assert browser["runs"] == 8 and browser["networks"] == 1
     mine = "SELECT node_id,host,token_hash FROM nodes WHERE host=%s"
-    hosts = query(production, mine, (browser_model.HOST,))
+    hosts = query(staging, mine, (browser_model.HOST,))
     assert len(hosts) == 1 and hosts[0][0] in found["nodes"] and hosts[0][2].startswith("disabled:")
 
 
-def test_a_stopped_replay_resumes_from_its_state_file(production, tmp_path, monkeypatch, capsys):
+def test_a_stopped_replay_resumes_from_its_state_file(staging, tmp_path, monkeypatch, capsys):
     real, stops = replay_steps.ReplaySteps.release, []
 
     def stop_once(self, day, start, step):
@@ -278,46 +276,46 @@ def test_a_stopped_replay_resumes_from_its_state_file(production, tmp_path, monk
         return real(self, day, start, step)
 
     monkeypatch.setattr(replay_steps.ReplaySteps, "release", stop_once)
-    assert replay.main(argv(production, tmp_path, 1, 2)) == 130
+    assert replay.main(argv(staging, tmp_path, 1, 2)) == 130
     first = state(tmp_path)
     assert first["hours"][0]["ingest"]["done"] and not first["hours"][0]["calculate"]["done"]
     assert first["hours"][0]["calculate"]["attempts"] == []  # killed while stopping
-    tokens = query(production, "SELECT token_hash FROM nodes")
+    tokens = query(staging, "SELECT token_hash FROM nodes")
     assert tokens and all(token.startswith("disabled:") for (token,) in tokens)
     path = tmp_path / "out" / "state.json"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE((tmp_path / "out").stat().st_mode) == 0o700
-    wrong = argv(production, tmp_path, 2, 2)
+    wrong = argv(staging, tmp_path, 2, 2)
     assert replay.main(wrong) == 2 and "is the replay of" in capsys.readouterr().err
-    with test_scale_cycle.Siteapi(production) as site:
-        resumed = argv(production, tmp_path, 1, 2, "--siteapi", site.url)
+    with test_scale_cycle.Siteapi(staging) as site:
+        resumed = argv(staging, tmp_path, 1, 2, "--siteapi", site.url)
         assert replay.main(resumed + ["--siteapi-timeout", "20"]) == 0
     found = state(tmp_path)
     assert found["replay_id"] == first["replay_id"] and len(found["resumed"]) == 1
     assert all(h["calculate"]["done"] for h in found["hours"])
     assert found["hours"][1]["calculate"]["siteapi"]["reached"]
-    assert len(query(production, DAILY)) == 4  # no run stored twice
+    assert len(query(staging, DAILY)) == 4  # no run stored twice
 
 
-def test_refusals_write_nothing(production, tmp_path, capsys):
+def test_refusals_write_nothing(staging, tmp_path, capsys):
     out = tmp_path / "out"
     later = (datetime.now(UTC) - timedelta(hours=2)).date().isoformat()
-    future = argv(production, tmp_path, 2, 24)
+    future = argv(staging, tmp_path, 2, 24)
     future[future.index("--first-day") + 1] = later
     assert replay.main(future) == 2 and "not before now" in capsys.readouterr().err
-    bad = argv(production, tmp_path, 1, 1)
+    bad = argv(staging, tmp_path, 1, 1)
     bad[bad.index("--owner-go") + 1] = "owner-go REPLAY-RUN-1"
     assert replay.main(bad) == 2 and "is not" in capsys.readouterr().err
-    with connect(production) as conn:
+    with connect(staging) as conn:
         recent = "INSERT INTO job_runs(job,started_at) VALUES ('calculate',now()-'4 min'::interval)"
         conn.execute(recent)
-    assert replay.main(argv(production, tmp_path, 1, 1)) == 2
-    assert "the orchestrator runs" in capsys.readouterr().err
+    assert replay.main(argv(staging, tmp_path, 1, 1)) == 2
+    assert "an orchestrator runs against this database" in capsys.readouterr().err
     assert not (out / "state.json").exists()
-    with connect(production) as conn:
+    with connect(staging) as conn:
         conn.execute("UPDATE job_runs SET started_at=now()-'6 min'::interval")
         # An older row does not refuse.
-        assert replay.guard(conn, replay.arguments(argv(production, tmp_path, 1, 1)))["go"] == GO
+        assert replay.guard(conn, replay.arguments(argv(staging, tmp_path, 1, 1)))["go"] == GO
 
 
 def test_the_memory_scope_is_used_where_systemd_run_exists(monkeypatch):

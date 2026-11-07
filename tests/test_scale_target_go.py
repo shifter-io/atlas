@@ -1,6 +1,7 @@
-"""SCALE-TARGET-2: the owner's go lets the replay (REPLAY-RUN-1) write to production's database.
+"""SCALE-TARGET-2/3: the owner's go lets the replay (REPLAY-RUN-1) write to the staging database.
 
-The scratch database stands in for production: `production` points target.PRODUCTION at its name.
+The scratch database stands in for staging: `staging` points target.STAGING at its name, and
+`production` points target.PRODUCTION at it to check that production stays refused.
 """
 
 import importlib
@@ -20,12 +21,22 @@ TODAY = datetime.now(UTC).date()
 GO = f"owner-go REPLAY-RUN-1 {TODAY}"
 
 
+def name_of(config):
+    with connect(config) as conn:
+        return conn.execute("SELECT current_database()").fetchone()[0]
+
+
+@pytest.fixture
+def staging(database, monkeypatch):
+    """The test database, named staging for the guard."""
+    monkeypatch.setattr(target, "STAGING", name_of(database))
+    return database
+
+
 @pytest.fixture
 def production(database, monkeypatch):
     """The test database, named production for the guard."""
-    with connect(database) as conn:
-        name = conn.execute("SELECT current_database()").fetchone()[0]
-    monkeypatch.setattr(target, "PRODUCTION", name)
+    monkeypatch.setattr(target, "PRODUCTION", name_of(database))
     return database
 
 
@@ -34,10 +45,31 @@ def check(config, owner_go=None):
         return target.refusal(conn, owner_go=owner_go)
 
 
-def test_without_the_go_production_is_refused_as_before(production, capsys):
-    assert check(production).startswith("the database is")
-    assert target.main(["check", "--database", str(production)]) == 2
+def test_without_the_go_staging_and_production_are_refused_as_before(staging, capsys):
+    assert check(staging).startswith("the database is")
+    assert target.main(["check", "--database", str(staging)]) == 2
     assert "write only to 'proxy_scale'" in capsys.readouterr().out
+
+
+def test_production_is_refused_with_a_valid_go(production, capsys):
+    assert check(production).startswith("the database is")
+    found = check(production, GO)
+    assert "is production's: the replay runs only in 'proxy_reviews_staging'" in found
+    assert target.main(["check", "--database", str(production), "--owner-go", GO]) == 2
+    assert "refused: " in capsys.readouterr().out
+
+
+def test_production_is_refused_even_without_test_runs(production, monkeypatch):
+    with connect(production) as conn:
+        assert conn.execute(target.FOREIGN_RUNS).fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 0
+    # Even were staging's name production's, the production check wins.
+    monkeypatch.setattr(target, "STAGING", target.PRODUCTION)
+    assert "is production's" in check(production, GO)
+
+
+def test_staging_and_production_are_distinct():
+    assert target.STAGING == "proxy_reviews_staging" and target.PRODUCTION == "proxy_reviews"
 
 
 @pytest.mark.parametrize(
@@ -50,36 +82,36 @@ def test_without_the_go_production_is_refused_as_before(production, capsys):
         (f"owner-go REPLAY-RUN-1 {TODAY + timedelta(days=1)}", "after today"),
     ],
 )
-def test_a_malformed_or_future_go_is_refused(production, go, reason):
-    assert reason in check(production, go)
+def test_a_malformed_or_future_go_is_refused(staging, go, reason):
+    assert reason in check(staging, go)
 
 
 def test_another_database_is_refused(database):
-    assert "the owner's go is for 'proxy_reviews', not the database" in check(database, GO)
+    assert "the owner's go is for 'proxy_reviews_staging', not the database" in check(database, GO)
 
 
-async def test_a_run_without_the_replay_marker_is_refused(production, tmp_path, capsys):
-    ingest(await measurement(tmp_path), production)
-    assert "holds 1 test runs without the 'scale_replay' marker" in check(production, GO)
-    assert target.main(["check", "--database", str(production), "--owner-go", GO]) == 2
+async def test_a_run_without_the_replay_marker_is_refused(staging, tmp_path, capsys):
+    ingest(await measurement(tmp_path), staging)
+    assert "holds 1 test runs without the 'scale_replay' marker" in check(staging, GO)
+    assert target.main(["check", "--database", str(staging), "--owner-go", GO]) == 2
     assert "refused: " in capsys.readouterr().out
-    with connect(production) as conn:
+    with connect(staging) as conn:
         conn.execute("""UPDATE test_runs SET summary=summary||'{"scale_replay":true}'""")
-    assert check(production, GO) is None
+    assert check(staging, GO) is None
 
 
-def test_the_go_is_allowed_logged_and_returned(production, capsys):
+def test_the_go_is_allowed_logged_and_returned(staging, capsys):
     yesterday = f"owner-go REPLAY-RUN-1 {TODAY - timedelta(days=1)}"  # a resumed run
-    assert check(production, yesterday) is None
-    with connect(production) as conn:
+    assert check(staging, yesterday) is None
+    with connect(staging) as conn:
         found, record = target.owner_go_refusal(conn, GO)
         role = conn.execute("SELECT current_user").fetchone()[0]
     assert found is None
-    assert record["go"] == GO and record["database"] == target.PRODUCTION
+    assert record["go"] == GO and record["database"] == target.STAGING
     assert record["role"] == role
     assert datetime.fromisoformat(record["at"]).tzinfo is not None
     assert f"owner go accepted: {record}" in capsys.readouterr().err
-    assert target.main(["check", "--database", str(production), "--owner-go", GO]) == 0
+    assert target.main(["check", "--database", str(staging), "--owner-go", GO]) == 0
     assert capsys.readouterr().out.endswith("allowed\n")
 
 
