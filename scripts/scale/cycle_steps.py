@@ -127,6 +127,19 @@ async def work(session, base: str, token: str) -> None:
         reply.raise_for_status()
 
 
+@contextlib.asynccontextmanager
+async def serve(database, db: Database):
+    """An orchestrator app on db, served on loopback for the block; its base URL."""
+    app = build_app(str(database), with_scheduler=False, db=db, admin_credential=None)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    try:
+        await web.TCPSite(runner, "127.0.0.1", 0).start()
+        yield f"http://127.0.0.1:{runner.addresses[0][1]}"
+    finally:
+        await runner.cleanup()
+
+
 class Steps:
     """The steps of a Cycle: it holds conn, args, model, writer, positions, locations, networks,
     pg_stat, rate and state, and late() tells when the run's budget is spent."""
@@ -239,14 +252,8 @@ class Steps:
         if self.args.node_api:
             yield self.args.node_api.rstrip("/")
             return
-        app = build_app(str(self.args.database), with_scheduler=False, db=db, admin_credential=None)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        try:
-            await web.TCPSite(runner, "127.0.0.1", 0).start()
-            yield f"http://127.0.0.1:{runner.addresses[0][1]}"
-        finally:
-            await runner.cleanup()
+        async with serve(self.args.database, db) as base:
+            yield base
 
     async def upload_hour(self, day: int, start: datetime, tokens: dict[int, str]) -> dict:
         """Plan the hour's slot as the scheduler does, then upload its runs at the pulse rate."""
