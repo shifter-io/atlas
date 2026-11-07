@@ -60,6 +60,10 @@ def test_the_tracer_times_statements_and_copies_by_shape(database):
         where = sql.SQL("SELECT {} FROM seen WHERE ip={}")
         conn.execute(where.format(sql.Identifier("n"), sql.Literal("192.0.2.1")))
         conn.execute(b"SELECT 42")
+        conn.execute("CREATE TEMP TABLE kept(k int PRIMARY KEY, n int)")
+        upsert = "INSERT INTO kept VALUES (1, 1) /* " + "x" * 250 + " */ ON CONFLICT (k) DO "
+        for _ in range(2):
+            conn.execute(upsert + "UPDATE SET n = kept.n + 1")
         with pytest.raises(psycopg.Error), conn.cursor().copy("COPY nowhere FROM STDIN"):
             pass
         asyncio.run(copied())
@@ -71,6 +75,9 @@ def test_the_tracer_times_statements_and_copies_by_shape(database):
     assert shapes["SELECT pg_sleep(%s)"]["calls"] == 1
     assert shapes["INSERT INTO seen VALUES (?, ?), (?, ?)"]["rows"] == 2
     assert shapes["COPY seen FROM STDIN"]["rows"] == 3 and shapes["COPY later FROM STDIN"]["rows"]
+    kept = shapes[measure.shape(upsert)]  # DO UPDATE is past the shape's 200 characters
+    assert kept["upsert"] and kept["calls"] == 2 and kept["rows"] == 2
+    assert not shapes["INSERT INTO seen VALUES (?, ?), (?, ?)"]["upsert"]
     failed = shapes["COPY nowhere FROM STDIN"]
     assert failed["calls"] == 1 and failed["rows"] == 0
     assert 'SELECT "n" FROM seen WHERE ip=?' in shapes and "SELECT ?" in shapes
@@ -106,6 +113,7 @@ def test_shapes_of_several_hours_add_up_with_their_p95():
 
 START = "2026-11-0{}T{:02d}:00:00+00:00"
 COUNTS = {"public.ip_observations": 10, "public.test_runs": 2, "public.job_runs": 3}
+COUNTS |= {"public.product_ips": 5, "public.pool_ips": 5}
 
 
 def ingest(rows, slow):
@@ -114,6 +122,10 @@ def ingest(rows, slow):
         shape('INSERT INTO "public"."test_runs" (run_id) VALUES ($1)', [0.01, 0.01], 2),
         shape("COPY incoming_ips FROM STDIN", [0.2], rows),  # staging: not a table of its own
         shape("SELECT count(*) FROM test_runs", [0.05], 1),
+        # Its rowcount includes updated rows: not counted per hour.
+        shape("INSERT INTO product_ips SELECT ? FROM incoming_ips", [0.1], 999) | {"upsert": True},
+        # pool_ips' insert inside WITH: its rowcount is the count(*) row.
+        shape("WITH added AS (INSERT INTO pool_ips SELECT ?) SELECT count(*) FROM added", [0.1], 1),
     ]
     slowest = [{"statement": shapes[0]["statement"], "seconds": slow, "rows": rows}]
     return {"count": 5, "seconds": slow + 0.27, "slowest": slowest, "shapes": shapes}
@@ -149,7 +161,8 @@ def fixture_state(tmp_path):
     state = {"replay_id": "ab" * 16, "database": "proxy_reviews", "first_day": "2026-11-01"}
     state |= {"days": 2, "hours_per_day": 2, "slices": str(slices), "hours": hours}
     state |= {"baseline": {"counts": COUNTS, "sizes": {"database_bytes": 4 * GB}}}
-    state["days_counted"] = {"0": {"other": other, "table_bytes": tables}}
+    replay = {"public.test_runs": 4, "public.pool_ips": 12, "public.product_ips": 30}
+    state["days_counted"] = {"0": {"other": other, "table_bytes": tables, "replay": replay}}
     out = tmp_path / "out"
     out.mkdir()
     (out / "state.json").write_text(json.dumps(state))
@@ -169,7 +182,7 @@ def test_the_report_per_hour_and_day_with_the_extremes_and_the_last_day(tmp_path
     sizes = sum(p.stat().st_size for p in slices.iterdir() if p.name.startswith("slice-00"))
     assert first["slice_bytes"] == sizes and first["growth_bytes"] == GB
     assert second["growth_bytes"] == 2**20 and third["growth_bytes"] == GB - 2**20
-    assert first["ingest_seconds"] == 90.0
+    assert first["ingest_seconds"] == 90.0 and second["ingest_seconds"] == 89.5  # no pause
     assert first["per_test"] == {"count": 2, "p50": 0.5, "p95": 1.5, "max": 1.5}
     assert first["calculate_seconds"] == 30.0 and first["peak_rss_kb"] == 2048
     assert first["slowest"]["statement"] == "SELECT build()" and first["slowest"]["seconds"] == 30
@@ -183,6 +196,10 @@ def test_the_report_per_hour_and_day_with_the_extremes_and_the_last_day(tmp_path
     assert day1["database_gb"] == 5.001 and day1["server_gb"] == 6.001
     assert day1["rows"]["public.ip_observations"] == 500 and day2["hours"] == 2
     assert day2["database_gb"] == 6.0  # the last hour with its sizes
+    assert day1["replay_rows"] == {"public.pool_ips": 12, "public.product_ips": 30} | {
+        "public.test_runs": 4
+    }
+    assert day2["replay_rows"] is None  # not counted yet
     assert (report["hardest"]["day"], report["hardest"]["hour"]) == (1, 1)
     assert (report["lightest"]["day"], report["lightest"]["hour"]) == (2, 0)
     assert report["final"] == {"day": 1, "of": 2, "database_gb": 5.001, "server_gb": 6.001} | {
@@ -196,7 +213,10 @@ def test_the_report_per_hour_and_day_with_the_extremes_and_the_last_day(tmp_path
     text = path.read_text()
     for heading in ("## Per day", "## Per hour", "## Day 1 of 2: sizes", "## Modelled, not real"):
         assert heading in text
-    assert "Hardest: day 1 01h, 402 rows" in text and "Lightest: day 2 00h, 52 rows" in text
+    assert "Hardest: day 1 01h, 402 rows inserted" in text
+    assert "Lightest: day 2 00h, 52 rows inserted" in text
+    assert "| 1 | 12 | 30 | 4 |" in text  # the exact replay rows of day 1, by table
+    assert "| 1 | 2 | 4 | 46 | 504 |" in text  # day 1: hours, tests, replay rows, rows inserted
     assert "| public.job_runs | 5 |" in text and "| ip_observations | 3.0 |" in text
     for label in ("Byteful rows", "HTTP pulses", "Browser data", "Bucket counters and latency"):
         assert label in text
@@ -211,7 +231,8 @@ def test_the_report_per_hour_and_day_with_the_extremes_and_the_last_day(tmp_path
 def test_the_clean_output_patterns_catch_what_they_guard():
     assert IPV4.search("from 192.0.2.1") and IPV6.search("2001:db8::1")
     assert IPV6.search("fe80:0:0:0:200:f8ff:fe21:67cf") and not IPV6.search("T00:01:30+00:00")
-    assert PATHS.search("in /srv/replay/x") and PATHS.search("../replay/x") and PATHS.search("C:\\x")
+    assert PATHS.search("in /srv/replay/x") and PATHS.search("../replay/x")
+    assert PATHS.search("C:\\x")
     assert not PATHS.search("p50/p95/max s") and not PATHS.search("done/planned")
 
 

@@ -60,14 +60,16 @@ def summaries(record: dict):
 
 
 def written(record: dict, tables) -> dict[str, int]:
-    """Rows the hour's ingest inserted or copied, per table of the baseline (replay rows only:
-    the ingest writes nothing else; staging and temporary tables are left out)."""
+    """Rows the hour's plain INSERT and COPY statements added, per table of the baseline (replay
+    rows only: the ingest writes nothing else; staging and temporary tables are left out). An
+    upsert's rowcount includes updated rows and an INSERT inside WITH reports its SELECT's rows:
+    neither is counted here (the day's counts are exact)."""
     found: dict[str, int] = {}
     for part, summary in summaries(record):
         for row in summary["shapes"] if part == "ingest" else ():
             match = WRITES.match(row["statement"])
             name = match and f"{match.group(1) or 'public'}.{match.group(2)}"
-            if name in tables and row["rows"]:
+            if name in tables and row["rows"] and not row.get("upsert"):
                 found[name] = found.get(name, 0) + row["rows"]
     return dict(sorted(found.items()))
 
@@ -96,7 +98,9 @@ def hour_row(state: dict, record: dict, events: list[dict], before) -> dict:
     found |= {"rows": rows, "rows_total": sum(rows.values())}
     found |= {"slice_bytes": slice_bytes(state, start.hour), "database_bytes": size}
     found["growth_bytes"] = None if None in (size, before) else size - before
-    found |= {"ingest_seconds": seconds_between(record["ingest"])}
+    paused = sum(e["pause"] for e in retries if e["step"] != "calculate")
+    wall = seconds_between(record["ingest"])  # without its retries' pauses (delay_seconds)
+    found["ingest_seconds"] = None if wall is None else round(max(wall - paused, 0), 3)
     found["per_test"] = measure.percentiles(daily.get("test_seconds", []))
     done = attempts[-1] if work["done"] and attempts else {}
     found |= {"calculate_seconds": done.get("seconds"), "peak_rss_kb": done.get("peak_rss_kb")}
@@ -105,8 +109,18 @@ def hour_row(state: dict, record: dict, events: list[dict], before) -> dict:
     return found | {"retries": len(retries), "delay_seconds": sum(e["pause"] for e in retries)}
 
 
-def day_row(day: int, hours: list[dict]) -> dict:
-    found = {"day": day, "hours": len(hours)}
+def replay_growth(state: dict, day: int) -> dict[str, int] | None:
+    """The replay's rows a counted day added per table (replay_baseline.day_counts), exact."""
+    counted = state["days_counted"]
+    if str(day - 1) not in counted:
+        return None
+    now, before = counted[str(day - 1)]["replay"], counted.get(str(day - 2), {}).get("replay", {})
+    found = {name: count - before.get(name, 0) for name, count in sorted(now.items())}
+    return {name: count for name, count in found.items() if count}
+
+
+def day_row(state: dict, day: int, hours: list[dict]) -> dict:
+    found = {"day": day, "hours": len(hours), "replay_rows": replay_growth(state, day)}
     found |= {key: round(sum(h[key] or 0 for h in hours), 3) for key in SUMMED}
     rows: dict[str, int] = {}
     for hour in hours:
@@ -175,7 +189,7 @@ def build(out: Path) -> dict:
             hours.append(hour_row(state, record, events, before))
             before = hours[-1]["database_bytes"] or before
     numbers = sorted({h["day"] for h in hours})
-    days = [day_row(n, [h for h in hours if h["day"] == n]) for n in numbers]
+    days = [day_row(state, n, [h for h in hours if h["day"] == n]) for n in numbers]
     done = [h for h in hours if h["calculated"]]
     found = {"replay_id": state["replay_id"], "database": state["database"]}
     found |= {"first_day": state["first_day"], "days": state["days"]}
@@ -228,27 +242,30 @@ def hour_cells(h: dict) -> list:
 
 def day_cells(d: dict) -> list:
     calculate = "{p95}/{max}".format(**d["calculate"]) if d["calculate"]["count"] else ""
-    return [d["day"], d["hours"], d["tests"], d["rows_total"], mb(d["slice_bytes"])] + [
+    exact = "" if d["replay_rows"] is None else sum(d["replay_rows"].values())
+    return [d["day"], d["hours"], d["tests"], exact, d["rows_total"], mb(d["slice_bytes"])] + [
         mb(d["growth_bytes"]), d["ingest_seconds"], d["calculate_seconds"], calculate,
         mb(d["peak_rss_kb"] * 1024), d["retries"], d["delay_seconds"], d["database_gb"],
         d["server_gb"],
     ]  # fmt: skip
 
 
-HOURS = ("Day", "Hour", "Tests", "Rows", "Slice MB", "Growth MB", "Ingest s")
+HOURS = ("Day", "Hour", "Tests", "Rows inserted", "Slice MB", "Growth MB", "Ingest s")
 HOURS += ("Per test p50/p95/max s", "Calculate s", "RSS MB", "Retries", "Delay s", "Slowest")
-DAYS = ("Day", "Hours", "Tests", "Rows", "Slice MB", "Growth MB", "Ingest s", "Calculate s")
+DAYS = ("Day", "Hours", "Tests", "Replay rows", "Rows inserted", "Slice MB", "Growth MB")
+DAYS += ("Ingest s", "Calculate s")
 DAYS += ("Calculate p95/max s", "RSS MB", "Retries", "Delay s", "Database GB", "Server GB")
 
 
 def extremes(report: dict) -> list[str]:
-    lines = ["", "## The hardest and the lightest hour (rows written)", ""]
+    lines = ["", "## The hardest and the lightest hour (rows inserted)", ""]
     for name in ("hardest", "lightest"):
         h = report[name]
         lines.append(
-            f"- {name.capitalize()}: day {h['day']} {h['hour']:02d}h, {h['rows_total']} rows, "
-            f"{h['tests']} tests, ingest {h['ingest_seconds']} s, calculation "
-            f"{h['calculate_seconds']} s, RSS {mb((h['peak_rss_kb'] or 0) * 1024)} MB."
+            f"- {name.capitalize()}: day {h['day']} {h['hour']:02d}h, "
+            f"{h['rows_total']} rows inserted, {h['tests']} tests, ingest "
+            f"{h['ingest_seconds']} s, calculation {h['calculate_seconds']} s, "
+            f"RSS {mb((h['peak_rss_kb'] or 0) * 1024)} MB."
             if h
             else f"- {name.capitalize()}: no hour calculated yet."
         )
@@ -266,6 +283,18 @@ def last_day(found: dict | None) -> list[str]:
     return lines + (table(("Table", "Rows"), growth) if growth else ["", "None."])
 
 
+ROWS = (
+    "Replay rows: each table's growth in rows reachable from the replay's runs and nodes, counted "
+    "at the day's end (exact). Rows inserted: the rows the ingest's plain INSERT and COPY "
+    "statements added, from their rowcount; upserts (ON CONFLICT DO UPDATE: product_ips, "
+    "provider_overlap) and inserts inside WITH (pool_ips) are not counted per hour."
+)
+
+
+def days(report: dict) -> list[dict]:
+    return [d for d in report["days_done"] if d["replay_rows"] is not None]
+
+
 def markdown(report: dict) -> str:
     done = sum(h["calculated"] for h in report["hours"])
     lines = ["# Replay report (REPLAY-REPORT-1)", ""]
@@ -275,12 +304,15 @@ def markdown(report: dict) -> str:
         "Statements are timed by the tool from the client side."
     )
     lines += extremes(report)
-    lines += ["", "## Per day", *table(DAYS, map(day_cells, report["days_done"]))]
+    lines += ["", "## Per day", "", ROWS, *table(DAYS, map(day_cells, report["days_done"]))]
+    found = sorted({name for d in report["days_done"] for name in d["replay_rows"] or {}})
+    rows = [[d["day"], *((d["replay_rows"] or {}).get(t, "") for t in found)] for d in days(report)]
+    lines += ["", "## Replay rows per day (exact)", *table(("Day", *found), rows)]
     lines += last_day(report["final"])
     lines += ["", "## Per hour", *table(HOURS, map(hour_cells, report["hours"]))]
     tables = sorted({name for h in report["hours"] for name in h["rows"]})
     rows = [[h["day"], h["hour"], *(h["rows"].get(t, 0) for t in tables)] for h in report["hours"]]
-    lines += ["", "## Replay rows written per hour", *table(("Day", "Hour", *tables), rows)]
+    lines += ["", "## Rows inserted per hour", "", ROWS, *table(("Day", "Hour", *tables), rows)]
     shapes = report["statements"][:STATEMENTS]
     lines += ["", f"## The {STATEMENTS} slowest statement shapes of the run"]
     keys = ("seconds", "calls", "p95_seconds", "max_seconds", "rows")

@@ -162,15 +162,22 @@ The command prints the replay id and the hours done.
 
 `replay_report.py <out>` (REPLAY-REPORT-1, #611) writes `report.md` and `report.json` from
 `state.json` and `events.jsonl`; `replay.py` runs it after every hour, so a stopped run has one.
-Days are numbered from 1.
+Days are numbered from 1. An hour's ingest resumed after a stop is traced from the resume on.
 
-- **Per hour:** the daily tests; the rows the ingest inserted or copied per table (only tables of
-  the baseline, so no staging table; the ingest writes replay rows only); the slice's bytes
-  (`slice-HH.json` and `.jsonl.gz`); the database's growth since the hour before (the baseline's
-  size before the first hour); the ingest's wall time and the p50, p95 and maximum per daily test;
+- **Per hour:** the daily tests; the rows inserted per table: what the ingest's plain INSERT and
+  COPY statements added, from their rowcount (only tables of the baseline, so no staging table;
+  the ingest writes replay rows only). Upserts (`ON CONFLICT DO UPDATE`, which the tracer flags
+  from the full statement: product_ips, provider_overlap) count updated rows and an INSERT inside
+  `WITH` (pool_ips) reports its SELECT's rows, so neither is counted per hour; the hardest and
+  the lightest hour are by these rows. Then the slice's bytes (`slice-HH.json` and `.jsonl.gz`);
+  the database's growth since the hour before (the baseline's size before the first hour); the
+  ingest's wall time without its retries' pauses (those are the delay) and the p50, p95 and
+  maximum per daily test;
   the calculation's seconds and peak RSS (its successful attempt); the slowest statement of the
   ingest or the calculation; the retries and their delay (`events.jsonl`).
-- **Per day:** the sums, the hourly calculation's p95 and maximum, the database size after the
+- **Per day:** the sums; the replay rows per table, exact: the day's growth of the rows
+  reachable from the replay's runs and nodes (`days_counted[d].replay`); the hourly calculation's
+  p95 and maximum, the database size after the
   day and the server's total (all databases), in GB.
 - **The hardest hour** (most rows written) **and the lightest**, by day and hour.
 - **The last day** (day 7 of a full run): the sizes, each table's size with its partitions

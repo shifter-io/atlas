@@ -113,6 +113,12 @@ def bucket(seconds: float) -> str:
     return str(max(0, round(math.log(max(seconds, 1e-6) / 1e-6, STEP))))
 
 
+@functools.lru_cache(maxsize=4096)
+def upsert(text: str) -> bool:
+    """An INSERT ... ON CONFLICT DO UPDATE: its rowcount includes the rows it updated."""
+    return re.search(r"\bDO\s+UPDATE\b", text, re.I) is not None
+
+
 def blank(text: str) -> dict:
     """A statement shape with nothing counted yet."""
     return {"statement": text, "calls": 0, "seconds": 0.0, "max_seconds": 0.0, "rows": 0} | {
@@ -200,9 +206,11 @@ class Tracer:
     def add(self, cursor, query, start: float, done: bool) -> None:
         seconds = time.perf_counter() - start
         rows = max(cursor.rowcount, 0) if done else 0
-        text = shape(_text(cursor, query))
+        raw = _text(cursor, query)
+        text = shape(raw)
         with self.lock:
-            entry = self.shapes.setdefault(text, blank(text))
+            entry = self.shapes.setdefault(text, blank(text) | {"upsert": False})
+            entry["upsert"] = entry["upsert"] or upsert(raw)  # seen in full, past the shape
             entry["calls"] += 1
             entry["seconds"] += seconds
             entry["rows"] += rows

@@ -152,6 +152,7 @@ def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(
         # Its daily tests, pulses and browser runs: every test_runs row of the hour is the replay's.
         assert hour["rows"]["public.test_runs"] > 2 and hour["per_test"]["count"] == 2
         assert hour["calculate_seconds"] and hour["slowest"] and hour["growth_bytes"] is not None
+    assert all(day["replay_rows"]["public.test_runs"] > 4 for day in report["days_done"])
     assert report["final"]["day"] == 2 and report["final"]["tables_gb"]
     assert [s for s in report["statements"] if s["statement"].startswith("COPY") and s["rows"]]
     assert (tmp_path / "out" / "report.md").exists()
