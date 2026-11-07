@@ -120,7 +120,11 @@ and no volume-size setting (owner, 2026-11-07): the owner's server monitoring al
 
 ## Statement timing
 
-Timed from the client side (owner, 2026-11-07: no dependence on `pg_stat_statements`):
+Two sources (REPLAY-STATS-1, #629). The client side is the base and is always recorded, so the
+replay works on a database without `pg_stat_statements`. Where the database has it (staging's
+does, owner 2026-11-07), the report takes its statement numbers from the server first.
+
+**Client side**, always:
 
 - the ingest steps in-process through `measure.Tracer` (the hour's `ingest.statements`);
 - the calculation child under `measure.py trace` (the hour's `calculate.statements`).
@@ -132,6 +136,28 @@ literals as `?`, so no value is kept. A summary has the statement count, the tot
 5 slowest statements (shape, seconds, rows) and per shape its calls, seconds, maximum, rows and
 a histogram of its times (buckets of a factor 1.1), from which the report adds up the run's p95
 (within 5%).
+
+**Server side**, when `measure.has_statements` finds `pg_stat_statements`. It needs no superuser
+right or `pg_read_all_settings` (proxy_admin has neither): the extension exists in the database,
+its view is on the search path, and `SELECT 1 FROM pg_stat_statements LIMIT 1` succeeds inside a
+savepoint (it fails while the server hasn't loaded the library). It answers True or False for
+any role.
+
+- `measure.snapshot` reads this database's counters (`dbid`) per queryid: calls, total exec ms,
+  rows and `max_exec_time`. Another role's statements (siteapi as `proxy_api`, for example),
+  whose text and queryid this role can't read, are added up per role as `other role`.
+- The hour's calculation runs beside the next hour's ingest, so the server can't tell their
+  statements apart. Snapshots are therefore taken only while nothing else runs: at the run's
+  start, after the first hour's ingest, and at the end of each hour's calculation (its retries,
+  the siteapi wait and the next hour's ingest included). The windows between them never
+  overlap. Each is the change of the counters (`statement_source.window`), with no reset, kept
+  in the record of the hour it ends on, as `server`: `covers` names the hours' ingest and
+  calculation it holds. The windows are: the first ingest; then each calculation with the next
+  hour's ingest; then the last calculation alone.
+- `max_exec_time` is cumulative, so it is kept as `max_ms_since_reset`, never as an hour's
+  maximum.
+- Texts are shapes, like the tracer's: 200 characters, literals as `?`.
+- A stopped run loses its open window; the resumed run opens a new one at its start.
 
 ## Telling replay rows from the database's own
 
@@ -152,9 +178,9 @@ a histogram of its times (buckets of a factor 1.1), from which the report adds u
 
 - `state.json`: the replay id, the go and every resume, the baseline, the nodes, per hour its
   steps' parts, start and end times of the ingest and the calculation, the calculation's
-  attempts, its build id, the siteapi wait, the statements and the sizes (the baseline has the
-  size before the run), the day counts (with each table's size at the day's end) and the retry
-  counts.
+  attempts, its build id, the siteapi wait, the statements (and the server windows) and the
+  sizes (the baseline has the size before the run), the day counts (with each table's size at
+  the day's end) and the retry counts.
 - `events.jsonl`: one line per retry.
 
 - `report.md` and `report.json`: the report (below), written again after every hour.
@@ -186,7 +212,13 @@ Days are numbered from 1. An hour's ingest resumed after a stop is traced from t
 - **The last day** (day 7 of a full run): the sizes, each table's size with its partitions
   (`measure.sizes`, recorded at each day's end as `days_counted[d].table_bytes`) and
   production's own growth during the run (`other`: rows not reachable from replay rows).
-- **The run's 20 slowest statement shapes:** calls, seconds, p95, maximum and rows.
+- **Statement time per hour:** with `pg_stat_statements`, the server's calls, total ms, mean ms
+  and rows of the hour's windows, and next to them the client's calls and wall seconds of the
+  hour's ingest and calculation. Without it, the client's only, with a note.
+- **The run's 20 slowest statement shapes:** with `pg_stat_statements`, by server time: total
+  ms, calls, mean ms, rows and the maximum since the counters' reset (other roles' statements
+  as `other role`). Always, by client wall time: calls, seconds, p95, maximum and rows. The
+  report's first lines name the source; each table says which one it uses.
 - **Labelled:** the modelled parts (byteful rows, HTTP pulses, browser data, bucket counters and
   latency) and the IP tables as a lower bound: the 7 days are copies of one day, so
   ip_addresses, ip_enrichment, product_ips and pool_ips stop growing after day 1, whereas in real

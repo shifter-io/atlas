@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import measure
+import statement_source
 
 GB = 2**30
 STATEMENTS = 20  # statement shapes of the whole run in the Markdown, slowest first
@@ -74,6 +75,13 @@ def written(record: dict, tables) -> dict[str, int]:
     return dict(sorted(found.items()))
 
 
+def client(record: dict) -> dict:
+    """The statements the tool timed in the hour's ingest and calculation: calls, wall seconds."""
+    found = [summary for _, summary in summaries(record)]
+    seconds = round(sum(summary["seconds"] for summary in found), 3)
+    return {"calls": sum(summary["count"] for summary in found), "seconds": seconds}
+
+
 def slowest(record: dict) -> dict | None:
     found = [s | {"part": part} for part, summary in summaries(record) for s in summary["slowest"]]
     return max(found, key=lambda s: s["seconds"], default=None)
@@ -105,6 +113,9 @@ def hour_row(state: dict, record: dict, events: list[dict], before) -> dict:
     done = attempts[-1] if work["done"] and attempts else {}
     found |= {"calculate_seconds": done.get("seconds"), "peak_rss_kb": done.get("peak_rss_kb")}
     found |= {"calculated": work["done"], "slowest": slowest(record)}
+    server = statement_source.windows(record)
+    found |= {"server": statement_source.totals(server) if server else None}
+    found["client"] = client(record)
     found["all_databases_bytes"] = record.get("sizes", {}).get("all_databases_bytes")
     return found | {"retries": len(retries), "delay_seconds": sum(e["pause"] for e in retries)}
 
@@ -199,6 +210,8 @@ def build(out: Path) -> dict:
     found["lightest"] = min(done, key=lambda h: h["rows_total"], default=None)
     traced = [summary for record in state["hours"] for _, summary in summaries(record)]
     found["statements"] = combine(traced)
+    server = [w for record in state["hours"] for w in statement_source.windows(record)]
+    found["server_statements"] = statement_source.merge(server) if server else None
     return found | {"modelled": MODELLED, "lower_bound": {"tables": IP_TABLES, "why": LOWER_BOUND}}
 
 
@@ -295,13 +308,57 @@ def days(report: dict) -> list[dict]:
     return [d for d in report["days_done"] if d["replay_rows"] is not None]
 
 
+SERVER = (
+    "Statement numbers come from the server first (pg_stat_statements: this database's "
+    "statements of every role) and from the tool's client-side wall time alongside."
+)
+CLIENT = "pg_stat_statements is absent: statements are timed by the tool from the client side only."
+WINDOWS = (
+    "Server: the statements between two snapshots taken while nothing else ran, so they never "
+    "overlap: this hour's calculation and the next hour's ingest (the first hour: also its own "
+    "ingest). Client: the tool's wall time of this hour's ingest and calculation."
+)
+SERVER_HOURS = ("Server calls", "Server ms", "Server mean ms", "Server rows")
+SERVER_SHAPES = (("Total ms", "ms"), ("Calls", "calls"), ("Mean ms", "mean_ms"), ("Rows", "rows"))
+SERVER_SHAPES += (("Max ms since reset", "max_ms_since_reset"),)
+CLIENT_SHAPES = (("Seconds", "seconds"), ("Calls", "calls"), ("p95 s", "p95_seconds"))
+CLIENT_SHAPES += (("Max s", "max_seconds"), ("Rows", "rows"))
+
+
+def statement_lines(report: dict) -> list[str]:
+    """Statement time per hour, then the run's slowest shapes: server time when present."""
+    server = report.get("server_statements")
+    header = ("Day", "Hour", *(SERVER_HOURS if server else ()), "Client calls", "Client s")
+    keys = ("calls", "ms", "mean_ms", "rows") if server else ()
+    rows = [
+        [h["day"], h["hour"], *((h["server"] or {}).get(key) for key in keys)]
+        + [h["client"]["calls"], h["client"]["seconds"]]
+        for h in report["hours"]
+    ]
+    lines = ["", "## Statement time per hour", "", WINDOWS if server else CLIENT]
+    lines += table(header, rows)
+    if server:
+        lines += ["", f"## The {STATEMENTS} slowest statement shapes of the run: server time"]
+        lines += ["", "Source: pg_stat_statements; max ms is since the counters' last reset."]
+        lines += shapes(server, SERVER_SHAPES)
+    lines += ["", f"## The {STATEMENTS} slowest statement shapes of the run: client wall time"]
+    lines += ["", "Source: the tool's timing of every statement it sent (measure.Tracer)."]
+    return lines + shapes(report["statements"], CLIENT_SHAPES)
+
+
+def shapes(found: list[dict], columns) -> list[str]:
+    """The slowest shapes as a table of (header, key) columns, then their text."""
+    rows = [[*(s[key] for _, key in columns), f"`{s['statement']}`"] for s in found[:STATEMENTS]]
+    return table((*(name for name, _ in columns), "Statement"), rows)
+
+
 def markdown(report: dict) -> str:
     done = sum(h["calculated"] for h in report["hours"])
     lines = ["# Replay report (REPLAY-REPORT-1)", ""]
     lines.append(
         f"Replay `{report['replay_id']}` in `{report['database']}`: {report['days']} days from "
         f"{report['first_day']}, {done} hours calculated, written {report['written_at']}. "
-        "Statements are timed by the tool from the client side."
+        + (SERVER if report.get("server_statements") else CLIENT)
     )
     lines += extremes(report)
     lines += ["", "## Per day", "", ROWS, *table(DAYS, map(day_cells, report["days_done"]))]
@@ -313,11 +370,7 @@ def markdown(report: dict) -> str:
     tables = sorted({name for h in report["hours"] for name in h["rows"]})
     rows = [[h["day"], h["hour"], *(h["rows"].get(t, 0) for t in tables)] for h in report["hours"]]
     lines += ["", "## Rows inserted per hour", "", ROWS, *table(("Day", "Hour", *tables), rows)]
-    shapes = report["statements"][:STATEMENTS]
-    lines += ["", f"## The {STATEMENTS} slowest statement shapes of the run"]
-    keys = ("seconds", "calls", "p95_seconds", "max_seconds", "rows")
-    found = [[*(s[key] for key in keys), f"`{s['statement']}`"] for s in shapes]
-    lines += table(("Seconds", "Calls", "p95 s", "Max s", "Rows", "Statement"), found)
+    lines += statement_lines(report)
     lines += ["", "## Modelled, not real", "", *(f"- {text}" for text in report["modelled"])]
     lines += ["", "## IP tables: a lower bound", "", report["lower_bound"]["why"]]
     return "\n".join(lines) + "\n"
