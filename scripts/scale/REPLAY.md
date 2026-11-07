@@ -193,14 +193,15 @@ highest run key), the replay's nodes (above the baseline's highest node id, host
   and memos of the simulated days, the rollup hours written after the baseline (`through_run`
   above its highest run key), with their geo hours and pulse buckets, the distinct and slot
   memos used since the baseline, and the load references chosen since the baseline for the
-  simulated days, and the provider overlaps updated since the baseline. The calculation and the
-  ingest rewrite any of these they miss.
+  simulated days. The calculation rewrites any of these it misses.
 - Lookup rows new since the baseline (not among its keys, or above its highest identity) that no
   remaining row references except a cache: scope_stats, pool_stats, products, providers,
   ip_addresses, dbip_releases, enrichment_locations, enrichment_networks, asn_labels,
   place_names, asn_names, cohorts and score_reasons. The cache rows that reference them go
   first: product_ips, pool_ips, provider_overlap and outages, and an IP's ip_enrichment and
   calculated_ip_last_seen.
+- The provider overlaps the ingest updated since the baseline are counted again from the IPs both
+  providers still have in product_ips; a pair with none left goes.
 - The empty daily partitions of the simulated days.
 
 **Never removed:** settings, countries, runner_regions, methodologies, targets, schema_versions,

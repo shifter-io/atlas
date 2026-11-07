@@ -72,7 +72,6 @@ FACTS = (
     ("calculated_bucket_ips", HOURS.format("bucket_start")),
     ("calculated_ip_last_seen", HOURS.format("last_seen")),
     *((name, "last_used>=%(at)s") for name in ("calculated_distinct", "calculated_slot_figures")),
-    ("provider_overlap", "updated_at>=%(at)s"),  # a lifetime cache the ingest updates
     ("load_references", "day>=%(first_day)s AND day<%(end_day)s AND chosen_at>=%(at)s"),
 )
 # Lookup tables in foreign-key order: a row new since the baseline (not among its keys, or above
@@ -89,6 +88,19 @@ REFERENCES = (
     "SELECT c.conrelid::regclass::text,a.attname FROM pg_constraint c JOIN pg_attribute a "
     "ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1] WHERE c.contype='f' AND c.conparentid=0 "
     "AND cardinality(c.conkey)=1 AND c.confrelid=%s::regclass ORDER BY 1,2"
+)
+# The provider pairs the ingest updated since the baseline, counted again from the IPs both
+# providers still have (the ingest only adds to a pair; nothing else rebuilds it).
+OVERLAP = (
+    "CREATE TEMP TABLE wipe_overlap ON COMMIT DROP AS SELECT o.provider_a,o.provider_b,"
+    "(SELECT count(DISTINCT a.ip_id) FROM product_ips a JOIN products pa USING(product_id) "
+    "JOIN product_ips b ON b.ip_id=a.ip_id JOIN products pb ON pb.product_id=b.product_id "
+    "WHERE pa.provider=o.provider_a AND pb.provider=o.provider_b) AS shared "
+    "FROM provider_overlap o WHERE o.updated_at>=%(at)s",
+    "DELETE FROM provider_overlap o USING wipe_overlap w WHERE w.shared=0 "
+    "AND (o.provider_a,o.provider_b)=(w.provider_a,w.provider_b)",
+    "UPDATE provider_overlap o SET shared_ips=w.shared FROM wipe_overlap w WHERE w.shared>0 "
+    "AND (o.provider_a,o.provider_b)=(w.provider_a,w.provider_b) AND o.shared_ips<>w.shared",
 )
 CURRENT = (
     "SELECT max(b.build_id) FROM calculation_builds b JOIN calculated_snapshots USING(build_id) "
@@ -206,6 +218,8 @@ def wipe(conn, state: dict, apply: bool) -> dict:
             delete = sql.SQL(f"DELETE FROM {{}} WHERE {condition}")
             conn.execute(delete.format(sql.Identifier(name)), bounds)
     lookups(conn, base)
+    for statement in OVERLAP if exists(conn, "provider_overlap") else ():
+        conn.execute(statement, bounds)
     dropped = partitions(conn, bounds["first"].date(), bounds["end"].date(), apply)
     after = replay_baseline.counts(conn)
     deleted = {name: before[name] - after[name] for name in before if before[name] != after[name]}

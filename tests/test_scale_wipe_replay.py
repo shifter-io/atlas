@@ -128,10 +128,16 @@ def test_a_production_run_after_the_baseline_survives(production, tmp_path, caps
     assert replay.main(argv(production, tmp_path, 1, 1)) == 0
     capsys.readouterr()
     replayed = counts(production)
-    directory = asyncio.run(measurement(tmp_path))  # production's own run, without the marker
-    enrichment(directory)
-    assert ingest(directory, production)["imported"]
+    for provider in ("fixture", "other"):  # production's own runs, without the marker
+        (tmp_path / provider).mkdir()
+        directory = asyncio.run(measurement(tmp_path / provider, provider=provider))
+        enrichment(directory)
+        assert ingest(directory, production)["imported"]
+    overlap = "SELECT provider_a,provider_b,shared_ips FROM provider_overlap"
+    assert query(production, overlap) == [("fixture", "other", 1)]
     own = growth(replayed, counts(production))
+    with replay.storage.connect(production) as conn:  # as if the replay shared their IPs
+        conn.execute("UPDATE provider_overlap SET shared_ips=shared_ips+4")
     code, dry = wipe(production, tmp_path, capsys)
     assert code == 0 and dry["deleted"] == replay_rows(base, replayed)
     # The counts the dry run kept differ from the apply's: it rolls back.
@@ -145,10 +151,11 @@ def test_a_production_run_after_the_baseline_survives(production, tmp_path, caps
     assert wipe(production, tmp_path, capsys)[0] == 0
     code, applied = wipe(production, tmp_path, capsys, "--apply", "--owner-go", GO)
     assert code == 0 and applied["counts"] == left(base, replayed, own)
-    [(marked,)] = query(production, "SELECT summary ? 'scale_replay' FROM test_runs")
-    assert not marked
+    marked = "SELECT count(*) FILTER (WHERE summary ? 'scale_replay'),count(*) FROM test_runs"
+    assert query(production, marked) == [(0, 2)]
     assert query(production, "SELECT count(*) FROM products WHERE provider='fixture'")[0][0] == 1
     assert query(production, "SELECT count(*) FROM ip_observations")[0][0] > 0
+    assert query(production, overlap) == [("fixture", "other", 1)]
 
 
 def test_a_current_replay_build_gives_way_to_the_newest_baseline_build(production):  # noqa: F811
