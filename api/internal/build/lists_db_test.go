@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"

@@ -2,11 +2,14 @@ package store_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
@@ -147,9 +150,9 @@ func TestAV4HeadIsReadWithoutItsCohortRows(t *testing.T) {
 	}
 }
 
-// A head with networks and no schema version is not a v4 head: it loads as
-// a payload before v4 (review N1: the v4 test is never NULL).
-func TestAHeadWithNetworksWithoutASchemaVersionLoads(t *testing.T) {
+// A head with networks and no schema version is not a v4 head: it is
+// ErrBeforeV4 (review N1: the v4 test is never NULL).
+func TestAHeadWithNetworksWithoutASchemaVersionIsBeforeV4(t *testing.T) {
 	t.Parallel()
 	db, _ := networkLists(t)
 	var doc map[string]any
@@ -162,8 +165,12 @@ func TestAHeadWithNetworksWithoutASchemaVersionLoads(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Publish(t, head)
-	// A v4 read gives the build a payload with the networks as product groups.
-	if in := load(t, db); in.Snapshot == nil || !bytes.Equal(in.Snapshot.Full(), in.Snapshot.Payload) {
-		t.Error("a head without a schema version was read as v4")
+	pool, err := store.OpenReadOnly(context.Background(), db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := store.Load(context.Background(), pool); !errors.Is(err, store.ErrBeforeV4) {
+		t.Errorf("a head without a schema version: %v, want ErrBeforeV4", err)
 	}
 }

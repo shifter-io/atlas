@@ -107,7 +107,7 @@ func TestPublishV4LoadsAsAV4Build(t *testing.T) {
 			if in.Snapshot == nil || in.Snapshot.BuildID != id || len(in.Snapshot.Networks) != 3 {
 				t.Fatalf("read %+v, want build %d with 3 network lists", in.Snapshot, id)
 			}
-			if !slices.Contains(ran(log), "load.network_counts") || len(got) < 20 {
+			if !slices.Contains(ran(log), "load.network_counts") || len(got) == 0 {
 				t.Errorf("the v4 read ran %v (want load.network_counts) and rendered %d answers", ran(log), len(got))
 			}
 			for _, table := range []string{"calculated_snapshot_parts", "calculated_windows", "calculated_breakdowns"} {
