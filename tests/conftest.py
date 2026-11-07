@@ -19,6 +19,10 @@ coverage and each coverage report (`timeline-main.jsonl`); a pytest a test start
 nothing. `scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is recorded
 or wrapped.
 
+Shared templates: the process that runs the session names the run (helpers.SHARED_RUN, which
+its xdist workers inherit) and drops the templates the workers share at its end
+(tests/sweep_prefix.py builds them).
+
 No coverage: a test marked `no_cover` runs without a tracer. pytest-cov's marker alone only
 stops its own coverage, and in an xdist worker that hands tracing back to the coverage it
 started before it, so the test stayed traced (and slower) there. Only for a test whose every
@@ -30,13 +34,14 @@ from __future__ import annotations
 import functools
 import json
 import os
-import sys
-import threading
 import time
+import uuid
 from pathlib import Path
 
 import helpers
 import pytest
+
+from proxy_index.providers.credentials import read_credentials
 
 # Shared test modules whose assertions report like the tests' own (pytest's introspection).
 pytest.register_assert_rewrite("admin_cases", "calculated_browser_cases", "orchestrator_cases")
@@ -93,14 +98,23 @@ def pytest_runtest_call(item):
     # trylast: inside pytest-cov's own no_cover wrapper, so after its pause, before its resume.
     if not item.get_closest_marker("no_cover"):
         return (yield)
-    traces = sys.gettrace(), threading.gettrace()
-    sys.settrace(None)
-    threading.settrace(None)
-    try:
+    with helpers.untraced():
         return (yield)
-    finally:
-        sys.settrace(traces[0])
-        threading.settrace(traces[1])
+
+
+# The process that runs the session (the xdist controller, or pytest without xdist) names the
+# run for the templates its workers share (helpers.shared_template) and drops them at its end;
+# a pytest a test starts inherits the name and drops nothing.
+SHARED_OWNER = helpers.SHARED_RUN not in os.environ
+if SHARED_OWNER:
+    os.environ[helpers.SHARED_RUN] = uuid.uuid4().hex[:8]
+
+
+def pytest_sessionfinish(session):
+    admin = os.environ.get("PG_TEST_ADMIN_FILE")
+    if SHARED_OWNER and admin:
+        credentials = read_credentials(admin, "postgres")
+        helpers.drop_shared_templates(credentials, os.environ[helpers.SHARED_RUN])
 
 
 if helpers.TIMELINE:

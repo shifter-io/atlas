@@ -11,13 +11,13 @@ collected by age.
 import random
 from collections import Counter
 from datetime import UTC, datetime, timedelta
-from functools import partial
 
 import psycopg
 import pytest
 from calculated_cases import lenient_policy
+from sweep_prefix import Chain, prefix
 from test_calculated_hourly_reads import BUCKET, DAY, HOUR, History, floor_hour
-from test_calculated_incremental import assert_equal, replay
+from test_calculated_incremental import assert_equal
 
 from proxy_index.calculated import fleetsql
 from proxy_index.calculated.aggregate import OUTCOMES, SeriesSpec, series, timed
@@ -31,7 +31,8 @@ MEMOS = ("calculated_bucket_ips", "calculated_ip_last_seen", "calculated_distinc
 MINUTE = timedelta(minutes=1)
 COUNTRIES = {"us": 3, "de": 3, "fr": 3, "jp": 2, "gb": 1}  # groups (networks) per country
 # The sweep's cutoffs (hours before the fixture's end, oldest first), its late run's cutoff, and
-# its chunks of CHUNK cutoffs, each its own case (they run in parallel).
+# its chunks of CHUNK cutoffs, each its own case (they run in parallel), which copies the sweep's
+# prefix at its start (sweep_prefix) instead of replaying the cutoffs before it.
 CUTOFFS = range(24, 0, -2)
 LATE = 12
 CHUNK = 3
@@ -127,19 +128,21 @@ async def late_run(h):
     await h.daily("beta", "jp", 40 * HOUR - 30 * MINUTE)  # late: before folded buckets
 
 
+SWEEP = Chain("fleet", 0, fleet_history, CUTOFFS, range(0, len(CUTOFFS), CHUNK), (LATE, late_run))
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("chunk", range(len(CUTOFFS) // CHUNK))
+@pytest.mark.parametrize("start", SWEEP.starts)
 async def test_fleet_counts_from_memos_equal_full_at_every_hourly_cutoff(
-    chunk, database, tmp_path, monkeypatch
+    start, database_template, databases, tmp_path, monkeypatch
 ):
-    """One chunk of the sweep, which starts from no memo: the cutoffs before the chunk are
-    replayed, then each of the chunk's is checked; the last chunk checks the memos the sweep
-    ends with."""
+    """One chunk of the sweep, which starts from no memo: a copy of the sweep's prefix at the
+    chunk's start (its cutoffs before the chunk's, replayed), then each of the chunk's is
+    checked; the last chunk checks the memos the sweep ends with."""
     end = floor_hour(datetime.now(UTC)) + HOUR
-    h = await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
-    await replay(database, policy, end, CUTOFFS[: chunk * CHUNK], (LATE, partial(late_run, h)))
-    own = CUTOFFS[chunk * CHUNK : (chunk + 1) * CHUNK]
+    database, h = await prefix(SWEEP, start, end, database_template, tmp_path, policy, databases)
+    own = SWEEP.checked(start)
     calls = counting(monkeypatch)
     seen = set()
     for hours in own:
@@ -169,10 +172,12 @@ def assert_last_memos(database, policy, end, calls):
 
 
 @pytest.mark.asyncio
-async def test_an_older_cutoff_counts_directly_and_keeps_the_memos(database, tmp_path):
+async def test_an_older_cutoff_counts_directly_and_keeps_the_memos(
+    database_template, databases, tmp_path
+):
     end = floor_hour(datetime.now(UTC)) + HOUR
-    await fleet_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
+    database, _ = await prefix(SWEEP, 0, end, database_template, tmp_path, policy, databases)
     assert_equal(database, policy, end)
     before = memo_rows(database)
     assert before["calculated_ip_last_seen"]
