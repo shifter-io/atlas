@@ -19,7 +19,9 @@ observation row comes back to Python. What moves with the cutoff comes from the
 frozen extension modules (hourly.py, fleetsql.py, rollups.py: the census-pulse geo rows from
 per-hour rollups), whose bodies count in the database.
 The fingerprint hashes run metadata and signatures instead of observations: a stored run's
-observations never change.
+observations never change. It hashes the geo rollup marks of the window (rollups.marks()) instead
+of the geo rows: an hour's rows change only with a run newer than its mark or a run linked to a
+batch (hashed with the runs), and the edge hours' rows with the runs.
 """
 
 from __future__ import annotations
@@ -176,7 +178,10 @@ def read(conn, config, method_id, as_of, mode="incremental"):
         hashed = {"runs": [{k: v for k, v in r.items() if k != "summary"} for r in runs]}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())
         source = Incremental(conn, config, as_of, runs, buckets, signed)
-    hashed |= {"release": release, "buckets": buckets} | common
+    hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
+    # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
+    geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
+    hashed["scheduled"] = {k: v for k, v in scheduled.items() if k != "geo"} | {"geo": geo}
     fingerprint = digest(jsonable(hashed | {"implementation_id": calculator.IMPLEMENTATION_ID}))
     fields = {"runs": runs, "buckets": buckets, "release": release, "signed": signed}
     return Inputs(source=source, fingerprint=fingerprint, as_of=as_of, **common, **fields)

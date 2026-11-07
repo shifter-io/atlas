@@ -5,8 +5,11 @@ snapshot (its one transaction), in the order calculator.scheduled_inputs() alway
 from __future__ import annotations
 
 import re
+from array import array
 from collections import defaultdict
 from datetime import timedelta
+
+from psycopg.rows import tuple_row
 
 from .. import detect, traffic
 from . import browser
@@ -15,6 +18,10 @@ from .aggregate import PLACE, census_overlaps
 EVENTS_IN_SNAPSHOT = 200
 # A geo row's group: product group, smallest window (hours), location, network and fallback.
 GEO_KEY = ("scope_id", "product_id", "hours", "location_id", "network_id", "fallback")
+COUNTERS = ("completed", "successes", "challenges", "blocks")
+# A geo row's fields (GeoRow), its histogram's bins last.
+GEO_FIELDS = ("scope_id", "product_id", "hours", "location", "network", "fallback", *COUNTERS)
+FIELD = {name: n for n, name in enumerate((*GEO_FIELDS, "bins"))}
 # The country of a request without an exit location: the batch's, else the requested one.
 FALLBACK = (
     "CASE WHEN l.country_code IS NULL THEN coalesce(b.country_code,upper(ps.requested_country)) END"
@@ -117,72 +124,94 @@ def overlap_runs(conn, bounds):
     return census_overlaps(census_runs, tested_runs)
 
 
+class GeoRow(tuple):
+    """A geo row: a tuple of its GEO_FIELDS and its histogram's bins (one int64 array of the
+    bins' ms, then their counts), read by field name like the dict it replaces (CALC-MEM-1)."""
+
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        if key == "histogram":  # its [ms, n] pairs
+            bins = tuple.__getitem__(self, -1)
+            half = len(bins) // 2
+            return list(zip(bins[:half], bins[half:], strict=True))
+        return tuple.__getitem__(self, FIELD[key] if isinstance(key, str) else key)
+
+    def get(self, key, default=None):
+        return self[key] if key in FIELD or key == "histogram" else default
+
+    def plain(self):
+        """The row as JSON-ready values (the full mode's fingerprint)."""
+        return [*self[:-1], self["histogram"]]
+
+
 def geo_rows(conn, bounds, overlaps, timed_target):
     """The window's run_geo_buckets per GEO_KEY, labelled, with their light-load histograms."""
     bounds = bounds | {
         "flagged": sorted(o["run_key"] for o in overlaps if o["run_key"] is not None),
         "latency_target": timed_target,
     }
-    totals = conn.execute(
-        f"SELECT {GEO_KEYS},sum(g.completed)::bigint AS completed,"
-        "sum(g.successes)::bigint AS successes,sum(g.challenges)::bigint AS challenges,"
-        f"sum(g.blocks)::bigint AS blocks {GEO_SOURCE}{GEO_WINDOW}"
-        "GROUP BY 1,2,3,4,5,6 ORDER BY 1,2,3,4,5,6",
-        bounds,
-    ).fetchall()
-    return labelled(conn, totals, geo_histograms(conn, bounds))
-
-
-def labelled(conn, totals, histograms):
-    """The geo rows of the totals (per GEO_KEY, in order) and histograms ({GEO_KEY: [[ms, n]]})."""
-    locations, networks, names = geo_labels(conn, totals)
-    geo = []
-    for t in totals:
-        code = t["fallback"]
-        geo.append(
-            {
-                "scope_id": t["scope_id"],
-                "product_id": t["product_id"],
-                "hours": t["hours"],
-                "location": locations[t["location_id"]],
-                "network": networks[t["network_id"]],
-                "fallback": (code, names.get(code))
-                if code and re.fullmatch("[A-Z]{2}", code)
-                else None,
-                **{k: t[k] for k in ("completed", "successes", "challenges", "blocks")},
-                "histogram": histograms[tuple(t[k] for k in GEO_KEY)],
-            }
+    totals = (
+        conn.cursor(row_factory=tuple_row)
+        .execute(
+            f"SELECT {GEO_KEYS},sum(g.completed)::bigint AS completed,"
+            "sum(g.successes)::bigint AS successes,sum(g.challenges)::bigint AS challenges,"
+            f"sum(g.blocks)::bigint AS blocks {GEO_SOURCE}{GEO_WINDOW}"
+            "GROUP BY 1,2,3,4,5,6 ORDER BY 1,2,3,4,5,6",
+            bounds,
         )
-    return geo
+        .fetchall()
+    )
+    histograms = geo_histograms(conn, bounds)
+    return labelled(conn, [(*t, *histograms.get(t[:6], ((), ()))) for t in totals])
+
+
+def labelled(conn, rows):
+    """The geo rows (GeoRow) of rows: tuples of a GEO_KEY, its counters and its histogram's ms
+    and counts, one per GEO_KEY in order. Each is replaced in place, so the list never holds
+    both forms of every row."""
+    locations, networks, names = geo_labels(conn, rows)
+    fallbacks = {}
+    for n, (scope, product, hours, location, network, code, *counters, ms, counts) in enumerate(
+        rows
+    ):
+        if code not in fallbacks:
+            named = code and re.fullmatch("[A-Z]{2}", code)
+            fallbacks[code] = (code, names.get(code)) if named else None
+        keys = (scope, product, hours, locations[location], networks[network], fallbacks[code])
+        rows[n] = GeoRow((*keys, *counters, array("q", [*ms, *counts])))
+    return rows
 
 
 def geo_histograms(conn, bounds):
-    """The light-load latency histogram ([ms, n] pairs) of every GEO_KEY group."""
-    histograms = defaultdict(list)
+    """The light-load latency histogram of every GEO_KEY group: its bins' ms and counts."""
+    histograms = defaultdict(lambda: ([], []))
     for row in conn.execute(
         f"SELECT {GEO_KEYS},h.ms,sum(h.n)::bigint AS n {GEO_SOURCE}CROSS JOIN LATERAL "
         f"histogram(g.histogram_steps,g.histogram_counts::bigint[]) h {GEO_WINDOW}{LIGHT}"
         "GROUP BY 1,2,3,4,5,6,7 ORDER BY 1,2,3,4,5,6,7",
         bounds,
     ):
-        histograms[tuple(row[k] for k in GEO_KEY)].append([row["ms"], row["n"]])
+        ms, counts = histograms[tuple(row[k] for k in GEO_KEY)]
+        ms.append(row["ms"])
+        counts.append(row["n"])
     return histograms
 
 
-def geo_labels(conn, totals):
-    """The places and networks the geo rows name, and every country's name."""
+def geo_labels(conn, rows):
+    """The places and networks the geo rows (GEO_KEY first) name, and every country's name."""
     locations = {
         r["location_id"]: tuple(r[f] for f in PLACE)
         for r in conn.execute(
             "SELECT * FROM enrichment_location_fields WHERE location_id=ANY(%s)",
-            (sorted({t["location_id"] for t in totals}),),
+            (sorted({t[3] for t in rows}),),
         )
     }
     networks = {
         r["network_id"]: (r["asn"], r["asn_organization"], r["usage_type"])
         for r in conn.execute(
             "SELECT * FROM enrichment_network_fields WHERE network_id=ANY(%s)",
-            (sorted({t["network_id"] for t in totals}),),
+            (sorted({t[4] for t in rows}),),
         )
     }
     names = {
