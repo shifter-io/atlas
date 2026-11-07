@@ -59,7 +59,7 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   the go every target but `proxy_scale` is refused as before; `generate.py` and `cycle.py` take no
   go and keep refusing `proxy_reviews`. Check it read-only with
   `target.py check --database <toml> --owner-go "<go>"` (exit 2 on a refusal). The owner removes
-  the replay's data before launch (LAUNCH-WIPE (#615)).
+  the replay's data before launch (LAUNCH-WIPE (#615)) with `wipe_replay.py` (REPLAY.md).
 - A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
   network's rows in its own transaction; the settings row records each finished network, so an
   interrupted step resumes with the networks the day lacks. Networks share no IP, run, pool or
@@ -238,8 +238,8 @@ loads, 2.79 MB per load, 1.674 GB per network-hour.
 checks, the bytes and outcomes of every target, and one planned hour of 2 networks on the test
 database: its rows, and that no settings row changes.
 
-The replay of simulated days in production's database (REPLAY-1, `replay.py`) is described in
-[REPLAY.md](REPLAY.md).
+The replay of simulated days in production's database (REPLAY-1, `replay.py`) and the removal of
+its data (WIPE-TOOL-1, `wipe_replay.py`) are described in [REPLAY.md](REPLAY.md).
 
 # A scratch schema in production's database (SCALE-SCHEMA-1)
 

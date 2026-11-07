@@ -43,15 +43,15 @@ IDENTITY = "SELECT current_database(),current_user,to_regclass('public.test_runs
 FOREIGN_RUNS = f"SELECT count(*) FROM public.test_runs WHERE NOT (summary ? '{REPLAY_MARKER}')"
 
 
-def go_date_refusal(owner_go: str, today: date) -> str | None:
-    """None when the go has the owner's form and a date that is not after `today`."""
-    match = GO.fullmatch(owner_go)
+def go_date_refusal(owner_go: str, today: date, pattern=GO, form=GO_FORM) -> str | None:
+    """None when the go has the owner's form (`pattern`) and a date that is not after `today`."""
+    match = pattern.fullmatch(owner_go)
     try:
         given = date.fromisoformat(match.group(1)) if match else None
     except ValueError:
         given = None
     if given is None:
-        return f"the owner's go {owner_go!r} is not {GO_FORM}"
+        return f"the owner's go {owner_go!r} is not {form}"
     if given > today:
         return f"the owner's go is dated {given}, after today ({today})"
     return None

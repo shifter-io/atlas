@@ -131,7 +131,7 @@ Each is the statements' wall time as `measure.Tracer` records it (calls, seconds
 - **Baseline** (`replay_baseline.py`, in the state at the start): the row count of every table in
   `public` and `site`, the highest value of every identity column, and the full key sets of
   providers, products, pool_stats, scope_stats, nodes, targets, dbip_releases, place_names,
-  asn_names, asn_labels, enrichment_locations and enrichment_networks.
+  asn_names, asn_labels, enrichment_locations, enrichment_networks and cohorts.
 - **After each day** (`days_counted`): the counts again, per table the growth since the baseline,
   the replay's rows (reachable from its runs by `run_key` and from its nodes by `node_id`,
   `test_batches` through their runs) and the other growth (`job_runs`, alerts, ...), reported as
@@ -150,7 +150,70 @@ Each is the statements' wall time as `measure.Tracer` records it (calls, seconds
 REPLAY-REPORT-1 (#611) reads both for the report. The command prints the replay id and the
 hours done.
 
+## Wiping the replay (WIPE-TOOL-1)
+
+`wipe_replay.py` removes exactly the replay's data from the database it ran in, before the launch
+(LAUNCH-WIPE, #615). It reads the replay's `state.json`: its baseline, nodes and simulated days.
+
+```sh
+uv run python scripts/scale/wipe_replay.py --database proxy_reviews.toml --state <out>/state.json
+uv run python scripts/scale/wipe_replay.py --database proxy_reviews.toml --state <out>/state.json \
+  --apply --owner-go "owner-go LAUNCH-WIPE <YYYY-MM-DD>"
+```
+
+- **Dry run** (the default): the whole wipe runs in one transaction, which is then rolled back. It
+  prints per table the rows it would delete (`deleted`), the counts it would leave, the tables
+  that would differ from the baseline, the empty partitions and the build that would be current;
+  the same JSON goes to `wipe-dry-run.json` (mode 600) beside the state.
+- **`--apply`** needs the owner's go, `owner-go LAUNCH-WIPE <YYYY-MM-DD>` (a date not after
+  today), and a dry run of the same replay. It runs the same transaction under the ingest and
+  calculation advisory locks (817452901 and 817452902) and commits it only when every table's
+  deleted rows equal the dry run's; any difference rolls everything back, as `archive/purge.py`
+  does. It prints the per-table counts afterwards; `not_at_baseline` lists every table whose
+  count differs from the baseline's.
+- A state of another database is refused. Exit codes: 0 done, 2 refused or rolled back.
+
+**What counts as the replay's:** runs whose summary has `scale_replay` (above the baseline's
+highest run key), the replay's nodes (above the baseline's highest node id, host
+`scale-replay-*` or `browser-scalereplay`, or listed in the state) and builds above the baseline.
+
+**What goes, in foreign-key order:**
+
+- Builds above the baseline, through `store_retention.discard` (snapshot partitions included),
+  then the lists no window references. When one of them is current, the newest published
+  baseline build left becomes current (none left: no current build).
+- The runs with their test_events (of their batches, or dated in the simulated days),
+  run_buckets, run_geo_buckets, ip_observations, run_enrichments, estimated_hours,
+  calculation_roles and batch_runs; the batches whose runs all belong to the replay's nodes, with
+  their outages; the nodes (their token hash is in the row).
+- The calculation's caches of the replay: the run memos (`calculated_run_ranges`), the rollups
+  and memos of the simulated days, the rollup hours written after the baseline (`through_run`
+  above its highest run key), with their geo hours and pulse buckets, the distinct and slot
+  memos used since the baseline, and the load references chosen since the baseline for the
+  simulated days. The calculation rewrites any of these it misses.
+- Lookup rows new since the baseline (not among its keys, or above its highest identity) that no
+  remaining row references except a cache: scope_stats, pool_stats, products, providers,
+  ip_addresses, dbip_releases, enrichment_locations, enrichment_networks, asn_labels,
+  place_names, asn_names, cohorts and score_reasons. The cache rows that reference them go
+  first: product_ips, pool_ips, provider_overlap and outages, and an IP's ip_enrichment and
+  calculated_ip_last_seen.
+- The empty daily partitions of the simulated days.
+
+**Never removed:** settings, countries, runner_regions, methodologies, targets, schema_versions,
+calculation_schema, `site.*`, and any row of the baseline. The browser targets the replay's ingest
+added stay; the output lists them (`targets_kept`). A row the replay changed in place (a
+baseline IP's product_ips counts, for example) cannot be restored; with no test run in the
+database at the baseline (the replay's guard), there is none.
+
 ## Tests
+
+`tests/test_scale_wipe_replay.py` replays the fixture slice set for 2 hours on the test database
+and checks the dry run's counts (equal to the replay's growth outside the protected tables, the
+database unchanged), the refusals (no dry run, no go, a malformed or future go, another
+database), the apply (every table back at its baseline count but the protected tables the replay
+grew, those row by row, no current build), a production run ingested after the baseline that
+survives with its lookups, a dry run whose counts differ that rolls back, and a current replay
+build that gives way to the newest baseline build.
 
 `tests/test_scale_replay.py` replays a fixture slice set (synthetic addresses only) on the test
 database, standing in for production: 2 days of 3 hours in order with the overlap (by
