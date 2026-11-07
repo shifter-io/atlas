@@ -31,13 +31,12 @@ import generate
 import measure
 import replay_baseline
 import target
-from cycle_steps import MEASURE
+from cycle_steps import HOUR, MEASURE
 from replay_steps import ERRORS, ReplaySteps, networks
 
 from proxy_index import storage
 
 INGEST = ("daily", "pulses", "browser", "release")
-HOUR = timedelta(hours=1)
 FLAG_AFTER = 3  # retries of an hour before stderr flags it for the operator
 LIVE = "SELECT count(*) FROM job_runs WHERE started_at>now()-interval '5 minutes'"
 SIZES = (
@@ -293,13 +292,9 @@ def arguments(argv=None):
     return args
 
 
-def stopped(*_):
-    raise KeyboardInterrupt
-
-
 def main(argv=None) -> int:
     args = arguments(argv)
-    signal.signal(signal.SIGTERM, stopped)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)  # a stop, as Ctrl-C
     try:
         result = run(args)
     except Refused as exc:

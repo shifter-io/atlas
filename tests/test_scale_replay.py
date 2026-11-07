@@ -12,6 +12,8 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import aiohttp
+import psycopg
 import pytest
 from orchestrator_cases import prepare, query
 
@@ -215,6 +217,38 @@ def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, m
     stored = query(production, DAILY)
     daily = state(tmp_path)["hours"][0]["ingest"]["steps"]["daily"]
     assert len(stored) == 2 and sorted(run_id for _, run_id in stored) == sorted(daily["ingested"])
+
+
+def test_a_failed_estimate_and_browser_hour_are_retried_and_their_nodes_kept(
+    production, tmp_path, monkeypatch
+):
+    estimate, drive, calls = replay_steps.compute.estimate_run, browser_model.Hour.drive, []
+
+    def flaky_estimate(database, run_id, country, formula):
+        calls.append(run_id)
+        if len(calls) == 1:
+            raise psycopg.OperationalError("connection lost")
+        return estimate(database, run_id, country, formula)
+
+    async def flaky_drive(self, text, nodes):
+        if not getattr(flaky_drive, "failed", False):  # after the nodes are registered
+            flaky_drive.failed = True
+            raise aiohttp.ClientError("register refused")
+        return await drive(self, text, nodes)
+
+    monkeypatch.setattr(replay_steps.compute, "estimate_run", flaky_estimate)
+    monkeypatch.setattr(browser_model.Hour, "drive", flaky_drive)
+    assert replay.main(argv(production, tmp_path, 1, 1)) == 0
+    assert [e["step"] for e in events(tmp_path)] == ["daily", "browser"]
+    assert calls[0] in calls[1:]  # the retry estimates the run again
+    found = state(tmp_path)
+    steps = found["hours"][0]["ingest"]["steps"]
+    assert [(p["stored"], p["failed"]) for p in steps["daily"]["parts"]] == [(1, 1), (2, 0)]
+    browser = steps["browser"]["parts"][-1]
+    assert browser["runs"] == 8 and browser["networks"] == 1
+    mine = "SELECT node_id,host,token_hash FROM nodes WHERE host=%s"
+    hosts = query(production, mine, (browser_model.HOST,))
+    assert len(hosts) == 1 and hosts[0][0] in found["nodes"] and hosts[0][2].startswith("disabled:")
 
 
 def test_a_stopped_replay_resumes_from_its_state_file(production, tmp_path, monkeypatch, capsys):

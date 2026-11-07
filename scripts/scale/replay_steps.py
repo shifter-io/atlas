@@ -7,12 +7,12 @@ import gzip
 import json
 import math
 import tempfile
-from collections import defaultdict
-from dataclasses import dataclass
+from collections import defaultdict, namedtuple
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import aiohttp
 import browser_model
 import psycopg
 import synthetic
@@ -30,7 +30,7 @@ from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
 from proxy_index.targets import registry
 
 NODE_HOST = "scale-replay-"  # every HTTP node the replay registers: scale-replay-<region>
-ERRORS = (Failed, OSError, ValueError, KeyError, TypeError, psycopg.Error)
+ERRORS = (Failed, OSError, ValueError, KeyError, TypeError, psycopg.Error, aiohttp.ClientError)
 REGIONS = (
     "SELECT DISTINCT r.region_id,r.slug FROM countries c JOIN runner_regions r USING(region_id) "
     "WHERE c.enabled ORDER BY 1"
@@ -43,13 +43,10 @@ RUNS = (
     "WHERE b.kind IN ('pulse','load') AND b.scheduled_for>=%s AND b.scheduled_for<%s "
     "AND br.node_id=ANY(%s) ORDER BY b.start_at,br.batch_id,br.product_id"
 )
-NODE = "SELECT node_id FROM nodes WHERE region_id=%s AND provider=%s AND product=%s"
+NODE = "SELECT node_id,host FROM nodes WHERE region_id=%s AND provider=%s AND product=%s"
 
 
-@dataclass(frozen=True)
-class Lane:
-    target: dict  # a replay run's summary target and config
-    config: dict
+Lane = namedtuple("Lane", "target config")  # a replay run's summary target and config
 
 
 class ReplayWriter(writer.Writer):
@@ -102,8 +99,7 @@ class ReplaySteps(Steps):
         self.slugs = dict(conn.execute(SLUGS).fetchall())
         self.rows: tuple[int, dict] = (-1, {})
 
-    def of(self, names) -> SimpleNamespace:
-        """The model the browser step reads: its networks, their formulas and the replay's id."""
+    def of(self, names) -> SimpleNamespace:  # the model the browser step reads
         settings = SimpleNamespace(networks=tuple(names), seed=self.replay)
         return SimpleNamespace(settings=settings, formulas=[self.formulas[n] for n in names])
 
@@ -118,9 +114,13 @@ class ReplaySteps(Steps):
     def product(self, network: str) -> str:
         return self.formulas[network].get("product", "residential")
 
-    def node(self, region_id: int, network: str) -> int | None:
-        found = self.conn.execute(NODE, (region_id, network, self.product(network))).fetchone()
-        return found[0] if found else None
+    def node(self, region_id: int, network: str) -> tuple | None:
+        return self.conn.execute(NODE, (region_id, network, self.product(network))).fetchone()
+
+    def ours(self, region_id: int, network: str) -> bool:
+        """No node there yet, or the replay's own (by id, or by its host name)."""
+        found, hosts = self.node(region_id, network), (NODE_HOST, browser_model.HOST)
+        return not found or found[0] in self.state["nodes"] or (found[1] or "").startswith(hosts)
 
     def identity(self, lane: Lane) -> dict:
         return {"target": lane.target, "config": lane.config, REPLAY_MARKER: self.replay}
@@ -143,18 +143,19 @@ class ReplaySteps(Steps):
             run_id = self.run_id("daily", day, start.hour, network, country)
             if run_id in done:
                 continue
-            try:
+            try:  # both idempotent: a retry ingests again (a no-op), then estimates
                 with tempfile.TemporaryDirectory(prefix="scale-replay-") as temporary:
                     self.directory(test, run_id, start, Path(temporary))
                     storage.ingest(temporary, self.args.database)  # one transaction
+                try:
+                    formula = self.formulas[network]
+                    compute.estimate_run(self.args.database, run_id, country, formula)
+                except ValueError as exc:  # no factor for the country there: noted, not retried
+                    unestimated.append(f"{network} {country}: {exc}"[:200])
             except ERRORS as exc:
                 failures.append(f"{network} {country}: {exc}"[:300])
                 continue
             done.append(run_id)
-            try:
-                compute.estimate_run(self.args.database, run_id, country, self.formulas[network])
-            except ValueError as exc:  # no factor for the country there: noted, not retried
-                unestimated.append(f"{network} {country}: {exc}"[:200])
         part = {"tests": len(tests), "stored": len(done), "failed": len(failures)}
         return part | {"not_estimated": len(unestimated), "failures": failures[:20]}, not failures
 
@@ -200,7 +201,7 @@ class ReplaySteps(Steps):
         tokens, mine = {}, self.state["nodes"]
         for name in self.model.settings.networks:
             for region_id, slug in self.regions.items():
-                if self.node(region_id, name) not in (None, *mine):
+                if not self.ours(region_id, name):
                     continue
                 who = {"provider": name, "product": self.product(name), "region": slug}
                 node = issue_token(self.args.database, **who, host=NODE_HOST + slug)
@@ -242,10 +243,13 @@ class ReplaySteps(Steps):
 
     def browser(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
         mine, names = self.state["nodes"], self.model.settings.networks
-        free = [n for n in names if self.node(BROWSER_REGION_ID, n) in (None, *mine)]
+        free = [n for n in names if self.ours(BROWSER_REGION_ID, n)]
         if not free:
             return {"skipped": "production has a browser node of every network"}, True
         steps = SimpleNamespace(args=self.args, model=self.of(free))
-        part, done = browser_model.browser_step(steps, day, start, step)
-        mine.extend(sorted({self.node(BROWSER_REGION_ID, n) for n in free} - {None, *mine}))
+        try:
+            part, done = browser_model.browser_step(steps, day, start, step)
+        finally:  # its nodes are registered first: kept even when the hour fails
+            found = {self.node(BROWSER_REGION_ID, n) for n in free} - {None}
+            mine.extend(sorted({node[0] for node in found} - set(mine)))
         return part | {"networks": len(free)}, done
