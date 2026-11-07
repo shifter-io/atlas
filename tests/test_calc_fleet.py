@@ -35,11 +35,11 @@ COUNTRIES = {"us": 3, "de": 3, "fr": 3, "jp": 2, "gb": 1}  # groups (networks) p
 # The sweep's cutoffs (hours before the fixture's end, oldest first), its late run's cutoff, and
 # its chunks' starts: each chunk is its own case (they run in parallel), which copies the sweep's
 # prefix at its start (sweep_prefix) instead of replaying the cutoffs before it. The first has
-# 3 cutoffs (from no memo), the others 2 (the last 1). Each counts some cohort set: the builds at
+# 1 cutoff (from no memo), the others 2 (the last 1). Each counts some cohort set: the builds at
 # 20 h, 18 h and 6 h count none, so none of them is a chunk alone.
 CUTOFFS = range(24, 0, -2)
 LATE = 12
-STARTS = (0, *range(3, len(CUTOFFS), 2))
+STARTS = (0, *range(1, len(CUTOFFS), 2))
 
 
 async def fleet_history(database, tmp_path, end):

@@ -108,7 +108,7 @@ def statements_made(log):
 # 2's after its late run) and the fleet sweep. Their next cutoffs add no late run.
 STARTS = [
     pytest.param(chain(0), 5, id="incremental-0-05"),
-    pytest.param(chain(1), 8, id="incremental-1-08"),
+    pytest.param(chain(1), 7, id="incremental-1-07"),
     pytest.param(chain(2), 6, id="incremental-2-06"),
     pytest.param(SWEEP, 3, id="fleet-03"),
 ]

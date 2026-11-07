@@ -170,7 +170,8 @@ def count_windows(monkeypatch):
 # prefix at its start (sweep_prefix) instead of replaying the cutoffs before it. The first chunk
 # starts from no stored list, so its first build misses every window: it has the day's first runs
 # and the fewest cutoffs whose builds hit more windows than they miss, FIRST[day] (day 2's late
-# run misses more). The others have CHUNK cutoffs (the last of days 0 and 1 one).
+# run misses more). The second has 2, as it builds the first prefix; the others CHUNK (the last
+# of day 2 one).
 # tests/durations.json lists the cases of later starts as shorter than they take, so they run
 # after other slow tests, once the earlier cases have built their prefixes.
 FIRST = (5, 5, 6)
@@ -182,7 +183,7 @@ def chain(day):
     on day 0)."""
     hours = cutoffs(day)
     late = min(36, hours[0]), lambda h: h.daily("beta", "us", 60 * HOUR)
-    starts = (0, *range(FIRST[day], len(hours), CHUNK))
+    starts = (0, FIRST[day], *range(FIRST[day] + 2, len(hours), CHUNK))
     return Chain("incremental", day, history, hours, starts, late)
 
 
