@@ -28,6 +28,7 @@ PRIMARY = (
 )
 SMALL = ("providers", "products", "pool_stats", "scope_stats", "nodes", "targets", "dbip_releases")
 SMALL += ("place_names", "asn_names", "asn_labels", "enrichment_locations", "enrichment_networks")
+SMALL += ("cohorts",)  # for WIPE-TOOL-1: its keys are text
 MARKED = sql.SQL("summary ? {}").format(sql.Literal(REPLAY_MARKER))
 RUNS = sql.SQL("run_key IN (SELECT run_key FROM public.test_runs WHERE {})").format(MARKED)
 BATCHES = sql.SQL(
