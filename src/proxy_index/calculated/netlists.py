@@ -31,7 +31,7 @@ from psycopg.rows import tuple_row
 
 from . import parts
 from .aggregate import BREAKDOWNS
-from .lists import LIST_ROW_COLUMNS
+from .list_write import LIST_ROW_COLUMNS
 
 COHORT = "network"
 DIMENSIONS = {name: code for name, code in BREAKDOWNS.items() if code != "x"}

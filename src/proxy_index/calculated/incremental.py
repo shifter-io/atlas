@@ -12,9 +12,10 @@ signature. A window whose signature names a stored list (a hit) takes its list i
 and figures from calculated_lists. The other windows (misses, and every census-pulse window until
 CALC-PULSE-1) are counted in the database (sqlwindow.window_inputs(), each run labelled with its
 own release as full mode reads them): breakdowns() over the label combinations, weighted by their
-IPs, and the window's geo rows give its list, written (lists.write_list(), one COPY) as soon as it
-is counted, so a missed window keeps only its counts in memory, as a hit does, and both name
-their list. No observation row comes back to Python. What moves with the cutoff comes from the
+IPs, and the window's geo rows give its list. A group's missed lists are written together once its
+last missed window is counted (list_write.write_lists(): one INSERT, one label lookup and one
+COPY), so a group keeps only its own lists' rows in memory, and every window names its list. No
+observation row comes back to Python. What moves with the cutoff comes from the
 frozen extension modules (hourly.py, fleetsql.py, rollups.py: the census-pulse geo rows from
 per-hour rollups), whose bodies count in the database.
 The fingerprint hashes run metadata and signatures instead of observations: a stored run's
@@ -32,7 +33,7 @@ from psycopg.rows import dict_row
 
 from ..estimates import window as estimates
 from ..storage import RAW_DAYS
-from . import calculator, fleetsql, hourly, lists, parts, rollups
+from . import calculator, fleetsql, hourly, list_write, lists, parts, rollups
 from .aggregate import breakdowns, daily_pools, iso, pool, pool_lists
 from .inputs import light_load
 from .policy import digest, effective, latency_target, payload_limits
@@ -77,7 +78,7 @@ STORED = (
     "FROM calculated_lists l JOIN unnest(%s::int[],%s::text[],%s::int[],%s::text[]) "
     "AS k(product_id,cohort,window_hours,signature) USING(product_id,cohort,window_hours,signature)"
 )
-# pool()'s counts after new_ips and churn_rate, in its order: list figures (lists.FIGURES).
+# pool()'s counts after new_ips and churn_rate, in its order: list figures (list_write.FIGURES).
 POOL = "recurring_share countries regions cities asns datacenter_asn_share classification_coverage"
 POOL = (*POOL.split(), "geo_accuracy", "enrichment_coverage", "observations")
 SHARES_BASIS = "unique exit IPs with the DB-IP field (unknowns excluded)"
@@ -95,6 +96,8 @@ class Inputs(SimpleNamespace):
             payload = estimates.attach(payload, self.runs, conn, self.as_of, config)
             persist = lists.reusing(conn, payload, self.runs, self.buckets)
             return write(conn, build_id, payload, config, persist)
+        if self.source.unwritten:
+            raise ValueError("A missed window's list was not written")
         groups = {(p["product_id"], p["cohort"]): p for p in payload["products"]}
         run_group = {r["run_key"]: r["group"] for r in self.runs}
         found = estimates.windows_with(groups, run_group, estimates.fetch(conn, self.as_of))
@@ -214,6 +217,7 @@ class Incremental(Full):
         active = {b["run_key"] for b in buckets}
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
         self.signed, self.counted = signed, {}
+        self.unwritten = defaultdict(list)  # group -> (prepared list, its reference) per window
         self.runs = defaultdict(dict)  # group -> run_key -> requested country, if in the window
         for r in runs:
             if r["run_key"] in active:
@@ -286,8 +290,9 @@ class Incremental(Full):
         return ps, {}, {"list_entries": pooled}, reference  # no IPs: cohorts() counts them
 
     def _missed(self, key, since, hours, hosting, geo, build_id):
-        """A missed window counted in the database: its pool figures, and its list written now
-        (the breakdowns of its weighted label combinations and geo rows, in one COPY)."""
+        """A missed window counted in the database: its pool figures, and its list (the
+        breakdowns of its weighted label combinations and geo rows), written with the group's
+        other missed lists once its last missed window is counted (_write())."""
         inputs = self._inputs(key, hours)
         ps = pool_figures(inputs, since, hours, hosting)
         weighted = {
@@ -300,13 +305,22 @@ class Incremental(Full):
         pooled = pool_lists(dimensions)
         window = {"breakdowns": dimensions, "pool": ps | pooled, "period": {"hours": hours}}
         bins = sorted((at, n) for at, n in inputs.first_seen.items() if at >= since)
-        window["first_seen"] = {iso(at): n for at, n in bins}  # lists.UNHASHED
-        rows, group = [], {"product_id": key[0], "cohort": key[1]}
-        signature = self.signed.get((*key, hours))
-        list_id = lists.write_list(self.conn, build_id, group, window, rows, signature)
-        lists.copy_rows(self.conn, rows)
+        window["first_seen"] = {iso(at): n for at, n in bins}  # list_write.UNHASHED
+        group = {"product_id": key[0], "cohort": key[1]}
+        prepared = list_write.prepare(group, window, self.signed.get((*key, hours)))
         entries = {name: len(found) for name, found in dimensions.items()}
-        return self._referenced(ps, list_id, entries, {n: len(pooled[n]) for n in POOL_LISTS})
+        found = self._referenced(ps, None, entries, {n: len(pooled[n]) for n in POOL_LISTS})
+        self.unwritten[key].append((prepared, found[3]["lists"]))
+        if len(self.unwritten[key]) == len(self.missed[key]):
+            self._write(key, build_id)
+        return found
+
+    def _write(self, key, build_id):
+        """Write the lists of the group's missed windows and name each in its reference."""
+        unwritten = self.unwritten.pop(key)
+        ids = list_write.write_lists(self.conn, build_id, [prepared for prepared, _ in unwritten])
+        for (_, reference), list_id in zip(unwritten, ids, strict=True):
+            reference["id"] = list_id
 
     def _inputs(self, key, hours):
         """The window's sqlwindow inputs: on its group's first miss, every missed window of the

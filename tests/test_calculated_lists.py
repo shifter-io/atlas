@@ -19,7 +19,15 @@ from test_dbserver import apply, toml
 from test_retention import clone
 
 from proxy_index import detect, traffic
-from proxy_index.calculated import browser, calculator, incremental, lists, netlists, store
+from proxy_index.calculated import (
+    browser,
+    calculator,
+    incremental,
+    list_write,
+    lists,
+    netlists,
+    store,
+)
 from proxy_index.calculated.aggregate import BREAKDOWNS
 from proxy_index.calculated.calculator import calculate
 from proxy_index.dbserver import Roles
@@ -61,23 +69,30 @@ def views(conn):
 @pytest.mark.asyncio
 async def test_each_target_free_window_writes_one_list_by_copy(database, tmp_path, monkeypatch):
     statements = []
-    execute = psycopg.Cursor.execute
+    execute, copy = psycopg.Cursor.execute, psycopg.Cursor.copy
 
     def spy(self, query, *args, **kwargs):
         statements.append(str(query))
         return execute(self, query, *args, **kwargs)
 
+    def copy_spy(self, statement, *args, **kwargs):
+        statements.append(str(statement))
+        return copy(self, statement, *args, **kwargs)
+
     monkeypatch.setattr(psycopg.Cursor, "execute", spy)
+    monkeypatch.setattr(psycopg.Cursor, "copy", copy_spy)
     _, _, first = await benchmark_scenario(database, tmp_path)
     monkeypatch.undo()
     build = int(first["snapshot_id"])
     windows = [(p, w) for p in first["products"] for w in p["windows"].values()]
-    # One INSERT per group list, and the rows go by COPY: never an INSERT per row. Each network
-    # window's list and rows come from one INSERT … SELECT (netlists.py).
+    # One INSERT and one COPY per product group, for all its new lists and their rows: never a
+    # round trip per window or an INSERT per row. Each network window's list and rows come from
+    # one INSERT … SELECT (netlists.py).
     networks = {(p["provider"], p["kind"]) for p in first["products"]}
     assert statements.count(netlists.MERGE) == len(networks) * len(first["periods"])
     groups = [s for s in statements if s != netlists.MERGE]
-    assert sum("INSERT INTO calculated_lists" in s for s in groups) == len(windows)
+    assert sum("INSERT INTO calculated_lists" in s for s in groups) == len(first["products"])
+    assert sum("COPY calculated_list_rows" in s for s in groups) == len(first["products"])
     assert not any("INSERT INTO calculated_list_rows" in s for s in groups)
     assert payload_mismatches(database, build) == []
     with connect(database) as conn:
@@ -104,7 +119,7 @@ async def test_each_target_free_window_writes_one_list_by_copy(database, tmp_pat
         # The slimmed window keeps the uncapped counts and totals the list was written from.
         assert entries == w["breakdown_entries"] and set(entries) == set(BREAKDOWNS)
         assert rows == sum(entries.values()) > 0
-        assert figures == {k: w["pool"][k] for k in lists.FIGURES} | {
+        assert figures == {k: w["pool"][k] for k in list_write.FIGURES} | {
             "list_entries": w["pool"]["list_entries"]
         }
         assert "new_ips" not in figures and len(content_hash) == 64
@@ -179,9 +194,10 @@ async def test_v8_breakdowns_migrate_into_lists_unchanged(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         8,
-        12,
+        13,
     )
     verified = [*store.V8_CHECKS, *store.V9_CHECKS, *store.V10_CHECKS, *store.V11_CHECKS]
+    verified += list(store.V12_CHECKS)
     assert result["verified"] == verified
     with connect(database) as conn:
         assert views(conn) == before
@@ -312,7 +328,7 @@ def owned(databases, tmp_path):
 def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
     roles, files = owned.roles, owned.files
     # The admin role migrates; the new tables and views get the default privileges only.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 12
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 13
     counters = {"ips": 2, "observations": 3, "completed": 4, "successes": 4, "success_rate": 1.0}
     counters |= {"challenges": 0, "blocks": 0, "p50": 1, "p90": 2, "p99": 3}
     country = {"country_code": "XA", "country": "Example"} | counters
@@ -324,10 +340,8 @@ def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
             "INSERT INTO products(provider,name) VALUES ('example','residential') "
             "RETURNING product_id"
         ).fetchone()[0]
-        written = []
         group = {"product_id": product, "cohort": "c"}
-        list_id = lists.write_list(conn, 1, group, window, written)
-        lists.copy_rows(conn, written)
+        (list_id,) = list_write.write_lists(conn, 1, [list_write.prepare(group, window)])
     with connect(files[roles.api]) as conn:
         assert conn.execute(
             "SELECT dimension,position,label->>'country',ips,success_rate "
@@ -345,9 +359,10 @@ def test_migrated_lists_are_written_by_runtime_and_read_by_api_roles(owned):
 
 
 def test_implementation_id_hashes_the_list_writer():
-    """persist and the list figures live in lists.py: a change there must change the build
+    """persist lives in lists.py, the list figures in list_write.py: a change must change the build
     fingerprint (and the list signature's implementation id), as it did inside calculator.py."""
     hashed = ("calculator.py", "aggregate.py", "policy.py", "slim.py", "inputs.py", "lists.py")
+    hashed += ("list_write.py",)  # the list contents and writer, split out of lists.py
     # The incremental calculation's modules (CALC-INC-1a) and the SQL counts they use.
     hashed += ("incremental.py", "hourly.py", "fleetsql.py", "rollups.py", "sqlwindow.py")
     hashed += ("poolfig.py", "network.py", "network_scores.py")  # networks (NET-SUM-1, -2)
@@ -363,5 +378,6 @@ def test_implementation_id_hashes_the_list_writer():
     ).hexdigest()
     assert calculator.IMPLEMENTATION_ID == expected
     # calculate() writes through lists.reusing(), which wraps lists.persist with the signatures.
-    for writer in (lists.reusing, lists.persist, lists.signatures, incremental.read):
+    writers = (lists.reusing, lists.persist, lists.signatures, incremental.read)
+    for writer in (*writers, list_write.prepare, list_write.write_lists):
         assert Path(sys.modules[writer.__module__].__file__).name in hashed

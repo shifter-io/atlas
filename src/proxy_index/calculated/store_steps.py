@@ -5,7 +5,7 @@ and store_retention.py checks the layer without importing store.py."""
 import hashlib
 from pathlib import Path
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 # Checksums of the unmodified v1 and v2 calculated schemas that storage.migrate() upgrades in place.
 V1_CHECKSUM = "2d4157aeadac7da566ab1edde723ad425cb068318c4a3722ca94f3c57d9f68a0"
 V2_CHECKSUM = "19bf2db0cd112b87d2de06aa0156d2693f36d8e21c2c2b1215ecc00ccb7f7699"
@@ -39,4 +39,19 @@ V11_SNAPSHOT = "CREATE TEMP TABLE v11_before ON COMMIT DROP AS SELECT * FROM cal
 V11_CHECKS = {
     "lists kept with the pulse buckets": "SELECT count(*) FROM v11_before o FULL JOIN "
     "calculated_lists n USING(list_id) WHERE row(o.*)::text IS DISTINCT FROM row(n.*)::text",
+}
+
+# Checksum of the unmodified calculated v12 schema (CALC-PULSE-1b's pulse buckets).
+V12_CHECKSUM = "2051da8ffb4b9cf9b91cbf2c8469a96d9899f4a1570e0da018f34818f9da3efd"
+# A v12 layer's list rows lose their foreign key to calculated_lists; every row stays.
+V12_SNAPSHOT = (
+    "CREATE TEMP TABLE v12_before ON COMMIT DROP AS "
+    "SELECT list_id,count(*) AS n FROM calculated_list_rows GROUP BY list_id"
+)
+V12_CHECKS = {
+    "list rows kept without the key": "SELECT count(*) FROM v12_before o FULL JOIN (SELECT "
+    "list_id,count(*) AS n FROM calculated_list_rows GROUP BY list_id) n USING(list_id) "
+    "WHERE o.n IS DISTINCT FROM n.n",
+    "every list row has its list": "SELECT count(*) FROM calculated_list_rows r WHERE NOT EXISTS "
+    "(SELECT FROM calculated_lists l WHERE l.list_id=r.list_id)",
 }

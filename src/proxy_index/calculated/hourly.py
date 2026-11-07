@@ -208,8 +208,8 @@ def stale_lists(conn, new_runs):
     affects are counted again. A list stores nothing a hit window reads that moves with the
     cutoff: its figures.first_seen histogram (CALC-INC-1b) is kept but not read, since a hit's
     new IPs come from slice_figures(), which reads the memos the rule renews. Marking such lists
-    stale would recount their windows without rewriting the histogram (lists.write_list() keeps
-    a stored list as it is), so none is returned."""
+    stale would recount their windows without rewriting the histogram
+    (list_write.write_lists() keeps a stored list as it is), so none is returned."""
     _runs(conn, new_runs)
     return frozenset()
 

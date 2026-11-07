@@ -4,10 +4,14 @@ place_names and asn_names hold every place and ASN name once; enrichment_locatio
 coordinate) and enrichment_networks (an ASN name with per-IP network attributes) refer to them,
 and so does the calculated layer. Every list is filled the same way: the distinct rows of a source
 query are added with ON CONFLICT DO NOTHING, and each source row then finds its id through a
-NULL-safe, hashable tuple join. The all-NULL row of each list is its unknown member.
+NULL-safe, hashable tuple join. The all-NULL row of each list is its unknown member. The
+calculated layer's labels (labels()) come from Python values and are matched through each list's
+unique key instead (_matched()).
 """
 
 from __future__ import annotations
+
+from collections import defaultdict
 
 from psycopg.rows import tuple_row
 
@@ -23,6 +27,12 @@ LISTS = {
     ),
     # Calculated layer: a breakdown's ASN label is an ASN name with a usage type.
     "asn_labels": ("asn_label_id", ("asn_name_id", "usage_type")),
+}
+# Column types of the lists that labels() fills from Python values.
+TYPES = {
+    "place_names": ("text",) * 5,
+    "asn_names": ("bigint", "text"),
+    "asn_labels": ("integer", "text"),
 }
 # A calculated breakdown label's ASN fields, as calculated.aggregate and its persist use them.
 NETWORK = ("asn", "name", "usage_type")
@@ -86,34 +96,49 @@ def labels(conn, places, networks):
     `places` holds PLACE tuples and `networks` (asn, name, usage_type) tuples; returns
     {place: place_names.place_id} and {network: asn_labels.asn_label_id}.
     """
-    return (
-        _ids(conn, places, PLACE, ("text",) * 5, _place),
-        _ids(conn, networks, NETWORK, ("bigint", "text", "text"), _network),
-    )
+    by_place = _ids(conn, "place_names", places)
+    asns = _ids(conn, "asn_names", {n[:2] for n in networks})
+    found = _ids(conn, "asn_labels", {(asns[n[:2]], n[2]) for n in networks})
+    return by_place, {n: found[asns[n[:2]], n[2]] for n in networks}
 
 
-def _place(conn, source, params):
-    values = [f"s.{field}" for field in PLACE]
-    fill(conn, "place_names", values, source, params)
-    return values, lookup("place_names", values), "place_id"
-
-
-def _network(conn, source, params):
-    asn = ["s.asn", "s.name"]
-    fill(conn, "asn_names", asn, source, params)
-    asns = lookup("asn_names", asn)
-    label = ["asn_name_id.asn_name_id", "s.usage_type"]
-    fill(conn, "asn_labels", label, f"{source} {asns}", params)
-    return [*asn, "s.usage_type"], f"{asns} {lookup('asn_labels', label)}", "asn_label_id"
-
-
-def _ids(conn, wanted, fields, types, add):
-    """Fill the lists of `wanted` (tuples of `fields`) with `add`; map each tuple to its id."""
+def _ids(conn, table, wanted):
+    """Add the rows of `wanted` (tuples of `table`'s fields) to the list; map each to its id."""
+    if not wanted:
+        return {}
+    fields, types = LISTS[table][1], TYPES[table]
     rows = sorted(wanted, key=str)
-    params = [list(column) for column in zip(*rows, strict=True)] or [[] for _ in fields]
+    params = [list(column) for column in zip(*rows, strict=True)]
     unnest = ",".join(f"%s::{kind}[]" for kind in types)
     source = f"unnest({unnest}) s({','.join(fields)})"
-    values, joins, identity = add(conn, source, params)
-    query = f"SELECT {','.join(values)},{identity}.{identity} FROM {source} {joins}"
-    found = conn.cursor(row_factory=tuple_row).execute(query, params)
-    return {tuple(row[:-1]): row[-1] for row in found}
+    fill(conn, table, [f"s.{field}" for field in fields], source, params)
+    return _matched(conn, table, rows)
+
+
+def _matched(conn, table, rows):
+    """Each row's id in the list `table`, read through the list's unique key in one statement.
+
+    A NULL-safe comparison of whole rows cannot use an index, so the rows are split by which of
+    their fields are NULL: each such pattern is one branch that compares its known fields with =
+    and the others with IS NULL, conditions the unique index answers.
+    """
+    identity, fields = LISTS[table]
+    patterns = defaultdict(list)
+    for row in rows:
+        patterns[tuple(value is None for value in row)].append(row)
+    branches, params = [], []
+    for n, (nulls, members) in enumerate(patterns.items()):
+        known = [i for i, null in enumerate(nulls) if not null]
+        on = " AND ".join(
+            f"d.{field} IS NULL" if null else f"d.{field}=s.{field}"
+            for field, null in zip(fields, nulls, strict=True)
+        )
+        unnest = ",".join(f"%s::{TYPES[table][i]}[]" for i in known)
+        named = ",".join([*(fields[i] for i in known), "n"])
+        source = f"unnest({unnest}) WITH ORDINALITY s({named})" if known else "(SELECT 1) s(n)"
+        select = f"SELECT {n},s.n::integer,d.{identity} FROM {source}"
+        branches.append(f"{select} JOIN {table} d ON {on}")
+        params += [[row[i] for row in members] for i in known]
+    found = conn.cursor(row_factory=tuple_row).execute(" UNION ALL ".join(branches), params)
+    grouped = list(patterns.values())
+    return {grouped[branch][n - 1]: found_id for branch, n, found_id in found}

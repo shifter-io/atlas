@@ -81,9 +81,11 @@ CREATE TABLE IF NOT EXISTS asn_labels (
 -- order within the dimension. Request counters and percentiles come from run_geo_buckets; they
 -- are NULL on rows calculated before calculated v3, which held IP counts only. Unpartitioned:
 -- lists are shared by builds, and store.collect() deletes the rows of unreferenced lists, so
--- autovacuum runs at 1% of the table.
+-- autovacuum runs at 1% of the table. list_id has no foreign key (calculated v13): its per-row
+-- check made a build's COPY take hours. A list's rows are written in the transaction that inserts
+-- the list (list_write.py), and store.collect() deletes a list's rows before the list.
 CREATE TABLE IF NOT EXISTS calculated_list_rows (
- list_id bigint NOT NULL REFERENCES calculated_lists(list_id), dimension "char" NOT NULL
+ list_id bigint NOT NULL, dimension "char" NOT NULL
   CHECK(dimension IN ('g','c','a','r','x','y')), position integer NOT NULL,
  place_id integer REFERENCES place_names(place_id),
  asn_label_id integer REFERENCES asn_labels(asn_label_id),
