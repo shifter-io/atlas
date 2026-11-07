@@ -134,7 +134,9 @@ def test_the_enable_script_reads_the_database_file_in_place():
     assert f"https://{MANAGER_IP}:8443/health" in script and "--connect-to ::127.0.0.1:" in script
     assert script.splitlines()[-2:] == [f"cat {manager_orch.CERT}", "echo healthy"]
     uses = [line for line in script.splitlines() if manager_orch.DATABASE_FILE in line]
-    assert all(line.startswith("test ") for line in uses) and len(uses) == 2  # never read
+    # Only checked, and read in place by db-seed: never copied or printed.
+    assert uses[-1] == f"{manager_orch.SEED_TARGETS} > /dev/null" and len(uses) == 3
+    assert all(line.startswith("test ") for line in uses[:-1])
     with pytest.raises(ValueError):
         manager_orch.enable_script("203.0.113.10; rm -rf /", CID)
     lines = script.splitlines()
@@ -160,6 +162,16 @@ def test_the_enable_script_makes_the_browser_ca_once_before_the_restart():
     fresh = manager_orch.enable_script(MANAGER_IP, CID, new_ca=True).splitlines()
     assert f"rm -f {manager_orch.BROWSER_CA} {manager_orch.BROWSER_CA_KEY}" in fresh
     assert fresh.index(f"rm -f {manager_orch.BROWSER_CA} {manager_orch.BROWSER_CA_KEY}") < make
+
+
+def test_the_enable_script_seeds_the_targets_before_the_start():
+    lines = manager_orch.enable_script(MANAGER_IP, CID).splitlines()
+    assert manager_orch.SEED_TARGETS == (
+        "/opt/proxy-index-campaign/venv/bin/proxy-index db-seed --only targets "
+        "--database-file /etc/proxy-index/database.toml"
+    )
+    seed = lines.index(f"{manager_orch.SEED_TARGETS} > /dev/null")
+    assert seed < next(i for i, line in enumerate(lines) if "systemctl restart" in line)
 
 
 def test_the_hourly_timer_is_never_started_by_enable_or_deploy():
@@ -238,6 +250,7 @@ async def test_enable_dry_run_changes_nothing(job, tmp_path):
     assert sorted(result["units"]) == sorted(manager_orch.UNIT_FILES)
     assert result["daily"] == {"template": CID, "formulas": 2}
     assert result["started"] == list(manager_orch.STARTED)
+    assert result["seed_targets"] == manager_orch.SEED_TARGETS  # printed, not run
     assert inventory(job) == before and writes(fake) == writes_before and shell.calls == []
 
 

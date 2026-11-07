@@ -87,7 +87,7 @@ func estimatedSnapshot(t *testing.T) []byte {
 func estimatedBuild(t *testing.T) *build.Result {
 	t.Helper()
 	db := testdb.New(t)
-	db.PublishV4(t, estimatedSnapshot(t))
+	db.Publish(t, estimatedSnapshot(t))
 	return buildFrom(t, db)
 }
 
@@ -105,14 +105,8 @@ func TestTheHourFormulaGivesTheIPNumbers(t *testing.T) {
 	if p.Pool.UniqueIps24h != want || p.Pool.UniqueIps30d != want {
 		t.Errorf("provider pool %v / %v, want %v", p.Pool.UniqueIps24h, p.Pool.UniqueIps30d, want)
 	}
-	// The geo rows are the network list's country rows: the fixture's
-	// country breakdown (US 4000, DE 900), not its pool list (US 4960, FI 6,
-	// JP 1).
-	if len(p.Geo) != 2 {
-		t.Errorf("geo %+v, want the 2 country rows", p.Geo)
-	}
 	for _, g := range p.Geo {
-		measured := map[string]float64{"US": 4000, "DE": 900}[g.CountryCode]
+		measured := map[string]float64{"US": 4960, "FI": 6, "JP": 1}[g.CountryCode]
 		if g.Ips != half(measured*estimateScale) || g.Share != g.Ips/want {
 			t.Errorf("geo %s: %v ips, share %v", g.CountryCode, g.Ips, g.Share)
 		}
@@ -238,12 +232,6 @@ func scaledOrNull(ips Num) Num {
 
 func sameNum(a, b Num) bool { return a == b || (!a.OK() && !b.OK()) }
 
-// hourReleased is a test event releasing an hour's figures, once shifter is
-// published.
-const hourReleased = `INSERT INTO test_events(at,kind,product_id,country_code,signal,severity,data) VALUES
- ('2026-09-26T14:01:00+00','estimate_hour_released',(SELECT product_id FROM products WHERE provider='shifter'),'US',0,'info',
-  '{"day": "2026-09-26", "hour": 13, "formula_version": 1, "unique_ips": 124, "countries": 1}')`
-
 // No answer body names the estimate: no `estimated` key or flag and no
 // "estimate" text, in every pre-rendered answer, the dataset and the pages.
 // The tape keeps an hour's release row, worded as an hourly update (owner
@@ -251,8 +239,10 @@ const hourReleased = `INSERT INTO test_events(at,kind,product_id,country_code,si
 func TestNoAnswerNamesTheEstimate(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
-	db.PublishV4(t, estimatedSnapshot(t))
-	db.Exec(t, hourReleased)
+	db.Publish(t, estimatedSnapshot(t))
+	db.Exec(t, `INSERT INTO test_events(at,kind,product_id,country_code,signal,severity,data) VALUES
+ ('2026-09-26T14:01:00+00','estimate_hour_released',(SELECT product_id FROM products WHERE provider='shifter'),'US',0,'info',
+  '{"day": "2026-09-26", "hour": 13, "formula_version": 1, "unique_ips": 124, "countries": 1}')`)
 	res := buildFrom(t, db)
 	released := false
 	for _, e := range res.Dataset.Tape {

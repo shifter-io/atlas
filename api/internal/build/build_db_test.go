@@ -147,9 +147,7 @@ func contains(list []string, v string) bool {
 }
 
 // partialSnapshot is a minimal v2 snapshot: one product, HTTP measured, HTTPS
-// not, no ready score, a v2 country breakdown for US only, one census. Its
-// cohort is a hash, as the framework's are, so no other text holds it
-// (testscale.AsV4Answers replaces it).
+// not, no ready score, a v2 country breakdown for US only, one census.
 const partialSnapshot = `{
  "schema_version": 2, "snapshot_id": "77", "implementation_id": "calc-test",
  "as_of": "2026-10-01T12:00:00+00:00", "generated_at": "2026-10-01T12:00:05+00:00",
@@ -159,7 +157,7 @@ const partialSnapshot = `{
    "30d": {"start": "2026-09-01T12:00:00+00:00", "end": "2026-10-01T12:00:00+00:00", "hours": 720}},
  "methodology": {"id": "m-test", "settings": {"weights": {"reliability": 22, "speed": 14, "uptime": 10, "coverage": 12, "diversity": 8, "dcAsns": 10, "authenticity": 10, "value": 14}, "profiles": {}}},
  "products": [{
-  "id": "1:5e0c2a9d1b7f4e3a8c61", "product_id": 1, "provider": "acme", "product": "residential", "name": "Acme", "kind": "residential", "cohort": "5e0c2a9d1b7f4e3a8c61",
+  "id": "1:c", "product_id": 1, "provider": "acme", "product": "residential", "name": "Acme", "kind": "residential", "cohort": "c",
   "criteria": {"kind": "residential", "country": null, "runner_location": null, "concurrency": 25, "session_policy": "rotate"},
   "census": [{"country": "US", "region": "fra1", "finished_at": "2026-10-01T06:10:00+00:00", "requests": 5000, "successes": 4900, "unique_ips": 4100, "duration_s": 300, "stop_reason": "unique_ratio"}],
   "outages": [],
@@ -201,20 +199,16 @@ const partialSnapshot = `{
  "dbip_release": null
 }`
 
-// acmeCatalog is partialSnapshot's network in the catalog and two of its
-// test events, once it is published.
-const acmeCatalog = `INSERT INTO site.providers(slug,name,hq,website,framework_provider,kinds,primary_kind) VALUES ('acme-proxies','Acme Proxies','Berlin, DE','https://acme.example','acme','{residential}','residential');
-INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,avg_payload_kb) VALUES ('acme-proxies','residential','per_gb',4.5,180);
-INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_size) VALUES ('acme-proxies','residential',true,1000000);
-INSERT INTO test_events(at,kind,product_id,country_code,signal,severity,data) VALUES
- ('2026-10-01T11:58:00+00','pulse_finished',(SELECT product_id FROM products WHERE provider='acme'),'US',1,'info','{"requests": 100, "success_rate": 0.97, "p50": 400}'),
- ('2026-10-01T11:59:00+00','down',(SELECT product_id FROM products WHERE provider='acme'),'DE',-1,'major','{"source": "pulse"}')`
-
 func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 	t.Parallel()
 	db := catalogued(t)
-	db.PublishV4(t, []byte(partialSnapshot))
-	db.Exec(t, acmeCatalog)
+	db.Publish(t, []byte(partialSnapshot))
+	db.Exec(t, `INSERT INTO site.providers(slug,name,hq,website,framework_provider,kinds,primary_kind) VALUES ('acme-proxies','Acme Proxies','Berlin, DE','https://acme.example','acme','{residential}','residential');
+INSERT INTO site.pricing(provider_slug,category,model,price_per_gb,avg_payload_kb) VALUES ('acme-proxies','residential','per_gb',4.5,180);
+INSERT INTO site.trust_signals(provider_slug,category,kyc_verified,claimed_pool_size) VALUES ('acme-proxies','residential',true,1000000);`)
+	db.Exec(t, `INSERT INTO test_events(at,kind,product_id,country_code,signal,severity,data) VALUES
+ ('2026-10-01T11:58:00+00','pulse_finished',(SELECT product_id FROM products WHERE provider='acme'),'US',1,'info','{"requests": 100, "success_rate": 0.97, "p50": 400}'),
+ ('2026-10-01T11:59:00+00','down',(SELECT product_id FROM products WHERE provider='acme'),'DE',-1,'major','{"source": "pulse"}')`)
 	res := buildFrom(t, db)
 	p := res.Details["acme-proxies"]
 	if p == nil {
@@ -233,7 +227,7 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 		"performance.ttfbP50", "performance.captchaRate", "pool.requestsPerIp", "pricing.plans", "pricing.trial",
 		"pricing.minCommit", "trust.blacklistHitRate", "trust.leakChecks", "trust.consentDisclosed",
 		"targets[generic_https].successRate", "targets[google_search].latencyP50", "targets[generic_http].delta24h",
-		"ipSamples", "series.pricePerGb90d", "overlap.overlaps", "overlap.exclusiveShare",
+		"geo[].latencyP50", "ipSamples", "series.pricePerGb90d", "overlap.overlaps", "overlap.exclusiveShare",
 		"overlap.likelyUpstream", "reviews.mean", "productMeasurements.residential.pricing.plans",
 	}
 	for _, x := range mustNA {
@@ -246,10 +240,7 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 		"performance.uptimePct", "trust.datacenterAsnShare", "score.breakdown.reliability", "targets[generic_http].successRate",
 		// A v2 snapshot publishes outages: an empty list is zero outages, and the
 		// 24h outage time gives the weighted downtime.
-		"incidents", "productMeasurements.residential.incidents", "performance.downtimeMinutes24h",
-		// The geo rows are the network list's country rows, the country
-		// breakdown's (US, with its latency), not the pool list's (US and DE).
-		"geo[].latencyP50"}
+		"incidents", "productMeasurements.residential.incidents", "performance.downtimeMinutes24h"}
 	for _, x := range mustHave {
 		if na[x] {
 			t.Errorf("%s has a value but is listed as N/A", x)
@@ -284,12 +275,8 @@ func TestNAManifestForAPartiallyMeasuredProvider(t *testing.T) {
 	if prov.Series.Success24h[0].T.F() != 60 {
 		t.Errorf("series ages are minutes: got %v", prov.Series.Success24h[0].T)
 	}
-	// A v4 build's coverage evidence is the dataset's City x ASN lists.
-	evidence := cityAsnLists(t, res)
-	for _, r := range build.Ranges {
-		if _, ok := evidence["city_asn acme-proxies "+prov.PrimaryKind+" "+r.ID]; !ok {
-			t.Errorf("%s coverage evidence not attached", r.ID)
-		}
+	if prov.CoverageEvidence[prov.PrimaryKind] == nil {
+		t.Error("coverage evidence not attached")
 	}
 	// Coverage lists the provider with sectioned N/A fields.
 	var cov *build.CoverageEntity
@@ -387,27 +374,15 @@ func collectNulls(v any, path string, out map[string]bool) {
 // Keep the pgxpool import used by helpers in other test files of this package.
 var _ *pgxpool.Pool
 
-// measuredOnlyV4 builds from a database the way staging looks before any
-// catalog rows: the framework's published snapshot, as payload v4, and
-// nothing else (no catalog scopes, profiles or pricing). With
+// measuredOnly builds from a database the way staging looks before any
+// catalog rows: the framework's published snapshot and nothing else (no
+// catalog scopes, profiles or pricing). With
 // SITEAPI_TEST_DUMP=<file> it also writes the /v1/dataset body there, for an
 // offline `SITE_API_DATASET_FILE` site build over measured-only data.
-func measuredOnlyV4(t *testing.T, snapshot []byte) *build.Result {
-	t.Helper()
-	return measuredBuild(t, snapshot, (*testdb.DB).PublishV4)
-}
-
-// measuredOnly is measuredOnlyV4 of the snapshot as it is, before payload
-// v4: the whole build longtail_db_test.go compares a capped one with.
 func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
 	t.Helper()
-	return measuredBuild(t, snapshot, (*testdb.DB).Publish)
-}
-
-func measuredBuild(t *testing.T, snapshot []byte, publish func(*testdb.DB, testing.TB, []byte) int64) *build.Result {
-	t.Helper()
 	db := testdb.New(t)
-	publish(db, t, snapshot)
+	db.Publish(t, snapshot)
 	res := buildFrom(t, db)
 	if out := os.Getenv("SITEAPI_TEST_DUMP"); out != "" {
 		body, err := server.Marshal(res.Dataset)
@@ -424,7 +399,7 @@ func measuredBuild(t *testing.T, snapshot []byte, publish func(*testdb.DB, testi
 func TestMeasuredOnlyDatasetHasNoPriceFigures(t *testing.T) {
 	t.Parallel()
 	// The fixture as v2 with outages, so the dump also shows real outage bands.
-	res := measuredOnlyV4(t, withOutages(t))
+	res := measuredOnly(t, withOutages(t))
 	ds := res.Dataset
 	if ds.Totals.Incidents24h != 2 {
 		t.Errorf("incidents24h over the measured fleet: %v", ds.Totals.Incidents24h)
@@ -458,7 +433,7 @@ func TestMeasuredOnlyEveryRequestDatasetIsPriced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := measuredOnlyV4(t, snapshot)
+	res := measuredOnly(t, snapshot)
 	for _, r := range build.Ranges {
 		if rank := valueRank(res, r.ID, "shifter"); rank != 1 {
 			t.Errorf("%s value rank %d, want 1", r.ID, rank)
@@ -478,7 +453,7 @@ func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := catalogued(t)
-	db.PublishV4(t, snapshot)
+	db.Publish(t, snapshot)
 	before := buildFrom(t, db).Details["shifter"].Provider
 	catalog, err := os.ReadFile(repoFile(t, "api", "scripts", "catalog-shifter.sql"))
 	if err != nil {
@@ -498,10 +473,8 @@ func TestReviewProductLinkPreservesMeasuredPrices(t *testing.T) {
 	}
 }
 
-// withCityAsn is the every-request fixture with one City x ASN row in every
-// window.
-func withCityAsn(t *testing.T) []byte {
-	t.Helper()
+func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -527,18 +500,12 @@ func withCityAsn(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return changed
-}
-
-func TestCoverageNetworkIntersectionsPassThroughToEveryReviewWindow(t *testing.T) {
-	t.Parallel()
-	res := measuredOnlyV4(t, withCityAsn(t))
+	res := measuredOnly(t, changed)
 	provider := res.Details["shifter"].Provider
-	// A v4 build's coverage evidence is the dataset's City x ASN lists.
-	expected := `{"total":1,"rows":[["DE","Germany","Berlin","Berlin",3320,"Deutsche Telekom","residential",12,50]]}`
-	evidence := cityAsnLists(t, res)
+	expected := `[["DE","Germany","Berlin","Berlin",3320,"Deutsche Telekom","residential",12,50]]`
 	for _, r := range build.Ranges {
-		if received := string(evidence["city_asn shifter "+provider.PrimaryKind+" "+r.ID]); received != expected {
+		received, _ := json.Marshal(provider.CoverageEvidence[provider.PrimaryKind][r.ID])
+		if string(received) != expected {
 			t.Errorf("%s lost coverage network evidence: %s", r.ID, received)
 		}
 	}
@@ -553,7 +520,7 @@ func TestLeftoverDemoRowsAreNotServed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.PublishV4(t, snapshot)
+	db.Publish(t, snapshot)
 	res := buildFrom(t, db)
 	if len(res.Dataset.Providers) != 1 || res.Details["nimbus-residential"] != nil || res.Pages.Network["nimbus-residential/residential"] != nil {
 		t.Fatalf("a demo network is served: %v", keys(res.Details))
@@ -599,10 +566,8 @@ func TestLeftoverDemoRowsAreNotServed(t *testing.T) {
 	}
 }
 
-// withEarlyTrend is the every-request fixture with a second observed bucket
-// in its 24h series, five minutes after its first.
-func withEarlyTrend(t *testing.T) []byte {
-	t.Helper()
+func TestMeasuredMarketDrawsFromFirstObservedSamples(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -643,13 +608,8 @@ func withEarlyTrend(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return raw
-}
-
-func TestMeasuredMarketDrawsFromFirstObservedSamples(t *testing.T) {
-	t.Parallel()
 	db := catalogued(t)
-	db.PublishV4(t, withEarlyTrend(t))
+	db.Publish(t, raw)
 	res := buildFrom(t, db)
 	for _, view := range marketViews(t, res) {
 		if len(view.HeadlineSpark.Values) < 2 {

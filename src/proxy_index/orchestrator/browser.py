@@ -13,7 +13,10 @@ the browser region (batches.participants leaves its nodes out).
 
 The settings file is parsed again only when its SHA-256 changes. An unreadable or invalid file
 raises the alert browser_settings_invalid (one alert, its occurrences counted) and nothing is
-planned; the alert is acknowledged once the file loads again.
+planned; the alert is acknowledged once the file loads again. A settings target with no row in
+`targets` (a database seeded before it was added) raises the alert browser_targets_missing, naming
+the ids and the fix, `proxy-index db-seed --only targets`; it is not planned, the other targets
+are, and the alert is acknowledged once every target is there.
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from .nodes import BROWSER_REGION_ROW, BROWSER_REGION_SQL
 GRACE = timedelta(seconds=60)  # a slot opened this late still uses its whole interval
 LATE_END = timedelta(minutes=10)  # a late slot leaves this much of its end unplanned
 ALERT = "browser_settings_invalid"
+TARGETS_ALERT = "browser_targets_missing"
 # Per settings path: the SHA-256 of the bytes last parsed and the settings, or the error.
 _LOADED: dict[str, tuple[str, BrowserSettings | str]] = {}
 
@@ -107,6 +111,36 @@ async def _create_runs(conn: psycopg.AsyncConnection, batch_ids: list[int]) -> i
     return row["networks"]
 
 
+async def _acknowledge(conn: psycopg.AsyncConnection, key: str) -> None:
+    await conn.execute(
+        "UPDATE alerts SET acknowledged_at=now() WHERE dedupe_key=%s AND acknowledged_at IS NULL",
+        (key,),
+    )
+
+
+async def _missing(conn: psycopg.AsyncConnection, settings: BrowserSettings) -> list[str]:
+    """The settings targets with no row in `targets`, alerted; acknowledged when there are none."""
+    ids = [target.id for target in settings.targets]
+    rows = await (
+        await conn.execute("SELECT target_id FROM targets WHERE target_id = ANY(%s)", (ids,))
+    ).fetchall()
+    present = {row["target_id"] for row in rows}
+    missing = [target for target in ids if target not in present]
+    if not missing:
+        await _acknowledge(conn, TARGETS_ALERT)
+        return missing
+    await raise_alert(
+        conn,
+        TARGETS_ALERT,
+        f"The browser targets {', '.join(missing)} are not in targets and are not planned; "
+        "run `proxy-index db-seed --only targets`",
+        severity="major",
+        dedupe_key=TARGETS_ALERT,
+        data={"missing": missing},
+    )
+    return missing
+
+
 async def _usable(conn: psycopg.AsyncConnection) -> BrowserSettings | dict[str, Any]:
     """The enabled settings, or the job's skip result."""
     if not await setting(conn, "browser.enabled"):
@@ -125,10 +159,7 @@ async def _usable(conn: psycopg.AsyncConnection) -> BrowserSettings | dict[str, 
             data={"error": settings},
         )
         return {"skipped": "the browser settings file is invalid"}
-    await conn.execute(
-        "UPDATE alerts SET acknowledged_at=now() WHERE dedupe_key=%s AND acknowledged_at IS NULL",
-        (ALERT,),
-    )
+    await _acknowledge(conn, ALERT)
     if not settings.enabled:
         return {"skipped": "the browser settings file has enabled = false"}
     return settings
@@ -140,7 +171,8 @@ async def browser_plan(
     """Open the current slot of every settings target that has no batch for it yet.
 
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
-    node}, or {"skipped": reason} when the planner is off or the settings file is unusable.
+    node}, plus "missing": target ids not in `targets` when there are any, or {"skipped":
+    reason} when the planner is off or the settings file is unusable.
     `given` settings (the scale replay's model) are planned as they are, without reading the
     settings browser.enabled and browser.settings_file.
     """
@@ -151,10 +183,13 @@ async def browser_plan(
             return settings
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))
         await conn.execute(BROWSER_REGION_SQL, BROWSER_REGION_ROW)
+        missing = await _missing(conn, settings)
         lead = timedelta(seconds=settings.schedule.lead_seconds)
         targets = [(target.id, target.every_minutes) for target in settings.targets]
         opened, created = [], []
         for target, slot, start in slot_starts(targets, now, lead):
+            if target in missing:  # its spread place stays free; the others keep theirs
+                continue
             batch_ids = await _open(conn, target, slot, start, settings.schedule.countries)
             if batch_ids:
                 opened.append(target)
@@ -163,4 +198,5 @@ async def browser_plan(
         if not networks:
             for batch_id in created:
                 await close_batch(conn, batch_id, now)
-    return {"opened": opened, "created": len(created), "networks": networks}
+    result = {"opened": opened, "created": len(created), "networks": networks}
+    return result | ({"missing": missing} if missing else {})

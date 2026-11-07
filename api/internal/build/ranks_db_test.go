@@ -65,10 +65,9 @@ func (p rankPlace) payloadRow() map[string]any {
 
 // rankedSnapshot publishes the every-request fixture as four networks with
 // seeded coverage counts and place lists, the region, city and ASN lists capped
-// to 2 rows the way slim() caps them: as payload v4 (each network its group,
-// testdb.PublishV4) when v4, else as it is, with the typed rows of every whole
+// to 2 rows the way slim() caps them, and stores the typed rows of every whole
 // list. Returns the build id.
-func rankedSnapshot(t *testing.T, db *testdb.DB, v4 bool) int64 {
+func rankedSnapshot(t *testing.T, db *testdb.DB) int64 {
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -130,9 +129,6 @@ func rankedSnapshot(t *testing.T, db *testdb.DB, v4 bool) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v4 {
-		return db.PublishV4(t, payload)
-	}
 	build := db.Publish(t, payload)
 	storeRankRows(t, db, build, products[0].(map[string]any)["cohort"].(string), whole)
 	return build
@@ -185,12 +181,11 @@ func storeRankRows(t *testing.T, db *testdb.DB, build int64, cohort string, whol
 }
 
 // directTileRanksSQL ranks every window's coverage counts above zero across
-// networks with RANK(), from the published payload: its networks (v4) or
-// its product groups.
+// networks with RANK(), from the published payload.
 const directTileRanksSQL = `WITH v AS (
  SELECT p->>'provider' AS provider, w.key AS range, t.name,
   CASE WHEN (w.value->'pool'->>t.name)::float > 0 THEN (w.value->'pool'->>t.name)::float END AS value
- FROM calculated_snapshots s, jsonb_array_elements(coalesce(s.payload->'networks', s.payload->'products')) p, jsonb_each(p->'windows') w,
+ FROM calculated_snapshots s, jsonb_array_elements(s.payload->'products') p, jsonb_each(p->'windows') w,
   unnest(ARRAY['unique_ips', 'countries', 'regions', 'cities', 'asns']) t(name)
  WHERE s.build_id = $1)
 SELECT provider, range, name,
@@ -205,18 +200,14 @@ func sameDBRank(got model.Rank, rank *int64, peers int64) bool {
 	return float64(got.Rank) == float64(*rank) && int64(got.Peers) == peers
 }
 
-// The ranks are the same read from a v4 build's network lists, and, before
-// v4, from calculated v8's breakdown partition and from v9's lists.
+// The ranks are the same read from calculated v8's breakdown partition and
+// from v9's lists.
 func TestRanksMatchADirectSQLRanking(t *testing.T) {
 	t.Parallel()
-	t.Run("network lists", func(t *testing.T) {
-		db := testdb.New(t)
-		ranksMatchSQL(t, db, rankedSnapshot(t, db, true))
-	})
 	for _, k2 := range []bool{false, true} {
 		t.Run(map[bool]string{false: "calculated_breakdowns", true: "lists"}[k2], func(t *testing.T) {
 			db := testdb.New(t)
-			build := rankedSnapshot(t, db, false)
+			build := rankedSnapshot(t, db)
 			if k2 {
 				db.MoveToLists(t)
 			}

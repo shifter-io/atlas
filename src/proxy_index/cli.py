@@ -210,6 +210,11 @@ def _add_data_parsers(commands) -> None:
         action="store_true",
         help="Put every census time back on the staggered default slots",
     )
+    seed.add_argument(
+        "--only",
+        choices=("targets",),
+        help="Upsert only the targets (keeps their schedules; regions and countries untouched)",
+    )
     database = commands.add_parser("db-info", help="Identify the local MMDB and show its checksum")
     database.add_argument("--mmdb")
 
@@ -257,15 +262,20 @@ def _enrich(args: argparse.Namespace) -> int:
 
 
 def _db_seed(args: argparse.Namespace) -> int:
-    from .storage import seed
+    from .storage import seed, seed_targets
 
-    result = seed(
-        args.database_file,
-        args.regions,
-        args.targets,
-        countries_path=args.countries,
-        reset_times=args.reset_times,
-    )
+    if args.only and args.reset_times:
+        raise UserError("--reset-times changes countries; it cannot go with --only targets")
+    if args.only:
+        result = seed_targets(args.database_file, args.targets)
+    else:
+        result = seed(
+            args.database_file,
+            args.regions,
+            args.targets,
+            countries_path=args.countries,
+            reset_times=args.reset_times,
+        )
     print(json.dumps(result, indent=2))
     return 0
 

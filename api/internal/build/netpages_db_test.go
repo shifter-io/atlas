@@ -11,6 +11,7 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -51,20 +52,13 @@ func tailLists(t *testing.T, c *pgx.Conn, nc netCase) {
 	}
 }
 
-// longListsGolden is the golden of TestLongNetworkListsPageFromTheDatabase:
-// the answers of the v3 build of its rows (its lists held in memory), but for
-// the documented id, cohort and schema version strings
-// (TestTheLongListGoldenIsTheV3Answers).
-const longListsGolden = "network-long-lists"
-
 // TestLongNetworkListsPageFromTheDatabase: a v4 build's lists longer than a
 // page are read from the database when a page or search asks for them, and
-// every answer equals, byte for byte, the golden's (the v3 build's of the
-// same rows, its lists held in memory) and the v4 build's whose network
-// lists are held in memory: later pages, a search only a tail row matches, a
-// country's merged cities and regions, the all-networks list, the Coverage
-// pages, the place pages and the dataset file. An unknown list is still not
-// found.
+// every answer equals, byte for byte, the v3 build's of the same rows (its
+// lists held in memory) and the v4 build's whose network lists are held in
+// memory: later pages, a search only a tail row matches, a country's merged
+// cities and regions, the all-networks list, the Coverage pages, the place
+// pages and the dataset file. An unknown list is still not found.
 func TestLongNetworkListsPageFromTheDatabase(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
@@ -72,9 +66,13 @@ func TestLongNetworkListsPageFromTheDatabase(t *testing.T) {
 	defer c.Close(context.Background())
 	nc := writeNetLists(t, c)
 	tailLists(t, c, nc)
-	_, v4, groups := netPayloads(t, c, nc)
+	v3, v4, groups := netPayloads(t, c, nc)
+	same := func() { db.Exec(t, "UPDATE calculated_snapshots SET content_hash = 'same'") }
+	db.PublishParts(t, v3, groups, nil)
+	same()
+	fromV3 := loadWith(t, db, nil)
 	db.PublishParts(t, v4, groups, nil)
-	db.Exec(t, "UPDATE calculated_snapshots SET content_hash = 'same'")
+	same()
 	ctx := context.Background()
 	pool, err := store.OpenReadOnly(ctx, db.DSN)
 	if err != nil {
@@ -92,7 +90,11 @@ func TestLongNetworkListsPageFromTheDatabase(t *testing.T) {
 	if n := fromDB.Pages.Network["shifter/residential"].Ranges["30d"].Lists["city"]; n != len(listLabels["g"])+tailRows {
 		t.Fatalf("shifter's 30d city list has %d rows, want %d", n, len(listLabels["g"])+tailRows)
 	}
-	golden(t, longListsGolden, netAnswers(t, fromDB))
+	want, err := testscale.AsV4Answers(netAnswers(t, fromV3), groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compareAnswers(t, "v4 from the database", want, netAnswers(t, fromDB))
 	held := heldBuild(t, pool, in, nc)
 	compareAnswers(t, "v4 held in memory", longPages(t, held), longPages(t, fromDB))
 	if page, ok, err := fromDB.Pages.List(ctx, "", "country/DE", "30d", "city", "zyx", 1); err != nil || !ok || len(page.Rows) != len(netProviders) ||

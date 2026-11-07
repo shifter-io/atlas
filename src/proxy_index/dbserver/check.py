@@ -5,9 +5,7 @@ not judged (the server's owner tunes it). Gaps are judged against `Roles`:
 
 - the run-time role writes every table and creates, drops and ANALYZEs the run-time
   partitions, so it needs CREATE on the schema and ownership of every partitioned table and of
-  its partitions (CREATE TABLE ... PARTITION OF needs the parent's owner), and ingest creates
-  temporary tables, so it needs TEMPORARY on the database (PUBLIC has it by default, but a
-  server may have revoked it);
+  its partitions (CREATE TABLE ... PARTITION OF needs the parent's owner);
 - the API role reads every framework table and view;
 - both run every function in the schema (EXECUTE): calculations and ingest call them, and a
   view's functions are checked against the role reading the view;
@@ -99,12 +97,7 @@ SELECT has_schema_privilege(%(runtime)s::name, %(schema)s::text, 'USAGE') AS run
        has_schema_privilege(%(runtime)s::name, %(schema)s::text, 'CREATE') AS runtime_create,
        has_schema_privilege(%(api)s::name, %(schema)s::text, 'USAGE') AS api_usage,
        pg_has_role(%(admin)s::name, %(runtime)s::name, 'USAGE')
-         AND pg_has_role(%(admin)s::name, %(runtime)s::name, 'SET') AS admin_acts_as_runtime,
-       has_database_privilege(%(runtime)s::name, d.oid, 'TEMPORARY') AS runtime_temporary,
-       pg_has_role(%(admin)s::name, d.datdba, 'USAGE')
-         OR has_database_privilege(%(admin)s::name, d.oid, 'TEMPORARY WITH GRANT OPTION')
-         AS admin_grants_temporary
-FROM pg_database d WHERE d.datname = current_database()"""
+         AND pg_has_role(%(admin)s::name, %(runtime)s::name, 'SET') AS admin_acts_as_runtime"""
 # Partitions are read through their parent, so only the parents are checked.
 OBJECTS = """
 SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname) AS name,
@@ -257,12 +250,6 @@ def _role_gaps(report, admin_role, runtime, api, admin):
             if not report["access"][flag]
         ],
     )
-    if not report["access"]["runtime_temporary"]:
-        database = sql.Identifier(report["server"]["database"])
-        statement = sql.SQL("GRANT TEMPORARY ON DATABASE {} TO {}").format(database, runtime)
-        run_as = "admin" if report["access"]["admin_grants_temporary"] else "superuser"
-        detail = "the run-time role cannot create the temporary tables ingest uses"
-        yield "temporary", detail, run_as, [statement]
 
 
 def _grant_gaps(report, runtime, api):
