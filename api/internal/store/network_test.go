@@ -170,11 +170,9 @@ func TestNewNetListRefusesWhatAListCannotHold(t *testing.T) {
 	}
 }
 
-// A v4 read drops the group lists a cache holds, a v3 read its network lists.
+// A v4 read drops the group lists a cache holds.
 func TestListsHoldOneKindOfList(t *testing.T) {
 	t.Parallel()
-	var none *Lists
-	none.dropNetworks()
 	c := NewLists()
 	c.held = map[int64]*List{1: {}}
 	n := c.networkLists(nil)
@@ -183,9 +181,5 @@ func TestListsHoldOneKindOfList(t *testing.T) {
 	}
 	if other := c.networkLists(&pgx.Conn{}); other == n || other.db == nil {
 		t.Error("network lists read through another database were kept")
-	}
-	c.dropNetworks()
-	if c.net != nil || c.networkLists(nil) == n {
-		t.Error("a v3 read kept the network lists")
 	}
 }

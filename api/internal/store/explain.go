@@ -21,7 +21,6 @@ import (
 const (
 	everyLayout = ""
 	v4Layout    = "v4"
-	preV4Layout = "pre-v4" // a build before v4 (or, LOCK, before K2): not timed
 )
 
 // Statement is one statement shape of the API's serving path.
@@ -86,8 +85,6 @@ func registry() []Statement {
 			revision, updated, _ := siteFingerprintSQL(p.Layout)
 			return fmt.Sprintf(fingerprintSQL, revision, updated), nil
 		}},
-		{"load.has_breakdowns", "hasBreakdowns", everyLayout, fixed(hasBreakdownsSQL)},
-		{"load.lock_breakdowns", "LoadLists", preV4Layout, fixed(lockBreakdownsSQL)},
 		{"load.now", "Inputs.loadHead", everyLayout, fixed(nowSQL)},
 	}
 	for _, r := range siteReads {
@@ -98,12 +95,6 @@ func registry() []Statement {
 		Statement{"load.framework_providers", "Inputs.frameworkSteps", everyLayout, fixed(frameworkProvidersSQL)},
 		Statement{"load.framework_products", "Inputs.frameworkSteps", everyLayout, fixed(frameworkProductsSQL)},
 		Statement{"load.snapshot", "Inputs.loadSnapshot", everyLayout, fixed(snapshotSQL)},
-		Statement{"load.product_parts", "SnapshotRow.readParts", preV4Layout, func(p *ExplainParams) (string, []any) { return productPartsSQL, []any{p.Build} }},
-		Statement{"load.has_list_rows", "SnapshotRow.windowLists", preV4Layout, fixed(hasListRowsSQL)},
-		Statement{"load.window_lists", "SnapshotRow.windowLists", preV4Layout, func(p *ExplainParams) (string, []any) { return windowListsSQL(true), []any{p.Build} }},
-		Statement{"load.breakdown_rows", "scanList", preV4Layout, func(p *ExplainParams) (string, []any) {
-			return listQuery(false), []any{[]int64{}, strings.Split(fullCodes, ""), p.Build}
-		}},
 		Statement{"load.network_counts", "NetLists.counts", v4Layout, func(p *ExplainParams) (string, []any) {
 			return netCountSQL, []any{p.Lists, strings.Split(netCodes, "")}
 		}},
@@ -186,8 +177,6 @@ func explainOne(ctx context.Context, tx pgx.Tx, p *ExplainParams, s Statement) E
 // skipReason is why s is not run against the current build, "" when it is.
 func skipReason(p *ExplainParams, s Statement) string {
 	switch {
-	case s.Only == preV4Layout:
-		return "pre-v4 layout: not timed"
 	case s.Only == v4Layout && !p.V4:
 		return "the current build is not v4"
 	case s.Only == v4Layout && len(p.Lists) == 0:
@@ -214,7 +203,7 @@ func explainParams(ctx context.Context, tx pgx.Tx) (*ExplainParams, error) {
 		return nil, err
 	}
 	var s SnapshotRow
-	err = tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, new(*int), &p.V4)
+	err = tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &p.V4)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, nil
 	}

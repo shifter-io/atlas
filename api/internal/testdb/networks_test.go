@@ -1,12 +1,10 @@
 package testdb_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"slices"
-	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +14,6 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
-	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -78,12 +75,12 @@ func answers(t *testing.T, db *testdb.DB) (map[string][]byte, *store.Inputs, *st
 	return out, in, log
 }
 
-// ran is the names of the registry's statements of a layout (store.Statement
-// Only: "v4" or "pre-v4") the log holds.
-func ran(log *statements, only string) []string {
+// ran is the names of the registry's v4 statements (store.Statement Only)
+// the log holds.
+func ran(log *statements) []string {
 	var out []string
 	for _, s := range store.Statements {
-		if sql, _ := s.Query(&store.ExplainParams{}); s.Only == only && slices.Contains(log.sql, sql) {
+		if sql, _ := s.Query(&store.ExplainParams{}); s.Only == "v4" && slices.Contains(log.sql, sql) {
 			out = append(out, s.Name)
 		}
 	}
@@ -92,10 +89,11 @@ func ran(log *statements, only string) []string {
 
 // PublishV4 of each saved fixture loads through store.LoadLists as a v4
 // build, reading its network lists and no product part or group list, and
-// gives every answer the build of the fixture's lists from one source gives
-// (testscale.Listed), but for the documented differences
-// (testscale.AsV4Answers).
-func TestPublishV4AnswersAsTheListedFixture(t *testing.T) {
+// renders every answer. Until payload v4 was the only one read, this test
+// also showed that it gives every answer the build of the fixture's lists
+// from one source gives (testscale.Listed), but for the documented
+// differences (testscale.AsV4Answers).
+func TestPublishV4LoadsAsAV4Build(t *testing.T) {
 	for _, name := range []string{"snapshot.json", "snapshot-every-request.json"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -103,70 +101,20 @@ func TestPublishV4AnswersAsTheListedFixture(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			listed, err := testscale.Listed(payload)
-			if err != nil {
-				t.Fatal(err)
-			}
 			db := testdb.New(t)
-			db.Publish(t, listed)
-			before, _, log := answers(t, db)
-			if len(ran(log, "pre-v4")) == 0 {
-				t.Errorf("the v1/v2 read ran no pre-v4 statement: %q", log.sql)
-			}
-			want, err := testscale.AsV4Answers(before, groups(t, payload))
-			if err != nil {
-				t.Fatal(err)
-			}
 			id := db.PublishV4(t, payload)
 			got, in, log := answers(t, db)
 			if in.Snapshot == nil || in.Snapshot.BuildID != id || len(in.Snapshot.Networks) != 3 {
 				t.Fatalf("read %+v, want build %d with 3 network lists", in.Snapshot, id)
 			}
-			if pre, v4 := ran(log, "pre-v4"), ran(log, "v4"); len(pre) > 0 || !slices.Contains(v4, "load.network_counts") {
-				t.Errorf("the v4 read ran %v (want none) and %v (want load.network_counts)", pre, v4)
+			if !slices.Contains(ran(log), "load.network_counts") || len(got) == 0 {
+				t.Errorf("the v4 read ran %v (want load.network_counts) and rendered %d answers", ran(log), len(got))
 			}
-			compare(t, want, got)
+			for _, table := range []string{"calculated_snapshot_parts", "calculated_windows", "calculated_breakdowns"} {
+				if i := slices.IndexFunc(log.sql, func(q string) bool { return strings.Contains(q, table) }); i >= 0 {
+					t.Errorf("the v4 read read %s: %s", table, log.sql[i])
+				}
+			}
 		})
-	}
-}
-
-// groups is a payload's product groups.
-func groups(t *testing.T, payload []byte) [][]byte {
-	t.Helper()
-	var s struct {
-		Products []json.RawMessage `json:"products"`
-	}
-	if err := json.Unmarshal(payload, &s); err != nil {
-		t.Fatal(err)
-	}
-	out := make([][]byte, len(s.Products))
-	for i, g := range s.Products {
-		out[i] = g
-	}
-	return out
-}
-
-// compare reports each answer that differs, around its first difference.
-func compare(t *testing.T, want, got map[string][]byte) {
-	t.Helper()
-	keys := make([]string, 0, len(want))
-	for k := range want {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		w, g := want[k], got[k]
-		if bytes.Equal(w, g) {
-			continue
-		}
-		i := 0
-		for i < min(len(w), len(g)) && w[i] == g[i] {
-			i++
-		}
-		from := max(i-120, 0)
-		t.Errorf("%s differs at byte %d:\nwant …%s\ngot  …%s", k, i, w[from:min(len(w), i+200)], g[from:min(len(g), i+200)])
-	}
-	if len(got) != len(want) {
-		t.Errorf("%d answers, want %d", len(got), len(want))
 	}
 }

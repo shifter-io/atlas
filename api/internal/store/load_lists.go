@@ -49,13 +49,16 @@ func readSite[T any](ctx context.Context, tx pgx.Tx, l SiteLayout, r siteRead, s
 // The statements of LoadEvents and LoadLists that take no layout.
 const (
 	maxEventSQL           = `SELECT max(event_id) FROM public.test_events`
-	lockBreakdownsSQL     = `LOCK TABLE ONLY public.calculated_breakdowns IN ACCESS SHARE MODE`
 	nowSQL                = `SELECT now()`
 	frameworkTargetsSQL   = `SELECT target_id, label, pass_condition, sort_order, engine FROM public.targets ORDER BY sort_order, target_id`
 	frameworkProvidersSQL = `SELECT id FROM public.providers ORDER BY id`
 	frameworkProductsSQL  = `SELECT product_id, provider, name FROM public.products ORDER BY provider, name`
-	hasBreakdownsSQL      = `SELECT to_regclass('public.calculated_breakdowns') IS NOT NULL`
 )
+
+// ErrBeforeV4 is LoadLists' error when the current build is older than
+// payload v4 (its head has no networks, or another schema_version): the API
+// reads only v4 builds.
+var ErrBeforeV4 = errors.New("the current build is older than payload v4")
 
 // TxBeginner starts the read-only transactions of Load and LoadEvents (a
 // pgxpool.Pool or a pgx.Conn).
@@ -88,41 +91,20 @@ func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 // afresh (LoadLists).
 func Load(ctx context.Context, db TxBeginner) (*Inputs, error) { return LoadLists(ctx, db, nil) }
 
-// afterSnapshot, when set, runs once the current snapshot row is read, and
-// lockBreakdowns off skips the lock below: tests of the concurrent reads.
-var (
-	afterSnapshot  func()
-	lockBreakdowns = true
-)
-
 // LoadLists reads every input in one consistent read-only snapshot, holding
 // the typed lists in lists between calls (nil: none held). Only the
 // framework schema is required; site tables that are missing read as empty
 // (Inputs.SiteGaps names them). A v4 build's network lists read their rows
 // through db when a build or a request needs them: db stays open while the
-// Inputs, or a build made from them, are used.
-//
-// Before K2 a build's typed rows are a calculated_breakdowns partition, which
-// a publication can drop: the snapshot would still see the build as current
-// and find no rows. The read therefore locks the calculated_breakdowns parent
-// (ACCESS SHARE, ONLY: no partition rights needed) before its snapshot is
-// taken; dropping a partition locks its parent exclusively, so it waits. K2 deletes
-// lists instead, and the snapshot keeps seeing them.
+// Inputs, or a build made from them, are used. A current build older than
+// payload v4 is ErrBeforeV4. K2 deletes lists, never drops them, so the
+// snapshot keeps seeing the rows of the build it read.
 func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error) {
-	partitioned, err := hasBreakdowns(ctx, db)
-	if err != nil {
-		return nil, err
-	}
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	if partitioned && lockBreakdowns {
-		if _, err := tx.Exec(ctx, lockBreakdownsSQL); err != nil {
-			return nil, fmt.Errorf("lock calculated_breakdowns: %w", err)
-		}
-	}
 	in := &Inputs{}
 	l, err := in.loadHead(ctx, tx)
 	if err != nil {
@@ -277,45 +259,22 @@ func (in *Inputs) frameworkSteps(ctx context.Context, tx pgx.Tx) []func() error 
 	}
 }
 
-// loadSnapshot reads the current snapshot row, if any, and its parts,
-// networks (whose rows are read through db afterwards) or typed lists.
+// loadSnapshot reads the current snapshot row, if any, and its networks,
+// whose rows are read through db afterwards. A build before v4 is
+// ErrBeforeV4, read no further.
 func (in *Inputs) loadSnapshot(ctx context.Context, db TxBeginner, tx pgx.Tx, lists *Lists) error {
 	var s SnapshotRow
-	var parts *int
 	var v4 bool
-	err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &parts, &v4)
+	err := tx.QueryRow(ctx, snapshotSQL).Scan(&s.BuildID, &s.ContentHash, &s.Payload, &v4)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if parts != nil {
-		if err := s.readParts(ctx, tx, *parts); err != nil {
-			return err
-		}
+	if !v4 {
+		return fmt.Errorf("snapshot %d: %w", s.BuildID, ErrBeforeV4)
 	}
 	in.Snapshot = &s
-	if afterSnapshot != nil {
-		afterSnapshot()
-	}
-	if v4 {
-		return s.readNetworks(ctx, tx, lists, db)
-	}
-	lists.dropNetworks()
-	return s.readLists(ctx, tx, lists)
-}
-
-// hasBreakdowns reports whether the database keeps typed rows in
-// calculated_breakdowns (before K2), in a transaction of its own: LoadLists
-// must lock the table before its snapshot.
-func hasBreakdowns(ctx context.Context, db TxBeginner) (bool, error) {
-	tx, err := db.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var ok bool
-	err = tx.QueryRow(ctx, hasBreakdownsSQL).Scan(&ok)
-	return ok, err
+	return s.readNetworks(ctx, tx, lists, db)
 }

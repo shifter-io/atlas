@@ -116,16 +116,6 @@ func (c *Lists) networkLists(db TxBeginner) *NetLists {
 	return c.net
 }
 
-// dropNetworks drops the network lists c holds (a build before v4 reads
-// none); c may be nil.
-func (c *Lists) dropNetworks() {
-	if c != nil {
-		c.mu.Lock()
-		c.net = nil
-		c.mu.Unlock()
-	}
-}
-
 // SetNetworks sets Full and Networks of a v4 snapshot whose Payload is its head,
 // from the network lists by id: each network becomes one product group (see
 // above). A window naming a list not in lists keeps only what the head has.

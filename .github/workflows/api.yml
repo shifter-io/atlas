@@ -58,7 +58,7 @@ env:
   PG_VERSION: 17.11.1
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
   # The slowest tests, in their own process beside the others.
-  SLOW_TEST: ^(TestEveryAnswerIsTheSameFromParts|TestEveryV4Answer)$
+  SLOW_TEST: ^TestEveryV4Answer$
   # The latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
 
@@ -213,10 +213,8 @@ jobs:
           done
           grep -E '^(--- FAIL|ok|FAIL)' "$EV/tests.log" || true
           grep -E '^(--- |ok)' "$EV/slow.log" || true
-          # Never an empty pass: each of the slowest tests ran and passed.
-          for slow in TestEveryAnswerIsTheSameFromParts TestEveryV4Answer; do
-            grep -qE "^--- PASS: $slow " "$EV/slow.log" || { echo "$slow did not pass"; failed=1; }
-          done
+          # Never an empty pass: the slowest test ran and passed.
+          grep -qE "^--- PASS: TestEveryV4Answer " "$EV/slow.log" || { echo "TestEveryV4Answer did not pass"; failed=1; }
           exit "$failed"
       - name: go test, the latency test alone (database)
         if: steps.diff.outputs.code == 'true'

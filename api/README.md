@@ -70,8 +70,8 @@ call sites run: the poll (site layout, fingerprint), the full rebuild in `LoadLi
 (site tables, framework tables, snapshot head, network list counts), the v4 network-list
 row and label reads of a row-cache miss, and the events reads (the load's window and
 notable reads, `LoadEvents`, and the `/v1/events` database fallback for the default,
-product, kinds, category and since filters). The shapes of builds before v4 (and the
-`LOCK` before K2) are listed as skipped.
+product, kinds, category and since filters). The API reads no build before v4, so
+there is no statement shape for one.
 
 The arguments come from the current build: the network list with the most rows (and its
 network's provider for the product filter), its largest dimension's rows, the label ids
@@ -145,36 +145,21 @@ groups counts twice (an upper bound, not a distinct count). Capped lists are rea
 typed rows. Network, country and coverage answers are computed and compressed once per build;
 a long-list page is cut from a precomputed list on first request and kept in a 1,024-entry LRU per version.
 
-The published snapshot is read in either of the framework's two stored forms
-(`internal/store/parts.go`). A build stored before calculated schema v8 is one
-`calculated_snapshots.payload` row. A build stored since (proxy-index
-`calculated/parts.py`, contract K1) keeps a head there (every top-level key except
-`products` and `runs`, plus `"parts": {"products": n, "runs": m}`) and its product
-groups in `calculated_snapshot_parts`, one group per `product` row; its daily groups'
-24-hour series hold only the 5-minute buckets with requests or availability. The API
-reads the head, then the `product` rows in order, one at a time: each 24-hour series
-gets its empty buckets back exactly as the framework writes them, and the groups go
-where the single row has them, so the payload decodes as the same text and every answer
-is byte for byte what it was. A build whose stored product rows differ from the head's
-count, or whose stored point is off its window's 5-minute grid, fails the rebuild (the
-old answers stay served). The `runs` rows are not read: no answer uses them.
+The API reads only payload v4 builds (`internal/store/parts.go`, below). The
+framework (proxy-index `calculated/parts.py`, contract K1) keeps a build's head in
+`calculated_snapshots.payload` and its product groups in `calculated_snapshot_parts`;
+the API reads the head and never the product rows. A current build before v4 (one
+`calculated_snapshots.payload` row, or a head with `schema_version` below 4 or without
+`networks`) fails the load with `store.ErrBeforeV4` before its payload, product parts or
+lists are read; the old answers stay served. Its product parts, sparse daily series and
+group lists (the `calculated_breakdowns` partition before calculated v9, a payload v3
+window's lists, the long-tail restore) are no longer read.
 
-The long lists are read from the typed rows (`internal/store/lists.go`): before
-calculated schema v9, a build's `calculated_breakdowns` partition (by `result_id`);
-from v9 (contract K2), the shared `calculated_list_rows` (by `list_id`, named by
-`calculated_windows.list_id` or by a payload v3 window's `lists.id`). One query per
-set of ids filters `list_id = ANY($1) AND dimension = ANY($2)` on the stored
-dimension code, by the primary key, and the rows' JSON is written in Go. `serve`
-keeps the rows of every list a current window references between rebuilds
-(`store.Lists`) and reads only the ids it does not hold; a list no window
-references any more is dropped. Country, region, city, ASN and country x ASN rows
-are held whole for every list; city x ASN rows only for each provider's product
-group per proxy kind (the group whose raw result `measurement` serves). Payload v3
-windows get their arrays back from these rows, so they read as their v2 form (see
-`FIELDS.md`, "Typed lists"). Before v9 the read locks the `calculated_breakdowns`
-parent (`ACCESS SHARE`, before its snapshot), so a publication that drops the old
-build's partition waits for the read instead of leaving it without rows; v9 deletes
-lists instead, which the read's snapshot keeps seeing.
+The long lists are typed rows (`internal/store/lists.go`): from calculated schema v9
+(contract K2), the shared `calculated_list_rows` (by `list_id`). One query per set of
+ids filters `list_id = ANY($1) AND dimension = ANY($2)` on the stored dimension code, by
+the primary key, and the rows' JSON is written in Go. Lists are deleted, never dropped,
+so a read's snapshot keeps seeing the rows of the build it read.
 
 A payload v4 build (contract K9: `schema_version` 4 and the head's `networks`, one
 summary per provider and proxy kind over all its product groups) is read from two
@@ -193,7 +178,7 @@ row, the coverage evidence), `pool.asns_breakdown` (the 50 ASNs with most IPs) a
 snapshot's overlap rows are made from its `overlap.peers`; a network with one
 requested country gets it as `criteria.country`. These arrays and typed rows are a
 bridge held only while a build is made (API-COVERAGE-1 serves the lists from the
-compact rows instead). A build before v4 is read exactly as before.
+compact rows instead). A build before v4 is not read: `store.ErrBeforeV4`.
 
 `source` is `"measured"` on providers, tape rows, changelog, reviews and community
 runs. On targets it is `"measured"` for framework targets and `"catalog"` for
@@ -404,23 +389,21 @@ Database tests create a throwaway `siteapi_test_<random>` database with the admi
 credentials. They load the framework schema (`schema.sql`, `calculated/schema.sql`) from
 `src/proxy_index/` in the repository root, so they always test the framework's current
 schema, and drop the database afterwards. `proxy_reviews` is never
-touched. The framework schema is calculated v10 (v9 and its memo tables); the tests of the read before
-v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), and
-`testdb.MoveToLists` moves it on to v9 the way the framework's migration does. The suite covers:
+touched. The framework schema is calculated v10 (v9 and its memo tables). The suite covers:
 
 - `store`:
   - migrations are idempotent and checksummed
-  - a build stored in parts (head, product rows, sparse daily 24-hour series)
-    reads as the same payload text stored whole, without its runs; a head whose
-    part count does not match, or a point off the 5-minute grid, fails the read
+  - a build before payload v4 (a v3 head in parts, a head of `schema_version` 4
+    without `networks`, a whole v2 payload) is `store.ErrBeforeV4`, and its load
+    reads neither its product parts nor any list
   - triggers bump the revision on insert and delete
   - a database without the site schema loads with every site table empty and one
     gap; `migrate` changes the fingerprint
   - a missing table or column empties only that table and is named; `is_demo` rows
     are never read
   - `siteapi explain`, through a read-only role on a v4 build: every registered
-    statement runs and appears in `explain.json` and `explain.md`, the pre-v4 shapes are
-    skipped, and the parameters are the build's; a role that can write is refused
+    statement runs and appears in `explain.json` and `explain.md`, and the parameters
+    are the build's; a role that can write is refused
 - `build`:
   - a framework-only database (no site schema, nothing published) builds an honest
     empty dataset
@@ -441,19 +424,12 @@ v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), 
     also compared the Go port with the site's TypeScript; that parity test went
     with it.
 - `server`:
-  - every answer is byte for byte the same from a build stored whole and from the
-    same build stored in parts with sparse daily 24-hour series: the every-request
-    fixture (a census/pulse group and a daily copy) and the QA-1 scale (18 x 40;
-    more than one jsonb row holds, so its whole form is the parts with every point)
   - every answer of a v4 build (`testdb.PublishV4`): the every-request fixture and
     QA-1 as payload v4 (18 networks with every exit country, the tails and 2,000
     City × ASN rows per window) match a per-route SHA-256 golden
-    (`testdata/answers-v4-scale.json`), and equal the same data's build before v4
-    (`testscale.Listed`, stored whole) after `testscale.AsV4Answers`
+    (`testdata/answers-v4-scale.json`)
   - the committed fixtures as v4 builds answer as main did before browser targets
-    (`testdata/answers-v4.json`); published before v4 they still match
-    `testdata/answers-before-browser.json`, and the v4 answers are those after
-    `testscale.Listed` and `testscale.AsV4Answers`
+    (`testdata/answers-v4.json`)
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
   - rebuild only on change

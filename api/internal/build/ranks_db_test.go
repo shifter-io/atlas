@@ -65,10 +65,9 @@ func (p rankPlace) payloadRow() map[string]any {
 
 // rankedSnapshot publishes the every-request fixture as four networks with
 // seeded coverage counts and place lists, the region, city and ASN lists capped
-// to 2 rows the way slim() caps them: as payload v4 (each network its group,
-// testdb.PublishV4) when v4, else as it is, with the typed rows of every whole
-// list. Returns the build id.
-func rankedSnapshot(t *testing.T, db *testdb.DB, v4 bool) int64 {
+// to 2 rows the way slim() caps them, as payload v4 (each network its group,
+// testdb.PublishV4). Returns the build id.
+func rankedSnapshot(t *testing.T, db *testdb.DB) int64 {
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +89,6 @@ func rankedSnapshot(t *testing.T, db *testdb.DB, v4 bool) int64 {
 	template, _ := json.Marshal(doc["products"].([]any)[0])
 	rng := rand.New(rand.NewSource(3))
 	var products []any
-	whole := map[[2]any]map[string][]rankPlace{} // product id, hours
 	for _, provider := range []string{"alpha", "beta", "gamma", "delta"} {
 		var p map[string]any
 		if err := json.Unmarshal(template, &p); err != nil {
@@ -106,11 +104,8 @@ func rankedSnapshot(t *testing.T, db *testdb.DB, v4 bool) int64 {
 				pool[k] = rng.Intn(4)
 			}
 			lists, entries := map[string]any{}, map[string]any{}
-			hours := int64(w["period"].(map[string]any)["hours"].(float64))
-			whole[[2]any{id, hours}] = map[string][]rankPlace{}
 			for dimension := range rankDimensionCode {
 				all := seededPlaces(rng, dimension)
-				whole[[2]any{id, hours}][dimension] = all
 				kept := all
 				if dimension != "country" && len(kept) > 2 {
 					kept = kept[:2]
@@ -130,58 +125,7 @@ func rankedSnapshot(t *testing.T, db *testdb.DB, v4 bool) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v4 {
-		return db.PublishV4(t, payload)
-	}
-	build := db.Publish(t, payload)
-	storeRankRows(t, db, build, products[0].(map[string]any)["cohort"].(string), whole)
-	return build
-}
-
-// storeRankRows writes the typed rows calculate() persists for whole place
-// lists, as calculated v8 stores them (testdb.CalculatedV8).
-func storeRankRows(t *testing.T, db *testdb.DB, build int64, cohort string, whole map[[2]any]map[string][]rankPlace) {
-	ctx := context.Background()
-	c := db.Conn(t)
-	defer c.Close(ctx)
-	one := func(sql string, args ...any) int64 {
-		var v int64
-		if err := c.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
-			t.Fatalf("%v\n%s", err, sql)
-		}
-		return v
-	}
-	null := func(s string) any {
-		if s == "" {
-			return nil
-		}
-		return s
-	}
-	db.Exec(t, "INSERT INTO cohorts(cohort) VALUES ($1) ON CONFLICT DO NOTHING", cohort)
-	db.CalculatedV8(t)
-	db.Exec(t, fmt.Sprintf("CREATE TABLE calculated_breakdowns_b%d PARTITION OF calculated_breakdowns FOR VALUES IN (%d)", build, build))
-	for k, lists := range whole {
-		result := one(`INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,
- body_bytes,coverage,readiness) VALUES ($1,$2,$3,'',$4,0,0,0,0,0,'ready') RETURNING result_id`, build, k[0], cohort, k[1])
-		for dimension, rows := range lists {
-			for i, r := range rows {
-				var place, label any
-				if dimension == "asn" {
-					name := one(`INSERT INTO asn_names(asn,name) VALUES ($1,$2) ON CONFLICT (asn,name) DO UPDATE SET asn=excluded.asn
- RETURNING asn_name_id`, r.asn, fmt.Sprint("AS", r.asn))
-					label = one(`INSERT INTO asn_labels(asn_name_id,usage_type) VALUES ($1,'isp')
- ON CONFLICT (asn_name_id,usage_type) DO UPDATE SET usage_type=excluded.usage_type RETURNING asn_label_id`, name)
-				} else {
-					place = one(`INSERT INTO place_names(country_code,country,region_code,region,city) VALUES ($1,$1,$2,$3,$4)
- ON CONFLICT (country_code,country,region_code,region,city) DO UPDATE SET city=excluded.city RETURNING place_id`,
-						r.cc, null(r.regionCode), null(r.region), null(r.city))
-				}
-				db.Exec(t, `INSERT INTO calculated_breakdowns(build_id,result_id,dimension,position,ips,observations,place_id,
- asn_label_id,completed,successes,p50) VALUES ($1,$2,$3,$4,$5,$5,$6,$7,$8,$8,$9)`,
-					build, result, rankDimensionCode[dimension], i, r.ips, place, label, r.successes, r.p50)
-			}
-		}
-	}
+	return db.PublishV4(t, payload)
 }
 
 // directTileRanksSQL ranks every window's coverage counts above zero across
@@ -205,24 +149,11 @@ func sameDBRank(got model.Rank, rank *int64, peers int64) bool {
 	return float64(got.Rank) == float64(*rank) && int64(got.Peers) == peers
 }
 
-// The ranks are the same read from a v4 build's network lists, and, before
-// v4, from calculated v8's breakdown partition and from v9's lists.
+// The ranks are the same read from a v4 build's network lists.
 func TestRanksMatchADirectSQLRanking(t *testing.T) {
 	t.Parallel()
-	t.Run("network lists", func(t *testing.T) {
-		db := testdb.New(t)
-		ranksMatchSQL(t, db, rankedSnapshot(t, db, true))
-	})
-	for _, k2 := range []bool{false, true} {
-		t.Run(map[bool]string{false: "calculated_breakdowns", true: "lists"}[k2], func(t *testing.T) {
-			db := testdb.New(t)
-			build := rankedSnapshot(t, db, false)
-			if k2 {
-				db.MoveToLists(t)
-			}
-			ranksMatchSQL(t, db, build)
-		})
-	}
+	db := testdb.New(t)
+	ranksMatchSQL(t, db, rankedSnapshot(t, db))
 }
 
 func ranksMatchSQL(t *testing.T, db *testdb.DB, build int64) {

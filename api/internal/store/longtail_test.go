@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -30,108 +29,6 @@ func testList() *List {
 	})
 }
 
-// v2Window is a slimmed v2 window as jsonb writes it: one of three city x ASN
-// rows and one of two ASN rows kept.
-const v2Window = `{"pool": {"unique_ips": 9, "list_entries": {"asns_breakdown": 2}, "asns_breakdown": ["x"]}, "period": {"hours": 24}, ` +
-	`"breakdowns": {"city_asn": ["a"]}, "breakdown_entries": {"city_asn": 3}}`
-
-func groupPayload(window string) []byte {
-	return []byte(`{"products": [{"kind": "residential", "name": "kept", "cohort": "c", "windows": {"24h": ` + window +
-		`}, "provider": "p", "product_id": 1}], "schema_version": 2}`)
-}
-
-func restored(t *testing.T, payload []byte, l *List, picked bool) (map[string]any, []byte) {
-	t.Helper()
-	s := &SnapshotRow{Payload: payload, Places: map[PlaceWindow]*List{{1, "c", 24}: l}}
-	pf, items, groups, err := s.groups()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.restore(pf, items, groups, map[groupKey]bool{{1, "c"}: picked}); err != nil {
-		t.Fatal(err)
-	}
-	var doc struct {
-		Products []struct {
-			Name    string                    `json:"name"`
-			Windows map[string]map[string]any `json:"windows"`
-		} `json:"products"`
-	}
-	if err := json.Unmarshal(s.Full(), &doc); err != nil {
-		t.Fatalf("%v\n%s", err, s.Full())
-	}
-	if doc.Products[0].Name != "kept" {
-		t.Fatalf("product fields changed: %s", s.Full())
-	}
-	return doc.Products[0].Windows["24h"], s.Full()
-}
-
-func marshal(v any) string { b, _ := json.Marshal(v); return string(b) }
-
-func TestRestoreV2PutsBackTheWholeListsWithMatchingCounts(t *testing.T) {
-	t.Parallel()
-	w, full := restored(t, groupPayload(v2Window), testList(), true)
-	cities := w["breakdowns"].(map[string]any)["city_asn"].([]any)
-	if len(cities) != 3 || cities[2].(map[string]any)["name"] != `O"2` || cities[2].(map[string]any)["success_rate"] != nil {
-		t.Errorf("city_asn %v", cities)
-	}
-	// ASNs with IPs, most first; the tie in Python's str() order ('asn': 3320 < 'asn': 6805).
-	if got := marshal(w["pool"].(map[string]any)["asns_breakdown"]); got != `[{"asn":3320,"ips":7,"name":"DTAG","observations":14,"usage_type":"isp"},{"asn":6805,"ips":7,"name":"Telefonica","observations":14,"usage_type":"isp"}]` {
-		t.Errorf("asns %s", got)
-	}
-	// Rows as jsonb writes them: keys shorter first, ", " and ": ".
-	if !strings.Contains(string(full), `{"asn": 3320, "ips": 5, "p50": 40, "p90": null, "p99": null, "city": "Berlin", "name": "DTAG", "blocks": 0, "region": "Berlin", `+
-		`"country": "Germany", "completed": 10, "successes": 10, "challenges": 0, "usage_type": "isp", "region_code": "BE", "country_code": "DE", "observations": 10, "success_rate": 1.0}`) {
-		t.Errorf("row text %s", full)
-	}
-	if w["pool"].(map[string]any)["unique_ips"] != 9.0 {
-		t.Errorf("pool fields changed %v", w["pool"])
-	}
-	// Not the provider's group: city x ASN stays as published.
-	w, _ = restored(t, groupPayload(v2Window), testList(), false)
-	if got := marshal(w["breakdowns"]); got != `{"city_asn":["a"]}` {
-		t.Errorf("unpicked city_asn %s", got)
-	}
-}
-
-func TestRestoreV2LeavesListsWhoseRowsDoNotMatch(t *testing.T) {
-	t.Parallel()
-	l := testList()
-	l.rows['y'] = l.rows['y'][:2]
-	l.rows['a'] = l.rows['a'][:1]
-	_, full := restored(t, groupPayload(v2Window), l, true)
-	if string(full) != string(groupPayload(v2Window)) {
-		t.Errorf("restored %s", full)
-	}
-}
-
-func TestRestoreV3IsItsV2Form(t *testing.T) {
-	t.Parallel()
-	v3 := `{"pool": {"unique_ips": 9, "list_entries": {"asns_breakdown": 2}}, "lists": {"id": 7, "entries": {"asn": 1, "city_asn": 1, "asns_breakdown": 1}}, ` +
-		`"period": {"hours": 24}, "breakdown_entries": {"city_asn": 3}}`
-	w, _ := restored(t, groupPayload(v3), testList(), true)
-	if _, ok := w["lists"]; ok {
-		t.Error("lists kept")
-	}
-	bd := w["breakdowns"].(map[string]any)
-	if len(bd["city_asn"].([]any)) != 3 || len(bd["asn"].([]any)) != 1 || len(bd) != 2 {
-		t.Errorf("breakdowns %v", bd)
-	}
-	if n := len(w["pool"].(map[string]any)["asns_breakdown"].([]any)); n != 2 {
-		t.Errorf("asns %d rows, want the whole list", n)
-	}
-	// Another group's window has no city x ASN list.
-	w, _ = restored(t, groupPayload(v3), testList(), false)
-	if _, ok := w["breakdowns"].(map[string]any)["city_asn"]; ok {
-		t.Error("city_asn of an unpicked v3 window")
-	}
-	bad := strings.Replace(v3, `"asn": 1,`, `"asn": 9,`, 1)
-	s := &SnapshotRow{Payload: groupPayload(bad), Places: map[PlaceWindow]*List{{1, "c", 24}: testList()}}
-	pf, items, groups, _ := s.groups()
-	if err := s.restore(pf, items, groups, nil); err == nil {
-		t.Error("a window keeping more rows than its list has was accepted")
-	}
-}
-
 func TestJSONMembersAndPythonText(t *testing.T) {
 	t.Parallel()
 	obj := []byte(`{"a": 1, "ccc": 3}`)
@@ -139,14 +36,6 @@ func TestJSONMembersAndPythonText(t *testing.T) {
 		if got, err := setMember(obj, c.key, []byte("0")); err != nil || string(got) != c.want {
 			t.Errorf("set %q: %s %v", c.key, got, err)
 		}
-	}
-	for key, want := range map[string]string{"a": `{"ccc": 3}`, "ccc": `{"a": 1}`, "x": `{"a": 1, "ccc": 3}`} {
-		if got, _ := dropMember(obj, key); string(got) != want {
-			t.Errorf("drop %q: %s", key, got)
-		}
-	}
-	if got, _ := dropMember([]byte(`{"a": 1}`), "a"); string(got) != `{}` {
-		t.Errorf("drop only member: %s", got)
 	}
 	if got, _ := setMember([]byte(`{}`), "a", []byte("1")); string(got) != `{"a": 1}` {
 		t.Errorf("set into empty: %s", got)
@@ -167,35 +56,10 @@ func TestJSONMembersAndPythonText(t *testing.T) {
 	}
 }
 
-func TestSnapshotsNeverSlimmedAreServedAsPublished(t *testing.T) {
+func TestMalformedJSONIsAnError(t *testing.T) {
 	t.Parallel()
-	s := &SnapshotRow{Payload: []byte(`{"schema_version":2,"products":[]}`)}
-	// A snapshot without list counts never queries the typed rows (no transaction is needed).
-	if err := s.readLists(context.Background(), nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if string(s.Full()) != string(s.Payload) || s.Places != nil {
-		t.Errorf("Full %s", s.Full())
-	}
-}
-
-func TestMalformedSnapshotsAreErrors(t *testing.T) {
-	t.Parallel()
-	for _, payload := range []string{`not json`, `{"products": {}}`, `{"products": [1]}`, `{"products": [`} {
-		s := &SnapshotRow{Payload: []byte(payload)}
-		if _, _, _, err := s.groups(); err == nil {
-			t.Errorf("%s: accepted", payload)
-		}
-	}
-	for _, window := range []string{`[]`, `{"pool": []}`, `{"pool": {}, "breakdown_entries": {"city_asn": "many"}}`,
-		`{"pool": {}, "lists": {"entries": {"asn": 9}}}`} {
-		if _, err := restoreWindow([]byte(window), testList(), true); err == nil {
-			t.Errorf("%s: accepted", window)
-		}
-	}
 	for _, f := range []func() error{
 		func() error { _, err := setMember([]byte(`[`), "a", nil); return err },
-		func() error { _, err := dropMember([]byte(`{"a": `), "a"); return err },
 		func() error { _, err := arrayItems([]byte(`{}`)); return err },
 		func() error { _, err := arrayItems([]byte(`[1, }`)); return err },
 	} {
@@ -203,33 +67,16 @@ func TestMalformedSnapshotsAreErrors(t *testing.T) {
 			t.Error("malformed JSON accepted")
 		}
 	}
-	if length([]byte(`[`), "a") != 0 {
-		t.Error("length of a malformed object")
-	}
-	s := &SnapshotRow{Payload: []byte(`{"products": [{"product_id": 1, "cohort": "c"}, {"product_id": 1, "cohort": "c", "windows": {"24h": {}}}]}`),
-		Places: map[PlaceWindow]*List{}}
-	pf, items, groups, _ := s.groups()
-	if err := s.restore(pf, items, groups, nil); err != nil || s.full != nil {
-		t.Errorf("groups without lists changed: %s %v", s.full, err)
-	}
 }
 
-func TestV3WindowWithoutAPoolAndRowsWithoutLabels(t *testing.T) {
+func TestRowsWithoutLabels(t *testing.T) {
 	t.Parallel()
-	w, _ := restored(t, groupPayload(`{"lists": {"id": 1, "entries": {"geo": 0}}, "period": {"hours": 24}}`), testList(), true)
-	if got := marshal(w["pool"]); got != `{"geo":[]}` {
-		t.Errorf("pool %s", got)
-	}
 	bare := ListRow{Ips: 1, Observations: 1, Completed: -1, Successes: -1, P50: -1, P90: -1, P99: -1}
 	if got := string(rowsJSON(rowColumns['y'], []*ListRow{&bare})); !strings.Contains(got, `"asn": null`) || !strings.Contains(got, `"city": null`) {
 		t.Errorf("row without labels %s", got)
 	}
 	if got := pyRepr(poolKeys["asns_breakdown"], &bare); got != "{'asn': None, 'name': None, 'usage_type': None, 'ips': 1, 'observations': 1}" {
 		t.Errorf("repr %s", got)
-	}
-	g := []listGroup{{Provider: "p", ProductID: 1, Cohort: "a", Windows: map[string]groupWindow{"30d": {}}}, {Provider: "p", ProductID: 2, Cohort: "b"}}
-	if got := headlineGroups(g); !got[groupKey{1, "a"}] || len(got) != 1 {
-		t.Errorf("headline groups %v", got)
 	}
 }
 
