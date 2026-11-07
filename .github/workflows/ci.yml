@@ -184,12 +184,25 @@ jobs:
         run: |
           # The step's start, for the CI time step below.
           date +%s > "$EV/step-start"
-          # Each background check writes $EV/<name>.log and $EV/<name>.rc; after the tests,
-          # every check with a non-zero status prints its log and fails the step.
+          # A span of this step in the test timeline (scripts/ci/timeline.py): its kind, its
+          # start (`date +%s.%N`) and, after them, any more JSON fields; it ends now.
+          span() {
+            printf '{"worker": "step", "kind": "%s", "start": %s, "stop": %s%s}\n' \
+              "$1" "$2" "$(date +%s.%N)" "${3:+, $3}" >> "$EV/timeline-step.jsonl"
+          }
+          # Each background check writes $EV/<name>.log and $EV/<name>.rc, and its wall and
+          # CPU time (its processes' user and system seconds) to the timeline; after the
+          # tests, every check with a non-zero status prints its log and fails the step.
           background() {
             local name=$1
             shift
-            ( rc=0; "$@" > "$EV/$name.log" 2>&1 || rc=$?; echo "$rc" > "$EV/$name.rc" ) &
+            (
+              rc=0 start=$(date +%s.%N) TIMEFORMAT='%U %S'
+              { time "$@" > "$EV/$name.log" 2>&1 || rc=$?; } 2> "$EV/$name.cpu"
+              echo "$rc" > "$EV/$name.rc"
+              read -r user sys < "$EV/$name.cpu"
+              span check "$start" "\"name\": \"$name\", \"user\": $user, \"sys\": $sys"
+            ) &
           }
           complexity() {
             git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
@@ -217,9 +230,11 @@ jobs:
           # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step.
           report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
           tests=0
+          start=$(date +%s.%N)
           CI_TIMELINE=1 uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
             --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
+          span pytest "$start"
           serial=0
           wait "$collecting"
           if [ "$(cat "$EV/serial-collect")" != 5 ]; then
@@ -268,6 +283,33 @@ jobs:
           { echo '```'; python3 scripts/ci/timeline.py "$EV" --top 0; echo '```'; } \
             | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$status"
+
+      - name: MEASURE-ONLY (CI-90-2, removed before merge) import profile of one collection
+        if: always() && env.CODE == 'true'
+        continue-on-error: true
+        run: |
+          start=$(date +%s.%N)
+          uv run --no-editable python -X importtime -m pytest -p no:cacheprovider -p no:xdist \
+            --collect-only -q --cov=proxy_index --cov-branch --cov-report= > /dev/null 2> "$EV/importtime.log" || true
+          echo "collect-only with coverage: $(python3 -c "import time; print(round(time.time() - $start, 1))") s"
+          python3 - "$EV/importtime.log" <<'EOF'
+          import sys
+          rows = []
+          for line in open(sys.argv[1]):
+              if not line.startswith("import time:") or "self [us]" in line:
+                  continue
+              self_us, cumulative, name = line[len("import time:"):].split("|", 2)
+              rows.append((int(cumulative), int(self_us), name.rstrip("\n")[1:]))
+          total = sum(s for _, s, _ in rows)
+          print(f"imports: {len(rows)}, self total {total / 1e6:.2f} s")
+          top = [r for r in rows if not r[2].startswith(" ")]
+          print("top-level imports by cumulative time:")
+          for cumulative, _, name in sorted(top, reverse=True)[:40]:
+              print(f"{cumulative / 1e6:7.3f} s  {name}")
+          print("any import by cumulative time:")
+          for cumulative, _, name in sorted(rows, reverse=True)[:60]:
+              print(f"{cumulative / 1e6:7.3f} s  {name.rstrip()}")
+          EOF
 
       - name: Keep the CI time record and the junit (timing_history.py, durations.py read them)
         if: always() && steps.timing.outcome != 'skipped'
