@@ -23,6 +23,7 @@ from proxy_index.storage import connect
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 replay = importlib.import_module("replay")
 replay_steps = importlib.import_module("replay_steps")
+statement_source = importlib.import_module("statement_source")
 synthetic = importlib.import_module("synthetic")
 target = importlib.import_module("target")
 browser_model = importlib.import_module("browser_model")
@@ -143,6 +144,10 @@ def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(staging
         assert pulses["planned"] > 0 and pulses["failed"] == 0
         assert hour["ingest"]["steps"]["browser"]["parts"][-1]["runs"] == 8
     assert events(tmp_path) == [] and found["counts"]["retries"] == 0
+    # Server windows on every hour exactly when the test database has pg_stat_statements.
+    with connect(staging) as conn:
+        present = replay.measure.has_statements(conn)
+    assert all(bool(statement_source.windows(h)) is present for h in hours)
     # The report (REPLAY-REPORT-1), written after every hour.
     report = json.loads((tmp_path / "out" / "report.json").read_text())
     assert len(report["hours"]) == 6 and len(report["days_done"]) == 2
@@ -295,6 +300,33 @@ def test_a_stopped_replay_resumes_from_its_state_file(staging, tmp_path, monkeyp
     assert all(h["calculate"]["done"] for h in found["hours"])
     assert found["hours"][1]["calculate"]["siteapi"]["reached"]
     assert len(query(staging, DAILY)) == 4  # no run stored twice
+
+
+def test_server_windows_never_overlap_and_reach_the_report(staging, tmp_path, monkeypatch):
+    taken = []
+
+    def snapshot(conn):  # per window: one statement of 2 ms and one of another role
+        n = len(taken)
+        taken.append(n)
+        return {"7": ("SELECT $1", n, 2.0 * n, n, 2.0), "other:10": ("other role", n, n, 0, 1.0)}
+
+    monkeypatch.setattr(replay.measure, "has_statements", lambda conn: True)
+    monkeypatch.setattr(replay.measure, "snapshot", snapshot)
+    assert replay.main(argv(staging, tmp_path, 1, 2)) == 0
+    hours = state(tmp_path)["hours"]
+    # Taken only while nothing else runs: the first ingest, then each calculation with the
+    # next hour's ingest, the last calculation alone.
+    assert [[w["covers"] for w in statement_source.windows(h)] for h in hours] == [
+        [{"ingest": [0], "calculate": []}, {"calculate": [0], "ingest": [1]}],
+        [{"calculate": [1], "ingest": []}],
+    ]
+    assert len(taken) == 4  # the run's start and three windows
+    assert all(w["calls"] == 2 and w["ms"] == 3.0 for h in hours for w in h["server"])
+    report = json.loads((tmp_path / "out" / "report.json").read_text())
+    assert [h["server"]["calls"] for h in report["hours"]] == [4, 2]
+    found = {row["statement"]: row["calls"] for row in report["server_statements"]}
+    assert found == {"SELECT $1": 3, "other role": 3}
+    assert "server time" in (tmp_path / "out" / "report.md").read_text()
 
 
 def test_refusals_write_nothing(staging, tmp_path, capsys):

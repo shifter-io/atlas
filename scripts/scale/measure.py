@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """SCALE-GEN-1b: what the hourly cycle measures, and its report (README.md, "Measurements").
 
-Statement timings come from pg_stat_statements when the database has it loaded, otherwise from
-`Tracer` (every psycopg execute, executemany and COPY of the process, by statement shape;
-`measure.py trace OUT MODULE [ARGS]` runs a module under it). Table sizes add each partition to
-its parent. Peak RSS is VmHWM from /proc (Linux), sampled while a child runs, with the child's
-maximum resident size from wait4.
+Statement timings come from pg_stat_statements when the database has it (`has_statements`: the
+extension exists, its view is on the search path and readable, so the server loaded it; no
+superuser setting is read), otherwise from `Tracer` (every psycopg execute, executemany and COPY
+of the process, by statement shape; `measure.py trace OUT MODULE [ARGS]` runs a module under it).
+`snapshot` keys another role's statements, whose text this role can't read, by role. Table sizes
+add each partition to its parent. Peak RSS is VmHWM from /proc (Linux), sampled while a child
+runs, with the child's maximum resident size from wait4.
 """
 
 from __future__ import annotations
@@ -34,12 +36,17 @@ TEXT = 300  # characters kept of a statement
 # (target.py) it is not, and its counters would mix in production's statements.
 EXTENSION = (
     "SELECT 1 FROM pg_extension WHERE extname='pg_stat_statements' "
-    "AND to_regclass('pg_stat_statements') IS NOT NULL "
-    "AND current_setting('shared_preload_libraries') LIKE '%pg_stat_statements%'"
+    "AND to_regclass('pg_stat_statements') IS NOT NULL"
 )
+LOADED = "SELECT 1 FROM pg_stat_statements LIMIT 1"  # fails while the server hasn't loaded it
+UNREADABLE = (psycopg.errors.ObjectNotInPrerequisiteState, psycopg.errors.InsufficientPrivilege)
+# Per key: text, calls, total ms, rows and the maximum ms since the counters' reset.
 STATEMENTS = (
-    "SELECT queryid::text,left(query,%s),calls,total_exec_time FROM pg_stat_statements "
-    "WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database())"
+    "SELECT coalesce(queryid::text,'other:'||userid::text),"
+    "min(CASE WHEN queryid IS NULL THEN 'other role' ELSE coalesce(left(query,%s),'') END),"
+    "sum(calls)::bigint,sum(total_exec_time),sum(rows)::bigint,max(max_exec_time) "
+    "FROM pg_stat_statements "
+    "WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) GROUP BY 1"
 )
 # pg_partition_tree gives no row for a table that is not partitioned: that table counts alone.
 SIZES = (
@@ -52,21 +59,30 @@ SIZES = (
 
 
 def has_statements(conn) -> bool:
-    """pg_stat_statements is installed in the database and loaded by the server."""
-    return conn.execute(EXTENSION).fetchone() is not None
+    """pg_stat_statements is installed in the database and loaded by the server: True or False
+    for any role, its view read inside a savepoint (or a transaction of its own)."""
+    if conn.execute(EXTENSION).fetchone() is None:
+        return False
+    try:
+        with conn.transaction():
+            conn.execute(LOADED)
+    except UNREADABLE:
+        return False
+    return True
 
 
 def snapshot(conn) -> dict[str, tuple]:
-    """pg_stat_statements counters of this database: queryid -> (text, calls, total ms)."""
+    """pg_stat_statements counters of this database: key -> (text, calls, total ms, rows, max ms
+    since reset); the key is the queryid, or `other:<role oid>` for another role's statements."""
     rows = conn.execute(STATEMENTS, (TEXT,)).fetchall()
-    return {qid: (text, calls, total) for qid, text, calls, total in rows}
+    return {key: tuple(values) for key, *values in rows}
 
 
 def delta(before: dict, after: dict) -> list[dict]:
     """The statements that ran between two snapshots, slowest first."""
     found = {}
-    for qid, (text, calls, total) in after.items():
-        _, calls_before, total_before = before.get(qid, (text, 0, 0.0))
+    for qid, (text, calls, total, *_) in after.items():
+        _, calls_before, total_before, *_ = before.get(qid, (text, 0, 0.0))
         if calls > calls_before:
             found[qid] = [text, calls - calls_before, (total - total_before) / 1000, None]
     return ranked(found.values())

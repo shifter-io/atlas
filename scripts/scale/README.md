@@ -183,7 +183,7 @@ A failed calculation stops the run with exit code 1 and is run again by the next
 ## Measurements
 
 - **Statement timings.** When the database has `pg_stat_statements` installed and loaded
-  (DB-CHECK-1 reports it), the change of its counters over each step: every statement of the
+  (`measure.has_statements`, readable by any role; DB-CHECK-1 reports it), the change of its counters over each step: every statement of the
   database in that time, including the calculation child's and siteapi's; not in a scratch schema,
   whose search path does not reach it and whose database also runs production. Otherwise the driver
   times every psycopg `execute`, `executemany` and COPY of its own process (ingest, the node API,

@@ -30,6 +30,7 @@ import generate
 import measure
 import replay_baseline
 import replay_report
+import statement_source
 import target
 from cycle_steps import HOUR, MEASURE
 from replay_report import private, write_private
@@ -94,6 +95,7 @@ class Replay:
         self.state = self.open(guard(conn, args))
         self.steps = ReplaySteps(conn, args, self.state)
         self.stop, self.pool = Event(), ThreadPoolExecutor(1)
+        self.counters = None  # the open window's snapshot when pg_stat_statements is there
 
     def open(self, go: dict) -> dict:
         """The state of state.json, or a new one with its baseline."""
@@ -140,11 +142,15 @@ class Replay:
         done = [r["calculate"]["done"] for r in self.state["hours"]]
         first = done.index(False) if False in done else len(done)
         pending = None
+        if measure.has_statements(self.conn):
+            self.counters = measure.snapshot(self.conn)
         try:
             for index in range(first, self.total()):
                 self.ingest(index)
                 if pending:
                     self.finish(*pending)
+                else:
+                    self.mark(index, {"ingest": [index], "calculate": []})
                 pending = (index, self.calculate(index))
             if pending:
                 self.finish(*pending)
@@ -158,6 +164,16 @@ class Replay:
             self.pool.shutdown()
         hours = sum(record["calculate"]["done"] for record in self.state["hours"])
         return {"replay_id": self.state["replay_id"], "hours_done": hours, "hours": self.total()}
+
+    def mark(self, index: int, covers: dict) -> None:
+        """Close the open pg_stat_statements window on the hour's record; the next one opens.
+        Only where nothing else runs, so windows never overlap (REPLAY.md, "Statement timing")."""
+        if self.counters is None:
+            return
+        after = measure.snapshot(self.conn)
+        found = statement_source.window(self.counters, after, covers)
+        self.record(index).setdefault("server", []).append(found)
+        self.counters = after
 
     # Steps 1 to 4: the hour's ingest, in this process.
 
@@ -249,6 +265,8 @@ class Replay:
         if self.args.siteapi:
             work["siteapi"] = self.steps.served(work["build_id"])
         work |= {"done": True, "finished": now()}
+        ingested = [index + 1] if index + 1 < len(self.state["hours"]) else []
+        self.mark(index, {"calculate": [index], "ingest": ingested})
         record["sizes"] = self.sizes()
         if (index + 1) % self.args.hours_per_day == 0:
             before = self.state["baseline"]["counts"]

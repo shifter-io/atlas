@@ -22,6 +22,7 @@ SCALE = Path(__file__).resolve().parents[1] / "scripts" / "scale"
 sys.path.insert(0, str(SCALE))
 measure = importlib.import_module("measure")
 replay_report = importlib.import_module("replay_report")
+statement_source = importlib.import_module("statement_source")
 
 pytest_plugins = ["test_storage"]
 
@@ -209,8 +210,16 @@ def test_the_report_per_hour_and_day_with_the_extremes_and_the_last_day(tmp_path
     statements = {row["statement"]: row for row in report["statements"]}
     assert statements["SELECT build()"]["calls"] == 3 and statements["SELECT build()"]["rows"] == 3
     assert statements["COPY incoming_ips FROM STDIN"]["rows"] == 620
+    # Without pg_stat_statements: the client side only, with a note.
+    assert report["server_statements"] is None and first["server"] is None
+    assert first["client"] == {"calls": 5 + 1, "seconds": 30.67}
+    assert fourth["client"] == {"calls": 5, "seconds": 0.67}  # its calculation is not done
 
     text = path.read_text()
+    assert text.count("pg_stat_statements is absent: statements are timed by the tool") == 2
+    assert "## Statement time per hour" in text and "Server ms" not in text
+    assert "| 1 | 0 | 6 | 30.67 |" in text
+    assert "slowest statement shapes of the run: server" not in text
     for heading in ("## Per day", "## Per hour", "## Day 1 of 2: sizes", "## Modelled, not real"):
         assert heading in text
     assert "Hardest: day 1 01h, 402 rows inserted" in text
@@ -252,3 +261,52 @@ def test_a_report_before_any_day_ends_and_from_the_command_line(tmp_path, monkey
     monkeypatch.setattr(sys, "argv", ["replay_report.py"])
     with pytest.raises(SystemExit, match="usage"):
         runpy.run_path(str(SCALE / "replay_report.py"), run_name="__main__")
+
+
+BUILD = "SELECT build_id FROM current_calculation WHERE x = $1"
+COPY = "COPY t FROM STDIN WITH (FORMAT 'csv', NULL '198.51.100.4')"
+SERVER_BEFORE = {"5": (BUILD, 1, 1.0, 1, 2.0)}
+
+
+def counters(n):
+    """The counters after `n` windows: each window runs BUILD twice, COPY and another role once."""
+    found = {"5": (BUILD, 1 + 2 * n, 1.0 + 8 * n, 1 + 2 * n, 6.5)}
+    found["other:16384"] = ("other role", n, 3.0 * n, n, 4.0)
+    return found | {"9": (COPY, n, 50.0 * n, 0, 70.0)}
+
+
+def test_the_report_with_pg_stat_statements_as_its_source(tmp_path):
+    out, _ = fixture_state(tmp_path)
+    state = json.loads((out / "state.json").read_text())
+    previous = SERVER_BEFORE
+    for n, record in enumerate(state["hours"][:3], start=1):
+        covers = {"calculate": [record["index"]], "ingest": [record["index"] + 1]}
+        record["server"] = [statement_source.window(previous, counters(n), covers)]
+        previous = counters(n)
+    (out / "state.json").write_text(json.dumps(state))
+    path = replay_report.write(out)
+    report = json.loads((out / "report.json").read_text())
+    first, *_, fourth = report["hours"]
+    assert first["server"] == {"calls": 4, "ms": 61.0, "rows": 3, "mean_ms": 15.25}
+    assert fourth["server"] is None and first["client"]["calls"] == 6
+    shapes = {row["statement"]: row for row in report["server_statements"]}
+    shaped = "COPY t FROM STDIN WITH (FORMAT ?, NULL ?)"  # no value kept
+    copy = shapes[shaped]
+    assert (copy["calls"], copy["ms"], copy["mean_ms"]) == (3, 150.0, 50.0)
+    assert copy["max_ms_since_reset"] == 70.0
+    assert shapes["other role"]["calls"] == 3  # another role's statements count in the totals
+    assert report["server_statements"][0]["statement"] == shaped
+
+    text = path.read_text()
+    assert "Statement numbers come from the server first (pg_stat_statements" in text
+    assert "pg_stat_statements is absent" not in text
+    assert "| Day | Hour | Server calls | Server ms | Server mean ms | Server rows |" in text
+    assert "| 1 | 0 | 4 | 61.0 | 15.25 | 3 | 6 | 30.67 |" in text
+    assert "| 2 | 1 |  |  |  |  | 5 | 0.67 |" in text  # no window closed on that hour yet
+    assert "slowest statement shapes of the run: server time" in text
+    assert f"| 150.0 | 3 | 50.0 | 0 | 70.0 | `{shaped}` |" in text
+    assert "Max ms since reset" in text and "`other role`" in text
+    assert "slowest statement shapes of the run: client wall time" in text
+    for name in ("report.md", "report.json"):
+        found = (out / name).read_text()
+        assert not IPV4.search(found) and not IPV6.search(found), name
