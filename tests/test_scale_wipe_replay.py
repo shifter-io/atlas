@@ -1,5 +1,5 @@
 """WIPE-TOOL-1: the wipe removes exactly the replay's rows, after a REPLAY-1 replay of the
-fixture slice set on the test database (standing in for production)."""
+fixture slice set on the test database (standing in for staging)."""
 
 import asyncio
 import importlib
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from orchestrator_cases import query
 from storage_cases import enrichment, measurement
-from test_scale_replay import argv, production  # noqa: F401 (the fixture)
+from test_scale_replay import argv, staging  # noqa: F401 (the fixture)
 
 from proxy_index.partitions import DAILY, children
 from proxy_index.storage import ingest
@@ -82,20 +82,20 @@ def left(base, replayed, own=None):
 
 
 def test_the_dry_run_counts_and_the_apply_leaves_exactly_the_baseline(
-    production,  # noqa: F811
+    staging,  # noqa: F811
     tmp_path,
     capsys,
 ):
-    baseline_rows(production)
-    base, protected = counts(production), rows(production)
-    assert replay.main(argv(production, tmp_path, 1, 2)) == 0
+    baseline_rows(staging)
+    base, protected = counts(staging), rows(staging)
+    assert replay.main(argv(staging, tmp_path, 1, 2)) == 0
     capsys.readouterr()
     state = json.loads((tmp_path / "out" / "state.json").read_text())
-    replayed, replayed_rows = counts(production), rows(production)
-    code, refused = wipe(production, tmp_path, capsys, "--apply", "--owner-go", GO)
+    replayed, replayed_rows = counts(staging), rows(staging)
+    code, refused = wipe(staging, tmp_path, capsys, "--apply", "--owner-go", GO)
     assert code == 2 and "no dry run" in refused
-    code, dry = wipe(production, tmp_path, capsys)
-    assert code == 0 and dry["dry_run"] and counts(production) == replayed
+    code, dry = wipe(staging, tmp_path, capsys)
+    assert code == 0 and dry["dry_run"] and counts(staging) == replayed
     assert dry["deleted"] == replay_rows(base, replayed)
     assert dry["deleted"]["public.test_runs"] == replayed["public.test_runs"] > 4
     assert dry["deleted"]["public.nodes"] == len(state["nodes"])
@@ -104,62 +104,62 @@ def test_the_dry_run_counts_and_the_apply_leaves_exactly_the_baseline(
     added = sorted(set(map(eval, replayed_rows["targets"])) - set(map(eval, protected["targets"])))
     assert dry["targets_kept"] == [row[0] for row in added]
     for extra in ([], ["--owner-go", "owner-go LAUNCH-WIPE"], ["--owner-go", "owner-go X"]):
-        code, refused = wipe(production, tmp_path, capsys, "--apply", *extra)
+        code, refused = wipe(staging, tmp_path, capsys, "--apply", *extra)
         assert code == 2 and "LAUNCH-WIPE" in refused
     later = f"owner-go LAUNCH-WIPE {datetime.now(UTC).date().replace(year=2999)}"
-    code, refused = wipe(production, tmp_path, capsys, "--apply", "--owner-go", later)
+    code, refused = wipe(staging, tmp_path, capsys, "--apply", "--owner-go", later)
     assert code == 2 and "after today" in refused
-    assert counts(production) == replayed
-    code, applied = wipe(production, tmp_path, capsys, "--apply", "--owner-go", GO)
+    assert counts(staging) == replayed
+    code, applied = wipe(staging, tmp_path, capsys, "--apply", "--owner-go", GO)
     assert code == 0 and not applied["dry_run"] and applied["deleted"] == dry["deleted"]
-    assert counts(production) == left(base, replayed) == applied["counts"]
+    assert counts(staging) == left(base, replayed) == applied["counts"]
     assert set(applied["not_at_baseline"]) == set(growth(base, left(base, replayed)))
-    assert rows(production) == replayed_rows  # the protected tables, row by row
+    assert rows(staging) == replayed_rows  # the protected tables, row by row
     for name, found in protected.items():
         assert set(found) <= set(replayed_rows[name])
-    assert query(production, "SELECT count(*) FROM current_calculation") == [(0,)]
-    with replay.storage.connect(production) as conn:
+    assert query(staging, "SELECT count(*) FROM current_calculation") == [(0,)]
+    with replay.storage.connect(staging) as conn:
         partitions = [name for table in DAILY for name, _, _ in children(conn, table)]
     assert not set(dry["empty_partitions"]) & set(partitions)
 
 
-def test_a_production_run_after_the_baseline_survives(production, tmp_path, capsys):  # noqa: F811
-    base = counts(production)
-    assert replay.main(argv(production, tmp_path, 1, 1)) == 0
+def test_a_production_run_after_the_baseline_survives(staging, tmp_path, capsys):  # noqa: F811
+    base = counts(staging)
+    assert replay.main(argv(staging, tmp_path, 1, 1)) == 0
     capsys.readouterr()
-    replayed = counts(production)
+    replayed = counts(staging)
     for provider in ("fixture", "other"):  # production's own runs, without the marker
         (tmp_path / provider).mkdir()
         directory = asyncio.run(measurement(tmp_path / provider, provider=provider))
         enrichment(directory)
-        assert ingest(directory, production)["imported"]
+        assert ingest(directory, staging)["imported"]
     overlap = "SELECT provider_a,provider_b,shared_ips FROM provider_overlap"
-    assert query(production, overlap) == [("fixture", "other", 1)]
-    own = growth(replayed, counts(production))
-    with replay.storage.connect(production) as conn:  # as if the replay shared their IPs
+    assert query(staging, overlap) == [("fixture", "other", 1)]
+    own = growth(replayed, counts(staging))
+    with replay.storage.connect(staging) as conn:  # as if the replay shared their IPs
         conn.execute("UPDATE provider_overlap SET shared_ips=shared_ips+4")
-    code, dry = wipe(production, tmp_path, capsys)
+    code, dry = wipe(staging, tmp_path, capsys)
     assert code == 0 and dry["deleted"] == replay_rows(base, replayed)
     # The counts the dry run kept differ from the apply's: it rolls back.
     path = tmp_path / "out" / wipe_replay.DRY_RUN
     tampered = json.loads(path.read_text())
     tampered["deleted"]["public.test_runs"] += 1
     path.write_text(json.dumps(tampered))
-    code, refused = wipe(production, tmp_path, capsys, "--apply", "--owner-go", GO)
+    code, refused = wipe(staging, tmp_path, capsys, "--apply", "--owner-go", GO)
     assert code == 2 and "rolled back" in refused
-    assert counts(production) == {name: replayed[name] + own.get(name, 0) for name in replayed}
-    assert wipe(production, tmp_path, capsys)[0] == 0
-    code, applied = wipe(production, tmp_path, capsys, "--apply", "--owner-go", GO)
+    assert counts(staging) == {name: replayed[name] + own.get(name, 0) for name in replayed}
+    assert wipe(staging, tmp_path, capsys)[0] == 0
+    code, applied = wipe(staging, tmp_path, capsys, "--apply", "--owner-go", GO)
     assert code == 0 and applied["counts"] == left(base, replayed, own)
     marked = "SELECT count(*) FILTER (WHERE summary ? 'scale_replay'),count(*) FROM test_runs"
-    assert query(production, marked) == [(0, 2)]
-    assert query(production, "SELECT count(*) FROM products WHERE provider='fixture'")[0][0] == 1
-    assert query(production, "SELECT count(*) FROM ip_observations")[0][0] > 0
-    assert query(production, overlap) == [("fixture", "other", 1)]
+    assert query(staging, marked) == [(0, 2)]
+    assert query(staging, "SELECT count(*) FROM products WHERE provider='fixture'")[0][0] == 1
+    assert query(staging, "SELECT count(*) FROM ip_observations")[0][0] > 0
+    assert query(staging, overlap) == [("fixture", "other", 1)]
 
 
-def test_a_current_replay_build_gives_way_to_the_newest_baseline_build(production):  # noqa: F811
-    with replay.storage.connect(production) as conn:
+def test_a_current_replay_build_gives_way_to_the_newest_baseline_build(staging):  # noqa: F811
+    with replay.storage.connect(staging) as conn:
         conn.execute("INSERT INTO methodologies VALUES ('baseline','{}')")
         older, kept, replayed = published(conn), published(conn), published(conn)
         conn.execute("INSERT INTO current_calculation(build_id) VALUES (%s)", (replayed,))
@@ -170,8 +170,8 @@ def test_a_current_replay_build_gives_way_to_the_newest_baseline_build(productio
         assert wipe_replay.builds(conn, kept) == older  # a baseline build stays current
 
 
-def test_a_state_of_another_database_is_refused(production, tmp_path, capsys):  # noqa: F811
+def test_a_state_of_another_database_is_refused(staging, tmp_path, capsys):  # noqa: F811
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "state.json").write_text(json.dumps({"database": "elsewhere"}))
-    code, refused = wipe(production, tmp_path, capsys)
+    code, refused = wipe(staging, tmp_path, capsys)
     assert code == 2 and "not of" in refused

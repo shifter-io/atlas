@@ -1,5 +1,5 @@
 """REPLAY-1: what the database held before the replay, and which rows the replay added
-(REPLAY.md, "Telling replay rows from production's")."""
+(REPLAY.md, "Telling replay rows from the database's own")."""
 
 from __future__ import annotations
 

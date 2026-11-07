@@ -50,14 +50,17 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   database with `search_path` exactly `proxy_scale` ("A scratch schema", below; `target.py`).
 - It refuses a database holding any `test_runs` row it did not write (its runs carry the summary
   key `scale_generator`), and a storage schema other than this framework's.
-- **The owner's go (REPLAY-RUN-1 (#614) only).** The 7-day replay may write to production's own
-  database, `proxy_reviews`, with `--owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"`
-  (`target.refusal(conn, owner_go=...)`). It is accepted only when the database is `proxy_reviews`,
-  the date is not in the future (a run resumed on a later day reuses the same go), and the database
-  holds no `test_runs` row without the replay's summary key `scale_replay`. The accepted go, the
-  database, the role and the UTC time go to stderr and into the replay's state and report. Without
-  the go every target but `proxy_scale` is refused as before; `generate.py` and `cycle.py` take no
-  go and keep refusing `proxy_reviews`. Check it read-only with
+- **The owner's go (REPLAY-RUN-1 (#614) only).** The 7-day replay may write to the staging
+  database, `proxy_reviews_staging` (`target.STAGING`: the same server as production, created
+  empty, with production's three roles), with `--owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"`
+  (`target.refusal(conn, owner_go=...)`). It is accepted only when the database is
+  `proxy_reviews_staging`, the date is not in the future (a run resumed on a later day reuses the
+  same go), and the database holds no `test_runs` row without the replay's summary key
+  `scale_replay`. Production's `proxy_reviews` is refused with or without the go; the refusal
+  names the staging database. The accepted go, the database, the role and the UTC time go to
+  stderr and into the replay's state and report. Without the go every target but `proxy_scale` is
+  refused as before; `generate.py` and `cycle.py` take no go and keep refusing both
+  `proxy_reviews` and `proxy_reviews_staging`. Check it read-only with
   `target.py check --database <toml> --owner-go "<go>"` (exit 2 on a refusal). The owner removes
   the replay's data before launch (LAUNCH-WIPE (#615)) with `wipe_replay.py` (REPLAY.md).
 - A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
@@ -239,7 +242,7 @@ loads, 2.79 MB per load, 1.674 GB per network-hour.
 checks, the bytes and outcomes of every target, and one planned hour of 2 networks on the test
 database: its rows, and that no settings row changes.
 
-The replay of simulated days in production's database (REPLAY-1, `replay.py`) and the removal of
+The replay of simulated days in the staging database (REPLAY-1, `replay.py`) and the removal of
 its data (WIPE-TOOL-1, `wipe_replay.py`) are described in [REPLAY.md](REPLAY.md).
 
 # A scratch schema in production's database (SCALE-SCHEMA-1)

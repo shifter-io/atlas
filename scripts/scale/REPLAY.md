@@ -1,7 +1,8 @@
 # Replay of simulated days (REPLAY-1)
 
 `replay.py` replays simulated days of real-data hours back to back, without waiting real time.
-It runs through production's own code paths, in production's database, with the owner's go
+It runs through production's own code paths, in the staging database `proxy_reviews_staging`
+(the same server as production, created empty), with the owner's go
 (REPLAY-RUN-1, #614). Its input is the 24 hourly slices of SLICES-1 (`slices.py`) and the
 modelled browser hour of BROWSER-MODEL-1 (`browser_model.py`). REPLAY-REPORT-1 (#611) turns its
 state into the report ("Report" below).
@@ -9,7 +10,7 @@ state into the report ("Report" below).
 ## Usage
 
 ```sh
-uv run python scripts/scale/replay.py --database proxy_reviews.toml \
+uv run python scripts/scale/replay.py --database proxy_reviews_staging.toml \
   --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --slices <slices dir> \
   --days 7 --first-day <YYYY-MM-DD> --out <dir> \
   [--hour-timeout 3000] [--siteapi http://127.0.0.1:<port>] [--siteapi-timeout 600] [--no-scope]
@@ -19,8 +20,8 @@ uv run python scripts/scale/replay.py --database proxy_reviews.toml \
   simulated hour must end before now.
 - The same command continues a stopped run from `<out>/state.json`. A state file of another
   database, first day or number of days is refused.
-- `--siteapi` is production's siteapi: after each calculation the replay waits (up to
-  `--siteapi-timeout` seconds) until its `/healthz` serves the new build. Without it, that wait
+- `--siteapi` is a siteapi reading the target database (staging's, not production's): after
+  each calculation the replay waits (up to `--siteapi-timeout` seconds) until its `/healthz` serves the new build. Without it, that wait
   is skipped.
 - `--no-scope` runs the calculation without the systemd memory scope (where the user may not
   create scopes).
@@ -31,15 +32,17 @@ uv run python scripts/scale/replay.py --database proxy_reviews.toml \
 Checked at every start, before anything is written:
 
 - **Target:** `target.refusal(conn, owner_go=...)` (SCALE-TARGET-2): the go has the owner's form
-  and a date not after today, the database is production's (`proxy_reviews`), and it holds no
-  test run without the replay's marker. The go string, the database and the start time are kept
+  and a date not after today, the database is staging's (`proxy_reviews_staging`), and it holds
+  no test run without the replay's marker. Production's `proxy_reviews` is refused, with or
+  without the go. The go string, the database and the start time are kept
   in the state (`go`, `started_at`, and each resume's go in `resumed`), for the report.
-- **Live scheduler:** a `job_runs` row started in the last 5 minutes means production's
-  orchestrator runs against the database. The replay refuses: the hourly `calculate` would build
+- **Live scheduler:** a `job_runs` row started in the last 5 minutes means an orchestrator runs
+  against this database (the check reads only the target database: production's scheduler never
+  touches staging, so it catches an orchestrator pointed at staging). The replay refuses: the hourly `calculate` would build
   on the replay's data, and its planners would plan work for the replay's nodes.
 - **Days:** the last simulated hour must have ended.
 
-The replay writes no settings row. It reads production's own settings and targets.
+The replay writes no settings row. It reads the database's own settings and targets.
 
 ## One simulated hour
 
@@ -57,7 +60,7 @@ Hour h of day d (`replay_steps.py`):
    failure of either retries the run (both are idempotent). A country the formula cannot
    estimate is noted (`not_estimated`), not retried.
 2. **HTTP pulses.** `cycle_steps.Steps.pulses` with the replay's hooks: `batches.pulse_plan` at
-   every 5 minutes of the hour on production's settings and targets, then every planned pulse
+   every 5 minutes of the hour on the database's settings and targets, then every planned pulse
    and load-wave run of the replay's nodes uploaded to an in-process node API (`POST
    /v1/results`, the real ingest). The runs are modelled (no real pulse data exists): 100
    requests, 0 to 3 timeouts, geo rows from the slice's enrichment of the country; a load-wave
@@ -130,7 +133,7 @@ literals as `?`, so no value is kept. A summary has the statement count, the tot
 a histogram of its times (buckets of a factor 1.1), from which the report adds up the run's p95
 (within 5%).
 
-## Telling replay rows from production's
+## Telling replay rows from the database's own
 
 - **Markers:** every run the replay stores has the summary key `scale_replay` (the replay's id):
   daily tests, pulses and browser runs. Its nodes are named as above.
@@ -141,7 +144,7 @@ a histogram of its times (buckets of a factor 1.1), from which the report adds u
 - **After each day** (`days_counted`): the counts again, per table the growth since the baseline,
   the replay's rows (reachable from its runs by `run_key` and from its nodes by `node_id`,
   `test_batches` through their runs) and the other growth (`job_runs`, alerts, ...), reported as
-  production's own.
+  the database's own.
 
 ## Outputs
 
@@ -198,8 +201,8 @@ left out, and statements are shapes.
 (LAUNCH-WIPE, #615). It reads the replay's `state.json`: its baseline, nodes and simulated days.
 
 ```sh
-uv run python scripts/scale/wipe_replay.py --database proxy_reviews.toml --state <out>/state.json
-uv run python scripts/scale/wipe_replay.py --database proxy_reviews.toml --state <out>/state.json \
+uv run python scripts/scale/wipe_replay.py --database proxy_reviews_staging.toml --state <out>/state.json
+uv run python scripts/scale/wipe_replay.py --database proxy_reviews_staging.toml --state <out>/state.json \
   --apply --owner-go "owner-go LAUNCH-WIPE <YYYY-MM-DD>"
 ```
 
@@ -263,7 +266,7 @@ survives with its lookups, a dry run whose counts differ that rolls back, and a 
 build that gives way to the newest baseline build.
 
 `tests/test_scale_replay.py` replays a fixture slice set (synthetic addresses only) on the test
-database, standing in for production: 2 days of 3 hours in order with the overlap (by
+database, standing in for staging: 2 days of 3 hours in order with the overlap (by
 timestamps), the sizes, the timed statements, the baseline, the markers, the day counts, no
 settings row and the nodes disabled at the end; a calculation that times out and fails, retried
 with doubling pauses until it succeeds and flagged; an ingest failure that keeps the stored run;
