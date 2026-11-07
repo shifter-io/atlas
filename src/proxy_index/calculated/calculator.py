@@ -44,9 +44,9 @@ from .window_scoring import slot_length as slot_length
 SCHEMA_VERSION = 4
 # The calculation's modules (and detect, traffic, browser): a change to any changes the id, so the
 # build fingerprint and every list signature.
-SOURCES = "calculator aggregate policy slim inputs lists incremental hourly fleetsql rollups "
-SOURCES += "sqlwindow poolfig network network_scores scheduled scores window_scoring hourly_windows"
-SOURCES += " product_windows"
+SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
+SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
+SOURCES += "hourly_windows product_windows"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))

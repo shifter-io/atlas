@@ -85,7 +85,7 @@ def layer_start(start, layered, layers, current_layer):
             "Only an unmodified calculated v1 schema can be migrated in place"
             if start == 4
             else "The calculated schema differs from this release; only an unmodified "
-            "calculated v2 to v11 schema can be migrated in place"
+            "calculated v2 to v12 schema can be migrated in place"
         )
     return upgraded, later
 
@@ -167,7 +167,8 @@ def compacted(start, layered, upgraded):
     Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
     columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
     v5 → v6 to v11 → v12 (but v8 → v9) and calculated v2 → v3 only add tables, nullable or
-    constant-default columns and an index (and swap a check constraint or index): no rewrite.
+    constant-default columns and an index (and swap a check constraint or index), and calculated
+    v12 → v13 drops a foreign key: no rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:

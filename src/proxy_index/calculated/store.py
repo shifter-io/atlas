@@ -27,7 +27,7 @@ from .store_retention import layer as layer
 from .store_retention import lists as lists
 from .store_retention import retained as retained
 from .store_retention import retention as retention
-from .store_steps import *  # noqa: F403 (the checksums and V10_ and V11_ steps migrate() reads)
+from .store_steps import *  # noqa: F403 (the checksums and V10_ to V12_ steps migrate() reads)
 from .store_steps import SCHEMA_VERSION, schema
 
 # Unpublished, non-current builds keep their payload only while among the newest few drafts.

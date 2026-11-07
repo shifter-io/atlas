@@ -244,6 +244,10 @@ status codes, which nothing reads. Hours are copied, rewritten and collected as 
 `calculated_pulse_rollups.loose` records the runs outside a batch an hour held, so a run linked to a
 batch since rewrites its hour. The census overlaps, pulse slots and tested spans come from one read
 of the batch runs instead of three.
+Calculated schema v13 (`calculated/migrate_v12_v13.sql`, LISTS-WRITE-1) drops the foreign key
+of `calculated_list_rows.list_id`, whose per-row check made a first build's list writing take
+hours; no row is rewritten. A product group's new lists are written with one INSERT, one label
+lookup and one COPY (`calculated/list_write.py`).
 Calculated schema v3 (`calculated/migrate_v2_v3.sql`, applied by `db-migrate`) adds request
 success, challenges, blocks and p50/p90/p99 to the breakdowns, which now cover country, region,
 city, ASN and country × ASN from `run_geo_buckets`, and challenge rate, block rate, uptime and

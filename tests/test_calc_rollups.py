@@ -274,9 +274,10 @@ async def test_v10_and_v11_layers_migrate_to_the_rollups_keeping_their_lists(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         version,
-        12,
+        13,
     )
-    assert result["verified"][-len(store.V11_CHECKS) :] == list(store.V11_CHECKS)
+    tail = [*store.V11_CHECKS, *store.V12_CHECKS]
+    assert result["verified"][-len(tail) :] == tail
     assert set(store.V10_CHECKS) <= set(result["verified"]) or version == 11
     with connect(database) as conn:
         assert conn.execute("SELECT * FROM calculated_lists ORDER BY list_id").fetchall() == before

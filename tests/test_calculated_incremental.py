@@ -292,7 +292,7 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         9,
-        12,
+        13,
     )
     assert set(store.V9_CHECKS) <= set(result["verified"])
     with connect(database) as conn:
@@ -312,7 +312,7 @@ async def test_v9_layer_migrates_to_the_memo_tables_keeping_its_lists(database, 
 def test_memo_tables_are_written_by_runtime_and_read_by_api_roles(owned):  # noqa: F811
     roles, files = owned.roles, owned.files
     # The admin role migrates (v8 → v12); the memo tables and rollups get the default privileges.
-    assert migrate(files[roles.admin])["calculated_schema_version"] == 12
+    assert migrate(files[roles.admin])["calculated_schema_version"] == 13
     now = datetime.now(UTC)
     rows = {
         "calculated_run_ranges": (1, 0, now, now, "{}", now),

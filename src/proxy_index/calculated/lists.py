@@ -2,7 +2,8 @@
 
 persist() writes a payload's cohorts, windows, scores, series and overlaps. Each target-free
 window's full breakdowns are its list: one calculated_lists row and its calculated_list_rows,
-copied in one COPY per persist(), never a round trip per row; the window row names the list in
+written per product group by list_write.write_lists() (one INSERT, one label lookup and one COPY
+for the group's new lists), never a round trip per row; the window row names the list in
 list_id. A list is written once and may outlive its build; store.collect() deletes the lists no
 window references.
 
@@ -21,11 +22,9 @@ from functools import partial
 from psycopg.rows import tuple_row
 from psycopg.types.json import Jsonb
 
-from ..names import labels as shared_labels
 from ..storage import column
-from .aggregate import BREAKDOWNS, NETWORK, PLACE
+from .list_write import prepare, write_lists
 from .policy import digest
-from .slim import POOL_LISTS
 
 CRITERIA = {
     "kind": "text",
@@ -41,18 +40,7 @@ CRITERIA = {
     "flags": "json",
     "target_variant": "json",
 }
-# Label fields of each breakdown: its place columns and whether it names an ASN.
-FIELDS = {
-    "country": (PLACE[:2], False),
-    "region": (PLACE[:4], False),
-    "city": (PLACE, False),
-    "asn": ((), True),
-    "country_asn": (PLACE[:2], True),
-    "city_asn": (PLACE, True),
-}
-COUNTERS = ("ips", "observations", "completed", "successes", "success_rate", "challenges", "blocks")
-LATENCY = ("p50", "p90", "p99")
-# Place and ASN labels use the shared name lists (shared_labels); reasons stay calculator-only.
+# Place and ASN labels use the shared name lists (names.labels()); reasons stay calculator-only.
 LABELS = {"score_reasons": ("reason_id", ("reason",), ("text",))}
 
 
@@ -123,44 +111,15 @@ def split_reasons(score, product):
     ]
 
 
-# A list's figures: the window's pool figures that do not depend on its start (new_ips and
-# churn_rate do; the daily averages depend on the cutoff), plus its pool lists' entry counts.
-# lists.py is part of IMPLEMENTATION_ID, so a change to FIGURES or content_hash changes every
-# signature. A list the incremental calculation counted in SQL also stores "first_seen", its IPs
-# per 5-minute bin of their product's first sighting from the window's start on (CALC-INC-2's
-# new IPs), outside content_hash: a late run moves product_ips.first_seen, which no signature
-# names (UNHASHED).
-FIGURES = (
-    "unique_ips",
-    "observations",
-    "recurring_share",
-    "countries",
-    "regions",
-    "cities",
-    "asns",
-    "datacenter_asn_share",
-    "classification_coverage",
-    "geo_accuracy",
-    "enrichment_coverage",
-)
-UNHASHED = ("first_seen",)
 WINDOW_COLUMNS = (
     "build_id,product_id,cohort,target,window_hours,completed,successes,errors,body_bytes,"
     "success_rate,timeout_rate,p50,p90,p95,p99,unique_ips,new_ips,recurring_share,countries,"
     "regions,cities,asns,coverage,last_observed,readiness,challenge_rate,block_rate,uptime,"
     "bytes_up,bytes_down,list_id"
 )
-LIST_ROW_COLUMNS = (
-    "list_id,dimension,position,place_id,asn_label_id,ips,observations,completed,successes,"
-    "challenges,blocks,p50,p90,p99"
-)
 
 
 SIGNATURE_VERSION = 1
-STORED = (
-    "SELECT list_id,content_hash FROM calculated_lists "
-    "WHERE product_id=%s AND cohort=%s AND window_hours=%s AND signature=%s"
-)
 # A run's enrichment: its newest run_enrichments row, the release its observations are read with
 # (releases.RUN_RELEASES).
 ENRICHMENTS = (
@@ -219,17 +178,18 @@ def persist(conn, payload, signed=None):
     for p in payload["products"]:
         store_cohort(conn, p["cohort"], p["criteria"])
     reason_ids = _reasons(conn, payload["products"])
-    rows, lists = [], {}
+    lists = {}
     for p in payload["products"]:
+        # A window that names a list already has it: the incremental calculation wrote it.
+        new = [(label, w) for label, w in p["windows"].items() if "lists" not in w]
+        keys = [(p["product_id"], p["cohort"], w["period"]["hours"]) for _, w in new]
+        signatures = [(signed or {}).get(k) for k in keys]
+        prepared = [prepare(p, w, s) for (_, w), s in zip(new, signatures, strict=True)]
+        written = write_lists(conn, build_id, prepared)
+        ids = dict(zip([label for label, _ in new], written, strict=True))
         for label, w in p["windows"].items():
-            signature = (signed or {}).get((p["product_id"], p["cohort"], w["period"]["hours"]))
-            list_id = lists[p["id"], label] = (
-                w["lists"]["id"]  # a stored list the incremental calculation reused
-                if "lists" in w
-                else write_list(conn, build_id, p, w, rows, signature)
-            )
+            list_id = lists[p["id"], label] = w["lists"]["id"] if "lists" in w else ids[label]
             _results(conn, (build_id, list_id), p, w, reason_ids)
-    copy_rows(conn, rows)
     for o in payload["overlap"]:
         _overlap(conn, build_id, payload["periods"], o)
     return lists
@@ -273,67 +233,6 @@ def _reasons(conn, products):
                 texts.update(c["reason"] for c in score["components"].values() if c["reason"])
                 texts.update(r for _, r in split_reasons(score, not target))
     return {k[0]: v for k, v in labels(conn, "score_reasons", {(t,) for t in texts}).items()}
-
-
-def figures(pool):
-    """The list figures of a window's pool (see FIGURES)."""
-    return {k: pool[k] for k in FIGURES if k in pool} | {
-        "list_entries": {name: len(pool[name]) for name in POOL_LISTS if name in pool}
-    }
-
-
-def write_list(conn, build_id, product, window, rows, signature=None):
-    """Return the list_id of the window's list: the stored list with its signature (verified),
-    else a new list, inserted with its rows appended to rows for copy_rows(). content_hash is the
-    digest of the full breakdowns and the figures; window["first_seen"], when present, is stored
-    with the figures (see FIGURES)."""
-    breakdowns, numbers = window["breakdowns"], figures(window["pool"])
-    key = (product["product_id"], product["cohort"], window["period"]["hours"], signature)
-    content_hash = digest({"breakdowns": breakdowns, "figures": numbers})
-    cur = conn.cursor(row_factory=tuple_row)
-    if signature is not None and (stored := cur.execute(STORED, key).fetchone()):
-        if stored[1] != content_hash:
-            raise ValueError("list signature is incomplete")
-        return stored[0]
-    list_id = cur.execute(
-        "INSERT INTO calculated_lists(product_id,cohort,window_hours,signature,content_hash,"
-        "entries,figures,created_build) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING list_id",
-        (
-            *key,
-            content_hash,
-            Jsonb({name: len(breakdowns[name]) for name in BREAKDOWNS}),
-            Jsonb(numbers | {k: window[k] for k in UNHASHED if k in window}),
-            build_id,
-        ),
-    ).fetchone()[0]
-    for name, code in BREAKDOWNS.items():
-        places, named = FIELDS[name]
-        for position, row in enumerate(breakdowns[name]):
-            label = set(row) - set(COUNTERS) - set(LATENCY)
-            if label != set(places) | (set(NETWORK) if named else set()):
-                raise ValueError("Unexpected breakdown label")
-            place = tuple(row.get(f) for f in PLACE) if places else None
-            network = tuple(row[f] for f in NETWORK) if named else None
-            rows.append((list_id, code, position, place, network, row))
-    return list_id
-
-
-def copy_rows(conn, rows):
-    """COPY the list rows write_list() collected, their labels resolved to shared ids."""
-    places, networks = shared_labels(conn, *({r[i] for r in rows if r[i]} for i in (3, 4)))
-    with conn.cursor().copy(f"COPY calculated_list_rows({LIST_ROW_COLUMNS}) FROM STDIN") as copy:
-        for list_id, code, position, place, network, row in rows:
-            copy.write_row(
-                (
-                    list_id,
-                    code,
-                    position,
-                    places[place] if place else None,
-                    networks[network] if network else None,
-                    *[row[k] for k in ("ips", "observations", "completed", "successes")],
-                    *[row[k] for k in ("challenges", "blocks", *LATENCY)],
-                )
-            )
 
 
 def _window(conn, ids, p, w, target):

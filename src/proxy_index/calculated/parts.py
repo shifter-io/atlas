@@ -97,7 +97,8 @@ LIST_ROWS = (
 )
 # Each pool list's breakdown, as aggregate.pool_lists() picks it.
 POOL_DIMENSIONS = {"geo": "city", "countries_breakdown": "country", "asns_breakdown": "asn"}
-# A breakdown row's label fields (lists.FIELDS) and counters, as aggregate.breakdowns() writes it.
+# A breakdown row's label fields (list_write.FIELDS) and counters, as aggregate.breakdowns()
+# writes it.
 LABELS = {
     "country": PLACE[:2],
     "region": PLACE[:4],
