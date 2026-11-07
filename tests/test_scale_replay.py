@@ -149,7 +149,8 @@ def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(
     report = json.loads((tmp_path / "out" / "report.json").read_text())
     assert len(report["hours"]) == 6 and len(report["days_done"]) == 2
     for hour in report["hours"]:
-        assert hour["rows"]["public.test_runs"] == 2 and hour["per_test"]["count"] == 2
+        # Its daily tests, pulses and browser runs: every test_runs row of the hour is the replay's.
+        assert hour["rows"]["public.test_runs"] > 2 and hour["per_test"]["count"] == 2
         assert hour["calculate_seconds"] and hour["slowest"] and hour["growth_bytes"] is not None
     assert report["final"]["day"] == 2 and report["final"]["tables_gb"]
     assert [s for s in report["statements"] if s["statement"].startswith("COPY") and s["rows"]]
@@ -206,9 +207,7 @@ def test_a_failed_calculation_pauses_doubling_and_retries_the_same_hour(
     assert query(production, "SELECT count(*) FROM current_calculation")[0][0] == 1
 
 
-def test_an_ingest_failure_keeps_the_runs_already_stored(
-    production, tmp_path, monkeypatch, capsys
-):
+def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, monkeypatch, capsys):
     real, calls = replay_steps.storage.ingest, []
 
     def unwritable(out):

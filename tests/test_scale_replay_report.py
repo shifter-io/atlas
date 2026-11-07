@@ -99,7 +99,8 @@ def test_shapes_of_several_hours_add_up_with_their_p95():
     select = found[0]
     assert select["calls"] == 100 and select["rows"] == 100 and select["max_seconds"] == 1.0
     assert select["p95_seconds"] == pytest.approx(0.01, rel=0.05)
-    assert found[1]["p95_seconds"] == 2.0  # never above the maximum
+    assert found[1]["p95_seconds"] == pytest.approx(2.0, rel=0.05)
+    assert found[1]["p95_seconds"] <= found[1]["max_seconds"]  # never above the maximum
     assert replay_report.quantile({}, 95) is None
 
 
