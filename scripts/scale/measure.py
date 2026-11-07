@@ -3,8 +3,9 @@
 
 Statement timings come from pg_stat_statements when the database has it loaded, otherwise from
 `Tracer` (every psycopg execute, executemany and COPY of the process, by statement shape;
-`measure.py trace OUT MODULE [ARGS]` runs a module under it). Table sizes add each partition to its parent. Peak RSS is VmHWM from /proc (Linux),
-sampled while a child runs, with the child's maximum resident size from wait4.
+`measure.py trace OUT MODULE [ARGS]` runs a module under it). Table sizes add each partition to
+its parent. Peak RSS is VmHWM from /proc (Linux), sampled while a child runs, with the child's
+maximum resident size from wait4.
 """
 
 from __future__ import annotations
