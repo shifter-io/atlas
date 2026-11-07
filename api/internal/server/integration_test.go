@@ -40,9 +40,9 @@ INSERT INTO site.changelog(change_id,kind,provider_slug,headline,detail,severity
 INSERT INTO site.tape_events(tape_id,kind,provider_slug,product,title,detail,occurred_at) VALUES ('tape-1','pool','shifter','residential','Pool grew','x',now());`
 
 // TestServeFromDatabase runs the real read path against a scratch database
-// with the measured snapshot published and test catalog rows, checks the
-// runtime pool cannot write, that a database change is picked up, and that
-// cached responses meet the latency target over loopback.
+// with the measured snapshot published as a v4 build and test catalog rows,
+// checks the runtime pool cannot write, that a database change is picked up,
+// and that cached responses meet the latency target over loopback.
 func TestServeFromDatabase(t *testing.T) {
 	// Serial: the p99 latency measurement runs alone (api.yml runs it alone too).
 	db := testdb.New(t)
@@ -53,7 +53,7 @@ func TestServeFromDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.Publish(t, snap)
+	db.PublishV4(t, snap)
 	db.Exec(t, siteCatalog)
 	pool, err := store.OpenReadOnly(ctx, db.DSN)
 	if err != nil {
@@ -159,10 +159,10 @@ func TestServeFromDatabase(t *testing.T) {
 // TestAFreshDatabaseServesEveryPageOfOnePublishedProduct is the database
 // DROPLET-1 left (API-ROUTE-CHECK-1): framework data only, no site catalog
 // rows, one published product group (Shifter residential, requested country
-// US). The site schema is, in turn, migrated by an older siteapi whose 0001
-// file differed in a comment (the checksum a 2026-10-24 build wrote), missing
-// altogether (`siteapi migrate` never ran), or missing some tables and a
-// column. Every page answers 200, and a missing site table is logged once.
+// US) as a v4 build. The site schema is, in turn, migrated by an older
+// siteapi whose 0001 file differed in a comment (the checksum a 2026-10-24
+// build wrote), missing altogether (`siteapi migrate` never ran), or missing
+// some tables and a column. Every page answers 200, and a missing site table is logged once.
 func TestAFreshDatabaseServesEveryPageOfOnePublishedProduct(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -200,7 +200,7 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.Publish(t, snap)
+	db.PublishV4(t, snap)
 	pool, err := store.OpenReadOnly(ctx, db.DSN)
 	if err != nil {
 		t.Fatal(err)

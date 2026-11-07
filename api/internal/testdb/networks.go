@@ -47,7 +47,10 @@ func (d *DB) PublishV4(t testing.TB, payload []byte) int64 {
 // netListRowsSQL writes list $1's rows from the jsonb array $2 of breakdown
 // rows (testscale.BreakdownRows) with their dimension code (d) and position
 // (pos), adding the place and ASN names they need. A network list keeps no
-// observations (0), challenges, blocks, p90 or p99 (NULL).
+// observations (0), challenges, blocks, p90 or p99 (NULL). A row finds its names
+// by a jsonb array of their columns, which equals when each column is the
+// same or both are NULL (as IS NOT DISTINCT FROM) and, unlike it, hashes: a
+// QA-1-sized list joins in a hash join, not a nested loop over every name.
 const netListRowsSQL = `WITH r AS (SELECT *, d <> 'a' AS place, d IN ('a','y') AS network FROM jsonb_to_recordset($2) AS r(d text, pos int,
  country_code text, country text, region_code text, region text, city text, asn bigint, name text, usage_type text,
  ips bigint, completed bigint, successes bigint, p50 int)),
@@ -57,13 +60,13 @@ p AS (INSERT INTO place_names(country_code,country,region_code,region,city)
 n AS (INSERT INTO asn_names(asn,name) SELECT DISTINCT asn,name FROM r WHERE network
  ON CONFLICT (asn,name) DO UPDATE SET name=excluded.name RETURNING *),
 l AS (INSERT INTO asn_labels(asn_name_id,usage_type)
- SELECT DISTINCT n.asn_name_id,r.usage_type FROM r JOIN n ON r.network AND (n.asn,n.name) IS NOT DISTINCT FROM (r.asn,r.name)
+ SELECT DISTINCT n.asn_name_id,r.usage_type FROM r JOIN n ON r.network AND jsonb_build_array(n.asn,n.name) = jsonb_build_array(r.asn,r.name)
  ON CONFLICT (asn_name_id,usage_type) DO UPDATE SET usage_type=excluded.usage_type RETURNING *)
 INSERT INTO calculated_list_rows
 SELECT $1,r.d::"char",r.pos,p.place_id,l.asn_label_id,coalesce(r.ips,0),0,r.completed,r.successes,NULL,NULL,r.p50,NULL,NULL FROM r
- LEFT JOIN p ON r.place AND (p.country_code,p.country,p.region_code,p.region,p.city)
-  IS NOT DISTINCT FROM (r.country_code,r.country,r.region_code,r.region,r.city)
- LEFT JOIN n ON r.network AND (n.asn,n.name) IS NOT DISTINCT FROM (r.asn,r.name)
+ LEFT JOIN p ON r.place AND jsonb_build_array(p.country_code,p.country,p.region_code,p.region,p.city)
+  = jsonb_build_array(r.country_code,r.country,r.region_code,r.region,r.city)
+ LEFT JOIN n ON r.network AND jsonb_build_array(n.asn,n.name) = jsonb_build_array(r.asn,r.name)
  LEFT JOIN l ON l.asn_name_id=n.asn_name_id AND l.usage_type IS NOT DISTINCT FROM r.usage_type`
 
 // netListCodes are the list row dimensions of the breakdown names.

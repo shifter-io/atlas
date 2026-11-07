@@ -2,20 +2,15 @@ package server
 
 import (
 	"bytes"
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
@@ -25,8 +20,16 @@ import (
 // this test on that commit with GOLDEN_WRITE=<path> and GOLDEN_MAIN=<commit>.
 // The dataset's and details' hashes are of their bytes without droppedKeys,
 // computed the same way on a1943b6 (the code before DATASET-SIZE-1, whose
-// other hashes all equal main's).
+// other hashes all equal main's). It is the fixtures published before
+// payload v4 (testdb.Publish); v4GoldenFile is them as v4 builds.
 const goldenFile = "testdata/answers-before-browser.json"
+
+// v4GoldenFile holds the same answers' SHA-256 with each fixture published
+// as a v4 build (testdb.PublishV4), written by this test with
+// GOLDEN_WRITE=<path>: goldenFile's answers after testscale.AsV4Answers,
+// with each window's lists from the one source a v4 build has
+// (testscale.Listed), which moves listedAnswers of them.
+const v4GoldenFile = "testdata/answers-v4.json"
 
 // newTargetFields is what BP-API adds to a network target's dataset entry:
 // its engine and its (null) group. Nothing else may differ.
@@ -41,61 +44,22 @@ type golden struct {
 var goldenPages = []string{"/v1/networks/shifter/places?dimension=city", "/v1/networks/shifter/places?dimension=asn&range=7d",
 	"/v1/countries/US/cities", "/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=shift", "/v1/events"}
 
+// goldenFixtures are the committed fixtures, by golden name.
+var goldenFixtures = map[string]string{"v1": "snapshot.json", "every-request": "snapshot-every-request.json"}
+
 // strippedAnswers is every answer of the database's current build, as
-// answers() renders them, with newTargetFields and what LAT-MEAN-API adds
-// without a latency mean removed. /v1/version is left out: its revision is
-// the dataset's hash, which is compared itself.
-func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
+// renderedAnswers renders them, with newTargetFields and what LAT-MEAN-API
+// adds without a latency mean removed. /v1/version is left out: its revision
+// is the dataset's hash, which is compared itself.
+func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string][]byte {
 	t.Helper()
-	db.Exec(t, "UPDATE calculated_snapshots SET content_hash='same' WHERE build_id=$1", id)
-	ctx := context.Background()
-	pool, err := store.OpenReadOnly(ctx, db.DSN)
-	if err != nil {
-		t.Fatal(err)
+	out := renderedAnswers(t, db, id, goldenPages, func(res *build.Result) { withoutLatencyMeanGaps(res.Coverage) })
+	delete(out, versionPath)
+	for _, name := range []string{"dataset", "details"} {
+		out[name] = withoutKeys(t, out[name], droppedKeys)
 	}
-	defer pool.Close()
-	in, err := store.Load(ctx, pool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := build.Build(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
-	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
-	withoutLatencyMeanGaps(res.Coverage)
-	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := map[string]string{}
-	sum := func(name string, b []byte) {
-		h := sha256.Sum256(testscale.WithoutLatencyMean(bytes.ReplaceAll(b, newTargetFields, nil)))
-		out[name] = hex.EncodeToString(h[:])
-	}
-	sum("dataset", withoutDroppedKeys(t, fileBytes(t, v.Dataset)))
-	for p, r := range v.Static {
-		if p != versionPath {
-			sum(p, r.Identity)
-		}
-	}
-	for name, part := range map[string]any{"details": res.Details, "pages": res.Pages} {
-		b, err := Marshal(part)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if name == "details" {
-			b = withoutDroppedKeys(t, b)
-		}
-		sum(name, b)
-	}
-	srv := New(&fakeSource{}, Options{})
-	srv.current.Store(v)
-	h := srv.Handler()
-	for _, path := range goldenPages {
-		rec := get(h, path)
-		sum("GET "+path, fmt.Appendf(nil, "%d %s", rec.Code, rec.Body.Bytes()))
+	for name, b := range out {
+		out[name] = testscale.WithoutLatencyMean(bytes.ReplaceAll(b, newTargetFields, nil))
 	}
 	return out
 }
@@ -103,17 +67,23 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string]string {
 // A snapshot without browser entries gives every answer byte for byte as
 // main did before browser targets, apart from the two fields each network
 // target gains in the dataset's target list (engine "http", group null): the
-// committed fixtures, published to a database with the framework's targets.
+// committed fixtures, published to a database with the framework's targets
+// as v4 builds, compared with v4GoldenFile. While the store still reads
+// builds before v4, each fixture published before v4 is still compared with
+// goldenFile, and the v4 answers are shown to be those (beforeV4).
 func TestWithoutBrowserEntriesEveryAnswerIsAsBefore(t *testing.T) {
 	t.Parallel()
 	got := golden{Main: os.Getenv("GOLDEN_MAIN"), Answers: map[string]map[string]string{}}
-	for name, file := range map[string]string{"v1": "snapshot.json", "every-request": "snapshot-every-request.json"} {
+	before := readGolden(t, goldenFile)
+	for name, file := range goldenFixtures {
 		snapshot, err := os.ReadFile(config.FindUp("fixtures/measured/" + file))
 		if err != nil {
 			t.Fatal(err)
 		}
 		db := testdb.New(t)
-		got.Answers[name] = strippedAnswers(t, db, db.Publish(t, snapshot))
+		v4 := strippedAnswers(t, db, db.PublishV4(t, snapshot))
+		got.Answers[name] = sums(v4)
+		beforeV4(t, db, name, snapshot, v4, before)
 	}
 	if path := os.Getenv("GOLDEN_WRITE"); path != "" {
 		b, err := json.MarshalIndent(got, "", " ")
@@ -125,28 +95,80 @@ func TestWithoutBrowserEntriesEveryAnswerIsAsBefore(t *testing.T) {
 		}
 		return
 	}
-	raw, err := os.ReadFile(goldenFile)
+	sameGolden(t, readGolden(t, v4GoldenFile), got)
+}
+
+// listedAnswers are the answers of each fixture that testscale.Listed moves
+// or adds: the fixtures' pool lists and breakdowns disagree (the v1 fixture
+// has no breakdowns, so its pool countries become country pages), and a v4
+// build reads both from its one network list.
+var listedAnswers = map[string][]string{
+	"v1": {"/v1/countries", "/v1/countries/FI", "/v1/countries/JP", "/v1/countries/US", "/v1/coverage", "/v1/coverage/shifter",
+		"/v1/networks/all/all", "/v1/networks/shifter/residential", "GET /v1/countries/US/cities", "GET /v1/networks/shifter/places?dimension=asn&range=7d", "dataset", "details", "pages"},
+	"every-request": {"/v1/coverage", "/v1/coverage/shifter", "/v1/networks/all/all", "/v1/networks/shifter/residential", "/v1/search-index",
+		"GET /v1/networks/shifter/places?dimension=asn&range=7d", "GET /v1/search?q=shift", "dataset", "details", "pages"},
+}
+
+// beforeV4 shows, for the fixture's v4 answers, that the fixture published
+// before v4 still answers as goldenFile holds (before), and that the v4
+// answers are its answers after testscale.AsV4Answers, with each window's
+// lists from one source (testscale.Listed), which moves or adds only
+// listedAnswers[name]. It publishes both to db, after the v4 build.
+func beforeV4(t *testing.T, db *testdb.DB, name string, snapshot []byte, v4 map[string][]byte, before golden) {
+	t.Helper()
+	whole := strippedAnswers(t, db, db.Publish(t, snapshot))
+	sameGolden(t, before, golden{Answers: map[string]map[string]string{name: sums(whole)}})
+	listed, err := testscale.Listed(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var want golden
-	if err := json.Unmarshal(raw, &want); err != nil {
+	fromListed := strippedAnswers(t, db, db.Publish(t, listed))
+	moved := []string{}
+	for p, b := range fromListed {
+		if old, ok := whole[p]; !ok || !bytes.Equal(b, old) {
+			moved = append(moved, p)
+		}
+	}
+	for p := range whole {
+		if _, ok := fromListed[p]; !ok {
+			moved = append(moved, p)
+		}
+	}
+	sort.Strings(moved)
+	if !slices.Equal(moved, listedAnswers[name]) {
+		t.Errorf("%s: Listed moves %q, want %q", name, moved, listedAnswers[name])
+	}
+	want, err := testscale.AsV4Answers(fromListed, payloadGroups(t, snapshot))
+	if err != nil {
 		t.Fatal(err)
 	}
-	for name, answers := range want.Answers {
-		if len(answers) < 20 || len(got.Answers[name]) != len(answers) {
-			t.Fatalf("%s: %d answers, %d on main %s", name, len(got.Answers[name]), len(answers), want.Main)
+	sameV4Answers(t, want, v4)
+}
+
+// readGolden is the golden file at path.
+func readGolden(t *testing.T, path string) golden {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g golden
+	if err := json.Unmarshal(raw, &g); err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
+// sameGolden reports each of got's answers whose hash differs from want's,
+// for every fixture got has.
+func sameGolden(t *testing.T, want, got golden) {
+	t.Helper()
+	for name, answers := range got.Answers {
+		if _, ok := want.Answers[name]; !ok {
+			t.Errorf("%s: not in the golden of main %s", name, want.Main)
+			continue
 		}
-		paths := make([]string, 0, len(answers))
-		for p := range answers {
-			paths = append(paths, p)
-		}
-		sort.Strings(paths)
-		for _, p := range paths {
-			if got.Answers[name][p] != answers[p] {
-				t.Errorf("%s %s differs from main %s", name, p, want.Main)
-			}
-		}
+		t.Run(name, func(t *testing.T) { sameSums(t, want.Answers[name], answers) })
 	}
 }
 
@@ -185,20 +207,21 @@ func withoutLatencyMeanGaps(c *build.Coverage) {
 // has to match main.
 var droppedKeys = map[string]bool{"measurement": true, "placeRanks": true, "pages": true, "coverageEvidence": true, "lists": true}
 
-// withoutDroppedKeys is the compact JSON b without droppedKeys members, at any
-// depth, every other byte as written (encoding/json writes what it reads back).
-func withoutDroppedKeys(t *testing.T, b []byte) []byte {
+// withoutKeys is the compact JSON b without the members named in keys, at
+// any depth, every other byte as written (encoding/json writes what it reads
+// back).
+func withoutKeys(t *testing.T, b []byte, keys map[string]bool) []byte {
 	t.Helper()
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	var out bytes.Buffer
-	if err := copyJSON(dec, &out); err != nil {
+	if err := copyJSON(dec, &out, keys); err != nil {
 		t.Fatal(err)
 	}
 	return out.Bytes()
 }
 
-func copyJSON(dec *json.Decoder, out *bytes.Buffer) error {
+func copyJSON(dec *json.Decoder, out *bytes.Buffer, keys map[string]bool) error {
 	tok, err := dec.Token()
 	if err != nil {
 		return err
@@ -211,7 +234,7 @@ func copyJSON(dec *json.Decoder, out *bytes.Buffer) error {
 			if err != nil {
 				return err
 			}
-			if droppedKeys[key.(string)] {
+			if keys[key.(string)] {
 				var skip json.RawMessage
 				if err := dec.Decode(&skip); err != nil {
 					return err
@@ -223,7 +246,7 @@ func copyJSON(dec *json.Decoder, out *bytes.Buffer) error {
 			}
 			k, _ := json.Marshal(key) // a string always encodes
 			out.Write(append(k, ':'))
-			if err := copyJSON(dec, out); err != nil {
+			if err := copyJSON(dec, out, keys); err != nil {
 				return err
 			}
 		}
@@ -234,7 +257,7 @@ func copyJSON(dec *json.Decoder, out *bytes.Buffer) error {
 			if n > 0 {
 				out.WriteByte(',')
 			}
-			if err := copyJSON(dec, out); err != nil {
+			if err := copyJSON(dec, out, keys); err != nil {
 				return err
 			}
 		}

@@ -445,6 +445,15 @@ v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), 
     same build stored in parts with sparse daily 24-hour series: the every-request
     fixture (a census/pulse group and a daily copy) and the QA-1 scale (18 x 40;
     more than one jsonb row holds, so its whole form is the parts with every point)
+  - every answer of a v4 build (`testdb.PublishV4`): the every-request fixture and
+    QA-1 as payload v4 (18 networks with every exit country, the tails and 2,000
+    City × ASN rows per window) match a per-route SHA-256 golden
+    (`testdata/answers-v4-scale.json`), and equal the same data's build before v4
+    (`testscale.Listed`, stored whole) after `testscale.AsV4Answers`
+  - the committed fixtures as v4 builds answer as main did before browser targets
+    (`testdata/answers-v4.json`); published before v4 they still match
+    `testdata/answers-before-browser.json`, and the v4 answers are those after
+    `testscale.Listed` and `testscale.AsV4Answers`
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
   - rebuild only on change
@@ -454,9 +463,9 @@ v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), 
   - the search LRU (normalisation, hits, bound, reset per version)
   - events filters and validation, and the database fallback that runs only when
     needed
-  - the DB-backed integration test: read-only pool, catalog rows in the network
-    answer, change pickup, and p99 latency
-  - a fresh database with one published product (site schema migrated by an older
+  - the DB-backed integration test (the v1 fixture as a v4 build): read-only pool,
+    catalog rows in the network answer, change pickup, and p99 latency
+  - a fresh database with one published product as a v4 build (site schema migrated by an older
     build, missing, or missing tables and a column) answers 200 on every page, logs
     the missing site tables once and lists them in `/healthz` `siteGaps`
 - `jsnum`: `toFixed`, `toLocaleString` and `JSON.stringify` number formatting
