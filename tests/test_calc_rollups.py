@@ -198,6 +198,8 @@ def seen_in(full):
     return {kind for kind, found in shown.items() if found}
 
 
+# No coverage (tests/conftest.py): other tests cover every line and branch it does (CI-90-5).
+@pytest.mark.no_cover
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("first", "last"), PARTS, ids=[f"{a}-{b}" for a, b in PARTS])
 async def test_rollups_equal_the_full_mode_over_three_days(database, tmp_path, first, last):

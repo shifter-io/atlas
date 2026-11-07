@@ -104,16 +104,18 @@ def statements_made(log):
     return sorted((SNAPSHOT if query.startswith(SNAPSHOT) else query, rows) for query, rows in log)
 
 
-# One start per chain: each day of the incremental sweep (day 2's after its late run) and the
-# fleet sweep. Their next cutoffs add no late run.
+# One start per chain: each day of the incremental sweep (day 1's built from another prefix, day
+# 2's after its late run) and the fleet sweep. Their next cutoffs add no late run.
 STARTS = [
-    pytest.param(chain(0), 6, id="incremental-0-06"),
-    pytest.param(chain(1), 9, id="incremental-1-09"),
+    pytest.param(chain(0), 5, id="incremental-0-05"),
+    pytest.param(chain(1), 8, id="incremental-1-08"),
     pytest.param(chain(2), 6, id="incremental-2-06"),
     pytest.param(SWEEP, 3, id="fleet-03"),
 ]
 
 
+# No coverage (tests/conftest.py): other tests cover every line and branch it does (CI-90-5).
+@pytest.mark.no_cover
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("days", "start"), STARTS)
 async def test_a_copied_prefix_equals_the_replayed_one(

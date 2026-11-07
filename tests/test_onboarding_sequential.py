@@ -104,6 +104,8 @@ def test_eight_days_manifest_and_total_calls(tmp_path):
     assert sum(24 * len(m["regions"][region]) for region in ORDER) == 5976
 
 
+# No coverage (tests/conftest.py): other tests cover every line and branch it does (CI-90-5).
+@pytest.mark.no_cover
 @pytest.mark.parametrize("day, region", list(enumerate(ORDER)), ids=ORDER)
 async def test_each_day_hourly_in_its_own_window_and_closed(tmp_path, no_fsync, day, region):
     path = make_eight_days(tmp_path)
