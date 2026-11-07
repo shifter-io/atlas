@@ -274,6 +274,12 @@ func (c *labels) network(id int32) *Network {
 	return c.networks[id]
 }
 
+// placeLabelsSQL and networkLabelsSQL read the names of label ids $1.
+const (
+	placeLabelsSQL   = `SELECT place_id, country_code, country, region_code, region, city FROM public.place_names WHERE place_id = ANY($1)`
+	networkLabelsSQL = `SELECT asn_label_id, asn, name, usage_type FROM public.asn_label_names WHERE asn_label_id = ANY($1)`
+)
+
 // readLabels fills the places and networks the last reads created.
 func (c *labels) readLabels(ctx context.Context, tx pgx.Tx) error {
 	var places, networks []int32
@@ -294,9 +300,9 @@ func (c *labels) readLabels(ctx context.Context, tx pgx.Tx) error {
 		dest []any
 		fill func()
 	}{
-		{`SELECT place_id, country_code, country, region_code, region, city FROM public.place_names WHERE place_id = ANY($1)`,
+		{placeLabelsSQL,
 			places, []any{&id, &p.CountryCode, &p.Country, &p.RegionCode, &p.Region, &p.City}, func() { *c.places[id] = p }},
-		{`SELECT asn_label_id, asn, name, usage_type FROM public.asn_label_names WHERE asn_label_id = ANY($1)`,
+		{networkLabelsSQL,
 			networks, []any{&id, &n.Asn, &n.Name, &n.UsageType}, func() { *c.networks[id] = n }},
 	} {
 		if len(q.ids) == 0 {

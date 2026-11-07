@@ -79,6 +79,9 @@ func Routine(kind string) bool {
 const routineSQL = `(left(e.kind,7)='census_' OR e.kind IN
  ('daily_test_started','daily_test_finished','estimate_hour_released','pulse_finished'))`
 
+// notableClause keeps the non-routine rows of the fallback's notable read.
+const notableClause = "NOT " + routineSQL
+
 // Prioritized reports whether f is answered with Prioritize: it names no kind and
 // no tab, as the live tape's polls do. A filter that names kinds or a tab gets
 // exactly the newest matching rows.
@@ -177,7 +180,7 @@ func QueryEvents(ctx context.Context, db interface {
 	if err != nil || !f.Prioritized() {
 		return rows, err
 	}
-	notable, err := newestEvents(ctx, tx, append(clauses, "NOT "+routineSQL), args, NotableQuota(f.Limit))
+	notable, err := newestEvents(ctx, tx, append(clauses, notableClause), args, NotableQuota(f.Limit))
 	if err != nil {
 		return nil, err
 	}
@@ -212,12 +215,19 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
 }
 
 func newestEvents(ctx context.Context, tx pgx.Tx, clauses []string, args []any, limit int) ([]Event, error) {
+	sql, args := eventsQuery(clauses, args, limit)
+	return collect(ctx, tx, sql, ScanEvent, args...)
+}
+
+// eventsQuery is the fallback query of the newest limit rows passing every
+// clause, and its arguments.
+func eventsQuery(clauses []string, args []any, limit int) (string, []any) {
 	where := ""
 	if len(clauses) > 0 {
 		where = " WHERE " + strings.Join(clauses, " AND ")
 	}
 	args = append(args[:len(args):len(args)], limit)
-	return collect(ctx, tx, "SELECT "+EventColumns+where+" ORDER BY e.at DESC, e.event_id DESC LIMIT $"+itoa(len(args)), ScanEvent, args...)
+	return "SELECT " + EventColumns + where + eventsOrder + "$" + itoa(len(args)), args
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

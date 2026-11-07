@@ -40,6 +40,7 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from 
 /tmp/siteapi serve --listen 127.0.0.1:8090  # the cached API (read-only DB sessions)
 /tmp/siteapi dump --out dataset.json        # write /v1/dataset to a file (an offline website build)
 /tmp/siteapi dump --endpoint /v1/coverage --out coverage.json --pretty
+/tmp/siteapi explain --database-file .secrets/database.toml --out /tmp/explain   # time every API statement
 ```
 
 Never run a prebuilt or older binary (`api/bin/` is ignored by git and nothing
@@ -56,6 +57,36 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
+| `--out` | (required) | dump: the output file; explain: the output directory |
+
+### Timing the API's statements: `siteapi explain`
+
+`siteapi explain --out <dir>` runs every SQL statement shape the API runs against the
+database with `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, in one REPEATABLE READ read-only
+transaction. Run it as the API's read-only role: a role that can write (a superuser, or
+one with `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a `public` or `site` table) is
+refused. The statements are the registry `store.Statements`, built from the same SQL the
+call sites run: the poll (site layout, fingerprint), the full rebuild in `LoadLists`
+(site tables, framework tables, snapshot head, network list counts), the v4 network-list
+row and label reads of a row-cache miss, and the events reads (the load's window and
+notable reads, `LoadEvents`, and the `/v1/events` database fallback for the default,
+product, kinds, category and since filters). The shapes of builds before v4 (and the
+`LOCK` before K2) are listed as skipped.
+
+The arguments come from the current build: the network list with the most rows (and its
+network's provider for the product filter), its largest dimension's rows, the label ids
+of those rows and of its city and ASN rows, and the oldest of the 2,000 newest events
+(the notable read's cursor and the since filter). The largest place, country and a
+city in it are reported with them.
+
+- `explain.json`: the parameters, then per statement its registry name, call site, SQL,
+  planning and execution time, rows, shared buffers hit and read, and the top plan nodes
+  (the root and its children); `skipped` or `error` when it did not run.
+- `explain.md`: the timed statements slowest first; every one over 100 ms is flagged, and
+  every one over 3 s (10% of the API's 30 s `statement_timeout`) is flagged as such; then
+  the skipped and failed ones.
+
+A statement that fails runs in a savepoint and is reported; the others still run.
 
 ### Where the site schema comes from
 
@@ -387,6 +418,9 @@ v9 turn their scratch database back into calculated v8 (`testdb.CalculatedV8`), 
     gap; `migrate` changes the fingerprint
   - a missing table or column empties only that table and is named; `is_demo` rows
     are never read
+  - `siteapi explain`, through a read-only role on a v4 build: every registered
+    statement runs and appears in `explain.json` and `explain.md`, the pre-v4 shapes are
+    skipped, and the parameters are the build's; a role that can write is refused
 - `build`:
   - a framework-only database (no site schema, nothing published) builds an honest
     empty dataset
