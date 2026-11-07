@@ -17,7 +17,7 @@ last missed window is counted (list_write.write_lists(): one INSERT, one label l
 COPY), so a group keeps only its own lists' rows in memory, and every window names its list. No
 observation row comes back to Python. What moves with the cutoff comes from the
 frozen extension modules (hourly.py, fleetsql.py, rollups.py: the census-pulse geo rows from
-per-hour rollups), whose bodies count in the database.
+per-hour rollups, read per product as build() measures it), whose bodies count in the database.
 The fingerprint hashes run metadata and signatures instead of observations: a stored run's
 observations never change. It hashes the geo rollup marks of the window (rollups.marks()) instead
 of the geo rows: an hour's rows change only with a run newer than its mark or a run linked to a
@@ -151,8 +151,11 @@ def read(conn, config, method_id, as_of, mode="incremental"):
     start = as_of - timedelta(days=RAW_DAYS)  # older raw rows are archived
     roles = " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in calculator.BATCH_ROLES.items())
     evidence = conn.execute(EVIDENCE).fetchall()
-    # The full mode reads the 30-day geo rows (the oracle), the incremental one their rollups.
-    reader = scheduled_inputs if mode == "full" else rollups.scheduled_inputs
+    # The full mode reads the 30-day geo rows (the oracle), the incremental one their rollups,
+    # per product when build() measures it (rollups.ProductGeo).
+    reader = scheduled_inputs
+    if mode != "full":
+        reader = partial(rollups.scheduled_inputs, geo=rollups.ProductGeo)
     scheduled = reader(conn, as_of, latency_target(config))
     common = {"evidence": evidence, "scheduled": scheduled}
     if mode == "full":
