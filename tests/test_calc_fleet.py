@@ -177,11 +177,12 @@ def assert_last_memos(database, policy, end, calls):
     assert calls == [0]
 
 
-# The older cutoffs, in two cases. The first stays traced: only it covers fleet_entries()'s
-# direct count of an older cutoff (tests/conftest.py, "No coverage").
+# The older cutoffs, in two cases. The second stays traced: only it covers fleet_entries()'s
+# direct count of an older cutoff (tests/conftest.py, "No coverage"); 3 h back, no bucket after
+# the cutoff is folded yet, so that build counts as the latest.
 OLDER = [
-    pytest.param((3 * HOUR,), id="3h"),
-    pytest.param((30 * HOUR, 3 * DAY), id="30h-3d", marks=pytest.mark.no_cover),
+    pytest.param((3 * HOUR,), id="3h", marks=pytest.mark.no_cover),
+    pytest.param((30 * HOUR, 3 * DAY), id="30h-3d"),
 ]
 
 
