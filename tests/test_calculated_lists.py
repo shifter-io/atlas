@@ -30,9 +30,13 @@ from proxy_index.storage import connect, initialize, migrate
 pytest_plugins = ["test_storage", "calculated_template"]
 
 CALCULATED_V8 = Path(__file__).parent / "fixtures/calculated_v8.sql"
-# Lists retention keeps no longer: group lists no window references, network lists (K10) whose
-# build has no window left.
-KEPT = "w.list_id=l.list_id OR l.cohort='network' AND w.build_id=l.created_build"
+# Lists retention keeps no longer: group lists no window references, network lists (K10) of a
+# build that is neither current nor a draft with a payload.
+KEPT = (
+    "w.list_id=l.list_id OR l.cohort='network' AND w.build_id=l.created_build AND (w.build_id IN "
+    "(SELECT build_id FROM current_calculation) OR w.build_id IN (SELECT build_id FROM "
+    "calculated_snapshots JOIN calculation_builds USING(build_id) WHERE NOT published))"
+)
 ORPHANS = (
     "SELECT (SELECT count(*) FROM calculated_lists l WHERE NOT EXISTS (SELECT FROM "
     f"calculated_windows w WHERE {KEPT})),(SELECT count(*) FROM calculated_list_rows r JOIN "

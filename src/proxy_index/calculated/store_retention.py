@@ -37,7 +37,8 @@ def lists(conn):
     return conn.cursor(row_factory=tuple_row).execute(query).fetchone()[0]
 
 
-# Group lists live while a window references them, network lists while their build has windows.
+# Group lists live while a window references them, network lists while their build is the current
+# build or a kept draft (netlists.KEPT).
 collect = netlists.collect
 
 
@@ -98,11 +99,14 @@ def retained(conn, days=None, per_day=None):
 
 
 def expire(conn, days=None, per_day=None):
-    """Delete every build outside the retention rule; return the kept and expired build ids."""
+    """Delete every build outside the retention rule and the network lists of every build but the
+    current one and the kept drafts; return the kept and expired build ids. A retained build
+    published again gets its network lists back first (netlists.restore()).
+    """
     kept, expired = retained(conn, days, per_day)
     for build_id in expired:
         discard(conn, build_id, gc=False)
-    if expired and lists(conn):
+    if lists(conn):
         collect(conn)
     return {"kept_builds": kept, "expired_builds": expired}
 
@@ -110,7 +114,8 @@ def expire(conn, days=None, per_day=None):
 def estimate(conn, expired):
     """Rows and approximate bytes that expiring these builds frees (read-only).
 
-    Lists count when no kept window references them, network lists when their build expires; on
+    Lists count when no kept window references them, network lists when their build expires or is
+    neither the current build nor a draft with a payload (netlists.KEPT); on
     a calculated v5 database, before its migration, breakdowns count through their windows.
     Bytes are each table's size (with its partitions, indexes and TOAST) in proportion to the
     rows removed; payloads and their parts use their stored size.
@@ -119,8 +124,8 @@ def estimate(conn, expired):
     freed = (
         "list_id IN (SELECT list_id FROM calculated_windows WHERE build_id=ANY(%(b)s) "
         "EXCEPT SELECT list_id FROM calculated_windows WHERE build_id<>ALL(%(b)s) "
-        "UNION SELECT list_id FROM calculated_lists "
-        "WHERE cohort='network' AND created_build=ANY(%(b)s))"
+        "UNION SELECT list_id FROM calculated_lists WHERE cohort='network' "
+        f"AND (created_build=ANY(%(b)s) OR created_build NOT IN ({netlists.KEPT})))"
     )
     shared = {"calculated_list_rows": freed, "calculated_lists": freed}
     keys = {table: windows for table in DERIVED_TABLES} | {

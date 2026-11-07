@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
-from . import browser, incremental, network, product_windows, rollups
+from . import browser, incremental, netlists, network, product_windows, rollups
 from .aggregate import floor_time
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
@@ -158,6 +158,7 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
                 "DO UPDATE SET build_id=excluded.build_id",
                 (int(payload["snapshot_id"]),),
             )
+            netlists.restore(conn)  # a retained build published again (store.publish())
             conn.execute(
                 "UPDATE calculation_builds SET published=true WHERE build_id=%s",
                 (int(payload["snapshot_id"]),),

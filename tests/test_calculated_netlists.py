@@ -4,7 +4,8 @@ Hand-written group lists check the merge itself (sums, the percentile row and it
 counts, positions, network isolation) against the K10 rule and an independent Python merge. The
 3-day fixtures check a real build: one list per network window, the payload, group lists,
 typed windows and serve answers unchanged against a build without network lists, the incremental
-build's network lists equal to the full one's, and retention (prune, discard, the estimate).
+build's network lists equal to the full one's, and retention (prune, discard, the estimate): only
+the current build and the kept drafts keep their network lists (test_calculated_netlist_keep.py).
 """
 
 import json
@@ -325,7 +326,7 @@ async def test_a_build_writes_one_list_per_network_window_and_changes_nothing_el
 
 
 @pytest.mark.asyncio
-async def test_network_lists_live_while_their_build_has_windows(database, tmp_path):
+async def test_network_lists_live_while_their_build_is_current_or_a_kept_draft(database, tmp_path):
     end = floor_hour(datetime.now(UTC)) + HOUR
     await daily_history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
@@ -345,20 +346,21 @@ async def test_network_lists_live_while_their_build_has_windows(database, tmp_pa
         # calculate()'s prune() dropped the oldest draft's payload; its windows stay.
         payloads = "SELECT build_id FROM calculated_snapshots ORDER BY 1"
         assert conn.execute(payloads).fetchall() == [(b,) for b in builds[1:]]
-        assert store.collect(conn) == 0
         assert by_build(conn) == {b: 2 * len(WINDOWS) for b in builds}
         assert conn.execute(
             "SELECT bool_and(signature IS NULL AND figures='{}') FROM calculated_lists "
             "WHERE cohort='network'"
         ).fetchone() == (True,)
-        store.discard(conn, builds[1])
-        assert by_build(conn) == {builds[0]: 6, builds[2]: 6}
-        # The estimate counts what discarding the pruned build frees: its network lists too.
-        estimate, before = store.estimate(conn, [builds[0]])["rows"], counts(conn)
-        store.discard(conn, builds[0])
+        # The pruned draft is neither current nor a kept draft: the estimate counts its network
+        # lists, though no build expires, and collect() frees them.
+        estimate, before = store.estimate(conn, [])["rows"], counts(conn)
+        assert store.collect(conn) == 2 * len(WINDOWS)
         freed = tuple(a - b for a, b in zip(before, counts(conn), strict=True))
         assert freed == (estimate["calculated_lists"], estimate["calculated_list_rows"])
-        assert freed[0] >= 6 and by_build(conn) == {builds[2]: 6}
+        assert by_build(conn) == {builds[1]: 6, builds[2]: 6}
+        store.discard(conn, builds[1])
+        assert by_build(conn) == {builds[2]: 6}
+        assert store.collect(conn) == 0
         # Group lists keep their rule: every one left is referenced by a window.
         assert conn.execute(
             "SELECT count(*) FROM calculated_lists l WHERE cohort<>'network' AND NOT EXISTS "
