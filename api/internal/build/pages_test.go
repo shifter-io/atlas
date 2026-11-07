@@ -9,13 +9,12 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
-// Two networks, each tested in two requested countries (AA and AB): four
-// product groups. Group c's country breakdown holds three exit countries
-// starting at the c-th code with 1000, 999 and 998 IPs; every group's region,
-// city and ASN lists are capped and their 60 typed rows are the network's.
+// Two networks as payload v4, each one summary over two requested countries
+// (AA and AB). Each network list holds three exit countries, AA, AB and AC
+// with 1000, 999 and 998 IPs, and 60 region, city and ASN rows.
 func smallPages(t *testing.T) *Pages {
 	t.Helper()
-	in, err := testscale.Inputs(testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60})
+	in, err := testscale.NetworkInputs(testscale.NetworkShape{Shape: testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 60}, Requested: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +25,7 @@ func smallPages(t *testing.T) *Pages {
 	return res.Pages
 }
 
-func TestANetworkAnswerSumsItsProductGroups(t *testing.T) {
+func TestANetworkAnswerIsItsSummary(t *testing.T) {
 	t.Parallel()
 	pg := smallPages(t)
 	if len(pg.Networks.Networks) != 2 || pg.Primary["net00"] != "residential" {
@@ -37,12 +36,11 @@ func TestANetworkAnswerSumsItsProductGroups(t *testing.T) {
 		t.Fatalf("answer %+v", ans)
 	}
 	r := ans.Ranges["30d"]
-	// AB: 999 IPs in group AA, 1000 in group AB; latency of the row with most successes.
-	if r.ExitCountries != 4 || r.Countries[0].Key != "AB" || r.Countries[0].IpsSum != 1999 || r.Countries[0].LatencyP50 != 400 ||
-		r.Countries[0].Requests != 3*1999 || r.Countries[0].SuccessRate != Num(2.0/3) {
+	if r.ExitCountries != 3 || r.Countries[0].Key != "AA" || r.Countries[0].IpsSum != 1000 || r.Countries[0].LatencyP50 != 400 ||
+		r.Countries[0].Requests != 3*1000 || r.Countries[0].SuccessRate != Num(2.0/3) {
 		t.Fatalf("countries %+v", r.Countries)
 	}
-	// The capped city list is read whole from the typed rows of both groups.
+	// The city and ASN lists are the network list's rows.
 	if r.Lists["city"] != 60 || r.Lists["asn"] != 60 {
 		t.Fatalf("lists %v", r.Lists)
 	}
@@ -55,7 +53,7 @@ func TestPlaceListsPageAndSearch(t *testing.T) {
 	t.Parallel()
 	pg := smallPages(t)
 	first, ok, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 1)
-	if !ok || first.Total != 60 || first.Pages != 2 || len(first.Rows) != PageSize || first.Rows[0].IpsSum != 2000 {
+	if !ok || first.Total != 60 || first.Pages != 2 || len(first.Rows) != PageSize || first.Rows[0].IpsSum != 1000 {
 		t.Fatalf("page 1: %+v", first)
 	}
 	second, _, _ := pg.List(context.Background(), "", "net00/residential", "30d", "city", "", 2)
@@ -83,11 +81,11 @@ func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
 		t.Fatalf("AB: %+v", ans)
 	}
 	for _, r := range ans.Ranges["30d"] {
-		if r.IpsSum != 1999 || r.IpsSumRank.Rank != 1 || r.IpsSumRank.Peers != 2 || r.LatencyRank.Rank != 1 {
+		if r.IpsSum != 999 || r.IpsSumRank.Rank != 1 || r.IpsSumRank.Peers != 2 || r.LatencyRank.Rank != 1 {
 			t.Fatalf("row %+v", r)
 		}
 	}
-	if pg.Countries.Countries[0].CountryCode != "AB" || pg.Countries.Countries[0].Networks != 2 || pg.Countries.Countries[0].IpsSum != 2*1999 {
+	if pg.Countries.Countries[0].CountryCode != "AA" || pg.Countries.Countries[0].Networks != 2 || pg.Countries.Countries[0].IpsSum != 2*1000 {
 		t.Fatalf("index %+v", pg.Countries.Countries)
 	}
 	cities, ok, _ := pg.List(context.Background(), "", "country/"+pg.Countries.Countries[0].CountryCode, "30d", "city", "", 1)
@@ -95,7 +93,7 @@ func TestACountryAnswerRanksTheNetworksInIt(t *testing.T) {
 		t.Fatal("no city list")
 	}
 	for _, r := range cities.Rows {
-		if model.SV(r.CountryCode) != "AB" || r.Network == "" {
+		if model.SV(r.CountryCode) != "AA" || r.Network == "" {
 			t.Fatalf("city row %+v", r)
 		}
 	}

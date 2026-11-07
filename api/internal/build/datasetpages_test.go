@@ -7,26 +7,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 )
 
 // The dataset file alone regenerates every page answer the site draws: its
 // `pages` holds, under each request path, exactly the bytes the server
-// renders for that answer, and nothing else (no list page). A v4 build's
-// pages also hold /v1/countries and each /v1/countries/{CC} (contract K11); a
-// build before v4 keeps DATASET-SIZE-1's pages. The expected paths are built
-// here from the build's answers, not by the code under test.
+// renders for that answer, and nothing else (no list page), with
+// /v1/countries and each /v1/countries/{CC} (contract K11). The expected
+// paths are built here from the build's answers, not by the code under test.
 func TestTheDatasetFileRegeneratesEveryPageAnswer(t *testing.T) {
 	t.Parallel()
-	file, res := datasetFile(t, goldenShape)
-	checkPages(t, file, res, false)
-	file, res = v4File(t)
-	checkPages(t, file, res, true)
-}
-
-func checkPages(t *testing.T, file []byte, res *build.Result, v4 bool) {
-	t.Helper()
+	file, res := v4File(t)
 	var doc struct {
 		Pages map[string]json.RawMessage `json:"pages"`
 	}
@@ -44,14 +35,12 @@ func checkPages(t *testing.T, file []byte, res *build.Result, v4 bool) {
 	for _, c := range pg.Charts {
 		want["/v1/networks/"+c.Network+"/chart?kind="+c.Kind+"&range="+c.Range] = c
 	}
-	if v4 {
-		want["/v1/countries"] = pg.Countries
-		for _, ans := range pg.Country {
-			want["/v1/countries/"+ans.CountryCode] = ans
-		}
-		if len(pg.Country) < 2 {
-			t.Fatalf("fixture too small: %d country answers", len(pg.Country))
-		}
+	want["/v1/countries"] = pg.Countries
+	for _, ans := range pg.Country {
+		want["/v1/countries/"+ans.CountryCode] = ans
+	}
+	if len(pg.Country) < 2 {
+		t.Fatalf("fixture too small: %d country answers", len(pg.Country))
 	}
 	if len(pg.Rankings) != 3 || len(pg.Network) < 3 || len(pg.Charts) < 9 {
 		t.Fatalf("fixture too small: %d rankings, %d network answers, %d charts", len(pg.Rankings), len(pg.Network), len(pg.Charts))
@@ -73,6 +62,6 @@ func checkPages(t *testing.T, file []byte, res *build.Result, v4 bool) {
 	}
 	sort.Strings(extra)
 	if len(extra) > 0 {
-		t.Errorf("v4 %v: pages the site does not draw: %s", v4, strings.Join(extra, ", "))
+		t.Errorf("pages the site does not draw: %s", strings.Join(extra, ", "))
 	}
 }

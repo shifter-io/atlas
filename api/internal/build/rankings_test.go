@@ -99,7 +99,15 @@ func TestRankingsListEveryNetworkInScoreOrderPerRange(t *testing.T) {
 
 func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
 	t.Parallel()
-	pg := shapePages(t, testscale.Shape{Networks: 2, Countries: 2, Exits: 3, Tail: 60}, nil)
+	in, err := testscale.NetworkInputs(testscale.NetworkShape{Shape: testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 60}, Requested: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg := res.Pages
 	ans := pg.Network[AllNetworks+"/"+AllNetworks]
 	if ans == nil || pg.Primary[AllNetworks] != AllNetworks || ans.Networks != 2 || ans.ProductGroups != 4 || ans.Network.Slug != AllNetworks {
 		t.Fatalf("answer %+v", ans)
@@ -107,22 +115,22 @@ func TestTheAllNetworksAnswerCountsDistinctIpsNeverASum(t *testing.T) {
 	one := pg.Network["net00/residential"]
 	for _, r := range Ranges {
 		all, net := ans.Ranges[r.ID], one.Ranges[r.ID]
-		// Every request counts once: the two networks' groups add up.
+		// Every request counts once: the two networks' summaries add up.
 		if all.Requests != 2*net.Requests || all.UniqueIps != testscale.FleetUniqueIps || all.IpsSum.OK() || !all.LatencyP50.OK() ||
 			!all.LatencyP99.OK() || all.SuccessRate != ratio(all.Successes, all.Requests) {
 			t.Fatalf("%s totals %+v", r.ID, all)
 		}
-		// Two groups of a network: their IPs may repeat, so no distinct figure.
-		if net.UniqueIps.OK() || net.LatencyP50.OK() {
+		// A network's summary has its own distinct IPs and latency.
+		if !net.UniqueIps.OK() || !net.LatencyP50.OK() {
 			t.Fatalf("%s network totals %+v", r.ID, net)
 		}
 	}
 	month := ans.Ranges["30d"]
-	// Places are a union: both networks saw AA-AD, and cities 0-59 and 1-60.
-	if month.Lists["city"] != 61 || month.Lists["country"] != 4 || month.ExitCountries != 4 {
+	// Places are a union: both networks saw AA-AC, and cities 0-59 and 1-60.
+	if month.Lists["city"] != 61 || month.Lists["country"] != 3 || month.ExitCountries != 3 {
 		t.Fatalf("lists %v", month.Lists)
 	}
-	if ans.Network.UniqueIps != testscale.FleetUniqueIps || ans.Network.Countries != 4 || ans.Network.SuccessRate != month.SuccessRate {
+	if ans.Network.UniqueIps != testscale.FleetUniqueIps || ans.Network.Countries != 3 || ans.Network.SuccessRate != month.SuccessRate {
 		t.Fatalf("head %+v", ans.Network)
 	}
 	for i, d := range ans.Days {
