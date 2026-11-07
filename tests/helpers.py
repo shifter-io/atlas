@@ -104,7 +104,7 @@ def untraced() -> Iterator[None]:
 
 
 def drop_databases(admin: dict, names: list[str]) -> None:
-    with psycopg.connect(**admin, autocommit=True) as conn:
+    with timed("drop_database"), psycopg.connect(**admin, autocommit=True) as conn:
         for name in names:
             conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 

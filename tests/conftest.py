@@ -11,11 +11,13 @@ artifact keeps the junit), and commit it:
 
 Timeline: each xdist worker (or a run without xdist) appends to
 `$EV/timeline-<worker>.jsonl` (the current directory without EV): the setup, call and
-teardown of every test with its start and end, and the spans that create a scratch
-database (`helpers.scratch_database`) or initialise a schema (`storage.initialize`,
-`calculated.store.initialize`). The xdist controller and a pytest a test starts do not
-record. `scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is
-recorded or wrapped.
+teardown of every test with its start and end, the spans that create or drop a scratch
+database (`helpers.scratch_database`, `helpers.drop_databases`) or initialise a schema
+(`storage.initialize`, `calculated.store.initialize`), and its collection (from loading this
+file to the last collected test). The xdist controller records only combining the workers'
+coverage and each coverage report (`timeline-main.jsonl`); a pytest a test starts records
+nothing. `scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is recorded
+or wrapped.
 
 Shared templates: the process that runs the session names the run (helpers.SHARED_RUN, which
 its xdist workers inherit) and drops the templates the workers share at its end
@@ -32,6 +34,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 
@@ -131,17 +134,36 @@ if helpers.TIMELINE:
     storage.initialize = _timed("initialize", storage.initialize)
     store.initialize = _timed("initialize", store.initialize)
 
+    # When this process loaded this file: the start of its collection span.
+    LOADED = time.time()
+    # Whether this process records its tests (the controller only its coverage spans).
+    RECORDS_TESTS = False
+
     def pytest_configure(config):
-        # Only the process that runs the tests records: an xdist worker or a run without
-        # xdist, never the controller nor a pytest started by a test (it inherits the owner).
+        # The process that runs the tests records them: an xdist worker or a run without
+        # xdist. The xdist controller records only combining the workers' coverage and each
+        # report; a pytest started by a test (it inherits the owner) records nothing.
+        global RECORDS_TESTS
         owner = os.environ.get("CI_TIMELINE_OWNER")
-        runs_tests = hasattr(config, "workerinput") or config.getoption("dist", "no") == "no"
-        if owner and owner != str(os.getpid()) or not runs_tests:
+        if owner and owner != str(os.getpid()):
             helpers.TIMELINE = False
             return
-        os.environ["CI_TIMELINE_OWNER"] = str(os.getpid())
+        if hasattr(config, "workerinput") or config.getoption("dist", "no") == "no":
+            RECORDS_TESTS = True
+            os.environ["CI_TIMELINE_OWNER"] = str(os.getpid())
+            return
+        import coverage
+
+        for method in ("combine", "report", "xml_report", "json_report"):
+            setattr(coverage.Coverage, method, _timed(method, getattr(coverage.Coverage, method)))
+
+    def pytest_collection_finish(session):
+        if RECORDS_TESTS:
+            helpers.timeline_record({"kind": "collect", "start": LOADED, "stop": time.time()})
 
     def pytest_runtest_logreport(report):
+        if not RECORDS_TESTS:
+            return
         helpers.timeline_record(
             {
                 "kind": report.when,

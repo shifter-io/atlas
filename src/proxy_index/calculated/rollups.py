@@ -10,7 +10,9 @@ the cutoff is on the hour) from run_geo_buckets. A rollup's histogram holds the 
 light-load candidate (pulses and runs outside a batch) per target; the pulses that ran during a
 census (the overlaps) are subtracted when read, by run key, so no rollup depends on them. The
 read is one statement that returns a row per geo key, its bins aggregated into arrays, through a
-server-side cursor, and the rows stay tuples (scheduled.GeoRow) (CALC-MEM-1).
+server-side cursor, and the rows stay tuples (scheduled.GeoRow) (CALC-MEM-1). The build reads
+them per product (ProductGeo, CALC-MEM-2) when it measures the product, so it holds one product's
+rows at a time.
 
 fill() writes them before the calculation's transaction, a day at most per transaction, and
 refresh() in it, before it reads, whatever went stale in between: an hour it reads is
@@ -101,6 +103,8 @@ RAW_KEYS = (
 )
 COUNTERS = scheduled.COUNTERS
 KEYS = ",".join(scheduled.GEO_KEY)  # OUT's columns
+# One product's geo rows (ProductGeo.product()): the rollups' condition and run_geo_buckets'.
+PRODUCT = ("AND h.product_id=%(product)s ", "AND s.product_id=%(product)s ")
 # The overlaps' light-load histograms in the hours read from rollups, subtracted from them.
 OVERLAPS = (
     f"SELECT {RAW_KEYS},x.ms,-x.n {scheduled.GEO_SOURCE}{EXPAND}WHERE g.run_key=ANY(%(flagged)s) "
@@ -168,10 +172,12 @@ TESTED = ("product_id", "batch_id", "run_key", "started_at", "finished_at")
 STREAM = 20000
 
 
-def scheduled_inputs(conn, as_of, timed_target):
+def scheduled_inputs(conn, as_of, timed_target, geo=None):
     """The census/pulse history of the 30-day window (scheduled.scheduled_inputs()), its geo rows
-    from the rollups (geo_rows()) and its batch runs read once (batch_inputs())."""
-    return scheduled.scheduled_inputs(conn, as_of, timed_target, geo=geo_rows, runs=batch_inputs)
+    from the rollups (geo, geo_rows() by default: ProductGeo reads them per product when the build
+    measures it) and its batch runs read once (batch_inputs())."""
+    geo = geo or geo_rows
+    return scheduled.scheduled_inputs(conn, as_of, timed_target, geo=geo, runs=batch_inputs)
 
 
 def scheduled_rows(conn, start, as_of):
@@ -264,19 +270,38 @@ def _slot(r, start, end):
 def geo_rows(conn, bounds, overlaps, timed_target):
     """scheduled.geo_rows() of the window in bounds, read from the rollups (module docstring):
     one row per geo key, its bins aggregated in SQL (_geo()), streamed in batches."""
-    hours, edges = spans((bounds["start"], bounds["d7"], bounds["d1"], bounds["end"]))
-    refresh(conn, hours)
-    flagged = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
-    params = bounds | {"hours": hours, "flagged": flagged, "latency_target": timed_target}
-    raw = []
-    for n, (lo, hi) in enumerate(edges):
-        raw.append(f"g.bucket_start>=%(lo{n})s AND g.bucket_start<%(hi{n})s")
-        params |= {f"lo{n}": lo, f"hi{n}": hi}
-    raw = f"WHERE ({' OR '.join(raw) or 'false'}) AND {NOT_BROWSER}"
-    with conn.cursor("geo_rows", row_factory=tuple_row) as cur:
-        cur.itersize = STREAM
-        rows = list(cur.execute(_geo(raw), params))
-    return scheduled.labelled(conn, rows)
+    return ProductGeo(conn, bounds, overlaps, timed_target).rows()
+
+
+class ProductGeo:
+    """The window's geo rows (geo_rows()), read per product (CALC-MEM-2): its rollups are
+    refreshed when it is made, then product() reads one product's rows when the build measures
+    the product (inputs.GeoGroups), and rows() reads every product's."""
+
+    def __init__(self, conn, bounds, overlaps, timed_target):
+        hours, edges = spans((bounds["start"], bounds["d7"], bounds["d1"], bounds["end"]))
+        refresh(conn, hours)
+        flagged = sorted(o["run_key"] for o in overlaps if o["run_key"] is not None)
+        params = bounds | {"hours": hours, "flagged": flagged, "latency_target": timed_target}
+        raw = []
+        for n, (lo, hi) in enumerate(edges):
+            raw.append(f"g.bucket_start>=%(lo{n})s AND g.bucket_start<%(hi{n})s")
+            params |= {f"lo{n}": lo, f"hi{n}": hi}
+        self.conn, self.params = conn, params
+        self.raw = f"WHERE ({' OR '.join(raw) or 'false'}) AND {NOT_BROWSER}"
+
+    def rows(self):
+        return self._read(_geo(self.raw), self.params)
+
+    def product(self, product_id):
+        """The geo rows of product product_id, in rows()' order."""
+        return self._read(_geo(self.raw, PRODUCT), self.params | {"product": product_id})
+
+    def _read(self, query, params):
+        with self.conn.cursor("geo_rows", row_factory=tuple_row) as cur:
+            cur.itersize = STREAM
+            rows = list(cur.execute(query, params))
+        return scheduled.labelled(self.conn, rows)
 
 
 def marks(conn, as_of):
@@ -294,37 +319,37 @@ def marks(conn, as_of):
     )
 
 
-def _geo(raw):
+def _geo(raw, only=("", "")):
     """Each geo row in GEO_KEY order: its counters (_totals()) and its light-load histogram's
-    ms and counts (_histograms()), aggregated."""
+    ms and counts (_histograms()), aggregated; only: PRODUCT for one product's rows."""
     sums = ",".join(f"sum({c})::bigint" for c in COUNTERS)
     bins = "coalesce(array_agg({}::bigint ORDER BY ms) FILTER (WHERE ms IS NOT NULL),'{{}}')"
     return (
-        f"SELECT {KEYS},{sums},{bins.format('ms')},{bins.format('n')} FROM ({_totals(raw)} "
-        f"UNION ALL {_histograms(raw)}) u GROUP BY {KEYS} ORDER BY {KEYS}"
+        f"SELECT {KEYS},{sums},{bins.format('ms')},{bins.format('n')} FROM ({_totals(raw, only)} "
+        f"UNION ALL {_histograms(raw, only)}) u GROUP BY {KEYS} ORDER BY {KEYS}"
     )
 
 
-def _totals(raw):
+def _totals(raw, only):
     """Each geo row's counters: its rollup hours' and its raw buckets' (raw: their condition)."""
     rollup, edge = (",".join(f"{t}.{c}" for c in COUNTERS) for t in "hg")
     return (
         f"SELECT {OUT},{','.join(COUNTERS)},NULL::bigint AS ms,NULL::bigint AS n FROM ("
         f"SELECT {ROLLUP_KEYS},{rollup} FROM calculated_geo_hours h WHERE h.hour=ANY(%(hours)s) "
-        f"UNION ALL SELECT {RAW_KEYS},{edge} {scheduled.GEO_SOURCE}{raw}) t"
+        f"{only[0]}UNION ALL SELECT {RAW_KEYS},{edge} {scheduled.GEO_SOURCE}{raw}{only[1]}) t"
     )
 
 
-def _histograms(raw):
+def _histograms(raw, only):
     """Each geo row's light-load histogram bins: its rollup hours' of the latency target, less the
     overlaps' there, and its raw buckets' (scheduled.LIGHT)."""
     blank = ",".join("NULL::bigint" for _ in COUNTERS)
     return (
         f"SELECT {OUT},{blank},ms,sum(n)::bigint FROM (SELECT {ROLLUP_KEYS},b.ms,b.n "
         "FROM calculated_geo_hours h CROSS JOIN LATERAL unnest(h.light_ms,h.light_n) b(ms,n) "
-        "WHERE h.hour=ANY(%(hours)s) AND h.target=%(latency_target)s UNION ALL "
+        f"WHERE h.hour=ANY(%(hours)s) AND h.target=%(latency_target)s {only[0]}UNION ALL "
         f"SELECT {RAW_KEYS},x.ms,x.n {scheduled.GEO_SOURCE}{EXPAND}{raw}{scheduled.LIGHT}"
-        f"UNION ALL {OVERLAPS}) v GROUP BY 1,2,3,4,5,6,11 HAVING sum(n)<>0"
+        f"{only[1]}UNION ALL {OVERLAPS} {only[1]}) v GROUP BY 1,2,3,4,5,6,11 HAVING sum(n)<>0"
     )
 
 

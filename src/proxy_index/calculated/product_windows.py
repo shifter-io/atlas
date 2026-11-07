@@ -55,6 +55,7 @@ class _Product:
     days: object
     tested: dict
     monitored: object
+    geo: list
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ def measure(step, key, p):
     days = step.source.days(key, as_of, max(step.config["windows"]) // 24)
     tested = tested_groups[product_id] if scheduled else {}
     monitored = monitored_groups[product_id] if scheduled else ()
+    geo = step.geo_groups[key]  # read now, per product, and dropped once measured (CALC-MEM-2)
     product = _Product(
         key,
         p,
@@ -112,6 +114,7 @@ def measure(step, key, p):
         days,
         tested,
         monitored,
+        geo,
     )
     for hours in step.config["windows"]:
         _window(step, product, hours)
@@ -169,7 +172,7 @@ def _pool_and_uptime(step, product, win):
     """The window's pool counts (with its lists), IPs, breakdowns and uptime; the uptime and
     the scheduled cohort's slot coverage go into its metrics."""
     as_of, key, since, hours, m = step.as_of, product.key, win.since, win.hours, win.metrics
-    located = [g for g in step.geo_groups[key] if g["hours"] <= hours]
+    located = [g for g in product.geo if g["hours"] <= hours]
     host = hosting_usage_types(product.cfg)
     ps, ips, lists, kept = step.source.window(
         key, win.seen, since, hours, host, located, step.build_id

@@ -1,9 +1,14 @@
 """Calculation inputs grouped per product for build()."""
 
 from collections import defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .aggregate import floor_time
 from .browser import NOT_BROWSER
+
+BUCKET = timedelta(minutes=5)
 
 
 def group_by_product(rows, drop_id=False):
@@ -25,6 +30,83 @@ def light_load(run, flagged_runs, timed_target):
         and not flagged_runs.get(run["run_key"])
         and run["scope"]["target"]["id"] == timed_target
     )
+
+
+@dataclass(frozen=True, slots=True)
+class RunFields:
+    """What a run adds to each of its bucket rows (BucketRow): its fields, shared by its buckets,
+    and what its rows' slot and last_observed derive from (slot_at: its batch's slot, if any)."""
+
+    fields: dict
+    slot_at: datetime | None
+    seconds: int
+    finished_at: datetime
+
+
+class BucketRow(Mapping):
+    """A group's bucket row (calculator._group_inputs()): its bucket's fields, its run's (RunFields)
+    and its slot and last_observed, derived when read. It references the bucket and its run instead
+    of copying them into one dict per bucket (CALC-MEM-2); their keys are apart."""
+
+    __slots__ = ("bucket", "run")
+    DERIVED = ("slot", "last_observed")
+
+    def __init__(self, bucket, run):
+        self.bucket, self.run = bucket, run
+
+    def __getitem__(self, key):
+        if key in self.bucket:
+            return self.bucket[key]
+        if key == "slot":
+            return floor_time(self.run.slot_at or self.bucket["bucket_start"], self.run.seconds)
+        if key == "last_observed":
+            return min(self.run.finished_at, self.bucket["bucket_start"] + BUCKET)
+        return self.run.fields[key]
+
+    def __iter__(self):
+        yield from self.bucket
+        yield from self.run.fields
+        yield from self.DERIVED
+
+    def __len__(self):
+        return len(self.bucket) + len(self.run.fields) + len(self.DERIVED)
+
+    def __or__(self, other):
+        return dict(self) | other
+
+
+class GeoGroups:
+    """Each product group's geo rows, read per product (CALC-MEM-2): a product's rows are read when
+    one of its groups asks for them (geo.product(): rollups.ProductGeo, or the full mode's rows
+    picked from its list), given to its groups (scheduled: each product's census-pulse group,
+    scopes: each scope's group) and dropped when another product is read."""
+
+    def __init__(self, geo, scheduled, scopes):
+        if not hasattr(geo, "product"):
+            geo = _Listed(geo)
+        self.geo, self.scheduled, self.scopes = geo, scheduled, scopes
+        self.product_id, self.groups = None, {}
+
+    def __getitem__(self, key):
+        """The geo rows of group key ((product_id, cohort)), in their read order."""
+        if key[0] != self.product_id:
+            self.product_id, self.groups = key[0], defaultdict(list)
+            for g in self.geo.product(key[0]):
+                scope = g["scope_id"]
+                group = self.scheduled.get(key[0]) if scope is None else self.scopes.get(scope)
+                if group:
+                    self.groups[group].append(g)
+        return self.groups.pop(key, [])
+
+
+class _Listed:
+    """The geo rows of a list (the full mode's, read up front) by product, as rollups.ProductGeo."""
+
+    def __init__(self, rows):
+        self.rows = group_by_product(rows)
+
+    def product(self, product_id):
+        return self.rows.get(product_id, [])
 
 
 def tested_by_product(tested):
