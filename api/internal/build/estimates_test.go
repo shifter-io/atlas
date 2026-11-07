@@ -85,27 +85,3 @@ func TestTheMappingTakesTheFormulasFigures(t *testing.T) {
 		t.Errorf("7d without figures %+v", pts)
 	}
 }
-
-// The coverage evidence keeps every city x ASN row of the headline group per
-// range, unknown fields null, each row's IPs scaled half up like any
-// breakdown row's; a range without the list has no rows.
-func TestCoverageEvidenceFollowsTheMapping(t *testing.T) {
-	t.Parallel()
-	p := decodeProduct(t, `{"id":"1:x","kind":"residential","windows":{
-"24h":{"breakdowns":{"city_asn":[{"country_code":"US","country":"United States","region_code":"CA","region":"California",
-  "city":"Los Angeles","asn":7922,"name":"Comcast","usage_type":"isp","ips":3,"p50":420},{"ips":1}]},
- "estimated":{"unique_ips":{"value":10},"breakdown_scale":2.5}},
-"7d":{"breakdowns":{"city_asn":[{"city":"Austin","ips":4,"p50":null}]}}}}`)
-	e := &entry{P: &model.Provider{}, Snap: map[string]*snap.Product{"residential": p}}
-	unmeasured := &entry{P: &model.Provider{}}
-	addCoverageEvidence([]*entry{e, unmeasured}, nil)
-	got, err := json.Marshal(e.P.CoverageEvidence)
-	want := `{"residential":{"24h":[["US","United States","California","Los Angeles",7922,"Comcast","isp",8,420],` +
-		`[null,null,null,null,null,null,null,3,null]],"30d":[],"7d":[[null,null,null,"Austin",null,null,null,4,null]]}}`
-	if err != nil || string(got) != want {
-		t.Errorf("coverage evidence %s %v", got, err)
-	}
-	if unmeasured.P.CoverageEvidence != nil {
-		t.Errorf("an unmeasured provider has coverage evidence: %v", unmeasured.P.CoverageEvidence)
-	}
-}

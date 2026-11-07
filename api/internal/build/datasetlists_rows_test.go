@@ -13,7 +13,7 @@ import (
 
 // A network kind without lists or a Coverage list writes every range and
 // dimension as an empty list; a published group whose provider has no
-// network has no lists; a build before v4 has none at all.
+// network has no lists; a build without a snapshot has none at all.
 func TestDatasetListsOfNetworksWithoutRows(t *testing.T) {
 	t.Parallel()
 	d := &DatasetLists{networks: []*datasetNetwork{{slug: "net", kinds: []*datasetKind{{kind: "residential"}}}}}
@@ -24,13 +24,11 @@ func TestDatasetListsOfNetworksWithoutRows(t *testing.T) {
 		t.Errorf("%v: %s", err, b)
 	}
 	s := &snap.Snapshot{Products: []snap.Product{{Provider: "unlisted", Kind: "residential"}}}
-	for _, pg := range []*Pages{{v4: true}, {v4: false}} {
-		if l := datasetLists(pg, s, nil); len(l.networks) != 0 {
-			t.Errorf("v4 %v: networks %v", pg.v4, l.networks)
-		}
+	if l := datasetLists(&Pages{}, s, nil); len(l.networks) != 0 {
+		t.Errorf("networks %v", l.networks)
 	}
 	if b, _ := json.Marshal(datasetLists(&Pages{}, nil, nil)); string(b) != "{}" {
-		t.Errorf("a build before v4: %s", b)
+		t.Errorf("a build without a snapshot: %s", b)
 	}
 }
 
