@@ -211,7 +211,7 @@ def test_the_report_per_hour_and_day_with_the_extremes_and_the_last_day(tmp_path
 def test_the_clean_output_patterns_catch_what_they_guard():
     assert IPV4.search("from 192.0.2.1") and IPV6.search("2001:db8::1")
     assert IPV6.search("fe80:0:0:0:200:f8ff:fe21:67cf") and not IPV6.search("T00:01:30+00:00")
-    assert PATHS.search("in /home/user/x") and PATHS.search("~/Coding/x") and PATHS.search("C:\\x")
+    assert PATHS.search("in /srv/replay/x") and PATHS.search("../replay/x") and PATHS.search("C:\\x")
     assert not PATHS.search("p50/p95/max s") and not PATHS.search("done/planned")
 
 
