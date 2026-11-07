@@ -16,9 +16,17 @@ from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
 from . import browser, incremental, netlists, network, product_windows, rollups
-from .aggregate import floor_time
 from .fleet import fleet_entry, fleet_totals
-from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
+from .inputs import (
+    BucketRow,
+    GeoGroups,
+    RunFields,
+    cutoff,
+    group_by_product,
+    light_load,
+    previous_products,
+    tested_by_product,
+)
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .policy import (
@@ -87,7 +95,7 @@ class _Build:
     evidence: list
     references: object
     census_groups: dict
-    geo_groups: dict
+    geo_groups: object
     threshold: int
     prev_products: dict
     sets: dict
@@ -96,8 +104,8 @@ class _Build:
 @dataclass(frozen=True)
 class _Groups:
     """build()'s inputs grouped (_group_inputs()): the product groups by key ((product_id,
-    cohort)), the runs by run key, each group's bucket and geo rows, and each product's
-    scheduled (census/pulse) group."""
+    cohort)), the runs by run key, each group's bucket rows, its geo rows (inputs.GeoGroups,
+    read per product) and each product's scheduled (census/pulse) group."""
 
     groups: dict
     run_map: dict
@@ -221,17 +229,38 @@ def build(inputs, config, method_id, build_id, previous):
         prev_products=previous_products(previous, as_of),
         sets=sets,
     )
-    for key, p in groups.items():
-        product_windows.measure(step, key, p)
+    # Each product's groups together, so its geo rows are read once (inputs.GeoGroups).
+    by_product = defaultdict(list)
+    for key in groups:
+        by_product[key[0]].append(key)
+    for keys in by_product.values():
+        for key in keys:
+            product_windows.measure(step, key, groups[key])
+    _in_group_order(fleet_groups, groups)
     fleets, overlaps = _fleet_rows(step, sets)
     # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
     fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
     return _payload(step, fleets, overlaps)
 
 
+def _in_group_order(fleet_groups, groups):
+    """Order fleet_groups, and each one's members, as measuring the groups in their order fills
+    them (build() measures them product by product)."""
+    rank = {key: n for n, key in enumerate(groups)}
+    order = {}
+    for (_, cohort), p in groups.items():
+        for label in p["windows"]:
+            order.setdefault((cohort, label), len(order))
+    found = sorted(fleet_groups.items(), key=lambda item: order[item[0]])
+    fleet_groups.clear()
+    for k, members in found:
+        fleet_groups[k] = sorted(members, key=lambda m: rank[m[0]["product_id"], m[0]["cohort"]])
+
+
 def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
     """build()'s inputs by product group ((product_id, cohort)): the groups, the runs by run key,
-    the bucket and geo rows of each group, and each product's scheduled (census/pulse) group.
+    the bucket rows of each group (inputs.BucketRow: each bucket with its run's fields), its geo
+    rows read per product (inputs.GeoGroups), and each product's scheduled (census/pulse) group.
     Every run gets its group and light flag."""
     slot_seconds = slot_length(pulse_minutes) * 60
     # Pulse and load runs that ran during a census of the same product: the census batch ids.
@@ -241,42 +270,37 @@ def _group_inputs(runs, buckets, geo, config, overlaps, pulse_minutes):
     groups, run_map, scheduled_groups, scope_groups = _group_runs(
         runs, config, flagged_runs, timed_target, pulse_minutes
     )
-    bucket_groups = defaultdict(list)
-    geo_groups = defaultdict(list)
+    bucket_groups, fields = defaultdict(list), {}
     for b in buckets:
         r = run_map[b["run_key"]]
-        test = r.get("test")
-        # Pulse and load requests belong to their batch's slot; census and unbatched requests
-        # to the slot their bucket starts in.
-        at = r.get("slot_at") if test in ("pulse", "load") and r.get("slot_at") else None
-        country = r.get("batch_country") or r["scope"]["config"].get("requested_country")
-        # Pulses and load waves that ran during a census of the product: requests, not light.
-        overlapped = flagged_runs.get(b["run_key"], [])
-        bucket_groups[r["group"]].append(
-            b
-            | {
-                "target": r["scope"]["target"]["id"],
-                "role": r["role"],
-                "test": test,
-                "during_census": bool(overlapped),
-                "census_batches": overlapped,
-                "light": r["light"],
-                "slot": floor_time(at or b["bucket_start"], slot_seconds),
-                "country": country.strip().upper() if country else None,
-                "region": r.get("batch_region"),
-                "concurrency": r["scope"]["config"].get("concurrency"),
-                "last_observed": min(r["finished_at"], b["bucket_start"] + timedelta(minutes=5)),
-            }
-        )
-    for g in geo:
-        key = (
-            scheduled_groups.get(g["product_id"])
-            if g["scope_id"] is None
-            else scope_groups.get(g["scope_id"])
-        )
-        if key:
-            geo_groups[key].append(g)
+        if b["run_key"] not in fields:
+            fields[b["run_key"]] = _run_fields(r, flagged_runs.get(b["run_key"], []), slot_seconds)
+        bucket_groups[r["group"]].append(BucketRow(b, fields[b["run_key"]]))
+    geo_groups = GeoGroups(geo, scheduled_groups, scope_groups)
     return _Groups(groups, run_map, bucket_groups, geo_groups, scheduled_groups)
+
+
+def _run_fields(r, overlapped, slot_seconds):
+    """What run r adds to each of its bucket rows (inputs.RunFields); overlapped: the censuses
+    it ran during."""
+    test = r.get("test")
+    # Pulse and load requests belong to their batch's slot; census and unbatched requests
+    # to the slot their bucket starts in.
+    at = r.get("slot_at") if test in ("pulse", "load") and r.get("slot_at") else None
+    country = r.get("batch_country") or r["scope"]["config"].get("requested_country")
+    fields = {
+        "target": r["scope"]["target"]["id"],
+        "role": r["role"],
+        "test": test,
+        # Pulses and load waves that ran during a census of the product: requests, not light.
+        "during_census": bool(overlapped),
+        "census_batches": overlapped,
+        "light": r["light"],
+        "country": country.strip().upper() if country else None,
+        "region": r.get("batch_region"),
+        "concurrency": r["scope"]["config"].get("concurrency"),
+    }
+    return RunFields(fields, at, slot_seconds, r["finished_at"])
 
 
 def _group_runs(runs, config, flagged_runs, timed_target, pulse_minutes):
