@@ -14,8 +14,8 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
-// scaleVersion renders a QA-1-sized build (18 networks x 40 requested
-// countries, three windows each) once per test binary.
+// scaleVersion renders the QA-1 build as payload v4 (18 networks, each one
+// summary over 40 requested countries, three windows each).
 func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 	t.Helper()
 	if testing.Short() {
@@ -27,7 +27,7 @@ func scaleVersion(t *testing.T) (*Version, *build.Result, time.Duration) {
 		// covered, without the detector, by the go test step.
 		t.Skip("a QA-1-sized build does not fit the CI runner under -race")
 	}
-	in, err := testscale.Inputs(testscale.QA1)
+	in, err := testscale.NetworkInputs(testscale.QA1Networks)
 	if err != nil {
 		t.Fatal(err)
 	}
