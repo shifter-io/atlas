@@ -46,6 +46,17 @@ func readSite[T any](ctx context.Context, tx pgx.Tx, l SiteLayout, r siteRead, s
 	return out, nil
 }
 
+// The statements of LoadEvents and LoadLists that take no layout.
+const (
+	maxEventSQL           = `SELECT max(event_id) FROM public.test_events`
+	lockBreakdownsSQL     = `LOCK TABLE ONLY public.calculated_breakdowns IN ACCESS SHARE MODE`
+	nowSQL                = `SELECT now()`
+	frameworkTargetsSQL   = `SELECT target_id, label, pass_condition, sort_order, engine FROM public.targets ORDER BY sort_order, target_id`
+	frameworkProvidersSQL = `SELECT id FROM public.providers ORDER BY id`
+	frameworkProductsSQL  = `SELECT product_id, provider, name FROM public.products ORDER BY provider, name`
+	hasBreakdownsSQL      = `SELECT to_regclass('public.calculated_breakdowns') IS NOT NULL`
+)
+
 // TxBeginner starts the read-only transactions of Load and LoadEvents (a
 // pgxpool.Pool or a pgx.Conn).
 type TxBeginner interface {
@@ -64,7 +75,7 @@ func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	in := &Inputs{}
-	if err := tx.QueryRow(ctx, `SELECT max(event_id) FROM public.test_events`).Scan(&in.Fingerprint.MaxEventID); err != nil {
+	if err := tx.QueryRow(ctx, maxEventSQL).Scan(&in.Fingerprint.MaxEventID); err != nil {
 		return nil, fmt.Errorf("newest event: %w", err)
 	}
 	if err := in.loadEvents(ctx, tx); err != nil {
@@ -108,7 +119,7 @@ func LoadLists(ctx context.Context, db TxBeginner, lists *Lists) (*Inputs, error
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	if partitioned && lockBreakdowns {
-		if _, err := tx.Exec(ctx, `LOCK TABLE ONLY public.calculated_breakdowns IN ACCESS SHARE MODE`); err != nil {
+		if _, err := tx.Exec(ctx, lockBreakdownsSQL); err != nil {
 			return nil, fmt.Errorf("lock calculated_breakdowns: %w", err)
 		}
 	}
@@ -144,7 +155,7 @@ func (in *Inputs) loadHead(ctx context.Context, tx pgx.Tx) (SiteLayout, error) {
 	if in.Fingerprint, err = readFingerprint(ctx, tx, l); err != nil {
 		return l, fmt.Errorf("fingerprint: %w", err)
 	}
-	return l, tx.QueryRow(ctx, "SELECT now()").Scan(&in.ReadAt)
+	return l, tx.QueryRow(ctx, nowSQL).Scan(&in.ReadAt)
 }
 
 // catalogSteps reads the targets (site and framework), scopes, weights and
@@ -158,7 +169,7 @@ func (in *Inputs) catalogSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []f
 			return
 		},
 		func() (err error) {
-			in.FrameworkTargets, err = collect(ctx, tx, `SELECT target_id, label, pass_condition, sort_order, engine FROM public.targets ORDER BY sort_order, target_id`,
+			in.FrameworkTargets, err = collect(ctx, tx, frameworkTargetsSQL,
 				func(r pgx.Rows, v *FrameworkTarget) error {
 					return r.Scan(&v.ID, &v.Label, &v.PassCondition, &v.SortOrder, &v.Engine)
 				})
@@ -254,12 +265,12 @@ func (in *Inputs) communitySteps(ctx context.Context, tx pgx.Tx, l SiteLayout) [
 func (in *Inputs) frameworkSteps(ctx context.Context, tx pgx.Tx) []func() error {
 	return []func() error{
 		func() (err error) {
-			in.FrameworkProviders, err = collect(ctx, tx, `SELECT id FROM public.providers ORDER BY id`,
+			in.FrameworkProviders, err = collect(ctx, tx, frameworkProvidersSQL,
 				func(r pgx.Rows, v *string) error { return r.Scan(v) })
 			return
 		},
 		func() (err error) {
-			in.FrameworkProducts, err = collect(ctx, tx, `SELECT product_id, provider, name FROM public.products ORDER BY provider, name`,
+			in.FrameworkProducts, err = collect(ctx, tx, frameworkProductsSQL,
 				func(r pgx.Rows, v *FrameworkProduct) error { return r.Scan(&v.ID, &v.Provider, &v.Name) })
 			return
 		},
@@ -305,6 +316,6 @@ func hasBreakdowns(ctx context.Context, db TxBeginner) (bool, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var ok bool
-	err = tx.QueryRow(ctx, `SELECT to_regclass('public.calculated_breakdowns') IS NOT NULL`).Scan(&ok)
+	err = tx.QueryRow(ctx, hasBreakdownsSQL).Scan(&ok)
 	return ok, err
 }

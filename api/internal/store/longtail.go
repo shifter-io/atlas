@@ -131,7 +131,7 @@ type groupKey struct {
 // windows take calculated_windows.list_id (K2) or, before K2, result_id.
 func (s *SnapshotRow) windowLists(ctx context.Context, tx pgx.Tx, groups []listGroup) (map[PlaceWindow]int64, bool, error) {
 	var k2 bool
-	if err := tx.QueryRow(ctx, `SELECT to_regclass('public.calculated_list_rows') IS NOT NULL`).Scan(&k2); err != nil {
+	if err := tx.QueryRow(ctx, hasListRowsSQL).Scan(&k2); err != nil {
 		return nil, false, err
 	}
 	ids, v2 := map[PlaceWindow]int64{}, false
@@ -150,9 +150,7 @@ func (s *SnapshotRow) windowLists(ctx context.Context, tx pgx.Tx, groups []listG
 	if !v2 {
 		return ids, k2, nil
 	}
-	column := map[bool]string{true: "list_id", false: "result_id"}[k2]
-	rows, _ := tx.Query(ctx, `SELECT product_id, cohort, window_hours, `+column+` FROM public.calculated_windows
- WHERE build_id = $1 AND target = '' AND `+column+` IS NOT NULL`, s.BuildID)
+	rows, _ := tx.Query(ctx, windowListsSQL(k2), s.BuildID)
 	var k PlaceWindow
 	var id int64
 	if _, err := pgx.ForEachRow(rows, []any{&k.Product, &k.Cohort, &k.Hours, &id}, func() error {
@@ -164,6 +162,17 @@ func (s *SnapshotRow) windowLists(ctx context.Context, tx pgx.Tx, groups []listG
 		return nil, false, fmt.Errorf("window lists: %w", err)
 	}
 	return ids, k2, nil
+}
+
+// hasListRowsSQL tells whether the K2 list tables exist.
+const hasListRowsSQL = `SELECT to_regclass('public.calculated_list_rows') IS NOT NULL`
+
+// windowListsSQL reads build $1's target-free windows and their list ids
+// (K2) or result ids (before K2).
+func windowListsSQL(k2 bool) string {
+	column := map[bool]string{true: "list_id", false: "result_id"}[k2]
+	return `SELECT product_id, cohort, window_hours, ` + column + ` FROM public.calculated_windows
+ WHERE build_id = $1 AND target = '' AND ` + column + ` IS NOT NULL`
 }
 
 // headlineGroups is each provider's group per proxy kind (snap.ByKind).
