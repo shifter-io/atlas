@@ -349,3 +349,15 @@ def test_only_the_first_xdist_worker_traces_its_collection(monkeypatch):
         traced.append(settrace)
     # gw7 collects without a tracer and gets it back after; the others keep it throughout.
     assert traced == [[], [], [None, tracer]]
+
+
+def test_no_test_patches_a_modules_file():
+    # Coverage names a file by its module's __file__ when it first traces it: in a worker that
+    # collected untraced, that can be inside the test that patched it (pytest_collection).
+    tests = Path(__file__).parent
+    patched = [
+        path.name
+        for path in tests.glob("*.py")
+        if path.name != Path(__file__).name and '"__file__",' in path.read_text()
+    ]
+    assert patched == []

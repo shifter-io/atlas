@@ -115,6 +115,8 @@ def pytest_runtest_call(item):
 def pytest_collection(session):
     # Every xdist worker collects the same tests, so runs the same imports and module code: gw0
     # (the first to start) records their coverage, the others collect untraced, which is faster.
+    # So a test must never patch a module's __file__: coverage names a file by it the first time
+    # it traces the file's code, which in those workers can be inside that test.
     if helpers.WORKER in ("main", "gw0"):
         return (yield)
     with helpers.untraced():

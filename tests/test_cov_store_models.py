@@ -85,7 +85,7 @@ def only_cwd_db_ip(tmp_path, monkeypatch):
     """find_source searches only tmp_path/db-ip: not $DBIP_MMDB, nor the checkout's db-ip."""
     monkeypatch.delenv("DBIP_MMDB", raising=False)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(enrichment, "__file__", str(tmp_path / "a" / "b" / "enrichment.py"))
+    monkeypatch.setattr(enrichment, "CHECKOUT_DB_IP", tmp_path / "db-ip")
     (tmp_path / "db-ip").mkdir()
 
 
