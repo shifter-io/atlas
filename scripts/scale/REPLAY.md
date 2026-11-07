@@ -53,8 +53,9 @@ Hour h of day d (`replay_steps.py`):
    timeouts the slice's modelled `slot_errors`, and its bucket counters and latency are modelled
    as the cycle does (2 to 4 five-minute buckets, the network's latency bins). It is stored with
    `storage.ingest` (one transaction per run) and `compute.estimate_run` with the network's
-   formula (`formulas/<network>.json`). A country the formula cannot estimate is noted
-   (`not_estimated`), not retried.
+   formula (`formulas/<network>.json`). A run counts as stored once both are done; any other
+   failure of either retries the run (both are idempotent). A country the formula cannot
+   estimate is noted (`not_estimated`), not retried.
 2. **HTTP pulses.** `cycle_steps.Steps.pulses` with the replay's hooks: `batches.pulse_plan` at
    every 5 minutes of the hour on production's settings and targets, then every planned pulse
    and load-wave run of the replay's nodes uploaded to an in-process node API (`POST
@@ -73,8 +74,9 @@ Hour h of day d (`replay_steps.py`):
 The replay registers its own nodes: for the HTTP pulses one node per network in every region of
 an enabled country, named `scale-replay-<region>`; for the browser hour BROWSER-MODEL-1's node per
 network on `browser-scalereplay` (a browser host name must be `browser-<letters and digits>`).
-Where production already has a node of that network in a region, the replay registers none
-there: `issue_token` would rotate production's token. Production's own nodes' runs stay queued
+A node counts as the replay's when its id is in the state or its host is one of these names; the
+browser nodes are recorded even when the hour fails after registering them. Where production
+already has a node of that network in a region, the replay registers none there: `issue_token` would rotate production's token. Production's own nodes' runs stay queued
 (production's reaper fails them later); the replay does not wait for them.
 
 At the end, or on any stop, the replay's nodes are disabled: their token hash is replaced by a
