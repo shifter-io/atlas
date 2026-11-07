@@ -14,14 +14,24 @@ Timeline: each xdist worker (or a run without xdist) appends to
 teardown of every test with its start and end, the spans that create or drop a scratch
 database (`helpers.scratch_database`, `helpers.drop_databases`) or initialise a schema
 (`storage.initialize`, `calculated.store.initialize`), and its collection (from loading this
-file to the last collected test). The xdist controller records only combining the workers'
-coverage and each coverage report (`timeline-main.jsonl`); a pytest a test starts records
-nothing. `scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is recorded
-or wrapped.
+file to the last collected test, with when its process started), and the cluster's database
+count before each drop of its scratch databases. The xdist controller records
+only when it started and loaded this file, combining the workers' coverage and each coverage
+report (`timeline-main.jsonl`); a pytest a test starts records nothing.
+`scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is recorded or wrapped.
 
 Shared templates: the process that runs the session names the run (helpers.SHARED_RUN, which
 its xdist workers inherit) and drops the templates the workers share at its end
 (tests/sweep_prefix.py builds them).
+
+Untraced collection: every xdist worker collects every test, so runs the same imports and
+module-level code; only gw0 records their coverage, the others collect without a tracer (an
+untraced collection takes about 60% of a traced one), and the combined coverage is the same.
+
+Scratch databases: `helpers.drop_databases` only queues its drops, for one dropper process per
+test process (tests/dropper.py), so a test's teardown never waits for a drop; each process waits
+for the rest in the teardown of `wait_for_drops`, after its other session fixtures, so a failed
+drop fails the run.
 
 No coverage: a test marked `no_cover` runs without a tracer. pytest-cov's marker alone only
 stops its own coverage, and in an xdist worker that hands tracing back to the coverage it
@@ -102,19 +112,46 @@ def pytest_runtest_call(item):
         return (yield)
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_collection(session):
+    # Every xdist worker collects the same tests, so runs the same imports and module code: gw0
+    # (the first to start) records their coverage, the others collect untraced, which is faster.
+    # So a test must never patch a module's __file__: coverage names a file by it the first time
+    # it traces the file's code, which in those workers can be inside that test.
+    if helpers.WORKER in ("main", "gw0"):
+        return (yield)
+    with helpers.untraced():
+        return (yield)
+
+
 # The process that runs the session (the xdist controller, or pytest without xdist) names the
 # run for the templates its workers share (helpers.shared_template) and drops them at its end;
-# a pytest a test starts inherits the name and drops nothing.
+# a pytest a test starts inherits the name and drops nothing. Every process waits for its own
+# scratch databases' drops at its end (helpers.drop_databases queues them).
 SHARED_OWNER = helpers.SHARED_RUN not in os.environ
 if SHARED_OWNER:
     os.environ[helpers.SHARED_RUN] = uuid.uuid4().hex[:8]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def wait_for_drops():
+    """Wait for this process's queued drops after its last test: autouse, so set up first and
+    torn down after every other session fixture (their drops are queued by then). A failed drop
+    is the last test's teardown error, which an xdist worker reports; raised later, in its
+    pytest_sessionfinish, xdist would lose it and the run would pass."""
+    yield
+    helpers.drop_queued()
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session):
+    # The controller's own queue (the shared templates), or anything a run without xdist
+    # queued after its last test; trylast: after pytest's own sessionfinish.
     admin = os.environ.get("PG_TEST_ADMIN_FILE")
     if SHARED_OWNER and admin:
         credentials = read_credentials(admin, "postgres")
         helpers.drop_shared_templates(credentials, os.environ[helpers.SHARED_RUN])
+    helpers.drop_queued()
 
 
 if helpers.TIMELINE:
@@ -134,8 +171,18 @@ if helpers.TIMELINE:
     storage.initialize = _timed("initialize", storage.initialize)
     store.initialize = _timed("initialize", store.initialize)
 
-    # When this process loaded this file: the start of its collection span.
+    def _started():
+        """When this process started (Linux: its start in clock ticks since boot), or None."""
+        try:
+            ticks = int(Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()[19])
+            uptime = float(Path("/proc/uptime").read_text().split()[0])
+        except (OSError, ValueError, IndexError):
+            return None
+        return time.time() - uptime + ticks / os.sysconf("SC_CLK_TCK")
+
+    # When this process loaded this file: the start of its collection span; and when it started.
     LOADED = time.time()
+    STARTED = _started()
     # Whether this process records its tests (the controller only its coverage spans).
     RECORDS_TESTS = False
 
@@ -152,6 +199,7 @@ if helpers.TIMELINE:
             RECORDS_TESTS = True
             os.environ["CI_TIMELINE_OWNER"] = str(os.getpid())
             return
+        helpers.timeline_record({"kind": "controller", "start": STARTED, "stop": LOADED})
         import coverage
 
         for method in ("combine", "report", "xml_report", "json_report"):
@@ -159,7 +207,8 @@ if helpers.TIMELINE:
 
     def pytest_collection_finish(session):
         if RECORDS_TESTS:
-            helpers.timeline_record({"kind": "collect", "start": LOADED, "stop": time.time()})
+            record = {"kind": "collect", "start": LOADED, "stop": time.time()}
+            helpers.timeline_record(record | {"process": STARTED})
 
     def pytest_runtest_logreport(report):
         if not RECORDS_TESTS:

@@ -358,3 +358,20 @@ def test_the_memory_scope_is_used_where_systemd_run_exists(monkeypatch):
     assert replay.memory_scope(False) == []
     monkeypatch.setattr(replay.shutil, "which", lambda name: None)
     assert replay.memory_scope() == []
+
+
+def test_the_sizes_count_a_database_dropped_meanwhile_as_none():
+    # Another session drops a database the query's snapshot still lists (another xdist worker's,
+    # at its session end): its size counts as NULL instead of failing the replay.
+    from helpers import scratch_database
+    from test_storage import admin_credentials
+
+    admin = admin_credentials()
+    gone = scratch_database(admin)
+    with psycopg.connect(**admin) as conn, psycopg.connect(**admin, autocommit=True) as other:
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        listed = "SELECT count(*) FROM pg_database WHERE datname=%s"
+        assert conn.execute(listed, (gone,)).fetchone()[0] == 1
+        other.execute(f'DROP DATABASE "{gone}" WITH (FORCE)')
+        database, every = conn.execute(replay.SIZES).fetchone()
+    assert 0 < database <= every
