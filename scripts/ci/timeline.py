@@ -5,12 +5,13 @@ Usage: timeline.py <dir with timeline-*.jsonl> [--top N] [--durations FILE [--mi
 Prints the run's wall time (first test start to last test end), then per worker its busy
 time (setup + call + teardown), idle time (the rest of the wall) and test count, when each
 worker ended (its last test's end, from the first test's start), the totals spent creating
-scratch databases and initialising schemas, and the N longest tests with their share of the
-wall time, and the fixed costs around the tests: pytest's start to the first test and the
-last test to its end (the CI step's `pytest` span), when the workers loaded and finished
-collecting, combining the coverage and each report, and each background check's wall and CPU
-time with its end (from the first test's start). --durations writes each test of at least S
-seconds (default 1) as {node id: seconds}, the format of tests/durations.json
+and dropping scratch databases and initialising schemas, the N longest tests with their
+share of the wall time, and the fixed costs around the tests: the CI step's spans before
+pytest (`rewrite`), pytest's start to the first test and the last test to its end (the
+step's `pytest` span), when the workers loaded and
+finished collecting, combining the coverage and each report, and each background check's
+wall and CPU time with its end (from the first test's start). --durations writes each test
+of at least S seconds (default 1) as {node id: seconds}, the format of tests/durations.json
 (scripts/ci/durations.py builds that one from a tier1 run's junit).
 """
 
@@ -20,7 +21,7 @@ from collections import defaultdict
 from pathlib import Path
 
 PHASES = ("setup", "call", "teardown")
-SPANS = ("create_database", "initialize")
+SPANS = ("create_database", "drop_database", "initialize")
 COVERAGE = ("combine", "report", "xml_report", "json_report")
 
 
@@ -82,7 +83,10 @@ def fixed(records, first, last):
     of = defaultdict(list)
     for r in records:
         of[r["kind"]].append(r)
-    result = {"coverage": {}, "checks": {}}
+    result = {"coverage": {}, "checks": {}, "step": {}}
+    for r in records:
+        if r.get("worker") == "step" and r["kind"] not in ("pytest", "check"):
+            result["step"][r["kind"]] = r["stop"] - r["start"]
     for kind in COVERAGE:
         if of[kind]:
             result["coverage"][kind] = sum(r["stop"] - r["start"] for r in of[kind])
@@ -104,7 +108,7 @@ def fixed(records, first, last):
 
 
 def fixed_report(costs):
-    lines = []
+    lines = [f"before pytest: {kind} {s:.1f} s" for kind, s in costs["step"].items()]
     if "before" in costs:
         lines.append(
             f"pytest start to first test {costs['before']:.1f} s, "

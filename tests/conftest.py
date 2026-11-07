@@ -11,13 +11,13 @@ artifact keeps the junit), and commit it:
 
 Timeline: each xdist worker (or a run without xdist) appends to
 `$EV/timeline-<worker>.jsonl` (the current directory without EV): the setup, call and
-teardown of every test with its start and end, and the spans that create a scratch
-database (`helpers.scratch_database`) or initialise a schema (`storage.initialize`,
-`calculated.store.initialize`), and its collection (from loading this file to the last
-collected test). The xdist controller records only combining the workers' coverage and each
-coverage report (`timeline-main.jsonl`); a pytest a test starts records nothing.
-`scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is recorded or
-wrapped.
+teardown of every test with its start and end, the spans that create or drop a scratch
+database (`helpers.scratch_database`, `helpers.drop_databases`) or initialise a schema
+(`storage.initialize`, `calculated.store.initialize`), and its collection (from loading this
+file to the last collected test). The xdist controller records only combining the workers'
+coverage and each coverage report (`timeline-main.jsonl`); a pytest a test starts records
+nothing. `scripts/ci/timeline.py` sums it per worker. Without CI_TIMELINE nothing is recorded
+or wrapped.
 
 No coverage: a test marked `no_cover` runs without a tracer. pytest-cov's marker alone only
 stops its own coverage, and in an xdist worker that hands tracing back to the coverage it

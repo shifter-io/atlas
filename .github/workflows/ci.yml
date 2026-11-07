@@ -166,8 +166,7 @@ jobs:
         # The virtualenv persists across runs, and uv rebuilds the project only when
         # pyproject.toml changes; reinstall it so scripts (the benchmark,
         # postgres_local.py) import this head's code, not an earlier build.
-        # Compiled once here, so the 32 test workers do not each compile the reinstalled package.
-        run: uv sync --locked --no-editable --reinstall-package proxy-index --compile-bytecode --python "$PYTHON_VERSION"
+        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
 
       - name: Start a PostgreSQL for this job
         if: env.CODE == 'true'
@@ -233,6 +232,16 @@ jobs:
           # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step. pytest
           # only combines the coverage; the two reports the gates read are written after it,
           # at the same time.
+          # pytest's assertion-rewrite cache (tests/__pycache__), written once by one collection
+          # per CPU of a share of the test files, without coverage: otherwise each worker
+          # rewrites every test module itself, traced (a cold collection takes 4 times a warm
+          # one). Its errors are the run's own, reported there.
+          start=$(date +%s.%N)
+          files=(tests/test_*.py)
+          printf "%s\n" "${files[@]}" | xargs -P "$(nproc)" -n "$(( (${#files[@]} + $(nproc) - 1) / $(nproc) ))" \
+            uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+            > "$EV/rewrite.log" 2>&1 || true
+          span rewrite "$start"
           tests=0
           start=$(date +%s.%N)
           CI_TIMELINE=1 uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
@@ -371,8 +380,8 @@ jobs:
           find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
           collect all-cold-nocov ""
           find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
-          collect all-cold-cov-importtime -X importtime "${cov[@]}"
-          collect warm-cov-importtime -X importtime "${cov[@]}"
+          collect all-cold-cov-importtime "-X importtime" "${cov[@]}"
+          collect warm-cov-importtime "-X importtime" "${cov[@]}"
           tail -n 5 "$m/all-cold-cov-importtime.out"
           python3 - "$m/all-cold-cov-importtime.err" "$m/warm-cov-importtime.err" <<'EOF'
           import sys

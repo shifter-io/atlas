@@ -10,6 +10,7 @@ from pathlib import Path
 import conftest
 import helpers
 import pytest
+from test_ci_timing import steps
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "ci" / "timeline.py"
 
@@ -91,6 +92,7 @@ def test_timeline_reports_when_each_worker_ended(tmp_path):
 def test_timeline_reports_the_fixed_costs_around_the_tests(tmp_path):
     scope = {"name": "scope", "user": 40.0, "sys": 2.5}
     step = [
+        {"worker": "step", "kind": "rewrite", "start": 88.0, "stop": 90.0},
         {"worker": "step", "kind": "pytest", "start": 90.0, "stop": 125.0},
         {"worker": "step", "kind": "check", "start": 90.0, "stop": 150.0} | scope,
     ]
@@ -118,7 +120,9 @@ def test_timeline_reports_the_fixed_costs_around_the_tests(tmp_path):
     assert fixed["collect"] == (2.0, 3.5, 8.0, 9.0)
     assert fixed["coverage"] == {"combine": 0.5, "xml_report": 2.5}
     assert fixed["checks"] == {"scope": {"wall": 60.0, "cpu": 42.5, "end": 50.0}}
+    assert fixed["step"] == {"rewrite": 2.0}
     assert timeline["fixed_report"](fixed) == [
+        "before pytest: rewrite 2.0 s",
         "pytest start to first test 10.0 s, last test to end 5.0 s",
         "workers loaded 2.0-3.5 s, collected 8.0-9.0 s after pytest start",
         "coverage: combine 0.5 s, xml_report 2.5 s",
@@ -127,7 +131,10 @@ def test_timeline_reports_the_fixed_costs_around_the_tests(tmp_path):
     # Without tests: the coverage and the checks, no start or end.
     empty = timeline["summarize"](step)["fixed"]
     assert "before" not in empty and empty["checks"]["scope"]["end"] is None
-    assert timeline["fixed_report"](empty) == ["check scope: wall 60.0 s, cpu 42.5 s"]
+    assert timeline["fixed_report"](empty) == [
+        "before pytest: rewrite 2.0 s",
+        "check scope: wall 60.0 s, cpu 42.5 s",
+    ]
 
 
 def test_timeline_of_no_tests(tmp_path):
@@ -259,3 +266,17 @@ def test_a_pytest_started_by_a_recording_test_does_not_record(tmp_path):
     # pid 1 is never the nested pytest: it inherited another process's ownership.
     run_with_timeline(tmp_path, CI_TIMELINE_OWNER="1")
     assert list(tmp_path.iterdir()) == []
+
+
+def test_tier1_writes_the_coverage_reports_after_pytest_and_runs_its_checks_at_nice_19():
+    run = next(s for s in steps("ci.yml", "tier1") if s.get("id") == "tests")["run"]
+    pytest_runs = [line for line in run.splitlines() if "pytest -p no:cacheprovider -rs" in line]
+    assert len(pytest_runs) == 2
+    # pytest only combines the coverage; both reports the gates read come after the last run.
+    assert run.count("--cov-report= ") == 2 and "--cov-report=xml" not in run
+    serial = run.index("--junitxml=\"$EV/junit-serial.xml\"")
+    for kind in ("xml", "json"):
+        report = f'coverage {kind} -q -o "$EV/coverage.{kind}"'
+        assert serial < run.index(report) < run.index("\nwait\n")
+    assert 'renice -n 19 -p "$BASHPID"' in run
+    assert 'span pytest "$start"' in run and 'span check "$start"' in run
