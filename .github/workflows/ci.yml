@@ -276,7 +276,6 @@ jobs:
           background coverage-xml uv run --no-editable coverage xml -q -o "$EV/coverage.xml"
           background coverage-json uv run --no-editable coverage json -q -o "$EV/coverage.json"
           wait
-          python3 -c 'import json,sys; print("TEMP totals", json.load(open(sys.argv[1]))["totals"])' "$EV/coverage.json" || true
 
           failed=0
           for rc in "$EV"/*.rc; do
