@@ -11,6 +11,7 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -89,7 +90,11 @@ func TestLongNetworkListsPageFromTheDatabase(t *testing.T) {
 	if n := fromDB.Pages.Network["shifter/residential"].Ranges["30d"].Lists["city"]; n != len(listLabels["g"])+tailRows {
 		t.Fatalf("shifter's 30d city list has %d rows, want %d", n, len(listLabels["g"])+tailRows)
 	}
-	compareAnswers(t, "v4 from the database", netAnswers(t, fromV3, true), netAnswers(t, fromDB, false))
+	want, err := testscale.AsV4Answers(netAnswers(t, fromV3), groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compareAnswers(t, "v4 from the database", want, netAnswers(t, fromDB))
 	held := heldBuild(t, pool, in, nc)
 	compareAnswers(t, "v4 held in memory", longPages(t, held), longPages(t, fromDB))
 	if page, ok, err := fromDB.Pages.List(ctx, "", "country/DE", "30d", "city", "zyx", 1); err != nil || !ok || len(page.Rows) != len(netProviders) ||

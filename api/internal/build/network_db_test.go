@@ -157,8 +157,9 @@ func netOverlap(a, b int, label string) snap.OverlapRow {
 }
 
 // netPayloads is the case as a v3 head with its groups (product parts) and
-// as a v4 head with the same groups and its networks; both heads carry the
-// per-cohort overlap and fleet rows and an every-group fleet entry.
+// as the v4 head of the same data (testscale.NetworkHead, naming the case's
+// network lists); the v3 head carries the per-cohort overlap and fleet rows
+// and an every-group fleet entry.
 func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [][]byte) {
 	t.Helper()
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
@@ -170,32 +171,19 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [
 		t.Fatal(err)
 	}
 	template := doc["products"].([]any)[0].(map[string]any)
-	overlap, networks := []any{}, []any{}
+	overlap, products := []any{}, []any{}
 	for i, p := range netProviders {
 		g := v3Group(t, c, template, p, i+1, nc.groupLists[p])
 		b, err := json.Marshal(g)
 		if err != nil {
 			t.Fatal(err)
 		}
-		groups = append(groups, b)
-		peers := map[string][]snap.OverlapPeer{}
-		for j := range netProviders {
+		groups, products = append(groups, b), append(products, g)
+		for j := i + 1; j < len(netProviders); j++ {
 			for _, label := range netLabels {
-				if j == i {
-					continue
-				}
-				r := netOverlap(min(i, j)+1, max(i, j)+1, label)
-				if j > i {
-					overlap = append(overlap, r)
-				}
-				ours, theirs := r.IpsA, r.IpsB
-				if j < i {
-					ours, theirs = theirs, ours
-				}
-				peers[label] = append(peers[label], snap.OverlapPeer{Provider: netProviders[j], ProductID: snap.Num(j + 1), SharedIps: r.SharedIps, IpsOurs: ours, IpsTheirs: theirs})
+				overlap = append(overlap, netOverlap(i+1, j+1, label))
 			}
 		}
-		networks = append(networks, testscale.NetworkEntry(cloneMap(t, g), []string{"US"}, 1, nc.netLists[p], nc.counts, peers))
 	}
 	for _, f := range doc["fleet"].([]any) {
 		all := cloneMap(t, f.(map[string]any))
@@ -208,8 +196,14 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [
 	if v3, err = json.Marshal(doc); err != nil {
 		t.Fatal(err)
 	}
-	doc["schema_version"], doc["networks"] = 4, networks
-	if v4, err = json.Marshal(doc); err != nil {
+	doc["products"] = products
+	whole, err := json.Marshal(doc)
+	if err == nil {
+		v4, err = testscale.NetworkHead(&store.SnapshotRow{Payload: whole}, 0, func(w testscale.NetWindow, _ map[string][]store.NetRow) (int64, map[string]int, error) {
+			return nc.netLists[w.Provider][w.Label], nc.counts[w.Label], nil
+		})
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	return v3, v4, groups
@@ -217,10 +211,8 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [
 
 // netAnswers is every answer of a build as the server renders them, and
 // pages and searches of every place list of its networks, of all networks
-// and of its countries; the v3 build's with the documented differences of a
-// v4 build applied: each group's id and cohort are its network's, and the
-// snapshot's schema version is 4.
-func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
+// and of its countries.
+func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	t.Helper()
 	res.BuiltAt = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
 	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
@@ -262,16 +254,6 @@ func netAnswers(t *testing.T, res *build.Result, v3 bool) map[string][]byte {
 			}
 		}
 	}
-	if !v3 {
-		return out
-	}
-	for name, b := range out {
-		for i, p := range netProviders {
-			b = bytes.ReplaceAll(b, fmt.Appendf(nil, "%d:%s", i+1, fixtureCohort), fmt.Appendf(nil, "%s:residential:network", p))
-		}
-		b = bytes.ReplaceAll(b, []byte(fixtureCohort), []byte(store.NetworkCohort))
-		out[name] = bytes.ReplaceAll(b, []byte(`"schemaVersion":3`), []byte(`"schemaVersion":4`))
-	}
 	return out
 }
 
@@ -304,8 +286,11 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 		t.Errorf("the v4 build: parts read %v, list ids %v (want the 9 network lists only), group lists fetched %d more",
 			log4.reads("calculated_snapshot_parts"), log4.listIDs, cache.Fetched-9)
 	}
-	want, got := netAnswers(t, fromV3, true), netAnswers(t, fromV4, false)
-	compareAnswers(t, "v4", want, got)
+	want, err := testscale.AsV4Answers(netAnswers(t, fromV3), groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compareAnswers(t, "v4", want, netAnswers(t, fromV4))
 	checkCoverageRows(t, fromV3, fromV4)
 	db.PublishParts(t, v3, groups, nil)
 	same()
@@ -313,7 +298,7 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 	if !log.reads("calculated_snapshot_parts") || cache.Fetched != 18 {
 		t.Errorf("the v3 build again: parts read %v, %d group lists fetched, want 18", log.reads("calculated_snapshot_parts"), cache.Fetched)
 	}
-	compareAnswers(t, "v3 again", netAnswers(t, fromV3, false), netAnswers(t, again, false))
+	compareAnswers(t, "v3 again", netAnswers(t, fromV3), netAnswers(t, again))
 }
 
 func compareAnswers(t *testing.T, name string, want, got map[string][]byte) {
