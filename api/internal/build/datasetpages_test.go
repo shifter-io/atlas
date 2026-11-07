@@ -51,7 +51,7 @@ func TestTheDatasetFileRegeneratesEveryPageAnswer(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got, ok := doc.Pages[path]; !ok || !bytes.Equal(got, body) {
-			t.Errorf("v4 %v %s: the file does not regenerate the served answer (in the file: %v)", v4, path, ok)
+			t.Errorf("%s: the file does not regenerate the served answer (in the file: %v)", path, ok)
 		}
 	}
 	var extra []string
