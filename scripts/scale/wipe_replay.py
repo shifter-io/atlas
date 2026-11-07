@@ -24,11 +24,11 @@ from pathlib import Path
 import replay_baseline
 import target
 from browser_model import HOST as BROWSER_HOST
-from psycopg import sql
+from psycopg import IsolationLevel, sql
 from replay import write_private
 from replay_steps import NODE_HOST
 
-from proxy_index.calculated import store_retention
+from proxy_index.calculated import netlists, store_retention
 from proxy_index.partitions import DAILY, children
 from proxy_index.storage import connect
 
@@ -72,6 +72,7 @@ FACTS = (
     ("calculated_bucket_ips", HOURS.format("bucket_start")),
     ("calculated_ip_last_seen", HOURS.format("last_seen")),
     *((name, "last_used>=%(at)s") for name in ("calculated_distinct", "calculated_slot_figures")),
+    ("provider_overlap", "updated_at>=%(at)s"),  # a lifetime cache the ingest updates
     ("load_references", "day>=%(first_day)s AND day<%(end_day)s AND chosen_at>=%(at)s"),
 )
 # Lookup tables in foreign-key order: a row new since the baseline (not among its keys, or above
@@ -119,7 +120,8 @@ def parameters(state: dict) -> dict:
 
 def builds(conn, top: int) -> int | None:
     """Discard every build above the baseline; when one of them is current, the newest
-    published baseline build left becomes current (none: no current build)."""
+    published baseline build left becomes current, with its network lists (none: no current
+    build)."""
     row = conn.execute("SELECT build_id FROM current_calculation").fetchone()
     current = row[0] if row else None
     if current is not None and current > top:
@@ -133,6 +135,7 @@ def builds(conn, top: int) -> int | None:
         store_retention.discard(conn, build_id, gc=False)
     if store_retention.lists(conn):
         store_retention.collect(conn)
+        netlists.restore(conn)  # a build made current again gets its network lists (publish())
     return current
 
 
@@ -235,6 +238,8 @@ def run(args) -> dict:
     path = Path(args.state)
     state, dry = json.loads(path.read_text()), path.with_name(DRY_RUN)
     with connect(args.database) as conn:
+        # One snapshot: the counts see the wipe's deletes, not other sessions' commits.
+        conn.isolation_level = IsolationLevel.REPEATABLE_READ
         found = refusal(args, state, conn.execute("SELECT current_database()").fetchone()[0])
         if found:
             raise Refused(found)

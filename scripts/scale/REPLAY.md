@@ -171,6 +171,9 @@ uv run python scripts/scale/wipe_replay.py --database proxy_reviews.toml --state
   deleted rows equal the dry run's; any difference rolls everything back, as `archive/purge.py`
   does. It prints the per-table counts afterwards; `not_at_baseline` lists every table whose
   count differs from the baseline's.
+- The transaction is REPEATABLE READ, so the counts see only its own deletes. Discarding the
+  builds drops their snapshot partitions, which locks `calculated_snapshot_parts` until the
+  transaction ends (the dry run's too): the siteapi's reads of it wait meanwhile.
 - A state of another database is refused. Exit codes: 0 done, 2 refused or rolled back.
 
 **What counts as the replay's:** runs whose summary has `scale_replay` (above the baseline's
@@ -190,7 +193,8 @@ highest run key), the replay's nodes (above the baseline's highest node id, host
   and memos of the simulated days, the rollup hours written after the baseline (`through_run`
   above its highest run key), with their geo hours and pulse buckets, the distinct and slot
   memos used since the baseline, and the load references chosen since the baseline for the
-  simulated days. The calculation rewrites any of these it misses.
+  simulated days, and the provider overlaps updated since the baseline. The calculation and the
+  ingest rewrite any of these they miss.
 - Lookup rows new since the baseline (not among its keys, or above its highest identity) that no
   remaining row references except a cache: scope_stats, pool_stats, products, providers,
   ip_addresses, dbip_releases, enrichment_locations, enrichment_networks, asn_labels,
