@@ -4,7 +4,7 @@
 # queue test compares its merge commit with the queue's base.
 #
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
-# its work in parallel there: the build and lint checks in the background and
+# its work in parallel there: the build and lint checks in the background (nice 19) and
 # pytest-xdist on every CPU, each worker with its own databases (copies of its template)
 # in one throwaway PostgreSQL without crash safety (CI-SPEED-1, CI-FAST-2). Then scripts/ci/timing.py writes the 20 slowest tests and the test
 # step's time to the job summary and the ci-timing artifact (90 days, with the junit
@@ -184,12 +184,27 @@ jobs:
         run: |
           # The step's start, for the CI time step below.
           date +%s > "$EV/step-start"
-          # Each background check writes $EV/<name>.log and $EV/<name>.rc; after the tests,
-          # every check with a non-zero status prints its log and fails the step.
+          # A span of this step in the test timeline (scripts/ci/timeline.py): its kind, its
+          # start (`date +%s.%N`) and, after them, any more JSON fields; it ends now.
+          span() {
+            printf '{"worker": "step", "kind": "%s", "start": %s, "stop": %s%s}\n' \
+              "$1" "$2" "$(date +%s.%N)" "${3:+, $3}" >> "$EV/timeline-step.jsonl"
+          }
+          # Each background check writes $EV/<name>.log and $EV/<name>.rc, and its wall and
+          # CPU time (its processes' user and system seconds) to the timeline; after the
+          # tests, every check with a non-zero status prints its log and fails the step. The
+          # checks run at the lowest priority (nice 19), so they never slow the tests.
           background() {
             local name=$1
             shift
-            ( rc=0; "$@" > "$EV/$name.log" 2>&1 || rc=$?; echo "$rc" > "$EV/$name.rc" ) &
+            (
+              renice -n 19 -p "$BASHPID" > /dev/null
+              rc=0 start=$(date +%s.%N) TIMEFORMAT='%U %S'
+              { time "$@" > "$EV/$name.log" 2>&1 || rc=$?; } 2> "$EV/$name.cpu"
+              echo "$rc" > "$EV/$name.rc"
+              read -r user sys < "$EV/$name.cpu"
+              span check "$start" "\"name\": \"$name\", \"user\": $user, \"sys\": $sys"
+            ) &
           }
           complexity() {
             git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
@@ -207,26 +222,43 @@ jobs:
 
           # Is any test marked serial? Collected alongside the tests (exit 5: none), so an empty
           # serial set costs nothing; any other status runs the set, which then reports it.
-          ( rc=0; uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+          ( rc=0; nice -n 19 uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
               -m serial > "$EV/serial-collect.log" 2>&1 || rc=$?; echo "$rc" > "$EV/serial-collect" ) &
           collecting=$!
+
+          # pytest's assertion-rewrite cache (tests/__pycache__), written once by one collection
+          # per CPU of a share of the test files, without coverage: otherwise each worker
+          # rewrites every test module itself, traced (a cold collection takes 4 times a warm
+          # one). Its errors are the run's own, reported there.
+          start=$(date +%s.%N)
+          files=(tests/test_*.py)
+          printf "%s\n" "${files[@]}" | xargs -P "$(nproc)" -n "$(( (${#files[@]} + $(nproc) - 1) / $(nproc) ))" \
+            uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+            > "$EV/rewrite.log" 2>&1 || true
+          span rewrite "$start"
 
           # Every test, database tests included, with branch coverage: one xdist worker per
           # CPU (longest first by tests/durations.json, tests/conftest.py), then the `serial`
           # set alone, appending to the same coverage. The parallel run records its timeline
-          # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step.
-          report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
+          # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step. pytest
+          # only combines the coverage; the two reports the gates read are written after it,
+          # at the same time.
           tests=0
+          start=$(date +%s.%N)
           CI_TIMELINE=1 uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
-            --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
+            --cov=proxy_index --cov-branch --cov-report= --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
+          span pytest "$start"
           serial=0
           wait "$collecting"
           if [ "$(cat "$EV/serial-collect")" != 5 ]; then
             uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-              --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
+              --cov=proxy_index --cov-branch --cov-append --cov-report= \
               --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
           fi
+          # diff-cover reads the XML, coverage_gate.py the JSON.
+          background coverage-xml uv run --no-editable coverage xml -q -o "$EV/coverage.xml"
+          background coverage-json uv run --no-editable coverage json -q -o "$EV/coverage.json"
           wait
 
           failed=0
