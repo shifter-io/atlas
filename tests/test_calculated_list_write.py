@@ -11,9 +11,9 @@ from types import SimpleNamespace
 
 import psycopg
 import pytest
-from psycopg.rows import tuple_row
 from calculated_cases import benchmark_scenario
 from migration_cases import catalog
+from psycopg.rows import tuple_row
 from test_calculated_lists import own_lists
 from test_retention import clone
 
