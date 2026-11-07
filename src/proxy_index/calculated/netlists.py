@@ -16,8 +16,11 @@ with the most successes; ties go to the lowest list id, then position. Positions
 desc, ips desc, place_id, asn_label_id, NULLs last. content_hash is the sha256 of the rows (their
 text, in dimension and position order) and entries counts them by dimension name.
 
-A network list is written for every build and is referenced by no window: collect() keeps it while
-its created_build has calculated_windows rows, so discarding or expiring the build frees it.
+A network list is written for every build and is referenced by no window: collect() keeps it only
+while its created_build is the current build or a draft whose payload prune() kept (KEPT), so each
+publication frees the network lists of every other build, retained or not. The current build's
+head names its lists, so when a publication makes current a build without them (an older retained
+build), restore() derives them again from its group lists, under the same list ids.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from collections import defaultdict
 
 from psycopg.rows import tuple_row
 
+from . import parts
 from .aggregate import BREAKDOWNS
 from .lists import LIST_ROW_COLUMNS
 
@@ -37,7 +41,7 @@ LATENCY = ("p50", "p90", "p99")
 TOP = "successes DESC NULLS LAST,list_id,position"
 ORDER = "sum(completed) DESC NULLS LAST,sum(ips) DESC,place_id NULLS LAST,asn_label_id NULLS LAST"
 # One statement per network window: the merged rows (m), the list row (l) and its rows.
-MERGE = (
+SHAPE = (
     "WITH m AS (SELECT dimension,(row_number() OVER (PARTITION BY dimension ORDER BY "
     f"{ORDER})-1)::integer AS position,place_id,asn_label_id,"
     + ",".join(f"sum({k})::bigint AS {k}" for k in SUMMED)
@@ -46,8 +50,8 @@ MERGE = (
     + " FROM calculated_list_rows WHERE list_id=ANY(%(members)s) AND dimension IN ("
     + ",".join(f"'{code}'" for code in DIMENSIONS.values())
     + ") GROUP BY dimension,place_id,asn_label_id),"
-    " l AS (INSERT INTO calculated_lists(product_id,cohort,window_hours,signature,content_hash,"
-    "entries,figures,created_build) SELECT %(product)s,%(cohort)s,%(hours)s,NULL,"
+    " l AS (INSERT INTO calculated_lists(<id>product_id,cohort,window_hours,signature,content_hash,"
+    "entries,figures,created_build) <select>%(product)s,%(cohort)s,%(hours)s,NULL,"
     "encode(sha256(convert_to(coalesce(string_agg(m::text,E'\\n' ORDER BY dimension,position),"
     "''),'UTF8')),'hex'),jsonb_build_object("
     + ",".join(f"'{k}',count(*) FILTER (WHERE dimension='{c}')" for k, c in DIMENSIONS.items())
@@ -55,11 +59,21 @@ MERGE = (
     f" r AS (INSERT INTO calculated_list_rows({LIST_ROW_COLUMNS}) SELECT l.list_id,m.* FROM m,l)"
     " SELECT list_id,entries FROM l"
 )
-# Lists collect() deletes: group lists no window references, network lists whose build has none.
+# A new list takes the next id; a restored one the id its build's head names (%(list)s).
+MERGE = SHAPE.replace("<id>", "").replace("<select>", "SELECT ")
+RESTORE = SHAPE.replace("<id>", "list_id,").replace(
+    "<select>", "OVERRIDING SYSTEM VALUE SELECT %(list)s,"
+)
+# The builds that keep their network lists: the current build and the drafts with a payload.
+KEPT = (
+    "SELECT build_id FROM current_calculation UNION SELECT build_id FROM calculated_snapshots "
+    "JOIN calculation_builds USING(build_id) WHERE NOT published"
+)
+# Lists collect() deletes: group lists no window references, network lists of no KEPT build.
 ORPHANS = (
     "SELECT list_id FROM calculated_lists l WHERE NOT EXISTS "
     "(SELECT FROM calculated_windows w WHERE w.list_id=l.list_id) AND NOT (l.cohort='network' "
-    "AND l.created_build IN (SELECT build_id FROM calculated_windows))"
+    f"AND l.created_build IN ({KEPT}))"
 )
 
 
@@ -76,11 +90,13 @@ def headline(groups):
     return min(completed, key=lambda product: (-completed[product], product))
 
 
-def write_network_lists(conn, build_id, payload, group_lists):
+def write_network_lists(conn, build_id, payload, group_lists, ids=None):
     """Write one network list per network window of payload's product groups.
 
     group_lists maps (group id, window label) to the group's list_id (what lists.persist()
-    returned for each group). Returns {(network_id, label): (list_id, entries)}.
+    returned for each group). ids, when given, maps (network_id, label) to the list_id to write
+    again (restore()): only those windows are written. Returns {(network_id, label): (list_id,
+    entries)}.
     """
     networks = defaultdict(list)
     for group in payload["products"]:
@@ -94,11 +110,45 @@ def write_network_lists(conn, build_id, payload, group_lists):
             members = sorted(
                 {group_lists[g["id"], label] for g in groups if (g["id"], label) in group_lists}
             )
-            if members:
+            if members and (ids is None or (network, label) in ids):
                 params = {"members": members, "product": product, "hours": hours[label]}
                 params |= {"cohort": COHORT, "build": int(build_id)}
-                written[network, label] = cur.execute(MERGE, params).fetchone()
+                params["list"] = None if ids is None else ids[network, label]
+                query = MERGE if ids is None else RESTORE
+                written[network, label] = cur.execute(query, params).fetchone()
     return written
+
+
+def restore(conn):
+    """Derive again the network lists the current build's head names and the database lacks,
+    from the build's group lists (its stored parts name them), under the same list ids; return
+    how many. The merge is deterministic, so each list is the one its build first wrote."""
+    cur = conn.cursor(row_factory=tuple_row)
+    found = cur.execute("SELECT build_id FROM current_calculation").fetchone()
+    head = found and parts.head(conn, found[0])
+    if not head or "parts" not in head:
+        return 0
+    ids = {
+        (entry["id"], label): window["lists"]["id"]
+        for entry in head.get("networks", ())
+        for label, window in entry["windows"].items()
+        if window.get("lists")
+    }
+    held = cur.execute(
+        "SELECT list_id FROM calculated_lists WHERE list_id=ANY(%s)", (list(ids.values()),)
+    )
+    held = {row[0] for row in held}
+    ids = {key: list_id for key, list_id in ids.items() if list_id not in held}
+    if not ids:
+        return 0
+    groups = list(parts.stream(conn, found[0], "products"))
+    members = {
+        (g["id"], label): w["lists"]["id"]
+        for g in groups
+        for label, w in g["windows"].items()
+        if w.get("lists")
+    }
+    return len(write_network_lists(conn, found[0], {"products": groups}, members, ids))
 
 
 def collect(conn):

@@ -456,6 +456,7 @@ def publish(database, snapshot):
             "DO UPDATE SET build_id=excluded.build_id",
             (int(snapshot),),
         )
+        netlists.restore(conn)  # an older retained build made current gets its network lists
         conn.execute(
             "UPDATE calculation_builds SET published=true WHERE build_id=%s", (int(snapshot),)
         )
