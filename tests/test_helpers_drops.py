@@ -2,6 +2,10 @@
 
 import io
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import conftest
 import dropper
@@ -75,26 +79,60 @@ def test_the_dropper_drops_each_line_and_reports_every_failure(capsys):
         dropped.append((admin["user"], names))
 
     lines = [
-        json.dumps({"admin": {"user": user}, "names": names}) + "\n"
+        json.dumps({"admin": {"user": user, "password": "secret"}, "names": names}) + "\n"
         for user, names in (("broken", ["lost"]), ("a", ["one", "two"]), ("broken", ["x"]))
     ]
-    assert dropper.serve(lines, drop) == 1
+    # A line it cannot read is one more failure; the drops after it still run.
+    assert dropper.serve([lines[0], "{not json\n", *lines[1:]], drop) == 1
     assert dropped == [("a", ["one", "two"])]
-    assert capsys.readouterr().err.splitlines() == [
-        "dropping ['lost']: refused",
-        "dropping ['x']: refused",
-    ]
+    errors = capsys.readouterr().err
+    assert errors.splitlines()[0::2] == ["dropping ['lost']: refused", "dropping ['x']: refused"]
+    assert errors.splitlines()[1].startswith("dropping an unreadable line: Expecting")
+    assert "secret" not in errors
     assert dropper.serve(lines[1:2], drop) == 0
 
 
-def test_the_session_end_waits_for_the_drops_after_the_session_fixtures(monkeypatch):
+def test_the_controllers_session_end_waits_for_its_own_drops(monkeypatch):
     waited = []
     monkeypatch.setattr(helpers, "drop_queued", lambda: waited.append(True))
     monkeypatch.setattr(conftest, "SHARED_OWNER", False)
     conftest.pytest_sessionfinish(None)
     assert waited == [True]
-    # trylast: after pytest's own pytest_sessionfinish, which tears the session fixtures down.
+    # trylast: after pytest's own pytest_sessionfinish.
     assert conftest.pytest_sessionfinish.pytest_impl["trylast"] is True
+
+
+FAILING = """
+import helpers
+from test_storage import admin_credentials
+
+
+def test_queues_a_drop_that_fails():
+    helpers.drop_databases(admin_credentials(), ["proxy_test_never_created"])
+"""
+
+
+def test_a_failed_drop_fails_an_xdist_run(tmp_path):
+    # The real path: a worker's failed drop must fail the run, not vanish in xdist's own
+    # pytest_sessionfinish (conftest.wait_for_drops).
+    admin_credentials()
+    (tmp_path / "test_failing_drop.py").write_text(FAILING)
+    tests = Path(__file__).resolve().parent
+    inherited = ("PYTEST_XDIST", "CI_TIMELINE", "COV_CORE", "COVERAGE")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(inherited)}
+    env["PYTHONPATH"] = os.pathsep.join([str(tests), str(tests.parent / "src")])
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "conftest", "-p", "no:cacheprovider", "-n", "1"]
+        + ["-q", "test_failing_drop.py"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "1 passed, 1 error" in result.stdout
+    assert "DropError" in result.stdout and "proxy_test_never_created" in result.stdout
 
 
 def test_a_queued_database_is_dropped_by_the_session_end(monkeypatch, tmp_path):

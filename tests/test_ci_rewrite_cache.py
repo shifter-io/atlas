@@ -148,7 +148,19 @@ def test_the_cache_keeps_the_newest_archives_and_drops_dead_saves(cache, tmp_pat
     dead.write_bytes(b"")
     running.write_bytes(b"")
     os.utime(dead, (1000, 1000))
-    cache["prune"](tmp_path)
+    # A file another run removes between the listing and its stat is skipped.
+    vanished = tmp_path / "vanished.tar"
+    vanished.write_bytes(b"")
+    stat = Path.stat
+
+    def racing(path, *args, **kwargs):
+        if path == vanished:
+            path.unlink()
+        return stat(path, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "stat", racing)
+        cache["prune"](tmp_path)
     kept = sorted(path.name for path in tmp_path.iterdir())
     assert kept == [".tmp-running.part"] + [f"{i:02d}.tar" for i in range(2, cache["KEEP"] + 2)]
 

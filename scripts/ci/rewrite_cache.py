@@ -19,6 +19,7 @@ short later: restore checks the count); keeps the newest KEEP archives.
 
 import argparse
 import compileall
+import contextlib
 import hashlib
 import os
 import shutil
@@ -109,11 +110,16 @@ def save(root, cache):
 
 
 def prune(cache):
-    archives = sorted(cache.glob("*.tar"), key=lambda path: path.stat().st_mtime, reverse=True)
+    # Another run may prune or rename a file between the listing and its stat.
+    ages = {}
+    for path in cache.iterdir():
+        with contextlib.suppress(FileNotFoundError):
+            ages[path] = path.stat().st_mtime
+    archives = sorted((p for p in ages if p.suffix == ".tar"), key=ages.get, reverse=True)
     for path in archives[KEEP:]:
         path.unlink(missing_ok=True)
-    for path in cache.glob(".tmp-*"):
-        if path.stat().st_mtime < time.time() - STALE:
+    for path in ages:
+        if path.name.startswith(".tmp-") and ages[path] < time.time() - STALE:
             path.unlink(missing_ok=True)
 
 

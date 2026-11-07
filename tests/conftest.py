@@ -30,7 +30,8 @@ untraced collection takes about 60% of a traced one), and the combined coverage 
 
 Scratch databases: `helpers.drop_databases` only queues its drops, for one dropper process per
 test process (tests/dropper.py), so a test's teardown never waits for a drop; each process waits
-for the rest at its session end, after its session fixtures.
+for the rest in the teardown of `wait_for_drops`, after its other session fixtures, so a failed
+drop fails the run.
 
 No coverage: a test marked `no_cover` runs without a tracer. pytest-cov's marker alone only
 stops its own coverage, and in an xdist worker that hands tracing back to the coverage it
@@ -132,9 +133,20 @@ if SHARED_OWNER:
     os.environ[helpers.SHARED_RUN] = uuid.uuid4().hex[:8]
 
 
+@pytest.fixture(scope="session", autouse=True)
+def wait_for_drops():
+    """Wait for this process's queued drops after its last test: autouse, so set up first and
+    torn down after every other session fixture (their drops are queued by then). A failed drop
+    is the last test's teardown error, which an xdist worker reports; raised later, in its
+    pytest_sessionfinish, xdist would lose it and the run would pass."""
+    yield
+    helpers.drop_queued()
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session):
-    # trylast: after pytest's own, which tears the session fixtures down (their drops queue too).
+    # The controller's own queue (the shared templates), or anything a run without xdist
+    # queued after its last test; trylast: after pytest's own sessionfinish.
     admin = os.environ.get("PG_TEST_ADMIN_FILE")
     if SHARED_OWNER and admin:
         credentials = read_credentials(admin, "postgres")

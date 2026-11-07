@@ -61,13 +61,17 @@ def serve(lines: Iterable[str], drop: Callable[[dict, list[str]], None]) -> int:
     """Drop each line's databases; 1 when any drop failed (the first 20 reported), else 0."""
     failed = 0
     for line in lines:
-        job = json.loads(line)
+        # Any failure is reported here: a dropper that died would break every later queue. Only
+        # the names: the line carries the admin's password.
+        names = "an unreadable line"
         try:
-            drop(job["admin"], job["names"])
-        except psycopg.Error as error:
+            job = json.loads(line)
+            names = job["names"]
+            drop(job["admin"], names)
+        except Exception as error:
             failed += 1
             if failed <= 20:
-                print(f"dropping {job['names']}: {error}", file=sys.stderr, flush=True)
+                print(f"dropping {names}: {error}", file=sys.stderr, flush=True)
     return int(failed > 0)
 
 
