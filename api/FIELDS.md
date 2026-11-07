@@ -121,7 +121,6 @@ With no providers, everything except the record counts is null (`na`).
 | `score.breakdown.*` | `w.scores.balanced.components.<key>.value`; all 8 keys always present. Each is a 0–100 ratio to the best network of the same proxy kind (100 × yours ÷ best, or best ÷ yours where lower is better), computed by the framework; the raw value, the leader's value and the peer count stay in the snapshot at `components.<key>.inputs` (`{value, best, peers}`; diversity per dimension; product-level reliability/speed per target) | data | ✱ |
 | `pool`, `performance`, `pricing`, `trust`, `targets`, `series`, `ipSamples`, `incidents`, `geo`, `asns`, `overlap` | the headline category's measurement | as below | |
 | `reviews` (summary) | computed from `site.reviews` (`summariseReviews` of the website's `scripts/generate-demo-data.ts`, in the old `proxy-index-api` repository's history before the website was removed) | `mean`, `verifiedMean` when there are no (verified) reviews (the generator wrote 0) | ✱ |
-| `coverageEvidence` *(added)* | the coverage evidence table's rows, see "Every-request snapshots" | a row's own fields are null when unknown, not listed in `na` | |
 | `framework` *(added)* | `{provider: public.providers.id, products: [public.products.name]}` | | |
 | `na` *(added)* | | | |
 
@@ -176,35 +175,13 @@ not read).
 | `overlap.overlaps[]` | snapshot `overlap[]` rows for the product's cohort and 30d: `sharedIps`, `shareOfOurs = shared/ips_ours`, `shareOfTheirs`; `requestsBothSides` null | data / always for `requestsBothSides` | |
 | `overlap.likelyUpstream` | none (reseller detection is not computed) | always | |
 
-### Every-request snapshots
-
-The network page's Coverage evidence table reads `coverageEvidence[kind][range]`: every
-row of the headline group's `windows[range].breakdowns.city_asn` (whole, see *Capped
-snapshots*), in the published order, written as the compact array
-`[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50]`.
-Each row is one observed location/network intersection: `asn`/`asnName` (the row's
-`name`) fill ASN / ISP, `usageType` (`usage_type`) the observed network type, and
-`latencyP50` (`p50`) is the light-load median latency. Distinct IPs are that
-intersection's `ips` (mapped like any breakdown row, see "IP numbers from the hour
-formula"), not the city total repeated for every ASN. A field the row does not have
-is null; those nulls are the row's own and are not listed in `na`. A range whose
-window has no City × ASN list has no rows; a provider without a measured group has
-no `coverageEvidence`.
-
 ### Capped snapshots
 
-The published snapshot keeps the top rows of each long list (proxy-index
-`calculated/slim.py`) and records every list's full row count in
-`windows[*].breakdown_entries` and `windows[*].pool.list_entries`; totals such as
-`pool.unique_ips`, `countries` and `asns` are counted from every row, and the typed
-`public.calculated_breakdowns` rows keep the whole lists. The country lists stay whole
-in the snapshot. The two other lists the site reads whole, `breakdowns.city_asn`
-(Coverage evidence) and `pool.asns_breakdown` (`asns[]`), are read back from the same
-build's typed rows (`public.calculated_breakdown_details` joined to
-`public.calculated_windows`) in the same read transaction (`store/longtail.go`), in
-the payload's row shape and order, for every window whose entry count says the list
-was capped and matches the typed rows. Otherwise the list is used as published.
-No endpoint serves the published snapshot or a summary of it (`/v1/snapshot` is gone);
+A window records every list's full row count in `windows[*].breakdown_entries`;
+totals such as `pool.unique_ips`, `countries` and `asns` are counted from every row.
+The lists the site reads whole, the country, region, city, ASN and City × ASN rows
+and `pool.asns_breakdown` (`asns[]`), are read from the build's network lists (see
+"Payload v4 (network summaries)"). No endpoint serves the published snapshot or a summary of it (`/v1/snapshot` is gone);
 the per-page answers below carry what pages need from it.
 
 `countryLatencyRanks[kind][range][country_code]` is calculated by the site API from
@@ -538,34 +515,6 @@ and `bands` stay empty there, since uptime is a per-product fact.
  "pool":[{"t":1435,"v":212}],"bands":[]}
 ```
 
-## Typed lists (API-LISTS-1)
-
-From proxy-index calculated v9 (contract K2) the whole lists are the rows of
-`public.calculated_list_rows`, keyed by `list_id`, which builds share; before it
-they are the build's `public.calculated_breakdowns` rows. *Capped snapshots* above
-still describes what is read whole; the API now reads those rows directly
-(`store/lists.go`), not through `calculated_breakdown_details`, and only for list
-ids it does not hold already. City x ASN rows are read only for each provider's
-product group per proxy kind (the most 30-day requests, `snap.ByKind`), the group
-`coverageEvidence` comes from.
-
-Payload v3 (proxy-index SNAP-LISTREF-1), as the API reads it:
-
-- A window carries `"lists": {"id": <list_id>, "entries": {<name>: <rows>}}`
-  instead of its `breakdowns` arrays and of the pool's `geo`,
-  `countries_breakdown` and `asns_breakdown` arrays. `<name>` is each list the v2
-  window carries (the six breakdowns `country`, `region`, `city`, `asn`,
-  `country_asn`, `city_asn`, and the three pool lists) and `<rows>` the number of
-  rows the v2 window kept (`slim.py`'s first N).
-- `breakdown_entries` and `pool.list_entries` (each list's full row count) stay.
-- A breakdown is the first `<rows>` rows of its dimension by position. A pool list
-  is picked from its dimension's rows as `aggregate.pool_lists()` picks it (rows
-  with IPs, most IPs first, then Python's `str()` of the row), first `<rows>` kept.
-- `schema_version` is 3. A v3 window reads exactly as its v2 form (the rows are
-  written as jsonb writes the payload), except that a group the API does not read
-  city x ASN rows for has no `city_asn` list.
-
-
 ## IP numbers from the hour formula (API-ESTIMATES-1)
 
 A daily test's product group whose windows (24h, 7d, 30d) hold released
@@ -590,8 +539,8 @@ groups, a window with no released hour) keeps its measured IPs, and so do a
 row or daily point when the block has no `breakdown_scale`, and the
 every-group fleet figures of `/v1/networks/all`.
 
-`coverageEvidence` rows follow the same mapping as any breakdown row: their `ips` are
-the measured row's IPs × `breakdown_scale`.
+Coverage rows (`/v1/networks/{slug}/coverage`, `lists.*.city_asn`) follow the same
+mapping as any breakdown row: their `ips` are the measured row's IPs × `breakdown_scale`.
 
 The tape keeps a row per released hour (event kind `estimate_hour_released`,
 an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update
@@ -605,8 +554,10 @@ A build whose head has `schema_version` 4 and `networks` (proxy-index calculated
 contract K9) is read from its head and its network lists (contract K10) only: no
 product part and no group list. The head is read without its `parts` count, its
 `overlap` rows (a network's are its windows' `overlap.peers`) and its per-cohort
-`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. A build before v4
-is read as before.
+`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. The API serves
+no build before v4: while the current build is older, every data route answers
+503 and `/healthz` has `status` `unavailable` and `reason`
+`calculation older than payload v4: recalculate` (README, "Endpoints").
 
 Each network entry is served as one product group of the payload, so every answer
 keeps its fields and rules. Per network and proxy kind there is exactly one group:
@@ -618,7 +569,7 @@ keeps its fields and rules. Per network and proxy kind there is exactly one grou
 | `criteria.country` | The one requested country when `requested_countries` has exactly one, else null |
 | A window's scalars, `metrics`, `uptime`, `pool` figures, `targets`, `series`, `scores.balanced`, `success_delta`, `estimated`, `overlap` shares | As published |
 | `breakdowns.country`, `pool.countries_breakdown` | Every country row of the window's network list |
-| `breakdowns.city_asn` (`coverageEvidence`) | Every City × ASN row of the list |
+| `breakdowns.city_asn` | Every City × ASN row of the list |
 | `pool.asns_breakdown` | The 50 ASN rows with most IPs (most IPs first, then Python's `str()` order) |
 | Region, city and ASN place rows (`/places`, place ranks, country pages) | Every row of the list, read whole |
 | `breakdown_entries` | The list's row counts |
@@ -626,28 +577,18 @@ keeps its fields and rules. Per network and proxy kind there is exactly one grou
 
 A list row keeps IPs, requests, successes and p50 only: `observations`,
 `challenges`, `blocks`, `p90` and `p99` of these rows are null (no answer reads
-them). A network of one product group answers byte for byte as that group does in
-a v3 build, except for the `id` and `cohort` strings, the schema version and, for a
-group with more than 50 ASNs with IPs, the provider's `asns` (a v3 build reads that
-group's ASN pool list whole). Until
-API-COVERAGE-1 reads the summaries directly, a network answer's `productGroups` is 1
-and its `requestedCountries` holds a country only for a network of one requested
-country; the summaries' `criteria.groups` and `criteria.requested_countries` are
-read (`snap.Criteria`) but not served yet.
+them).
 
 ## Payload v4 list answers (API-COVERAGE-1)
 
-The gaps recorded above are closed for a v4 build:
-
-- a network answer's `productGroups` is its summary's `criteria.groups` (a summary
+- A network answer's `productGroups` is its summary's `criteria.groups` (a summary
   without it counts as one), and `requestedCountries` its
   `criteria.requested_countries`, upper case and sorted; the all-networks answer
   sums the groups and joins the countries;
-- a network's provider `asns` is every ASN row of its 30d network list with IPs,
-  most IPs first (then Python's `str()` order), as a v3 build reads a group's ASN
-  pool list whole.
+- A network's provider `asns` is every ASN row of its 30d network list with IPs,
+  most IPs first (then Python's `str()` order).
 
-A v4 build reads every list answer from the compact network lists, their rows read
+A build reads every list answer from the compact network lists, their rows read
 from the database when needed (API-MEM-1): it keeps no place row per list row. A place list (`/places`, `/v1/countries/{cc}/cities`
 and `/regions`, `/v1/networks/all/places`) is its networks' compact lists, merged
 and ordered as before (rows of one place key add up; most IPs first, then key,
@@ -656,11 +597,10 @@ row count and its first page without `q` as rows (at most 50 a list, about 6 MB
 at QA-1; a Coverage list's first page likewise). Every page, the first included,
 is rendered when first asked, at fast compression, and kept in the version's page
 cache (1,024 pages) until the next build; a first page the cache drops is rendered
-again from the rows the build keeps, without merging the list. The City × ASN rows (`coverageEvidence` of the dataset) are no
-longer put into the payload the build reads: the coverage evidence reads them from
-the list, in list order. A build before v4 keeps its lists as before.
+again from the rows the build keeps, without merging the list. The Coverage answers
+read the City × ASN rows from the list, in list order.
 
-New answers (contract K11), of a v4 build only (404 before v4):
+Answers of the network lists (contract K11):
 
 | Path | Answer |
 |---|---|
@@ -674,12 +614,10 @@ A v4 build's dataset file holds what the pages use (contract K11, the owner's
 rule on DATASET-SIZE-1): every page answer, and of every network list its first
 page, its exact total and its page count (owner decision on DATASET-SIZE-2,
 2026-11-06: option 1). Every further page, a search and the lists built across
-networks are read from the API, which still serves every page. A build before
-v4 writes the file as before, plus `"lists":{}`.
+networks are read from the API, which still serves every page.
 
-- **`providers`:** as before, from the network summaries, without
-  `coverageEvidence`: its City × ASN rows are the Coverage answer's
-  (`lists.*.city_asn` holds its first page).
+- **`providers`:** from the network summaries. A network's City × ASN rows are
+  its Coverage answer's (`lists.*.city_asn` holds its first page).
 - **`pages`:** as before (see "Page answers in the dataset file"), plus
   `/v1/countries` and every `/v1/countries/<CC>`, byte for byte.
 - **`lists`:** between `pages` and `snapshot`:

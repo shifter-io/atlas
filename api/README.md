@@ -111,7 +111,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | Path | Body |
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
-| `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), each provider's `coverageEvidence` (the network page's City × ASN rows, whole; builds before payload v4 only) and `pages`, the body of every page answer the site draws by its request (FIELDS.md, "Page answers in the dataset file"). A v4 build's file also has the country answers in `pages` and `lists`: of every network list (country, region, city, ASN and City × ASN) its first page as compact arrays, its exact `total` and its page count; every further page, search and cross-network list is read from the API (DATASET-SIZE-2; FIELDS.md, "The dataset file of a v4 build"). At 18 networks × 249 countries it is about 9.2 MB, gzip 0.5 MB (at most 15 MB, `TestTheRunADatasetFileIsSmallAndQuickToWrite`). A build before v4 writes `"lists":{}`. The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
+| `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), `pages`, the body of every page answer the site draws by its request, the country answers included (FIELDS.md, "Page answers in the dataset file"), and `lists`: of every network list (country, region, city, ASN and City × ASN) its first page as compact arrays, its exact `total` and its page count; every further page, search and cross-network list is read from the API (DATASET-SIZE-2; FIELDS.md, "The dataset file of a v4 build"). At 18 networks × 249 countries it is about 9.2 MB, gzip 0.5 MB (at most 15 MB, `TestTheRunADatasetFileIsSmallAndQuickToWrite`). The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
 | `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex` without its articles: networks, pages, targets, actions, plus a new `Countries` group) and the palette's constants (`groupBonus` has no `Guides` group). Guides and network reviews are not searched, and the pages only the old website had (`/guides`, `/contribute`, `/disclosure`) are not listed, nor its "Download the raw dataset" action (`/data/design-preview.json`, the old site's demo file). |
@@ -130,19 +130,19 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | A v4 build only: one page (50 rows) of the network's City × ASN rows with IPs, most IPs first, with `total`, `pages` and, with `q`, `totals` (FIELDS.md, "Payload v4 list answers"). |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | A v4 build only: every network's row in that region or city, ranked among the networks of the same kind; 404 for an unknown key. |
 | `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
-| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`), version, build timings, fingerprint, `lastError`, `lastErrorAt`, cache sizes, `unserved`, `siteGaps` and `binary`. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
+| `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps` and `binary`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
-Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders a QA-1-sized
-build (`internal/testscale`: 21 framework providers, 18 with 40 per-country product groups, the framework
-targets and 559 test events) and fails when any answer or page is larger. It has no
+Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders the QA-1
+build as payload v4 (`internal/testscale`: 21 framework providers, 18 networks each one summary over 40
+requested countries, the framework targets and 559 test events) and fails when any answer or page is larger. It has no
 exemptions: the dataset is not an answer but the file `/v1/dataset` redirects to. That file must stay at most
-12 MB, gzip at most 2 MB, at the QA-1 scale (about 8.9 MB, gzip 1.4 MB, with 1,000 City × ASN rows per network
-and range; the test logs its identity, gzip and brotli sizes). Its largest part is the coverage evidence, about 88
-bytes per City × ASN row and range, so real networks' lists (tens of thousands of rows) make the file larger. `/v1/overview`, `/v1/providers`, `/v1/providers/{slug}` and `/v1/snapshot` are gone:
-`/v1/rankings`, `/v1/networks/{slug}` and `/v1/networks/{slug}/chart` answer what a page needs. A place row adds the requests of every product group that saw the place and keeps the latency
-p50 of the row with the most successes; `ipsSum` adds each group's distinct IPs, so an IP seen by two
-groups counts twice (an upper bound, not a distinct count). Capped lists are read whole from the build's
-typed rows. Network, country and coverage answers are computed and compressed once per build;
+12 MB, gzip at most 2 MB, at the QA-1 scale (about 9.0 MB, gzip 0.5 MB, with 2,000 City × ASN rows per network
+and range; the test logs its identity, gzip and brotli sizes). It holds each list's first page only, so real
+networks' longer lists do not make it larger. `/v1/overview`, `/v1/providers`, `/v1/providers/{slug}` and `/v1/snapshot` are gone:
+`/v1/rankings`, `/v1/networks/{slug}` and `/v1/networks/{slug}/chart` answer what a page needs. A place row adds the requests of every network list that saw the place and keeps the latency
+p50 of the row with the most successes; `ipsSum` adds each list's distinct IPs, so an IP seen by two
+networks counts twice (an upper bound, not a distinct count). Lists are read whole from the network
+lists. Network, country and coverage answers are computed and compressed once per build;
 a long-list page is cut from a precomputed list on first request and kept in a 1,024-entry LRU per version.
 
 The API reads only payload v4 builds (`internal/store/parts.go`, below). The
@@ -151,9 +151,9 @@ framework (proxy-index `calculated/parts.py`, contract K1) keeps a build's head 
 the API reads the head and never the product rows. A current build before v4 (one
 `calculated_snapshots.payload` row, or a head with `schema_version` below 4 or without
 `networks`) fails the load with `store.ErrBeforeV4` before its payload, product parts or
-lists are read; the old answers stay served. Its product parts, sparse daily series and
-group lists (the `calculated_breakdowns` partition before calculated v9, a payload v3
-window's lists, the long-tail restore) are no longer read.
+lists are read. The API then serves nothing: every data route answers 503 and
+`/healthz` gives the reason `calculation older than payload v4: recalculate` (see
+`/healthz` above) until a v4 build is current. The website reads v4 dataset files only.
 
 The long lists are typed rows (`internal/store/lists.go`): from calculated schema v9
 (contract K2), the shared `calculated_list_rows` (by `list_id`). One query per set of
@@ -169,16 +169,12 @@ keeps the every-group `*` entries), and the network lists its windows name (cont
 K10, `store.NetLists`: each list's row counts, held between rebuilds like the group
 lists, which a v4 read drops; the rows stay in the database). No product part and no group list is read. Each network is then given to the
 build as one product group (`cohort` `network`, `id` `<provider>:<kind>:network`),
-so every answer is made by the code that serves a v3 build: a network of one product
-group answers byte for byte as that group did, but for those two strings (and the
-schema version). Each window gets from its list its `breakdowns.country` and
+so every answer is made by the build's product-group code. Each window gets from its list its `breakdowns.country` and
 `pool.countries_breakdown` (every country), `breakdowns.city_asn` (every City × ASN
-row, the coverage evidence), `pool.asns_breakdown` (the 50 ASNs with most IPs) and
-`breakdown_entries`; its region, city and ASN rows are read whole as typed rows; the
-snapshot's overlap rows are made from its `overlap.peers`; a network with one
-requested country gets it as `criteria.country`. These arrays and typed rows are a
-bridge held only while a build is made (API-COVERAGE-1 serves the lists from the
-compact rows instead). A build before v4 is not read: `store.ErrBeforeV4`.
+row), `pool.asns_breakdown` (the 50 ASNs with most IPs) and
+`breakdown_entries`; the snapshot's overlap rows are made from its `overlap.peers`; a network with one
+requested country gets it as `criteria.country`. The build serves its place,
+country and Coverage lists from the compact rows (`build/placelists.go`).
 
 `source` is `"measured"` on providers, tape rows, changelog, reviews and community
 runs. On targets it is `"measured"` for framework targets and `"catalog"` for
@@ -435,6 +431,9 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
   - rebuild only on change
   - the background loop picks up changes
   - a failed rebuild keeps serving, and health reports it
+  - a current build older than payload v4 (a v3 head in parts), at start or after
+    a v4 build served, answers 503 on every data route and on `/healthz`, with the
+    reason `calculation older than payload v4: recalculate`; a v4 build serves again
   - single-flight
   - the search LRU (normalisation, hits, bound, reset per version)
   - events filters and validation, and the database fallback that runs only when
