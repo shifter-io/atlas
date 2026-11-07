@@ -183,10 +183,11 @@ A failed calculation stops the run with exit code 1 and is run again by the next
   (DB-CHECK-1 reports it), the change of its counters over each step: every statement of the
   database in that time, including the calculation child's and siteapi's; not in a scratch schema,
   whose search path does not reach it and whose database also runs production. Otherwise the driver
-  times every psycopg `execute` and `executemany` of its own process (ingest, the node API,
-  release) and runs the calculation under `measure.py trace` to time the child's; COPY is not
-  traced (the step's time includes it) and siteapi's statements are not seen. The 20 slowest
-  statements of each step are kept.
+  times every psycopg `execute`, `executemany` and COPY of its own process (ingest, the node API,
+  release) and runs the calculation under `measure.py trace` to time the child's; siteapi's
+  statements are not seen. `measure.Tracer` groups statements by shape: the first 200
+  characters with numbers and quoted literals as `?`, so no value is kept. The 20 slowest
+  shapes of each step are kept.
 - **Sizes.** After each hour: the database size and `pg_total_relation_size` of every table of
   the session's schema, its partitions and indexes included, and their sum (`tables_bytes`, the
   report's "Tables GB"). In a scratch schema the database size includes production's data.

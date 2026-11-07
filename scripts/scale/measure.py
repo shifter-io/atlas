@@ -2,15 +2,20 @@
 """SCALE-GEN-1b: what the hourly cycle measures, and its report (README.md, "Measurements").
 
 Statement timings come from pg_stat_statements when the database has it loaded, otherwise from
-`Tracer` (every psycopg execute of the process; `measure.py trace OUT MODULE [ARGS]` runs a module
-under it). Table sizes add each partition to its parent. Peak RSS is VmHWM from /proc (Linux),
-sampled while a child runs, with the child's maximum resident size from wait4.
+`Tracer` (every psycopg execute, executemany and COPY of the process, by statement shape;
+`measure.py trace OUT MODULE [ARGS]` runs a module under it). Table sizes add each partition to
+its parent. Peak RSS is VmHWM from /proc (Linux), sampled while a child runs, with the child's
+maximum resident size from wait4.
 """
 
 from __future__ import annotations
 
+import contextlib
+import functools
+import heapq
 import inspect
 import json
+import math
 import os
 import re
 import runpy
@@ -90,20 +95,54 @@ def merge(lists) -> list[dict]:
     return ranked(found.values())
 
 
+SHAPE = 200  # characters kept of a statement's shape
+SLOWEST = 5  # statements kept per hour, slowest first
+STEP = 1.1  # a shape's times in buckets of a factor 1.1: its p95 is within 5%
+# A quoted literal (or one cut off at the end) and a number not inside a name or a $n placeholder.
+LITERAL = re.compile(r"'(?:[^']|'')*'|'.*$|(?<![\w$])\d+(?:\.\d+)?(?:e[+-]?\d+)?\b", re.S | re.I)
+
+
+@functools.lru_cache(maxsize=4096)
+def shape(text: str) -> str:
+    """A statement's text without its values: blanks collapsed, quoted literals and numbers ?."""
+    text = re.sub(r"\s+", " ", text[: SHAPE * 10]).strip()
+    return LITERAL.sub("?", text)[:SHAPE]
+
+
+def bucket(seconds: float) -> str:
+    return str(max(0, round(math.log(max(seconds, 1e-6) / 1e-6, STEP))))
+
+
+@functools.lru_cache(maxsize=4096)
+def upsert(text: str) -> bool:
+    """An INSERT ... ON CONFLICT DO UPDATE: its rowcount includes the rows it updated."""
+    return re.search(r"\bDO\s+UPDATE\b", text, re.I) is not None
+
+
+def blank(text: str) -> dict:
+    """A statement shape with nothing counted yet."""
+    return {"statement": text, "calls": 0, "seconds": 0.0, "max_seconds": 0.0, "rows": 0} | {
+        "histogram": {}
+    }
+
+
 class Tracer:
-    """Per-statement time of every psycopg execute and executemany in this process."""
+    """Wall time and rows of every psycopg execute, executemany and COPY in this process, by
+    statement shape (README.md, "Measurements")."""
 
     def __init__(self):
-        self.found: dict[str, list] = {}
+        self.shapes: dict[str, dict] = {}
+        self.slowest: list[tuple] = []  # a heap of (seconds, shape, rows)
         self.lock = threading.Lock()
         self.saved: list[tuple] = []
 
     def __enter__(self) -> Tracer:
         for cls in (psycopg.Cursor, psycopg.AsyncCursor):
-            for name in ("execute", "executemany"):
+            for name in ("execute", "executemany", "copy"):
                 real = getattr(cls, name)
                 self.saved.append((cls, name, real))
-                setattr(cls, name, self.wrap(real))
+                wrapped = self.wrap_copy(real, cls) if name == "copy" else self.wrap(real)
+                setattr(cls, name, wrapped)
         return self
 
     def __exit__(self, *exc) -> None:
@@ -115,35 +154,104 @@ class Tracer:
         if inspect.iscoroutinefunction(real):
 
             async def traced_async(cursor, query, *args, **kwargs):
-                start = time.perf_counter()
+                start, done = time.perf_counter(), False
                 try:
-                    return await real(cursor, query, *args, **kwargs)
+                    result = await real(cursor, query, *args, **kwargs)
+                    done = True
+                    return result
                 finally:
-                    self.add(query, time.perf_counter() - start)
+                    self.add(cursor, query, start, done)
 
             return traced_async
 
         def traced(cursor, query, *args, **kwargs):
-            start = time.perf_counter()
+            start, done = time.perf_counter(), False
             try:
-                return real(cursor, query, *args, **kwargs)
+                result = real(cursor, query, *args, **kwargs)
+                done = True
+                return result
             finally:
-                self.add(query, time.perf_counter() - start)
+                self.add(cursor, query, start, done)
 
         return traced
 
-    def add(self, query, seconds: float) -> None:
-        text = query if isinstance(query, str) else repr(query)
-        text = re.sub(r"\s+", " ", text).strip()[:TEXT]
+    def wrap_copy(self, real, cls):
+        """A COPY is timed from its start to the end of its block; its rows are those copied."""
+        if cls is psycopg.AsyncCursor:
+
+            @contextlib.asynccontextmanager
+            async def traced_async(cursor, statement, *args, **kwargs):
+                start, done = time.perf_counter(), False
+                try:
+                    async with real(cursor, statement, *args, **kwargs) as copy:
+                        yield copy
+                    done = True
+                finally:
+                    self.add(cursor, statement, start, done)
+
+            return traced_async
+
+        @contextlib.contextmanager
+        def traced(cursor, statement, *args, **kwargs):
+            start, done = time.perf_counter(), False
+            try:
+                with real(cursor, statement, *args, **kwargs) as copy:
+                    yield copy
+                done = True
+            finally:
+                self.add(cursor, statement, start, done)
+
+        return traced
+
+    def add(self, cursor, query, start: float, done: bool) -> None:
+        seconds = time.perf_counter() - start
+        rows = max(cursor.rowcount, 0) if done else 0
+        raw = _text(cursor, query)
+        text = shape(raw)
         with self.lock:
-            entry = self.found.setdefault(text, [text, 0, 0.0, 0.0])
-            entry[1] += 1
-            entry[2] += seconds
-            entry[3] = max(entry[3], seconds)
+            entry = self.shapes.setdefault(text, blank(text) | {"upsert": False})
+            entry["upsert"] = entry["upsert"] or upsert(raw)  # seen in full, past the shape
+            entry["calls"] += 1
+            entry["seconds"] += seconds
+            entry["rows"] += rows
+            entry["max_seconds"] = max(entry["max_seconds"], seconds)
+            key = bucket(seconds)
+            entry["histogram"][key] = entry["histogram"].get(key, 0) + 1
+            heapq.heappush(self.slowest, (seconds, text, rows))
+            if len(self.slowest) > SLOWEST:
+                heapq.heappop(self.slowest)
+
+    def summary(self) -> dict:
+        """The statement count, the seconds, the 5 slowest statements and every shape (its calls,
+        seconds, maximum, rows and its times' histogram: replay_report.combine adds them up)."""
+        with self.lock:
+            shapes = [row | {"histogram": dict(row["histogram"])} for row in self.shapes.values()]
+            slowest = sorted(self.slowest, reverse=True)
+        shapes.sort(key=lambda row: (-row["seconds"], row["statement"]))
+        found = [{"statement": t, "seconds": round(s, 4), "rows": r} for s, t, r in slowest]
+        total = round(sum(row["seconds"] for row in shapes), 4)
+        count = sum(row["calls"] for row in shapes)
+        return {"count": count, "seconds": total, "slowest": found, "shapes": shapes}
 
     def report(self) -> list[dict]:
-        with self.lock:
-            return ranked([list(row) for row in self.found.values()])
+        return top(self.summary())
+
+
+def top(summary: dict) -> list[dict]:
+    """A Tracer.summary as the cycle report's top statements."""
+    rows = summary["shapes"]
+    return ranked([[r["statement"], r["calls"], r["seconds"], r["max_seconds"]] for r in rows])
+
+
+def _text(cursor, query) -> str:
+    if isinstance(query, bytes):
+        return query.decode(errors="replace")
+    if isinstance(query, str):
+        return query
+    try:
+        return query.as_string(cursor)
+    except (psycopg.Error, AttributeError, TypeError, ValueError):
+        return type(query).__name__
 
 
 def sizes(conn) -> dict:
@@ -270,7 +378,7 @@ def write_report(directory: str | Path, report: dict) -> Path:
 
 
 def trace(argv: list[str]) -> int:
-    """`trace OUT MODULE [ARGS]`: run a module as __main__ under a Tracer; timings to OUT."""
+    """`trace OUT MODULE [ARGS]`: run a module as __main__ under a Tracer; its summary to OUT."""
     out, module, *rest = argv
     code = 0
     with Tracer() as tracer:
@@ -280,7 +388,7 @@ def trace(argv: list[str]) -> int:
         except SystemExit as exc:
             code = exc.code if isinstance(exc.code, int) else int(exc.code is not None)
         finally:
-            Path(out).write_text(json.dumps(tracer.report()))
+            Path(out).write_text(json.dumps(tracer.summary()))
     return code
 
 

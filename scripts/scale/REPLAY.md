@@ -4,7 +4,7 @@
 It runs through production's own code paths, in production's database, with the owner's go
 (REPLAY-RUN-1, #614). Its input is the 24 hourly slices of SLICES-1 (`slices.py`) and the
 modelled browser hour of BROWSER-MODEL-1 (`browser_model.py`). REPLAY-REPORT-1 (#611) turns its
-state into the report.
+state into the report ("Report" below).
 
 ## Usage
 
@@ -122,7 +122,13 @@ Timed from the client side (owner, 2026-11-07: no dependence on `pg_stat_stateme
 - the ingest steps in-process through `measure.Tracer` (the hour's `ingest.statements`);
 - the calculation child under `measure.py trace` (the hour's `calculate.statements`).
 
-Each is the statements' wall time as `measure.Tracer` records it (calls, seconds, maximum).
+Each is `measure.Tracer`'s summary: every `execute`, `executemany` and COPY (timed from its start
+to the end of its block) with its wall time and rows (the cursor's rowcount; for a COPY, the rows
+copied). Statements are grouped by shape: the first 200 characters with numbers and quoted
+literals as `?`, so no value is kept. A summary has the statement count, the total seconds, the
+5 slowest statements (shape, seconds, rows) and per shape its calls, seconds, maximum, rows and
+a histogram of its times (buckets of a factor 1.1), from which the report adds up the run's p95
+(within 5%).
 
 ## Telling replay rows from production's
 
@@ -143,12 +149,48 @@ Each is the statements' wall time as `measure.Tracer` records it (calls, seconds
 
 - `state.json`: the replay id, the go and every resume, the baseline, the nodes, per hour its
   steps' parts, start and end times of the ingest and the calculation, the calculation's
-  attempts, its build id, the siteapi wait, the statements and the sizes, the day counts and the
-  retry counts.
+  attempts, its build id, the siteapi wait, the statements and the sizes (the baseline has the
+  size before the run), the day counts (with each table's size at the day's end) and the retry
+  counts.
 - `events.jsonl`: one line per retry.
 
-REPLAY-REPORT-1 (#611) reads both for the report. The command prints the replay id and the
-hours done.
+- `report.md` and `report.json`: the report (below), written again after every hour.
+
+The command prints the replay id and the hours done.
+
+## Report
+
+`replay_report.py <out>` (REPLAY-REPORT-1, #611) writes `report.md` and `report.json` from
+`state.json` and `events.jsonl`; `replay.py` runs it after every hour, so a stopped run has one.
+Days are numbered from 1. An hour's ingest resumed after a stop is traced from the resume on.
+
+- **Per hour:** the daily tests; the rows inserted per table: what the ingest's plain INSERT and
+  COPY statements added, from their rowcount (only tables of the baseline, so no staging table;
+  the ingest writes replay rows only). Upserts (`ON CONFLICT DO UPDATE`, which the tracer flags
+  from the full statement: product_ips, provider_overlap) count updated rows and an INSERT inside
+  `WITH` (pool_ips) reports its SELECT's rows, so neither is counted per hour; the hardest and
+  the lightest hour are by these rows. Then the slice's bytes (`slice-HH.json` and `.jsonl.gz`);
+  the database's growth since the hour before (the baseline's size before the first hour); the
+  ingest's wall time without its retries' pauses (those are the delay) and the p50, p95 and
+  maximum per daily test;
+  the calculation's seconds and peak RSS (its successful attempt); the slowest statement of the
+  ingest or the calculation; the retries and their delay (`events.jsonl`).
+- **Per day:** the sums; the replay rows per table, exact: the day's growth of the rows
+  reachable from the replay's runs and nodes (`days_counted[d].replay`); the hourly calculation's
+  p95 and maximum, the database size after the
+  day and the server's total (all databases), in GB.
+- **The hardest hour** (most rows written) **and the lightest**, by day and hour.
+- **The last day** (day 7 of a full run): the sizes, each table's size with its partitions
+  (`measure.sizes`, recorded at each day's end as `days_counted[d].table_bytes`) and
+  production's own growth during the run (`other`: rows not reachable from replay rows).
+- **The run's 20 slowest statement shapes:** calls, seconds, p95, maximum and rows.
+- **Labelled:** the modelled parts (byteful rows, HTTP pulses, browser data, bucket counters and
+  latency) and the IP tables as a lower bound: the 7 days are copies of one day, so
+  ip_addresses, ip_enrichment, product_ips and pool_ips stop growing after day 1, whereas in real
+  data 30-60% of a day's IPs recur (#150).
+
+It holds no IP, host name, credential or path: the slices' directory and the retry reasons are
+left out, and statements are shapes.
 
 ## Tests
 

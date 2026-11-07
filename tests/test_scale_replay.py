@@ -145,6 +145,17 @@ def test_two_days_of_three_hours_overlap_in_order_with_markers_and_sizes(
         assert pulses["planned"] > 0 and pulses["failed"] == 0
         assert hour["ingest"]["steps"]["browser"]["parts"][-1]["runs"] == 8
     assert events(tmp_path) == [] and found["counts"]["retries"] == 0
+    # The report (REPLAY-REPORT-1), written after every hour.
+    report = json.loads((tmp_path / "out" / "report.json").read_text())
+    assert len(report["hours"]) == 6 and len(report["days_done"]) == 2
+    for hour in report["hours"]:
+        # Its daily tests, pulses and browser runs: every test_runs row of the hour is the replay's.
+        assert hour["rows"]["public.test_runs"] > 2 and hour["per_test"]["count"] == 2
+        assert hour["calculate_seconds"] and hour["slowest"] and hour["growth_bytes"] is not None
+    assert all(day["replay_rows"]["public.test_runs"] > 4 for day in report["days_done"])
+    assert report["final"]["day"] == 2 and report["final"]["tables_gb"]
+    assert [s for s in report["statements"] if s["statement"].startswith("COPY") and s["rows"]]
+    assert (tmp_path / "out" / "report.md").exists()
     # The baseline, the markers and the day counts.
     baseline = found["baseline"]
     assert baseline["counts"]["public.test_runs"] == 0
@@ -197,8 +208,13 @@ def test_a_failed_calculation_pauses_doubling_and_retries_the_same_hour(
     assert query(production, "SELECT count(*) FROM current_calculation")[0][0] == 1
 
 
-def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, monkeypatch):
+def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, monkeypatch, capsys):
     real, calls = replay_steps.storage.ingest, []
+
+    def unwritable(out):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(replay.replay_report, "write", unwritable)  # the replay goes on
 
     def flaky(directory, database, **options):
         if "scale-replay-" in str(directory):  # a daily test, not a pulse the node API ingests
@@ -217,6 +233,7 @@ def test_an_ingest_failure_keeps_the_runs_already_stored(production, tmp_path, m
     stored = query(production, DAILY)
     daily = state(tmp_path)["hours"][0]["ingest"]["steps"]["daily"]
     assert len(stored) == 2 and sorted(run_id for _, run_id in stored) == sorted(daily["ingested"])
+    assert "no report after hour" in capsys.readouterr().err
 
 
 def test_a_failed_estimate_and_browser_hour_are_retried_and_their_nodes_kept(

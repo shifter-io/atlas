@@ -365,7 +365,8 @@ def test_statement_timings_from_snapshots_and_the_tracer(database, tmp_path, mon
             conn.execute("SELECT nothing")
     assert psycopg.Cursor.execute is real
     found = {row["statement"]: row["calls"] for row in tracer.report()}
-    assert found["SELECT 1"] == 1 and found["SELECT 2"] == 1 and found["SELECT %s"] == 1
+    # Shapes: numbers as ?, so "SELECT 1" and "SELECT  2" are one shape.
+    assert found["SELECT ?"] == 2 and found["SELECT %s"] == 1
     assert found["SELECT nothing"] == 1
 
     module = tmp_path / "scale_child.py"
@@ -373,7 +374,8 @@ def test_statement_timings_from_snapshots_and_the_tracer(database, tmp_path, mon
     monkeypatch.syspath_prepend(str(tmp_path))
     monkeypatch.setattr(sys, "argv", list(sys.argv))  # trace() sets the child's argv
     out = tmp_path / "statements.json"
-    assert measure.trace([str(out), "scale_child"]) == 0 and json.loads(out.read_text()) == []
+    assert measure.trace([str(out), "scale_child"]) == 0
+    assert json.loads(out.read_text()) == {"count": 0, "seconds": 0, "slowest": [], "shapes": []}
     assert measure.trace([str(out), "scale_child", "fail"]) == 1
 
 

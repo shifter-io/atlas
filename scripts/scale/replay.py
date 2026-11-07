@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import signal
 import sys
@@ -30,8 +29,10 @@ import cycle
 import generate
 import measure
 import replay_baseline
+import replay_report
 import target
 from cycle_steps import HOUR, MEASURE
+from replay_report import private, write_private
 from replay_steps import ERRORS, ReplaySteps, networks
 
 from proxy_index import storage
@@ -58,17 +59,6 @@ class Refused(Exception):
 
 def now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
-
-
-def private(path, flags):
-    return os.open(path, flags, 0o600)
-
-
-def write_private(path: Path, text: str) -> None:
-    """Replace a file with text, mode 600 from its creation."""
-    with open(path.with_name(path.name + ".tmp"), "w", opener=private) as handle:
-        handle.write(text)
-    os.replace(handle.name, path)
 
 
 def memory_scope(enabled: bool = True) -> list[str]:
@@ -118,6 +108,7 @@ class Replay:
         slices = Path(args.slices)
         state |= {"slices": str(slices.resolve()), "networks": networks(slices)}
         state |= {"baseline": replay_baseline.baseline(self.conn), "nodes": [], "hours": []}
+        state["baseline"]["sizes"] = self.sizes()
         state |= {"days_counted": {}, "resumed": [], "counts": {"retries": 0, "pause_seconds": 0}}
         self.state = state
         self.save()
@@ -125,6 +116,10 @@ class Replay:
 
     def save(self) -> None:
         write_private(self.out / "state.json", json.dumps(self.state, default=str))
+
+    def sizes(self) -> dict:
+        database, every = self.conn.execute(SIZES).fetchone()
+        return {"database_bytes": database, "all_databases_bytes": every}
 
     def total(self) -> int:
         return self.args.days * self.args.hours_per_day
@@ -175,7 +170,7 @@ class Replay:
         with measure.Tracer() as tracer:
             for name in INGEST:
                 self.step(index, name, record["day"], start)
-        work |= {"done": True, "finished": now(), "statements": tracer.report()}
+        work |= {"done": True, "finished": now(), "statements": tracer.summary()}
         self.save()
 
     def step(self, index: int, name: str, day: int, start: datetime) -> None:
@@ -253,13 +248,17 @@ class Replay:
         if self.args.siteapi:
             work["siteapi"] = self.steps.served(work["build_id"])
         work |= {"done": True, "finished": now()}
-        database, every = self.conn.execute(SIZES).fetchone()
-        record["sizes"] = {"database_bytes": database, "all_databases_bytes": every}
+        record["sizes"] = self.sizes()
         if (index + 1) % self.args.hours_per_day == 0:
             before = self.state["baseline"]["counts"]
             counted = replay_baseline.day_counts(self.conn, before, self.state["nodes"])
+            counted["table_bytes"] = measure.sizes(self.conn)["tables"]
             self.state["days_counted"][str(record["day"])] = counted
         self.save()
+        try:  # after every hour, so a stopped run has its report
+            replay_report.write(self.out)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"replay: no report after hour {record['start']}: {exc}", file=sys.stderr)
 
 
 def run(args) -> dict:
