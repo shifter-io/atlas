@@ -162,6 +162,39 @@ The daily factor is the median of the donors' daily factors, (2.4 + 2.6) / 2 = 2
 4.0, is pulled up by the one 9.0), so the day is about 1,136 x 2.5 = 2,840 unique IPs. A daily test
 at the test hour 20 that measures 1,100 IPs gives 1,100 x 0.64 = 704 for hour 04.
 
+## Best hours
+
+`formulas/best-hours/<network>.json` gives each country's best hour: the UTC clock hour with the
+most unique live IPs, where an IP is live in an hour when it answered at least once in it. The
+replay puts each country's daily test in that hour, and production starts a country's tests at
+it. The files are made from the formulas (counts only, no IP):
+
+```sh
+python -m proxy_index.formula best-hours --formulas formulas/ --out formulas/best-hours/
+```
+
+- Over all 24 hours of the country's own `unique_ips`, the best hour has the most unique IPs.
+  Ties go to more request rows (`requests`), then to the earlier hour. Unlike `peak_hour`, no
+  low-sample hour is left out; in version 2 the two agree for every own-curve country.
+- A borrowed formula (byteful) has IPs in too few hours for that. Each of its countries takes the
+  hour most of the other networks chose as their best hour for the same country (the mode). Ties
+  go to the larger sum of the choosing networks' unique IPs at that hour, then to the earlier
+  hour. A country no other network has keeps the formula's borrowed `peak_hour`.
+- A country with no IP in any hour has no best hour and is listed under `no_ips`.
+- The daily planner still reads `schedule` (`test_hour`), which is the network curve's peak for a
+  country on the network-curve fallback.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `schema`, `schema_version` | string, int | `"proxy-index-best-hours"`, 1. |
+| `network`, `rule` | string | The network and the rule above in words. |
+| `hours` | object | `"00"` to `"23"`, each a list of country codes (empty when none); every country is in exactly one hour. |
+| `countries.<CC>.hour` | int | The best hour (UTC). |
+| `countries.<CC>.unique_ips` | int | The network's own measured unique IPs of the country in that hour (for a borrowed formula often 0). |
+| `countries.<CC>.basis` | string | `own` (its own curve) or `borrowed` (the other networks' choice). |
+| `countries.<CC>.donors` | int | Borrowed only: how many other networks have the country with IPs; 0 for `own`. |
+| `no_ips` | [string] | Countries with no IP in any hour. |
+
 ## Latency
 
 `latency.available` is `false`. The hour files hold one record per exit IP with its request count,

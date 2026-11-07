@@ -1,0 +1,839 @@
+{
+  "schema": "proxy-index-best-hours",
+  "schema_version": 1,
+  "network": "byteful",
+  "rule": "the UTC clock hour with the most unique live IPs (an IP answered at least once in it); ties: more request rows, then the earlier hour; a borrowed formula takes the hour most other networks chose for the country (ties: more of their unique IPs, then the earlier hour)",
+  "hours": {
+    "00": ["BB", "CW", "DO", "GD"],
+    "01": ["CA", "TL", "US"],
+    "02": ["BS", "CR", "WF", "WS"],
+    "03": ["MX"],
+    "04": ["ID", "MH", "NC"],
+    "05": ["MM", "SB"],
+    "06": ["NP", "PF"],
+    "07": ["AF", "IR", "LA", "NZ", "SD", "TM"],
+    "08": ["KH", "MN", "SO", "TH", "TO"],
+    "09": ["AU", "BD", "FJ"],
+    "10": ["BT", "LK", "MG", "TJ"],
+    "11": ["GU", "PH", "RU", "UZ"],
+    "12": ["BN", "KR", "MR", "MW", "RW", "UG"],
+    "13": ["JP", "MY", "SG", "TW", "VN"],
+    "14": ["HK", "MO"],
+    "15": ["IN", "KG", "KZ", "OM", "PK"],
+    "16": ["CH", "DM", "GG", "IO", "KM", "MU", "MV", "RE", "SC", "YE", "YT"],
+    "17": ["AE", "BY", "ET", "GI", "GM", "IM", "KE", "QA"],
+    "18": ["AL", "BG", "BH", "CZ", "EE", "FI", "LT", "LV", "MD", "MZ", "RO", "SA", "SI", "SK", "UA"],
+    "19": ["BE", "CU", "DE", "DK", "HR", "HU", "KW", "LI", "LU", "ME", "NO", "PL"],
+    "20": ["AT", "BA", "FR", "IS", "MK", "NL", "PM", "RS", "SE", "SS"],
+    "21": ["AD", "BI", "CN", "DJ", "ES", "FO", "GB", "GP", "GW", "IE", "JE", "MA", "PT", "SN", "TZ"],
+    "22": ["BM", "BZ", "GL"],
+    "23": ["PG"]
+  },
+  "countries": {
+    "AD": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "AE": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "AF": {
+      "hour": 7,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "AL": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "AT": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "AU": {
+      "hour": 9,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BA": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BB": {
+      "hour": 0,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BD": {
+      "hour": 9,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "BE": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BG": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BH": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BI": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "BM": {
+      "hour": 22,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BN": {
+      "hour": 12,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BS": {
+      "hour": 2,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BT": {
+      "hour": 10,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BY": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "BZ": {
+      "hour": 22,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "CA": {
+      "hour": 1,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "CH": {
+      "hour": 16,
+      "unique_ips": 1729,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "CN": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "CR": {
+      "hour": 2,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "CU": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 15
+    },
+    "CW": {
+      "hour": 0,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 13
+    },
+    "CZ": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "DE": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "DJ": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "DK": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "DM": {
+      "hour": 16,
+      "unique_ips": 128,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "DO": {
+      "hour": 0,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "EE": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "ES": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "ET": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "FI": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "FJ": {
+      "hour": 9,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 15
+    },
+    "FO": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "FR": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "GB": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "GD": {
+      "hour": 0,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "GG": {
+      "hour": 16,
+      "unique_ips": 65,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "GI": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "GL": {
+      "hour": 22,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 14
+    },
+    "GM": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "GP": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "GU": {
+      "hour": 11,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "GW": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "HK": {
+      "hour": 14,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "HR": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "HU": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "ID": {
+      "hour": 4,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "IE": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "IM": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "IN": {
+      "hour": 15,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "IO": {
+      "hour": 16,
+      "unique_ips": 1,
+      "basis": "borrowed",
+      "donors": 6
+    },
+    "IR": {
+      "hour": 7,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 15
+    },
+    "IS": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "JE": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "JP": {
+      "hour": 13,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "KE": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "KG": {
+      "hour": 15,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "KH": {
+      "hour": 8,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "KM": {
+      "hour": 16,
+      "unique_ips": 7,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "KR": {
+      "hour": 12,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "KW": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "KZ": {
+      "hour": 15,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "LA": {
+      "hour": 7,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "LI": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "LK": {
+      "hour": 10,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "LT": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "LU": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "LV": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MA": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "MD": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "ME": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MG": {
+      "hour": 10,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "MH": {
+      "hour": 4,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 14
+    },
+    "MK": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MM": {
+      "hour": 5,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "MN": {
+      "hour": 8,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "MO": {
+      "hour": 14,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MR": {
+      "hour": 12,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "MU": {
+      "hour": 16,
+      "unique_ips": 500,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MV": {
+      "hour": 16,
+      "unique_ips": 271,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MW": {
+      "hour": 12,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "MX": {
+      "hour": 3,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MY": {
+      "hour": 13,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "MZ": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "NC": {
+      "hour": 4,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 13
+    },
+    "NL": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "NO": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "NP": {
+      "hour": 6,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "NZ": {
+      "hour": 7,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "OM": {
+      "hour": 15,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "PF": {
+      "hour": 6,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "PG": {
+      "hour": 23,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "PH": {
+      "hour": 11,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "PK": {
+      "hour": 15,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "PL": {
+      "hour": 19,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "PM": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 9
+    },
+    "PT": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "QA": {
+      "hour": 17,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "RE": {
+      "hour": 16,
+      "unique_ips": 216,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "RO": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "RS": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "RU": {
+      "hour": 11,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "RW": {
+      "hour": 12,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "SA": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "SB": {
+      "hour": 5,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 14
+    },
+    "SC": {
+      "hour": 16,
+      "unique_ips": 268,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "SD": {
+      "hour": 7,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "SE": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "SG": {
+      "hour": 13,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "SI": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "SK": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "SN": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "SO": {
+      "hour": 8,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "SS": {
+      "hour": 20,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "TH": {
+      "hour": 8,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "TJ": {
+      "hour": 10,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "TL": {
+      "hour": 1,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 15
+    },
+    "TM": {
+      "hour": 7,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 14
+    },
+    "TO": {
+      "hour": 8,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "TW": {
+      "hour": 13,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "TZ": {
+      "hour": 21,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "UA": {
+      "hour": 18,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "UG": {
+      "hour": 12,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "US": {
+      "hour": 1,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "UZ": {
+      "hour": 11,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "VN": {
+      "hour": 13,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 17
+    },
+    "WF": {
+      "hour": 2,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 9
+    },
+    "WS": {
+      "hour": 2,
+      "unique_ips": 0,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "YE": {
+      "hour": 16,
+      "unique_ips": 146,
+      "basis": "borrowed",
+      "donors": 16
+    },
+    "YT": {
+      "hour": 16,
+      "unique_ips": 16,
+      "basis": "borrowed",
+      "donors": 16
+    }
+  },
+  "no_ips": []
+}

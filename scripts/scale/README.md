@@ -50,6 +50,16 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   database with `search_path` exactly `proxy_scale` ("A scratch schema", below; `target.py`).
 - It refuses a database holding any `test_runs` row it did not write (its runs carry the summary
   key `scale_generator`), and a storage schema other than this framework's.
+- **The owner's go (REPLAY-RUN-1 (#614) only).** The 7-day replay may write to production's own
+  database, `proxy_reviews`, with `--owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"`
+  (`target.refusal(conn, owner_go=...)`). It is accepted only when the database is `proxy_reviews`,
+  the date is not in the future (a run resumed on a later day reuses the same go), and the database
+  holds no `test_runs` row without the replay's summary key `scale_replay`. The accepted go, the
+  database, the role and the UTC time go to stderr and into the replay's state and report. Without
+  the go every target but `proxy_scale` is refused as before; `generate.py` and `cycle.py` take no
+  go and keep refusing `proxy_reviews`. Check it read-only with
+  `target.py check --database <toml> --owner-go "<go>"` (exit 2 on a refusal). The owner removes
+  the replay's data before launch (LAUNCH-WIPE (#615)).
 - A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
   network's rows in its own transaction; the settings row records each finished network, so an
   interrupted step resumes with the networks the day lacks. Networks share no IP, run, pool or
@@ -199,6 +209,34 @@ and its largest tables.
 checks that the daily rows, enrichment, estimated hours and pulse geo rows equal those
 `generate.py` writes for the same hours, that no new pool, scope, location or network row appears, that
 an interrupted hour continues where it stopped, and that the guards refuse.
+
+## The modelled browser hour (BROWSER-MODEL-1)
+
+Browser pulse data does not exist in production yet. `browser_model.py` models it from
+BP-VERIFY-2's measured hour (#147: Shifter, US, one host with 12 browsers): 8 targets, 600 page
+loads, 2.79 MB per load, 1.674 GB per network-hour.
+
+- `settings(every_minutes=60)` is the settings file (K-BP3) of that hour: the 8 targets in
+  #147's order with its tries (100 for each page target, then 34, 33 and 33), schedule US.
+- `bundle(run, target, seed, out)` writes one planned run's bundle (K-BP4) through the real
+  runner and `browser.rawfiles.seal`: #147's tries and outcome counts exactly (its other outcomes
+  too: login wall, no content, no answer; its one unnamed instagram_web error is a
+  browser_error), bytes per try drawn from the seed around the target's mean and summing to mean
+  x tries. Its summary carries `scale_replay_model: "BP-VERIFY-2"`.
+- `browser_step(steps, day, start, state)` adds the browser hour to a replay slice, as `pulses`
+  does for pulses: one node per network in the browser region on the logical host
+  `browser-scalereplay` (a browser host name is `browser-<letters and digits>`, so the name
+  cannot carry the network), the hour planned by `orchestrator.browser.browser_plan` with the
+  model's settings passed in-process (no settings row; `browser.enabled` stays as it is), and
+  every bundle uploaded to an in-process node API, so the rows land through the real ingest in
+  `test_batches`, `batch_runs`, `test_runs` and `run_buckets`, with no IP or geo rows. Ingest
+  needs an archive: a temporary local directory (`browser_ingest.LocalArchive`) stands in for the
+  object store, whatever the settings say, and goes with the hour. The step returns the runs,
+  loads, bytes and rows per table of the hour.
+
+`tests/test_scale_browser_model.py` checks the settings, that a bundle passes the ingest's
+checks, the bytes and outcomes of every target, and one planned hour of 2 networks on the test
+database: its rows, and that no settings row changes.
 
 # A scratch schema in production's database (SCALE-SCHEMA-1)
 

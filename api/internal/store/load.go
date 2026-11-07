@@ -284,8 +284,7 @@ type Inputs struct {
 // loadEvents reads the newest EventWindow events and, past them, the newest
 // NotableWindow non-routine ones.
 func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
-	const order = ` ORDER BY e.at DESC, e.event_id DESC LIMIT `
-	in.Events, err = collect(ctx, tx, `SELECT `+EventColumns+order+`$1`, ScanEvent, EventWindow+1)
+	in.Events, err = collect(ctx, tx, eventsNewestSQL, ScanEvent, EventWindow+1)
 	if err != nil {
 		return err
 	}
@@ -295,13 +294,21 @@ func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
 	}
 	in.Events = in.Events[:EventWindow]
 	last := in.Events[EventWindow-1]
-	in.Notable, err = collect(ctx, tx, `SELECT `+EventColumns+` WHERE NOT `+routineSQL+
-		` AND e.at <= $1 AND (e.at, e.event_id) < ($1, $2)`+order+`$3`, ScanEvent, last.At, last.ID, NotableWindow+1)
+	in.Notable, err = collect(ctx, tx, eventsNotableSQL, ScanEvent, last.At, last.ID, NotableWindow+1)
 	if len(in.Notable) > NotableWindow {
 		in.Notable, in.NotableComplete = in.Notable[:NotableWindow], false
 	}
 	return err
 }
+
+// eventsNewestSQL reads the newest $1 events; eventsNotableSQL the newest $3
+// non-routine ones older than the event at $1 with id $2.
+const (
+	eventsOrder      = ` ORDER BY e.at DESC, e.event_id DESC LIMIT `
+	eventsNewestSQL  = `SELECT ` + EventColumns + eventsOrder + `$1`
+	eventsNotableSQL = `SELECT ` + EventColumns + ` WHERE NOT ` + routineSQL +
+		` AND e.at <= $1 AND (e.at, e.event_id) < ($1, $2)` + eventsOrder + `$3`
+)
 
 // EventWindow is how many of the newest events are held in memory.
 const EventWindow = 2000

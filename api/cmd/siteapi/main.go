@@ -5,6 +5,7 @@
 //	siteapi serve        [--listen 127.0.0.1:8090] [--database-file F] [--interval 10s] [--files-dir D]
 //	siteapi migrate      [--database-file F]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
+//	siteapi explain --out DIR [--database-file F]
 //
 // The database comes from DATABASE_URL, --database-file, or
 // .secrets/database.toml in the repository root (the working directory or its
@@ -24,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -40,6 +42,7 @@ commands:
   serve        serve the cached JSON API (read-only database access)
   migrate      create or upgrade the "site" schema (catalog, pricing, trust, reviews)
   dump         write one response (default /v1/dataset) to a file, for static builds
+  explain      time every API statement with EXPLAIN ANALYZE (read-only role)
 
 run "siteapi <command> -h" for flags`)
 }
@@ -85,6 +88,8 @@ func main() {
 		err = migrate(args)
 	case "dump":
 		err = dump(args)
+	case "explain":
+		err = explain(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -282,6 +287,53 @@ func renderEndpoint(res *build.Result, endpoint string) (*server.Rendered, error
 		return nil, fmt.Errorf("unknown endpoint %s", endpoint)
 	}
 	return rendered, nil
+}
+
+// explain writes explain.json and explain.md to --out: every statement the
+// API runs, timed with EXPLAIN ANALYZE through a read-only role.
+func explain(args []string) error {
+	fs := flag.NewFlagSet("explain", flag.ExitOnError)
+	var c common
+	c.register(fs)
+	out := fs.String("out", "", "output directory (required): explain.json and explain.md are written there")
+	fs.Parse(args) //nolint:errcheck
+	if *out == "" {
+		return errors.New("--out is required")
+	}
+	dsn, err := c.dsn()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	pool, err := store.OpenReadOnly(ctx, dsn)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	report, err := store.Explain(ctx, pool)
+	if err != nil {
+		return err
+	}
+	return writeExplain(*out, report)
+}
+
+// writeExplain writes the report's two files to dir, creating it.
+func writeExplain(dir string, report *store.ExplainReport) error {
+	body, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "explain.json"), append(body, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "explain.md"), report.Markdown(), 0o644); err != nil {
+		return err
+	}
+	printJSON(map[string]any{"out": dir, "statements": len(report.Statements), "build": report.Params.Build})
+	return nil
 }
 
 // deref is *p, or def when p is nil.

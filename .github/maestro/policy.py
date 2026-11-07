@@ -3,7 +3,8 @@
 
   maestro-policy --base <ref> --head <ref> [--pr-body-file FILE]
 
-Size counts changed lines (added + deleted) of production files between the merge base and head.
+Size counts changed lines (added + deleted) of production files between the merge base and head. Files the
+repo's .gitattributes marks `linguist-generated` (GitHub's own marker) are generated and don't count.
 Warning above 400, failure above 800 unless the PR body has a `Size-exception:` line approved by the owner.
 Privacy scans added lines for absolute home paths, private keys and tokens.
 Attribution scans commit messages and the PR body. Exit 1 on any failure.
@@ -41,12 +42,21 @@ def production(path):
                    for pat in NOT_PRODUCTION)
 
 
-def size(numstat):
-    """Changed production lines from `git diff --numstat` output; binary files count 0."""
+def generated(paths):
+    """The paths .gitattributes marks `linguist-generated` (set or true), read at the checked-out head."""
+    if not paths:
+        return set()
+    out = subprocess.run(["git", "check-attr", "-z", "linguist-generated", "--"] + list(paths),
+                         capture_output=True, text=True).stdout.split("\0")
+    return {out[i] for i in range(0, len(out) - 2, 3) if out[i + 2] in ("set", "true")}
+
+
+def size(numstat, skip=frozenset()):
+    """Changed production lines from `git diff --numstat` output; binary and `skip` files count 0."""
     total = 0
     for line in numstat.splitlines():
         added, deleted, path = line.split("\t", 2)
-        if production(path) and added != "-":
+        if production(path) and path not in skip and added != "-":
             total += int(added) + int(deleted)
     return total
 
@@ -70,7 +80,8 @@ def attribution(text):
 def check(base, head, body):
     merge_base = git("merge-base", base, head).strip()
     errors, notes = [], []
-    lines = size(git("diff", "--numstat", "--no-renames", merge_base, head))
+    numstat = git("diff", "--numstat", "--no-renames", merge_base, head)
+    lines = size(numstat, generated([ln.split("\t", 2)[2] for ln in numstat.splitlines()]))
     notes.append("size: %d changed production lines" % lines)
     if lines > HARD and not re.search(r"^Size-exception:\s*\S", body, re.M):
         errors.append("size: %d > %d; split the work or add an owner-approved `Size-exception:` line" % (lines, HARD))

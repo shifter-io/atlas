@@ -134,15 +134,19 @@ async def _usable(conn: psycopg.AsyncConnection) -> BrowserSettings | dict[str, 
     return settings
 
 
-async def browser_plan(db: Database, now: datetime | None = None) -> dict[str, Any]:
+async def browser_plan(
+    db: Database, now: datetime | None = None, given: BrowserSettings | None = None
+) -> dict[str, Any]:
     """Open the current slot of every settings target that has no batch for it yet.
 
     Returns {"opened": target ids, "created": batches, "networks": networks with a browser
     node}, or {"skipped": reason} when the planner is off or the settings file is unusable.
+    `given` settings (the scale replay's model) are planned as they are, without reading the
+    settings browser.enabled and browser.settings_file.
     """
     now = (now or datetime.now(UTC)).astimezone(UTC)
     async with db.transaction() as conn:
-        settings = await _usable(conn)
+        settings = given or await _usable(conn)
         if not isinstance(settings, BrowserSettings):
             return settings
         await conn.execute("SELECT pg_advisory_xact_lock(%s)", (PLAN_LOCK,))

@@ -1,9 +1,11 @@
-"""Command line: python -m proxy_index.formula {aggregate,build}.
+"""Command line: python -m proxy_index.formula {aggregate,build,best-hours}.
 
 aggregate reads the private hour enrichment (one directory per network) and writes one counts
 file per network (no IPs); build turns those counts into the public formulas/<network>.json files
 and formulas/SUMMARY.md; `--borrow <network>` gives that network the other networks' average curve
-(formula/borrow.py). Each written file replaces the old one atomically.
+(formula/borrow.py); best-hours writes each formula's best hour per country to
+formulas/best-hours/<network>.json (formula/best_hours.py). Each written file replaces the old
+one atomically.
 """
 
 from __future__ import annotations
@@ -14,11 +16,12 @@ import os
 import sys
 from pathlib import Path
 
-from proxy_index.formula import borrow
+from proxy_index.formula import best_hours, borrow
 from proxy_index.formula.aggregate import FormulaError, aggregate_network
 from proxy_index.formula.build import (
     DEFAULT_MIN_HOURS,
     DEFAULT_MIN_PEAK_IPS,
+    SCHEMA,
     build_formula,
     dumps,
     summary_markdown,
@@ -73,6 +76,17 @@ def run_build(args: argparse.Namespace) -> None:
     print(f"built {len(documents)} formulas", flush=True)
 
 
+def run_best_hours(args: argparse.Namespace) -> None:
+    documents = [json.loads(path.read_text()) for path in sorted(args.formulas.glob("*.json"))]
+    documents = [document for document in documents if document.get("schema") == SCHEMA]
+    if not documents:
+        raise FormulaError(f"no formula files in {args.formulas}")
+    args.out.mkdir(parents=True, exist_ok=True)
+    for result in best_hours.build_all(documents):
+        _write(args.out / f"{result['network']}.json", dumps(result))
+    print(f"wrote {len(documents)} best-hour files", flush=True)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="python -m proxy_index.formula")
     commands = root.add_subparsers(dest="command", required=True)
@@ -96,6 +110,10 @@ def parser() -> argparse.ArgumentParser:
         help="temporary: give NETWORK the average curve of the other networks (see borrow.py)",
     )
     build.set_defaults(run=run_build)
+    best = commands.add_parser("best-hours", help="write each formula's best hour per country")
+    best.add_argument("--formulas", type=Path, required=True)
+    best.add_argument("--out", type=Path, required=True)
+    best.set_defaults(run=run_best_hours)
     return root
 
 

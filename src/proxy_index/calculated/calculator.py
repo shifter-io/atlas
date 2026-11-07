@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
-from . import browser, incremental, netlists, network, product_windows
+from . import browser, incremental, netlists, network, product_windows, rollups
 from .aggregate import floor_time
 from .fleet import fleet_entry, fleet_totals
 from .inputs import cutoff, group_by_product, light_load, previous_products, tested_by_product
@@ -117,10 +117,12 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
         as_of = datetime.fromisoformat(as_of)
     if as_of.tzinfo is None:
         raise ValueError("Measurement cutoff requires a timezone")
+    if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
+        rollups.fill(database, as_of)
     with connect(database) as conn:
         conn.row_factory = dict_row
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-        conn.execute("SELECT pg_advisory_xact_lock(817452902)")
+        conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
         inputs = incremental.read(conn, config, method_id, as_of, mode)
         previous = previous_payload(conn)  # only the groups' ids and scores
