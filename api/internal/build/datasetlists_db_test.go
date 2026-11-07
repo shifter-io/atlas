@@ -21,7 +21,7 @@ func TestTheDatasetFileReadsNoListRows(t *testing.T) {
 	defer c.Close(context.Background())
 	nc := writeNetLists(t, c)
 	tailLists(t, c, nc)
-	_, v4, groups := netPayloads(t, c, nc)
+	v4, groups := netPayloads(t, c, nc)
 	db.PublishParts(t, v4, groups, nil)
 	ctx := context.Background()
 	pool, err := store.OpenReadOnly(ctx, db.DSN)

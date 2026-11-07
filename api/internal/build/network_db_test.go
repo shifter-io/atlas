@@ -171,11 +171,10 @@ func netOverlap(a, b int, label string) snap.OverlapRow {
 		SharedIps: snap.Num(100*a + 10*b + w), IpsA: snap.Num(1000 + a), IpsB: snap.Num(1000 + b)}
 }
 
-// netPayloads is the case as a v3 head with its groups (product parts) and
-// as the v4 head of the same data (testscale.NetworkHead, naming the case's
-// network lists); the v3 head carries the per-cohort overlap and fleet rows
-// and an every-group fleet entry.
-func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [][]byte) {
+// netPayloads is the case as a v4 head (testscale.NetworkHead, naming the
+// case's network lists) with its groups (product parts), made from the data
+// with per-cohort overlap and fleet rows and an every-group fleet entry.
+func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v4 []byte, groups [][]byte) {
 	t.Helper()
 	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
@@ -208,9 +207,6 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [
 	delete(doc, "products")
 	delete(doc, "runs")
 	doc["overlap"], doc["parts"], doc["schema_version"] = overlap, map[string]int{"products": len(groups), "runs": 0}, 3
-	if v3, err = json.Marshal(doc); err != nil {
-		t.Fatal(err)
-	}
 	doc["products"] = products
 	whole, err := json.Marshal(doc)
 	if err == nil {
@@ -221,7 +217,7 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v3, v4 []byte, groups [
 	if err != nil {
 		t.Fatal(err)
 	}
-	return v3, v4, groups
+	return v4, groups
 }
 
 // netAnswers is every answer of a build as the server renders them, and
@@ -289,7 +285,7 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 	c := db.Conn(t)
 	defer c.Close(context.Background())
 	nc := writeNetLists(t, c)
-	_, v4, groups := netPayloads(t, c, nc)
+	v4, groups := netPayloads(t, c, nc)
 	cache := store.NewLists()
 	db.PublishParts(t, v4, groups, nil)
 	db.Exec(t, "UPDATE calculated_snapshots SET content_hash = 'same'")

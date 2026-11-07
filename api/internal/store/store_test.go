@@ -21,6 +21,18 @@ func count(t *testing.T, db *testdb.DB, sql string) int {
 	return n
 }
 
+// text is a query's one text value.
+func text(t *testing.T, db *testdb.DB, sql string, args ...any) string {
+	t.Helper()
+	c := db.Conn(t)
+	defer c.Close(context.Background())
+	var s string
+	if err := c.QueryRow(context.Background(), sql, args...).Scan(&s); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	return s
+}
+
 func load(t *testing.T, db *testdb.DB) *store.Inputs {
 	t.Helper()
 	ctx := context.Background()

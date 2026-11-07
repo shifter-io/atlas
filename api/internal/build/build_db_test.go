@@ -397,13 +397,6 @@ func measuredOnlyV4(t *testing.T, snapshot []byte) *build.Result {
 	return measuredBuild(t, snapshot, (*testdb.DB).PublishV4)
 }
 
-// measuredOnly is measuredOnlyV4 of the snapshot as it is, before payload
-// v4: the whole build longtail_db_test.go compares a capped one with.
-func measuredOnly(t *testing.T, snapshot []byte) *build.Result {
-	t.Helper()
-	return measuredBuild(t, snapshot, (*testdb.DB).Publish)
-}
-
 func measuredBuild(t *testing.T, snapshot []byte, publish func(*testdb.DB, testing.TB, []byte) int64) *build.Result {
 	t.Helper()
 	db := testdb.New(t)

@@ -159,66 +159,6 @@ func oracleList(t *testing.T, c *pgx.Conn, list int64, code string, n int, pool 
 	return json.RawMessage(text), len(rows)
 }
 
-// listedPayloads is the every-request fixture with every window's lists made
-// from the typed list lists[label]: v2 slimmed to keep, and v3 naming them.
-func listedPayloads(t *testing.T, c *pgx.Conn, lists map[string]int64) (v2, v3 []byte) {
-	t.Helper()
-	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, version := range []int{2, 3} {
-		var doc map[string]any
-		if err := json.Unmarshal(raw, &doc); err != nil {
-			t.Fatal(err)
-		}
-		for label, entry := range doc["products"].([]any)[0].(map[string]any)["windows"].(map[string]any) {
-			w, id := entry.(map[string]any), lists[label]
-			pool := w["pool"].(map[string]any)
-			breakdowns, entries, kept := map[string]any{}, map[string]any{}, map[string]any{}
-			for code, name := range listNames {
-				rows, n := oracleList(t, c, id, code, keep[name], false)
-				breakdowns[name], entries[name], kept[name] = rows, n, min(n, keep[name])
-			}
-			poolEntries := map[string]any{}
-			for name, code := range map[string]string{"geo": "g", "countries_breakdown": "c", "asns_breakdown": "a"} {
-				rows, n := oracleList(t, c, id, code, keep[name], true)
-				pool[name], poolEntries[name], kept[name] = rows, n, min(n, keep[name])
-			}
-			w["breakdowns"], w["breakdown_entries"], pool["list_entries"] = breakdowns, entries, poolEntries
-			if version == 3 {
-				delete(w, "breakdowns")
-				for _, name := range []string{"geo", "countries_breakdown", "asns_breakdown"} {
-					delete(pool, name)
-				}
-				w["lists"] = map[string]any{"id": id, "entries": kept}
-			}
-		}
-		doc["schema_version"] = version
-		b, err := json.Marshal(doc)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if version == 2 {
-			v2 = b
-		} else {
-			v3 = b
-		}
-	}
-	return v2, v3
-}
-
-// linkWindows writes a v2 build's target-free windows with their list ids.
-func linkWindows(t *testing.T, db *testdb.DB, build int64, lists map[string]int64) {
-	t.Helper()
-	for label, id := range lists {
-		hours := map[string]int{"24h": 24, "7d": 168, "30d": 720}[label]
-		db.Exec(t, `INSERT INTO cohorts(cohort) VALUES ('7a5d84127c244707dc0e') ON CONFLICT DO NOTHING`)
-		db.Exec(t, `INSERT INTO calculated_windows(build_id,product_id,cohort,target,window_hours,completed,successes,errors,body_bytes,
- coverage,readiness,list_id) VALUES ($1,1,'7a5d84127c244707dc0e','',$2,0,0,0,0,0,'ready',$3)`, build, hours, id)
-	}
-}
-
 func loadWith(t *testing.T, db *testdb.DB, lists *store.Lists) *build.Result {
 	t.Helper()
 	pool, err := store.OpenReadOnly(context.Background(), db.DSN)
@@ -253,59 +193,6 @@ func datasetText(t *testing.T, res *build.Result) []byte {
 		t.Fatal(err)
 	}
 	return b
-}
-
-func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
-	t.Parallel()
-	db := testdb.New(t)
-	c := db.Conn(t)
-	defer c.Close(context.Background())
-	lists := map[string]int64{"24h": writeList(t, c, 0), "7d": writeList(t, c, 1), "30d": writeList(t, c, 2)}
-	v2, v3 := listedPayloads(t, c, lists)
-	var doc struct {
-		Products []struct {
-			Windows map[string]struct {
-				Breakdowns any `json:"breakdowns"`
-				Pool       struct {
-					Geo any `json:"geo"`
-				} `json:"pool"`
-			} `json:"windows"`
-		} `json:"products"`
-	}
-	if err := json.Unmarshal(v3, &doc); err != nil || doc.Products[0].Windows["24h"].Breakdowns != nil || doc.Products[0].Windows["24h"].Pool.Geo != nil {
-		t.Fatalf("the v3 payload carries lists (%v)", err)
-	}
-	cache := store.NewLists()
-	linkWindows(t, db, db.Publish(t, v2), lists)
-	fromV2 := loadWith(t, db, cache)
-	if cache.Fetched != 3 {
-		t.Errorf("v2 build fetched %d lists, want 3", cache.Fetched)
-	}
-	db.Publish(t, v3)
-	fromV3 := loadWith(t, db, cache)
-	if cache.Fetched != 3 {
-		t.Errorf("the v3 build of the same lists fetched %d more, want none", cache.Fetched-3)
-	}
-	fresh := loadWith(t, db, nil)
-	for name, res := range map[string]*build.Result{"cached": fromV3, "fresh": fresh} {
-		if a, b := datasetText(t, fromV2), datasetText(t, res); !bytes.Equal(a, b) {
-			var diffs []string
-			diff(generic(t, a), generic(t, b), "dataset", &diffs)
-			t.Errorf("%s v3 dataset differs from v2 (%d bytes, %d bytes):\n%v", name, len(a), len(b), diffs)
-		}
-		if !reflect.DeepEqual(generic(t, fromV2.Details["shifter"]), generic(t, res.Details["shifter"])) {
-			t.Errorf("%s v3 provider differs from v2", name)
-		}
-		for _, r := range []string{"24h", "7d", "30d"} {
-			for _, d := range []string{"country", "region", "city", "asn"} {
-				w, _, _ := fromV2.Pages.List(context.Background(), "", "shifter/residential", r, d, "", 1)
-				g, _, _ := res.Pages.List(context.Background(), "", "shifter/residential", r, d, "", 1)
-				if !reflect.DeepEqual(generic(t, w), generic(t, g)) {
-					t.Errorf("%s %s %s: v3 page %+v, v2 page %+v", name, r, d, g, w)
-				}
-			}
-		}
-	}
 }
 
 // networkPayload is the every-request fixture as payload v4 (its group's

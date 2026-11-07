@@ -218,13 +218,11 @@ type FrameworkProduct struct {
 type SnapshotRow struct {
 	BuildID     int64
 	ContentHash string
-	// Payload is the published payload as the single payload of a build
-	// before calculated v8 reads (parts.go), without runs for a build stored
-	// in parts.
+	// Payload is the v4 head (parts.go).
 	Payload []byte
-	full    []byte // Payload with its lists put back (longtail.go)
-	// Places is each target-free window's typed list (lists.go) of a slimmed
-	// snapshot; nil when nothing was slimmed.
+	full    []byte // Payload with its networks as product groups (network.go)
+	// Places is each target-free window's typed list (lists.go), which only
+	// a build before v4 had; nil.
 	Places map[PlaceWindow]*List
 	// Networks is each network window's compact list (network.go) of a v4
 	// build; nil before v4.
