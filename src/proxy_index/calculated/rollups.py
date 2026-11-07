@@ -10,7 +10,8 @@ the cutoff is on the hour) from run_geo_buckets. A rollup's histogram holds the 
 light-load candidate (pulses and runs outside a batch) per target; the pulses that ran during a
 census (the overlaps) are subtracted when read, by run key, so no rollup depends on them.
 
-refresh() writes them in the calculation's transaction, before it reads: an hour it reads is
+fill() writes them before the calculation's transaction, a day at most per transaction, and
+refresh() in it, before it reads, whatever went stale in between: an hour it reads is
 counted when it has no rollup, or holds a run newer than its rollup (a run key above its
 through_run: ingestion is serialized, so run keys follow commits), or holds a run outside a batch
 that a batch owns now (the run was ingested again into its batch). Every hour read then records
@@ -33,11 +34,14 @@ from itertools import accumulate, pairwise
 
 from psycopg.rows import dict_row, tuple_row
 
+from ..storage import connect
 from . import scheduled
 from .aggregate import census_overlaps
 from .browser import NOT_BROWSER
 
 HOUR = timedelta(hours=1)
+DAY = timedelta(days=1)
+LOCK = 817452902  # the calculation's advisory lock (calculator.calculate())
 BIN = "date_bin('1 hour',{}.bucket_start,'2000-01-01 00:00:00+00')"
 ON_HOUR = BIN.format("g")
 SCOPE = "CASE WHEN r.batch_id IS NULL THEN r.scope_id END AS scope_id"
@@ -302,12 +306,37 @@ def refresh(conn, hours):
     and record the newest run key for every one of them."""
     window = _window(conn, hours, "calculated_geo_hours", "calculated_geo_rollups")
     stale = [row["hour"] for row in _rows(conn, STALE, window)]
-    if stale:
-        conn.execute("DELETE FROM calculated_geo_hours WHERE hour=ANY(%s)", (stale,))
     for lo, hi in _ranges(stale):
-        conn.execute(WRITE, {"lo": lo, "hi": hi})
+        _count(conn, lo, hi)
     conn.execute(MARK, (hours, window["newest"]))
     return stale
+
+
+def fill(database, as_of):
+    """Count the missing or stale rollups of the 30 days before as_of ahead of the build, one
+    range of at most a day per transaction, each with its marks and the calculation's lock: a
+    failed build keeps them, and its own refresh() counts only what went stale since."""
+    hours, _ = spans((as_of - 720 * HOUR, as_of))
+    if not hours:
+        return []
+    with connect(database) as conn:
+        window = _marks(conn, hours, "calculated_geo_rollups")
+        stale = [row["hour"] for row in _rows(conn, STALE, window)]
+    for lo, hi in _ranges(stale):
+        with connect(database) as conn:
+            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            conn.execute(f"SELECT pg_advisory_xact_lock({LOCK})")
+            span = [lo + n * HOUR for n in range((hi - lo) // HOUR)]
+            newest = _marks(conn, span, "calculated_geo_rollups")["newest"]
+            _count(conn, lo, hi)
+            conn.execute(MARK, (span, newest))
+    return stale
+
+
+def _count(conn, lo, hi):
+    """Count the rollups of the hours [lo, hi) again."""
+    conn.execute("DELETE FROM calculated_geo_hours WHERE hour>=%s AND hour<%s", (lo, hi))
+    conn.execute(WRITE, {"lo": lo, "hi": hi})
 
 
 def _window(conn, hours, *tables):
@@ -315,7 +344,12 @@ def _window(conn, hours, *tables):
     hours (ascending) and the newest run key."""
     for table in tables:
         conn.execute(COLLECT.format(table), (hours[0],))
-    marks = _rows(conn, NEWEST.format(tables[-1]), (hours,))[0]
+    return _marks(conn, hours, tables[-1])
+
+
+def _marks(conn, hours, table):
+    """The STALE parameters of the hours (ascending) in the marks table, and the newest run key."""
+    marks = _rows(conn, NEWEST.format(table), (hours,))[0]
     return {"hours": hours, "lo": hours[0], "hi": hours[-1] + HOUR} | marks
 
 
@@ -339,10 +373,10 @@ def _floor(at):
 
 
 def _ranges(hours):
-    """The runs of consecutive hours as [lo, hi) ranges."""
+    """The runs of consecutive hours as [lo, hi) ranges of at most a day (one statement each)."""
     ranges = []
     for hour in hours:
-        if ranges and ranges[-1][1] == hour:
+        if ranges and ranges[-1][1] == hour and hour - ranges[-1][0] < DAY:
             ranges[-1][1] = hour + HOUR
         else:
             ranges.append([hour, hour + HOUR])
