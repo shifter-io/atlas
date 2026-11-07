@@ -13,7 +13,9 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // keep is how many rows of each list the slimmed payload keeps (nine lists:
@@ -219,13 +221,18 @@ func linkWindows(t *testing.T, db *testdb.DB, build int64, lists map[string]int6
 
 func loadWith(t *testing.T, db *testdb.DB, lists *store.Lists) *build.Result {
 	t.Helper()
-	ctx := context.Background()
-	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	pool, err := store.OpenReadOnly(context.Background(), db.DSN)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	in, err := store.LoadLists(ctx, pool, lists)
+	return loadFrom(t, pool, lists)
+}
+
+// loadFrom loads and builds the current build through db.
+func loadFrom(t *testing.T, db store.TxBeginner, lists *store.Lists) *build.Result {
+	t.Helper()
+	in, err := store.LoadLists(context.Background(), db, lists)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,32 +308,80 @@ func TestV3PayloadAnswersAsItsV2Form(t *testing.T) {
 	}
 }
 
+// networkPayload is the every-request fixture as payload v4 (its group's
+// network, testscale.NetworkHead) whose windows name the typed lists
+// lists[label], and the group.
+func networkPayload(t *testing.T, c *pgx.Conn, lists map[string]int64) (head []byte, groups [][]byte) {
+	t.Helper()
+	raw, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Products []json.RawMessage `json:"products"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	head, err = testscale.NetworkHead(&store.SnapshotRow{Payload: raw}, 0, func(w testscale.NetWindow, _ map[string][]store.NetRow) (int64, map[string]int, error) {
+		counts := map[string]int{}
+		for code, name := range netCodes {
+			_, counts[name] = oracleList(t, c, lists[w.Label], code, 0, false)
+		}
+		return lists[w.Label], counts, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head, [][]byte{doc.Products[0]}
+}
+
+// loggedPool is a pool to db whose connections log their statements.
+func loggedPool(t *testing.T, db *testdb.DB) (*pgxpool.Pool, *statementLog) {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := &statementLog{}
+	cfg.ConnConfig.Tracer = log
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	return pool, log
+}
+
+// A v4 build reads only the network lists the API does not hold yet, and
+// the API drops those the build no longer names.
 func TestOnlyNewListsAreFetched(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
 	first := map[string]int64{"24h": writeList(t, c, 0), "7d": writeList(t, c, 1), "30d": writeList(t, c, 2)}
-	_, v3 := listedPayloads(t, c, first)
+	pool, log := loggedPool(t, db)
 	cache := store.NewLists()
-	db.Publish(t, v3)
-	loadWith(t, db, cache)
+	head, groups := networkPayload(t, c, first)
+	db.PublishParts(t, head, groups, nil)
+	loadFrom(t, pool, cache)
 	// The next build shares the 7d and 30d lists and has a new 24h one.
 	second := map[string]int64{"24h": writeList(t, c, 3), "7d": first["7d"], "30d": first["30d"]}
-	_, v3 = listedPayloads(t, c, second)
-	db.Publish(t, v3)
-	res := loadWith(t, db, cache)
-	if cache.Fetched != 4 {
-		t.Errorf("fetched %d lists over two builds, want 3 + 1", cache.Fetched)
+	head, groups = networkPayload(t, c, second)
+	db.PublishParts(t, head, groups, nil)
+	res := loadFrom(t, pool, cache)
+	if len(log.counts) != 4 {
+		t.Errorf("fetched %d lists over two builds, want 3 + 1", len(log.counts))
 	}
 	if want := datasetText(t, loadWith(t, db, nil)); !bytes.Equal(datasetText(t, res), want) {
 		t.Error("the cached build differs from a fresh read")
 	}
 	// The first 24h list is no longer referenced: it was dropped.
-	_, v3 = listedPayloads(t, c, first)
-	db.Publish(t, v3)
-	loadWith(t, db, cache)
-	if cache.Fetched != 5 {
-		t.Errorf("fetched %d lists after going back, want 5 (the dropped list read again)", cache.Fetched)
+	head, groups = networkPayload(t, c, first)
+	db.PublishParts(t, head, groups, nil)
+	loadFrom(t, pool, cache)
+	if len(log.counts) != 5 {
+		t.Errorf("fetched %d lists after going back, want 5 (the dropped list read again)", len(log.counts))
 	}
 }
