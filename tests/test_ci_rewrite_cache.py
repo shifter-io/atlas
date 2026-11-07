@@ -1,4 +1,4 @@
-"""CI-90-6: pytest's assertion-rewrite cache kept between tier1 runs (scripts/ci/rewrite_cache.py)."""
+"""CI-90-6: pytest's rewrite cache kept between tier1 runs (scripts/ci/rewrite_cache.py)."""
 
 import os
 import py_compile
@@ -144,13 +144,13 @@ def test_the_cache_keeps_the_newest_archives_and_drops_dead_saves(cache, tmp_pat
         archive = tmp_path / f"{index:02d}.tar"
         archive.write_bytes(b"")
         os.utime(archive, (1000 + index, 1000 + index))
-    dead, running = tmp_path / ".tmp-dead.tar", tmp_path / ".tmp-running.tar"
+    dead, running = tmp_path / ".tmp-dead.part", tmp_path / ".tmp-running.part"
     dead.write_bytes(b"")
     running.write_bytes(b"")
     os.utime(dead, (1000, 1000))
     cache["prune"](tmp_path)
     kept = sorted(path.name for path in tmp_path.iterdir())
-    assert kept == [".tmp-running.tar"] + [f"{i:02d}.tar" for i in range(2, cache["KEEP"] + 2)]
+    assert kept == [".tmp-running.part"] + [f"{i:02d}.tar" for i in range(2, cache["KEEP"] + 2)]
 
 
 def test_the_command_exits_0_on_a_hit_and_1_on_a_miss(cache, tmp_path, monkeypatch):

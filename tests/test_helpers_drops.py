@@ -1,4 +1,4 @@
-"""CI-90-6: scratch databases are dropped at each process's session end, not in each teardown."""
+"""CI-90-6: a test's teardown queues its scratch databases' drops for a dropper thread."""
 
 import json
 import threading
@@ -11,12 +11,13 @@ from test_storage import admin_credentials
 
 
 class Connection:
-    """A fake admin connection: records each statement, answers the database count."""
+    """A fake admin connection: records each statement and its thread, answers a count."""
 
-    def __init__(self, log, admin):
-        self.log, self.admin = log, admin
+    def __init__(self, log, admin, release):
+        self.log, self.admin, self.release = log, admin, release
 
     def __enter__(self):
+        self.release.wait(5)
         return self
 
     def __exit__(self, *exc):
@@ -24,7 +25,7 @@ class Connection:
 
     def execute(self, statement, *args):
         text = statement if isinstance(statement, str) else statement.as_string(None)
-        self.log.append((self.admin["user"], threading.get_ident(), text))
+        self.log.append((self.admin["user"], threading.current_thread().name, text))
         return self
 
     def fetchone(self):
@@ -33,79 +34,92 @@ class Connection:
 
 @pytest.fixture
 def connections(monkeypatch):
-    log = []
-    monkeypatch.setattr(helpers, "QUEUED", [])
+    """The statements the dropper runs; it waits for `release` before each connection."""
+    log, release = [], threading.Event()
+    monkeypatch.setattr(helpers, "DROPPER", None)
+    monkeypatch.setattr(helpers, "DROPS", [])
     monkeypatch.setattr(helpers, "TIMELINE", False)
     monkeypatch.setattr(
-        helpers.psycopg, "connect", lambda autocommit, **admin: Connection(log, admin)
+        helpers.psycopg, "connect", lambda autocommit, **admin: Connection(log, admin, release)
     )
-    return log
+    yield log, release
+    release.set()
+    helpers.drop_queued()
 
 
-def test_a_drop_only_queues_until_the_session_end(connections):
+def test_a_drop_runs_in_the_dropper_thread_and_the_session_end_waits(connections):
+    log, release = connections
     helpers.drop_databases({"user": "a"}, ["one", "two"])
-    assert connections == []
-    assert helpers.QUEUED == [({"user": "a"}, "one"), ({"user": "a"}, "two")]
+    helpers.drop_databases({"user": "b"}, ["three"])
+    # The teardown returned before any drop ran.
+    assert log == [] and len(helpers.DROPS) == 2
+    release.set()
     helpers.drop_queued()
-    assert helpers.QUEUED == []
-    assert sorted(text for _, _, text in connections) == [
-        'DROP DATABASE "one" WITH (FORCE)',
-        'DROP DATABASE "two" WITH (FORCE)',
+    assert helpers.DROPPER is None and helpers.DROPS == []
+    assert [(user, text) for user, _, text in log] == [
+        ("a", 'DROP DATABASE "one" WITH (FORCE)'),
+        ("a", 'DROP DATABASE "two" WITH (FORCE)'),
+        ("b", 'DROP DATABASE "three" WITH (FORCE)'),
     ]
+    assert {thread for _, thread, _ in log} == {"drop-databases_0"}
+    # Nothing queued: nothing to wait for; a later drop starts a new thread.
     helpers.drop_queued()
-    assert len(connections) == 2
+    helpers.drop_databases({"user": "a"}, ["four"])
+    helpers.drop_queued()
+    assert log[-1][2] == 'DROP DATABASE "four" WITH (FORCE)'
 
 
-def test_the_queue_drops_on_droppers_connections_per_admin(connections, monkeypatch, tmp_path):
+def test_the_timeline_samples_the_database_count_before_each_drop(
+    connections, monkeypatch, tmp_path
+):
+    log, release = connections
     monkeypatch.setenv("EV", str(tmp_path))
     monkeypatch.setattr(helpers, "TIMELINE", True)
-    names = [f"db{index}" for index in range(10)]
-    helpers.drop_databases({"user": "a"}, names)
-    helpers.drop_databases({"user": "b"}, ["other"])
+    release.set()
+    helpers.drop_databases({"user": "a"}, ["one", "two"])
     helpers.drop_queued()
-    count, *drops = connections
-    assert count[2] == "SELECT count(*) FROM pg_database"
-    assert sorted(text.split('"')[1] for _, _, text in drops) == sorted(names + ["other"])
-    assert {user for user, _, _ in drops if user == "b"} == {"b"}
-    records = [json.loads(line) for line in (tmp_path / f"timeline-{helpers.WORKER}.jsonl").open()]
-    assert records[0]["kind"] == "databases" and records[0]["count"] == 42
-    spans = [r for r in records if r["kind"] == "drop_database"]
-    # Four shares of a's ten databases (3, 3, 2, 2) and b's one, each on its own connection.
-    assert sorted(r["databases"] for r in spans) == [1, 2, 2, 3, 3]
-    assert len(spans) == helpers.DROPPERS + 1
+    assert [text for _, _, text in log][0] == "SELECT count(*) FROM pg_database"
+    path = tmp_path / f"timeline-{helpers.WORKER}.jsonl"
+    count, span = (json.loads(line) for line in path.read_text().splitlines())
+    assert count["kind"] == "databases" and count["count"] == 42
+    assert span["kind"] == "drop_database" and span["databases"] == 2
 
 
 def test_a_failed_drop_fails_the_session_end_after_the_others(connections, monkeypatch):
+    log, release = connections
+    release.set()
+
     def connect(autocommit, **admin):
         if admin["user"] == "broken":
             raise psycopg.OperationalError("refused")
-        return Connection(connections, admin)
+        return Connection(log, admin, release)
 
     monkeypatch.setattr(helpers.psycopg, "connect", connect)
     helpers.drop_databases({"user": "broken"}, ["lost"])
     helpers.drop_databases({"user": "a"}, ["kept"])
     with pytest.raises(psycopg.OperationalError, match="refused"):
         helpers.drop_queued()
-    assert [text for _, _, text in connections] == ['DROP DATABASE "kept" WITH (FORCE)']
+    assert [text for _, _, text in log] == ['DROP DATABASE "kept" WITH (FORCE)']
+    assert helpers.DROPS == []
 
 
-def test_the_session_end_drops_the_queue_after_the_session_fixtures(monkeypatch):
-    dropped = []
-    monkeypatch.setattr(helpers, "drop_queued", lambda: dropped.append(True))
+def test_the_session_end_waits_for_the_drops_after_the_session_fixtures(monkeypatch):
+    waited = []
+    monkeypatch.setattr(helpers, "drop_queued", lambda: waited.append(True))
     monkeypatch.setattr(conftest, "SHARED_OWNER", False)
     conftest.pytest_sessionfinish(None)
-    assert dropped == [True]
+    assert waited == [True]
     # trylast: after pytest's own pytest_sessionfinish, which tears the session fixtures down.
     assert conftest.pytest_sessionfinish.pytest_impl["trylast"] is True
 
 
-def test_a_queued_database_lives_until_the_queue_drops(monkeypatch):
+def test_a_queued_database_is_dropped_by_the_session_end(monkeypatch):
     admin = admin_credentials()
-    monkeypatch.setattr(helpers, "QUEUED", [])
+    monkeypatch.setattr(helpers, "DROPPER", None)
+    monkeypatch.setattr(helpers, "DROPS", [])
     name = helpers.scratch_database(admin)
-    query = "SELECT count(*) FROM pg_database WHERE datname=%s"
     helpers.drop_databases(admin, [name])
+    helpers.drop_queued()
+    query = "SELECT count(*) FROM pg_database WHERE datname=%s"
     with psycopg.connect(**admin, autocommit=True) as conn:
-        assert conn.execute(query, (name,)).fetchone()[0] == 1
-        helpers.drop_queued()
         assert conn.execute(query, (name,)).fetchone()[0] == 0

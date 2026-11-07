@@ -12,9 +12,8 @@ import sys
 import threading
 import time
 import uuid
-from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,10 +28,9 @@ TIMELINE = os.environ.get("CI_TIMELINE") == "1"
 # This test run's id, set by the process that runs the session (tests/conftest.py) and inherited
 # by its xdist workers: it names the templates they share (shared_template).
 SHARED_RUN = "PROXY_TEST_SHARED_RUN"
-# The databases this process drops at its session end (drop_databases, drop_queued), with the
-# admin credentials that drop them, and how many connections drop them at once.
-QUEUED: list[tuple[dict, str]] = []
-DROPPERS = 4
+# The thread that drops this process's scratch databases (drop_databases), and its drops.
+DROPPER: ThreadPoolExecutor | None = None
+DROPS: list[Future] = []
 
 
 def timeline_record(record: dict) -> None:
@@ -110,40 +108,38 @@ def untraced() -> Iterator[None]:
 
 
 def drop_databases(admin: dict, names: list[str]) -> None:
-    """Queue `names` to be dropped as `admin` at this process's session end (drop_queued, from
-    tests/conftest.py): a test's teardown does not wait for its drops, and each xdist worker
-    drops its own at once, while the others still run their tests."""
-    QUEUED.extend((admin, name) for name in names)
+    """Queue `names` to be dropped as `admin` by this process's dropper thread: a test's
+    teardown does not wait for its drops, which run while the next tests do (and still free
+    their pages in PostgreSQL soon: a dropped database's dirty pages are never written)."""
+    global DROPPER
+    if DROPPER is None:
+        DROPPER = ThreadPoolExecutor(1, thread_name_prefix="drop-databases")
+    DROPS.append(DROPPER.submit(_drop, admin, list(names)))
 
 
 def drop_queued() -> None:
-    """Drop every queued database, on up to DROPPERS connections per admin, and empty the
-    queue. In the test timeline, the cluster's database count first (the worker's peak)."""
-    batches = defaultdict(list)
-    for admin, name in QUEUED:
-        batches[json.dumps(admin, sort_keys=True)].append(name)
-    QUEUED.clear()
-    if TIMELINE and batches:
-        with psycopg.connect(**json.loads(next(iter(batches))), autocommit=True) as conn:
-            count = conn.execute("SELECT count(*) FROM pg_database").fetchone()[0]
-        timeline_record({"kind": "databases", "count": count, "start": time.time()})
-    shares = [
-        (json.loads(admin), names[index::DROPPERS])
-        for admin, names in batches.items()
-        for index in range(min(DROPPERS, len(names)))
-    ]
-    with ThreadPoolExecutor(DROPPERS) as pool:
-        for done in [pool.submit(_drop, *share) for share in shares]:
-            done.result()
+    """At the session end (tests/conftest.py): wait for every queued drop and stop the dropper
+    thread; the first failed drop raises, after all of them ran."""
+    global DROPPER
+    if DROPPER is None:
+        return
+    DROPPER.shutdown(wait=True)
+    DROPPER = None
+    done = DROPS[:]
+    DROPS.clear()
+    for drop in done:
+        drop.result()
 
 
 def _drop(admin: dict, names: list[str]) -> None:
-    with (
-        timed("drop_database", databases=len(names)),
-        psycopg.connect(**admin, autocommit=True) as conn,
-    ):
-        for name in names:
-            conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+    with psycopg.connect(**admin, autocommit=True) as conn:
+        if TIMELINE:
+            count = conn.execute("SELECT count(*) FROM pg_database").fetchone()[0]
+            timeline_record({"kind": "databases", "count": count, "start": time.time()})
+        with timed("drop_database", databases=len(names)):
+            for name in names:
+                statement = sql.SQL("DROP DATABASE {} WITH (FORCE)")
+                conn.execute(statement.format(sql.Identifier(name)))
 
 
 @asynccontextmanager

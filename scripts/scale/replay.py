@@ -41,9 +41,10 @@ from proxy_index import storage
 INGEST = ("daily", "pulses", "browser", "release")
 FLAG_AFTER = 3  # retries of an hour before stderr flags it for the operator
 LIVE = "SELECT count(*) FROM job_runs WHERE started_at>now()-interval '5 minutes'"
+# By oid: a database dropped while this runs (another session's) counts as NULL, not an error.
 SIZES = (
-    "SELECT pg_database_size(current_database()),(SELECT sum(pg_database_size(datname))::bigint "
-    "FROM pg_database WHERE datallowconn AND has_database_privilege(datname,'CONNECT'))"
+    "SELECT pg_database_size(current_database()),(SELECT sum(pg_database_size(oid))::bigint "
+    "FROM pg_database WHERE datallowconn AND has_database_privilege(oid,'CONNECT'))"
 )
 # A disabled node keeps its row (its runs reference it) but no token can match its hash.
 DISABLE = (

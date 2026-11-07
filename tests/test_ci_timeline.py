@@ -170,7 +170,7 @@ def test_timeline_reports_the_processes_starts_and_the_database_peak(tmp_path):
         "pytest start to first test 10.0 s, last test to end 5.0 s",
         "controller started 0.5 s, loaded 1.0 s after pytest start",
         "workers started 2.0-2.5 s, loaded 3.0-3.0 s, collected 7.0-8.0 s after pytest start",
-        "databases: peak 55 (at a worker's session end)",
+        "databases: peak 55 (sampled before each drop)",
     ]
     # Without the processes' starts (not Linux): the line as before.
     write(tmp_path, "main", [{"worker": "main", "kind": "controller", "start": None, "stop": 1}])
@@ -329,3 +329,4 @@ def test_tier1_writes_the_coverage_reports_after_pytest_and_runs_its_checks_at_n
         assert serial < run.index(report) < run.index("\nwait\n")
     assert 'renice -n 19 -p "$BASHPID"' in run
     assert 'span pytest "$start"' in run and 'span check "$start"' in run
+

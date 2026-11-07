@@ -10,8 +10,8 @@ restore: sets every tests/**/*.py's mtime to one fixed time first (a checkout's 
 each run, and pytest and Python keep a .pyc only while its source's mtime and size match; the
 key already covers the content), then unpacks `<key>.tar` when the cache has it, and compiles
 src/ (the tests import proxy_index from there, pytest's `pythonpath`; the rewrite pass otherwise
-writes its bytecode, and every worker would compile it at once). Exit 0 on a hit; 1 on a miss or an unreadable archive, whose files are
-removed again, so the caller runs the rewrite pass.
+writes its bytecode, and every worker would compile it at once). Exit 0 on a hit; 1 on a miss
+or an unreadable archive, whose files are removed again, so the caller runs the rewrite pass.
 save: packs every tests/**/__pycache__/*.pyc into `<key>.tar`, with their count, under a
 temporary name, then renames it into place, so a partial archive is never read (nor one cut
 short later: restore checks the count); keeps the newest KEEP archives.
@@ -89,14 +89,15 @@ def _cached(name):
 def save(root, cache):
     cache.mkdir(parents=True, exist_ok=True)
     target = cache / f"{key(root)}.tar"
-    descriptor, temporary = tempfile.mkstemp(dir=cache, prefix=".tmp-", suffix=".tar")
+    descriptor, temporary = tempfile.mkstemp(dir=cache, prefix=".tmp-", suffix=".part")
     try:
         files = [path for directory in caches(root) for path in sorted(directory.glob("*.pyc"))]
         headers = {COUNT: str(len(files))}
         with (
             os.fdopen(descriptor, "wb") as stream,
-            tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT, pax_headers=headers)
-            as tar,
+            tarfile.open(
+                fileobj=stream, mode="w", format=tarfile.PAX_FORMAT, pax_headers=headers
+            ) as tar,
         ):
             for path in files:
                 tar.add(path, path.relative_to(root).as_posix())
