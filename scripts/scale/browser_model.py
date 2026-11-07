@@ -4,7 +4,8 @@ Browser pulse data does not exist in production yet. BP-VERIFY-2 measured one ne
 (Shifter, US, one host with 12 browsers, the 18:00 UTC slot): 8 targets, 600 page loads, 2.79 MB
 per load, 1.674 GB per network-hour. settings() is that hour's settings file. bundle() writes one
 planned run's bundle through the real runner and seal: the measured tries, the exact outcome
-counts and bytes drawn around the measured mean, its summary marked scale_replay_model.
+counts and bytes drawn around the measured mean, its summary marked scale_replay_model and
+scale_replay (the replay's id).
 browser_step() adds the modelled browser hour to a replay slice: one node per network in the
 browser region, the hour planned by orchestrator/browser.py's planner with these settings given
 in-process (no settings row is written), every bundle uploaded through the in-process node API
@@ -31,6 +32,7 @@ from typing import Any
 import aiohttp
 from cycle_steps import HOUR, Failed, bearer, serve
 from synthetic import apportion
+from target import REPLAY_MARKER
 
 from proxy_index import ProxyConfig, RunConfig, RunOptions, run
 from proxy_index.browser import contracts as bc
@@ -236,6 +238,7 @@ def bundle(run_row: dict, target: str, seed: Any, out: Path) -> Path:
     clock = lambda: start + time.perf_counter() - began  # noqa: E731
     asyncio.run(run(config, sink, RunOptions(transport_factory=transport, wall_clock=clock)))
     summary = json.loads((sink.directory / "summary.json").read_text()) | {MARKER: MODEL}
+    summary[REPLAY_MARKER] = seed  # the replay's id: every run it stores carries it
     (sink.directory / "summary.json").write_text(json.dumps(summary))
     sealed = seal(sink.directory, batch, summary, recorder.settings_sha256, CAMOUFOX, outbox=out)
     return sealed.archive

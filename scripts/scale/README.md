@@ -238,6 +238,9 @@ loads, 2.79 MB per load, 1.674 GB per network-hour.
 checks, the bytes and outcomes of every target, and one planned hour of 2 networks on the test
 database: its rows, and that no settings row changes.
 
+The replay of simulated days in production's database (REPLAY-1, `replay.py`) is described in
+[REPLAY.md](REPLAY.md).
+
 # A scratch schema in production's database (SCALE-SCHEMA-1)
 
 Where no separate database may be created (no `CREATEDB`, no new server), the scripts run in a

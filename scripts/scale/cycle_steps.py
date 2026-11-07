@@ -95,6 +95,25 @@ def run_bucket(moment: datetime, successes: int, errors: int, bins) -> dict:
     return bucket(moment, successes, errors, bins) | extra
 
 
+def daily_buckets(started: datetime, successes, errors, bins) -> list[dict]:
+    """A daily test's 5-minute buckets, latency modelled from the network's bins."""
+    found = []
+    for b, (good, bad) in enumerate(zip(successes, errors, strict=True)):
+        latency = zip(bins, apportion(good, synthetic.WEIGHTS), strict=True)
+        found.append(run_bucket(started + timedelta(minutes=5 * b), good, bad, latency))
+    return found
+
+
+def daily_files(directory: Path, run_id: str, rows, release: str, metadata: dict) -> dict:
+    """A daily test's ips.jsonl.gz and DB-IP files from (ips row, enrichment); the ips entry."""
+    ips = gzip_rows(directory / "ips.jsonl.gz", [row for row, _ in rows])
+    enriched = [row | {"dbip_release": release, "enrichment": place} for row, place in rows]
+    report = gzip_rows(directory / f"enriched-{release}.jsonl.gz", enriched)
+    report |= {"run_id": run_id, "release": {"sha256": release} | metadata}
+    (directory / f"enrichment-{release}.json").write_text(json.dumps(report))
+    return ips
+
+
 def observation(run_id: str, line: str) -> tuple[int, dict]:
     """(IP index, ips.jsonl row) of one of the generator's ip_observations COPY lines."""
     moment, _, ip_id, count, first, last = line.split("\t")
@@ -153,10 +172,22 @@ class Steps:
         body = self.writer.summary(successes, errors, bins, duration, {}, {})
         del body["config_overrides"], body[writer.MARKER]
         finished = (started + timedelta(seconds=duration)).isoformat()
-        body |= {"run_id": run_id, "status": "completed", "target": self.writer.target}
+        body |= {"run_id": run_id, "status": "completed"}
         body |= {"started_at": started.isoformat(), "finished_at": finished, "buckets": buckets}
         body["latency_histogram"] = Histogram(bins).export()
-        return body | {"config": self.writer.config(lane), MARKER: self.model.settings.seed}
+        return body | self.identity(lane)
+
+    def identity(self, lane) -> dict:
+        """A lane's target, config and marker in its runs' summaries."""
+        config = self.writer.config(lane)
+        return {"target": self.writer.target, "config": config, MARKER: self.model.settings.seed}
+
+    def daily_summary(self, run_id: str, lane, started: datetime, buckets, ips, unique) -> dict:
+        """A daily test's summary.json: the run's, with the daily scope, length and marker."""
+        summary = self.summary(run_id, lane, started, len(buckets) * 300 - 1, buckets)
+        summary["config"] |= DAILY_SCOPE | DAILY_LENGTH | {"target_url": summary["target"]["url"]}
+        summary |= {"requested": None, "unique_ips": unique, "stop_reason": "unique_ratio"}
+        return summary | {"artifacts": {"ips": ips}, daily.MARKER: daily.DAILY}
 
     def run_id(self, *parts) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{MARKER}:{self.model.settings.seed}:{parts}"))
@@ -192,29 +223,13 @@ class Steps:
         """summary.json, ips.jsonl.gz and the DB-IP enrichment files of one daily test."""
         lines, successes, _ = self.writer.observations(test)
         rows = [observation(run_id, line) for line in lines]
-        ips = gzip_rows(directory / "ips.jsonl.gz", [row for _, row in rows])
         release, places = self.writer.release(test.day), self.attributes(test)
-        enriched = [row | {"dbip_release": release, "enrichment": places[n]} for n, row in rows]
-        report = gzip_rows(directory / f"enriched-{release}.jsonl.gz", enriched)
-        report |= {"run_id": run_id, "release": {"sha256": release, "synthetic": True}}
-        (directory / f"enrichment-{release}.json").write_text(json.dumps(report))
-        bins, errors = (
-            self.model.latency(test.lane.network),
-            apportion(test.errors, [1] * test.buckets),
-        )
-        buckets = [
-            run_bucket(
-                test.started_at + timedelta(minutes=5 * b),
-                good,
-                bad,
-                zip(bins, apportion(good, synthetic.WEIGHTS), strict=True),
-            )
-            for b, (good, bad) in enumerate(zip(successes, errors, strict=True))
-        ]
-        summary = self.summary(run_id, test.lane, test.started_at, test.buckets * 300 - 1, buckets)
-        summary["config"] |= DAILY_SCOPE | DAILY_LENGTH | {"target_url": self.writer.target["url"]}
-        summary |= {"requested": None, "unique_ips": test.ips, "stop_reason": "unique_ratio"}
-        summary |= {"artifacts": {"ips": ips}, daily.MARKER: daily.DAILY}
+        observed = [(row, places[n]) for n, row in rows]
+        ips = daily_files(directory, run_id, observed, release, {"synthetic": True})
+        errors = apportion(test.errors, [1] * test.buckets)
+        bins = self.model.latency(test.lane.network)
+        buckets = daily_buckets(test.started_at, successes, errors, bins)
+        summary = self.daily_summary(run_id, test.lane, test.started_at, buckets, ips, test.ips)
         (directory / "summary.json").write_text(json.dumps(summary))
 
     def attributes(self, test) -> dict[int, dict]:
@@ -230,7 +245,8 @@ class Steps:
 
     # Step 2: the hour's pulses, through the node API.
 
-    def pulses(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
+    def pulse_nodes(self) -> dict[int, str]:
+        """A node of every network in every region of the data set's countries: id -> token."""
         tokens = {}
         slugs = {self.writer.regions[code][1] for code in self.positions}
         for n, network in enumerate(self.model.settings.networks):
@@ -240,11 +256,22 @@ class Steps:
                     self.args.database, provider=network, product=product, region=slug
                 )
                 tokens[node["node_id"]] = node["token"]
-        part = asyncio.run(self.upload_hour(day, start, tokens))
-        runs = self.conn.cursor(row_factory=dict_row).execute(RUNS, (TARGET, start)).fetchall()
+        return tokens
+
+    def pulses(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
+        part = asyncio.run(self.upload_hour(day, start, self.pulse_nodes()))
+        runs = self.pulse_runs(start)
         part["planned"] = len(runs)
         part["statuses"] = dict(Counter(run["status"] for run in runs))  # the runs' final states
         return part, not any(run["status"] in PENDING for run in runs)
+
+    def pulse_runs(self, start: datetime) -> list[dict]:
+        """The pulse runs of the hour's slot that this driver uploads."""
+        return self.conn.cursor(row_factory=dict_row).execute(RUNS, (TARGET, start)).fetchall()
+
+    def plan_times(self, start: datetime) -> list[datetime]:
+        """The moments pulse_plan runs at in the hour: its start (the generator's hourly slot)."""
+        return [start]
 
     @contextlib.asynccontextmanager
     async def node_api(self, db: Database):
@@ -259,12 +286,12 @@ class Steps:
         """Plan the hour's slot as the scheduler does, then upload its runs at the pulse rate."""
         db = Database(str(self.args.database), size=4)
         try:
-            await batches.pulse_plan(db, start)
+            for moment in self.plan_times(start):
+                await batches.pulse_plan(db, moment)
             # Concurrent first events of a month can race on CREATE TABLE IF NOT EXISTS of
             # the test_events partition; the app shares this pool, which creates it once here.
             await db.ensure_partition("test_events", datetime.now(UTC))
-            runs = self.conn.cursor(row_factory=dict_row).execute(RUNS, (TARGET, start))
-            runs = [run for run in runs.fetchall() if run["status"] in PENDING]
+            runs = [run for run in self.pulse_runs(start) if run["status"] in PENDING]
             async with self.node_api(db) as base, aiohttp.ClientSession() as session:
                 await asyncio.gather(*(work(session, base, token) for token in tokens.values()))
                 return await self.upload_runs(session, base, (day, start), runs, tokens)
@@ -305,16 +332,13 @@ class Steps:
 
     def pulse_archive(self, slot, run: dict) -> bytes:
         """A pulse's run directory as a node uploads it (tar.gz), started at the batch start."""
-        (day, start), country = slot, self.positions[run["country"]]
-        lane = self.model.lane(run["product_id"] - 1, country)
-        errors, rows = self.model.pulse(lane, day, start.hour)
+        lane, errors, rows = self.pulse_geo(slot, run)
         begin = run["start_at"].astimezone(UTC)
         moment = begin.replace(minute=begin.minute - begin.minute % 5, second=0, microsecond=0)
         geo, bins = [], Counter()
         for location, network, completed, successes, ms in rows:
             item = bucket(moment, successes, completed - successes, [(ms, successes)])
-            item |= {"location": self.locations.get(location)}
-            geo.append(item | {"network": self.networks.get(network)})
+            geo.append(item | {"location": location, "network": network})
             bins[ms] += successes
         successes = synthetic.PULSE_REQUESTS - errors
         duration = 30 + run["batch_id"] % 10
@@ -322,15 +346,29 @@ class Steps:
         run_id = self.run_id("pulse", run["batch_id"], run["product_id"])
         summary = self.summary(run_id, lane, begin, duration, buckets)
         summary["config"] |= PULSE_SCOPE | {"requests": synthetic.PULSE_REQUESTS}
-        summary |= {"requested": synthetic.PULSE_REQUESTS, "unique_ips": successes}
+        ips = self.pulse_ips(slot, run, run_id, moment, successes)
+        unique = len({row["ip"] for row in ips}) if ips else successes
+        summary |= {"requested": synthetic.PULSE_REQUESTS, "unique_ips": unique}
         with tempfile.TemporaryDirectory(prefix="scale-pulse-") as temporary:
             directory = Path(temporary, "run")
             directory.mkdir()
-            artifacts = {"ips": gzip_rows(directory / "ips.jsonl.gz", [])}
+            artifacts = {"ips": gzip_rows(directory / "ips.jsonl.gz", ips)}
             artifacts["geo"] = gzip_rows(directory / "geo.jsonl.gz", geo)
             summary |= {"stop_reason": "requests", "artifacts": artifacts}
             (directory / "summary.json").write_text(json.dumps(summary))
             return pack(directory, Path(temporary, "run.tar.gz")).read_bytes()
+
+    def pulse_ips(self, slot, run: dict, run_id: str, moment: datetime, successes: int) -> list:
+        """The ips.jsonl rows of a run: none for a pulse (the generator plans no load wave)."""
+        return []
+
+    def pulse_geo(self, slot, run: dict) -> tuple:
+        """A pulse's lane, timeouts and (location, network, completed, successes, ms) rows."""
+        (day, start), country = slot, self.positions[run["country"]]
+        lane = self.model.lane(run["product_id"] - 1, country)
+        errors, rows = self.model.pulse(lane, day, start.hour)
+        places = self.locations, self.networks
+        return lane, errors, [(places[0].get(a), places[1].get(b), *rest) for a, b, *rest in rows]
 
     # Steps 3 to 5.
 
@@ -363,6 +401,10 @@ class Steps:
         if not self.args.siteapi:
             return {"skipped": "no --siteapi"}, True
         build_id = self.state["current"]["steps"]["calculate"]["parts"][-1]["build_id"]
+        return self.served(build_id), True
+
+    def served(self, build_id) -> dict:
+        """The wait until siteapi (--siteapi) serves build_id, its build timings and peak RSS."""
         deadline, health = time.monotonic() + self.args.siteapi_timeout, {}
         while not (reached := time.monotonic() >= deadline):
             health = healthz(self.args.siteapi)
@@ -374,4 +416,4 @@ class Steps:
         result["unserved"] = len(health.get("unserved") or [])
         if self.args.siteapi_pid:
             result["peak_rss_kb"] = measure.vm_hwm(self.args.siteapi_pid)
-        return result, True
+        return result

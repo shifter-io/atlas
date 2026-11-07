@@ -14,6 +14,7 @@ import json
 import os
 import re
 import runpy
+import signal
 import subprocess
 import sys
 import threading
@@ -163,23 +164,35 @@ def vm_hwm(pid: int) -> int | None:
     return int(found.group(1)) if found else None
 
 
-def run_child(command: list[str], poll: float = 0.5) -> dict:
-    """Run a command (its stdout discarded); its exit code, seconds and peak RSS in kB."""
-    start = time.monotonic()
-    child = subprocess.Popen(command, stdout=subprocess.DEVNULL)
-    peak = 0
+def run_child(command: list[str], poll: float = 0.5, timeout=None, stop=None) -> dict:
+    """Run a command (its stdout discarded); its exit code, seconds and peak RSS in kB. Its process
+    group is killed past `timeout` s or once the Event `stop` is set (`killed`: why)."""
+    start, guarded = time.monotonic(), timeout is not None or stop is not None
+    child = subprocess.Popen(command, stdout=subprocess.DEVNULL, start_new_session=guarded)
+    peak, killed = 0, None
     while True:
         pid, status, usage = os.wait4(child.pid, os.WNOHANG)
         if pid:
             break
+        if guarded and killed is None and (killed := _overdue(start, timeout, stop)):
+            os.killpg(child.pid, signal.SIGKILL)
         peak = max(peak, vm_hwm(child.pid) or 0)
         time.sleep(poll)
     child.returncode = os.waitstatus_to_exitcode(status)
-    return {
+    result = {
         "exit": child.returncode,
         "seconds": round(time.monotonic() - start, 3),
         "peak_rss_kb": max(peak, usage.ru_maxrss),  # ru_maxrss is kB on Linux
     }
+    return result | ({"killed": killed} if killed else {})
+
+
+def _overdue(start: float, timeout, stop) -> str | None:
+    if stop is not None and stop.is_set():
+        return "stopped"
+    if timeout is not None and time.monotonic() - start > timeout:
+        return "timeout"
+    return None
 
 
 def percentiles(values) -> dict:
