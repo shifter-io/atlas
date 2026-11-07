@@ -19,6 +19,7 @@ import contextlib
 import hashlib
 import json
 import random
+import shutil
 import tempfile
 import time
 from dataclasses import dataclass, replace
@@ -172,7 +173,8 @@ def plan(target: str, key: str) -> list[tuple[str | None, int]]:
     codes = [code for code, count in measured.outcomes.items() for _ in range(count)]
     rng.shuffle(codes)
     weights = [rng.randint(50, 150) for _ in codes]
-    return list(zip(codes, apportion(round(measured.mean_mb * MB * len(codes)), weights)))
+    sizes = apportion(round(measured.mean_mb * MB * len(codes)), weights)
+    return list(zip(codes, sizes, strict=True))
 
 
 class ModelTransport:
@@ -262,7 +264,9 @@ def browser_step(steps, day: int, start: datetime, state: dict) -> tuple[dict, b
     nodes = {}
     for n, provider in enumerate(model.settings.networks):
         product = model.formulas[n].get("product", "residential")
-        node = issue_token(database, provider=provider, product=product, region="browser", host=HOST)
+        node = issue_token(
+            database, provider=provider, product=product, region=bc.BROWSER_REGION, host=HOST
+        )
         nodes[node["node_id"]] = node
     networks = [f"{node['provider']}/{node['product']}" for node in nodes.values()]
     done = state.setdefault("uploaded", [])
@@ -284,17 +288,17 @@ class Hour:
     done: list
 
     async def drive(self, text: str, nodes: dict[int, dict]) -> dict:
+        work = Path(tempfile.mkdtemp(prefix="scale-browser-"))
         db = Database(str(self.database), size=4)
         try:
-            with tempfile.TemporaryDirectory(prefix="scale-browser-") as temporary:
-                work = Path(temporary)
-                with local_archive(work / "archive"):
-                    planned = await browser_plan(db, self.start, load(text, work))
-                    await db.ensure_partition("test_events", datetime.now(UTC))
-                    async with serve(self.database, db) as base, aiohttp.ClientSession() as http:
-                        part = await self.upload_all(db, http, base, nodes, work)
+            with local_archive(work / "archive"):
+                planned = await browser_plan(db, self.start, load(text, work))
+                await db.ensure_partition("test_events", datetime.now(UTC))
+                async with serve(self.database, db) as base, aiohttp.ClientSession() as http:
+                    part = await self.upload_all(db, http, base, nodes, work)
         finally:
             await db.close()
+            shutil.rmtree(work, ignore_errors=True)
         return part | {"planned": planned.get("created", 0)}
 
     async def upload_all(self, db, http, base: str, nodes: dict, work: Path) -> dict:
