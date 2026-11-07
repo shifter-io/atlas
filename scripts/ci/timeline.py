@@ -9,9 +9,9 @@ scratch databases and initialising schemas, and the N longest tests with their s
 wall time, and the fixed costs around the tests: pytest's start to the first test and the
 last test to its end (the CI step's `pytest` span), when the workers loaded and finished
 collecting, combining the coverage and each report, and each background check's wall and CPU
-time with its end (from the first test's start). --durations writes each test of at least S seconds (default 1) as {node id:
-seconds}, the format of tests/durations.json (scripts/ci/durations.py builds that one from a
-tier1 run's junit).
+time with its end (from the first test's start). --durations writes each test of at least S
+seconds (default 1) as {node id: seconds}, the format of tests/durations.json
+(scripts/ci/durations.py builds that one from a tier1 run's junit).
 """
 
 import argparse

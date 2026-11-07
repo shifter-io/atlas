@@ -166,7 +166,8 @@ jobs:
         # The virtualenv persists across runs, and uv rebuilds the project only when
         # pyproject.toml changes; reinstall it so scripts (the benchmark,
         # postgres_local.py) import this head's code, not an earlier build.
-        run: uv sync --locked --no-editable --reinstall-package proxy-index --python "$PYTHON_VERSION"
+        # Compiled once here, so the 32 test workers do not each compile the reinstalled package.
+        run: uv sync --locked --no-editable --reinstall-package proxy-index --compile-bytecode --python "$PYTHON_VERSION"
 
       - name: Start a PostgreSQL for this job
         if: env.CODE == 'true'
@@ -192,11 +193,13 @@ jobs:
           }
           # Each background check writes $EV/<name>.log and $EV/<name>.rc, and its wall and
           # CPU time (its processes' user and system seconds) to the timeline; after the
-          # tests, every check with a non-zero status prints its log and fails the step.
+          # tests, every check with a non-zero status prints its log and fails the step. The
+          # checks run at the lowest priority (nice 19), so they never slow the tests.
           background() {
             local name=$1
             shift
             (
+              renice -n 19 -p "$BASHPID" > /dev/null
               rc=0 start=$(date +%s.%N) TIMEFORMAT='%U %S'
               { time "$@" > "$EV/$name.log" 2>&1 || rc=$?; } 2> "$EV/$name.cpu"
               echo "$rc" > "$EV/$name.rc"
@@ -220,28 +223,32 @@ jobs:
 
           # Is any test marked serial? Collected alongside the tests (exit 5: none), so an empty
           # serial set costs nothing; any other status runs the set, which then reports it.
-          ( rc=0; uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+          ( rc=0; nice -n 19 uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
               -m serial > "$EV/serial-collect.log" 2>&1 || rc=$?; echo "$rc" > "$EV/serial-collect" ) &
           collecting=$!
 
           # Every test, database tests included, with branch coverage: one xdist worker per
           # CPU (longest first by tests/durations.json, tests/conftest.py), then the `serial`
           # set alone, appending to the same coverage. The parallel run records its timeline
-          # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step.
-          report=(--cov-report=xml:"$EV/coverage.xml" --cov-report=json:"$EV/coverage.json")
+          # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step. pytest
+          # only combines the coverage; the two reports the gates read are written after it,
+          # at the same time.
           tests=0
           start=$(date +%s.%N)
           CI_TIMELINE=1 uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
-            --cov=proxy_index --cov-branch "${report[@]}" --junitxml="$EV/junit.xml" --durations=25 \
+            --cov=proxy_index --cov-branch --cov-report= --junitxml="$EV/junit.xml" --durations=25 \
             | tee "$EV/pytest.log" || tests=$?
           span pytest "$start"
           serial=0
           wait "$collecting"
           if [ "$(cat "$EV/serial-collect")" != 5 ]; then
             uv run --no-editable pytest -p no:cacheprovider -rs -p no:xdist -m serial \
-              --cov=proxy_index --cov-branch --cov-append "${report[@]}" \
+              --cov=proxy_index --cov-branch --cov-append --cov-report= \
               --junitxml="$EV/junit-serial.xml" --durations=25 | tee -a "$EV/pytest.log" || serial=$?
           fi
+          # diff-cover reads the XML, coverage_gate.py the JSON.
+          background coverage-xml uv run --no-editable coverage xml -q -o "$EV/coverage.xml"
+          background coverage-json uv run --no-editable coverage json -q -o "$EV/coverage.json"
           wait
 
           failed=0
@@ -283,33 +290,6 @@ jobs:
           { echo '```'; python3 scripts/ci/timeline.py "$EV" --top 0; echo '```'; } \
             | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$status"
-
-      - name: MEASURE-ONLY (CI-90-2, removed before merge) import profile of one collection
-        if: always() && env.CODE == 'true'
-        continue-on-error: true
-        run: |
-          start=$(date +%s.%N)
-          uv run --no-editable python -X importtime -m pytest -p no:cacheprovider -p no:xdist \
-            --collect-only -q --cov=proxy_index --cov-branch --cov-report= > /dev/null 2> "$EV/importtime.log" || true
-          echo "collect-only with coverage: $(python3 -c "import time; print(round(time.time() - $start, 1))") s"
-          python3 - "$EV/importtime.log" <<'EOF'
-          import sys
-          rows = []
-          for line in open(sys.argv[1]):
-              if not line.startswith("import time:") or "self [us]" in line:
-                  continue
-              self_us, cumulative, name = line[len("import time:"):].split("|", 2)
-              rows.append((int(cumulative), int(self_us), name.rstrip("\n")[1:]))
-          total = sum(s for _, s, _ in rows)
-          print(f"imports: {len(rows)}, self total {total / 1e6:.2f} s")
-          top = [r for r in rows if not r[2].startswith(" ")]
-          print("top-level imports by cumulative time:")
-          for cumulative, _, name in sorted(top, reverse=True)[:40]:
-              print(f"{cumulative / 1e6:7.3f} s  {name}")
-          print("any import by cumulative time:")
-          for cumulative, _, name in sorted(rows, reverse=True)[:60]:
-              print(f"{cumulative / 1e6:7.3f} s  {name.rstrip()}")
-          EOF
 
       - name: Keep the CI time record and the junit (timing_history.py, durations.py read them)
         if: always() && steps.timing.outcome != 'skipped'
@@ -355,3 +335,61 @@ jobs:
           data=.state/postgres/data
           [ -f "$data/postmaster.pid" ] || exit 0
           "$PG_BIN/pg_ctl" -D "$data" stop -m fast
+
+      - name: MEASURE-ONLY (CI-90-2, removed before merge) collection cold and warm, import profile
+        if: always() && env.CODE == 'true'
+        continue-on-error: true
+        env:
+          COVERAGE_FILE: ${{ runner.temp }}/measure/.coverage
+        run: |
+          m=$RUNNER_TEMP/measure
+          mkdir -p "$m"
+          now() { date +%s.%N; }
+          took() { python3 -c "import sys; print(f'{float(sys.argv[2]) - float(sys.argv[1]):.2f} s')" "$1" "$(now)"; }
+          py=$UV_PROJECT_ENVIRONMENT/bin/python
+          t=$(now); uv run --no-editable python -c pass; echo "uv run python -c pass: $(took "$t")"
+          t=$(now); "$py" -c pass; echo "venv python -c pass: $(took "$t")"
+          t=$(now); "$py" -c 'import proxy_index.cli'; echo "venv python import proxy_index.cli: $(took "$t")"
+          pkg=$("$py" -c 'import os, proxy_index; print(os.path.dirname(proxy_index.__file__))')
+          echo "proxy_index pyc files: $(find "$pkg" -name '*.pyc' | wc -l)"
+          # collect LABEL PYTHON-FLAG PYTEST-ARGS...: one collection of every test, as one worker does.
+          collect() {
+            local label=$1 flag=$2
+            shift 2
+            t=$(now)
+            "$py" $flag -m pytest -p no:cacheprovider -p no:xdist --collect-only -q "$@" \
+              > "$m/$label.out" 2> "$m/$label.err" || true
+            echo "collect $label: $(took "$t"); $(tail -n 1 "$m/$label.out")"
+          }
+          cov=(--cov=proxy_index --cov-branch --cov-report=)
+          collect warm-nocov ""
+          collect warm-cov "" "${cov[@]}"
+          find "$pkg" -name __pycache__ -prune -exec rm -rf {} +
+          collect src-cold-cov "" "${cov[@]}"
+          find tests -name __pycache__ -prune -exec rm -rf {} +
+          collect tests-cold-cov "" "${cov[@]}"
+          find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
+          collect all-cold-nocov ""
+          find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
+          collect all-cold-cov-importtime -X importtime "${cov[@]}"
+          collect warm-cov-importtime -X importtime "${cov[@]}"
+          tail -n 5 "$m/all-cold-cov-importtime.out"
+          python3 - "$m/all-cold-cov-importtime.err" "$m/warm-cov-importtime.err" <<'EOF'
+          import sys
+          for path in sys.argv[1:]:
+              rows = []
+              for line in open(path):
+                  if not line.startswith("import time:") or "self [us]" in line:
+                      continue
+                  self_us, cumulative, name = line[len("import time:"):].split("|", 2)
+                  rows.append((int(cumulative), int(self_us), name.rstrip("\n")[1:]))
+              total = sum(s for _, s, _ in rows)
+              print(f"== {path}: {len(rows)} imports, self total {total / 1e6:.2f} s")
+              top = [r for r in rows if not r[2].startswith(" ")]
+              print("top-level imports by cumulative time:")
+              for cumulative, _, name in sorted(top, reverse=True)[:40]:
+                  print(f"{cumulative / 1e6:7.3f} s  {name}")
+              print("by self time:")
+              for _, self_us, name in sorted(rows, key=lambda r: -r[1])[:40]:
+                  print(f"{self_us / 1e6:7.3f} s  {name.strip()}")
+          EOF

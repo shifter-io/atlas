@@ -88,6 +88,48 @@ def test_timeline_reports_when_each_worker_ended(tmp_path):
     assert timeline["summarize"]([])["ends"] == {}
 
 
+def test_timeline_reports_the_fixed_costs_around_the_tests(tmp_path):
+    scope = {"name": "scope", "user": 40.0, "sys": 2.5}
+    step = [
+        {"worker": "step", "kind": "pytest", "start": 90.0, "stop": 125.0},
+        {"worker": "step", "kind": "check", "start": 90.0, "stop": 150.0} | scope,
+    ]
+    write(tmp_path, "step", step)
+    write(
+        tmp_path,
+        "main",
+        [
+            {"worker": "main", "kind": "combine", "start": 121.0, "stop": 121.5},
+            {"worker": "main", "kind": "xml_report", "start": 121.5, "stop": 124.0},
+        ],
+    )
+    write(
+        tmp_path,
+        "gw0",
+        [
+            {"worker": "gw0", "kind": "collect", "start": 92.0, "stop": 98.0},
+            phase("gw0", "a", "call", 100.0, 120.0),
+        ],
+    )
+    write(tmp_path, "gw1", [{"worker": "gw1", "kind": "collect", "start": 93.5, "stop": 99.0}])
+    timeline = runpy.run_path(str(SCRIPT))
+    fixed = timeline["summarize"](timeline["load"](tmp_path))["fixed"]
+    assert fixed["before"] == 10.0 and fixed["after"] == 5.0
+    assert fixed["collect"] == (2.0, 3.5, 8.0, 9.0)
+    assert fixed["coverage"] == {"combine": 0.5, "xml_report": 2.5}
+    assert fixed["checks"] == {"scope": {"wall": 60.0, "cpu": 42.5, "end": 50.0}}
+    assert timeline["fixed_report"](fixed) == [
+        "pytest start to first test 10.0 s, last test to end 5.0 s",
+        "workers loaded 2.0-3.5 s, collected 8.0-9.0 s after pytest start",
+        "coverage: combine 0.5 s, xml_report 2.5 s",
+        "check scope: wall 60.0 s, cpu 42.5 s, ends at 50.0 s",
+    ]
+    # Without tests: the coverage and the checks, no start or end.
+    empty = timeline["summarize"](step)["fixed"]
+    assert "before" not in empty and empty["checks"]["scope"]["end"] is None
+    assert timeline["fixed_report"](empty) == ["check scope: wall 60.0 s, cpu 42.5 s"]
+
+
 def test_timeline_of_no_tests(tmp_path):
     out = subprocess.run(
         [sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True, check=True
@@ -161,14 +203,16 @@ def test_only_xdist_workers_reorder(monkeypatch, tmp_path):
     assert [item.nodeid for item in items] == ["a"]
 
 
-def run_with_timeline(ev, **env):
-    """Run one fast test of this file in a fresh pytest with CI_TIMELINE=1 and EV=ev."""
+def run_with_timeline(ev, *args, **env):
+    """Run one fast test of this file in a fresh pytest with CI_TIMELINE=1 and EV=ev (without
+    xdist unless `args` ask for it)."""
     inherited = ("PYTEST_XDIST", "CI_TIMELINE", "COV_CORE", "COVERAGE")
     environment = {k: v for k, v in os.environ.items() if not k.startswith(inherited)}
     environment.update(CI_TIMELINE="1", EV=str(ev), **env)
     nodeid = "tests/test_ci_timeline.py::test_chunks_follow_the_worksteal_first_split"
     subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-p", "no:xdist", "-q", nodeid],
+        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", nodeid]
+        + list(args or ("-p", "no:xdist")),
         cwd=SCRIPT.parents[2],
         env=environment,
         capture_output=True,
@@ -177,15 +221,38 @@ def run_with_timeline(ev, **env):
     return nodeid
 
 
+def records(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
 def test_the_timeline_records_each_phase_of_the_test_process(tmp_path):
     nodeid = run_with_timeline(tmp_path)
     (path,) = tmp_path.iterdir()
     assert path.name == "timeline-main.jsonl"
-    records = [json.loads(line) for line in path.read_text().splitlines()]
-    assert [(r["kind"], r["nodeid"], r["outcome"]) for r in records] == [
+    collect, *phases = records(path)
+    assert collect["kind"] == "collect" and collect["start"] <= collect["stop"]
+    assert [(r["kind"], r["nodeid"], r["outcome"]) for r in phases] == [
         (phase, nodeid, "passed") for phase in ("setup", "call", "teardown")
     ]
-    assert all(r["worker"] == "main" and r["start"] <= r["stop"] for r in records)
+    assert all(r["worker"] == "main" and r["start"] <= r["stop"] for r in phases)
+    assert collect["stop"] <= phases[0]["start"]
+
+
+def test_the_xdist_controller_records_only_its_coverage_spans(tmp_path):
+    report = tmp_path / "reports"
+    run_with_timeline(
+        tmp_path,
+        "-n",
+        "1",
+        "--cov=proxy_index",
+        f"--cov-report=json:{report / 'coverage.json'}",
+        COVERAGE_FILE=str(report / ".coverage"),
+    )
+    controller = records(tmp_path / "timeline-main.jsonl")
+    assert [r["kind"] for r in controller] == ["combine", "report", "json_report"]
+    assert all(r["worker"] == "main" and r["start"] <= r["stop"] for r in controller)
+    worker = [r["kind"] for r in records(tmp_path / "timeline-gw0.jsonl")]
+    assert worker == ["collect", "setup", "call", "teardown"]
 
 
 def test_a_pytest_started_by_a_recording_test_does_not_record(tmp_path):
