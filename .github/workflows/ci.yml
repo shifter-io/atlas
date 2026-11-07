@@ -4,7 +4,7 @@
 # queue test compares its merge commit with the queue's base.
 #
 # Runs on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with all
-# its work in parallel there: the build and lint checks in the background and
+# its work in parallel there: the build and lint checks in the background (nice 19) and
 # pytest-xdist on every CPU, each worker with its own databases (copies of its template)
 # in one throwaway PostgreSQL without crash safety (CI-SPEED-1, CI-FAST-2). Then scripts/ci/timing.py writes the 20 slowest tests and the test
 # step's time to the job summary and the ci-timing artifact (90 days, with the junit
@@ -226,12 +226,6 @@ jobs:
               -m serial > "$EV/serial-collect.log" 2>&1 || rc=$?; echo "$rc" > "$EV/serial-collect" ) &
           collecting=$!
 
-          # Every test, database tests included, with branch coverage: one xdist worker per
-          # CPU (longest first by tests/durations.json, tests/conftest.py), then the `serial`
-          # set alone, appending to the same coverage. The parallel run records its timeline
-          # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step. pytest
-          # only combines the coverage; the two reports the gates read are written after it,
-          # at the same time.
           # pytest's assertion-rewrite cache (tests/__pycache__), written once by one collection
           # per CPU of a share of the test files, without coverage: otherwise each worker
           # rewrites every test module itself, traced (a cold collection takes 4 times a warm
@@ -242,6 +236,13 @@ jobs:
             uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
             > "$EV/rewrite.log" 2>&1 || true
           span rewrite "$start"
+
+          # Every test, database tests included, with branch coverage: one xdist worker per
+          # CPU (longest first by tests/durations.json, tests/conftest.py), then the `serial`
+          # set alone, appending to the same coverage. The parallel run records its timeline
+          # ($EV/timeline-*.jsonl) for the per-worker end times in the CI time step. pytest
+          # only combines the coverage; the two reports the gates read are written after it,
+          # at the same time.
           tests=0
           start=$(date +%s.%N)
           CI_TIMELINE=1 uv run --no-editable pytest -p no:cacheprovider -rs -n auto --dist worksteal -m "not serial" \
@@ -344,61 +345,3 @@ jobs:
           data=.state/postgres/data
           [ -f "$data/postmaster.pid" ] || exit 0
           "$PG_BIN/pg_ctl" -D "$data" stop -m fast
-
-      - name: MEASURE-ONLY (CI-90-2, removed before merge) collection cold and warm, import profile
-        if: always() && env.CODE == 'true'
-        continue-on-error: true
-        env:
-          COVERAGE_FILE: ${{ runner.temp }}/measure/.coverage
-        run: |
-          m=$RUNNER_TEMP/measure
-          mkdir -p "$m"
-          now() { date +%s.%N; }
-          took() { python3 -c "import sys; print(f'{float(sys.argv[2]) - float(sys.argv[1]):.2f} s')" "$1" "$(now)"; }
-          py=$UV_PROJECT_ENVIRONMENT/bin/python
-          t=$(now); uv run --no-editable python -c pass; echo "uv run python -c pass: $(took "$t")"
-          t=$(now); "$py" -c pass; echo "venv python -c pass: $(took "$t")"
-          t=$(now); "$py" -c 'import proxy_index.cli'; echo "venv python import proxy_index.cli: $(took "$t")"
-          pkg=$("$py" -c 'import os, proxy_index; print(os.path.dirname(proxy_index.__file__))')
-          echo "proxy_index pyc files: $(find "$pkg" -name '*.pyc' | wc -l)"
-          # collect LABEL PYTHON-FLAG PYTEST-ARGS...: one collection of every test, as one worker does.
-          collect() {
-            local label=$1 flag=$2
-            shift 2
-            t=$(now)
-            "$py" $flag -m pytest -p no:cacheprovider -p no:xdist --collect-only -q "$@" \
-              > "$m/$label.out" 2> "$m/$label.err" || true
-            echo "collect $label: $(took "$t"); $(tail -n 1 "$m/$label.out")"
-          }
-          cov=(--cov=proxy_index --cov-branch --cov-report=)
-          collect warm-nocov ""
-          collect warm-cov "" "${cov[@]}"
-          find "$pkg" -name __pycache__ -prune -exec rm -rf {} +
-          collect src-cold-cov "" "${cov[@]}"
-          find tests -name __pycache__ -prune -exec rm -rf {} +
-          collect tests-cold-cov "" "${cov[@]}"
-          find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
-          collect all-cold-nocov ""
-          find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
-          collect all-cold-cov-importtime "-X importtime" -s "${cov[@]}"
-          collect warm-cov-importtime "-X importtime" -s "${cov[@]}"
-          tail -n 5 "$m/all-cold-cov-importtime.out"
-          python3 - "$m/all-cold-cov-importtime.err" "$m/warm-cov-importtime.err" <<'EOF'
-          import sys
-          for path in sys.argv[1:]:
-              rows = []
-              for line in open(path):
-                  if not line.startswith("import time:") or "self [us]" in line:
-                      continue
-                  self_us, cumulative, name = line[len("import time:"):].split("|", 2)
-                  rows.append((int(cumulative), int(self_us), name.rstrip("\n")[1:]))
-              total = sum(s for _, s, _ in rows)
-              print(f"== {path}: {len(rows)} imports, self total {total / 1e6:.2f} s")
-              top = [r for r in rows if not r[2].startswith(" ")]
-              print("top-level imports by cumulative time:")
-              for cumulative, _, name in sorted(top, reverse=True)[:40]:
-                  print(f"{cumulative / 1e6:7.3f} s  {name}")
-              print("by self time:")
-              for _, self_us, name in sorted(rows, key=lambda r: -r[1])[:40]:
-                  print(f"{self_us / 1e6:7.3f} s  {name.strip()}")
-          EOF
