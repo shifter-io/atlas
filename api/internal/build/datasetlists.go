@@ -14,7 +14,7 @@ import (
 var datasetDimensions = [...]string{"country", "region", "city", "asn", "city_asn"}
 
 // DatasetLists is the dataset file's `lists` (contract K11, DATASET-SIZE-2):
-// in a v4 build, lists[slug][kind][range][dimension] is that network kind's
+// lists[slug][kind][range][dimension] is that network kind's
 // list answer without a query as {"total", "pages", "rows"}: its row count,
 // its page count and its first page (at most PageSize rows, as compact arrays
 // in the order FIELDS.md gives each dimension), byte for byte the values the
@@ -22,7 +22,8 @@ var datasetDimensions = [...]string{"country", "region", "city", "asn", "city_as
 // further page is read from the API. It holds the build's lists (placeIndex,
 // coverageList), whose first pages the build keeps, so writing it reads
 // nothing from the database. Networks and kinds are in snapshot order, the
-// order the all-networks list merges them. Before v4 it is empty ({}).
+// order the all-networks list merges them. Without a snapshot it is empty
+// ({}).
 type DatasetLists struct {
 	networks []*datasetNetwork
 }
@@ -45,7 +46,7 @@ type datasetKind struct {
 // network, in snapshot order.
 func datasetLists(pg *Pages, s *snap.Snapshot, entries []*entry) *DatasetLists {
 	out := &DatasetLists{}
-	if !pg.v4 || s == nil {
+	if s == nil {
 		return out
 	}
 	slugOf := map[string]string{}
@@ -178,7 +179,7 @@ func placeFirst(x *placeIndex, dimension string) datasetList {
 	if x == nil {
 		return out
 	}
-	out.Total, out.Pages = x.count(), (x.count()+PageSize-1)/PageSize
+	out.Total, out.Pages = x.total, (x.total+PageSize-1)/PageSize
 	for _, r := range x.first {
 		out.Rows = append(out.Rows, placeArray(dimension, r))
 	}

@@ -59,12 +59,12 @@ type CoveragePage struct {
 	Rows        []CoverageRow   `json:"rows"`
 }
 
-// addCoverage keeps, in a v4 build, the network's City x ASN list of each
+// addCoverage keeps the network's City x ASN list of each
 // range for its Coverage answer: its headline group's list, as the coverage
 // evidence reads it.
 func (pg *Pages) addCoverage(e *entry, kind string, nr *netRead) {
 	p := e.Snap[kind]
-	if !pg.v4 || p == nil || nr.err != nil {
+	if p == nil || nr.err != nil {
 		return
 	}
 	for _, r := range Ranges {

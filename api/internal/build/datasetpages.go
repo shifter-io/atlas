@@ -12,7 +12,7 @@ import (
 // values). Keys are "/v1/networks", "/v1/rankings?range=<r>",
 // "/v1/networks/<slug>?kind=<kind>" and
 // "/v1/networks/<slug>/chart?kind=<kind>&range=<r>" (the all-networks answer
-// under slug and kind "all"), and in a v4 build "/v1/countries" and
+// under slug and kind "all"), "/v1/countries" and
 // "/v1/countries/<CC>" (contract K11: the country pages are pages of the
 // site's design). The network lists' first pages are the dataset's lists
 // (DatasetLists); further pages, the answers with q and the region and city
@@ -22,11 +22,9 @@ type DatasetPages map[string]any
 // datasetPages is pg's page answers by request.
 func datasetPages(pg *Pages) DatasetPages {
 	out := DatasetPages{"/v1/networks": pg.Networks}
-	if pg.v4 {
-		out["/v1/countries"] = pg.Countries
-		for cc, ans := range pg.Country {
-			out["/v1/countries/"+cc] = ans
-		}
+	out["/v1/countries"] = pg.Countries
+	for cc, ans := range pg.Country {
+		out["/v1/countries/"+cc] = ans
 	}
 	for rangeID, ans := range pg.Rankings {
 		out["/v1/rankings?range="+rangeID] = ans

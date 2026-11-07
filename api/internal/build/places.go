@@ -8,7 +8,6 @@ import (
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // listKey names one precomputed place list: scope is "slug/kind" for a
@@ -19,14 +18,13 @@ type placeList struct{ rangeID, dimension string }
 
 // networkAnswer sums a network's product groups of one category: its 30-day
 // days, and per range its totals and every place list in order (the top
-// countries go into the answer, every list into the pages). In a v4 build the
-// lists are merged from the groups' network lists, which it also gives per
-// range (srcs); the groups are network summaries.
+// countries go into the answer, every list into the pages). The lists are
+// merged from the groups' network lists, which it also gives per range
+// (srcs); the groups are network summaries.
 func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*snap.Product,
 	nr *netRead) (ans *NetworkAnswer, lists map[placeList][]PlaceRow, srcs map[string][]placeSource) {
-	v4 := nr.v4()
-	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups, v4),
-		RequestedCountries: requestedCountries(groups, v4), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
+	ans = &NetworkAnswer{GeneratedAt: generatedAt, Network: head, Kind: kind, ProductGroups: productGroups(groups),
+		RequestedCountries: requestedCountries(groups), Days: days(groups), Ranges: map[string]*RangeTotals{}, Stats: map[string]*RangeStats{},
 		Reviews: []model.UserReview{}, CommunityRuns: []model.CommunityRun{}, Changelog: []model.ChangeEvent{}, Tape: []model.TapeEvent{}}
 	lists, srcs = map[placeList][]PlaceRow{}, map[string][]placeSource{}
 	for _, r := range Ranges {
@@ -40,25 +38,18 @@ func networkAnswer(generatedAt string, head NetworkRow, kind string, groups []*s
 }
 
 // rangeAnswer is a network's totals of one range, its place lists by
-// dimension and, in a v4 build, the network lists they are merged from.
+// dimension and the network lists they are merged from.
 func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRead,
 	rangeID string) (*RangeTotals, map[string][]PlaceRow, []placeSource) {
-	row, v4 := nr.row, nr.v4()
 	t := &RangeTotals{Requests: 0, Successes: 0, IpsSum: nan, UniqueIps: nan, LatencyP50: nan, LatencyP90: nan, LatencyP99: nan,
 		Lists: map[string]int{}}
-	merged := map[string]map[string]*PlaceRow{}
-	for _, d := range placeDimensions {
-		merged[d] = map[string]*PlaceRow{}
-	}
 	var srcs []placeSource
 	for _, p := range groups {
 		w := p.Window(rangeID)
 		t.Requests, t.Successes = addNum(t.Requests, w.Metrics.Completed), addNum(t.Successes, w.Metrics.Successes)
 		t.IpsSum = addNum(t.IpsSum, ipsOf(w))
-		if l := netListOf(row, p, w); l != nil {
+		if l := netListOf(nr.row, p, w); l != nil {
 			srcs = append(srcs, placeSource{list: l, scale: breakdownScale(w), network: head.Slug, name: head.Name, kind: kind})
-		} else if !v4 {
-			mergeWindow(merged, row, p, w)
 		}
 	}
 	if len(groups) == 0 {
@@ -72,11 +63,7 @@ func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRe
 	}
 	rows := map[string][]PlaceRow{}
 	for _, d := range placeDimensions {
-		if v4 {
-			rows[d] = nr.merge(srcs, d)
-		} else {
-			rows[d] = sortedRows(merged[d])
-		}
+		rows[d] = nr.merge(srcs, d)
 		t.Lists[d] = len(rows[d])
 	}
 	countries := rows["country"]
@@ -85,12 +72,9 @@ func rangeAnswer(head NetworkRow, kind string, groups []*snap.Product, nr *netRe
 	return t, rows, srcs
 }
 
-// productGroups is how many product groups the groups stand for: a v4
-// network summary for its criteria.groups (one when it names none).
-func productGroups(groups []*snap.Product, v4 bool) int {
-	if !v4 {
-		return len(groups)
-	}
+// productGroups is how many product groups the groups stand for: a network
+// summary for its criteria.groups (one when it names none).
+func productGroups(groups []*snap.Product) int {
 	n := 0
 	for _, p := range groups {
 		n++
@@ -102,16 +86,12 @@ func productGroups(groups []*snap.Product, v4 bool) int {
 }
 
 // requestedCountries is the groups' requested countries, upper case and
-// sorted: a v4 network summary's own list, else each group's country.
-func requestedCountries(groups []*snap.Product, v4 bool) []string {
+// sorted: each network summary's own list.
+func requestedCountries(groups []*snap.Product) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, p := range groups {
-		ccs := []string{model.SV(p.Criteria.Country)}
-		if v4 {
-			ccs = p.Criteria.RequestedCountries
-		}
-		for _, cc := range ccs {
+		for _, cc := range p.Criteria.RequestedCountries {
 			if cc = strings.ToUpper(cc); cc != "" && !seen[cc] {
 				seen[cc] = true
 				out = append(out, cc)
@@ -149,28 +129,6 @@ func days(groups []*snap.Product) []DayRow {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Day < out[j].Day })
 	return out
-}
-
-// mergeWindow adds a group window's place rows: a list the snapshot capped is
-// read whole from the typed rows when they are complete (capturedPlaceRows).
-func mergeWindow(merged map[string]map[string]*PlaceRow, row *store.SnapshotRow, p *snap.Product, w snap.Window) {
-	typed := capturedPlaceRows(row, p, w)
-	for _, d := range placeDimensions {
-		if rows, ok := typed[d]; ok {
-			for i := range rows {
-				r := rows[i].PlaceRow(d)
-				mergePlace(merged[d], d, PlaceRow{CountryCode: r.CountryCode, Country: r.Country, RegionCode: r.RegionCode,
-					Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: scaledIps(w, Num(r.Ips)), Requests: Num(r.Completed),
-					Successes: Num(r.Successes), LatencyP50: Num(r.P50)}, Num(r.Asn))
-			}
-			continue
-		}
-		for _, r := range w.Breakdowns[d] {
-			mergePlace(merged[d], d, PlaceRow{CountryCode: r.CountryCode, Country: r.Country, RegionCode: r.RegionCode,
-				Region: r.Region, City: r.City, AsnName: r.Name, IpsSum: scaledIps(w, r.Ips), Requests: r.Completed, Successes: r.Successes,
-				LatencyP50: r.P50}, r.Asn)
-		}
-	}
 }
 
 func mergePlace(into map[string]*PlaceRow, dimension string, r PlaceRow, asn Num) {
@@ -270,16 +228,6 @@ func addCountryRows(by map[string]map[string][]PlaceRow, rangeID string, rows []
 	}
 }
 
-func (pg *Pages) addCityRows(rangeID string, rows []PlaceRow, head NetworkRow, kind string) {
-	for _, r := range tagged(rows, head, kind) {
-		k := listKey{scope: "country/" + model.SV(r.CountryCode), rangeID: rangeID, dimension: "city"}
-		if pg.lists[k] == nil {
-			pg.lists[k] = &placeIndex{}
-		}
-		pg.lists[k].all = append(pg.lists[k].all, r)
-	}
-}
-
 // countryAnswers ranks every country's network rows within each category
 // (IPs: more is better; latency: lower is better) and builds the index.
 func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]PlaceRow) {
@@ -296,7 +244,7 @@ func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]P
 			ans.Ranges[r.ID] = rows
 			ans.Cities[r.ID] = 0
 			if l := pg.lists[listKey{"country/" + cc, r.ID, "city"}]; l != nil {
-				ans.Cities[r.ID] = l.count()
+				ans.Cities[r.ID] = l.total
 			}
 			for _, row := range rows {
 				if ans.Country == nil {
@@ -313,11 +261,6 @@ func (pg *Pages) countryAnswers(generatedAt string, by map[string]map[string][]P
 			}
 		}
 		pg.Countries.Countries = append(pg.Countries.Countries, idx)
-	}
-	for k, l := range pg.lists {
-		if rows := l.all; strings.HasPrefix(k.scope, "country/") {
-			sort.Slice(rows, func(i, j int) bool { return placeLess(rows[i], rows[j]) })
-		}
 	}
 	sort.Slice(pg.Countries.Countries, func(i, j int) bool {
 		a, b := pg.Countries.Countries[i], pg.Countries.Countries[j]
@@ -366,7 +309,7 @@ type PlacePage struct {
 
 // List is a page of a list; ok is false for an unknown list. The query
 // keeps rows whose code, names or ASN contain every token (case-insensitive);
-// pages count from 1. A v4 build's first page without a query is the one it
+// pages count from 1. The first page without a query is the one the build
 // computed; another page merges the list's rows (placeIndex), read from the
 // database unless cached.
 func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimension, query string, page int) (*PlacePage, bool, error) {
@@ -381,7 +324,7 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 		return out, true, nil
 	}
 	rows := l.first
-	if l.srcs == nil || page > 1 || len(tokens) > 0 {
+	if page > 1 || len(tokens) > 0 {
 		var err error
 		if rows, err = l.rows(ctx, tokens); err != nil {
 			return nil, false, err
@@ -399,7 +342,7 @@ func (pg *Pages) List(ctx context.Context, generatedAt, scope, rangeID, dimensio
 
 func (pg *Pages) known(scope, dimension string) bool {
 	if cc, ok := strings.CutPrefix(scope, "country/"); ok {
-		return (dimension == "city" || dimension == "region" && pg.v4) && pg.Country[cc] != nil
+		return (dimension == "city" || dimension == "region") && pg.Country[cc] != nil
 	}
 	return pg.Network[scope] != nil && validDimension(dimension)
 }

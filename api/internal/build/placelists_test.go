@@ -220,7 +220,7 @@ func netSource(t *testing.T, slug string, cities map[string][2]int64) placeSourc
 // and by p50 among networks of the same kind; an unknown key has no page.
 func TestACityPageRanksTheNetworksInIt(t *testing.T) {
 	t.Parallel()
-	pg := &Pages{v4: true, sources: map[placeList][]placeSource{{"30d", "city"}: {
+	pg := &Pages{sources: map[placeList][]placeSource{{"30d", "city"}: {
 		netSource(t, "a", map[string][2]int64{"Berlin": {10, 300}, "Potsdam": {99, 10}}),
 		netSource(t, "b", map[string][2]int64{"Berlin": {30, 100}}),
 		netSource(t, "c", map[string][2]int64{"Berlin": {20, 200}})}}}

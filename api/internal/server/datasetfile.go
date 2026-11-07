@@ -320,7 +320,7 @@ func (s *Server) serveDatasetFile(w http.ResponseWriter, r *http.Request, v *Ver
 func (s *Server) serveDataset(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	if v == nil || v.Dataset == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	h := w.Header()
@@ -341,7 +341,7 @@ var datasetName = regexp.MustCompile(`^dataset-[0-9a-f]{64}\.json$`)
 func (s *Server) serveFile(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	if v == nil || v.Dataset == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	name := r.PathValue("name")

@@ -4,7 +4,9 @@
 // read. Requests only ever look up bytes in the current Version (an atomic
 // pointer), so they never touch the database; the refresh loop builds the
 // next Version in the background and swaps it in. A failed build leaves the
-// previous Version serving and is reported by /healthz.
+// previous Version serving and is reported by /healthz, except a current
+// build older than payload v4 (store.ErrBeforeV4): nothing serves then, and
+// /healthz gives BeforeV4Reason.
 package server
 
 import (
@@ -49,6 +51,10 @@ type Version struct {
 	NextData time.Time
 }
 
+// BeforeV4Reason is /healthz's reason while the current build is older than
+// payload v4, which the API does not serve.
+const BeforeV4Reason = "calculation older than payload v4: recalculate"
+
 // Source loads inputs; the database in production, fixtures in tests.
 type Source interface {
 	Fingerprint(ctx context.Context) (store.Fingerprint, error)
@@ -92,8 +98,10 @@ type Server struct {
 		lastError   string
 		lastErrorAt time.Time
 		lastCheck   time.Time
-		builds      int
-		failures    int
+		// reason is why nothing serves (BeforeV4Reason), empty otherwise.
+		reason   string
+		builds   int
+		failures int
 		// unserved is the serving version's pages that a published product
 		// should have and that do not answer 200 (unservedPages).
 		unserved []string
@@ -164,6 +172,12 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	v, err := s.rebuild(ctx, cur)
 	if err != nil {
 		s.fail(err)
+		if errors.Is(err, store.ErrBeforeV4) {
+			s.current.Store(nil)
+			s.state.Lock()
+			s.state.reason = BeforeV4Reason
+			s.state.Unlock()
+		}
 		return false, err
 	}
 	s.current.Store(v)
@@ -214,7 +228,7 @@ func (s *Server) rebuilt(v *Version) {
 	unserved := s.unservedPages(v)
 	s.state.Lock()
 	s.state.builds++
-	s.state.lastError = ""
+	s.state.lastError, s.state.reason = "", ""
 	s.state.unserved = unserved
 	gapsChanged := !slices.Equal(s.state.siteGaps, v.Result.SiteGaps)
 	s.state.siteGaps = v.Result.SiteGaps
@@ -235,7 +249,11 @@ func (s *Server) fail(err error) {
 	s.state.lastErrorAt = time.Now()
 	s.state.failures++
 	s.state.Unlock()
-	s.log.Error("cache refresh failed; serving the previous version", "error", err)
+	msg := "cache refresh failed; serving the previous version"
+	if errors.Is(err, store.ErrBeforeV4) {
+		msg = "cache refresh failed; serving nothing: " + BeforeV4Reason
+	}
+	s.log.Error(msg, "error", err)
 }
 
 // build reads and renders a new Version, reusing prev's bodies whose bytes
@@ -447,7 +465,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, v *Version, body 
 func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string) {
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	body, ok := v.Static[path]
@@ -461,7 +479,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string
 func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	for k := range r.URL.Query() {
@@ -581,7 +599,7 @@ var errNeedDB = errors.New("events window does not cover this filter")
 func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	f, err := ParseEventFilter(r.URL.Query())
@@ -618,72 +636,4 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		v.events.Add(key, body)
 	}
 	s.write(w, r, v, body)
-}
-
-// Health is /healthz.
-type Health struct {
-	Status      string     `json:"status"`
-	Version     uint64     `json:"version"`
-	BuiltAt     *time.Time `json:"builtAt"`
-	BuildMs     int64      `json:"buildMs"`
-	LoadMs      int64      `json:"loadMs"`
-	AssembleMs  int64      `json:"assembleMs"`
-	RenderMs    int64      `json:"renderMs"`
-	Fingerprint string     `json:"fingerprint"`
-	GeneratedAt string     `json:"generatedAt"`
-	Providers   int        `json:"providers"`
-	LastCheck   *time.Time `json:"lastCheck"`
-	LastError   *string    `json:"lastError"`
-	LastErrorAt *time.Time `json:"lastErrorAt"`
-	Builds      int        `json:"builds"`
-	Failures    int        `json:"failures"`
-	SearchCache int        `json:"searchCacheEntries"`
-	EventsCache int        `json:"eventsCacheEntries"`
-	// Unserved lists the pages a published product's network should have
-	// that do not answer 200; any makes the status degraded.
-	Unserved []string `json:"unserved"`
-	// SiteGaps lists the site tables (or columns) the database lacks, served
-	// as empty; informational, the status stays ok (`siteapi migrate` adds them).
-	SiteGaps []string `json:"siteGaps"`
-	// Binary is the source revision this siteapi was built from.
-	Binary Binary `json:"binary"`
-}
-
-func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
-	v := s.current.Load()
-	s.state.Lock()
-	h := Health{Status: "ok", Builds: s.state.builds, Failures: s.state.failures, Unserved: append([]string{}, s.state.unserved...),
-		SiteGaps: append([]string{}, s.state.siteGaps...), Binary: BinaryInfo()}
-	if len(h.Unserved) > 0 {
-		h.Status = "degraded"
-	}
-	if !s.state.lastCheck.IsZero() {
-		t := s.state.lastCheck
-		h.LastCheck = &t
-	}
-	if s.state.lastError != "" {
-		e, t := s.state.lastError, s.state.lastErrorAt
-		h.LastError, h.LastErrorAt = &e, &t
-		h.Status = "degraded"
-	}
-	s.state.Unlock()
-	status := http.StatusOK
-	if v == nil {
-		h.Status = "starting"
-		status = http.StatusServiceUnavailable
-	} else {
-		t := v.BuiltAt
-		h.Version, h.BuiltAt, h.BuildMs, h.Fingerprint = v.ID, &t, v.BuildTime.Milliseconds(), v.Fingerprint
-		h.LoadMs, h.AssembleMs, h.RenderMs = v.LoadTime.Milliseconds(), v.AssembleTime.Milliseconds(), v.RenderTime.Milliseconds()
-		h.GeneratedAt, h.Providers = v.Result.Dataset.GeneratedAt, len(v.Result.Dataset.Providers)
-		h.SearchCache, h.EventsCache = v.search.Len(), v.events.Len()
-	}
-	body, _ := Marshal(h)
-	hd := w.Header()
-	hd.Set("Content-Type", "application/json; charset=utf-8")
-	hd.Set("Cache-Control", CacheNone)
-	w.WriteHeader(status)
-	if r.Method != http.MethodHead {
-		w.Write(body) //nolint:errcheck
-	}
 }
