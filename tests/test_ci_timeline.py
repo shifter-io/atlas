@@ -330,3 +330,22 @@ def test_tier1_writes_the_coverage_reports_after_pytest_and_runs_its_checks_at_n
     assert 'renice -n 19 -p "$BASHPID"' in run
     assert 'span pytest "$start"' in run and 'span check "$start"' in run
 
+
+def test_only_the_first_xdist_worker_traces_its_collection(monkeypatch):
+    def tracer(*args):
+        return tracer
+
+    traced = []
+    for worker in ("main", "gw0", "gw7"):
+        monkeypatch.setattr(helpers, "WORKER", worker)
+        monkeypatch.setattr(sys, "gettrace", lambda: tracer)
+        settrace = []
+        monkeypatch.setattr(sys, "settrace", settrace.append)
+        hook = conftest.pytest_collection(None)
+        next(hook)
+        with pytest.raises(StopIteration) as done:
+            hook.send("collected")
+        assert done.value.value == "collected"
+        traced.append(settrace)
+    # gw7 collects without a tracer and gets it back after; the others keep it throughout.
+    assert traced == [[], [], [None, tracer]]

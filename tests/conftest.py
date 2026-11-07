@@ -24,9 +24,13 @@ Shared templates: the process that runs the session names the run (helpers.SHARE
 its xdist workers inherit) and drops the templates the workers share at its end
 (tests/sweep_prefix.py builds them).
 
-Scratch databases: `helpers.drop_databases` only queues its drops, for one dropper thread per
-process (each xdist worker), so a test's teardown never waits for a drop; each process waits for
-the rest at its session end, after its session fixtures.
+Untraced collection: every xdist worker collects every test, so runs the same imports and
+module-level code; only gw0 records their coverage, the others collect without a tracer (an
+untraced collection takes about 60% of a traced one), and the combined coverage is the same.
+
+Scratch databases: `helpers.drop_databases` only queues its drops, for one dropper process per
+test process (tests/dropper.py), so a test's teardown never waits for a drop; each process waits
+for the rest at its session end, after its session fixtures.
 
 No coverage: a test marked `no_cover` runs without a tracer. pytest-cov's marker alone only
 stops its own coverage, and in an xdist worker that hands tracing back to the coverage it
@@ -102,6 +106,16 @@ def pytest_collection_modifyitems(config, items):
 def pytest_runtest_call(item):
     # trylast: inside pytest-cov's own no_cover wrapper, so after its pause, before its resume.
     if not item.get_closest_marker("no_cover"):
+        return (yield)
+    with helpers.untraced():
+        return (yield)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_collection(session):
+    # Every xdist worker collects the same tests, so runs the same imports and module code: gw0
+    # (the first to start) records their coverage, the others collect untraced, which is faster.
+    if helpers.WORKER in ("main", "gw0"):
         return (yield)
     with helpers.untraced():
         return (yield)

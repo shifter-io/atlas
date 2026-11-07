@@ -1,106 +1,90 @@
-"""CI-90-6: a test's teardown queues its scratch databases' drops for a dropper thread."""
+"""CI-90-6: a test's teardown queues its scratch databases' drops for a dropper process."""
 
+import io
 import json
-import threading
 
 import conftest
+import dropper
 import helpers
 import psycopg
 import pytest
 from test_storage import admin_credentials
 
 
-class Connection:
-    """A fake admin connection: records each statement and its thread, answers a count."""
+class Process:
+    """A fake dropper process: keeps what it is sent, exits with `code`."""
 
-    def __init__(self, log, admin, release):
-        self.log, self.admin, self.release = log, admin, release
+    def __init__(self, code=0, errors=""):
+        self.stdin, self.stderr, self.code = io.StringIO(), io.StringIO(errors), code
+        self.stdin.close = lambda: setattr(self, "sent", self.stdin.getvalue())
 
-    def __enter__(self):
-        self.release.wait(5)
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def execute(self, statement, *args):
-        text = statement if isinstance(statement, str) else statement.as_string(None)
-        self.log.append((self.admin["user"], threading.current_thread().name, text))
-        return self
-
-    def fetchone(self):
-        return (42,)
+    def wait(self):
+        self.returncode = self.code
+        return self.code
 
 
 @pytest.fixture
-def connections(monkeypatch):
-    """The statements the dropper runs; it waits for `release` before each connection."""
-    log, release = [], threading.Event()
-    monkeypatch.setattr(helpers, "DROPPER", None)
-    monkeypatch.setattr(helpers, "DROPS", [])
-    monkeypatch.setattr(helpers, "TIMELINE", False)
-    monkeypatch.setattr(
-        helpers.psycopg, "connect", lambda autocommit, **admin: Connection(log, admin, release)
-    )
-    yield log, release
-    release.set()
-    helpers.drop_queued()
+def spawned(monkeypatch):
+    """The fake dropper processes queue starts, with the arguments each one was given."""
+    started = []
+
+    def popen(args, **kwargs):
+        started.append((args, kwargs, Process(*outcome)))
+        return started[-1][2]
+
+    outcome = []
+    monkeypatch.setattr(dropper, "PROCESS", None)
+    monkeypatch.setattr(dropper, "_POPEN", popen)
+    return started, outcome
 
 
-def test_a_drop_runs_in_the_dropper_thread_and_the_session_end_waits(connections):
-    log, release = connections
+def test_a_drop_is_sent_to_one_dropper_and_the_session_end_waits(spawned):
+    started, _ = spawned
     helpers.drop_databases({"user": "a"}, ["one", "two"])
-    helpers.drop_databases({"user": "b"}, ["three"])
-    # The teardown returned before any drop ran.
-    assert log == [] and len(helpers.DROPS) == 2
-    release.set()
+    helpers.drop_databases({"user": "b"}, ("three",))
+    ((args, kwargs, process),) = started
+    assert args[1:] == [str(dropper.Path(dropper.__file__).resolve())]
+    assert kwargs["stdin"] is dropper.subprocess.PIPE
     helpers.drop_queued()
-    assert helpers.DROPPER is None and helpers.DROPS == []
-    assert [(user, text) for user, _, text in log] == [
-        ("a", 'DROP DATABASE "one" WITH (FORCE)'),
-        ("a", 'DROP DATABASE "two" WITH (FORCE)'),
-        ("b", 'DROP DATABASE "three" WITH (FORCE)'),
+    assert [json.loads(line) for line in process.sent.splitlines()] == [
+        {"admin": {"user": "a"}, "names": ["one", "two"]},
+        {"admin": {"user": "b"}, "names": ["three"]},
     ]
-    assert {thread for _, thread, _ in log} == {"drop-databases_0"}
-    # Nothing queued: nothing to wait for; a later drop starts a new thread.
+    assert dropper.PROCESS is None
+    # Nothing queued: nothing to wait for; a later drop starts a new dropper.
     helpers.drop_queued()
     helpers.drop_databases({"user": "a"}, ["four"])
-    helpers.drop_queued()
-    assert log[-1][2] == 'DROP DATABASE "four" WITH (FORCE)'
+    assert len(started) == 2
 
 
-def test_the_timeline_samples_the_database_count_before_each_drop(
-    connections, monkeypatch, tmp_path
-):
-    log, release = connections
-    monkeypatch.setenv("EV", str(tmp_path))
-    monkeypatch.setattr(helpers, "TIMELINE", True)
-    release.set()
-    helpers.drop_databases({"user": "a"}, ["one", "two"])
-    helpers.drop_queued()
-    assert [text for _, _, text in log][0] == "SELECT count(*) FROM pg_database"
-    path = tmp_path / f"timeline-{helpers.WORKER}.jsonl"
-    count, span = (json.loads(line) for line in path.read_text().splitlines())
-    assert count["kind"] == "databases" and count["count"] == 42
-    assert span["kind"] == "drop_database" and span["databases"] == 2
+def test_a_failed_dropper_fails_the_session_end(spawned):
+    started, outcome = spawned
+    outcome[:] = [1, "dropping ['lost']: refused\n"]
+    helpers.drop_databases({"user": "a"}, ["lost"])
+    with pytest.raises(dropper.DropError, match=r"exit 1\): dropping \['lost'\]: refused"):
+        helpers.drop_queued()
+    assert dropper.PROCESS is None
 
 
-def test_a_failed_drop_fails_the_session_end_after_the_others(connections, monkeypatch):
-    log, release = connections
-    release.set()
+def test_the_dropper_drops_each_line_and_reports_every_failure(capsys):
+    dropped = []
 
-    def connect(autocommit, **admin):
+    def drop(admin, names):
         if admin["user"] == "broken":
             raise psycopg.OperationalError("refused")
-        return Connection(log, admin, release)
+        dropped.append((admin["user"], names))
 
-    monkeypatch.setattr(helpers.psycopg, "connect", connect)
-    helpers.drop_databases({"user": "broken"}, ["lost"])
-    helpers.drop_databases({"user": "a"}, ["kept"])
-    with pytest.raises(psycopg.OperationalError, match="refused"):
-        helpers.drop_queued()
-    assert [text for _, _, text in log] == ['DROP DATABASE "kept" WITH (FORCE)']
-    assert helpers.DROPS == []
+    lines = [
+        json.dumps({"admin": {"user": user}, "names": names}) + "\n"
+        for user, names in (("broken", ["lost"]), ("a", ["one", "two"]), ("broken", ["x"]))
+    ]
+    assert dropper.serve(lines, drop) == 1
+    assert dropped == [("a", ["one", "two"])]
+    assert capsys.readouterr().err.splitlines() == [
+        "dropping ['lost']: refused",
+        "dropping ['x']: refused",
+    ]
+    assert dropper.serve(lines[1:2], drop) == 0
 
 
 def test_the_session_end_waits_for_the_drops_after_the_session_fixtures(monkeypatch):
@@ -113,13 +97,23 @@ def test_the_session_end_waits_for_the_drops_after_the_session_fixtures(monkeypa
     assert conftest.pytest_sessionfinish.pytest_impl["trylast"] is True
 
 
-def test_a_queued_database_is_dropped_by_the_session_end(monkeypatch):
+def test_a_queued_database_is_dropped_by_the_session_end(monkeypatch, tmp_path):
     admin = admin_credentials()
-    monkeypatch.setattr(helpers, "DROPPER", None)
-    monkeypatch.setattr(helpers, "DROPS", [])
-    name = helpers.scratch_database(admin)
-    helpers.drop_databases(admin, [name])
+    monkeypatch.setattr(dropper, "PROCESS", None)
+    monkeypatch.setenv("EV", str(tmp_path))
+    monkeypatch.setenv("CI_TIMELINE", "1")
+    names = [helpers.scratch_database(admin) for _ in range(2)]
+    helpers.drop_databases(admin, names)
     helpers.drop_queued()
-    query = "SELECT count(*) FROM pg_database WHERE datname=%s"
+    query = "SELECT count(*) FROM pg_database WHERE datname = ANY(%s)"
     with psycopg.connect(**admin, autocommit=True) as conn:
-        assert conn.execute(query, (name,)).fetchone()[0] == 0
+        assert conn.execute(query, (names,)).fetchone()[0] == 0
+    # The dropper's own timeline: the database count before the drop, then the drop.
+    path = tmp_path / f"timeline-{helpers.WORKER}.jsonl"
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    count, span = (r for r in records if r["kind"] in ("databases", "drop_database"))
+    assert count["count"] >= 2 and span["databases"] == 2
+    # A drop that fails (the databases are gone) fails the session end.
+    helpers.drop_databases(admin, names[:1])
+    with pytest.raises(dropper.DropError, match="does not exist"):
+        helpers.drop_queued()
