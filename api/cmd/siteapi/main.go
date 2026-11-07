@@ -146,7 +146,8 @@ func serve(args []string) error {
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
 	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
 		FilesDir: f.filesDir})
-	if _, err := srv.Refresh(ctx, true); err != nil {
+	// A build older than payload v4 serves nothing, but /healthz says why.
+	if _, err := srv.Refresh(ctx, true); err != nil && !errors.Is(err, store.ErrBeforeV4) {
 		return fmt.Errorf("initial build: %w", err)
 	}
 	go srv.Run(ctx)

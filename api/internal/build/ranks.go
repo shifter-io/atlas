@@ -6,7 +6,6 @@ import (
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
 // rankGroup is who a product window is ranked against: measured products of
@@ -124,25 +123,6 @@ func rankOf(v Num, peers []Num, higherIsBetter bool) model.Rank {
 		}
 	}
 	return r
-}
-
-// capturedPlaceRows is, per place list the snapshot capped, the build's typed
-// rows of that list when their count is the list's recorded full count (as
-// store/longtail.go restores lists). Other lists are used as published.
-func capturedPlaceRows(s *store.SnapshotRow, p *snap.Product, w snap.Window) map[string][]store.ListRow {
-	if s == nil || !p.ProductID.OK() || !w.Period.Hours.OK() {
-		return nil
-	}
-	l := s.Places[store.PlaceWindow{Product: int64(p.ProductID), Cohort: p.Cohort, Hours: int64(w.Period.Hours)}]
-	out := map[string][]store.ListRow{}
-	for _, dimension := range placeDimensions {
-		list := l.Rows(dimension)
-		n, recorded := w.BreakdownEntries[dimension]
-		if recorded && len(w.Breakdowns[dimension]) < n && len(list) == n {
-			out[dimension] = list
-		}
-	}
-	return out
 }
 
 // placeKeyOf is a row's key in a network's place lists: the country code

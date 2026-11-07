@@ -4,7 +4,9 @@
 // read. Requests only ever look up bytes in the current Version (an atomic
 // pointer), so they never touch the database; the refresh loop builds the
 // next Version in the background and swaps it in. A failed build leaves the
-// previous Version serving and is reported by /healthz.
+// previous Version serving and is reported by /healthz, except a current
+// build older than payload v4 (store.ErrBeforeV4): nothing serves then, and
+// /healthz gives BeforeV4Reason.
 package server
 
 import (
@@ -49,6 +51,10 @@ type Version struct {
 	NextData time.Time
 }
 
+// BeforeV4Reason is /healthz's reason while the current build is older than
+// payload v4, which the API does not serve.
+const BeforeV4Reason = "calculation older than payload v4: recalculate"
+
 // Source loads inputs; the database in production, fixtures in tests.
 type Source interface {
 	Fingerprint(ctx context.Context) (store.Fingerprint, error)
@@ -92,8 +98,10 @@ type Server struct {
 		lastError   string
 		lastErrorAt time.Time
 		lastCheck   time.Time
-		builds      int
-		failures    int
+		// reason is why nothing serves (BeforeV4Reason), empty otherwise.
+		reason   string
+		builds   int
+		failures int
 		// unserved is the serving version's pages that a published product
 		// should have and that do not answer 200 (unservedPages).
 		unserved []string
@@ -164,6 +172,12 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 	v, err := s.rebuild(ctx, cur)
 	if err != nil {
 		s.fail(err)
+		if errors.Is(err, store.ErrBeforeV4) {
+			s.current.Store(nil)
+			s.state.Lock()
+			s.state.reason = BeforeV4Reason
+			s.state.Unlock()
+		}
 		return false, err
 	}
 	s.current.Store(v)
@@ -214,7 +228,7 @@ func (s *Server) rebuilt(v *Version) {
 	unserved := s.unservedPages(v)
 	s.state.Lock()
 	s.state.builds++
-	s.state.lastError = ""
+	s.state.lastError, s.state.reason = "", ""
 	s.state.unserved = unserved
 	gapsChanged := !slices.Equal(s.state.siteGaps, v.Result.SiteGaps)
 	s.state.siteGaps = v.Result.SiteGaps
@@ -403,6 +417,18 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// unavailable answers 503: nothing serves yet, or, while the current build
+// is older than payload v4, its reason.
+func (s *Server) unavailable(w http.ResponseWriter) {
+	s.state.Lock()
+	msg := s.state.reason
+	s.state.Unlock()
+	if msg == "" {
+		msg = "cache is not built yet"
+	}
+	writeError(w, http.StatusServiceUnavailable, msg)
+}
+
 func writeError(w http.ResponseWriter, status int, msg string) {
 	body, _ := Marshal(map[string]string{"error": msg})
 	h := w.Header()
@@ -447,7 +473,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request, v *Version, body 
 func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string) {
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	body, ok := v.Static[path]
@@ -461,7 +487,7 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, path string
 func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	for k := range r.URL.Query() {
@@ -581,7 +607,7 @@ var errNeedDB = errors.New("events window does not cover this filter")
 func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	f, err := ParseEventFilter(r.URL.Query())
@@ -635,10 +661,12 @@ type Health struct {
 	LastCheck   *time.Time `json:"lastCheck"`
 	LastError   *string    `json:"lastError"`
 	LastErrorAt *time.Time `json:"lastErrorAt"`
-	Builds      int        `json:"builds"`
-	Failures    int        `json:"failures"`
-	SearchCache int        `json:"searchCacheEntries"`
-	EventsCache int        `json:"eventsCacheEntries"`
+	// Reason is why nothing serves: BeforeV4Reason, else null.
+	Reason      *string `json:"reason"`
+	Builds      int     `json:"builds"`
+	Failures    int     `json:"failures"`
+	SearchCache int     `json:"searchCacheEntries"`
+	EventsCache int     `json:"eventsCacheEntries"`
 	// Unserved lists the pages a published product's network should have
 	// that do not answer 200; any makes the status degraded.
 	Unserved []string `json:"unserved"`
@@ -666,12 +694,17 @@ func (s *Server) serveHealth(w http.ResponseWriter, r *http.Request) {
 		h.LastError, h.LastErrorAt = &e, &t
 		h.Status = "degraded"
 	}
+	reason := s.state.reason
 	s.state.Unlock()
 	status := http.StatusOK
-	if v == nil {
+	switch {
+	case v == nil && reason != "":
+		h.Status, h.Reason = "unavailable", &reason
+		status = http.StatusServiceUnavailable
+	case v == nil:
 		h.Status = "starting"
 		status = http.StatusServiceUnavailable
-	} else {
+	default:
 		t := v.BuiltAt
 		h.Version, h.BuiltAt, h.BuildMs, h.Fingerprint = v.ID, &t, v.BuildTime.Milliseconds(), v.Fingerprint
 		h.LoadMs, h.AssembleMs, h.RenderMs = v.LoadTime.Milliseconds(), v.AssembleTime.Milliseconds(), v.RenderTime.Milliseconds()
