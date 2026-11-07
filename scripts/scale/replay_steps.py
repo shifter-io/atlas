@@ -7,6 +7,7 @@ import gzip
 import json
 import math
 import tempfile
+import time
 from collections import defaultdict, namedtuple
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -137,12 +138,14 @@ class ReplaySteps(Steps):
     def daily(self, day: int, start: datetime, step: dict) -> tuple[dict, bool]:
         done, failures = step.setdefault("ingested", []), []
         unestimated = step.setdefault("not_estimated", [])
+        timings = step.setdefault("test_seconds", [])  # each stored test's ingest and estimate
         tests = slice_tests(Path(self.args.slices), start.hour)
         for test in tests:
             network, country = test["network"], test["country"]
             run_id = self.run_id("daily", day, start.hour, network, country)
             if run_id in done:
                 continue
+            began = time.monotonic()
             try:  # both idempotent: a retry ingests again (a no-op), then estimates
                 with tempfile.TemporaryDirectory(prefix="scale-replay-") as temporary:
                     self.directory(test, run_id, start, Path(temporary))
@@ -156,6 +159,7 @@ class ReplaySteps(Steps):
                 failures.append(f"{network} {country}: {exc}"[:300])
                 continue
             done.append(run_id)
+            timings.append(round(time.monotonic() - began, 3))
         part = {"tests": len(tests), "stored": len(done), "failed": len(failures)}
         return part | {"not_estimated": len(unestimated), "failures": failures[:20]}, not failures
 

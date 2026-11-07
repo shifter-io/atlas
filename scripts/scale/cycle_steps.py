@@ -390,7 +390,7 @@ class Steps:
             prefix = ["-m"] if self.pg_stat else [str(MEASURE), "trace", str(trace)]
             result = measure.run_child([sys.executable, *prefix, *cli, "--publish"])
             if trace.exists():
-                result["statements"] = json.loads(trace.read_text())
+                result["statements"] = measure.top(json.loads(trace.read_text()))
         if result["exit"]:
             raise Failed(f"calculate exited with {result['exit']}")
         build = self.conn.execute("SELECT build_id FROM current_calculation").fetchone()
