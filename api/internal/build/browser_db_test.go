@@ -29,7 +29,7 @@ func browserBuild(t *testing.T, withBrowser bool) *build.Result {
 	}
 	db := testdb.New(t)
 	db.Exec(t, testscale.BrowserTargetsSQL())
-	db.Publish(t, snapshot)
+	db.PublishV4(t, snapshot)
 	return buildFrom(t, db)
 }
 
@@ -216,8 +216,10 @@ func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 
 // The snapshot methodology's target_groups marks the sources even before a
 // browser run is measured: no browser entry, yet the cards stay eight.
-func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
-	t.Parallel()
+// withTargetGroups is the every-request fixture whose methodology groups
+// the browser sources under their target, without browser entries.
+func withTargetGroups(t *testing.T) []byte {
+	t.Helper()
 	snapshot, err := os.ReadFile(repoFile(t, "fixtures", "measured", "snapshot-every-request.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -227,9 +229,14 @@ func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc["methodology"].(map[string]any)["settings"].(map[string]any)["target_groups"] = map[string]any{testscale.GroupTarget: testscale.GroupSources()}
+	return []byte(jsonOf(t, doc))
+}
+
+func TestTheMethodologyMarksTheSourcesBeforeAnyBrowserRun(t *testing.T) {
+	t.Parallel()
 	db := testdb.New(t)
 	db.Exec(t, testscale.BrowserTargetsSQL())
-	db.Publish(t, []byte(jsonOf(t, doc)))
+	db.PublishV4(t, withTargetGroups(t))
 	res := buildFrom(t, db)
 	cards := 0
 	for _, x := range res.Dataset.Targets {

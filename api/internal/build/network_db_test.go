@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"sort"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -33,13 +33,25 @@ var (
 
 const fixtureCohort = "7a5d84127c244707dc0e"
 
-// statementLog records every statement a connection runs and the list ids
-// of its list row reads.
+// statementLog records every statement a connection runs, the list ids
+// of its list row reads and those whose network row counts it reads.
 type statementLog struct {
-	mu      sync.Mutex
-	sql     []string
-	listIDs []int64
+	mu              sync.Mutex
+	sql             []string
+	listIDs, counts []int64
 }
+
+// networkCountsSQL is the store's statement reading network lists' row
+// counts: the lists a v4 load reads (store.NetLists).
+var networkCountsSQL = func() string {
+	for _, s := range store.Statements {
+		if s.Name == "load.network_counts" {
+			sql, _ := s.Query(&store.ExplainParams{})
+			return sql
+		}
+	}
+	return ""
+}()
 
 func (s *statementLog) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
 	s.mu.Lock()
@@ -48,6 +60,9 @@ func (s *statementLog) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.T
 	if strings.Contains(d.SQL, "calculated_list_rows") && len(d.Args) > 0 {
 		if ids, ok := d.Args[0].([]int64); ok {
 			s.listIDs = append(s.listIDs, ids...)
+			if d.SQL == networkCountsSQL {
+				s.counts = append(s.counts, ids...)
+			}
 		}
 	}
 	return ctx
@@ -257,48 +272,43 @@ func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	return out
 }
 
+// oneGroupGolden is the golden of TestANetworkOfOneGroupAnswersAsTheGroup:
+// the answers of the v3 build of its data, but for the documented id, cohort
+// and schema version strings (TestTheNetworkGoldensAreTheV3Answers).
+const oneGroupGolden = "network-one-group"
+
 // TestANetworkOfOneGroupAnswersAsTheGroup is regression and equality cases
 // 1 and 2 (API-SUM-1): a v4 build whose networks have one product group each
-// gives every answer, byte for byte, the v3 build of the same data gives, but
-// for the documented id, cohort and schema version strings; it reads neither
-// product parts nor group lists, only its network lists. A v3 build read
-// afterwards reads both again and answers as before.
+// gives every answer, byte for byte, the golden holds (the v3 build of the
+// same data's, but for the documented id, cohort and schema version
+// strings), and its City x ASN lists are that build's coverage evidence; it
+// reads neither product parts nor group lists, only its network lists.
 func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
 	c := db.Conn(t)
 	defer c.Close(context.Background())
 	nc := writeNetLists(t, c)
-	v3, v4, groups := netPayloads(t, c, nc)
-	same := func() { db.Exec(t, "UPDATE calculated_snapshots SET content_hash = 'same'") }
+	_, v4, groups := netPayloads(t, c, nc)
 	cache := store.NewLists()
-	db.PublishParts(t, v3, groups, nil)
-	same()
-	fromV3, log3 := loadLogged(t, db, cache)
-	if !log3.reads("calculated_snapshot_parts") || !subset(log3.listIDs, nc.groupLists) || cache.Fetched != 9 {
-		t.Errorf("the v3 build: parts read %v, list ids %v, %d lists fetched; want its parts and its 9 group lists", log3.reads("calculated_snapshot_parts"), log3.listIDs, cache.Fetched)
-	}
 	db.PublishParts(t, v4, groups, nil)
-	same()
+	db.Exec(t, "UPDATE calculated_snapshots SET content_hash = 'same'")
 	fromV4, log4 := loadLogged(t, db, cache)
 	if read := slices.Compact(slices.Sorted(slices.Values(log4.listIDs))); log4.reads("calculated_snapshot_parts") ||
-		!subset(log4.listIDs, nc.netLists) || len(read) != 9 || cache.Fetched != 9 {
-		t.Errorf("the v4 build: parts read %v, list ids %v (want the 9 network lists only), group lists fetched %d more",
-			log4.reads("calculated_snapshot_parts"), log4.listIDs, cache.Fetched-9)
+		!subset(log4.listIDs, nc.netLists) || len(read) != 9 || cache.Fetched != 0 {
+		t.Errorf("the v4 build: parts read %v, list ids %v (want the 9 network lists only), %d group lists fetched",
+			log4.reads("calculated_snapshot_parts"), log4.listIDs, cache.Fetched)
 	}
-	want, err := testscale.AsV4Answers(netAnswers(t, fromV3), groups)
-	if err != nil {
-		t.Fatal(err)
-	}
-	compareAnswers(t, "v4", want, netAnswers(t, fromV4))
-	checkCoverageRows(t, fromV3, fromV4)
-	db.PublishParts(t, v3, groups, nil)
-	same()
-	again, log := loadLogged(t, db, cache)
-	if !log.reads("calculated_snapshot_parts") || cache.Fetched != 18 {
-		t.Errorf("the v3 build again: parts read %v, %d group lists fetched, want 18", log.reads("calculated_snapshot_parts"), cache.Fetched)
-	}
-	compareAnswers(t, "v3 again", netAnswers(t, fromV3), netAnswers(t, again))
+	golden(t, oneGroupGolden, oneGroupAnswers(t, fromV4))
+}
+
+// oneGroupAnswers is a v4 build's answers (netAnswers) and its City x ASN
+// lists (cityAsnLists).
+func oneGroupAnswers(t *testing.T, res *build.Result) map[string][]byte {
+	t.Helper()
+	out := netAnswers(t, res)
+	maps.Copy(out, cityAsnLists(t, res))
+	return out
 }
 
 func compareAnswers(t *testing.T, name string, want, got map[string][]byte) {
@@ -371,11 +381,11 @@ func withoutV4Dataset(t *testing.T, b []byte) []byte {
 	return out
 }
 
-// checkCoverageRows: the v4 file's City x ASN list of each network, kind and
-// range is the v3 build's coverage evidence rows with IPs, as the evidence
-// writes them (the v4 rows add the country latency rank and peers): their
-// count, and the first page of them, most IPs first (ties in list order).
-func checkCoverageRows(t *testing.T, v3, v4 *build.Result) {
+// cityAsnLists is a v4 build's coverage evidence: the dataset file's City x
+// ASN list of each network, kind and range, by "city_asn <slug> <kind>
+// <range>", as its row count and first page, each row with the evidence's
+// fields (the list adds the country latency rank and peers).
+func cityAsnLists(t testing.TB, res *build.Result) map[string][]byte {
 	t.Helper()
 	var doc struct {
 		Lists map[string]map[string]map[string]map[string]struct {
@@ -383,42 +393,35 @@ func checkCoverageRows(t *testing.T, v3, v4 *build.Result) {
 			Rows  [][]json.RawMessage `json:"rows"`
 		} `json:"lists"`
 	}
-	b, err := server.Marshal(v4.Dataset)
+	b, err := server.Marshal(res.Dataset)
 	if err == nil {
 		err = json.Unmarshal(b, &doc)
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := 0
-	for _, p := range v3.Dataset.Providers {
-		for kind, byRange := range p.CoverageEvidence {
-			for rangeID, rows := range byRange {
-				var with []model.CoverageRow
-				for _, r := range rows {
-					if r.Ips.OK() && r.Ips > 0 {
-						with = append(with, r)
-					}
+	out := map[string][]byte{}
+	for slug, kinds := range doc.Lists {
+		for kind, ranges := range kinds {
+			for rangeID, lists := range ranges {
+				l, ok := lists["city_asn"]
+				if !ok {
+					continue
 				}
-				sort.SliceStable(with, func(i, j int) bool { return with[i].Ips > with[j].Ips })
-				var want, got []string
-				for _, r := range with[:min(len(with), build.PageSize)] {
-					want = append(want, string(must(json.Marshal(r))))
-				}
-				l := doc.Lists[p.Slug][kind][rangeID]["city_asn"]
+				var rows []string
 				for _, r := range l.Rows {
-					got = append(got, string(must(json.Marshal(r[:9]))))
+					rows = append(rows, string(must(json.Marshal(r[:min(len(r), 9)]))))
 				}
-				if !slices.Equal(got, want) || l.Total != len(with) {
-					t.Errorf("%s %s %s: v4 City x ASN rows %v of %d, v3 evidence %v of %d", p.Slug, kind, rangeID, got, l.Total, want, len(with))
-				}
-				n += len(got)
+				out[fmt.Sprintf("city_asn %s %s %s", slug, kind, rangeID)] = coverageAnswer(l.Total, rows)
 			}
 		}
 	}
-	if n == 0 {
-		t.Error("no City x ASN rows compared")
-	}
+	return out
+}
+
+// coverageAnswer is a City x ASN list's row count and first page.
+func coverageAnswer(total int, rows []string) []byte {
+	return fmt.Appendf(nil, `{"total":%d,"rows":[%s]}`, total, strings.Join(rows, ","))
 }
 
 func must(b []byte, err error) []byte {

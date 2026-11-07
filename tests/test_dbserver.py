@@ -90,6 +90,8 @@ def test_check_reports_the_gaps_and_its_statements_close_them(server):
     assert {"shared_buffers", "work_mem"} <= set(report["settings"])
     assert report["pg_stat_statements_preloaded"] is False
     assert {r["name"] for r in report["roles"]} >= set(roles)
+    # PostgreSQL's default: PUBLIC creates temporary tables, so no `temporary` gap.
+    assert report["access"]["runtime_temporary"] is True
     owners = {t["name"]: t["owner"] for t in report["partitioned"]}
     calculated = {"calculated_snapshot_parts"}
     assert owners == {f"public.{name}": roles.admin for name in PARENTS | calculated}
@@ -186,6 +188,43 @@ def test_check_reports_missing_function_rights_and_its_statements_close_them(ser
         assert conn.execute("SELECT summary FROM test_run_details").fetchall() == []
         assert conn.execute("SELECT metrics FROM scope_details").fetchall() == []
         assert conn.execute("SELECT dbcheck_new()").fetchone() == (7,)
+
+
+@pytest.mark.parametrize("granted_by", ["superuser", "admin"])
+def test_check_reports_a_missing_temporary_privilege_and_its_statement_closes_it(
+    server, granted_by
+):
+    """The production state: TEMPORARY revoked from PUBLIC, so ingest cannot make its tables."""
+    roles, files = server.roles, server.files
+    database = sql.Identifier(server.superuser["dbname"])
+    runtime, admin = sql.Identifier(roles.runtime), sql.Identifier(roles.admin)
+    with dbserver.connect(files["superuser"], autocommit=True) as conn:
+        for grantee in (sql.SQL("PUBLIC"), runtime):
+            conn.execute(
+                sql.SQL("REVOKE TEMPORARY ON DATABASE {} FROM {}").format(database, grantee)
+            )
+        if granted_by == "admin":
+            conn.execute(
+                sql.SQL("GRANT TEMPORARY ON DATABASE {} TO {} WITH GRANT OPTION").format(
+                    database, admin
+                )
+            )
+    with dbserver.connect(files[roles.runtime]) as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege, match="temporary tables"):
+            conn.execute("CREATE TEMP TABLE incoming_ips (ip text)")
+    report = check(files["superuser"], roles)
+    assert report["access"]["runtime_temporary"] is False
+    kinds = [g["kind"] for g in report["gaps"]]
+    assert kinds.index("schema") + 1 == kinds.index("temporary")
+    gap = {g["kind"]: g for g in report["gaps"]}["temporary"]
+    name = server.superuser["dbname"]
+    assert gap["statements"] == [f'GRANT TEMPORARY ON DATABASE "{name}" TO "{roles.runtime}";']
+    assert gap["run_as"] == granted_by
+
+    apply(server, report["gaps"])
+    assert check(files["superuser"], roles)["gaps"] == []
+    with dbserver.connect(files[roles.runtime], autocommit=True) as conn:
+        conn.execute("CREATE TEMP TABLE incoming_ips (ip text)")
 
 
 def test_analyze_reports_a_lock_timeout_and_a_database_without_the_tables(server, databases):

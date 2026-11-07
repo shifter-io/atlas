@@ -187,7 +187,7 @@ func TestMeasuredTotalsCountOnlyTheMeasuredNetwork(t *testing.T) {
 func publishedBuild(t *testing.T, snapshot []byte) *build.Result {
 	t.Helper()
 	db := catalogued(t)
-	db.Publish(t, snapshot)
+	db.PublishV4(t, snapshot)
 	res := buildFrom(t, db)
 	var measured *model.Provider
 	for _, p := range res.Dataset.Providers {
