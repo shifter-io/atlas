@@ -50,6 +50,16 @@ SCALE-RUN-1 does. Days must be generated in order; a day already done is skipped
   database with `search_path` exactly `proxy_scale` ("A scratch schema", below; `target.py`).
 - It refuses a database holding any `test_runs` row it did not write (its runs carry the summary
   key `scale_generator`), and a storage schema other than this framework's.
+- **The owner's go (REPLAY-RUN-1 (#614) only).** The 7-day replay may write to production's own
+  database, `proxy_reviews`, with `--owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"`
+  (`target.refusal(conn, owner_go=...)`). It is accepted only when the database is `proxy_reviews`,
+  the date is not in the future (a run resumed on a later day reuses the same go), and the database
+  holds no `test_runs` row without the replay's summary key `scale_replay`. The accepted go, the
+  database, the role and the UTC time go to stderr and into the replay's state and report. Without
+  the go every target but `proxy_scale` is refused as before; `generate.py` and `cycle.py` take no
+  go and keep refusing `proxy_reviews`. Check it read-only with
+  `target.py check --database <toml> --owner-go "<go>"` (exit 2 on a refusal). The owner removes
+  the replay's data before launch (LAUNCH-WIPE (#615)).
 - A day commits its shared rows first (partitions, the DB-IP release, the pulse batches), then each
   network's rows in its own transaction; the settings row records each finished network, so an
   interrupted step resumes with the networks the day lacks. Networks share no IP, run, pool or
