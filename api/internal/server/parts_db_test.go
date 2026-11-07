@@ -1,71 +1,23 @@
 package server
 
 import (
-	"context"
 	"crypto/sha256"
-	"fmt"
 	"os"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/build"
-	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
-// answers loads the database's current build, renders it and returns the
-// SHA-256 of every answer: each static one, the dataset, the details and
-// pages the per-page answers come from, and the given answers rendered on
-// request (status and body). The content hash and build time are set to one
-// value, so two builds of the same payload compare.
+// answers is the SHA-256 of every answer of the database's current build
+// (renderedAnswers).
 func answers(t *testing.T, db *testdb.DB, id int64, pages []string) map[string][32]byte {
 	t.Helper()
-	defer runtime.GC()
-	db.Exec(t, "UPDATE calculated_snapshots SET content_hash='same' WHERE build_id=$1", id)
-	ctx := context.Background()
-	pool, err := store.OpenReadOnly(ctx, db.DSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	in, err := store.Load(ctx, pool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in.Snapshot == nil || in.Snapshot.BuildID != id {
-		t.Fatalf("read %+v, want build %d", in.Snapshot, id)
-	}
-	res, err := build.Build(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
-	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
-	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := map[string][32]byte{"dataset": sha256.Sum256(fileBytes(t, v.Dataset))}
-	for p, r := range v.Static {
-		out[p] = sha256.Sum256(r.Identity)
-	}
-	for name, part := range map[string]any{"details": res.Details, "pages": res.Pages} {
-		b, err := Marshal(part)
-		if err != nil {
-			t.Fatal(err)
-		}
+	out := map[string][32]byte{}
+	for name, b := range renderedAnswers(t, db, id, pages, asBuilt) {
 		out[name] = sha256.Sum256(b)
-	}
-	srv := New(&fakeSource{}, Options{})
-	srv.current.Store(v)
-	h := srv.Handler()
-	for _, path := range pages {
-		rec := get(h, path)
-		out["GET "+path] = sha256.Sum256(fmt.Appendf(nil, "%d %s", rec.Code, rec.Body.Bytes()))
 	}
 	return out
 }

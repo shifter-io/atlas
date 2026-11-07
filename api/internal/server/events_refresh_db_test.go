@@ -35,7 +35,7 @@ var eventQueries = []string{"/v1/events", "/v1/events?limit=500", "/v1/events?li
 	"/v1/events?category=census", "/v1/events?kind=pulse_down&limit=500", "/v1/events?kind=pulse_down,latency_rise&limit=50",
 	"/v1/events?since=2026-11-02T00:20:00Z&limit=500", "/v1/events?since=2026-11-01T23:59:00Z&category=pulse&limit=500"}
 
-// API-CACHE-2 against the database: with 1, 2,000 (the in-memory window) and
+// API-CACHE-2 against the database (the v1 fixture as a v4 build): with 1, 2,000 (the in-memory window) and
 // 2,501 events (the window cut, older notable rows held past it), an
 // events-only change refreshes without a full load, keeps every other answer's
 // Rendered, and answers every events query byte for byte like a full build of
@@ -48,7 +48,7 @@ func TestEventAnswersAfterAnEventsOnlyRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.Publish(t, snap)
+	db.PublishV4(t, snap)
 	pool, err := store.OpenReadOnly(ctx, db.DSN)
 	if err != nil {
 		t.Fatal(err)
