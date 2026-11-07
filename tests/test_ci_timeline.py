@@ -274,7 +274,7 @@ def test_tier1_writes_the_coverage_reports_after_pytest_and_runs_its_checks_at_n
     assert len(pytest_runs) == 2
     # pytest only combines the coverage; both reports the gates read come after the last run.
     assert run.count("--cov-report= ") == 2 and "--cov-report=xml" not in run
-    serial = run.index("--junitxml=\"$EV/junit-serial.xml\"")
+    serial = run.index('--junitxml="$EV/junit-serial.xml"')
     for kind in ("xml", "json"):
         report = f'coverage {kind} -q -o "$EV/coverage.{kind}"'
         assert serial < run.index(report) < run.index("\nwait\n")

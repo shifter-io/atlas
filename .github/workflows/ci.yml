@@ -380,8 +380,8 @@ jobs:
           find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
           collect all-cold-nocov ""
           find tests "$pkg" -name __pycache__ -prune -exec rm -rf {} +
-          collect all-cold-cov-importtime "-X importtime" "${cov[@]}"
-          collect warm-cov-importtime "-X importtime" "${cov[@]}"
+          collect all-cold-cov-importtime "-X importtime" -s "${cov[@]}"
+          collect warm-cov-importtime "-X importtime" -s "${cov[@]}"
           tail -n 5 "$m/all-cold-cov-importtime.out"
           python3 - "$m/all-cold-cov-importtime.err" "$m/warm-cov-importtime.err" <<'EOF'
           import sys
