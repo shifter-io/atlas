@@ -229,18 +229,23 @@ def build(inputs, config, method_id, build_id, previous):
         prev_products=previous_products(previous, as_of),
         sets=sets,
     )
-    # Each product's groups together, so its geo rows are read once (inputs.GeoGroups).
+    _measure(step, groups)
+    fleets, overlaps = _fleet_rows(step, sets)
+    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
+    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
+    return _payload(step, fleets, overlaps)
+
+
+def _measure(step, groups):
+    """Measure every group (product_windows.measure()), each product's groups together so its
+    geo rows are read once (inputs.GeoGroups), and order step.fleet_groups as before."""
     by_product = defaultdict(list)
     for key in groups:
         by_product[key[0]].append(key)
     for keys in by_product.values():
         for key in keys:
             product_windows.measure(step, key, groups[key])
-    _in_group_order(fleet_groups, groups)
-    fleets, overlaps = _fleet_rows(step, sets)
-    # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
-    fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
-    return _payload(step, fleets, overlaps)
+    _in_group_order(step.fleet_groups, groups)
 
 
 def _in_group_order(fleet_groups, groups):

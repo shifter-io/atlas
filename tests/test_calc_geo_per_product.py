@@ -54,7 +54,7 @@ def test_bucket_rows_reference_their_bucket_and_share_their_run(tmp_path):
     config, _ = load(lenient_policy(tmp_path))
     found = calculator._group_inputs([run], buckets, (), config, (), 30)
     (rows,) = found.buckets.values()
-    assert [r.bucket for r in rows] == buckets and all(r.bucket is b for r, b in zip(rows, buckets))
+    assert all(r.bucket is b for r, b in zip(rows, buckets, strict=True))
     assert all(r.run is rows[0].run for r in rows)
     assert {r["slot"] for r in rows} == {AT.replace(minute=0)} and rows[0]["country"] == "DE"
     assert rows[0]["census_batches"] == [] and rows[0]["during_census"] is False
