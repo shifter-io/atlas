@@ -1,0 +1,1415 @@
+{
+  "schema": "proxy-index-best-hours",
+  "schema_version": 1,
+  "network": "oxylabs",
+  "rule": "the UTC clock hour with the most unique live IPs (an IP answered at least once in it); ties: more request rows, then the earlier hour; a borrowed formula takes the hour most other networks chose for the country (ties: more of their unique IPs, then the earlier hour)",
+  "hours": {
+    "00": ["AI", "BB", "BQ", "BR", "CM", "CW", "DM", "DO", "GD", "GP", "LR", "MS", "NG", "PR", "TG", "TO", "TT", "UY", "VE", "VI"],
+    "01": ["BM", "CA", "CO", "EC", "PE", "PF", "TL", "US", "VC", "WS"],
+    "02": ["AG", "AW", "BL", "BZ", "CR", "GY", "HN", "JM", "KN", "MY", "PA", "PG", "PW", "SB", "SV", "VG", "WF"],
+    "03": ["CG", "FJ", "GA", "YT"],
+    "04": ["ID", "KE", "KH", "MH", "MX"],
+    "05": [],
+    "06": ["AS", "GU", "NP", "PK", "TZ"],
+    "07": ["AF", "DJ", "IR", "MN", "MW", "NE", "NZ", "SA", "SD", "TM", "ZA", "ZW"],
+    "08": ["BI", "ET", "LA", "SO", "SY", "TH", "YE"],
+    "09": ["AU", "BD", "NA", "NU"],
+    "10": ["BT", "BW", "GM", "GN", "KG", "LK", "MG", "MM", "SL", "SS", "TD", "TJ"],
+    "11": ["CD", "CF", "CI", "IL", "IN", "LB", "LY", "MU", "PH", "PS", "QA", "SZ", "TN", "UZ"],
+    "12": ["AZ", "BH", "BN", "KR", "KZ", "MR", "RW", "TW", "UG"],
+    "13": ["AL", "AM", "AX", "BO", "CV", "EG", "JP", "LS", "ML", "MZ", "NR", "SG", "TV", "VN"],
+    "14": ["DZ", "HK", "HT", "MO", "PY", "ZM"],
+    "15": ["BJ", "GH", "KW", "OM", "RU", "SN"],
+    "16": ["AE", "BF", "FK", "LC", "MP", "MV", "RE", "SC", "SR"],
+    "17": ["AO", "BY", "ES", "FR", "GG", "GW", "IM", "IQ", "JO", "LT", "MD", "PT", "TC"],
+    "18": ["AD", "BG", "CL", "CY", "EE", "FI", "GE", "GR", "KY", "LU", "LV", "RO", "RS", "SE", "SK", "SM", "TR", "UA"],
+    "19": ["BE", "CU", "DK", "GB", "HU", "KM", "LI", "NO"],
+    "20": ["AR", "AT", "BA", "CH", "CN", "CZ", "DE", "GT", "HR", "IE", "IS", "IT", "JE", "MC", "MF", "MQ", "MT", "NI", "NL", "PL", "SI"],
+    "21": ["BS", "FO", "GF", "GI", "GL", "MA", "ME", "MK", "ST", "SX"],
+    "22": ["FM", "KI", "PM"],
+    "23": ["GQ", "TK", "VU"]
+  },
+  "countries": {
+    "AD": {
+      "hour": 18,
+      "unique_ips": 94,
+      "basis": "own",
+      "donors": 0
+    },
+    "AE": {
+      "hour": 16,
+      "unique_ips": 11712,
+      "basis": "own",
+      "donors": 0
+    },
+    "AF": {
+      "hour": 7,
+      "unique_ips": 233,
+      "basis": "own",
+      "donors": 0
+    },
+    "AG": {
+      "hour": 2,
+      "unique_ips": 136,
+      "basis": "own",
+      "donors": 0
+    },
+    "AI": {
+      "hour": 0,
+      "unique_ips": 28,
+      "basis": "own",
+      "donors": 0
+    },
+    "AL": {
+      "hour": 13,
+      "unique_ips": 1893,
+      "basis": "own",
+      "donors": 0
+    },
+    "AM": {
+      "hour": 13,
+      "unique_ips": 1613,
+      "basis": "own",
+      "donors": 0
+    },
+    "AO": {
+      "hour": 17,
+      "unique_ips": 666,
+      "basis": "own",
+      "donors": 0
+    },
+    "AR": {
+      "hour": 20,
+      "unique_ips": 32807,
+      "basis": "own",
+      "donors": 0
+    },
+    "AS": {
+      "hour": 6,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "AT": {
+      "hour": 20,
+      "unique_ips": 2573,
+      "basis": "own",
+      "donors": 0
+    },
+    "AU": {
+      "hour": 9,
+      "unique_ips": 5687,
+      "basis": "own",
+      "donors": 0
+    },
+    "AW": {
+      "hour": 2,
+      "unique_ips": 93,
+      "basis": "own",
+      "donors": 0
+    },
+    "AX": {
+      "hour": 13,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "AZ": {
+      "hour": 12,
+      "unique_ips": 832,
+      "basis": "own",
+      "donors": 0
+    },
+    "BA": {
+      "hour": 20,
+      "unique_ips": 1787,
+      "basis": "own",
+      "donors": 0
+    },
+    "BB": {
+      "hour": 0,
+      "unique_ips": 1547,
+      "basis": "own",
+      "donors": 0
+    },
+    "BD": {
+      "hour": 9,
+      "unique_ips": 23212,
+      "basis": "own",
+      "donors": 0
+    },
+    "BE": {
+      "hour": 19,
+      "unique_ips": 5364,
+      "basis": "own",
+      "donors": 0
+    },
+    "BF": {
+      "hour": 16,
+      "unique_ips": 1049,
+      "basis": "own",
+      "donors": 0
+    },
+    "BG": {
+      "hour": 18,
+      "unique_ips": 4038,
+      "basis": "own",
+      "donors": 0
+    },
+    "BH": {
+      "hour": 12,
+      "unique_ips": 1145,
+      "basis": "own",
+      "donors": 0
+    },
+    "BI": {
+      "hour": 8,
+      "unique_ips": 19,
+      "basis": "own",
+      "donors": 0
+    },
+    "BJ": {
+      "hour": 15,
+      "unique_ips": 191,
+      "basis": "own",
+      "donors": 0
+    },
+    "BL": {
+      "hour": 2,
+      "unique_ips": 2,
+      "basis": "own",
+      "donors": 0
+    },
+    "BM": {
+      "hour": 1,
+      "unique_ips": 108,
+      "basis": "own",
+      "donors": 0
+    },
+    "BN": {
+      "hour": 12,
+      "unique_ips": 673,
+      "basis": "own",
+      "donors": 0
+    },
+    "BO": {
+      "hour": 13,
+      "unique_ips": 1728,
+      "basis": "own",
+      "donors": 0
+    },
+    "BQ": {
+      "hour": 0,
+      "unique_ips": 45,
+      "basis": "own",
+      "donors": 0
+    },
+    "BR": {
+      "hour": 0,
+      "unique_ips": 147067,
+      "basis": "own",
+      "donors": 0
+    },
+    "BS": {
+      "hour": 21,
+      "unique_ips": 867,
+      "basis": "own",
+      "donors": 0
+    },
+    "BT": {
+      "hour": 10,
+      "unique_ips": 124,
+      "basis": "own",
+      "donors": 0
+    },
+    "BW": {
+      "hour": 10,
+      "unique_ips": 398,
+      "basis": "own",
+      "donors": 0
+    },
+    "BY": {
+      "hour": 17,
+      "unique_ips": 3522,
+      "basis": "own",
+      "donors": 0
+    },
+    "BZ": {
+      "hour": 2,
+      "unique_ips": 354,
+      "basis": "own",
+      "donors": 0
+    },
+    "CA": {
+      "hour": 1,
+      "unique_ips": 30662,
+      "basis": "own",
+      "donors": 0
+    },
+    "CD": {
+      "hour": 11,
+      "unique_ips": 160,
+      "basis": "own",
+      "donors": 0
+    },
+    "CF": {
+      "hour": 11,
+      "unique_ips": 8,
+      "basis": "own",
+      "donors": 0
+    },
+    "CG": {
+      "hour": 3,
+      "unique_ips": 460,
+      "basis": "own",
+      "donors": 0
+    },
+    "CH": {
+      "hour": 20,
+      "unique_ips": 2450,
+      "basis": "own",
+      "donors": 0
+    },
+    "CI": {
+      "hour": 11,
+      "unique_ips": 1596,
+      "basis": "own",
+      "donors": 0
+    },
+    "CL": {
+      "hour": 18,
+      "unique_ips": 19479,
+      "basis": "own",
+      "donors": 0
+    },
+    "CM": {
+      "hour": 0,
+      "unique_ips": 218,
+      "basis": "own",
+      "donors": 0
+    },
+    "CN": {
+      "hour": 20,
+      "unique_ips": 92647,
+      "basis": "own",
+      "donors": 0
+    },
+    "CO": {
+      "hour": 1,
+      "unique_ips": 18567,
+      "basis": "own",
+      "donors": 0
+    },
+    "CR": {
+      "hour": 2,
+      "unique_ips": 1842,
+      "basis": "own",
+      "donors": 0
+    },
+    "CU": {
+      "hour": 19,
+      "unique_ips": 6,
+      "basis": "own",
+      "donors": 0
+    },
+    "CV": {
+      "hour": 13,
+      "unique_ips": 141,
+      "basis": "own",
+      "donors": 0
+    },
+    "CW": {
+      "hour": 0,
+      "unique_ips": 216,
+      "basis": "own",
+      "donors": 0
+    },
+    "CY": {
+      "hour": 18,
+      "unique_ips": 784,
+      "basis": "own",
+      "donors": 0
+    },
+    "CZ": {
+      "hour": 20,
+      "unique_ips": 5166,
+      "basis": "own",
+      "donors": 0
+    },
+    "DE": {
+      "hour": 20,
+      "unique_ips": 21736,
+      "basis": "own",
+      "donors": 0
+    },
+    "DJ": {
+      "hour": 7,
+      "unique_ips": 62,
+      "basis": "own",
+      "donors": 0
+    },
+    "DK": {
+      "hour": 19,
+      "unique_ips": 2321,
+      "basis": "own",
+      "donors": 0
+    },
+    "DM": {
+      "hour": 0,
+      "unique_ips": 101,
+      "basis": "own",
+      "donors": 0
+    },
+    "DO": {
+      "hour": 0,
+      "unique_ips": 5878,
+      "basis": "own",
+      "donors": 0
+    },
+    "DZ": {
+      "hour": 14,
+      "unique_ips": 11735,
+      "basis": "own",
+      "donors": 0
+    },
+    "EC": {
+      "hour": 1,
+      "unique_ips": 11907,
+      "basis": "own",
+      "donors": 0
+    },
+    "EE": {
+      "hour": 18,
+      "unique_ips": 1216,
+      "basis": "own",
+      "donors": 0
+    },
+    "EG": {
+      "hour": 13,
+      "unique_ips": 11969,
+      "basis": "own",
+      "donors": 0
+    },
+    "ES": {
+      "hour": 17,
+      "unique_ips": 47099,
+      "basis": "own",
+      "donors": 0
+    },
+    "ET": {
+      "hour": 8,
+      "unique_ips": 4498,
+      "basis": "own",
+      "donors": 0
+    },
+    "FI": {
+      "hour": 18,
+      "unique_ips": 2346,
+      "basis": "own",
+      "donors": 0
+    },
+    "FJ": {
+      "hour": 3,
+      "unique_ips": 136,
+      "basis": "own",
+      "donors": 0
+    },
+    "FK": {
+      "hour": 16,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "FM": {
+      "hour": 22,
+      "unique_ips": 6,
+      "basis": "own",
+      "donors": 0
+    },
+    "FO": {
+      "hour": 21,
+      "unique_ips": 46,
+      "basis": "own",
+      "donors": 0
+    },
+    "FR": {
+      "hour": 17,
+      "unique_ips": 40419,
+      "basis": "own",
+      "donors": 0
+    },
+    "GA": {
+      "hour": 3,
+      "unique_ips": 364,
+      "basis": "own",
+      "donors": 0
+    },
+    "GB": {
+      "hour": 19,
+      "unique_ips": 37461,
+      "basis": "own",
+      "donors": 0
+    },
+    "GD": {
+      "hour": 0,
+      "unique_ips": 177,
+      "basis": "own",
+      "donors": 0
+    },
+    "GE": {
+      "hour": 18,
+      "unique_ips": 2937,
+      "basis": "own",
+      "donors": 0
+    },
+    "GF": {
+      "hour": 21,
+      "unique_ips": 60,
+      "basis": "own",
+      "donors": 0
+    },
+    "GG": {
+      "hour": 17,
+      "unique_ips": 57,
+      "basis": "own",
+      "donors": 0
+    },
+    "GH": {
+      "hour": 15,
+      "unique_ips": 1541,
+      "basis": "own",
+      "donors": 0
+    },
+    "GI": {
+      "hour": 21,
+      "unique_ips": 43,
+      "basis": "own",
+      "donors": 0
+    },
+    "GL": {
+      "hour": 21,
+      "unique_ips": 24,
+      "basis": "own",
+      "donors": 0
+    },
+    "GM": {
+      "hour": 10,
+      "unique_ips": 43,
+      "basis": "own",
+      "donors": 0
+    },
+    "GN": {
+      "hour": 10,
+      "unique_ips": 32,
+      "basis": "own",
+      "donors": 0
+    },
+    "GP": {
+      "hour": 0,
+      "unique_ips": 262,
+      "basis": "own",
+      "donors": 0
+    },
+    "GQ": {
+      "hour": 23,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "GR": {
+      "hour": 18,
+      "unique_ips": 3929,
+      "basis": "own",
+      "donors": 0
+    },
+    "GT": {
+      "hour": 20,
+      "unique_ips": 2377,
+      "basis": "own",
+      "donors": 0
+    },
+    "GU": {
+      "hour": 6,
+      "unique_ips": 35,
+      "basis": "own",
+      "donors": 0
+    },
+    "GW": {
+      "hour": 17,
+      "unique_ips": 12,
+      "basis": "own",
+      "donors": 0
+    },
+    "GY": {
+      "hour": 2,
+      "unique_ips": 252,
+      "basis": "own",
+      "donors": 0
+    },
+    "HK": {
+      "hour": 14,
+      "unique_ips": 3022,
+      "basis": "own",
+      "donors": 0
+    },
+    "HN": {
+      "hour": 2,
+      "unique_ips": 2274,
+      "basis": "own",
+      "donors": 0
+    },
+    "HR": {
+      "hour": 20,
+      "unique_ips": 2086,
+      "basis": "own",
+      "donors": 0
+    },
+    "HT": {
+      "hour": 14,
+      "unique_ips": 172,
+      "basis": "own",
+      "donors": 0
+    },
+    "HU": {
+      "hour": 19,
+      "unique_ips": 5116,
+      "basis": "own",
+      "donors": 0
+    },
+    "ID": {
+      "hour": 4,
+      "unique_ips": 85891,
+      "basis": "own",
+      "donors": 0
+    },
+    "IE": {
+      "hour": 20,
+      "unique_ips": 5139,
+      "basis": "own",
+      "donors": 0
+    },
+    "IL": {
+      "hour": 11,
+      "unique_ips": 6727,
+      "basis": "own",
+      "donors": 0
+    },
+    "IM": {
+      "hour": 17,
+      "unique_ips": 83,
+      "basis": "own",
+      "donors": 0
+    },
+    "IN": {
+      "hour": 11,
+      "unique_ips": 288187,
+      "basis": "own",
+      "donors": 0
+    },
+    "IQ": {
+      "hour": 17,
+      "unique_ips": 10366,
+      "basis": "own",
+      "donors": 0
+    },
+    "IR": {
+      "hour": 7,
+      "unique_ips": 38,
+      "basis": "own",
+      "donors": 0
+    },
+    "IS": {
+      "hour": 20,
+      "unique_ips": 280,
+      "basis": "own",
+      "donors": 0
+    },
+    "IT": {
+      "hour": 20,
+      "unique_ips": 23731,
+      "basis": "own",
+      "donors": 0
+    },
+    "JE": {
+      "hour": 20,
+      "unique_ips": 115,
+      "basis": "own",
+      "donors": 0
+    },
+    "JM": {
+      "hour": 2,
+      "unique_ips": 2586,
+      "basis": "own",
+      "donors": 0
+    },
+    "JO": {
+      "hour": 17,
+      "unique_ips": 3615,
+      "basis": "own",
+      "donors": 0
+    },
+    "JP": {
+      "hour": 13,
+      "unique_ips": 4185,
+      "basis": "own",
+      "donors": 0
+    },
+    "KE": {
+      "hour": 4,
+      "unique_ips": 2224,
+      "basis": "own",
+      "donors": 0
+    },
+    "KG": {
+      "hour": 10,
+      "unique_ips": 858,
+      "basis": "own",
+      "donors": 0
+    },
+    "KH": {
+      "hour": 4,
+      "unique_ips": 4315,
+      "basis": "own",
+      "donors": 0
+    },
+    "KI": {
+      "hour": 22,
+      "unique_ips": 2,
+      "basis": "own",
+      "donors": 0
+    },
+    "KM": {
+      "hour": 19,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "KN": {
+      "hour": 2,
+      "unique_ips": 90,
+      "basis": "own",
+      "donors": 0
+    },
+    "KR": {
+      "hour": 12,
+      "unique_ips": 66681,
+      "basis": "own",
+      "donors": 0
+    },
+    "KW": {
+      "hour": 15,
+      "unique_ips": 2687,
+      "basis": "own",
+      "donors": 0
+    },
+    "KY": {
+      "hour": 18,
+      "unique_ips": 127,
+      "basis": "own",
+      "donors": 0
+    },
+    "KZ": {
+      "hour": 12,
+      "unique_ips": 2558,
+      "basis": "own",
+      "donors": 0
+    },
+    "LA": {
+      "hour": 8,
+      "unique_ips": 966,
+      "basis": "own",
+      "donors": 0
+    },
+    "LB": {
+      "hour": 11,
+      "unique_ips": 1323,
+      "basis": "own",
+      "donors": 0
+    },
+    "LC": {
+      "hour": 16,
+      "unique_ips": 186,
+      "basis": "own",
+      "donors": 0
+    },
+    "LI": {
+      "hour": 19,
+      "unique_ips": 15,
+      "basis": "own",
+      "donors": 0
+    },
+    "LK": {
+      "hour": 10,
+      "unique_ips": 4742,
+      "basis": "own",
+      "donors": 0
+    },
+    "LR": {
+      "hour": 0,
+      "unique_ips": 31,
+      "basis": "own",
+      "donors": 0
+    },
+    "LS": {
+      "hour": 13,
+      "unique_ips": 187,
+      "basis": "own",
+      "donors": 0
+    },
+    "LT": {
+      "hour": 17,
+      "unique_ips": 3074,
+      "basis": "own",
+      "donors": 0
+    },
+    "LU": {
+      "hour": 18,
+      "unique_ips": 594,
+      "basis": "own",
+      "donors": 0
+    },
+    "LV": {
+      "hour": 18,
+      "unique_ips": 2247,
+      "basis": "own",
+      "donors": 0
+    },
+    "LY": {
+      "hour": 11,
+      "unique_ips": 818,
+      "basis": "own",
+      "donors": 0
+    },
+    "MA": {
+      "hour": 21,
+      "unique_ips": 12689,
+      "basis": "own",
+      "donors": 0
+    },
+    "MC": {
+      "hour": 20,
+      "unique_ips": 12,
+      "basis": "own",
+      "donors": 0
+    },
+    "MD": {
+      "hour": 17,
+      "unique_ips": 2204,
+      "basis": "own",
+      "donors": 0
+    },
+    "ME": {
+      "hour": 21,
+      "unique_ips": 358,
+      "basis": "own",
+      "donors": 0
+    },
+    "MF": {
+      "hour": 20,
+      "unique_ips": 43,
+      "basis": "own",
+      "donors": 0
+    },
+    "MG": {
+      "hour": 10,
+      "unique_ips": 377,
+      "basis": "own",
+      "donors": 0
+    },
+    "MH": {
+      "hour": 4,
+      "unique_ips": 4,
+      "basis": "own",
+      "donors": 0
+    },
+    "MK": {
+      "hour": 21,
+      "unique_ips": 1186,
+      "basis": "own",
+      "donors": 0
+    },
+    "ML": {
+      "hour": 13,
+      "unique_ips": 505,
+      "basis": "own",
+      "donors": 0
+    },
+    "MM": {
+      "hour": 10,
+      "unique_ips": 483,
+      "basis": "own",
+      "donors": 0
+    },
+    "MN": {
+      "hour": 7,
+      "unique_ips": 3033,
+      "basis": "own",
+      "donors": 0
+    },
+    "MO": {
+      "hour": 14,
+      "unique_ips": 409,
+      "basis": "own",
+      "donors": 0
+    },
+    "MP": {
+      "hour": 16,
+      "unique_ips": 3,
+      "basis": "own",
+      "donors": 0
+    },
+    "MQ": {
+      "hour": 20,
+      "unique_ips": 180,
+      "basis": "own",
+      "donors": 0
+    },
+    "MR": {
+      "hour": 12,
+      "unique_ips": 197,
+      "basis": "own",
+      "donors": 0
+    },
+    "MS": {
+      "hour": 0,
+      "unique_ips": 4,
+      "basis": "own",
+      "donors": 0
+    },
+    "MT": {
+      "hour": 20,
+      "unique_ips": 832,
+      "basis": "own",
+      "donors": 0
+    },
+    "MU": {
+      "hour": 11,
+      "unique_ips": 652,
+      "basis": "own",
+      "donors": 0
+    },
+    "MV": {
+      "hour": 16,
+      "unique_ips": 560,
+      "basis": "own",
+      "donors": 0
+    },
+    "MW": {
+      "hour": 7,
+      "unique_ips": 56,
+      "basis": "own",
+      "donors": 0
+    },
+    "MX": {
+      "hour": 4,
+      "unique_ips": 33694,
+      "basis": "own",
+      "donors": 0
+    },
+    "MY": {
+      "hour": 2,
+      "unique_ips": 26712,
+      "basis": "own",
+      "donors": 0
+    },
+    "MZ": {
+      "hour": 13,
+      "unique_ips": 494,
+      "basis": "own",
+      "donors": 0
+    },
+    "NA": {
+      "hour": 9,
+      "unique_ips": 310,
+      "basis": "own",
+      "donors": 0
+    },
+    "NE": {
+      "hour": 7,
+      "unique_ips": 18,
+      "basis": "own",
+      "donors": 0
+    },
+    "NG": {
+      "hour": 0,
+      "unique_ips": 1470,
+      "basis": "own",
+      "donors": 0
+    },
+    "NI": {
+      "hour": 20,
+      "unique_ips": 836,
+      "basis": "own",
+      "donors": 0
+    },
+    "NL": {
+      "hour": 20,
+      "unique_ips": 8190,
+      "basis": "own",
+      "donors": 0
+    },
+    "NO": {
+      "hour": 19,
+      "unique_ips": 2276,
+      "basis": "own",
+      "donors": 0
+    },
+    "NP": {
+      "hour": 6,
+      "unique_ips": 8479,
+      "basis": "own",
+      "donors": 0
+    },
+    "NR": {
+      "hour": 13,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "NU": {
+      "hour": 9,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "NZ": {
+      "hour": 7,
+      "unique_ips": 1787,
+      "basis": "own",
+      "donors": 0
+    },
+    "OM": {
+      "hour": 15,
+      "unique_ips": 689,
+      "basis": "own",
+      "donors": 0
+    },
+    "PA": {
+      "hour": 2,
+      "unique_ips": 1878,
+      "basis": "own",
+      "donors": 0
+    },
+    "PE": {
+      "hour": 1,
+      "unique_ips": 13896,
+      "basis": "own",
+      "donors": 0
+    },
+    "PF": {
+      "hour": 1,
+      "unique_ips": 33,
+      "basis": "own",
+      "donors": 0
+    },
+    "PG": {
+      "hour": 2,
+      "unique_ips": 34,
+      "basis": "own",
+      "donors": 0
+    },
+    "PH": {
+      "hour": 11,
+      "unique_ips": 32118,
+      "basis": "own",
+      "donors": 0
+    },
+    "PK": {
+      "hour": 6,
+      "unique_ips": 11302,
+      "basis": "own",
+      "donors": 0
+    },
+    "PL": {
+      "hour": 20,
+      "unique_ips": 18878,
+      "basis": "own",
+      "donors": 0
+    },
+    "PM": {
+      "hour": 22,
+      "unique_ips": 4,
+      "basis": "own",
+      "donors": 0
+    },
+    "PR": {
+      "hour": 0,
+      "unique_ips": 1877,
+      "basis": "own",
+      "donors": 0
+    },
+    "PS": {
+      "hour": 11,
+      "unique_ips": 1928,
+      "basis": "own",
+      "donors": 0
+    },
+    "PT": {
+      "hour": 17,
+      "unique_ips": 12248,
+      "basis": "own",
+      "donors": 0
+    },
+    "PW": {
+      "hour": 2,
+      "unique_ips": 5,
+      "basis": "own",
+      "donors": 0
+    },
+    "PY": {
+      "hour": 14,
+      "unique_ips": 2779,
+      "basis": "own",
+      "donors": 0
+    },
+    "QA": {
+      "hour": 11,
+      "unique_ips": 1553,
+      "basis": "own",
+      "donors": 0
+    },
+    "RE": {
+      "hour": 16,
+      "unique_ips": 281,
+      "basis": "own",
+      "donors": 0
+    },
+    "RO": {
+      "hour": 18,
+      "unique_ips": 8536,
+      "basis": "own",
+      "donors": 0
+    },
+    "RS": {
+      "hour": 18,
+      "unique_ips": 3465,
+      "basis": "own",
+      "donors": 0
+    },
+    "RU": {
+      "hour": 15,
+      "unique_ips": 11012,
+      "basis": "own",
+      "donors": 0
+    },
+    "RW": {
+      "hour": 12,
+      "unique_ips": 416,
+      "basis": "own",
+      "donors": 0
+    },
+    "SA": {
+      "hour": 7,
+      "unique_ips": 15994,
+      "basis": "own",
+      "donors": 0
+    },
+    "SB": {
+      "hour": 2,
+      "unique_ips": 15,
+      "basis": "own",
+      "donors": 0
+    },
+    "SC": {
+      "hour": 16,
+      "unique_ips": 25,
+      "basis": "own",
+      "donors": 0
+    },
+    "SD": {
+      "hour": 7,
+      "unique_ips": 29,
+      "basis": "own",
+      "donors": 0
+    },
+    "SE": {
+      "hour": 18,
+      "unique_ips": 3547,
+      "basis": "own",
+      "donors": 0
+    },
+    "SG": {
+      "hour": 13,
+      "unique_ips": 3011,
+      "basis": "own",
+      "donors": 0
+    },
+    "SI": {
+      "hour": 20,
+      "unique_ips": 1360,
+      "basis": "own",
+      "donors": 0
+    },
+    "SK": {
+      "hour": 18,
+      "unique_ips": 2976,
+      "basis": "own",
+      "donors": 0
+    },
+    "SL": {
+      "hour": 10,
+      "unique_ips": 14,
+      "basis": "own",
+      "donors": 0
+    },
+    "SM": {
+      "hour": 18,
+      "unique_ips": 26,
+      "basis": "own",
+      "donors": 0
+    },
+    "SN": {
+      "hour": 15,
+      "unique_ips": 1890,
+      "basis": "own",
+      "donors": 0
+    },
+    "SO": {
+      "hour": 8,
+      "unique_ips": 215,
+      "basis": "own",
+      "donors": 0
+    },
+    "SR": {
+      "hour": 16,
+      "unique_ips": 84,
+      "basis": "own",
+      "donors": 0
+    },
+    "SS": {
+      "hour": 10,
+      "unique_ips": 34,
+      "basis": "own",
+      "donors": 0
+    },
+    "ST": {
+      "hour": 21,
+      "unique_ips": 30,
+      "basis": "own",
+      "donors": 0
+    },
+    "SV": {
+      "hour": 2,
+      "unique_ips": 2169,
+      "basis": "own",
+      "donors": 0
+    },
+    "SX": {
+      "hour": 21,
+      "unique_ips": 133,
+      "basis": "own",
+      "donors": 0
+    },
+    "SY": {
+      "hour": 8,
+      "unique_ips": 430,
+      "basis": "own",
+      "donors": 0
+    },
+    "SZ": {
+      "hour": 11,
+      "unique_ips": 105,
+      "basis": "own",
+      "donors": 0
+    },
+    "TC": {
+      "hour": 17,
+      "unique_ips": 38,
+      "basis": "own",
+      "donors": 0
+    },
+    "TD": {
+      "hour": 10,
+      "unique_ips": 12,
+      "basis": "own",
+      "donors": 0
+    },
+    "TG": {
+      "hour": 0,
+      "unique_ips": 723,
+      "basis": "own",
+      "donors": 0
+    },
+    "TH": {
+      "hour": 8,
+      "unique_ips": 38808,
+      "basis": "own",
+      "donors": 0
+    },
+    "TJ": {
+      "hour": 10,
+      "unique_ips": 290,
+      "basis": "own",
+      "donors": 0
+    },
+    "TK": {
+      "hour": 23,
+      "unique_ips": 1,
+      "basis": "own",
+      "donors": 0
+    },
+    "TL": {
+      "hour": 1,
+      "unique_ips": 40,
+      "basis": "own",
+      "donors": 0
+    },
+    "TM": {
+      "hour": 7,
+      "unique_ips": 3,
+      "basis": "own",
+      "donors": 0
+    },
+    "TN": {
+      "hour": 11,
+      "unique_ips": 6493,
+      "basis": "own",
+      "donors": 0
+    },
+    "TO": {
+      "hour": 0,
+      "unique_ips": 4,
+      "basis": "own",
+      "donors": 0
+    },
+    "TR": {
+      "hour": 18,
+      "unique_ips": 30284,
+      "basis": "own",
+      "donors": 0
+    },
+    "TT": {
+      "hour": 0,
+      "unique_ips": 1397,
+      "basis": "own",
+      "donors": 0
+    },
+    "TV": {
+      "hour": 13,
+      "unique_ips": 2,
+      "basis": "own",
+      "donors": 0
+    },
+    "TW": {
+      "hour": 12,
+      "unique_ips": 7224,
+      "basis": "own",
+      "donors": 0
+    },
+    "TZ": {
+      "hour": 6,
+      "unique_ips": 1215,
+      "basis": "own",
+      "donors": 0
+    },
+    "UA": {
+      "hour": 18,
+      "unique_ips": 18936,
+      "basis": "own",
+      "donors": 0
+    },
+    "UG": {
+      "hour": 12,
+      "unique_ips": 713,
+      "basis": "own",
+      "donors": 0
+    },
+    "US": {
+      "hour": 1,
+      "unique_ips": 98953,
+      "basis": "own",
+      "donors": 0
+    },
+    "UY": {
+      "hour": 0,
+      "unique_ips": 3712,
+      "basis": "own",
+      "donors": 0
+    },
+    "UZ": {
+      "hour": 11,
+      "unique_ips": 4239,
+      "basis": "own",
+      "donors": 0
+    },
+    "VC": {
+      "hour": 1,
+      "unique_ips": 146,
+      "basis": "own",
+      "donors": 0
+    },
+    "VE": {
+      "hour": 0,
+      "unique_ips": 8213,
+      "basis": "own",
+      "donors": 0
+    },
+    "VG": {
+      "hour": 2,
+      "unique_ips": 110,
+      "basis": "own",
+      "donors": 0
+    },
+    "VI": {
+      "hour": 0,
+      "unique_ips": 100,
+      "basis": "own",
+      "donors": 0
+    },
+    "VN": {
+      "hour": 13,
+      "unique_ips": 105824,
+      "basis": "own",
+      "donors": 0
+    },
+    "VU": {
+      "hour": 23,
+      "unique_ips": 12,
+      "basis": "own",
+      "donors": 0
+    },
+    "WF": {
+      "hour": 2,
+      "unique_ips": 2,
+      "basis": "own",
+      "donors": 0
+    },
+    "WS": {
+      "hour": 1,
+      "unique_ips": 4,
+      "basis": "own",
+      "donors": 0
+    },
+    "YE": {
+      "hour": 8,
+      "unique_ips": 273,
+      "basis": "own",
+      "donors": 0
+    },
+    "YT": {
+      "hour": 3,
+      "unique_ips": 3,
+      "basis": "own",
+      "donors": 0
+    },
+    "ZA": {
+      "hour": 7,
+      "unique_ips": 13943,
+      "basis": "own",
+      "donors": 0
+    },
+    "ZM": {
+      "hour": 14,
+      "unique_ips": 294,
+      "basis": "own",
+      "donors": 0
+    },
+    "ZW": {
+      "hour": 7,
+      "unique_ips": 673,
+      "basis": "own",
+      "donors": 0
+    }
+  },
+  "no_ips": []
+}
