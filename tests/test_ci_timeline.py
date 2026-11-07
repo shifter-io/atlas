@@ -137,6 +137,52 @@ def test_timeline_reports_the_fixed_costs_around_the_tests(tmp_path):
     ]
 
 
+def test_timeline_reports_the_processes_starts_and_the_database_peak(tmp_path):
+    write(tmp_path, "step", [{"worker": "step", "kind": "pytest", "start": 90.0, "stop": 125.0}])
+    collect = {"kind": "collect", "start": 93.0, "stop": 97.0}
+    write(
+        tmp_path,
+        "main",
+        [{"worker": "main", "kind": "controller", "start": 90.5, "stop": 91.0}],
+    )
+    write(
+        tmp_path,
+        "gw0",
+        [
+            {"worker": "gw0", "process": 92.0} | collect,
+            phase("gw0", "a", "call", 100.0, 120.0),
+            {"worker": "gw0", "kind": "databases", "count": 40, "start": 120.0},
+        ],
+    )
+    write(
+        tmp_path,
+        "gw1",
+        [
+            {"worker": "gw1", "process": 92.5} | collect | {"stop": 98.0},
+            {"worker": "gw1", "kind": "databases", "count": 55, "start": 121.0},
+        ],
+    )
+    timeline = runpy.run_path(str(SCRIPT))
+    fixed = timeline["summarize"](timeline["load"](tmp_path))["fixed"]
+    assert fixed["controller"] == (0.5, 1.0) and fixed["started"] == (2.0, 2.5)
+    assert fixed["databases"] == 55
+    assert timeline["fixed_report"](fixed) == [
+        "pytest start to first test 10.0 s, last test to end 5.0 s",
+        "controller started 0.5 s, loaded 1.0 s after pytest start",
+        "workers started 2.0-2.5 s, loaded 3.0-3.0 s, collected 7.0-8.0 s after pytest start",
+        "databases: peak 55 (at a worker's session end)",
+    ]
+    # Without the processes' starts (not Linux): the line as before.
+    write(tmp_path, "main", [{"worker": "main", "kind": "controller", "start": None, "stop": 1}])
+    write(tmp_path, "gw1", [])
+    unknown = {"worker": "gw0", "process": None} | collect
+    write(tmp_path, "gw0", [unknown, phase("gw0", "a", "call", 100.0, 120.0)])
+    fixed = timeline["summarize"](timeline["load"](tmp_path))["fixed"]
+    assert "controller" not in fixed and "started" not in fixed and "databases" not in fixed
+    lines = timeline["fixed_report"](fixed)
+    assert "workers loaded 3.0-3.0 s, collected 7.0-7.0 s after pytest start" in lines
+
+
 def test_timeline_of_no_tests(tmp_path):
     out = subprocess.run(
         [sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True, check=True
@@ -255,9 +301,12 @@ def test_the_xdist_controller_records_only_its_coverage_spans(tmp_path):
         f"--cov-report=json:{report / 'coverage.json'}",
         COVERAGE_FILE=str(report / ".coverage"),
     )
-    controller = records(tmp_path / "timeline-main.jsonl")
+    started, *controller = records(tmp_path / "timeline-main.jsonl")
     assert [r["kind"] for r in controller] == ["combine", "report", "json_report"]
     assert all(r["worker"] == "main" and r["start"] <= r["stop"] for r in controller)
+    # When the controller started (Linux only) and loaded conftest.py.
+    assert started["kind"] == "controller" and started["stop"] <= controller[0]["start"]
+    assert started["start"] is None or started["start"] <= started["stop"]
     worker = [r["kind"] for r in records(tmp_path / "timeline-gw0.jsonl")]
     assert worker == ["collect", "setup", "call", "teardown"]
 

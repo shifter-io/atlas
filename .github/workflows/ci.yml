@@ -210,6 +210,15 @@ jobs:
             git diff --name-only --diff-filter=AM "$BASE...HEAD" -- 'src/*.py' 'scripts/*.py' \
               | xargs -r uv run --no-editable ruff check --select C901 --config 'lint.mccabe.max-complexity = 25'
           }
+          # pytest's assertion-rewrite cache (tests/**/__pycache__) from a run with the same
+          # tests, pytest and Python, before anything imports a test module; a miss runs the
+          # rewrite pass below, which keeps its cache for the next runs (rewrite_cache.py).
+          rewrite_cache=$CI_CACHE_DIR/proxy-index/rewrite
+          start=$(date +%s.%N)
+          rewritten=false
+          uv run --no-editable python scripts/ci/rewrite_cache.py restore "$rewrite_cache" \
+            && rewritten=true
+          span restore "$start" "\"hit\": $rewritten"
           background build uv build --out-dir "$RUNNER_TEMP/dist"
           background ruff uv run --no-editable ruff check src tests scripts
           background ruff-format uv run --no-editable ruff format --check src tests scripts
@@ -226,16 +235,23 @@ jobs:
               -m serial > "$EV/serial-collect.log" 2>&1 || rc=$?; echo "$rc" > "$EV/serial-collect" ) &
           collecting=$!
 
-          # pytest's assertion-rewrite cache (tests/__pycache__), written once by one collection
-          # per CPU of a share of the test files, without coverage: otherwise each worker
-          # rewrites every test module itself, traced (a cold collection takes 4 times a warm
-          # one). Its errors are the run's own, reported there.
-          start=$(date +%s.%N)
-          files=(tests/test_*.py)
-          printf "%s\n" "${files[@]}" | xargs -P "$(nproc)" -n "$(( (${#files[@]} + $(nproc) - 1) / $(nproc) ))" \
-            uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
-            > "$EV/rewrite.log" 2>&1 || true
-          span rewrite "$start"
+          # Without a cached one, pytest's assertion-rewrite cache (tests/__pycache__), written
+          # once by one collection per CPU of a share of the test files, without coverage:
+          # otherwise each worker rewrites every test module itself, traced (a cold collection
+          # takes 4 times a warm one). Its errors are the run's own, reported there; only a pass
+          # without errors keeps its cache.
+          if [ "$rewritten" = false ]; then
+            start=$(date +%s.%N)
+            files=(tests/test_*.py)
+            rewrite=0
+            printf "%s\n" "${files[@]}" | xargs -P "$(nproc)" -n "$(( (${#files[@]} + $(nproc) - 1) / $(nproc) ))" \
+              uv run --no-editable pytest -p no:cacheprovider -p no:xdist --collect-only -q \
+              > "$EV/rewrite.log" 2>&1 || rewrite=$?
+            span rewrite "$start"
+            if [ "$rewrite" -eq 0 ]; then
+              background rewrite-cache uv run --no-editable python scripts/ci/rewrite_cache.py save "$rewrite_cache"
+            fi
+          fi
 
           # Every test, database tests included, with branch coverage: one xdist worker per
           # CPU (longest first by tests/durations.json, tests/conftest.py), then the `serial`
@@ -260,6 +276,7 @@ jobs:
           background coverage-xml uv run --no-editable coverage xml -q -o "$EV/coverage.xml"
           background coverage-json uv run --no-editable coverage json -q -o "$EV/coverage.json"
           wait
+          python3 -c 'import json,sys; print("TEMP totals", json.load(open(sys.argv[1]))["totals"])' "$EV/coverage.json" || true
 
           failed=0
           for rc in "$EV"/*.rc; do

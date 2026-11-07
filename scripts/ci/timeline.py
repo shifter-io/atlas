@@ -7,10 +7,11 @@ time (setup + call + teardown), idle time (the rest of the wall) and test count,
 worker ended (its last test's end, from the first test's start), the totals spent creating
 and dropping scratch databases and initialising schemas, the N longest tests with their
 share of the wall time, and the fixed costs around the tests: the CI step's spans before
-pytest (`rewrite`), pytest's start to the first test and the last test to its end (the
-step's `pytest` span), when the workers loaded and
-finished collecting, combining the coverage and each report, and each background check's
-wall and CPU time with its end (from the first test's start). --durations writes each test
+pytest (`restore`, `rewrite`), pytest's start to the first test and the last test to its end
+(the step's `pytest` span), when the controller and the workers started and loaded
+tests/conftest.py and the workers finished collecting, the peak database count (sampled at
+each worker's session end, before its drops), combining the coverage and each report, and each
+background check's wall and CPU time with its end (from the first test's start). --durations writes each test
 of at least S seconds (default 1) as {node id: seconds}, the format of tests/durations.json
 (scripts/ci/durations.py builds that one from a tier1 run's junit).
 """
@@ -98,6 +99,14 @@ def fixed(records, first, last):
             loaded = [r["start"] - pytest["start"] for r in of["collect"]]
             collected = [r["stop"] - pytest["start"] for r in of["collect"]]
             result["collect"] = (min(loaded), max(loaded), min(collected), max(collected))
+            started = [r["process"] - pytest["start"] for r in of["collect"] if r.get("process")]
+            if started:
+                result["started"] = (min(started), max(started))
+        for r in of["controller"]:
+            if r["start"] is not None:
+                result["controller"] = (r["start"] - pytest["start"], r["stop"] - pytest["start"])
+    if of["databases"]:
+        result["databases"] = max(r["count"] for r in of["databases"])
     for r in of["check"]:
         result["checks"][r["name"]] = {
             "wall": r["stop"] - r["start"],
@@ -114,12 +123,18 @@ def fixed_report(costs):
             f"pytest start to first test {costs['before']:.1f} s, "
             f"last test to end {costs['after']:.1f} s"
         )
+    if "controller" in costs:
+        started, loaded = costs["controller"]
+        lines.append(f"controller started {started:.1f} s, loaded {loaded:.1f} s after pytest start")
     if "collect" in costs:
         first, last, done, all_done = costs["collect"]
+        started = "started {:.1f}-{:.1f} s, ".format(*costs["started"]) if "started" in costs else ""
         lines.append(
-            f"workers loaded {first:.1f}-{last:.1f} s, collected {done:.1f}-{all_done:.1f} s "
-            "after pytest start"
+            f"workers {started}loaded {first:.1f}-{last:.1f} s, "
+            f"collected {done:.1f}-{all_done:.1f} s after pytest start"
         )
+    if "databases" in costs:
+        lines.append(f"databases: peak {costs['databases']} (at a worker's session end)")
     if costs["coverage"]:
         each = ", ".join(f"{kind} {s:.1f} s" for kind, s in costs["coverage"].items())
         lines.append(f"coverage: {each}")

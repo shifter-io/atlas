@@ -12,7 +12,9 @@ import sys
 import threading
 import time
 import uuid
+from collections import defaultdict
 from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,6 +29,10 @@ TIMELINE = os.environ.get("CI_TIMELINE") == "1"
 # This test run's id, set by the process that runs the session (tests/conftest.py) and inherited
 # by its xdist workers: it names the templates they share (shared_template).
 SHARED_RUN = "PROXY_TEST_SHARED_RUN"
+# The databases this process drops at its session end (drop_databases, drop_queued), with the
+# admin credentials that drop them, and how many connections drop them at once.
+QUEUED: list[tuple[dict, str]] = []
+DROPPERS = 4
 
 
 def timeline_record(record: dict) -> None:
@@ -39,13 +45,13 @@ def timeline_record(record: dict) -> None:
 
 
 @contextlib.contextmanager
-def timed(kind: str) -> Iterator[None]:
-    """Record the enclosed span as `kind` in the test timeline."""
+def timed(kind: str, **fields) -> Iterator[None]:
+    """Record the enclosed span as `kind`, with any more `fields`, in the test timeline."""
     start = time.time()
     try:
         yield
     finally:
-        timeline_record({"kind": kind, "start": start, "stop": time.time()})
+        timeline_record({"kind": kind, "start": start, "stop": time.time()} | fields)
 
 
 def scratch_database_name() -> str:
@@ -104,7 +110,38 @@ def untraced() -> Iterator[None]:
 
 
 def drop_databases(admin: dict, names: list[str]) -> None:
-    with timed("drop_database"), psycopg.connect(**admin, autocommit=True) as conn:
+    """Queue `names` to be dropped as `admin` at this process's session end (drop_queued, from
+    tests/conftest.py): a test's teardown does not wait for its drops, and each xdist worker
+    drops its own at once, while the others still run their tests."""
+    QUEUED.extend((admin, name) for name in names)
+
+
+def drop_queued() -> None:
+    """Drop every queued database, on up to DROPPERS connections per admin, and empty the
+    queue. In the test timeline, the cluster's database count first (the worker's peak)."""
+    batches = defaultdict(list)
+    for admin, name in QUEUED:
+        batches[json.dumps(admin, sort_keys=True)].append(name)
+    QUEUED.clear()
+    if TIMELINE and batches:
+        with psycopg.connect(**json.loads(next(iter(batches))), autocommit=True) as conn:
+            count = conn.execute("SELECT count(*) FROM pg_database").fetchone()[0]
+        timeline_record({"kind": "databases", "count": count, "start": time.time()})
+    shares = [
+        (json.loads(admin), names[index::DROPPERS])
+        for admin, names in batches.items()
+        for index in range(min(DROPPERS, len(names)))
+    ]
+    with ThreadPoolExecutor(DROPPERS) as pool:
+        for done in [pool.submit(_drop, *share) for share in shares]:
+            done.result()
+
+
+def _drop(admin: dict, names: list[str]) -> None:
+    with (
+        timed("drop_database", databases=len(names)),
+        psycopg.connect(**admin, autocommit=True) as conn,
+    ):
         for name in names:
             conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 
