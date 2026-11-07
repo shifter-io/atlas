@@ -41,14 +41,53 @@ func NetworkInputs(shape NetworkShape) (*store.Inputs, error) {
 }
 
 // Networks is the v4 head and network lists, by list id, of a v3 snapshot
-// with one product group per network: each group is its network's summary
-// (contract K9: the keys a network window publishes, its peers made from the
-// snapshot's overlap rows) and each window's list holds the rows the build
-// reads of the group (its typed rows when complete, else its breakdowns).
+// with one product group per network (NetworkHead), the lists held in memory
+// as store reads them.
+func Networks(row *store.SnapshotRow, requested int) ([]byte, map[int64]*store.NetList, error) {
+	lists := map[int64]*store.NetList{}
+	head, err := NetworkHead(row, requested, func(_ NetWindow, rows map[string][]store.NetRow) (int64, map[string]int, error) {
+		id := int64(len(lists) + 1)
+		l, err := store.NewNetList(rows)
+		lists[id] = l
+		return id, RowCounts(rows), err
+	})
+	return head, lists, err
+}
+
+// NetWindow is a network window whose list a ListWriter stores: its
+// network's provider and product name, and the window.
+type NetWindow struct {
+	Provider, Product, Label string
+	Hours                    int64
+}
+
+// ListWriter stores the list of a network window, its rows by payload
+// breakdown name, and returns the list id the head names and its row count
+// by breakdown name.
+type ListWriter func(w NetWindow, rows map[string][]store.NetRow) (int64, map[string]int, error)
+
+// netNames are the payload breakdown names a network list has rows of.
+var netNames = []string{"country", "region", "city", "asn", "city_asn"}
+
+// RowCounts is the row count of each breakdown name a network list has.
+func RowCounts(rows map[string][]store.NetRow) map[string]int {
+	out := map[string]int{}
+	for _, name := range netNames {
+		out[name] = len(rows[name])
+	}
+	return out
+}
+
+// NetworkHead is the v4 head of a snapshot before v4 (whole, with its
+// product groups) with one product group per network: each group is its
+// network's summary (contract K9: the keys a network window publishes, its
+// peers made from the snapshot's overlap rows) and each window's list,
+// stored by write, holds the rows the build reads of the group (its typed
+// rows when complete, else its breakdowns or, without those, its pool lists).
 // requested > 0 gives every network that many requested countries. The head
 // is as store reads it: without parts, runs, overlap rows or per-cohort fleet
 // rows.
-func Networks(row *store.SnapshotRow, requested int) ([]byte, map[int64]*store.NetList, error) {
+func NetworkHead(row *store.SnapshotRow, requested int, write ListWriter) ([]byte, error) {
 	var doc map[string]any
 	var typed snap.Snapshot
 	err := json.Unmarshal(row.Full(), &doc)
@@ -56,14 +95,13 @@ func Networks(row *store.SnapshotRow, requested int) ([]byte, map[int64]*store.N
 		err = json.Unmarshal(row.Full(), &typed)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	lists := map[int64]*store.NetList{}
 	networks := []any{}
-	for i, g := range doc["products"].([]any) {
-		entry, err := networkEntry(g.(map[string]any), &typed.Products[i], &typed, row, requested, lists)
+	for i, g := range asList(doc["products"]) {
+		entry, err := networkEntry(g.(map[string]any), &typed.Products[i], &typed, row, requested, write)
 		if err != nil {
-			return nil, nil, fmt.Errorf("group %d: %w", i, err)
+			return nil, fmt.Errorf("group %d: %w", i, err)
 		}
 		networks = append(networks, entry)
 	}
@@ -80,8 +118,7 @@ func Networks(row *store.SnapshotRow, requested int) ([]byte, map[int64]*store.N
 		doc["fleet"] = fleet
 	}
 	doc["schema_version"], doc["networks"] = 4, networks
-	head, err := json.Marshal(doc)
-	return head, lists, err
+	return json.Marshal(doc)
 }
 
 func asList(v any) []any {
@@ -93,9 +130,9 @@ func asList(v any) []any {
 var unpublished = []string{"benchmark", "previous_period", "census_overlap", "latency", "evidence_sources", "unavailable", "roles",
 	"breakdowns", "breakdown_entries", "lists", "ip_samples"}
 
-// networkEntry turns group g (p typed) into its network's entry, adding its
-// windows' lists to lists.
-func networkEntry(g map[string]any, p *snap.Product, s *snap.Snapshot, row *store.SnapshotRow, requested int, lists map[int64]*store.NetList) (map[string]any, error) {
+// networkEntry turns group g (p typed) into its network's entry, its
+// windows' lists stored by write.
+func networkEntry(g map[string]any, p *snap.Product, s *snap.Snapshot, row *store.SnapshotRow, requested int, write ListWriter) (map[string]any, error) {
 	countries, groups := []string{}, 1
 	if cc := p.Criteria.Country; cc != nil {
 		countries = []string{upper(*cc)}
@@ -108,12 +145,12 @@ func networkEntry(g map[string]any, p *snap.Product, s *snap.Snapshot, row *stor
 	}
 	ids, entries, peerRows := map[string]int64{}, map[string]map[string]int{}, map[string][]snap.OverlapPeer{}
 	for label := range g["windows"].(map[string]any) {
-		l, n, err := windowList(row, p, p.Windows[label])
+		w := p.Windows[label]
+		id, n, err := write(NetWindow{p.Provider, p.Product, label, int64(w.Period.Hours)}, windowRows(row, p, w))
 		if err != nil {
 			return nil, fmt.Errorf("window %s: %w", label, err)
 		}
-		ids[label] = int64(len(lists) + 1)
-		lists[ids[label]], entries[label], peerRows[label] = l, n, peers(s, p, label)
+		ids[label], entries[label], peerRows[label] = id, n, peers(s, p, label)
 	}
 	return NetworkEntry(g, countries, groups, ids, entries, peerRows), nil
 }
@@ -125,7 +162,7 @@ func networkEntry(g map[string]any, p *snap.Product, s *snap.Snapshot, row *stor
 // rows by breakdown name) and its overlap peers.
 func NetworkEntry(g map[string]any, requested []string, groups int, lists map[string]int64, entries map[string]map[string]int,
 	peers map[string][]snap.OverlapPeer) map[string]any {
-	g["id"] = fmt.Sprintf("%s:%s:network", g["provider"], g["kind"])
+	g["id"] = NetworkID(g["provider"], g["kind"])
 	g["cohort"] = store.NetworkCohort
 	g["criteria"] = map[string]any{"country": nil, "requested_countries": requested, "groups": groups}
 	delete(g, "scoring")
@@ -154,6 +191,11 @@ func NetworkEntry(g map[string]any, requested []string, groups int, lists map[st
 		w["overlap"], w["lists"] = overlap, map[string]any{"id": lists[label], "entries": entries[label]}
 	}
 	return g
+}
+
+// NetworkID is the id of the v4 network of provider's product kind.
+func NetworkID(provider, kind any) string {
+	return fmt.Sprintf("%s:%s:network", provider, kind)
 }
 
 func upper(s string) string {
@@ -189,28 +231,55 @@ func peers(s *snap.Snapshot, p *snap.Product, label string) []snap.OverlapPeer {
 	return out
 }
 
-// windowList is the network list of a group window and its row counts by
-// payload breakdown name: country and City x ASN rows from the breakdowns,
-// region, city and ASN rows from the typed rows when they are whole.
-func windowList(row *store.SnapshotRow, p *snap.Product, w snap.Window) (*store.NetList, map[string]int, error) {
+// windowRows is the network list rows of a group window by payload
+// breakdown name: country and City x ASN rows from the breakdowns, region,
+// city and ASN rows from the typed rows when they are whole; a window
+// without a breakdown (a v1 snapshot's) has its pool list's country or ASN
+// rows instead, IPs only.
+func windowRows(row *store.SnapshotRow, p *snap.Product, w snap.Window) map[string][]store.NetRow {
 	typed := row.Places[store.PlaceWindow{Product: int64(p.ProductID), Cohort: p.Cohort, Hours: int64(w.Period.Hours)}]
-	rows, entries := map[string][]store.NetRow{}, map[string]int{}
-	for _, name := range []string{"country", "region", "city", "asn", "city_asn"} {
+	rows := map[string][]store.NetRow{}
+	for _, name := range netNames {
 		list := typed.Rows(name)
-		if name != "country" && name != "city_asn" && list != nil && len(list) == w.BreakdownEntries[name] {
+		_, recorded := w.Breakdowns[name]
+		switch {
+		case name != "country" && name != "city_asn" && list != nil && len(list) == w.BreakdownEntries[name]:
 			for _, r := range list {
 				rows[name] = append(rows[name], store.NetRow{Place: r.Place, Network: r.Network, Ips: r.Ips, Completed: r.Completed,
 					Successes: r.Successes, P50: r.P50})
 			}
-		} else {
+		case !recorded:
+			rows[name] = poolRows(name, w.Pool)
+		default:
 			for _, r := range w.Breakdowns[name] {
 				rows[name] = append(rows[name], netRow(name, r))
 			}
 		}
-		entries[name] = len(rows[name])
 	}
-	l, err := store.NewNetList(rows)
-	return l, entries, err
+	return rows
+}
+
+// poolRows is pool list rows of breakdown name (country or asn) as network
+// list rows, without request counters.
+func poolRows(name string, pool snap.Pool) []store.NetRow {
+	var out []store.NetRow
+	switch name {
+	case "country":
+		for _, c := range pool.CountriesBreakdown {
+			out = append(out, store.NetRow{Place: &store.Place{CountryCode: &c.CountryCode, Country: &c.Country}, Ips: count(c.Ips),
+				Completed: -1, Successes: -1, P50: -1})
+		}
+	case "asn":
+		for _, a := range pool.AsnsBreakdown {
+			n := &store.Network{Name: &a.Name, UsageType: &a.UsageType}
+			if a.Asn.OK() {
+				asn := int64(a.Asn)
+				n.Asn = &asn
+			}
+			out = append(out, store.NetRow{Network: n, Ips: count(a.Ips), Completed: -1, Successes: -1, P50: -1})
+		}
+	}
+	return out
 }
 
 // netRow is a breakdown row of name as a network list row.
