@@ -8,6 +8,8 @@ import os
 import socket
 import ssl
 import struct
+import sys
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
@@ -22,6 +24,9 @@ from psycopg import sql
 WORKER = os.environ.get("PYTEST_XDIST_WORKER", "main")
 # The opt-in test timeline (tests/conftest.py).
 TIMELINE = os.environ.get("CI_TIMELINE") == "1"
+# This test run's id, set by the process that runs the session (tests/conftest.py) and inherited
+# by its xdist workers: it names the templates they share (shared_template).
+SHARED_RUN = "PROXY_TEST_SHARED_RUN"
 
 
 def timeline_record(record: dict) -> None:
@@ -48,18 +53,54 @@ def scratch_database_name() -> str:
     return f"proxy_test_{WORKER}_{uuid.uuid4().hex}"
 
 
-def scratch_database(admin: dict, *, template: str | None = None) -> str:
+def scratch_database(admin: dict, *, template: str | None = None, attempts: int = 5) -> str:
     """Create a scratch database as `admin`, a copy of `template` when given; return its name.
 
     A template copy is the same fresh database its template was, without rerunning its DDL.
+    Copies of one template may run at once (a shared template, from several workers); one that
+    finds the template in use (a connection still closing) tries again, up to `attempts` times.
     """
     name = scratch_database_name()
     statement = sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name))
     if template:
         statement += sql.SQL(" TEMPLATE {}").format(sql.Identifier(template))
     with timed("create_database"), psycopg.connect(**admin, autocommit=True) as conn:
-        conn.execute(statement)
+        for attempt in range(attempts):
+            try:
+                conn.execute(statement)
+                break
+            except psycopg.errors.ObjectInUse:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.2)
     return name
+
+
+def shared_template(*parts: str) -> str:
+    """The name of a template the run's workers share: `proxy_test_shared_<run>_<parts>`."""
+    return "_".join(["proxy_test_shared", os.environ[SHARED_RUN], *parts])
+
+
+def drop_shared_templates(admin: dict, run: str) -> None:
+    """Drop the shared templates of `run` (shared_template)."""
+    pattern = f"proxy\\_test\\_shared\\_{run}\\_%"
+    with psycopg.connect(**admin, autocommit=True) as conn:
+        query = "SELECT datname FROM pg_database WHERE datname LIKE %s"
+        names = [row[0] for row in conn.execute(query, (pattern,))]
+    drop_databases(admin, names)
+
+
+@contextlib.contextmanager
+def untraced() -> Iterator[None]:
+    """No tracer (so no coverage) in the enclosed block, in this thread and threads it starts."""
+    traces = sys.gettrace(), threading.gettrace()
+    sys.settrace(None)
+    threading.settrace(None)
+    try:
+        yield
+    finally:
+        sys.settrace(traces[0])
+        threading.settrace(traces[1])
 
 
 def drop_databases(admin: dict, names: list[str]) -> None:

@@ -16,11 +16,11 @@ an observation row, and each list it wrote stores its window's first-seen histog
 
 import json
 from datetime import UTC, datetime
-from functools import partial
 
 import psycopg
 import pytest
 from calculated_cases import lenient_policy, payload_mismatches
+from sweep_prefix import Chain, prefix
 from test_calculated_hourly_reads import (
     BUCKET,
     DAY,
@@ -148,18 +148,6 @@ def cutoffs(day):
     return range(72 - 24 * day, 48 - 24 * day, -1)
 
 
-async def replay(database, policy, end, hours, late):
-    """A sweep's incremental builds at its cutoffs hours (before end), unasserted, adding its late
-    run (late: the cutoff and the coroutine function that adds it) where the sweep does. They
-    leave the lists and memos the sweep's next build reads: the sweep's full builds add none an
-    incremental build reads, so the next one has the same hits, misses and statements."""
-    at, add = late
-    for cutoff in hours:
-        if cutoff == at:
-            await add()
-        calculate(database, policy, as_of=end - cutoff * HOUR, mode="incremental")
-
-
 def count_windows(monkeypatch):
     """The windows the incremental builds reuse (hit) and count (miss), counted from now on."""
     counted = {"hit": 0, "miss": 0}
@@ -178,23 +166,26 @@ def count_windows(monkeypatch):
     return counted
 
 
-# Each day's cutoffs in chunks of CHUNK, each chunk its own case (they run in parallel). A late
-# chunk first replays most of its day, so each of SPLIT's is cut into its number of cases,
-# "<day>-<chunk>a", "b" and so on, of an equal share of its cutoffs.
-CHUNK = 6
-SPLIT = {(day, 2): 2 for day in range(3)} | {(day, 3): 3 for day in range(3)}
+# Each day's cutoffs in chunks, each its own case (they run in parallel), which copies the day's
+# prefix at its start (sweep_prefix) instead of replaying the cutoffs before it: STARTS. The first
+# chunk, from no stored list, has the day's first runs and enough hits; the others CHUNK cutoffs.
+CHUNK = 3
+STARTS = (0, *range(6, 24, CHUNK))
+
+
+def chain(day):
+    """The day's sweep: from no stored list, its late run earlier than runs counted before (not
+    on day 0)."""
+    hours = cutoffs(day)
+    late = min(36, hours[0]), lambda h: h.daily("beta", "us", 60 * HOUR)
+    return Chain("incremental", day, history, hours, STARTS, late)
 
 
 def chunks():
-    """Each case's day and the start and stop of its cutoffs in cutoffs(day)."""
+    """Each case's day and the start of its cutoffs in cutoffs(day)."""
     for day in range(3):
-        for chunk in range(len(cutoffs(day)) // CHUNK):
-            parts = SPLIT.get((day, chunk), 1)
-            size = CHUNK // parts
-            for part in range(parts):
-                start = chunk * CHUNK + part * size
-                suffix = "abc"[part] if parts > 1 else ""
-                yield pytest.param(day, start, start + size, id=f"{day}-{chunk}{suffix}")
+        for start in chain(day).starts:
+            yield pytest.param(day, start, id=f"{day}-{start:02d}")
 
 
 # The cutoffs (hours before the end) with a window that has exactly one peer (overlap 1: two of
@@ -204,24 +195,24 @@ SINGLE_PEER = range(10, 55)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("day", "start", "stop"), list(chunks()))
+@pytest.mark.parametrize(("day", "start"), list(chunks()))
 async def test_incremental_equals_full_at_every_hourly_cutoff(
-    day, start, stop, database, tmp_path, monkeypatch
+    day, start, database_template, databases, tmp_path, monkeypatch
 ):
-    """One case of a day's sweep, which starts from no stored list: the day's cutoffs before the
-    case's are replayed, then each of the case's is checked."""
+    """One case of a day's sweep, which starts from no stored list: a copy of the day's prefix
+    at the case's start (its cutoffs before the case's, replayed), then each of the case's is
+    checked."""
     end = floor_hour(datetime.now(UTC)) + HOUR
-    h = await history(database, tmp_path, end)
     policy = lenient_policy(tmp_path)
-    hours_of = cutoffs(day)
-    late = min(36, hours_of[0])  # a late run: earlier than runs counted before (not on day 0)
-    add_late = partial(h.daily, "beta", "us", 60 * HOUR)
-    await replay(database, policy, end, hours_of[:start], (late, add_late))
+    days = chain(day)
+    database, h = await prefix(days, start, end, database_template, tmp_path, policy, databases)
+    late, add_late = days.late
+    own = days.checked(start)
     counted = count_windows(monkeypatch)
     log, seen = statements(monkeypatch), set()
-    for hours in hours_of[start:stop]:
+    for hours in own:
         if hours == late:
-            await add_late()
+            await add_late(h)
         payload = assert_equal(database, policy, end - hours * HOUR, log)
         for p in payload["products"]:
             for w in p["windows"].values():
@@ -233,7 +224,7 @@ async def test_incremental_equals_full_at_every_hourly_cutoff(
     # Every case is exercised: empty and measured windows, estimates, peers, census-pulse
     # groups, and windows the incremental builds reused and ones they counted.
     assert {("data", True), ("estimated", True)} <= seen
-    assert (("overlap", 1) in seen) == any(at in SINGLE_PEER for at in hours_of[start:stop])
+    assert (("overlap", 1) in seen) == any(at in SINGLE_PEER for at in own)
     assert ("data", False) in seen  # gamma's windows
     assert ("scheduled", "census_pulse") in seen and ("scheduled", None) in seen
     assert ("delta", "census_pulse") in seen
