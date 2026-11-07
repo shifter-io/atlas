@@ -101,7 +101,8 @@ stored in `run_geo_buckets` against the shared location/network ids. Artifacts w
 keys still import and rebuild unchanged. `proxy-index db-seed --database-file
 .secrets/database.toml` upserts regions, countries and targets from `configs/regions.yaml`,
 `configs/countries.json` and `configs/targets.toml`; it keeps census times, enabled flags and
-target schedules once set (`--reset-times` restores the staggered default census slots).
+target schedules once set (`--reset-times` restores the staggered default census slots;
+`--only targets` upserts the targets alone and leaves regions and countries untouched).
 
 Schema v7 (`migrate_v6_v7.sql`) adds the batch kind `load` (the latency-under-load wave, see
 below) and `test_batches.retry_of` (a census rerun after a provider outage names the census it

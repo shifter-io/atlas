@@ -85,3 +85,17 @@ def seed(
         "targets": [row["target_id"] for row in targets],
         "census_times_reset": reset_times,
     }
+
+
+def seed_targets(credentials_file, targets_path=None):
+    """Upsert only the targets, as seed does (proxy-index db-seed --only targets): a database
+    seeded before a target was added gets it; regions and countries are never read or touched."""
+    from . import storage
+    from .regions import load_targets
+
+    targets = load_targets(targets_path)
+    with storage.connect(credentials_file) as conn:
+        storage._lock(conn, "seeding")
+        with conn.cursor() as cursor:
+            _seed_targets(cursor, targets)
+    return {"targets": [row["target_id"] for row in targets]}

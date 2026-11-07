@@ -27,6 +27,7 @@ from .storage_read import _read_run, _steps
 from .storage_read import connect as connect
 from .storage_read import read_summary as read_summary
 from .storage_seed import seed as seed
+from .storage_seed import seed_targets as seed_targets
 from .storage_status import status as status
 
 SCHEMA_VERSION = 12
