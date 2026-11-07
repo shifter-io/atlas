@@ -222,9 +222,6 @@ func (b *builder) naManifests() error {
 		}
 		e.P.NA = withoutPublishedEmpties(e)
 	}
-	// After the N/A manifests: a coverage row's nulls are the row's own
-	// unknown fields, not gaps of the provider (FIELDS.md).
-	addCoverageEvidence(b.entries, b.in.Snapshot)
 	for i := range ds.Targets {
 		if ds.Targets[i].NA, err = naOf(ds.Targets[i], nil, false); err != nil {
 			return err

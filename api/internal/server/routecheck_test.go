@@ -14,12 +14,14 @@ import (
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // freshSource serves what a fresh database holds after one real test cycle:
 // the framework's provider and product, one published product group (the
 // every-request fixture: Shifter residential, requested country US, exits in
-// US and DE) and, unless a test adds some, no site catalog rows.
+// US and DE) published as payload v4 and, unless a test adds some, no site
+// catalog rows.
 type freshSource struct {
 	payload []byte
 	catalog []store.ProviderRow
@@ -49,7 +51,15 @@ func (f *freshSource) Load(context.Context) (*store.Inputs, error) {
 	if err := json.Unmarshal(f.payload, &doc); err != nil {
 		return nil, err
 	}
-	in := &store.Inputs{Snapshot: &store.SnapshotRow{BuildID: 1, ContentHash: "fresh", Payload: f.payload},
+	head, lists, err := testscale.Networks(&store.SnapshotRow{Payload: f.payload}, 0)
+	if err != nil {
+		return nil, err
+	}
+	row := &store.SnapshotRow{BuildID: 1, ContentHash: "fresh", Payload: head}
+	if err := row.SetNetworks(lists); err != nil {
+		return nil, err
+	}
+	in := &store.Inputs{Snapshot: row,
 		FrameworkProviders: []string{"shifter"}, FrameworkProducts: []store.FrameworkProduct{{ID: 1, Provider: "shifter", Name: "residential"}},
 		Providers: append([]store.ProviderRow{}, f.catalog...), EventsComplete: true, NotableComplete: true}
 	for i, t := range doc.Targets {
@@ -123,7 +133,7 @@ func TestAPublishedProductWithoutItsNetworkPagesIsFlagged(t *testing.T) {
 	}
 	joined := strings.Join(hz.Unserved, "\n")
 	for _, want := range []string{"/v1/networks/Shifter_IO answers 400", "/v1/networks/Shifter_IO/chart?kind=residential answers 400",
-		"/v1/networks/Shifter_IO/places answers 400", "(published product 1:7a5d84127c244707dc0e)"} {
+		"/v1/networks/Shifter_IO/places answers 400", "(published product shifter:residential:network)"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("unserved lacks %q:\n%s", want, joined)
 		}

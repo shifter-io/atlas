@@ -16,6 +16,8 @@ import maxminddb
 # The one file name `dbip update` keeps the current release under (replaced atomically).
 CURRENT = "dbip-full.mmdb"
 OPEN_ATTEMPTS = 3  # the file replaced while it was being opened: open the new one
+# The checkout's db-ip/, the second place find_source looks in.
+CHECKOUT_DB_IP = Path(__file__).resolve().parents[2] / "db-ip"
 
 
 def find_source(path: str | Path | None = None) -> Path:
@@ -27,7 +29,7 @@ def find_source(path: str | Path | None = None) -> Path:
         if not result.is_file():
             raise FileNotFoundError("Configured MMDB file does not exist")
         return result
-    roots = [Path.cwd() / "db-ip", Path(__file__).resolve().parents[2] / "db-ip"]
+    roots = [Path.cwd() / "db-ip", CHECKOUT_DB_IP]
     for root in roots:
         if (root / CURRENT).is_file():
             return (root / CURRENT).absolute()

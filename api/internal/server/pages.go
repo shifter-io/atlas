@@ -115,7 +115,7 @@ func (s *Server) serveNetwork(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	kind := q.Get("kind")
@@ -142,7 +142,7 @@ func (s *Server) serveNetworkChart(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	kind := q.Get("kind")
@@ -210,7 +210,7 @@ func (s *Server) serveNetworkPlaces(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	kind := q.Get("kind")
@@ -232,7 +232,7 @@ func (s *Server) serveCountryCities(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	dimension := "city"
@@ -259,7 +259,7 @@ func (s *Server) servePlace(w http.ResponseWriter, r *http.Request) {
 	}
 	v := s.current.Load()
 	if v == nil {
-		writeError(w, http.StatusServiceUnavailable, "cache is not built yet")
+		s.unavailable(w)
 		return
 	}
 	s.serveCut(w, r, v, strings.Join([]string{"place", dimension, key, rangeID}, "\x00"), func() (any, bool, error) {

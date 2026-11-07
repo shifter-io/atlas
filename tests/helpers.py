@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import dropper
 import psycopg
 from psycopg import sql
 
@@ -39,13 +40,13 @@ def timeline_record(record: dict) -> None:
 
 
 @contextlib.contextmanager
-def timed(kind: str) -> Iterator[None]:
-    """Record the enclosed span as `kind` in the test timeline."""
+def timed(kind: str, **fields) -> Iterator[None]:
+    """Record the enclosed span as `kind`, with any more `fields`, in the test timeline."""
     start = time.time()
     try:
         yield
     finally:
-        timeline_record({"kind": kind, "start": start, "stop": time.time()})
+        timeline_record({"kind": kind, "start": start, "stop": time.time()} | fields)
 
 
 def scratch_database_name() -> str:
@@ -104,9 +105,13 @@ def untraced() -> Iterator[None]:
 
 
 def drop_databases(admin: dict, names: list[str]) -> None:
-    with timed("drop_database"), psycopg.connect(**admin, autocommit=True) as conn:
-        for name in names:
-            conn.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+    """Queue `names` to be dropped as `admin` by this process's dropper (tests/dropper.py)."""
+    dropper.queue(admin, names)
+
+
+def drop_queued() -> None:
+    """At the session end (tests/conftest.py): wait for every queued drop."""
+    dropper.wait()
 
 
 @asynccontextmanager

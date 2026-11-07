@@ -2,8 +2,6 @@ package build_test
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -86,17 +84,14 @@ func datasetFile(t *testing.T, shape testscale.Shape) ([]byte, *build.Result) {
 // file the earlier code wrote for goldenShape, with those two provider
 // fields and the N/A paths under placeRanks taken out. The new `pages` and
 // `coverageEvidence` are left out of the comparison; their own tests check
-// them. goldenShape is a build before v4, so its `lists` is {}. Its snapshot
-// has no latency mean, so what LAT-MEAN-API adds for it is left out too.
+// them, as is `lists`. Its snapshot has no latency mean, so what LAT-MEAN-API
+// adds for it is left out too.
 func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 	t.Parallel()
 	file, _ := datasetFile(t, goldenShape)
 	file = testscale.WithoutLatencyMean(file)
 	top := []pair{}
 	for _, kv := range pairs(t, file) {
-		if kv.key == "lists" && string(kv.raw) != "{}" {
-			t.Errorf("a build before v4 has lists %.200s", kv.raw)
-		}
 		if kv.key == "pages" || kv.key == "lists" {
 			continue
 		}
@@ -130,26 +125,5 @@ func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 		}
 		t.Fatalf("kept fields differ from the golden at byte %d: got ...%s..., want ...%s...", at,
 			got[max(0, at-80):min(len(got), at+80)], want[max(0, at-80):min(len(want), at+80)])
-	}
-}
-
-// preV4File is the SHA-256 of goldenShape's dataset file as the base of
-// API-DATASET-2 writes it (computed there).
-const preV4File = "557cf8117404a621f49101125b055769e293f90bf08480f74accbb5e8b032d9e"
-
-// A build before v4 writes the file it wrote before the lists, plus
-// "lists":{} (regression case 3 of API-DATASET-2), and what LAT-MEAN-API
-// adds without a latency mean.
-func TestAPreV4FileIsTheEarlierFileWithEmptyLists(t *testing.T) {
-	t.Parallel()
-	file, _ := datasetFile(t, goldenShape)
-	file = testscale.WithoutLatencyMean(file)
-	i := bytes.Index(file, []byte(`,"lists":{},"snapshot":`))
-	if i < 0 {
-		t.Fatal(`no "lists":{} before the snapshot`)
-	}
-	earlier := append(append([]byte{}, file[:i]...), file[i+len(`,"lists":{}`):]...)
-	if sum := sha256.Sum256(earlier); hex.EncodeToString(sum[:]) != preV4File {
-		t.Errorf("the pre-v4 file without its empty lists has SHA-256 %x, the earlier file %s", sum, preV4File)
 	}
 }

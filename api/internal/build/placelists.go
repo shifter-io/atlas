@@ -10,21 +10,18 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
-// A v4 build (payload v4, contract K11) answers its long place lists from the
+// A build (payload v4, contract K11) answers its long place lists from the
 // network lists the store reads as compact rows (store.NetList) when asked:
 // such a list is the lists it is merged from, and its rows are read, merged,
 // ordered and cut only when a page is asked for. The build keeps each list's row
 // count and first page (rows, not rendered: QA-1 has about 1,700 lists); the
 // server renders a page when first asked and keeps it in its page cache
-// (server.PagesLRU). A build before v4 keeps every row of every list as
-// before.
+// (server.PagesLRU).
 
-// placeIndex is one long place list: before v4 every row in order (all); in a
-// v4 build the sources whose rows of dimension it merges, only those in
-// country cc when set, each source's rows apart and tagged with its network
+// placeIndex is one long place list: the sources whose rows of dimension it
+// merges, only those in country cc when set, each source's rows apart and tagged with its network
 // when tagged (a country's lists), with the merged row count and first page.
 type placeIndex struct {
-	all       []PlaceRow
 	srcs      []placeSource
 	dimension string
 	cc        string
@@ -41,33 +38,21 @@ type placeSource struct {
 	network, name, kind string
 }
 
-// netListOf is the network list of a product window of a v4 build, nil when
-// the build is older or the window names no list.
+// netListOf is the network list of a product window, nil when the window
+// names none.
 func netListOf(row *store.SnapshotRow, p *snap.Product, w snap.Window) *store.NetList {
-	if row == nil || row.Networks == nil || !p.ProductID.OK() || !w.Period.Hours.OK() {
+	if row == nil || !p.ProductID.OK() || !w.Period.Hours.OK() {
 		return nil
 	}
 	return row.Networks[store.PlaceWindow{Product: int64(p.ProductID), Cohort: p.Cohort, Hours: int64(w.Period.Hours)}]
 }
 
-// count is the list's row count.
-func (x *placeIndex) count() int {
-	if x.srcs == nil {
-		return len(x.all)
-	}
-	return x.total
-}
-
-// rows is every row of the list that holds every token, in list order: in a
-// v4 build merged from the sources as a build before v4 merges a network's
-// product groups (mergePlace, placeLess).
+// rows is every row of the list that holds every token, in list order:
+// merged from the sources by place key (mergePlace, placeLess).
 func (x *placeIndex) rows(ctx context.Context, tokens []string) ([]PlaceRow, error) {
-	all := x.all
-	if x.srcs != nil {
-		var err error
-		if all, err = mergeSources(ctx, x.srcs, x.dimension, x.cc, x.tagged); err != nil {
-			return nil, err
-		}
+	all, err := mergeSources(ctx, x.srcs, x.dimension, x.cc, x.tagged)
+	if err != nil {
+		return nil, err
 	}
 	if len(tokens) == 0 {
 		return all, nil
@@ -122,9 +107,6 @@ type netRead struct {
 	err error
 }
 
-// v4 is whether the build is of payload v4.
-func (nr *netRead) v4() bool { return nr.row != nil && nr.row.Networks != nil }
-
 // merge is the merged rows of dimension of a network's sources (none once a
 // read has failed).
 func (nr *netRead) merge(srcs []placeSource, dimension string) []PlaceRow {
@@ -136,8 +118,7 @@ func (nr *netRead) merge(srcs []placeSource, dimension string) []PlaceRow {
 	return rows
 }
 
-// netPlaceRow is a compact row as a place row and its ASN, as mergeWindow
-// reads a typed row.
+// netPlaceRow is a compact row as a place row and its ASN.
 func netPlaceRow(r store.NetRow, scale Num) (PlaceRow, Num) {
 	row, asn := PlaceRow{IpsSum: scaleBy(scale, counted(r.Ips)), Requests: counted(r.Completed), Successes: counted(r.Successes),
 		LatencyP50: counted(int64(r.P50))}, nan
@@ -170,7 +151,7 @@ func firstPage(rows []PlaceRow) []PlaceRow {
 }
 
 // countryLists gathers, per country, range and dimension, the city and
-// region rows of every network of a v4 build: the rows a country's list
+// region rows of every network: the rows a country's list
 // counts and the candidates of its first page (each network's first PageSize
 // rows in the country; a country's first page is among them).
 type countryLists struct {

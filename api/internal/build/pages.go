@@ -36,10 +36,8 @@ type Pages struct {
 	// network that should serve it. It is not an answer: the server checks
 	// after each build that each one has its network pages.
 	Published []PublishedProduct
-	lists     map[listKey]*placeIndex
-	// v4 is a build of payload v4: its lists are read from the network
-	// lists (placelists.go), and it has the coverage, region and place answers.
-	v4       bool
+	// lists and coverage are read from the network lists (placelists.go).
+	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList
 	sources  map[placeList][]placeSource // every network's list of a range and region or city dimension
 }
@@ -220,7 +218,7 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	s *snap.Snapshot, row *store.SnapshotRow) (*Pages, error) {
 	nr := &netRead{ctx: context.Background(), row: row}
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
-		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, v4: row != nil && row.Networks != nil, coverage: map[listKey]*coverageList{}}
+		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}
 	groups := groupsByProvider(s)
 	byCountry := map[string]map[string][]PlaceRow{} // cc -> range -> one row per network and kind
@@ -239,10 +237,8 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 				switch {
 				case key.dimension == "country":
 					addCountryRows(byCountry, key.rangeID, rows, head, kind)
-				case pg.v4 && key.dimension != "asn" && len(srcs[key.rangeID]) > 0:
+				case key.dimension != "asn" && len(srcs[key.rangeID]) > 0:
 					country.add(key, srcs[key.rangeID], rows)
-				case key.dimension == "city":
-					pg.addCityRows(key.rangeID, rows, head, kind)
 				}
 			}
 		}
@@ -264,12 +260,9 @@ func buildPages(generatedAt string, entries []*entry, stats map[string]map[strin
 	return pg, nr.err
 }
 
-// index is a list of rows in order: in a v4 build its count and first page
-// and the sources it is merged from, else every row.
+// index is a list of rows in order: its count and first page and the
+// sources it is merged from.
 func (pg *Pages) index(rows []PlaceRow, srcs []placeSource, dimension string) *placeIndex {
-	if !pg.v4 {
-		return &placeIndex{all: rows}
-	}
 	return &placeIndex{srcs: append([]placeSource{}, srcs...), dimension: dimension, total: len(rows), first: firstPage(rows)}
 }
 
