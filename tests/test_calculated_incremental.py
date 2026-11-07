@@ -169,6 +169,8 @@ def count_windows(monkeypatch):
 # Each day's cutoffs in chunks, each its own case (they run in parallel), which copies the day's
 # prefix at its start (sweep_prefix) instead of replaying the cutoffs before it: STARTS. The first
 # chunk, from no stored list, has the day's first runs and enough hits; the others CHUNK cutoffs.
+# tests/durations.json lists the cases of later starts as shorter than they take, so they run
+# after other slow tests, once the earlier cases have built their prefixes.
 CHUNK = 3
 STARTS = (0, *range(6, 24, CHUNK))
 
