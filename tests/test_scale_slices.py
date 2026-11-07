@@ -183,8 +183,7 @@ def test_byteful_is_sized_to_its_estimate_in_both_directions(fixture):
         by_country[code] = [row for row in rows if row["country"] == code]
     assert {code: len(rows) for code, rows in by_country.items()} == {"DE": 3, "FR": 5, "JP": 3}
     assert sorted(row["count"] for row in by_country["DE"]) == [3, 4, 5]  # most rows kept
-    reserved = ipaddress.ip_network("240.0.0.0/4")
-    synthetic = [row for row in by_country["FR"] if ipaddress.ip_address(row["ip"]) in reserved]
+    synthetic = [row for row in by_country["FR"] if ipaddress.ip_address(row["ip"]).is_reserved]
     assert len(synthetic) == 3
     assert all(row["enrichment"]["country_code"] == "FR" for row in synthetic)
     assert all(row["modelled"] == "byteful-formula" for rows in by_country.values() for row in rows)
@@ -290,6 +289,9 @@ def test_a_missing_best_hours_file_or_a_bad_manifest_fails(fixture):
     path = fixture["source"] / "alpha" / "manifest.json"
     path.write_text(json.dumps({**json.loads(path.read_text()), "schema_version": 1}))
     with pytest.raises(slices.SliceError, match="alpha/manifest.json: manifest schema"):
+        _build(fixture)
+    path.write_text("{")
+    with pytest.raises(slices.SliceError, match="alpha/manifest.json: "):
         _build(fixture)
 
 

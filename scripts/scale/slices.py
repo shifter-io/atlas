@@ -27,8 +27,9 @@ committed file, else the build fails with the list.
 Byteful (a formula with `borrowed`): its rows are the real records of its one hour with IPs,
 placed at each country's borrowed best hour and sized to the formula's
 countries.<CC>.estimated_unique_ips[best hour]: fewer by keeping the IPs with the most request
-rows, more by adding synthetic addresses (synthetic.address: 240.0.0.0/4 and 2001:db8::/32) that
-copy the enrichment of the country's real records in turn. All of them are "byteful-formula".
+rows, more by adding synthetic addresses (synthetic.address: 240/4, class E, and 2001:db8::/32)
+that copy the enrichment and the count of the country's real records in turn. All of them are
+"byteful-formula".
 
 The output is deterministic: rows are sorted and gzip's mtime is 0.
 """
@@ -88,7 +89,7 @@ def load_networks(source: Path, best_dir: Path, formulas: Path) -> list[Network]
     for folder in sorted(path.parent for path in source.glob("*/manifest.json")):
         try:
             _, manifest = load_manifest(folder)
-        except (FormulaError, KeyError) as error:
+        except (FormulaError, KeyError, ValueError) as error:
             raise SliceError(f"{folder.name}/manifest.json: {error}") from None
         best = _json(best_dir / f"{folder.name}.json")["countries"]
         formula = _json(formulas / f"{folder.name}.json")
