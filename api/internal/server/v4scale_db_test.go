@@ -271,6 +271,7 @@ func v4ScaleAnswers(t *testing.T, c v4ScaleCase) map[string]string {
 	}
 	answers := renderedAnswers(t, db, db.PublishV4(t, payload), pages, asBuilt)
 	windowFiguresServed(t, answers)
+	rankingsServed(t, answers)
 	return sums(answers)
 }
 

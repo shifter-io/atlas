@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
@@ -126,6 +127,28 @@ func reusable(prev *Version) bodies {
 		}
 	}
 	return out
+}
+
+// shareIdentical points every path of static whose body has the same bytes,
+// cache policy and status as another's at one body (the first path's in
+// order), as reusable does across versions: a rankings answer of the one kind
+// measured is the answer of every kind, and the empty kinds' are alike.
+func shareIdentical(static map[string]*Rendered) {
+	paths := make([]string, 0, len(static))
+	for p := range static {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	first := bodies{}
+	for _, p := range paths {
+		r := static[p]
+		k := bodyKey{r.ETag, r.CacheControl, r.Status}
+		if f, ok := first[k]; ok {
+			static[p] = f
+		} else {
+			first[k] = r
+		}
+	}
 }
 
 // render is Render at LevelBest, except that when the encoded bytes, cache

@@ -203,13 +203,33 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 	}
 }
 
-// Browser targets are per target only: rankings, fleet figures, the network
-// list and every network-level figure are the same with and without them.
+// withoutBrowserFacts is rankings without what browser targets add to them:
+// the target counts and each row's overall browser score.
+func withoutBrowserFacts(rankings map[string]*build.RankingsAnswer) map[string]build.RankingsAnswer {
+	out := map[string]build.RankingsAnswer{}
+	for key, ans := range rankings {
+		a := *ans
+		a.Targets, a.Networks = build.TargetCounts{}, append([]build.RankingRow{}, ans.Networks...)
+		for i := range a.Networks {
+			a.Networks[i].BrowserOverall = nil
+		}
+		out[key] = a
+	}
+	return out
+}
+
+// Browser targets are per target only: rankings (but for the target counts
+// and overall browser scores), fleet figures, the network list and every
+// network-level figure are the same with and without them.
 func TestBrowserTargetsChangeNoNetworkLevelFigure(t *testing.T) {
 	t.Parallel()
 	with, without := browserBuild(t, true), browserBuild(t, false)
+	if row := with.Pages.Rankings["30d"].Networks[0]; row.BrowserOverall == nil || without.Pages.Rankings["30d"].Networks[0].BrowserOverall != nil {
+		t.Errorf("%s: overall browser score %v with browser targets", row.Slug, row.BrowserOverall)
+	}
 	for name, pick := range map[string]func(*build.Result) any{
-		"rankings":       func(r *build.Result) any { return r.Pages.Rankings },
+		"rankings":       func(r *build.Result) any { return withoutBrowserFacts(r.Pages.Rankings) },
+		"kind rankings":  func(r *build.Result) any { return withoutBrowserFacts(r.Pages.RankingsByKind) },
 		"networks":       func(r *build.Result) any { return r.Pages.Networks },
 		"countries":      func(r *build.Result) any { return r.Pages.Countries },
 		"totals":         func(r *build.Result) any { return r.Dataset.Totals },

@@ -207,6 +207,7 @@ func TestCacheHeadersEncodingsAndConditionalRequests(t *testing.T) {
 		"/v1/networks/alpha-net/places?page=0": 400, "/v1/networks/alpha-net/places?range=1y": 400, "/v1/countries": 200,
 		"/v1/countries/DE": 404, "/v1/countries/DEU": 400, "/v1/countries/DE/cities": 404, "/v1/countries/D1/cities": 400,
 		"/v1/rankings": 200, "/v1/rankings?range=24h": 200, "/v1/rankings?range=1y": 400, "/v1/rankings?x=1": 400,
+		"/v1/rankings?kind=residential": 200, "/v1/rankings?range=7d&kind=mobile": 200, "/v1/rankings?kind=all": 400, "/v1/rankings?kind=x&range=1y": 400,
 		"/v1/networks/all": 200, "/v1/networks/all/places?dimension=city": 200, "/v1/networks/all?kind=residential": 404} {
 		if r := get(h, path); r.Code != code {
 			t.Errorf("%s: %d, want %d", path, r.Code, code)

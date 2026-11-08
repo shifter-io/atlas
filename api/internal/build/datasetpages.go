@@ -9,7 +9,8 @@ import (
 // DatasetPages is the dataset file's `pages`: the body of every per-page
 // answer the site's pages draw, by the request that serves it, so the file
 // alone regenerates each answer byte for byte (the server renders the same
-// values). Keys are "/v1/networks", "/v1/rankings?range=<r>",
+// values). Keys are "/v1/networks", "/v1/rankings?range=<r>" (and
+// "&kind=<kind>" for each proxy kind),
 // "/v1/networks/<slug>?kind=<kind>" and
 // "/v1/networks/<slug>/chart?kind=<kind>&range=<r>" (the all-networks answer
 // under slug and kind "all"), "/v1/countries" and
@@ -29,6 +30,10 @@ func datasetPages(pg *Pages) DatasetPages {
 	}
 	for rangeID, ans := range pg.Rankings {
 		out["/v1/rankings?range="+rangeID] = ans
+	}
+	for key, ans := range pg.RankingsByKind {
+		rangeID, kind, _ := strings.Cut(key, "/")
+		out["/v1/rankings?range="+rangeID+"&kind="+kind] = ans
 	}
 	for key, ans := range pg.Network {
 		slug, kind, _ := strings.Cut(key, "/")

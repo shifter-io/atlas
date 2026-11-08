@@ -334,6 +334,7 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 	if err := <-errs; err != nil {
 		return nil, err
 	}
+	shareIdentical(v.Static)
 	if err := registeredFit(v); err != nil {
 		return nil, err
 	}
