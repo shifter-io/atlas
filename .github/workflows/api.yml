@@ -250,19 +250,6 @@ jobs:
           # Never an empty pass: the test ran, measured and passed.
           grep -qE '^--- PASS: TestPageLatency ' "$log"
           grep -qE 'list cold .* p99' "$log"
-      - name: TEMPORARY (#754, removed before merge) the page latency test 5 times in a row
-        if: steps.diff.outputs.code == 'true'
-        run: |
-          failed=0
-          for i in 1 2 3 4 5; do
-            rc=0
-            go test -count=1 -json -run "$PAGE_LATENCY_TEST" ./internal/server/ > "$RUNNER_TEMP/pl-$i.json" 2> "$RUNNER_TEMP/pl-$i.err" || rc=$?
-            python3 ../scripts/ci/timing.py --go --log "$RUNNER_TEMP/pl-$i.json" > "$RUNNER_TEMP/pl-$i.log"
-            echo "run $i: exit $rc" | tee -a "$GITHUB_STEP_SUMMARY"
-            grep -oE '^--- (PASS|FAIL): TestPageLatency.*|(RETRY|STAGING-BUDGET|LATENCY-RATIO).*' "$RUNNER_TEMP/pl-$i.log" | sed 's/^/- /' | tee -a "$GITHUB_STEP_SUMMARY" || true
-            [ "$rc" -eq 0 ] || { tail -n 100 "$RUNNER_TEMP/pl-$i.log"; failed=1; }
-          done
-          exit "$failed"
       - name: CI time (slowest Go tests, budgets)
         # Also after a failed test step: the summary is there for failed runs too. Fails
         # the job when a test takes 90 s or more or the test steps over 240 s (CI-TIME-1).
