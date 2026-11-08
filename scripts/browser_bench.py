@@ -47,7 +47,6 @@ from proxy_index.campaign.sampler import percentile
 from proxy_index.errors import UserError
 from proxy_index.models import RequestContext, RunConfig
 
-
 ENGINES = ("camoufox", "chrome")
 MAX_TRIES = 500
 MAX_BROWSERS = 16
@@ -84,7 +83,12 @@ def _stats(values: list[float]) -> dict[str, float | None]:
         return dict.fromkeys(("average", "median", "p95", "max"))
     average = round(sum(values) / len(values), 1)
     median = statistics.median(values)
-    return {"average": average, "median": median, "p95": percentile(values, 0.95), "max": max(values)}
+    return {
+        "average": average,
+        "median": median,
+        "p95": percentile(values, 0.95),
+        "max": max(values),
+    }
 
 
 def summarize(records: list[dict], samples: list[dict], run: dict[str, Any]) -> dict[str, Any]:
@@ -100,7 +104,10 @@ def summarize(records: list[dict], samples: list[dict], run: dict[str, Any]) -> 
         "outcomes": outcomes,
         "other_errors": dict(sorted(others.items(), key=lambda item: str(item[0]))),
         "request_ms": _stats([record["duration_ms"] for record in records]),
-        "bytes": {"total": sum(sizes), "per_try": round(sum(sizes) / len(sizes)) if sizes else None},
+        "bytes": {
+            "total": sum(sizes),
+            "per_try": round(sum(sizes) / len(sizes)) if sizes else None,
+        },
         "cpu_percent": machine["cpu_percent"],
         "rss_bytes": machine["rss_bytes"],
         "cpu_seconds": samples[-1]["cpu_seconds"] if samples else None,

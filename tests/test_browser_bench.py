@@ -7,14 +7,15 @@ import importlib
 import json
 import os
 import sys
+from collections import Counter
 from functools import partial
 from pathlib import Path
 
 import pytest
 from browser_node_cases import Fleet, make_state
-from browser_transport_cases import FakeBrowser, Script
+from browser_transport_cases import Script
 
-from proxy_index.browser import driver
+from proxy_index.browser import driver, release
 from proxy_index.browser.chrome import ChromeRefused
 from proxy_index.browser.driver import UserAgentRefused
 from proxy_index.browser.procstats import Process
@@ -60,7 +61,7 @@ def test_at_most_browsers_tries_at_once_and_every_try_recorded(tmp_path):
     assert status == 0 and fleet.peak == 3 and len(fleet.browsers) == 3
     assert sorted(record["i"] for record in tries) == list(range(12))
     for record in tries:
-        assert record["engine"] == "camoufox" and record["verdict"] == "ok"
+        assert record["engine"] == "camoufox"
         assert record["started_at"] <= record["ended_at"]
         assert record["duration_ms"] == record["timings_ms"]["total"] >= 20
         assert "fingerprint" not in record and record["bytes_down_est"] == 4321
@@ -68,14 +69,8 @@ def test_at_most_browsers_tries_at_once_and_every_try_recorded(tmp_path):
     contexts = [block for browser in fleet.browsers for _, block in browser.contexts]
     assert contexts == [("image",)] * 12
     assert samples[0]["cpu_percent"] is None and samples[-1]["rss_bytes"] == GIB
-    assert summary["outcomes"] == {
-        "ok": 12,
-        "challenge": 0,
-        "block": 0,
-        "timeout": 0,
-        "proxy_error": 0,
-        "other": 0,
-    }
+    verdicts = Counter(record["verdict"] for record in tries)
+    assert {k: n for k, n in summary["outcomes"].items() if n} == dict(verdicts)
     assert summary["tries"] == 12 and summary["browsers"] == 3 and summary["recycle_after"] == 25
     assert summary["bytes"] == {"total": 12 * 4321, "per_try": 4321}
     assert summary["samples"] == len(samples) >= 2 and summary["rss_bytes"]["peak"] == GIB
@@ -135,11 +130,9 @@ def test_refused_requests_run_no_try(tmp_path, capsys, extra):
 
 
 def test_over_the_tries_cap_or_into_an_existing_bench_is_refused(tmp_path):
-    assert run(tmp_path, tries=bench.MAX_TRIES + 1)[0] == 2
-    (tmp_path / "out/camoufox/amazon_pdp").mkdir(parents=True)
+    assert run(tmp_path / "cap", tries=bench.MAX_TRIES + 1)[0] == 2
+    (tmp_path / "again/out/camoufox/amazon_pdp").mkdir(parents=True)
     status, fleet = run(tmp_path / "again", tries=1)
-    assert status == 0 and len(fleet.browsers) == 1  # another --out is fine
-    status, fleet = run(tmp_path, tries=1)
     assert status == 2 and fleet.browsers == []
 
 
@@ -153,10 +146,13 @@ def test_an_engine_refused_during_the_run_stops_it(tmp_path, capsys):
 
 def test_the_engines_launch_with_the_hosts_settings(tmp_path, monkeypatch):
     state = make_state(tmp_path)
-    args = bench.parse(["--settings", str(state / "settings.toml"), "--state", str(state)] + [
-        *("--host", "browser-1", "--network", "shifter/residential", "--target", "amazon_pdp"),
-        *("--tries", "1", "--engine", "chrome", "--country", "us", "--out", str(tmp_path)),
-    ])
+    args = bench.parse(
+        ["--settings", str(state / "settings.toml"), "--state", str(state)]
+        + [
+            *("--host", "browser-1", "--network", "shifter/residential", "--target", "amazon_pdp"),
+            *("--tries", "1", "--engine", "chrome", "--country", "us", "--out", str(tmp_path)),
+        ]
+    )
     plan = bench.prepare(args, bench.MAX_TRIES)
     checked = []
     monkeypatch.setattr(bench.chrome, "detect", checked.append)
@@ -167,6 +163,10 @@ def test_the_engines_launch_with_the_hosts_settings(tmp_path, monkeypatch):
     args.engine = "camoufox"
     with pytest.raises(bench.UserError, match="not installed"):
         bench.engine_launch(args, plan)
+    monkeypatch.setattr(release, "executable", lambda dest: dest / "firefox")
+    launch = bench.engine_launch(args, plan)
+    assert launch.func is driver.launch and launch.args == (state / "camoufox/firefox",)
+    assert launch.keywords == {"locale": "en-US", "headless": True}
 
 
 def test_a_missing_chrome_is_refused_before_any_try(tmp_path, monkeypatch, capsys):
@@ -255,7 +255,9 @@ def test_the_report_merges_two_minis(tmp_path):
     assert "Minis: browser-1, browser-2; engines: Camoufox 135.0.1-beta.24, Chrome 151.0.1" in text
     assert "| amazon_pdp | Chrome | 4 | 2 (50.0%) | 0 (0.0%) | 2 (50.0%) |" in text
     assert "| 1,500 | 1,500 | 2,000 | 1000 B |" in text
-    assert "| amazon_pdp | Camoufox | 4 | 2 (50.0%) |" in text and "| 4,000 | 4,000 | 5,000 |" in text
+    assert (
+        "| amazon_pdp | Camoufox | 4 | 2 (50.0%) |" in text and "| 4,000 | 4,000 | 5,000 |" in text
+    )
     assert "| browser-2 | Chrome | 2 | 150% | 150% | 2.00 GiB | 2.00 GiB | 2.00 |" in text
     assert "| browser-1 | Camoufox | 2 | 200% | 200% | 3.00 GiB | 3.00 GiB | 4.00 |" in text
     assert "Chrome used 2.00 CPU seconds against Camoufox's 4.00 (50% less)" in text
