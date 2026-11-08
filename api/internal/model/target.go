@@ -64,6 +64,8 @@ type BrowserBenchmark struct {
 	// Engines is each engine's own figures, by engine name (never added
 	// together); empty when the snapshot has none.
 	Engines map[string]EngineBenchmark `json:"engines"`
+	// Scores is Engine's rank-based scores; null when the snapshot has none.
+	Scores *TargetScores `json:"scores"`
 }
 
 // EngineBenchmark is one browser engine's figures of a browser target.
@@ -73,6 +75,38 @@ type EngineBenchmark struct {
 	Outcomes    Outcomes `json:"outcomes"`
 	PageLoadP50 Num      `json:"pageLoadP50"`
 	PageLoadP90 Num      `json:"pageLoadP90"`
+	// Scores is the engine's rank-based scores; null when the snapshot has none.
+	Scores *TargetScores `json:"scores"`
+}
+
+// TargetScores are a browser target's rank-based 1-10 scores in one window
+// and engine (TARGET-SCORES-1), next to the raw rates they rank.
+type TargetScores struct {
+	Success   MetricScore `json:"success"`
+	Challenge MetricScore `json:"challenge"`
+	Block     MetricScore `json:"block"`
+}
+
+// MetricScore is one metric's score: Score (1-10), Rank (fractional on a tie)
+// and RankedOf (M, the networks ranked) are null unless Status is "ranked".
+type MetricScore struct {
+	Score    Num    `json:"score"`
+	Rank     Num    `json:"rank"`
+	RankedOf Num    `json:"rankedOf"`
+	Status   string `json:"status"`
+}
+
+// OverallScore is a network's overall browser success score for one engine,
+// with the targets it averaged and their difficulty weights.
+type OverallScore struct {
+	MetricScore
+	Targets []string       `json:"targets"`
+	Weights map[string]Num `json:"weights"`
+}
+
+// BrowserOverall is a network's overall browser score for one engine.
+type BrowserOverall struct {
+	Success OverallScore `json:"success"`
 }
 
 // Outcomes are shares of the completed tries per outcome; they sum to 1.

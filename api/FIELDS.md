@@ -39,7 +39,7 @@ General rules:
   - community run `rejectionReason`, `overlapShare`.
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - target `group` for a target that is not a source of a group target.
-- Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`) are written
+- Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores`) are written
   only on browser targets' entries; a network target's entry has exactly its
   older fields (see "Browser targets" below).
 - Reasons for every N/A path are in `/v1/coverage` (`build/na.go` `reasons`).
@@ -162,7 +162,8 @@ not read).
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | always (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are set for `generic_http` only (its headline latency, under load in every-request snapshots) and null for every other target | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
-| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
+| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
+| `browserOverall` | the network's overall browser score per engine, from `w.browser_overall` ("Browser scores" below); not written when the snapshot has none | data | ✱ |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -300,6 +301,35 @@ On a browser target's `targets[<id>]` entry (network answers, providers and
 | `engines.<name>.requests`, `successes` | tries | `w.targets[id].browser.engines.<name>.completed` / `.successes` | |
 | `engines.<name>.outcomes.*` | fraction | `w.targets[id].browser.engines.<name>.outcome_rates` | no completed try of the engine |
 | `engines.<name>.pageLoadP50`, `pageLoadP90` | milliseconds, successful tries only | `w.targets[id].browser.engines.<name>.page_load_ms.p50` / `.p90` | no successful try of the engine |
+| `scores.success`, `challenge`, `block` | `engine`'s rank-based scores ("Browser scores" below), next to the raw rates | `w.targets[id].browser.scores` | `scores`: not measured, or a snapshot from before target scores |
+| `engines.<name>.scores.*` | that engine's scores, ranked among that engine's networks only | `w.targets[id].browser.engines.<name>.scores` | as `scores` |
+
+### Browser scores
+
+TARGET-SCORES-1 (the calculator's `calculated/target_scores.py`, K-BP6) ranks
+the networks per browser target, window and engine, and never ranks Chrome
+against Camoufox. Each metric is `{score, rank, rankedOf, status}`:
+
+| Field | Meaning |
+|---|---|
+| `score` | 1 to 10: `1 + 9 × (M − rank) / (M − 1)`, so the best network gets 10 and the last 1; null unless `status` is `ranked` |
+| `rank` | the network's rank among the M ranked networks (1 is best); ties share the average of their ranks, so it may be fractional; null unless `ranked` |
+| `rankedOf` | M, the number of networks ranked for that target, window and engine; null unless `ranked` |
+| `status` | `ranked`; `not_enough_data` (this network has fewer than 100 completed tries of the engine in the window); `too_few_networks` (fewer than 3 networks are ranked); `all_similar` (the best and worst ranked rates are too close to tell apart: under the larger of 3 points and 1.96 standard errors of their difference) |
+
+`success` ranks the `ok` share (higher is better), `challenge` the challenge
+share and `block` the hard-block share (lower is better). The snapshot's
+`rate` is not repeated: it is `outcomes.ok`, `challenge` and `block`.
+
+`browserOverall.<engine>.success` (network answers, providers and
+`productMeasurements`, from `w.browser_overall.<engine>`) is the network's
+overall: `score` is the mean of its ranked targets' success scores weighted by
+each target's difficulty (1 to 5), `rank` and `rankedOf` its place among the
+networks with an overall, `status` the snapshot's, `targets` the ids it
+averaged (`ai_answers` counts once for the AI sources; `all_similar`,
+`not_enough_data` and `too_few_networks` targets are left out) and `weights`
+each one's difficulty. There is no overall for `challenge` or `block`.
+`score`, `rank` and `rankedOf` are null when the network has no overall.
 
 `latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP
 target's only, and browser cards show `pageLoadP50`/`P90` instead. A browser

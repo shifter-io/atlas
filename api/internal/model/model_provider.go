@@ -21,6 +21,9 @@ type Measured struct {
 	Geo         []GeoBucket       `json:"geo"`
 	Asns        []AsnBucket       `json:"asns"`
 	Overlap     OverlapSummary    `json:"overlap"`
+	// BrowserOverall is each engine's overall browser score; not written when
+	// the snapshot has none, so an older snapshot's answer is unchanged.
+	BrowserOverall map[string]BrowserOverall `json:"browserOverall,omitempty"`
 }
 
 // Normalize replaces nil slices with empty ones.

@@ -12,6 +12,7 @@ import (
 // benchmark adds its outcome shares and page-load times to the network
 // target figures; a group target (ai_answers) adds its sources' breakdown.
 // The figures are one engine's (engine); engines holds each engine's own.
+// Scores rank them among the networks (TARGET-SCORES-1), next to the raw rates.
 // Network-level figures never read them: the snapshot keeps browser runs out
 // of every network metric, and the API maps only per-target fields here.
 
@@ -103,9 +104,11 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		if tr.Browser.Engine != "" {
 			b.Engine = model.S(tr.Browser.Engine)
 		}
+		b.Scores = targetScores(tr.Browser.Scores)
 		for name, e := range tr.Browser.Engines {
 			b.Engines[name] = model.EngineBenchmark{Requests: e.Completed, Successes: e.Successes,
-				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90}
+				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90,
+				Scores: targetScores(e.Scores)}
 		}
 	}
 	for _, id := range t.Sources {
@@ -119,4 +122,39 @@ func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model
 		b.Sources = append(b.Sources, src)
 	}
 	return b
+}
+
+func metricScore(m snap.MetricScore) model.MetricScore {
+	return model.MetricScore{Score: m.Score, Rank: m.Rank, RankedOf: m.RankedOf, Status: m.Status}
+}
+
+// targetScores is a browser target's scores in one engine; nil (null) when
+// the snapshot has none.
+func targetScores(s *snap.TargetScores) *model.TargetScores {
+	if s == nil {
+		return nil
+	}
+	return &model.TargetScores{Success: metricScore(s.Success), Challenge: metricScore(s.Challenge), Block: metricScore(s.Block)}
+}
+
+// browserOverall is a window's overall browser score per engine; nil (not
+// written) when the snapshot has none.
+func browserOverall(w snap.Window) map[string]model.BrowserOverall {
+	if w.BrowserOverall == nil {
+		return nil
+	}
+	out := make(map[string]model.BrowserOverall, len(w.BrowserOverall))
+	for engine, o := range w.BrowserOverall {
+		s := o.Success
+		success := model.OverallScore{MetricScore: model.MetricScore{Score: s.Score, Rank: s.Rank, RankedOf: s.RankedOf, Status: s.Status},
+			Targets: o.Targets, Weights: o.Weights}
+		if success.Targets == nil {
+			success.Targets = []string{}
+		}
+		if success.Weights == nil {
+			success.Weights = map[string]model.Num{}
+		}
+		out[engine] = model.BrowserOverall{Success: success}
+	}
+	return out
 }

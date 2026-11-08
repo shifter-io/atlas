@@ -281,6 +281,9 @@ func reasonFor(path string) string {
 	if r, ok := reasons[p]; ok {
 		return r
 	}
+	if r, ok := scoreReason(p); ok {
+		return r
+	}
 	if strings.HasPrefix(p, "targets[].outcomes.") || strings.HasPrefix(p, "targets[].sources[].outcomes.") {
 		return "Browser target not measured for this product in the published snapshot (no completed tries)"
 	}
@@ -300,6 +303,20 @@ func reasonFor(path string) string {
 		return "No weight in the snapshot methodology or site.score_weights"
 	}
 	return "No value in the database for this field"
+}
+
+// scoreReason explains a null browser score (TARGET-SCORES-1): a whole
+// scores object, or one metric's or overall's score, rank or rankedOf.
+func scoreReason(p string) (string, bool) {
+	switch {
+	case strings.HasPrefix(p, "browserOverall."):
+		return "No overall browser score for this engine: see its status (no ranked target, or too few networks with one)", true
+	case !strings.HasPrefix(p, "targets[]") || !strings.Contains(p, "scores"):
+		return "", false
+	case strings.HasSuffix(p, ".scores"):
+		return "No rank-based scores in the published snapshot (not measured, or a snapshot from before target scores)", true
+	}
+	return "Not ranked: see the metric's status (not_enough_data, too_few_networks or all_similar)", true
 }
 
 // CoverageField is one N/A path with its explanation.
