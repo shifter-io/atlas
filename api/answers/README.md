@@ -54,4 +54,6 @@ of the answers served before the registry are `rankings`, `networks`, `charts`, 
 `places` (the long-list pages), `coverage`, `search`, `events` and `dataset` (the dataset file,
 the encoded pages and details, and `/v1/version`). A registered answer's family is its `Name`:
 its stored bodies and its samples, rendered on request. `GOLDEN_WRITE=1` rewrites each file
-(a case skipped with `-short` is left out, so write without it).
+(a case skipped with `-short` is left out, so write without it). The goldens of the answers from before the
+registry (`testdata/answers-v4.json` and the build package's `network-one-group` and
+`network-long-lists`) leave registered answers out, so a new answer changes only its own file.
