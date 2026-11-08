@@ -77,6 +77,11 @@ func Inputs(shape Shape) (*store.Inputs, error) {
 	if err != nil {
 		return nil, err
 	}
+	return docInputs(shape, doc, places)
+}
+
+// docInputs is Inputs of a shape's snapshot document.
+func docInputs(shape Shape, doc map[string]any, places map[store.PlaceWindow]*store.List) (*store.Inputs, error) {
 	payload, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err
