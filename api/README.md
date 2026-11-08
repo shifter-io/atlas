@@ -150,8 +150,9 @@ request or page is over its budget or a request does not answer 200 (a 404 or 50
 
 #### Every map gap, pass or fail: `--gaps`
 
-`siteapi bench ... --gaps docs/api-web-map-gaps.json` first checks every gap of
-`docs/api-web-map.md`. The manifest has one entry per gap ID of the map's "Gaps summary"
+`siteapi bench ... --gaps docs/api-web-map-gaps.json` also checks every gap of
+`docs/api-web-map.md`, after the bench (its requests would otherwise warm the list pages the
+bench times cold). The manifest has one entry per gap ID of the map's "Gaps summary"
 lists (`tests/test_api_web_map_gaps.py` keeps it in step with the map): its `page` (section),
 its `class` and how it is closed:
 

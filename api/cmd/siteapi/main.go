@@ -344,7 +344,7 @@ func writeExplain(dir string, report *store.ExplainReport) error {
 
 // runBench writes bench.json and bench.md to --out: every page's requests
 // timed against the siteapi at --base-url. It fails when a budget is
-// exceeded or a request does not answer 200. With --gaps it first writes
+// exceeded or a request does not answer 200. With --gaps it then writes
 // gaps.json and gaps.md there, the verdict of every map gap, and also fails
 // when a gap fails.
 func runBench(args []string) error {
@@ -365,15 +365,17 @@ func runBench(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	gapErr, err := checkGaps(ctx, *gaps, *base, *out)
-	if err != nil {
-		return err
-	}
 	report, err := bench.Run(ctx, bench.Options{BaseURL: *base, Warm: *warm, Concurrency: *conc, Budgets: b})
 	if err != nil {
 		return err
 	}
 	if err := report.Write(*out); err != nil {
+		return err
+	}
+	// After the bench: the gap checks request the same URLs, so before it
+	// they would warm the list pages the bench times cold.
+	gapErr, err := checkGaps(ctx, *gaps, *base, *out)
+	if err != nil {
 		return err
 	}
 	printJSON(map[string]any{"out": *out, "pages": len(report.Pages), "requests": len(report.Requests), "failures": len(report.Failures)})

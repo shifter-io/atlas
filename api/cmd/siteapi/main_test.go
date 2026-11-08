@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -93,5 +94,51 @@ func TestBenchFailsOnAServerError(t *testing.T) {
 	}
 	if err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--gaps", filepath.Join(dir, "none.json")}); err == nil {
 		t.Error("a missing gap manifest: no error")
+	}
+}
+
+// The gap checks request the URLs the bench times, so they must come after
+// every timed request, or the bench's cold requests would find warm pages.
+func TestBenchGapsRunAfterTheTimedRequests(t *testing.T) {
+	var mu sync.Mutex
+	var order []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		order = append(order, r.Header.Get("Accept-Encoding")+" "+r.URL.RequestURI())
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/healthz":
+			fmt.Fprint(w, `{"status":"ok","version":1,"builtAt":"2026-11-08T00:00:00Z"}`)
+		case "/v1/version":
+			fmt.Fprint(w, `{"revision":"abc"}`)
+		case "/v1/networks":
+			fmt.Fprint(w, `{"networks":[{"slug":"a","kind":"residential","kinds":["residential"]}]}`)
+		default:
+			fmt.Fprint(w, `{"countries":[],"x":1}`)
+		}
+	}))
+	defer ts.Close()
+	dir := t.TempDir()
+	gaps := filepath.Join(dir, "m.json")
+	if err := os.WriteFile(gaps, []byte(`{"gaps":[{"id":"G","class":"api","checks":[{"request":"/v1/rankings?range={range}","paths":["x"]}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	budgets := filepath.Join(dir, "b.json")
+	if err := os.WriteFile(budgets, []byte(`{"classes":{"answer":{},"events":{},"search":{},"list":{},"list-search":{}},"pageMs":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--warm", "1", "--concurrency", "1", "--budgets", budgets, "--gaps", gaps}); err != nil {
+		t.Fatal(err)
+	}
+	firstGap, lastTimed := -1, -1
+	for i, r := range order {
+		if strings.HasPrefix(r, "br ") || strings.HasPrefix(r, "identity ") {
+			lastTimed = i
+		} else if firstGap < 0 && strings.HasPrefix(r, " /v1/rankings") {
+			firstGap = i
+		}
+	}
+	if firstGap < 0 || lastTimed < 0 || firstGap < lastTimed {
+		t.Errorf("first gap request %d, last timed request %d: %v", firstGap, lastTimed, order)
 	}
 }
