@@ -1,4 +1,4 @@
-# The profile of the real 24-hour data (SIM-PROFILE-1) and the generated days (SIM-GEN-1)
+# The profile of the real 24-hour data (SIM-PROFILE-1), the generated days (SIM-GEN-1) and their load (SIM-LOAD-1)
 
 `profile.py` turns the private 24-hour test data into one statistical **profile**: aggregate
 figures only, with no IP address, host name, credential or path. The generator (SIM-GEN-1)
@@ -306,3 +306,95 @@ Both return `{"pass", "compared", "checks"}`. Each check carries its group, `dev
 browser targets) and checks the cadence, the sizes, the ingest of a generated test and bundle,
 determinism, recurrence, pulses only when switched on, and both checks passing on generated
 days and failing on shifted ones.
+
+## Loading the generated days (SIM-LOAD-1)
+
+`simulate.py` loads the generated days into the staging database `proxy_reviews_staging`
+through production's real processing and insert paths, then calculates and reports. Nothing
+waits for real time: the hours are generated ahead while earlier ones are stored.
+
+```sh
+uv run python scripts/scale/simulate.py --database <staging toml> \
+  --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --profile <profile.json> --days 7 \
+  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--batch-daily 20] [--pulses] \
+  [--siteapi URL] [--plan-only] [--no-scope]
+```
+
+- The same command resumes from `<out>/state.json`; another database, first day, number of
+  days, `--pulses` or profile is refused. Exit 0 done, 2 refused (nothing written), 130
+  stopped (Ctrl-C or SIGTERM).
+- **Guards**, checked before any write, are the replay's (`replay.guard`): `target.refusal`
+  with the owner's go accepts `proxy_reviews_staging` only (production is refused, with or
+  without a go); no `job_runs` row of the last 5 minutes (a live scheduler); and the extra hour
+  after the days must have ended.
+- Every run's summary carries `scale_replay` with the load's own id, and the state holds the
+  baseline, the nodes and the days (the extra hour's day included), so `wipe_replay.py
+  --state <out>/state.json` removes exactly what the load wrote.
+- `--plan-only` reads the plan in one read-only transaction and writes nothing. It prints per
+  simulated day the runs by kind (daily, browser, and pulse only with `--pulses`), then per
+  table the rows and the table and index GB the profile's `reference` gives those runs (its
+  mean per run × the runs), and the totals.
+
+### The cadence
+
+One daily test per network × country per day; one 100-try browser run per network × target
+per day; no HTTP pulse fleet, so no pulses, census or load waves unless switched on
+(`docs/api-web-map.md` section 14). `--pulses` switches them on at the pulse targets' cadence.
+
+### Generation ahead, storage in order
+
+`--jobs` worker processes (spawned, never forked) build the model once each and write their
+share of an hour's daily tests as run directories under `<out>/generated/hour-<n>/`, at most 2
+hours ahead of the hour being stored. The main process stores the hours strictly in order and
+deletes each hour's directories once it is stored (all of them when the load ends). The model's
+seed is the load's id, so a resumed load generates the same hours again.
+
+### One simulated hour
+
+replay.py's step loop runs each step until it is done; a failed part is recorded in
+`events.jsonl`, paused (doubling from `--pause`) and retried. Client statements are traced
+(`measure.Tracer`) and, with `pg_stat_statements`, the server's windows are kept per hour.
+
+1. **daily**: the hour's `daily/planner.py` cells, each a cell as `daily ingest` prepares one,
+   go through `daily/ingest.store_cells`: whole cells about `--batch-daily` tests at a time,
+   each batch in one `storage.ingest_many` and one `compute.estimate_runs`, then each cell's
+   `daily_test_started` and `daily_test_finished` (`emit_cell`), once
+   (`<out>/daily-ingest.json` holds the hour's cells).
+2. **browser**: one browser node per network of the settings' hosts, bound to its host's
+   name (the tokens are issued once a process, never saved). The real planner
+   (`orchestrator/browser.py`, queue mode) runs at each run's start with the model's settings
+   given in-process; no settings row is written. Each planned run's bundle (the model's tries,
+   sealed for its host) is uploaded through the in-process node API into `browser_ingest`,
+   with a temporary local archive deleted after the hour.
+3. **pulses**, only with `--pulses`: the replay's pulse step, with the model's geo rows.
+4. **release**: `cycle_steps.Steps.release`, the estimated hours that ended.
+
+The nodes are disabled when the load ends, however it ends.
+
+### The calculation
+
+After the last hour, `proxy-index calculate --as-of <end> --publish` runs as a child under
+`measure.py trace`, in a systemd memory scope as the replay's (unless `--no-scope`). Then one
+more simulated hour is loaded and `calculate --incremental --publish` runs for it, so the
+report has the hourly calculation's time at the days' volume. A failed calculation is paused
+and retried. With `--siteapi`, each waits until its `/healthz` serves the build. The 24h and 7d
+figures come from the daily tests and the released hours through the existing windows.
+
+### The report
+
+`<out>/report.md` and `report.json` (mode 600, rewritten when the load ends or stops) hold
+names and counts only, no IP, host name or path:
+- per day the runs by kind, and the rows inserted per second of ingest;
+- the size report at the end of each simulated day and after the calculations, for every
+  table whose rows or bytes changed (public and site, partitions included): its rows,
+  `pg_table_size` and `pg_indexes_size`, the growth, and the expected figure (the profile's
+  `reference` per run × that day's runs);
+- per day the generated unique IPs, requests, browser runs, tries and bundle bytes next to the
+  profile's `real_24h` totals; the basis of every figure is named in `basis`;
+- wall time per step; the calculations' time, peak memory and attempts;
+- `simulate_check.size` over the stored days and `simulate_check.stats` of day 2 (day 1 when
+  there is one), per network.
+
+`tests/test_scale_simulate.py` loads the synthetic profile of `test_scale_simulate_model.py`
+(2 networks × 3 countries × 2 browser targets) for 2 days, a stop and resume against an
+uninterrupted load, pulses switched on, `--plan-only` and the refusals.

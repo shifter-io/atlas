@@ -280,7 +280,7 @@ def _prepared(root: Path, spec, formulas: Path | None, mmdb):
 
 
 @dataclass
-class _Hour:
+class CampaignHour:
     """One ingest_campaign call: where it stores, and its report and the previous one."""
 
     db: Database
@@ -293,7 +293,7 @@ class _Hour:
     products: set = field(default_factory=set)  # networks whose product row exists
 
 
-async def _has_product(hour: _Hour, network: str, manifest: dict) -> bool:
+async def _has_product(hour: CampaignHour, network: str, manifest: dict) -> bool:
     """Whether the network's product row exists (or may: a lookup error), before a chunk."""
     if network not in hour.products:
         try:
@@ -305,7 +305,7 @@ async def _has_product(hour: _Hour, network: str, manifest: dict) -> bool:
     return True
 
 
-async def _store_chunk(hour: _Hour, chunk: list[Cell], batch: int) -> None:
+async def _store_chunk(hour: CampaignHour, chunk: list[Cell], batch: int) -> None:
     """Store the chunk's countries `batch` at a time, then finish its cells in order: each
     one's spool alert, its events (once) and the saved report.
 
@@ -335,6 +335,19 @@ async def _store_chunk(hour: _Hour, chunk: list[Cell], batch: int) -> None:
         atomic_json(hour.path, hour.report | {"cells": cells})
 
 
+async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
+    """Store the cells' countries about `batch` at a time, whole cells per chunk (a larger cell
+    is a chunk of its own), each chunk finished as _store_chunk does. SIM-LOAD-1's generated
+    cells (scripts/scale/simulate_steps.py) go through it too."""
+    chunk = []
+    for cell in cells:
+        if chunk and sum(len(c.countries) for c in chunk) + len(cell.countries) > batch:
+            await _store_chunk(hour, chunk, batch)
+            chunk = []
+        chunk.append(cell)
+    await _store_chunk(hour, chunk, batch)
+
+
 async def ingest_campaign(
     root: Path,
     credentials: Path,
@@ -359,15 +372,9 @@ async def ingest_campaign(
     report = {"campaign_id": spec.campaign_id, "cells": {}}
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
-    hour = _Hour(db, credentials, spool, path, previous, report, fallback)
+    hour = CampaignHour(db, credentials, spool, path, previous, report, fallback)
     try:
-        chunk = []
-        for cell in _prepared(root, spec, formulas, mmdb):
-            if chunk and sum(len(c.countries) for c in chunk) + len(cell.countries) > batch:
-                await _store_chunk(hour, chunk, batch)
-                chunk = []
-            chunk.append(cell)
-        await _store_chunk(hour, chunk, batch)
+        await store_cells(hour, _prepared(root, spec, formulas, mmdb), batch)
         if formulas:
             await _release(db, report)
     finally:
