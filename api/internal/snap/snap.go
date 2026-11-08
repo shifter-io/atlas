@@ -251,6 +251,9 @@ type Methodology struct {
 		// TargetGroups is each group target's sources, in order (browser
 		// pulse methodology [target_groups]; nil before it).
 		TargetGroups map[string][]string `json:"target_groups"`
+		// BrowserDifficulty is each browser target's difficulty, 1 to 5, its
+		// weight in the overall browser score ([browser_difficulty]; nil before it).
+		BrowserDifficulty map[string]float64 `json:"browser_difficulty"`
 	} `json:"settings"`
 }
 
