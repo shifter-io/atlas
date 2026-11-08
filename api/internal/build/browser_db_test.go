@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,11 +86,11 @@ func TestBrowserTargetsAreListedInOrderWithEngineAndGroup(t *testing.T) {
 	if strings.Contains(jsonOf(t, res.Pages), "ticketing_queue") || strings.Contains(jsonOf(t, res.Dataset), "ticketing_queue") {
 		t.Error("ticketing_queue appears in measured data")
 	}
-	// Search and coverage list the browser targets as targets.
+	// Search lists the card targets (not the AI sources), coverage every target.
 	search := jsonOf(t, res.Search)
 	for _, id := range want {
-		if !strings.Contains(search, `"target:`+id+`"`) {
-			t.Errorf("search index has no target %s", id)
+		if strings.Contains(search, `"target:`+id+`"`) != slices.Contains(cards, id) {
+			t.Errorf("search index lists target %s %v times, a card: %v", id, strings.Count(search, `"target:`+id+`"`), slices.Contains(cards, id))
 		}
 	}
 	if len(res.Coverage.Targets) != len(want) {

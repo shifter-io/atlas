@@ -299,7 +299,7 @@ func (b *builder) countRecords(name string, na []string) {
 	b.records[name] = r
 }
 
-// datasetNA fills the dataset's own N/A manifest and the score leaderboard.
+// datasetNA fills the dataset's own N/A manifest.
 func (b *builder) datasetNA() error {
 	ds := b.ds
 	meta := struct {
@@ -322,17 +322,6 @@ func (b *builder) datasetNA() error {
 		return err
 	}
 	b.res.Dataset = ds
-
-	// Leaderboard: score rank, unranked last (stable).
-	leader := append([]*model.Provider{}, ds.Providers...)
-	sort.SliceStable(leader, func(i, j int) bool {
-		x, y := leader[i].Score.Rank, leader[j].Score.Rank
-		if x.OK() != y.OK() {
-			return x.OK()
-		}
-		return x-y < 0
-	})
-	b.leader = leader
 	return nil
 }
 
@@ -390,7 +379,11 @@ func (b *builder) assemble() error {
 		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages})
 	ds.Pages = datasetPages(res.Pages)
 	ds.Lists = datasetLists(res.Pages, s, b.entries)
-	res.Search = buildSearchIndex(b.leader, ds.Targets, ds.GeneratedAt)
+	var networks []RankingRow
+	if r := res.Pages.RankingsByKind[searchRanking]; r != nil {
+		networks = r.Networks
+	}
+	res.Search = buildSearchIndex(networks, ds.Targets, ds.GeneratedAt)
 	res.Coverage = coverage(ds, res.BuiltAt, b.records)
 	return nil
 }
