@@ -45,7 +45,7 @@ def test_detect_newer_warns_once(tmp_path, caplog, monkeypatch):
     [
         (None, 0o755, 0, "missing or not executable"),
         (f"Google Chrome {OK}", 0o644, 0, "missing or not executable"),
-        ("Chromium 151.0.1.2", 0o755, 0, "no 'Google Chrome <version>' line"),
+        (f"Chromium {OK}", 0o755, 0, "no 'Google Chrome <version>' line"),
         ("Google Chrome 151.0", 0o755, 0, "no 'Google Chrome <version>' line"),
         (f"Google Chrome {OK}", 0o755, 3, "--version failed (CalledProcessError)"),
         (f"Google Chrome {chrome.CHROME_MIN_MAJOR - 1}.0.1.2", 0o755, 0, "older than"),
