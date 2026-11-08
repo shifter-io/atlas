@@ -260,6 +260,21 @@ fraction of it, labelled `major · <country>`), so the charts shade real outages
 For a v1 snapshot `incidentCount` and `downtimeMinutes` are null and `bands` is
 empty.
 
+Per-range figures of the same window (WINDOW-FIGURES-1; every one null for a
+network without a snapshot product, and wherever the window has no value):
+
+| Field | Source |
+|---|---|
+| `captchaRate`, `blockRate` | `metrics.challenge_rate`, `block_rate` |
+| `requestSuccessRate` | `metrics.request_success_rate`: successes ÷ requests, beside the time-weighted `successRate` (null before every-request snapshots) |
+| `countries`, `regions`, `cities`, `asns` | `pool.countries`, `regions`, `cities`, `asns` |
+| `datacenterAsnShare` | `pool.datacenter_asn_share` |
+| `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
+| `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
+| `latencyUnderLoad` | true when `latencyP50` is under load (every-request snapshots); false when the latency shown is light load (`latency_ms` of an older snapshot, or `lightLatencyP50` alone in an every-request window without a load test); null without latency |
+| `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when `lightLatencyP50` is set (`"HTTP, under load"`); null without `latencyTarget` |
+| `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 1024³`: GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
+
 `availability` is the per-bucket fractional availability history, mapped from
 the snapshot's `windows.<range>.series[].uptime` without interpolation. Buckets
 are five minutes for 24h and one day for 7d/30d. The calculator unions and clips
@@ -514,7 +529,8 @@ Besides the summed totals and places above, a network's answer carries what
   answers) and `countryLatencyRanks` (the place rows carry their ranks). The whole
   provider stays in `/v1/dataset`.
 - `stats`: `windowStats` of that category per range (see "Window statistics of
-  a measured provider") without `success`, `availability`, `latency`, `pool`
+  a measured provider", with its per-range figures `captchaRate` to
+  `wireGbPer1k`) without `success`, `availability`, `latency`, `pool`
   and `bands`.
 - the network's newest `reviews` (published), `communityRuns`, `changelog`
   and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
@@ -537,17 +553,25 @@ The all-networks answer has `profile: null`, empty `stats` and empty records.
 
 The histories `windowStats` draws for that category and range: `success`
 (`{t, v}` success rate), `availability` (`{t, v}`), `latency`
-(`{t, p50, p90, p99}`), `pool` (`{t, v}` distinct IPs) and `bands` (outages).
+(`{t, p50, p90, p99}`), `latencyUnderLoad` (`{t, p50, p90, p99}` from
+`series[].latency_under_load_ms`, a point per bucket, null values where a
+bucket has none or the window's latency is not `generic_http`'s alone),
+`pool` (`{t, v}` distinct IPs) and `bands` (outages).
 `t` is minutes before the build's as-of time; points are five minutes apart
-for 24h and a day apart otherwise. For `all` the series is the every-group
+for 24h and a day apart otherwise. `labels` holds, per history (`success`,
+`availability`, `latency`, `latencyUnderLoad`, `pool`), the old site's label
+of each point in order (format.ts `bucketLabel` of `t`: `"now"`,
+`"25 min ago"`, `"3h 5m ago"`, `"1 day ago"`, `"6 days ago"`). For `all` the series is the every-group
 fleet entry's (`series[]`: `success_rate`, `latency_ms` light-load, distinct
 `unique_ips` per bucket, buckets without requests left out); `availability`
-and `bands` stay empty there, since uptime is a per-product fact.
+`latencyUnderLoad` and `bands` stay empty there, since uptime is a
+per-product fact and the fleet entry has no latency under load.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","network":"net00","kind":"residential","range":"24h",
  "success":[{"t":1435,"v":0.98}],"availability":[{"t":1435,"v":1}],"latency":[{"t":1435,"p50":1110,"p90":1390,"p99":3290}],
- "pool":[{"t":1435,"v":212}],"bands":[]}
+ "pool":[{"t":1435,"v":212}],"bands":[],"latencyUnderLoad":[{"t":1435,"p50":1450,"p90":1770,"p99":3970}],
+ "labels":{"success":["23h 55m ago"],"availability":["23h 55m ago"],"latency":["23h 55m ago"],"latencyUnderLoad":["23h 55m ago"],"pool":["23h 55m ago"]}}
 ```
 
 ## IP numbers from the hour formula (API-ESTIMATES-1)

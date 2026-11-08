@@ -269,7 +269,9 @@ func v4ScaleAnswers(t *testing.T, c v4ScaleCase) map[string]string {
 	for _, a := range build.Answers() {
 		pages = append(pages, a.Samples...)
 	}
-	return sums(renderedAnswers(t, db, db.PublishV4(t, payload), pages, asBuilt))
+	answers := renderedAnswers(t, db, db.PublishV4(t, payload), pages, asBuilt)
+	windowFiguresServed(t, answers)
+	return sums(answers)
 }
 
 // sameSums reports each answer whose SHA-256 differs from the golden's.
