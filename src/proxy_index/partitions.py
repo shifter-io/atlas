@@ -52,6 +52,16 @@ def monthly(table, moment):
     return f"{table}_{start:%Y_%m}", start, end
 
 
+def holder(table, moment, existing):
+    """The partition partition() puts this moment in, given the names that exist: (name, start,
+    end). The month's when it exists or the table is not DAILY; otherwise the day's."""
+    name, start, end = monthly(table, moment)
+    if name in existing or table not in DAILY:
+        return name, start, end
+    start = moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return f"{table}_{start:%Y_%m_%d}", start, start + timedelta(days=1)
+
+
 def creation(table, name, start, end):
     """The statements that create one partition, to run in one transaction.
 
