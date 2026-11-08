@@ -24,12 +24,33 @@ Every parameter is optional; any other parameter answers 400.
 
 ## Order and choice
 
-- With `after`: the rows past it by `event_id`, oldest first, up to `limit`. A poll that passes the
-  last answer's `cursor` walks forward through a burst that shares one `at` without losing a row.
+- With `after`: the rows past it by `event_id`, oldest first, up to `limit`, stopping before the
+  first row that is not yet settled (below). A poll that passes the last answer's `cursor` walks
+  forward through a burst that shares one `at` without losing a row.
 - With `since`, `kind` or `category`: exactly the newest matching rows, newest first.
 - Otherwise (the tape's first read): prioritized, newest first. Routine rows (the census tab and
   `pulse_finished`) never push other rows off the page: the newest other rows take up to half of
   `limit`, the newest rows of any kind fill the rest.
+
+## Settled rows (the `after` cursor)
+
+`event_id` is taken when a row is inserted, not when its transaction commits. A slow transaction
+can therefore commit a row with a smaller id after a poll has already returned larger ones; a
+cursor past them would skip it. So an `after` answer, and the `cursor` it returns, covers only
+**settled** rows: rows whose inserting transaction is older than the oldest transaction still
+running when the API read the events (the row's `xmin` below `pg_snapshot_xmin` of the read's own
+snapshot, compared through `xid8`, without 32-bit wraparound: `store.unsettledSQL`).
+
+- The answer stops before the first matching row that is not settled, and `more` stays true while
+  such rows wait. They come in a later answer, in id order, once a read settles them.
+- The in-memory window keeps each row's mark from the read that loaded it (`store.LoadEvents`, in
+  the same read-only transaction as the rows, in the same statement). While it holds an unsettled
+  row, every refresh (10 s) reads the events again, even without a new event. So a just-written
+  event can show up through `after` one refresh (10 s) later than in the default poll, longer
+  while any transaction of the database server that started before it is still open.
+- The database fallback reads the same mark in its query.
+- No time lag is used: no fixed delay can bound a slow transaction, the snapshot can.
+- The default poll, without a cursor, is unchanged: it returns unsettled rows too.
 
 ## Body
 
@@ -40,9 +61,9 @@ Every parameter is optional; any other parameter answers 400.
 | `events[]` | The rows: every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the five below. | `test_events` |
 | `events[].title`, `.detail`, `.value` | The tape's text, the mapping `Dataset.tape` uses (`build/tape.go` `TapeFromEvents`): `detail` starts with the network name. Rendered once per event when the event window loads. | `test_events.kind`, `.data`, `.country`, `.region` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
-| `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
+| `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. With `after`, it never passes a row that is not settled. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |
-| `more` | True when more matching rows follow `cursor`: pass it as the next `after`. | |
+| `more` | True when more matching rows follow `cursor`, settled or not: pass it as the next `after`. | |
 
 ## Speed
 
@@ -65,6 +86,9 @@ Every parameter is optional; any other parameter answers 400.
 
 ## Tests
 
+`build/events_settle_test.go` (an `after` answer stops before the first unsettled row, from memory
+and from the fallback), `server/events_settle_db_test.go` (a row held back behind an open
+transaction, returned once it commits; a 300-row burst in one transaction read whole),
 `build/events_tape_test.go` (a 300-event burst read with `limit=100` and `after` loses none, from
 memory and from the fallback; a late row an `after` poll returns; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
 a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate, the late read),

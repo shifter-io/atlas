@@ -354,7 +354,10 @@ editorial ones.
     the newest half-`limit` non-routine matches were found (or all of them are held).
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
-  in a 256-entry LRU for that version (a new event starts a new one).
+  in a 256-entry LRU for that version (a new event starts a new one). An `after`
+  answer stops before the first row whose transaction is not older than the oldest
+  one running at the read (settled rows, `answers/events.md`); while the window holds
+  such a row, each refresh reads the events again.
 - **Network lists** (contracts K10, K11; read for a payload v4 build; API-MEM-1).
   `store.NetLists` holds only each network window's list id and row count per
   dimension, reading the counts only of list ids it does not hold. A dimension's rows

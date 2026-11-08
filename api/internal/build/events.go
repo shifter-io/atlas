@@ -216,8 +216,8 @@ func (w *EventWindow) FromRows(f store.EventFilter, rows []store.Event) *EventsA
 }
 
 // answer picks f's rows among refs (newest first, or with after in any order):
-// with after the oldest by id, for a prioritized filter the store.Prioritize
-// choice, else the newest. bounded means refs stop at a q read's bound.
+// with after the oldest by id up to the first unsettled one, for a
+// prioritized filter the store.Prioritize choice, else the newest. bounded means refs stop at a q read's bound.
 func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool) *EventsAnswer {
 	matched := []eventRef{}
 	for _, r := range refs {
@@ -225,10 +225,12 @@ func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool)
 			matched = append(matched, r)
 		}
 	}
+	settled := matched
 	if f.After != nil {
 		slices.SortFunc(matched, func(a, b eventRef) int { return cmp.Compare(a.e.ID, b.e.ID) })
+		settled = matched[:settledPrefix(matched)]
 	}
-	out := matched[:min(len(matched), f.Limit)]
+	out := settled[:min(len(settled), f.Limit)]
 	if f.Prioritized() {
 		out = []eventRef{}
 		for _, k := range store.Prioritize(len(matched), f.Limit, func(k int) string { return matched[k].e.Kind }) {
@@ -251,6 +253,27 @@ func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool)
 	}
 	return a
 }
+
+// settledPrefix is how many of refs (by id) come before the first unsettled
+// one: an after answer and its cursor stop there, and More stays true until a
+// later read settles it (store.Event.Unsettled).
+func settledPrefix(refs []eventRef) int {
+	for i, r := range refs {
+		if r.e.Unsettled {
+			return i
+		}
+	}
+	return len(refs)
+}
+
+// Unsettled reports whether an after read may hold back a row of the window:
+// its rows or late rows include an unsettled one. The server then reads the
+// events again on its next poll, even with no new event.
+func (w *EventWindow) Unsettled() bool {
+	return slices.ContainsFunc(w.Raw, isUnsettled) || slices.ContainsFunc(w.Late, isUnsettled)
+}
+
+func isUnsettled(e store.Event) bool { return e.Unsettled }
 
 // updatedAt is the newest at of the events held and the rows returned.
 func (w *EventWindow) updatedAt(out []eventRef) *string {

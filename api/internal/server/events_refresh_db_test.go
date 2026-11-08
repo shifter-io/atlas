@@ -92,6 +92,10 @@ func TestEventAnswersAfterAnEventsOnlyRefresh(t *testing.T) {
 			}
 		}
 	}
+	// Once every row is settled, one more read holds them settled, and then
+	// nothing changes.
+	db.Settle(t)
+	s.Refresh(ctx, false) //nolint:errcheck
 	if refreshed, _ := s.Refresh(ctx, false); refreshed {
 		t.Fatal("refreshed without a change")
 	}

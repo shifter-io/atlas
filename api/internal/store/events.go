@@ -304,6 +304,46 @@ func afterQuery(clauses []string, args []any, limit int) (string, []any) {
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
+// EventColumns is the SELECT list shared by Load and the events fallback query.
+const EventColumns = `e.event_id, e.at, e.kind, p.provider, p.name, e.country_code,
+ coalesce(r.slug, e.data->>'region'), e.target_id, e.signal, e.severity, e.data, ` + unsettledSQL + `
+ FROM public.test_events e LEFT JOIN public.products p ON p.product_id = e.product_id
+ LEFT JOIN public.runner_regions r ON r.region_id = e.region_id`
+
+// unsettledSQL is Event.Unsettled for the row alias e, from the snapshot of
+// the statement reading it (a REPEATABLE READ transaction's own): the row's
+// 32-bit xmin, widened to the first xid8 at or above the snapshot's xmin (the
+// oldest transaction then running), falls below the snapshot's xmax. A
+// visible row's transaction is then not older than every running one, so a
+// running one may hold a smaller event_id. Measured from the xmin, no
+// wraparound applies, and a frozen row decades old (Postgres keeps its raw
+// xmin) is held back at most while its low 32 bits fall in that range. The
+// two subqueries are init plans, run once per statement.
+const unsettledSQL = `(e.xmin::text::bigint - (SELECT pg_snapshot_xmin(pg_current_snapshot())::text::bigint)) & 4294967295
+ < (SELECT pg_snapshot_xmax(s)::text::bigint - pg_snapshot_xmin(s)::text::bigint FROM pg_current_snapshot() s)`
+
+// ScanEvent reads one EventColumns row.
+func ScanEvent(r pgx.Rows, e *Event) error {
+	var country *string
+	if err := r.Scan(&e.ID, &e.At, &e.Kind, &e.Provider, &e.Product, &country, &e.Region, &e.Target, &e.Signal, &e.Severity, &e.Data,
+		&e.Unsettled); err != nil {
+		return err
+	}
+	if country != nil {
+		c := trimSpace(*country)
+		country = &c
+	}
+	e.Country = country
+	return nil
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && s[len(s)-1] == ' ' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
 // EventJSON is detect.event_json: the shape of /v1/events rows and of the
 // snapshot's `events` (src/lib/measured-types.ts TestEvent).
 type EventJSON struct {
