@@ -1,0 +1,38 @@
+{
+ "QA-1": {
+  "/v1/targets/datacenter/24h": "d3643418104f6adac4246139998787027efb9556f45a06c594d52164f23de01c",
+  "/v1/targets/datacenter/30d": "a67c2f8b56455b25961b5de75e66f0423d714f40fb7360d10c68b033dc0e2a1f",
+  "/v1/targets/datacenter/7d": "e4cc7d128562850ffebdbc073207bc0ef262971f9aed354093283953d4878d43",
+  "/v1/targets/isp/24h": "f9062229fece9f8f37a3c3eec321f62d86da026ee5feb6ca98b6a934115169e9",
+  "/v1/targets/isp/30d": "0170c9a9c9c6715321e1738f6a19f1d8970e0e8b7627580335326f764d5a95b9",
+  "/v1/targets/isp/7d": "f5d9db282b9bc1eeef097fed00eaf618c689ea396fab94c61d127203edf61e56",
+  "/v1/targets/mobile/24h": "5e9affe424cf913e3ce5d5772fd2339d8e5b3bc4872eec8958f481a77cdf42e8",
+  "/v1/targets/mobile/30d": "44bfb7b93d5dedbd8464dc2ec858ad5886eaadee75fdb6d7afb5a3deac4cf6ae",
+  "/v1/targets/mobile/7d": "b057dd550bce4c553b91f72ad754a1dcdc2d64c815036030a2e416786fc18682",
+  "/v1/targets/residential/24h": "a1b5bce9bd192c03337de8878e78e6585465d04bb0e259ef8dec889ad22cffde",
+  "/v1/targets/residential/30d": "bb056072d3461b4eeb7376b182de02bf549381b8dfa81695089159c9bd33d786",
+  "/v1/targets/residential/7d": "506ddebb438084c9cea7311b115c060abc677ffa4dad6fe036501b9e7c713616",
+  "GET /v1/targets": "f1d8dedd70bfde5da9359cc7a382ccb9c85b6c66bd6479c378a1f1e1d12cdd08",
+  "GET /v1/targets?kind=datacenter": "991ffce4bc866d614782e35dec53ea1eb69f42261794961b2c771d7d4c1c06c9",
+  "GET /v1/targets?kind=residential\u0026range=7d": "3f67b57393fb7be0ed382f8264996beb9e3d588bd93ff28bbf72aa6d1a9d2014",
+  "GET /v1/targets?range=24h": "c9821f058603d57f66bf1fd791f34c223041b973f545f5cabd8e79d030258c07"
+ },
+ "every-request": {
+  "/v1/targets/datacenter/24h": "d3643418104f6adac4246139998787027efb9556f45a06c594d52164f23de01c",
+  "/v1/targets/datacenter/30d": "a67c2f8b56455b25961b5de75e66f0423d714f40fb7360d10c68b033dc0e2a1f",
+  "/v1/targets/datacenter/7d": "e4cc7d128562850ffebdbc073207bc0ef262971f9aed354093283953d4878d43",
+  "/v1/targets/isp/24h": "f9062229fece9f8f37a3c3eec321f62d86da026ee5feb6ca98b6a934115169e9",
+  "/v1/targets/isp/30d": "0170c9a9c9c6715321e1738f6a19f1d8970e0e8b7627580335326f764d5a95b9",
+  "/v1/targets/isp/7d": "f5d9db282b9bc1eeef097fed00eaf618c689ea396fab94c61d127203edf61e56",
+  "/v1/targets/mobile/24h": "5e9affe424cf913e3ce5d5772fd2339d8e5b3bc4872eec8958f481a77cdf42e8",
+  "/v1/targets/mobile/30d": "44bfb7b93d5dedbd8464dc2ec858ad5886eaadee75fdb6d7afb5a3deac4cf6ae",
+  "/v1/targets/mobile/7d": "b057dd550bce4c553b91f72ad754a1dcdc2d64c815036030a2e416786fc18682",
+  "/v1/targets/residential/24h": "be9f969ade0917629bd94a9760d09219a86b5c03e7e70fa670e669e2a6d800fa",
+  "/v1/targets/residential/30d": "edf782d8cc23de2a51408f970cd8278c9aa643f572c6b6297e4837d234cd8b76",
+  "/v1/targets/residential/7d": "0bdb05bed1b698bd8900d623bce3681eb44606c28913f2a65ec052c02df5a51b",
+  "GET /v1/targets": "c8019820a9d75442ef953ac143e6c65390cca0a16444c8e25834b442a3708204",
+  "GET /v1/targets?kind=datacenter": "991ffce4bc866d614782e35dec53ea1eb69f42261794961b2c771d7d4c1c06c9",
+  "GET /v1/targets?kind=residential\u0026range=7d": "2ef2b3cfbf3b54a1d3e0ffe6bcaf05410154f5f64d6609ecd87d701bf3a2a596",
+  "GET /v1/targets?range=24h": "0f181c8f0c167fafea6c75bfe3078d00208377e230724591032eaee42801430c"
+ }
+}

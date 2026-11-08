@@ -534,6 +534,20 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
     needed
   - the DB-backed integration test (the v1 fixture as a v4 build): read-only pool,
     catalog rows in the network answer, change pickup, and p99 latency
+  - the page latency test (`TestPageLatency`, PAGE-LATENCY-1): `testscale.Week`, a
+    production week (18 networks × 249 countries, 8 browser targets and the AI group's
+    3 sources on two engines with scores, 24-hour series at 5-minute points, per network
+    and window 30,000 City × ASN rows, 30,000 cities and 9,000 ASNs, 2,500 events), as a
+    v4 build; its full rebuild within 30 s, then every request of every page as
+    `siteapi bench` expands them (`bench.Specs`, with every registered answer's
+    `Samples`) over loopback with keep-alive and brotli, within `bench.CIBudgets`: first
+    the cold requests, each once after 50 warm-up requests (a City × ASN list page's
+    first render, its rows not read yet, 50 ms; list searches 50 ms; `/v1/search?q=`
+    5 ms), then every page's requests 50 times to warm up and 200 times timed (p99: a
+    precomputed answer, `/v1/events` and a cached list page 2 ms); one page's requests'
+    p99 add up to at most 10 ms, and the whole test takes under 60 s. A failure names
+    the request, its p99 and the budget. CI runs it alone in its own process after
+    `TestServeFromDatabase` and reports its time in the job summary.
   - a fresh database with one published product as a v4 build (site schema migrated by an older
     build, missing, or missing tables and a column) answers 200 on every page, logs
     the missing site tables once and lists them in `/healthz` `siteGaps`

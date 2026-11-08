@@ -63,22 +63,26 @@ type WindowStats struct {
 	// LatencyTarget names the target the latency fields are for (measured
 	// networks: generic_http, the only target with a latency, see
 	// latencyMetrics); null without a snapshot product.
-	LatencyTarget    *string              `json:"latencyTarget"`
-	LatencyDeltaPct  Num                  `json:"latencyDeltaPct"`
-	UniqueIps        Num                  `json:"uniqueIps"`
-	ChurnRate        Num                  `json:"churnRate"`
-	RecurringShare   Num                  `json:"recurringShare"`
-	Requests         Num                  `json:"requests"`
-	BandwidthMb      Num                  `json:"bandwidthMb"`
-	CostPer1kSuccess Num                  `json:"costPer1kSuccess"`
-	UptimePct        Num                  `json:"uptimePct"`
-	DowntimeMinutes  Num                  `json:"downtimeMinutes"`
-	IncidentCount    Num                  `json:"incidentCount"`
-	Bands            []IncidentBand       `json:"bands"`
-	Success          []model.SeriesPoint  `json:"success"`
-	Availability     []model.SeriesPoint  `json:"availability"`
-	Latency          []model.LatencyPoint `json:"latency"`
-	Pool             []model.SeriesPoint  `json:"pool"`
+	LatencyTarget    *string `json:"latencyTarget"`
+	LatencyDeltaPct  Num     `json:"latencyDeltaPct"`
+	UniqueIps        Num     `json:"uniqueIps"`
+	ChurnRate        Num     `json:"churnRate"`
+	RecurringShare   Num     `json:"recurringShare"`
+	Requests         Num     `json:"requests"`
+	BandwidthMb      Num     `json:"bandwidthMb"`
+	CostPer1kSuccess Num     `json:"costPer1kSuccess"`
+	UptimePct        Num     `json:"uptimePct"`
+	DowntimeMinutes  Num     `json:"downtimeMinutes"`
+	IncidentCount    Num     `json:"incidentCount"`
+	WindowFigures
+	Bands        []IncidentBand       `json:"bands"`
+	Success      []model.SeriesPoint  `json:"success"`
+	Availability []model.SeriesPoint  `json:"availability"`
+	Latency      []model.LatencyPoint `json:"latency"`
+	Pool         []model.SeriesPoint  `json:"pool"`
+	// UnderLoad is the latency under load per series bucket, served by the
+	// chart answer (latencyUnderLoad) only.
+	UnderLoad []model.LatencyPoint `json:"-"`
 }
 
 // FleetWindow is window.ts FleetWindow.
