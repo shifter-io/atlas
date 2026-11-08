@@ -49,7 +49,8 @@ type RowBrowserScore struct {
 }
 
 // TargetCounts counts the dataset's targets: every one, the measured ones
-// and the cards (targets of no group).
+// and the cards (isCard). /v1/meta and /v1/rankings both count with
+// targetCounts, so their counts agree.
 type TargetCounts struct {
 	All      int `json:"all"`
 	Measured int `json:"measured"`
@@ -139,11 +140,17 @@ func targetCounts(targets []model.TargetMeta) TargetCounts {
 		if t.Source == model.SourceMeasured {
 			c.Measured++
 		}
-		if t.Group == nil {
+		if isCard(t) {
 			c.Cards++
 		}
 	}
 	return c
+}
+
+// isCard is true for a measured target outside any group: the ones a client
+// shows as cards (not the AI source targets nor a catalog-only row).
+func isCard(t model.TargetMeta) bool {
+	return t.Source == model.SourceMeasured && t.Group == nil
 }
 
 // valueRanks is each network's place on its kind's cost board (costBoard

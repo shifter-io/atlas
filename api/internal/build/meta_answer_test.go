@@ -110,6 +110,28 @@ func TestMetaFromBothFixtures(t *testing.T) {
 	}
 }
 
+// /v1/meta targetCounts and /v1/rankings targets count with one rule, so one
+// build gives them alike: a catalog-only target outside any group (the test
+// catalog's google_search) is not a card in either.
+func TestMetaAndRankingsCountTargetsAlike(t *testing.T) {
+	t.Parallel()
+	res := publishedBuild(t, fixtureSnapshot(t, "snapshot.json", nil))
+	m, r := metaOf(t, res), res.Pages.Rankings["30d"]
+	if r == nil {
+		t.Fatal("no /v1/rankings?range=30d answer")
+	}
+	if r.Targets != m.TargetCounts {
+		t.Errorf("rankings targets %+v, meta targetCounts %+v", r.Targets, m.TargetCounts)
+	}
+	catalogOnly := false
+	for _, mt := range m.Targets {
+		catalogOnly = catalogOnly || (mt.Source != model.SourceMeasured && mt.Group == nil)
+	}
+	if !catalogOnly {
+		t.Errorf("the fixture has no catalog-only target outside a group: %+v", m.Targets)
+	}
+}
+
 // A snapshot that publishes no grades gives null grades, listed in na.
 func TestMetaWithoutGrades(t *testing.T) {
 	t.Parallel()

@@ -144,3 +144,104 @@ func placeKeyOf(dimension string, cc, regionCode, region, city *string, asn Num)
 	}
 	return "", false
 }
+
+// RangeRanks is a network's competition rank among the networks of its kind
+// in one range (its rankings rows, /v1/rankings?range=&kind=): success rate,
+// uptime and price higher or lower is better, as the site reads them. ValueRank
+// ranks cost per 1,000 successes, ListRate the list $/GB (both lower first).
+type RangeRanks struct {
+	SuccessRate        model.Rank `json:"successRate"`
+	UptimePct          model.Rank `json:"uptimePct"`
+	DatacenterAsnShare model.Rank `json:"datacenterAsnShare"`
+	ValueRank          model.Rank `json:"valueRank"`
+	ListRate           model.Rank `json:"listRate"`
+}
+
+// Alternative is provider-view.ts cheaperAndBetter[0]: the first network of
+// the kind's ranking that costs less per 1,000 successes than this one with a
+// success rate at most AlternativeSlack below it. CheaperBy is 1 − its cost ÷
+// this network's.
+type Alternative struct {
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	SuccessRate Num    `json:"successRate"`
+	LatencyP50  Num    `json:"latencyP50"`
+	CheaperBy   Num    `json:"cheaperBy"`
+}
+
+// AlternativeSlack is how far below a network's success rate an alternative's
+// may be (provider-view.ts: 2 points).
+const AlternativeSlack = 0.02
+
+// rankedFigures are the figures RangeRanks ranks, in its field order, and
+// whether a higher value is better.
+var rankedFigures = [...]struct {
+	of     func(RankingRow) Num
+	higher bool
+}{
+	{func(r RankingRow) Num { return r.SuccessRate }, true},
+	{func(r RankingRow) Num { return r.UptimePct }, true},
+	{func(r RankingRow) Num { return r.DatacenterAsnShare }, false},
+	{func(r RankingRow) Num { return r.CostPer1k }, false},
+	{func(r RankingRow) Num { return r.ListRate }, false},
+}
+
+func noRanks() RangeRanks {
+	none := model.Rank{Rank: nan}
+	return RangeRanks{none, none, none, none, none}
+}
+
+// addRangeRanks sets every network answer's per-range ranks and alternative
+// from its kind's ranking of that range, once per build.
+func (pg *Pages) addRangeRanks() {
+	for key, ranking := range pg.RankingsByKind {
+		rangeID, kind, _ := strings.Cut(key, "/")
+		ranks := rowRanks(ranking.Networks)
+		for _, row := range ranking.Networks {
+			ans := pg.Network[row.Slug+"/"+kind]
+			if ans == nil || ans.Stats[rangeID] == nil {
+				continue
+			}
+			ans.Stats[rangeID].Ranks, ans.Stats[rangeID].Alternative = ranks[row.Slug], alternative(row, ranking.Networks)
+		}
+	}
+}
+
+// rowRanks ranks every row's figures among rows, by slug.
+func rowRanks(rows []RankingRow) map[string]RangeRanks {
+	var peers [len(rankedFigures)][]Num
+	for _, r := range rows {
+		for i, f := range rankedFigures {
+			if v := f.of(r); v.OK() {
+				peers[i] = append(peers[i], v)
+			}
+		}
+	}
+	out := make(map[string]RangeRanks, len(rows))
+	for _, r := range rows {
+		var got [len(rankedFigures)]model.Rank
+		for i, f := range rankedFigures {
+			got[i] = rankOf(f.of(r), peers[i], f.higher)
+		}
+		out[r.Slug] = RangeRanks{got[0], got[1], got[2], got[3], got[4]}
+	}
+	return out
+}
+
+// alternative is own's Alternative among rows (in ranking order); nil when
+// no network qualifies or own has no cost or success rate.
+func alternative(own RankingRow, rows []RankingRow) *Alternative {
+	if !own.CostPer1k.OK() || !own.SuccessRate.OK() {
+		return nil
+	}
+	for _, r := range rows {
+		if r.Slug == own.Slug || !r.CostPer1k.OK() || !r.SuccessRate.OK() {
+			continue
+		}
+		if r.CostPer1k < own.CostPer1k && r.SuccessRate >= own.SuccessRate-AlternativeSlack {
+			return &Alternative{Slug: r.Slug, Name: r.Name, SuccessRate: r.SuccessRate, LatencyP50: r.LatencyP50,
+				CheaperBy: 1 - r.CostPer1k/own.CostPer1k}
+		}
+	}
+	return nil
+}
