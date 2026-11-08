@@ -15,7 +15,7 @@ from test_browser_node import make_state
 from proxy_index.browser.driver import NavigationError
 from proxy_index.browser.judge import selector_list
 from proxy_index.browser.targets import ai
-from proxy_index.browser.targets.ai import AiOverview
+from proxy_index.browser.targets.ai_overview import AiOverview
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "browser_capture.py"

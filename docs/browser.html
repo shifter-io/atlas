@@ -74,7 +74,7 @@ td:first-child{width:auto}</style>
 </section>
 
 <section id="success"><h2>2a. What counts as success</h2>
-<p>A page answering 200 is not a success: a try is <code>ok</code> only when the browser shows the real content below. The code is <code>proxy_index.browser.judge</code> (shared steps) and <code>proxy_index.browser.targets.pages</code> and <code>proxy_index.browser.targets.ai</code> (one class per target, registered in the target registry). Every judge runs the same steps in this order and stops at the first that applies:</p>
+<p>A page answering 200 is not a success: a try is <code>ok</code> only when the browser shows the real content below. The code is <code>proxy_index.browser.judge</code> (shared steps) and <code>proxy_index.browser.targets.pages</code> and <code>proxy_index.browser.targets.ai_types</code> (one class per target, registered in the target registry). Every judge runs the same steps in this order and stops at the first that applies:</p>
 <ol>
 <li>a navigation error, already mapped by the transport (the judge never sees it);</li>
 <li>a main document answered with 407: proxy error <code>proxy_auth</code>;</li>

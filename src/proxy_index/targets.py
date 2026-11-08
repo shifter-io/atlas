@@ -186,9 +186,9 @@ registry.register(pages.LinkedinPublic())
 registry.register(pages.InstagramWeb())
 registry.register(pages.CloudflareChallenge())
 
-# The AI answer sources (K-BP1, browser.targets.ai), imported the same way.
-from .browser.targets import ai  # noqa: E402
+# The AI answer sources (K-BP1, browser.targets.ai_types), imported the same way.
+from .browser.targets import ai_types  # noqa: E402
 
-registry.register(ai.AiOverview())
-registry.register(ai.ChatGpt())
-registry.register(ai.Gemini())
+registry.register(ai_types.AiOverview())
+registry.register(ai_types.ChatGpt())
+registry.register(ai_types.Gemini())
