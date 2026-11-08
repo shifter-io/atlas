@@ -34,9 +34,10 @@ GO = f"owner-go REPLAY-RUN-1 {datetime.now(UTC).date()}"
 FIRST = (datetime.now(UTC) - timedelta(days=4)).date()
 COUNTRIES = tuple(cases.SCHEDULE)
 SETTINGS = "SELECT key,value FROM settings ORDER BY key"
-DAILY = (
-    "SELECT summary->'config'->>'provider',upper(summary->'config'->>'requested_country'),"
-    "summary->>'started_at' FROM test_runs WHERE summary->>'test_kind'='daily'"
+DAILY = (  # the network and country of a daily test (daily/__init__.py)
+    "SELECT p.provider,upper(o.requested_country),t.summary->>'started_at' FROM test_runs t "
+    "JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id) "
+    "JOIN pool_stats o USING(pool_id) WHERE t.summary->>'test_kind'='daily'"
 )
 BROWSER = (
     "SELECT p.provider,b.target_id,b.scheduled_for FROM test_runs t JOIN test_batches b "
@@ -194,19 +195,20 @@ def test_a_stopped_load_resumes_to_the_rows_of_an_uninterrupted_one(
     stopped = staged(databases(template=database_template), monkeypatch)
     monkeypatch.setattr(simulate_steps.SimSteps, "release", stop_once)
     out = tmp_path / "stopped"
-    assert simulate.main(argv(stopped, inputs, out, 1)) == 130
+    short = ("--hours-per-day", "8")  # hours 0-7: a daily test and two browser runs a network
+    assert simulate.main(argv(stopped, inputs, out, 1, *short)) == 130
     first = state(out)
     assert [h["ingest"]["done"] for h in first["hours"][:6]] == [True] * 5 + [False]
     tokens = query(stopped, "SELECT token_hash FROM nodes")
     assert tokens and all(token.startswith("disabled:") for (token,) in tokens)
     assert (out / "report.md").exists()
-    other = argv(stopped, inputs, out, 2)
+    other = argv(stopped, inputs, out, 2, *short)
     assert simulate.main(other) == 2 and "is the load of" in capsys.readouterr().err
-    assert simulate.main(argv(stopped, inputs, out, 1)) == 0
+    assert simulate.main(argv(stopped, inputs, out, 1, *short)) == 0
     resumed = state(out)
     assert resumed["replay_id"] == first["replay_id"] and len(resumed["resumed"]) == 1
     uninterrupted = staged(databases(template=database_template), monkeypatch)
-    assert simulate.main(argv(uninterrupted, inputs, tmp_path / "whole", 1)) == 0
+    assert simulate.main(argv(uninterrupted, inputs, tmp_path / "whole", 1, *short)) == 0
     with simulate.storage.connect(stopped) as a, simulate.storage.connect(uninterrupted) as b:
         mine, whole = replay_baseline.counts(a), replay_baseline.counts(b)
     data = ("test_runs", "run_buckets", "ip_observations", "run_enrichments", "estimated_hours")
@@ -215,7 +217,7 @@ def test_a_stopped_load_resumes_to_the_rows_of_an_uninterrupted_one(
     assert {name: mine[f"public.{name}"] for name in data} == {
         name: whole[f"public.{name}"] for name in data
     }
-    assert mine["public.test_runs"] > 6
+    assert mine["public.test_runs"] > 2 and mine["public.estimated_hours"] > 0
 
 
 def test_pulses_only_when_switched_on(staging, inputs, tmp_path):

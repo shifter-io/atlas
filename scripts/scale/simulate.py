@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
 """SIM-LOAD-1: load generated days into the staging database through the real ingest paths.
 
-Usage:
-  simulate.py --database <toml> --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"
-              --profile <profile.json> --days 7 --first-day <YYYY-MM-DD> --out <dir>
-              [--jobs 6] [--batch-daily 20] [--pulses] [--siteapi URL] [--no-scope]
-  simulate.py --database <toml> --profile <profile.json> --days 7 --first-day <YYYY-MM-DD>
-              --plan-only [--pulses]
-
-SIMULATE.md ("Loading the generated days") describes the hour, the guards, the calculation and
-the report. The same command resumes from <out>/state.json. Exit 0 done, 2 refused (nothing
-written), 130 stopped.
+SIMULATE.md ("Loading the generated days") gives the usage, the guards, the hour, the
+calculation and the report. The same command resumes from <out>/state.json. Exit 0 done, 2
+refused (nothing written), 130 stopped.
 """
 
 from __future__ import annotations
@@ -62,14 +55,10 @@ def tables(conn) -> dict:
     return {"at": now(), "database_bytes": measure.sizes(conn)["database_bytes"], "tables": found}
 
 
-def first_day(args) -> date:
-    return date.fromisoformat(args.first_day)
-
-
 def read_plan(conn, args):
     """The plan, read in the connection's transaction, for the days and the extra hour."""
-    found = (args.formulas, args.browser_settings, args.pulses)
-    return replace(simulate_model.read_plan(conn, first_day(args), *found), days=args.days + 1)
+    found = (date.fromisoformat(args.first_day), args.formulas, args.browser_settings)
+    return replace(simulate_model.read_plan(conn, *found, args.pulses), days=args.days + 1)
 
 
 class Simulation(replay.Replay):
@@ -113,24 +102,21 @@ class Simulation(replay.Replay):
         self.save()
         return state
 
-    def slot(self, index: int) -> tuple[int, int]:
-        """The model's (day, hour) of an hour."""
-        record = self.record(index)
-        return record["day"] + 1, datetime.fromisoformat(record["start"]).hour
-
     def run(self) -> dict:
         """Load every hour not stored yet, calculate, check; disable the nodes however it ends."""
         total = self.total()  # the simulated hours; index total is the extra hour
-        slots = [self.slot(index) for index in range(total + 1)]
-        done = [self.record(index)["ingest"]["done"] for index in range(total + 1)]
-        first = done.index(False) if False in done else total + 1
+        records = [self.record(index) for index in range(total + 1)]  # the model's (day, hour):
+        slots = [(r["day"] + 1, datetime.fromisoformat(r["start"]).hour) for r in records]
+        first = next((i for i, r in enumerate(records) if not r["ingest"]["done"]), total + 1)
         given = (self.profile, self.plan, self.state["seed"], self.state["replay_id"])
         producer = simulate_steps.Producer(self.args.jobs, self.out / "generated", given, slots)
         if measure.has_statements(self.conn):
             self.counters = measure.snapshot(self.conn)
         try:
             for index in range(first, total + 1):
-                self.day_ended(index)
+                day, hour = divmod(index, self.args.hours_per_day)
+                if index and not hour and str(day) not in self.state["sizes"]:  # a day ended
+                    self.state["sizes"][str(day)] = tables(self.conn)
                 if index == total:
                     self.calculated(total - 1, incremental=False)
                 self.load(index, producer)
@@ -149,19 +135,14 @@ class Simulation(replay.Replay):
         hours = sum(self.record(index)["ingest"]["done"] for index in range(total + 1))
         return {"replay_id": self.state["replay_id"], "hours_done": hours, "hours": total + 1}
 
-    def day_ended(self, index: int) -> None:
-        """The sizes of the day that ended before this hour, when they are not recorded yet."""
-        day, hour = divmod(index, self.args.hours_per_day)
-        if index and not hour and str(day) not in self.state["sizes"]:
-            self.state["sizes"][str(day)] = tables(self.conn)
-            self.save()
-
     def load(self, index: int, producer) -> None:
         """Store one generated hour with the replay's step loop (Replay.ingest)."""
         record, hour = self.record(index), self.model.hour(*producer.hours[index])
         figures = producer.take(index)
-        record["runs"] = {"daily": len(hour.daily), "browser": len(hour.browser)}
-        record["runs"]["pulse"] = len(hour.pulses)
+        runs = (hour.daily, hour.browser, hour.pulses)
+        record["runs"] = {
+            kind: len(own) for kind, own in zip(simulate_report.KINDS, runs, strict=True)
+        }
         record["figures"] = simulate_report.figures(hour, figures)
         self.steps.current = simulate_steps.Current(hour, figures, producer.directory(index))
         self.ingest(index)
@@ -192,8 +173,8 @@ class Simulation(replay.Replay):
         day = min(2, self.args.days)
         found = producer.pool.submit(simulate_steps.stats, day, self.args.hours_per_day)
         hours = simulate_report.stored(self.model, self.state["hours"][: self.total()])
-        self.state["checks"] = {"size": simulate_check.size(self.profile, hours)}
-        self.state["checks"] |= {"stats": found.result(), "stats_day": day}
+        size = simulate_check.size(self.profile, hours)
+        self.state |= {"checks": {"size": size, "stats": found.result()}, "stats_day": day}
         self.save()
 
 
@@ -234,10 +215,8 @@ def arguments(argv=None):
     parser.add_argument("--hour-timeout", type=float, default=86400.0, help=argparse.SUPPRESS)
     parser.set_defaults(pulse_concurrency=8, node_api=None, siteapi_pid=None)
     args = parser.parse_args(argv)
-    if args.days < 1 or not 1 <= args.hours_per_day <= 24:
-        parser.error("--days is at least 1 and the hours of a day 1..24")
-    if args.jobs < 1 or args.batch_daily < 1:
-        parser.error("--jobs and --batch-daily are at least 1")
+    if min(args.days, args.jobs, args.batch_daily) < 1 or not 1 <= args.hours_per_day <= 24:
+        parser.error("--days, --jobs and --batch-daily are at least 1, the hours of a day 1..24")
     if not args.plan_only and not (args.owner_go and args.out):
         parser.error("--owner-go and --out are required, except with --plan-only")
     return args

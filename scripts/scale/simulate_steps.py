@@ -1,22 +1,13 @@
-"""SIM-LOAD-1: the steps of a generated hour in the staging database (SIMULATE.md, "Loading the
-generated days"), and the worker processes that generate the hours ahead.
-
-Producer runs `jobs` worker processes. Each writes its share of an hour's daily tests as run
-directories, at most AHEAD hours ahead of the hour being stored. SimSteps stores an hour with
-replay.py's step loop:
-- daily: the hour's planner cells through daily/ingest.store_cells (storage.ingest_many and
-  compute.estimate_runs per batch), then each cell's emit_cell events;
-- browser: the queue planner (orchestrator/browser.py) at each run's start, with the plan's
-  settings given in-process, then each run's bundle through the in-process node API;
-- pulses (only with --pulses): the replay's pulse step, with the model's geo rows;
-- release: cycle_steps.Steps.release.
-"""
+"""SIM-LOAD-1: the worker processes that generate hours ahead (Producer), and the steps that
+store a generated hour in the staging database with replay.py's step loop: daily, browser,
+pulses (only with --pulses) and release (SIMULATE.md, "One simulated hour")."""
 
 from __future__ import annotations
 
 import asyncio
 import multiprocessing
 import shutil
+from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,9 +29,7 @@ from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
 AHEAD = 2  # hours generated ahead of the one being stored
 DAILY_REPORT = "daily-ingest.json"  # the hour's cells as store_cells saves them (events once)
 WORKER: dict[str, Any] = {}  # a worker process's model (start)
-
-
-# The worker processes.
+Current = namedtuple("Current", "hour figures directory")  # the hour being stored
 
 
 def start(profile: dict, plan, seed, replay_id: str) -> None:
@@ -102,18 +91,6 @@ class Producer:
         shutil.rmtree(self.root, ignore_errors=True)
 
 
-# The steps of an hour, in the loader's process.
-
-
-@dataclass
-class Current:
-    """The hour being stored: the model's hour, its tests' figures and their directories."""
-
-    hour: Any  # simulate_model.Hour
-    figures: dict[str, dict]
-    directory: Path
-
-
 class SimSteps(ReplaySteps):
     """The replay's steps on the loader's database, the model's hour given (current)."""
 
@@ -160,18 +137,18 @@ class SimSteps(ReplaySteps):
         """A planner cell as prepare_cell leaves it: its report so far and its countries' run
         directories, complete (the model's rounds always are)."""
         own = [tests[cell.network, code] for code in cell.countries]
-        report = {"network": cell.network, "region": cell.region}
-        report |= {"countries": list(cell.countries), "status": "failed", "ingested": []}
+        report = {"network": cell.network, "region": cell.region, "status": "failed"}
+        report |= {"countries": list(cell.countries), "unique_ips": 0}
         report["requests"] = sum(self.current.figures[t.run_id]["requests"] for t in own)
         report["started_at"] = min(t.started_at for t in own).isoformat()
         report["finished_at"] = max(t.finished_at for t in own).isoformat()
-        report |= {"unique_ips": 0, "issues": [], "estimated": [], "estimate_issues": []}
+        report |= {name: [] for name in ("ingested", "issues", "estimated", "estimate_issues")}
         report["spool_issues"] = []
-        countries = [
-            batches.Country(t.lane.country, {"unique_ips": t.size}, t.lane.formula) for t in own
-        ]
-        for country, test in zip(countries, own, strict=True):
-            country.directory = self.current.directory / test.run_id
+        directory, countries = self.current.directory, []
+        for t in own:
+            found = batches.Country(t.lane.country, {"unique_ips": t.size}, t.lane.formula)
+            countries.append(found)
+            found.directory = directory / t.run_id
         product = self.formulas[cell.network].get("product", "residential")
         manifest = {"provider": cell.network, "product": product}
         key = f"{cell.network}/{cell.region}"
@@ -183,11 +160,9 @@ class SimSteps(ReplaySteps):
         runs = {(run.target, run.country, run.start): run for run in self.current.hour.browser}
         if not runs:
             return {"runs": 0, "planned": 0, "failed": 0}, True
-        nodes = self.browser_nodes()
-        settings = self.sim.plan.browser
         hour = Hour(self.args.database, self.replay, start, step.setdefault("uploaded", []))
-        hour.runs, hour.settings = runs, settings
-        part = asyncio.run(hour.drive("", nodes))
+        hour.runs, hour.settings = runs, self.sim.plan.browser
+        part = asyncio.run(hour.drive("", self.browser_nodes()))
         return part, part["failed"] == 0
 
     def browser_nodes(self) -> dict[int, dict]:

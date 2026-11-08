@@ -220,8 +220,7 @@ class ModelTransport:
 
 def bundle(run_row: dict, target: str, seed: Any, out: Path, tries=None) -> Path:
     """One planned browser run's bundle (K-BP4) in the outbox `out`; its tar.gz. `tries`: (error
-    code, bytes[, page load ms, screenshot bytes]) per try, by default plan()'s. The bundle's
-    host is the row's `host` when it has one (its node's), else HOST."""
+    code, bytes[, page load ms, screenshot bytes]) per try, by default plan()'s; host: the row's."""
     tries = tries or plan(target, f"{seed}:{run_row['batch_id']}:{run_row['product_id']}")
     host = run_row.get("host") or HOST
     batch = Batch(run_row["batch_id"], run_row["country"], run_row["scheduled_for"], host)
@@ -290,8 +289,7 @@ def browser_step(steps, day: int, start: datetime, state: dict) -> tuple[dict, b
 
 @dataclass
 class Hour:
-    """One modelled browser hour on a database: plan, then upload each pending run's bundle.
-    plan, bundle and size are the hooks SIM-LOAD-1's generated hour (simulate_steps) replaces."""
+    """One modelled browser hour on a database: plan, then upload each pending run's bundle."""
 
     database: Any
     seed: Any
@@ -319,8 +317,7 @@ class Hour:
     def bundle(self, row: dict, outbox: Path) -> Path:
         return bundle(row, row["target_id"], self.seed, outbox)
 
-    def size(self, row: dict) -> tuple[int, int]:
-        """(page loads, bytes) of an uploaded run."""
+    def size(self, row: dict) -> tuple[int, int]:  # an uploaded run's (page loads, bytes)
         measured = MEASURED[row["target_id"]]
         return measured.tries, round(measured.mean_mb * MB * measured.tries)
 
