@@ -151,6 +151,7 @@ class Tracer:
         self.slowest: list[tuple] = []  # a heap of (seconds, shape, rows)
         self.lock = threading.Lock()
         self.saved: list[tuple] = []
+        self.pending: list[tuple] = []  # (cursor, shape) in pipeline mode: rows come with a sync
 
     def __enter__(self) -> Tracer:
         for cls in (psycopg.Cursor, psycopg.AsyncCursor):
@@ -221,7 +222,8 @@ class Tracer:
 
     def add(self, cursor, query, start: float, done: bool) -> None:
         seconds = time.perf_counter() - start
-        rows = max(cursor.rowcount, 0) if done else 0
+        late = done and cursor.pgresult is None
+        rows = max(cursor.rowcount, 0) if done and not late else 0
         raw = _text(cursor, query)
         text = shape(raw)
         with self.lock:
@@ -231,6 +233,7 @@ class Tracer:
             entry["seconds"] += seconds
             entry["rows"] += rows
             entry["max_seconds"] = max(entry["max_seconds"], seconds)
+            self.pending += [(cursor, text)] if late else []
             key = bucket(seconds)
             entry["histogram"][key] = entry["histogram"].get(key, 0) + 1
             heapq.heappush(self.slowest, (seconds, text, rows))
@@ -241,6 +244,9 @@ class Tracer:
         """The statement count, the seconds, the 5 slowest statements and every shape (its calls,
         seconds, maximum, rows and its times' histogram: replay_report.combine adds them up)."""
         with self.lock:
+            for cursor, text in self.pending:
+                self.shapes[text]["rows"] += max(cursor.rowcount, 0)
+            self.pending.clear()
             shapes = [row | {"histogram": dict(row["histogram"])} for row in self.shapes.values()]
             slowest = sorted(self.slowest, reverse=True)
         shapes.sort(key=lambda row: (-row["seconds"], row["statement"]))
