@@ -234,8 +234,11 @@ class ReplaySteps(Steps):
         seed = synthetic.key(self.replay, "pulse", run["batch_id"], run["product_id"])
         errors, (low, high) = seed % 4, synthetic.GEO_ROWS
         found = places(self.country_rows(slot[1].hour, run["country"]))
-        found = found[: low + (seed >> 8) % (high - low + 1)] or [(None, None)]
+        found = found[: low + (seed >> 8) % (high - low + 1)]
         bins = self.bins(run["provider"])
+        if not found:  # the empty key once: the timeouts too, or the ingest refuses a duplicate
+            ms, requests = bins[seed % len(bins)], synthetic.PULSE_REQUESTS
+            return lane, errors, [(None, None, requests, requests - errors, ms)]
         shares = apportion(synthetic.PULSE_REQUESTS - errors, [1] * len(found))
         rows = [
             (loc, net, n, n, bins[(seed + i) % len(bins)])
