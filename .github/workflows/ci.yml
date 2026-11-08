@@ -13,7 +13,8 @@
 # run. A job-started hook on the servers refuses every job except the owner's pull
 # requests from this repository's own branches, merge-queue tests and owner dispatches.
 # Draft pull requests run nothing until they are marked ready. A change only to
-# docs/ (except docs/onboarding.html, which a test reads), LICENSE, Markdown outside
+# docs/ (except docs/onboarding.html, docs/api-web-map.md and docs/api-web-map-gaps.json,
+# which tests read), LICENSE, Markdown outside
 # src/, tests/, scripts/ and configs/ (where Markdown can be a golden) or the API
 # (api/, tested by api.yml) runs only the privacy, commit-message, commit-identity
 # and secret checks.
@@ -71,9 +72,11 @@ jobs:
           code=false
           while IFS= read -r f; do
             case "$f" in
-              # docs/onboarding.html: tests/test_onboarding_round.py reads it; Markdown
-              # under these trees can be a golden (tests/fixtures/campaign-data/*.md).
-              docs/onboarding.html|src/*|tests/*|scripts/*|configs/*) code=true ;;
+              # docs/onboarding.html: tests/test_onboarding_round.py reads it;
+              # docs/api-web-map.md and docs/api-web-map-gaps.json:
+              # tests/test_api_web_map_gaps.py reads them. Markdown under these trees
+              # can be a golden (tests/fixtures/campaign-data/*.md).
+              docs/onboarding.html|docs/api-web-map.md|docs/api-web-map-gaps.json|src/*|tests/*|scripts/*|configs/*) code=true ;;
               # The API is tested by api.yml; its diff still gets the checks below.
               docs/*|*.md|LICENSE|api/*) ;;
               *) code=true ;;
