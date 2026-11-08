@@ -366,7 +366,7 @@ func (b *builder) assemble() error {
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	res.Pages.buildRegistered(&Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
-		Dataset: ds, Events: &res.Events, Inputs: in})
+		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages})
 	ds.Pages = datasetPages(res.Pages)
 	ds.Lists = datasetLists(res.Pages, s, b.entries)
 	var networks []RankingRow
