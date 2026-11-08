@@ -85,7 +85,9 @@ func datasetFile(t *testing.T, shape testscale.Shape) ([]byte, *build.Result) {
 // fields and the N/A paths under placeRanks taken out. The new `pages` and
 // `coverageEvidence` are left out of the comparison; their own tests check
 // them, as is `lists`. Its snapshot has no latency mean, so what LAT-MEAN-API
-// adds for it is left out too.
+// adds for it is left out too. The tape rows' raw event kind and the reviews'
+// verification label (NETWORK-EXTRAS-1) were added to it since;
+// SITEAPI_UPDATE_GOLDENS rewrites it.
 func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 	t.Parallel()
 	file, _ := datasetFile(t, goldenShape)
@@ -114,7 +116,14 @@ func TestTheKeptDatasetFieldsAreUnchanged(t *testing.T) {
 		}
 		top = append(top, kv)
 	}
-	want, err := os.ReadFile(filepath.Join("testdata", "dataset-retained.golden.json"))
+	name := filepath.Join("testdata", "dataset-retained.golden.json")
+	if os.Getenv("SITEAPI_UPDATE_GOLDENS") != "" {
+		if err := os.WriteFile(name, joinPairs(top), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(name)
 	if err != nil {
 		t.Fatal(err)
 	}

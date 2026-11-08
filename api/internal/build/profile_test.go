@@ -88,10 +88,10 @@ func TestANetworkAnswerKeepsItsNewestRecordsWithinTheCap(t *testing.T) {
 	d := res.Details["net00"]
 	body := strings.Repeat("x", 2048)
 	for i := range 400 {
-		d.Reviews = append(d.Reviews, model.UserReview{ID: fmt.Sprintf("r%03d", i), ProviderSlug: "net00", Body: body})
+		d.Reviews = append(d.Reviews, model.UserReview{ID: fmt.Sprintf("r%03d", i), ProviderSlug: "net00", Product: "residential_rotating", Body: body})
 		d.Changelog = append(d.Changelog, model.ChangeEvent{ID: fmt.Sprintf("c%03d", i), Detail: body})
-		d.CommunityRuns = append(d.CommunityRuns, model.CommunityRun{ID: fmt.Sprintf("u%03d", i)})
-		d.Tape = append(d.Tape, model.TapeEvent{ID: fmt.Sprintf("t%03d", i), Detail: body})
+		d.CommunityRuns = append(d.CommunityRuns, model.CommunityRun{ID: fmt.Sprintf("u%03d", i), Product: "residential_sticky"})
+		d.Tape = append(d.Tape, model.TapeEvent{ID: fmt.Sprintf("t%03d", i), Product: "residential", Detail: body})
 	}
 	res.Pages.addDetails("", res.Details)
 	ans := res.Pages.Network["net00/residential"]
