@@ -42,6 +42,9 @@ def register(commands) -> None:
     ingest.add_argument(
         "--spool", type=Path, help="keep each imported run's raw files there (raw.spool_dir)"
     )
+    ingest.add_argument(
+        "--batch", type=int, help="daily tests stored per transaction (default 20, at least 1)"
+    )
     hour = actions.add_parser("hour", help="Manager: run the next hour's test, then ingest it")
     check = actions.add_parser("check", help="Check formulas and template for all 24 hours")
     for action in (hour, check):
@@ -91,9 +94,10 @@ def _ingest(args) -> int:
     if not json.loads(collected.read_text())["clean"]:
         print("Not ingested: the download did not verify", file=sys.stderr)
         return 3
+    batch = {"batch": args.batch} if args.batch is not None else {}  # else ingest_campaign's
     report = asyncio.run(
         ingest_campaign(
-            dest, args.database_file, args.mmdb, formulas=args.formulas, spool=args.spool
+            dest, args.database_file, args.mmdb, formulas=args.formulas, spool=args.spool, **batch
         )
     )
     print(json.dumps({k: report[k] for k in ("campaign_id", "complete")}, indent=2))
