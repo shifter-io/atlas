@@ -204,11 +204,11 @@ def test_manifest_refusals():
     with pytest.raises(ValueError, match="once"):
         c.manifest(**manifest_fields(files=[tries, tries]))
     for document in (
-        manifest_fields() | {"format": "other", "version": 1},
+        manifest_fields() | {"format": "other", "version": 2},
         manifest_fields() | {"format": c.MANIFEST_FORMAT, "version": True},
-        manifest_fields() | {"format": c.MANIFEST_FORMAT, "version": 2},
+        manifest_fields() | {"format": c.MANIFEST_FORMAT, "version": 3},
     ):
-        with pytest.raises(ValueError, match="version 1"):
+        with pytest.raises(ValueError, match="not a version 1 or 2"):
             c.check_manifest(document)
     with pytest.raises(ValueError, match="table or object"):
         c.check_manifest([])
