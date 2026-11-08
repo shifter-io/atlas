@@ -168,8 +168,7 @@ class SimSteps(ReplaySteps):
         report |= {"unique_ips": 0, "issues": [], "estimated": [], "estimate_issues": []}
         report["spool_issues"] = []
         countries = [
-            batches.Country(t.lane.country, {"unique_ips": t.size}, t.lane.formula)
-            for t in own
+            batches.Country(t.lane.country, {"unique_ips": t.size}, t.lane.formula) for t in own
         ]
         for country, test in zip(countries, own, strict=True):
             country.directory = self.current.directory / test.run_id

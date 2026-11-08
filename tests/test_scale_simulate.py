@@ -95,7 +95,7 @@ def day_of(value) -> date:
     return moment.astimezone(UTC).date()
 
 
-def tests(found: dict, day: int | None = None) -> list:
+def daily_figures(found: dict, day: int | None = None) -> list:
     """The recorded daily tests [network, rows, unique IPs, requests] (of a 0-based day)."""
     hours = [h for h in found["hours"] if "figures" in h and day in (None, h["day"])]
     return [test for hour in hours for test in hour["figures"]["daily"]]
@@ -118,7 +118,7 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
     assert sum(browser.values()) - len(wanted) <= 2  # the extra hour's, at its first minutes
     assert query(staging, "SELECT count(*) FROM test_batches WHERE kind<>'browser'")[0][0] == 0
     # The rows the size check expects of the daily tests, from the recorded figures.
-    stored = tests(found)
+    stored = daily_figures(found)
     marked = "summary->>'test_kind'='daily'"
     for name in ("test_runs", "run_buckets", "ip_observations", "run_enrichments"):
         count = query(staging, OWN.format(name, marked))
@@ -128,11 +128,12 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
     # Every run carries the run's own id; each planner cell has its two events.
     mine = "SELECT count(*) FILTER (WHERE summary->>'scale_replay'=%s),count(*) FROM test_runs"
     assert len(set(query(staging, mine, (found["replay_id"],))[0])) == 1
-    cells = sum(
-        h["ingest"]["steps"]["daily"]["parts"][-1]["cells"] for h in found["hours"]
-    )
+    cells = sum(h["ingest"]["steps"]["daily"]["parts"][-1]["cells"] for h in found["hours"])
     events = "SELECT kind,count(*) FROM test_events WHERE kind LIKE 'daily_test_%%' GROUP BY 1"
-    assert dict(query(staging, events)) == {"daily_test_started": cells, "daily_test_finished": cells}
+    assert dict(query(staging, events)) == {
+        "daily_test_started": cells,
+        "daily_test_finished": cells,
+    }
     # The full calculation after the days, the incremental one of the extra hour.
     full, incremental = (h["calculate"] for h in found["hours"][-2:])
     assert (full["kind"], incremental["kind"]) == ("full", "incremental")
@@ -142,9 +143,11 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
     # The full build's 24h window holds day 2's daily tests and its released hours.
     windows = dict(query(staging, WINDOWS, (full["build_id"], netlists.COHORT)))
     for network in cases.NETWORKS:
-        requests = sum(test[3] for test in tests(found, 1) if test[0] == network)
+        requests = sum(test[3] for test in daily_figures(found, 1) if test[0] == network)
         assert windows[network] == requests > 0
-    payload = query(staging, "SELECT payload FROM calculated_snapshots WHERE build_id=%s", (full["build_id"],))[0][0]
+    payload = query(
+        staging, "SELECT payload FROM calculated_snapshots WHERE build_id=%s", (full["build_id"],)
+    )[0][0]
     for entry in payload["networks"]:
         assert entry["windows"]["24h"]["estimated"]["hours"] > 0
     # Nodes disabled, no settings row written, the generated hours deleted.
@@ -221,7 +224,9 @@ def test_pulses_only_when_switched_on(staging, inputs, tmp_path):
     found = state(out)
     pulses = [h["ingest"]["steps"]["pulses"]["parts"][-1] for h in found["hours"]]
     assert all(part["failed"] == 0 for part in pulses) and found["hours"][0]["runs"]["pulse"]
-    runs = "SELECT count(*) FROM test_runs JOIN test_batches b USING(batch_id) WHERE b.kind<>'browser'"
+    runs = (
+        "SELECT count(*) FROM test_runs JOIN test_batches b USING(batch_id) WHERE b.kind<>'browser'"
+    )
     assert query(staging, runs)[0][0] == sum(part["planned"] for part in pulses) > 0
     geo = "SELECT count(*) FROM run_geo_buckets"
     assert query(staging, geo)[0][0] > 0

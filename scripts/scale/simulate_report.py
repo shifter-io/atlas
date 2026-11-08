@@ -101,7 +101,10 @@ def plan(model, profile: dict, days: int, hours: int, pulses: bool) -> dict:
     found, totals = [], Counter()
     for day in range(1, days + 1):
         own = [model.hour(day, h) for h in range(hours)]
-        runs = {"daily": sum(len(h.daily) for h in own), "browser": sum(len(h.browser) for h in own)}
+        runs = {
+            "daily": sum(len(h.daily) for h in own),
+            "browser": sum(len(h.browser) for h in own),
+        }
         runs |= {"pulse": sum(len(h.pulses) for h in own)} if pulses else {}
         found.append({"day": day, "runs": runs, "tables": expected(profile, runs)})
         totals.update(runs)
@@ -115,7 +118,10 @@ def plan_table(found: dict) -> str:
         (f"total of {len(found['days'])} days", found["totals"])
     ]:
         runs = ", ".join(f"{kind} {n}" for kind, n in entry["runs"].items())
-        lines += [f"{title}: {runs}", f"  {'table':<20}{'rows':>14}{'table GB':>11}{'index GB':>11}"]
+        lines += [
+            f"{title}: {runs}",
+            f"  {'table':<20}{'rows':>14}{'table GB':>11}{'index GB':>11}",
+        ]
         for name, size in sorted(entry["tables"].items()):
             gbs = "".join(f"{size[field] / GB:>11.3f}" for field in BYTES)
             lines.append(f"  {name:<20}{size['rows']:>14}{gbs}")
@@ -168,9 +174,11 @@ def day_row(state: dict, profile: dict, day: int, before: dict) -> dict:
     real = dig(profile, "real_24h")
     found = generated(records)
     row["real_24h"] = [
-        {"metric": label, "generated": found[mine], "real_24h": sum(
-            (entry.get(theirs) or 0) for entry in real.values()
-        )}
+        {
+            "metric": label,
+            "generated": found[mine],
+            "real_24h": sum((entry.get(theirs) or 0) for entry in real.values()),
+        }
         for label, mine, theirs in REAL
     ]
     return row
@@ -229,19 +237,26 @@ def check_lines(checks: dict | None) -> list[str]:
     networks = {}
     for name in ("size", "stats"):
         found = checks[name]
-        lines.append(f"- {name}: {'pass' if found['pass'] else 'FAIL'}, {found['compared']} compared")
+        lines.append(
+            f"- {name}: {'pass' if found['pass'] else 'FAIL'}, {found['compared']} compared"
+        )
         for check in found["checks"]:
             entry = networks.setdefault(check.get("network") or "(all)", Counter())
             entry[name, check["pass"]] += 1
     rows = [
-        [network] + [f"{c[name, True]}/{c[name, True] + c[name, False]}" for name in ("size", "stats")]
+        [network]
+        + [f"{c[name, True]}/{c[name, True] + c[name, False]}" for name in ("size", "stats")]
         for network, c in sorted(networks.items())
     ]
     return lines + [*table(("Network", "Size passed", "Stats passed"), rows)]
 
 
 def markdown(report: dict) -> str:
-    lines = ["# Generated days loaded into staging (SIM-LOAD-1)", "", f"Cadence: {report['cadence']}."]
+    lines = [
+        "# Generated days loaded into staging (SIM-LOAD-1)",
+        "",
+        f"Cadence: {report['cadence']}.",
+    ]
     head = ("Day", "Hours", "Daily", "Browser", "Pulses", "Rows", "Rows/s", "Ingest s")
     rows = [
         [d["day"], d["hours"], *(d["runs"].get(kind, 0) for kind in KINDS), cell(d.get("rows"))]
@@ -257,10 +272,15 @@ def markdown(report: dict) -> str:
         real = [[r["metric"], r["generated"], r["real_24h"]] for r in day["real_24h"]]
         lines += [*table(("Metric", f"Day {day['day']}", "real_24h"), real)]
     if report.get("final"):
-        lines += size_lines("Size report after the days and the calculations", report["final"]["tables"])
+        lines += size_lines(
+            "Size report after the days and the calculations", report["final"]["tables"]
+        )
     lines += ["", "## Wall time per step", *table(("Step", "Seconds"), sorted(steps.items()))]
     calculated = [c for c in report["calculation"] if c]
-    rows = [[c["kind"], c["seconds"], mb((c["peak_rss_kb"] or 0) * 1024), c["attempts"]] for c in calculated]
+    rows = [
+        [c["kind"], c["seconds"], mb((c["peak_rss_kb"] or 0) * 1024), c["attempts"]]
+        for c in calculated
+    ]
     lines += ["", "## Calculation", *table(("Kind", "Seconds", "Peak MB", "Attempts"), rows)]
     lines += check_lines(report["checks"])
     lines += ["", "## Basis", ""] + [f"- {key}: {text}" for key, text in report["basis"].items()]
