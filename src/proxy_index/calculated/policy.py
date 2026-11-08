@@ -9,7 +9,7 @@ import math
 import tomllib
 from pathlib import Path
 
-from ..browser.contracts import BROWSER_TARGETS
+from ..browser.contracts import BROWSER_TARGETS, RUN_TARGETS
 
 KEYS = (
     "reliability",
@@ -68,6 +68,9 @@ PAYLOAD = {
     "countries_breakdown": 1000,
     "asns_breakdown": 50,
 }
+# A browser target's difficulty ([browser_difficulty]): an integer from 1 (easy) to 5 (hard), the
+# weight of its success score in a network's overall browser score (calculated/target_scores.py).
+DIFFICULTY = range(1, 6)
 # Diversity mixes the ratio to the leader of these pool dimensions ([peer.diversity] weights).
 DIMENSIONS = ("countries", "regions", "cities", "asns")
 OVERRIDES = {
@@ -109,6 +112,7 @@ KNOWN = {
     "latency_target",
     "payload",
     "target_groups",
+    "browser_difficulty",
 }
 
 
@@ -164,6 +168,7 @@ def validate(config):
     _counts(config.get("payload", {}), PAYLOAD, 0, "payload")
     _usage_types(config.get("hosting_usage_types", HOSTING_USAGE_TYPES))
     _groups(config)
+    _difficulty(config)
     if latency_target(config) not in config["required_targets"]:
         raise ValueError("The latency target must be a required target")
     return config
@@ -230,6 +235,34 @@ def _groups(config):
         raise ValueError("Invalid target groups")
     if set(config["required_targets"]) & {*BROWSER_TARGETS, *groups, *sources}:
         raise ValueError("A browser or group target cannot be a required target")
+
+
+def _difficulty(config):
+    """[browser_difficulty] (optional): a DIFFICULTY integer for every run target, and only for
+    browser, group or source targets; a group without one takes its hardest source's."""
+    values = config.get("browser_difficulty")
+    if values is None:
+        return
+    groups = config.get("target_groups", {})
+    known = {*BROWSER_TARGETS, *groups, *(s for v in groups.values() for s in v)}
+    if (
+        not isinstance(values, dict)
+        or set(values) - known
+        or set(RUN_TARGETS) - set(values)
+        or any(type(v) is not int or v not in DIFFICULTY for v in values.values())
+    ):
+        raise ValueError("Invalid browser difficulty")
+
+
+def browser_difficulty(config):
+    """Each browser target's difficulty: [browser_difficulty], plus each group without one the
+    highest of its sources' (none without a table)."""
+    values = dict(config.get("browser_difficulty", {}))
+    for group, sources in config.get("target_groups", {}).items():
+        found = [values[s] for s in sources if s in values]
+        if group not in values and found:
+            values[group] = max(found)
+    return values
 
 
 def _usage_types(value):

@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 from .. import detect, traffic
 from ..storage import connect
 from ..targets import registry
-from . import browser, incremental, netlists, network, product_windows, rollups
+from . import browser, incremental, netlists, network, product_windows, rollups, target_scores
 from .fleet import fleet_entry, fleet_totals
 from .inputs import (
     BucketRow,
@@ -30,6 +30,7 @@ from .inputs import (
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .policy import (
+    browser_difficulty,
     effective,
     hosting_usage_types,
     latency_target,
@@ -54,7 +55,7 @@ SCHEMA_VERSION = 4
 # build fingerprint and every list signature.
 SOURCES = "calculator aggregate policy slim inputs lists list_write incremental hourly fleetsql "
 SOURCES += "rollups sqlwindow poolfig network network_scores scheduled scores window_scoring "
-SOURCES += "hourly_windows product_windows"
+SOURCES += "hourly_windows product_windows target_scores"
 IMPLEMENTATION_ID = hashlib.sha256(
     b"".join(Path(__file__).with_name(f"{name}.py").read_bytes() for name in SOURCES.split())
     + b"".join(Path(m.__file__).read_bytes() for m in (detect, traffic, browser))
@@ -231,6 +232,9 @@ def build(inputs, config, method_id, build_id, previous):
     )
     _measure(step, groups)
     fleets, overlaps = _fleet_rows(step, sets)
+    # Browser target scores rank every product group of a window label together (K-BP6).
+    groups_of = config.get("target_groups", {})
+    target_scores.score(groups.values(), browser_difficulty(config), groups_of)
     # Full: the counts of these IP sets; incremental: its IP counts across groups (fleetsql.py).
     fleets, overlaps = source.cohorts(fleets, overlaps, fleet_groups, as_of)
     return _payload(step, fleets, overlaps)
