@@ -138,8 +138,9 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
     assert full["done"] and incremental["done"] and full["build_id"] < incremental["build_id"]
     current = query(staging, "SELECT build_id FROM current_calculation")[0][0]
     assert current == incremental["build_id"]
-    # The full build's 24h window holds day 2's daily tests and its released hours.
-    payload = query(staging, SNAPSHOT, (full["build_id"],))[0][0]
+    # The published build's 24h window (to the extra hour's end; the full build is retired)
+    # holds day 2's daily tests and its released hours.
+    payload = query(staging, SNAPSHOT, (current,))[0][0]
     networks = {entry["provider"]: entry["windows"]["24h"] for entry in payload["networks"]}
     for network in cases.NETWORKS:  # the network figures leave the browser rows out
         requests = sum(test[3] for test in daily_figures(found, 1) if test[0] == network)
