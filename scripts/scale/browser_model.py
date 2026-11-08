@@ -57,6 +57,7 @@ PAGE_TIMEOUT_S = 45
 MB = 1_000_000
 UPLOADS = 2  # bundles uploaded at once, as a host's outbox sends them
 PENDING = ("queued", "running", "uploading")
+LOAD_MS = 2500  # a modelled try's page load when its plan gives none
 CAMOUFOX = {
     "release": release.RELEASE,
     "engine_version": release.ENGINE_VERSION,
@@ -193,10 +194,11 @@ class ModelTransport:
 
     async def execute(self, target, *, context) -> Outcome:
         i = context.request_index
-        code, size = self.tries[i]
+        code, size, ms, shot = (*self.tries[i], LOAD_MS, 0)[:4]
         verdict = bc.CODE_VERDICTS[code] if code else "ok"
         status = None if code == "timeout" else 200
-        timings = {"queue": 0, "context": 100, "navigate": 2000, "settle": 500, "total": 2600}
+        timings = {"queue": 0, "context": 100, "navigate": max(0, ms - 500), "settle": 500}
+        timings["total"] = ms + 100
         record = bc.try_record(
             i=i,
             input=self.inputs[i % len(self.inputs)],
@@ -208,15 +210,18 @@ class ModelTransport:
             timings_ms=timings,
             bytes_down_est=size,
             reason=None,
-            screenshot=None,
+            screenshot=bc.bundle_members().screenshot(i) if shot else None,
         )
-        self.recorder.try_done(record, None)
-        return Outcome(2500.0, error=code, status=status, verdict=verdict, bytes_down=size)
+        # A screenshot of `shot` incompressible bytes: the bundle bytes a failure costs.
+        image = hashlib.shake_256(f"screenshot:{i}".encode()).digest(shot) if shot else None
+        self.recorder.try_done(record, image)
+        return Outcome(float(ms), error=code, status=status, verdict=verdict, bytes_down=size)
 
 
-def bundle(run_row: dict, target: str, seed: Any, out: Path) -> Path:
-    """One planned browser run's bundle (K-BP4) in the outbox `out`; its tar.gz."""
-    tries = plan(target, f"{seed}:{run_row['batch_id']}:{run_row['product_id']}")
+def bundle(run_row: dict, target: str, seed: Any, out: Path, tries=None) -> Path:
+    """One planned browser run's bundle (K-BP4) in the outbox `out`; its tar.gz. `tries`: (error
+    code, bytes[, page load ms, screenshot bytes]) per try, by default plan()'s."""
+    tries = tries or plan(target, f"{seed}:{run_row['batch_id']}:{run_row['product_id']}")
     batch = Batch(run_row["batch_id"], run_row["country"], run_row["scheduled_for"], HOST)
     recorder = FileRecorder(batch, hashlib.sha256(settings().encode()).hexdigest())
     sink = BundleSink(Path(out) / "runs", recorder)
