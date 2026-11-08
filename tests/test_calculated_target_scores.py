@@ -281,16 +281,18 @@ def test_the_methodology_refuses_a_missing_or_invalid_difficulty(change):
 
 
 def without_scores(payload):
-    """The payload without the new fields."""
+    """The payload without the new fields (also in a build's network windows' "_lead", the
+    lead product's window, which network_scores.py drops before publishing)."""
     payload = copy.deepcopy(payload)
-    for p in payload["products"]:
-        for w in p["windows"].values():
-            w.pop("browser_overall", None)
-            for entry in w["targets"].values():
-                if "browser" in entry:
-                    entry["browser"].pop("scores")
-                    for figures in entry["browser"]["engines"].values():
-                        figures.pop("scores")
+    windows = [w for p in payload["products"] for w in p["windows"].values()]
+    windows += [w["_lead"] for n in payload.get("networks", []) for w in n["windows"].values()]
+    for w in windows:
+        w.pop("browser_overall", None)
+        for entry in w.get("targets", {}).values():
+            if "browser" in entry:
+                entry["browser"].pop("scores")
+                for figures in entry["browser"]["engines"].values():
+                    figures.pop("scores")
     return payload
 
 
@@ -336,7 +338,8 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
         m.setattr(ts, "score", lambda *args: None)
         before = built(database, policy, as_of)
     stripped = without_scores(after)
-    assert json.dumps(stripped) == json.dumps(before), first_difference(stripped, before)
+    # The first difference only: a diff of two whole payloads takes minutes.
+    assert first_difference(stripped, before) is None
     for p in after["products"]:
         w = p["windows"]["24h"]
         assert w["targets"]["amazon_pdp"]["browser"]["scores"]["success"]["score"] == 5.5
@@ -350,4 +353,3 @@ async def test_a_camoufox_build_is_byte_identical_apart_from_the_scores(
             "cloudflare_challenge",
             GROUP,
         ]
-
