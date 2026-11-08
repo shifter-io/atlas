@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 
 import pytest
 
 from proxy_index.browser import pool as pool_module
+from proxy_index.browser import procstats
 from proxy_index.browser.pool import BrowserPool, resident_bytes
 
 
@@ -149,12 +149,8 @@ def test_size_and_recycle_after_must_be_positive(bad):
 
 def test_resident_bytes_sums_this_process_descendants(monkeypatch):
     me = pool_module.os.getpid()
-    listing = f"{me} 1 500\n10 {me} 100\n11 10 50\n12 1 999\n"
-
-    def fake_run(*args, **kwargs):
-        return subprocess.CompletedProcess(args, 0, stdout=listing)
-
-    monkeypatch.setattr(pool_module.subprocess, "run", fake_run)
+    listing = f"{me} 1 500 0:01.00\n10 {me} 100 0:00.50\n11 10 50 00:00:01\n12 1 999 0:00.00\n"
+    monkeypatch.setattr(procstats, "read_ps", lambda: procstats.parse(listing))
     assert resident_bytes() == 150 * 1024
 
 
@@ -162,7 +158,7 @@ def test_resident_bytes_is_none_without_ps(monkeypatch):
     def fail(*args, **kwargs):
         raise FileNotFoundError("ps")
 
-    monkeypatch.setattr(pool_module.subprocess, "run", fail)
+    monkeypatch.setattr(procstats.subprocess, "Popen", fail)
     assert resident_bytes() is None
 
 
