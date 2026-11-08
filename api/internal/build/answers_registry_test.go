@@ -33,8 +33,8 @@ func TestRegisterAnswerRefusesABadAnswer(t *testing.T) {
 			RegisterAnswer(a)
 		}()
 	}
-	if after := Answers(); len(after) != len(before) {
-		t.Fatalf("registered %v", after)
+	if got := Answers(); len(got) != len(before) {
+		t.Fatalf("registered %v", got)
 	}
 }
 
