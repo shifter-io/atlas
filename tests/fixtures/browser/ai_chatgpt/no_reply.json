@@ -9,7 +9,16 @@
     },
     "texts": {}
   },
-  "timeline": [],
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "url": "https://chatgpt.com/c/00000000-0000-4000-8000-000000000001",
+      "counts": {
+        "[data-message-author-role=\"user\"]": 1
+      }
+    }
+  ],
   "expect": {
     "verdict": "error",
     "error": "no_answer",

@@ -47,17 +47,22 @@ class FakeClock:
 
 class ScriptedDriver:
     """A PageDriver over a fixture: the loaded page, then timeline entries that apply from
-    their time `t` (seconds since the start, or since Enter was pressed when after_submit)."""
+    their time `t` (seconds since the start, or since Enter was last pressed when
+    after_submit). goto() reloads the page: the timeline starts again, and entries marked
+    after_reload apply only from then on."""
 
     def __init__(self, document, clock):
         self.page, self.timeline, self.clock = document["page"], document["timeline"], clock
         self.calls, self.clicked, self.submitted_ms = [], set(), None
+        self.loaded_ms, self.reloaded = 0, False
 
     def state(self):
         page = self.page
         state = {**page, "counts": dict(page["counts"]), "texts": dict(page["texts"])}
         for entry in self.timeline:
-            start = self.submitted_ms if entry.get("after_submit") else 0
+            if entry.get("after_reload") and not self.reloaded:
+                continue
+            start = self.submitted_ms if entry.get("after_submit") else self.loaded_ms
             if start is None or self.clock.ms < start + round(entry["t"] * 1000):
                 continue
             state["counts"].update(entry.get("counts", {}))
@@ -99,8 +104,13 @@ class ScriptedDriver:
         self.calls.append(("press", selector, key))
         self.submitted_ms = self.clock.ms
 
-    async def goto(self, url, timeout_ms):  # pragma: no cover - the transport navigates
-        raise AssertionError("interact() never navigates")
+    async def goto(self, url, timeout_ms):
+        """A reload of the fixture's page (only ChatGPT's interact() reloads)."""
+        assert url == self.page["url"], "a reload of another page"
+        self.calls.append(("goto", url, timeout_ms))
+        self.clicked, self.submitted_ms = set(), None
+        self.loaded_ms, self.reloaded = self.clock.ms, True
+        return self.page["status"]
 
     async def screenshot(self):  # pragma: no cover - never on an AI try
         raise AssertionError("interact() never takes a screenshot")
@@ -153,7 +163,8 @@ def test_every_source_has_its_cases():
             *("ok", "cookie_dialog", "login_modal", "login_after_submit", "auth_redirect"),
             *("cloudflare", "too_many_requests", "status_429", "no_reply", "one_sentence"),
             *("no_prompt", "challenge_after_submit", "answer_names_markers", "challenge_cleared"),
-            *("stream_names_limit", "login_after_answer"),
+            *("stream_names_limit", "login_after_answer", "lightweight_ok"),
+            *("lightweight_resent", "lightweight_not_sent", "lightweight_no_reply"),
         },
         c.AI_GEMINI: {
             *("ok", "one_sentence_ok", "sign_in_redirect", "sign_in_dialog"),
@@ -168,9 +179,12 @@ def test_fixture_outcome(path):
     expect, view, result, driver, clock, numbers = run(path)
     assert outcome(result) == (expect["verdict"], expect["error"], expect["reason"])
     asked = [call for call in driver.calls if call[0] in ("fill", "press")]
+    reloads = [call for call in driver.calls if call[0] == "goto"]
+    assert len(reloads) == expect.get("reloads", 0)
     if expect["asked"]:
         prompt = registry.get(path.parent.name).PROMPT
-        assert asked == [("fill", prompt, QUESTION), ("press", prompt, "Enter")]
+        sends = [("fill", prompt, QUESTION), ("press", prompt, "Enter")]
+        assert asked == sends * (1 + len(reloads))
     else:
         assert asked == []
     for key in ("answer_chars", "answer_ms"):
@@ -269,7 +283,7 @@ def test_chat_sources_ask_the_one_fixed_question(tmp_path):
             spec = target.page(context(i), (QUESTION,))
             assert isinstance(spec, AskSpec) and spec.question == QUESTION
             assert spec.url == target.url and spec.settle_ms == 0
-            assert j.selectors(spec.wait_for)[0] == target.PROMPT
+            assert spec.wait_for.startswith(target.PROMPT + ", ")
         driver = ScriptedDriver({"page": {}, "timeline": []}, FakeClock())
         with pytest.raises(TypeError, match="AskSpec"):
             asyncio.run(target.interact(driver, PageSpec(target.url)))
@@ -293,8 +307,9 @@ def test_registered_sources_match_the_targets_file():
     for target_id in c.AI_SOURCES:
         target = registry.get(target_id)
         assert (target.id, target.engine, target.pool_eligible) == (target_id, "browser", False)
-        # ai_overview's 2 reads today's overview container (#677).
-        version = "2" if target_id == c.AI_OVERVIEW else "1"
+        # ai_overview's 2 reads today's overview container (#677); ai_chatgpt's 2 reads
+        # ChatGPT's lightweight client (#678).
+        version = "2" if target_id in (c.AI_OVERVIEW, c.AI_CHATGPT) else "1"
         assert target.version == version and isinstance(target, PageTarget)
         assert target.build_request().url == urls[target_id]
         assert target.answer_wait_s == 30 and target.page_timeout_s is None

@@ -1,0 +1,30 @@
+{
+  "page": {
+    "url": "https://chatgpt.com/",
+    "status": 200,
+    "title": "ChatGPT: Chat, Work, Create & Code with AI",
+    "text_head": "",
+    "counts": {
+      "textarea[name=\"prompt\"]": 1
+    },
+    "texts": {}
+  },
+  "timeline": [
+    {
+      "t": 0.5,
+      "after_submit": true,
+      "url": "https://chatgpt.com/uc/00000000-0000-4000-8000-000000000001",
+      "counts": {
+        "li[data-message-role=\"user\"]": 1
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "error",
+    "error": "no_answer",
+    "reason": "no_reply",
+    "answer_chars": 0,
+    "asked": true,
+    "waited_s": 30
+  }
+}
