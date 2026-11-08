@@ -34,7 +34,9 @@ uv run python scripts/scale/profile.py reference --database <toml> \
   - with `--runs batches:<id>` and `--basis modelled`, for one modelled browser bundle of
     BP-VERIFY-3's tries and bytes, ingested on staging through the real node API ingest.
 - Exit 0 on success. Exit 1 with one line on stderr when a source does not have the expected
-  shape (the line names the file), or no run matches `--runs`.
+  shape (the line names the file), when `--enrich` is missing or holds no network folder with a
+  `manifest.json` (the line names the folder; no file is written), or no run matches `--runs`.
+  A folder with at least one network keeps the networks it lacks as `gaps`.
 
 ## Inputs
 

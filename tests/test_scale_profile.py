@@ -366,6 +366,21 @@ def test_a_source_that_does_not_match_its_manifest_fails(tmp_path, capsys):
     assert "alpha/manifest.json: manifest schema 1 is not 2" in capsys.readouterr().err
 
 
+def test_an_enrich_folder_without_a_network_folder_fails(tmp_path, capsys):
+    browser_fixture(tmp_path / "hours")
+    formulas = tmp_path / "formulas"
+    formulas.mkdir()
+    (formulas / "alpha.json").write_text("{}")
+    (tmp_path / "empty" / "alpha").mkdir(parents=True)  # a folder, but no manifest.json
+    out = tmp_path / "p.json"
+    for enrich in (tmp_path / "missing", tmp_path / "empty"):
+        argv = ["build", "--enrich", str(enrich), "--browser", str(tmp_path / "hours")]
+        assert profile.main([*argv, "--out", str(out), "--formulas", str(formulas)]) == 1
+        error = capsys.readouterr().err
+        assert error == f"profile: {enrich.name}: no network folder with a manifest.json\n"
+        assert str(tmp_path) not in error and not out.exists()
+
+
 def test_run_filters():
     assert profile_reference.run_filter("marker:scale_replay")[1] == {"marker": "scale_replay"}
     assert profile_reference.run_filter("batches:3-5,9")[1] == {"batches": [3, 4, 5, 9]}
@@ -468,10 +483,12 @@ def test_a_browser_summary_without_a_run_field_fails(tmp_path, capsys):
     data = json.loads(mgr.read_text())
     del data["runs"][0]["bytes_down"]
     mgr.write_text(json.dumps(data))
+    enrich_fixture(tmp_path / "enrich")
     formulas = tmp_path / "formulas"
     formulas.mkdir()
     (formulas / "alpha.json").write_text("{}")
-    argv = ["build", "--enrich", str(tmp_path), "--browser", str(tmp_path / "hours"), "--out"]
+    argv = ["build", "--enrich", str(tmp_path / "enrich"), "--browser", str(tmp_path / "hours")]
+    argv.append("--out")
     assert profile.main([*argv, str(tmp_path / "p.json"), "--formulas", str(formulas)]) == 1
     assert f"{HOUR_FOLDERS[1]}/mgr.json: a run lacks bytes_down" in capsys.readouterr().err
     empty = tmp_path / "empty"
