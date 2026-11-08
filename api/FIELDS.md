@@ -355,9 +355,9 @@ target never counts as another target in the window-latency rule
 
 | Entity | Fields | Source |
 |---|---|---|
-| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `at`, `source`, `na` | Measured: `public.test_events`, mapped by the port of `tape.ts`. `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial: `site.tape_events`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. |
+| `TapeEvent` | `id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds` + *added* `event`, `at`, `source`, `na` | Measured (`source` `measured`): `public.test_events`, mapped by the port of `tape.ts`; `kind` is the event's category (`census`, `pulse`, `incident` or `audit`) and `event` its raw kind (`ip_overlap`, `pulse_down`, `daily_test_finished`, ...; the framework's `estimate_hour_released` is published as `hour_released`, so no answer names the estimate); `at` is the event's time and `agoSeconds` is relative to the snapshot's `generated_at` (or `generatedAt`). Editorial (`source` `editorial`): `site.tape_events`, `kind` and `event` the row's `kind`, `at = occurred_at`, `agoSeconds = generatedAt − occurred_at`. `providerName` comes from the provider list. The dataset's `tape` is both in one time order (`at`), newest first; at the same time a measured row comes first. |
 | `ChangeEvent` | all + `source`, `na` | `site.changelog`; `providerName` from the provider list |
-| `UserReview` | all + `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`) |
+| `UserReview` | all + `verificationLabel`, `source`, `na` | `site.reviews` (`posted_at` → `agoSeconds`); `verificationLabel` is the old site's `verificationLabels` text of `verification`: `Invoice verified`, `Run verified`, `Unverified`, `In review` (an unknown value as it is) |
 | `CommunityRun` | all + `source`, `na` | `site.community_runs` (typed headline numbers, JSONB `targets`/`successSeries`/`latencySeries`); `providerName` from the provider list |
 | `TargetMeta` | `id`, `label`, `category`, `passCondition`, `difficulty` + `source`, `engine`, `group`, `na` | `site.targets`, falling back to `public.targets`; `engine` is `public.targets.engine` (`"http"` or `"browser"`, null for a catalog-only target); `group` is the group target the snapshot names in `w.targets[id].browser.group` (null when none, by contract) |
 | `TestScope` | all + `na` | `site.scopes` (`targets` is `"all"` when `all_targets`, else `target_ids`) |
@@ -580,25 +580,75 @@ Besides the summed totals and places above, a network's answer carries what
   `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`.
   Left out: `geo` and `asns` (paged by `/places`), `series` (the chart
   answers) and `countryLatencyRanks` (the place rows carry their ranks). The whole
-  provider stays in `/v1/dataset`.
+  provider stays in `/v1/dataset`. Beside the Provider's fields (NETWORK-EXTRAS-1):
+  - `score.peers`: the ready networks of its kind the score was set against
+    (`ScoreView.Peers`, the snapshot's `components.*.inputs.peers`); null when
+    unknown. `score.standing {rank, peers, note}`: the rankings rows' `standing`
+    (the framework's rank, or 1 for a scored network alone in its kind) and
+    the old site's `kindStanding` label as `note`: `#1 of 1 in its kind`,
+    `#3 of 18 in its kind`, `#3` without peers, or `Unranked`.
+  - `pricing.listRate` (`pricePerGbAtScale`, else `pricePerGb`), `pricing.hasTrial`
+    and `pricing.trialKind` (`free`, `card`, `paid`, `sales` or `none`): the
+    rules of the rankings rows (CMP-12), null without a price or a trial text.
+  - `schedule`: the schedule part of the generated tagline (`measured on a
+    census, pulse and load schedule`, `measured on a census and pulse
+    schedule` or `measured HTTP pool sample`) of the category's snapshot
+    product, also when a catalog tagline replaces the generated one; null for
+    a category that is not measured.
+  - `protocol {label, targets, summary, schedule, cadence}`: the measured
+    product's label (`Rotating residential`, ...), the ids of the category's
+    `targets` with requests, the product's `site.scopes` `summary` and its
+    `cadence` as `schedule` (null without a scope row), and `cadence`, the
+    production cadence (`docs/api-web-map.md` section 14): "One daily test per
+    country and one browser run per target per day". The bucket resolution
+    stays `stats[r].range.resolution`.
+  - `reviews` (`count`, `verifiedCount`, `mean`, `distribution`, `verifiedMean`)
+    summarises the answer's reviews (the kind's, below), plus `runVerifiedCount`,
+    the reviews with verification `run_verified` ("backed by a submitted run";
+    `verifiedCount` also counts `invoice_verified`). `/v1/dataset`'s provider
+    `reviews` still counts every product.
 - `stats`: `windowStats` of that category per range (see "Window statistics of
   a measured provider", with its per-range figures `captchaRate` to
   `wireGbPer1k`) without `success`, `availability`, `latency`, `pool`
-  and `bands`.
+  and `bands`, plus:
+  - `ranks`: `successRate`, `uptimePct`, `datacenterAsnShare`, `valueRank`
+    and `listRate`, each `{rank, peers}` among the networks of the answer's
+    kind in that range: the rows of `/v1/rankings?range=&kind=`, computed once
+    per build (`build/ranks.go`). Ranks are competition ranks (ties share a
+    rank, as `tileRanks`): success rate and uptime highest first, hosting
+    share, cost per 1,000 successes (`valueRank`) and list $/GB lowest first.
+    `peers` counts the networks with a value; `rank` is null without one.
+  - `alternative {slug, name, successRate, latencyP50, cheaperBy}`: the old
+    site's pick (`provider-view.ts` `cheaperAndBetter[0]`): the first network
+    of the kind's ranking (in its order) whose `costPer1kSuccess` is lower and
+    whose success rate is at most 2 points below this network's;
+    `cheaperBy = 1 − its cost ÷ this network's`. Null when none qualifies or
+    this network has no cost or success rate.
+  - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
+    (the old site's "pool vs claim"), null without a claimed pool size.
 - the network's newest `reviews` (published), `communityRuns`, `changelog`
   and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
   first), and `records`, the full length of each list. The whole history
-  stays in `/v1/dataset`.
+  stays in `/v1/dataset`. Reviews, community runs and tape rows are the
+  answer's kind only (NET-RECORDS-KIND): a review's and a run's product kind
+  (`residential_rotating`, ...) of that category, a tape row's `product`
+  equal to it. The changelog has no product and is the network's.
 
 The all-networks answer has `profile: null`, empty `stats` and empty records.
 
 ```json
 {"generatedAt":"2026-11-03T09:00:00.000Z","kind":"residential","productGroups":40,"network":{"slug":"net00","...":null},
  "days":[],"ranges":{"24h":{"...":null}},
- "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null},
-  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},"pricing":{"...":null},
+ "profile":{"source":"measured","slug":"net00","name":"Net 00","primaryKind":"residential","score":{"composite":91.4,"rank":1,"...":null,
+  "peers":18,"standing":{"rank":1,"peers":18,"note":"#1 of 18 in its kind"}},"schedule":"measured on a census, pulse and load schedule",
+  "protocol":{"label":"Rotating residential","targets":["generic_http"],"summary":null,"schedule":null,"cadence":"One daily test per country and one browser run per target per day"},
+  "pool":{"uniqueIps24h":1630,"...":null},"performance":{"successRate":0.981,"latencyP50":1113,"...":null},
+  "pricing":{"pricePerGb":4,"pricePerGbAtScale":3,"...":null,"listRate":3,"hasTrial":true,"trialKind":"card"},
   "trust":{"...":null},"targets":[],"ipSamples":[],"incidents":[],"overlap":{"...":null},"tileRanks":{"24h":{"...":null}},"na":[]},
- "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null}},
+ "stats":{"24h":{"range":{"id":"24h","...":null},"successRate":0.981,"latencyP50":1113,"uniqueIps":1630,"uptimePct":99.9,"...":null,
+  "ranks":{"successRate":{"rank":1,"peers":18},"uptimePct":{"rank":2,"peers":18},"datacenterAsnShare":{"rank":4,"peers":18},
+   "valueRank":{"rank":5,"peers":15},"listRate":{"rank":6,"peers":15}},
+  "alternative":{"slug":"net04","name":"Net 04","successRate":0.975,"latencyP50":1210,"cheaperBy":0.31},"claimShare":null}},
  "reviews":[],"communityRuns":[],"changelog":[],"tape":[],"records":{"reviews":0,"communityRuns":0,"changelog":0,"tape":0}}
 ```
 
@@ -657,7 +707,8 @@ mapping as any breakdown row: their `ips` are the measured row's IPs × `breakdo
 The tape keeps a row per released hour (event kind `estimate_hour_released`,
 an event, not a value), titled "Hourly update for HH:00 UTC" ("Hourly update
 released" when the hour is missing) with that hour's IPs as its value: no
-answer text names the estimate (owner decision on the API-ESTIMATES-1 review).
+answer text names the estimate (owner decision on the API-ESTIMATES-1 review): its
+raw kind on a tape row (`event`) is `hour_released`.
 The `/v1/events` rows keep the framework's event kind name.
 
 ## Payload v4 (network summaries) (API-SUM-1)
@@ -719,6 +770,21 @@ Answers of the network lists (contract K11):
 | `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | One page (50 rows) of the network's City × ASN rows with IPs (the headline group's list), most IPs first, ties in list order: `network`, `kind`, `range`, `query`, `page`, `pageSize`, `total`, `pages`, `rows`. A row is `[countryCode, country, region, city, asn, asnName, usageType, ips, latencyP50, countryLatencyRank, countryLatencyPeers]`: IPs follow K8 (× `breakdown_scale`, rounded half up), `latencyP50` is the row's p50 (null when it has none), and the rank and peers are the provider's `countryLatencyRanks` value of the row's country (null rank, 0 peers when the country has none). `q` keeps rows where every word occurs, case-insensitive, in the country code, country, region, city, `AS<n>` (or the bare ASN number) or ASN name; with `q` the answer also has `totals` `{ips, countries, cities, asns}` over every matching row (IPs summed as the rows show them, distinct country codes, cities and ASN numbers). |
 | `/v1/countries/{cc}/regions?range=&q=&page=` | One page of the country's regions across networks, in the shape and rules of `/cities`. |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | `generatedAt`, `dimension`, `key`, `range` and `rows`: every network's row in that region or city (the place key of the place lists, `CC\|region_code\|region` or `CC\|region_code\|region\|city`, URL-escaped), in list order, with `ipsSumRank` and `latencyRank` among the networks of the same kind, as a country answer ranks them. 404 when no network has that key in that range. |
+
+In a City × ASN row (NET-COUNTRY-RANK-NOTE, NET-USAGE-LABEL):
+
+- `countryLatencyRank` and `countryLatencyPeers` are the row's **country's**
+  latency rank among the networks of the same kind, cohort and period, the
+  same for every row of that country; they are not a rank of the City × ASN
+  row itself. A page that prints the rank under the row's latency should say
+  it is the country's.
+- `usageType` is the DB-IP usage type of the ASN as enrichment stored it
+  (lower case, null when unknown); the API serves no display label. The
+  values seen are `residential`, `consumer`, `business`, `cellular` and
+  `hosting` (the calculator also treats `datacenter` as hosting:
+  `HOSTING_USAGE_TYPES`). A page maps them, for example `residential` and
+  `consumer` to "Residential", `hosting` and `datacenter` to "Hosting",
+  `cellular` to "Mobile" and `business` to "Business".
 
 ## The dataset file of a v4 build (API-DATASET-2, DATASET-SIZE-2)
 

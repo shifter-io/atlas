@@ -116,7 +116,7 @@ func (b *builder) siteRecords() error {
 	for _, r := range in.Reviews {
 		ds.Reviews = append(ds.Reviews, model.UserReview{ID: r.ID, ProviderSlug: r.ProviderSlug, Author: r.Author, Role: r.Role, Rating: Num(r.Rating),
 			Title: r.Title, Body: r.Body, Product: r.ProductKind, UseCase: r.UseCase, MonthlySpend: r.Spend, MonthsUsed: Num(r.MonthsUsed),
-			Verification: r.Verification, InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
+			Verification: r.Verification, VerificationLabel: verificationLabel(r.Verification), InvoiceMonth: r.InvoiceMonth, LinkedRunID: r.LinkedRunID, HelpfulCount: Num(r.HelpfulCount),
 			ProviderReply: r.ProviderReply, AgoSeconds: b.ageOf(r.PostedAt), Source: model.SourceMeasured})
 	}
 	sortByAge(ds.Reviews, func(r model.UserReview) Num { return r.AgoSeconds })
@@ -161,8 +161,17 @@ func (b *builder) communityRun(r store.CommunityRunRow) (model.CommunityRun, err
 	return run, nil
 }
 
-// tape fills the tape: measured events first (newest first), then the
-// editorial rows.
+// verificationLabel is a review's verification as the site prints it; an
+// unknown value as it is.
+func verificationLabel(v string) string {
+	if label, ok := model.VerificationLabels[v]; ok {
+		return label
+	}
+	return v
+}
+
+// tape fills the tape: the measured events and the editorial rows in one
+// time order, newest first (measured first at the same time).
 func (b *builder) tape() error {
 	in, ds, s := b.in, b.ds, b.s
 	products := []TapeProduct{}
@@ -194,14 +203,13 @@ func (b *builder) tape() error {
 		return sorted[i].ID > sorted[j].ID
 	})
 	ds.Tape = TapeFromEvents(sorted, products, tapeRef, b.slugOfFramework)
-	editorial := []model.TapeEvent{}
 	for _, r := range in.Tape {
-		editorial = append(editorial, model.TapeEvent{ID: r.ID, Kind: r.Kind, ProviderSlug: r.ProviderSlug, ProviderName: b.nameOrSlug(r.ProviderSlug),
-			Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal), Value: r.Value,
-			AgoSeconds: b.ageOf(r.OccurredAt), Source: model.SourceMeasured})
+		at := JSISO(r.OccurredAt)
+		ds.Tape = append(ds.Tape, model.TapeEvent{ID: r.ID, Kind: r.Kind, Event: r.Kind, ProviderSlug: r.ProviderSlug,
+			ProviderName: b.nameOrSlug(r.ProviderSlug), Product: r.Product, Title: r.Title, Detail: r.Detail, Signal: Num(r.Signal),
+			Value: r.Value, AgoSeconds: b.ageOf(r.OccurredAt), At: &at, Source: model.SourceEditorial})
 	}
-	sortByAge(editorial, func(r model.TapeEvent) Num { return r.AgoSeconds })
-	ds.Tape = append(ds.Tape, editorial...)
+	sort.SliceStable(ds.Tape, func(i, j int) bool { return snap.Ms(model.SV(ds.Tape[i].At)) > snap.Ms(model.SV(ds.Tape[j].At)) })
 	return nil
 }
 
@@ -364,6 +372,8 @@ func (b *builder) assemble() error {
 		return err
 	}
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
+	res.Pages.addRangeRanks()
+	res.Pages.addProtocols(b.entries, ds.Scopes)
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	res.Pages.buildRegistered(&Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
 		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages})
