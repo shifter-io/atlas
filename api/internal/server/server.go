@@ -334,6 +334,9 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 	if err := <-errs; err != nil {
 		return nil, err
 	}
+	if err := registeredFit(v); err != nil {
+		return nil, err
+	}
 	if err := setDataset(v, nil); err != nil {
 		return nil, err
 	}

@@ -75,8 +75,20 @@ func eventsShape(notable bool, f func(p *ExplainParams) EventFilter) func(*Expla
 	}
 }
 
-// Statements is the registry: every statement shape the API runs.
-var Statements = registry()
+// Statements is the registry: every statement shape the API runs, the
+// registered ones (RegisterStatement) after the API's own.
+func Statements() []Statement {
+	return append(registry(), registered...)
+}
+
+var registered []Statement
+
+// RegisterStatement adds a page answer's request-time statement to
+// Statements, from an init() in the answer's own file
+// (api/answers/README.md).
+func RegisterStatement(s Statement) {
+	registered = append(registered, s)
+}
 
 func registry() []Statement {
 	out := []Statement{
@@ -147,7 +159,7 @@ func Explain(ctx context.Context, db TxBeginner) (*ExplainReport, error) {
 		return nil, fmt.Errorf("parameters: %w", err)
 	}
 	report := &ExplainReport{Params: *p}
-	for _, s := range Statements {
+	for _, s := range Statements() {
 		report.Statements = append(report.Statements, explainOne(ctx, tx, p, s))
 	}
 	return report, nil

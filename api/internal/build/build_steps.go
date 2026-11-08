@@ -375,6 +375,8 @@ func (b *builder) assemble() error {
 		return err
 	}
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
+	res.Pages.buildRegistered(&Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
+		Dataset: ds, Events: &res.Events, Inputs: in})
 	ds.Pages = datasetPages(res.Pages)
 	ds.Lists = datasetLists(res.Pages, s, b.entries)
 	res.Search = buildSearchIndex(b.leader, ds.Targets, ds.GeneratedAt)

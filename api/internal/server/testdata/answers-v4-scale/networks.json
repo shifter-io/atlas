@@ -1,0 +1,29 @@
+{
+ "QA-1": {
+  "/v1/networks": "822edc68a5104204d58b1e6cbc688f1b95c2df369b3d4f4e464e29245a2ebebc",
+  "/v1/networks/all/all": "bc0c06d47427e74ebd86139d2f1a5ead993ca2543c8069bc341de8f9d71e135e",
+  "/v1/networks/net00/residential": "f216e2f554bb818a29a2baf8065815def274057cf4b6aaa6c969eda4a4a57d47",
+  "/v1/networks/net01/residential": "572dd208e6f3bedda2ece6f7ef1541407ab0615c7df8a47a7666186a4d9ca3c5",
+  "/v1/networks/net02/residential": "052e4c3f020b5f5ce38862a1f9cf9fde57e8ec4a951bd063eb7b1300fe4e5da8",
+  "/v1/networks/net03/residential": "233bed99fb52bc7bbb85913106b832ee283802ba0f7f569144ef6e0d193d987a",
+  "/v1/networks/net04/residential": "c770a2330b942ce01a049b29e0b46951de79f2fa7e6ce9eeeea54cb2c408db18",
+  "/v1/networks/net05/residential": "af69a684feda7e92cf432063bea9c3668bcdda480582f01bd316f4061e2b9d95",
+  "/v1/networks/net06/residential": "5f2d65b31394806f07aeafbca1dfddfdcfa8fa8385d358bc20fc68f69bf5cdcc",
+  "/v1/networks/net07/residential": "6501c014c13135822eb1591ca45286f9b1f5b7895537b39d48b2309e95a556e1",
+  "/v1/networks/net08/residential": "9f9d0debe75240c057c419d1b20f598a92fc05090fbefd03408f9e0f7efac542",
+  "/v1/networks/net09/residential": "8eccec2a7f07ceb44def4181fe9ac070552fb1034c354cc3281bb24a6a05b1f2",
+  "/v1/networks/net10/residential": "f18b740b812070bc84ecb5c80e692569bb8dc394b184db6986e6bae00a6f2176",
+  "/v1/networks/net11/residential": "2b0177eedb0aff2e2e3bef89dc62d0d2b6d3c8a46994ef5bdd3f79015fe6bc0f",
+  "/v1/networks/net12/residential": "ba454d879eff04c03c5c78aad11e89a21a91ff2c176a34176ab03f54072dc7d4",
+  "/v1/networks/net13/residential": "a365467d4000b109d8bf9c63a518be345947443cf7cc1e80e5966cfee3b2097a",
+  "/v1/networks/net14/residential": "182d4e9270f520e4b88dde4a3ad5769a4f56a5db4b189ae2f9cb0c2b4c9bc1b6",
+  "/v1/networks/net15/residential": "1f48b228ef0b322191aa3624a6e2254bcfb4aa438d6e9a231347fe03f52677cf",
+  "/v1/networks/net16/residential": "b0a18b93257f76f905916fd8820589d332c236071807f92be6616c0efe3ba871",
+  "/v1/networks/net17/residential": "b663717ee20d279c03d6c516169833ec14e0417c1e09cf5500040cc1041debe5"
+ },
+ "every-request": {
+  "/v1/networks": "4999558ff7d7f172e517b7fd0eb7b2b57925e30b4aec199aa34caf57060ada23",
+  "/v1/networks/all/all": "05ade0407d2506f0eea3984c96a6f77b789d894850d32474369dea94db67231b",
+  "/v1/networks/shifter/residential": "9de46d81b1231793b8768485d2fb368cf29bc68bc18ff1b51134c0d6133243b6"
+ }
+}

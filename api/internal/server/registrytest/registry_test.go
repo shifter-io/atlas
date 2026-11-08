@@ -1,0 +1,182 @@
+// Package registrytest registers throwaway page answers (api/answers/README.md)
+// in a test binary of their own, so no other test's answers or goldens see them.
+package registrytest
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/server"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
+)
+
+// mode makes the throwaway answer build ("" ), fail ("fail") or give a body
+// over the cap ("big"). The tests set it one at a time, never in parallel.
+var mode string
+
+func init() {
+	build.RegisterAnswer(build.PageAnswer{
+		Name:  "throwaway",
+		Route: "GET /v1/throwaway",
+		Key: func(r *http.Request) (string, error) {
+			q, err := build.Query(r, "range")
+			if err != nil {
+				return "", err
+			}
+			rangeID, err := build.QueryRange(q)
+			return "/v1/throwaway/" + rangeID, err
+		},
+		Build: func(c *build.Context) (map[string]any, error) {
+			if mode == "fail" {
+				return nil, errors.New("no rows")
+			}
+			out := map[string]any{}
+			for _, r := range []string{"24h", "7d"} {
+				body := map[string]any{"generatedAt": c.GeneratedAt, "range": r, "networks": len(c.Entries), "targets": len(c.Dataset.Targets)}
+				if mode == "big" {
+					body["pad"] = strings.Repeat("x", build.MaxAnswerBytes)
+				}
+				out["/v1/throwaway/"+r] = body
+			}
+			return out, nil
+		},
+		Samples: []string{"/v1/throwaway?range=7d"},
+	})
+	build.RegisterAnswer(build.PageAnswer{
+		Name:      "throwaway-dataset",
+		Route:     "GET /v1/throwaway-dataset",
+		Key:       func(*http.Request) (string, error) { return "/v1/throwaway-dataset", nil },
+		Build:     func(*build.Context) (map[string]any, error) { return map[string]any{"/v1/throwaway-dataset": []int{1}}, nil },
+		Samples:   []string{"/v1/throwaway-dataset"},
+		InDataset: true,
+	})
+}
+
+// source is a two-network v4 build in memory.
+type source struct{}
+
+func (source) Fingerprint(context.Context) (store.Fingerprint, error) {
+	return store.Fingerprint{SiteRevision: 1}, nil
+}
+
+func (source) Load(context.Context) (*store.Inputs, error) {
+	return testscale.NetworkInputs(testscale.NetworkShape{Shape: testscale.Shape{Networks: 2, Countries: 1, Exits: 3, Tail: 4, CityAsn: 5}})
+}
+
+func (source) LoadEvents(context.Context) (*store.Inputs, error) {
+	return &store.Inputs{EventsComplete: true, NotableComplete: true}, nil
+}
+
+func (source) Events(context.Context, store.EventFilter) ([]store.Event, error) { return nil, nil }
+
+// built is a server over source, refreshed once, and the refresh's error.
+func built(t *testing.T, m string) (*server.Server, error) {
+	t.Helper()
+	mode = m
+	s := server.New(source{}, server.Options{FilesDir: t.TempDir()})
+	_, err := s.Refresh(context.Background(), true)
+	return s, err
+}
+
+func get(h http.Handler, path string, headers ...string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// unserved is /healthz's unserved lines about the throwaway answers.
+func unserved(t *testing.T, h http.Handler) []string {
+	t.Helper()
+	var hz server.Health
+	if err := json.Unmarshal(get(h, "/healthz").Body.Bytes(), &hz); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, line := range hz.Unserved {
+		if strings.Contains(line, "throwaway") {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func TestARegisteredAnswerIsServedLikeEveryAnswer(t *testing.T) {
+	s, err := built(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	rec := get(h, "/v1/throwaway?range=7d")
+	var body struct {
+		Range    string `json:"range"`
+		Networks int    `json:"networks"`
+	}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &body) != nil || body.Range != "7d" || body.Networks != 2 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" || !strings.Contains(rec.Header().Get("Cache-Control"), "max-age") || rec.Header().Get("X-Site-Version") == "" {
+		t.Errorf("headers %v", rec.Header())
+	}
+	if r := get(h, "/v1/throwaway?range=7d", "If-None-Match", etag); r.Code != http.StatusNotModified {
+		t.Errorf("If-None-Match: %d", r.Code)
+	}
+	if r := get(h, "/v1/throwaway?range=7d", "Accept-Encoding", "br"); r.Header().Get("Content-Encoding") != "br" {
+		t.Errorf("brotli: %v", r.Header())
+	}
+	for path, want := range map[string]int{"/v1/throwaway?range=1y": 400, "/v1/throwaway?page=2": 400, "/v1/throwaway": 404} {
+		if r := get(h, path); r.Code != want {
+			t.Errorf("%s: %d %s, want %d", path, r.Code, r.Body, want)
+		}
+	}
+	if lines := unserved(t, h); len(lines) != 0 {
+		t.Errorf("unserved %v", lines)
+	}
+	// Only an answer with InDataset is in the dataset file's pages.
+	pages := s.Current().Result.Dataset.Pages
+	if _, ok := pages["/v1/throwaway-dataset"]; !ok || pages["/v1/throwaway/7d"] != nil {
+		t.Errorf("dataset pages hold %v and %v", pages["/v1/throwaway-dataset"], pages["/v1/throwaway/7d"])
+	}
+}
+
+func TestAFailedRegisteredAnswerIsUnserved(t *testing.T) {
+	s, err := built(t, "fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	if r := get(h, "/v1/throwaway-dataset"); r.Code != http.StatusOK {
+		t.Errorf("the other answer: %d", r.Code)
+	}
+	lines := unserved(t, h)
+	if len(lines) != 1 || lines[0] != "/v1/throwaway?range=7d answers 404 (answer throwaway: no rows)" {
+		t.Fatalf("unserved %v", lines)
+	}
+}
+
+func TestARegisteredAnswerOverTheCapFailsTheBuild(t *testing.T) {
+	if _, err := built(t, "big"); err == nil || !strings.Contains(err.Error(), "answer /v1/throwaway/") || !strings.Contains(err.Error(), "above the") {
+		t.Fatalf("refresh: %v", err)
+	}
+}
+
+func TestAnAnswerIsRegisteredOnce(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("registered twice")
+		}
+	}()
+	build.RegisterAnswer(build.PageAnswer{Name: "throwaway", Route: "GET /v1/throwaway", Key: func(*http.Request) (string, error) { return "", nil },
+		Build: func(*build.Context) (map[string]any, error) { return nil, nil }})
+}
