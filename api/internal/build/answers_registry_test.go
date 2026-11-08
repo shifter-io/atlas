@@ -9,9 +9,10 @@ import (
 )
 
 // RegisterAnswer refuses a bad, reserved or incomplete answer before it adds
-// anything, so none of these cases is registered.
+// anything, so these cases leave the registry as it was.
 func TestRegisterAnswerRefusesABadAnswer(t *testing.T) {
 	t.Parallel()
+	before := Answers()
 	ok := PageAnswer{Name: "fine", Route: "GET /v1/fine", Build: func(*Context) (map[string]any, error) { return nil, nil },
 		Key: func(*http.Request) (string, error) { return "/v1/fine", nil }}
 	for name, edit := range map[string]func(*PageAnswer){
@@ -32,10 +33,8 @@ func TestRegisterAnswerRefusesABadAnswer(t *testing.T) {
 			RegisterAnswer(a)
 		}()
 	}
-	for _, a := range Answers() {
-		if a.Name == "fine" || a.Name == "networks" || a.Name == "Fine/1" {
-			t.Fatalf("registered %v", a)
-		}
+	if got := Answers(); len(got) != len(before) {
+		t.Fatalf("registered %v", got)
 	}
 }
 
