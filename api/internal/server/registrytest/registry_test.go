@@ -50,10 +50,12 @@ func init() {
 		Samples: []string{"/v1/throwaway?range=7d"},
 	})
 	build.RegisterAnswer(build.PageAnswer{
-		Name:      "throwaway-dataset",
-		Route:     "GET /v1/throwaway-dataset",
-		Key:       func(*http.Request) (string, error) { return "/v1/throwaway-dataset", nil },
-		Build:     func(*build.Context) (map[string]any, error) { return map[string]any{"/v1/throwaway-dataset": []int{1}}, nil },
+		Name:  "throwaway-dataset",
+		Route: "GET /v1/throwaway-dataset",
+		Key:   func(*http.Request) (string, error) { return "/v1/throwaway-dataset", nil },
+		Build: func(*build.Context) (map[string]any, error) {
+			return map[string]any{"/v1/throwaway-dataset": []int{1}}, nil
+		},
 		Samples:   []string{"/v1/throwaway-dataset"},
 		InDataset: true,
 	})
@@ -144,7 +146,7 @@ func TestARegisteredAnswerIsServedLikeEveryAnswer(t *testing.T) {
 		t.Errorf("unserved %v", lines)
 	}
 	// Only an answer with InDataset is in the dataset file's pages.
-	pages := s.Current().Result.Dataset.Pages
+	pages, _ := s.Current().Result.Dataset.Pages.(build.DatasetPages)
 	if _, ok := pages["/v1/throwaway-dataset"]; !ok || pages["/v1/throwaway/7d"] != nil {
 		t.Errorf("dataset pages hold %v and %v", pages["/v1/throwaway-dataset"], pages["/v1/throwaway/7d"])
 	}
