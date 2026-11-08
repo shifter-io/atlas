@@ -8,8 +8,9 @@ import types
 
 import pytest
 
-from proxy_index.browser import driver, release
+from proxy_index.browser import driver, geo, release
 from proxy_index.browser.driver import Browser, NavigationError, Page, UserAgentRefused
+from proxy_index.browser.geo import GeoRefused
 from proxy_index.models import ProxyConfig
 
 REFUSED = "NS_ERROR_PROXY_CONNECTION_REFUSED"
@@ -239,6 +240,30 @@ async def test_context_options_blocking_and_close_on_every_path():
         pass
     assert pw.contexts[1].options == {} and pw.contexts[1].routes == []
     assert pw.closed_contexts == 2 and browser.alive()
+
+
+async def test_a_country_gives_its_locale_zone_and_city_drawn_from_the_seed():
+    pw = PWBrowser()
+    browser = Browser(PWDriver(), pw)
+    for _ in range(12):
+        async with browser.context(None, country="us"):
+            pass
+    async with browser.context(None, country="US", seed="run:5"):
+        pass
+    zones = set()
+    for context in pw.contexts[:-1]:
+        options, zone = context.options, context.options["timezone_id"]
+        assert options["locale"] == "en-US,en" and zone in geo.country("US").zones
+        assert options["geolocation"] == geo.geolocation(zone)
+        assert options["extra_http_headers"] == {"Accept-Language": "en-US,en;q=0.9"}
+        zones.add(zone)
+    assert len(zones) > 1 and browser._tries == 12
+    place = geo.place(geo.seeded("run:5"), "US")
+    assert pw.contexts[-1].options == place.camoufox_options()
+    with pytest.raises(GeoRefused):
+        async with browser.context(None, country="zz"):
+            pass
+    assert len(pw.contexts) == 13 and pw.closed_contexts == 13
 
 
 @pytest.mark.parametrize(

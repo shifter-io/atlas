@@ -1,8 +1,9 @@
 """BrowserTransport: the runner's Transport for browser targets (docs/browser.html, Runner).
 
 One execute() is one try: lease a pooled browser, open a fresh context through the try's
-proxy, navigate, settle, let the target interact, read the PageView, judge it, hand the try
-record to the recorder and return the Outcome the runner counts like an HTTP request.
+proxy (in the run country's locale, time zone and geolocation), navigate, settle, let the
+target interact, read the PageView, judge it, hand the try record to the recorder and return
+the Outcome the runner counts like an HTTP request.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from .contracts import (
     try_record,
 )
 from .driver import NavigationError, Page, UserAgentRefused
+from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
 from .pool import BrowserPool
 from .settings import BrowserOptions, TargetSettings
@@ -159,7 +161,7 @@ class BrowserTransport:
         try:
             async with budget:
                 assessment = await self._attempt(target, context, state)
-        except UserAgentRefused:
+        except (UserAgentRefused, GeoRefused):
             raise
         except Exception as exc:  # boundary: a failed try is recorded, never raised
             if isinstance(exc, TimeoutError) and budget.expired():
@@ -198,7 +200,8 @@ class BrowserTransport:
         async with self.pool.browser() as browser:
             timings["queue"] = _ms(mark)
             mark = time.perf_counter()
-            async with browser.context(proxy, self.block, self.timeout_s * 1000) as page:
+            timeout_ms, country = self.timeout_s * 1000, self.config.requested_country
+            async with browser.context(proxy, self.block, timeout_ms, country=country) as page:
                 timings["context"] = _ms(mark)
                 return await self._on_page(page, target, spec, state)
 

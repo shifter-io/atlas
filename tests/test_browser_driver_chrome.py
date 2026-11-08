@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from proxy_index.browser import chrome, driver
+from proxy_index.browser import chrome, driver, geo
 from proxy_index.browser.chrome import ChromeRefused
 from proxy_index.browser.driver import (
     ChromeBrowser,
@@ -149,6 +149,15 @@ def profiles(chromium: Chromium) -> list[Path]:
     return [path for path in chromium.started if path.exists()]
 
 
+async def test_the_runs_country_overrides_the_launchs():
+    chromium = Chromium()
+    async with handle(chromium, country="DE").context(None, country="us", seed="s") as page:
+        assert page.fingerprint == chrome.fingerprint("s", "US").record()
+    options = chromium.contexts[0].options
+    assert options["locale"] == "en-US" and options["timezone_id"] in geo.country("US").zones
+    assert options["geolocation"] == geo.geolocation(options["timezone_id"])
+
+
 async def test_three_tries_three_profiles_none_left():
     chromium = Chromium()
     browser = handle(chromium)
@@ -172,6 +181,7 @@ async def test_three_tries_three_profiles_none_left():
         "headless": True,
         "proxy": driver.proxy_option(proxy),
     }
+    assert first.options["geolocation"] == geo.geolocation(fingerprint.timezone_id)
     assert first.scripts == [fingerprint.init_script()] and first.routes == ["**/*"]
     assert first.timeout == 5000 and chromium.contexts[1].routes == []
     assert browser.alive()

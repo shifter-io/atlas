@@ -118,11 +118,13 @@ class Fleet:
 
         class Tracked(FakeBrowser):
             @contextlib.asynccontextmanager
-            async def context(self, proxy, block=(), timeout_ms=30_000):
+            async def context(self, proxy, block=(), timeout_ms=30_000, *, country=None):
                 fleet.open += 1
                 fleet.peak = max(fleet.peak, fleet.open)
                 try:
-                    async with FakeBrowser.context(self, proxy, block, timeout_ms) as page:
+                    async with FakeBrowser.context(
+                        self, proxy, block, timeout_ms, country=country
+                    ) as page:
                         yield page
                 finally:
                     fleet.open -= 1

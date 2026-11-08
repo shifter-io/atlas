@@ -16,6 +16,7 @@ from browser_transport_cases import HTTP_PROXY, OPTIONS, SETTINGS, Harness, Scri
 from proxy_index.browser import chrome
 from proxy_index.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMINGS
 from proxy_index.browser.driver import NavigationError, UserAgentRefused
+from proxy_index.browser.geo import GeoRefused
 from proxy_index.browser.judge import OK, failed
 from proxy_index.browser.targets.pages import GoogleSearch
 from proxy_index.browser.transport import CONSENT_ACCEPT, BrowserTransport, NullRecorder
@@ -193,6 +194,24 @@ async def test_a_refused_user_agent_stops_the_run():
 
     harness.pool._launch = refuse
     with pytest.raises(UserAgentRefused):
+        await harness.execute()
+
+
+async def test_the_runs_country_reaches_the_context():
+    harness, untargeted = Harness(country="us"), Harness()
+    await harness.execute()
+    await untargeted.execute()
+    assert harness.browsers[0].countries == ["us"] and untargeted.browsers[0].countries == [None]
+
+
+async def test_a_country_without_a_table_stops_the_run():
+    harness = Harness(country="zz")
+
+    async def refuse():
+        raise GeoRefused("no browser geography for country 'zz'")
+
+    harness.pool._launch = refuse
+    with pytest.raises(GeoRefused):
         await harness.execute()
 
 
