@@ -491,7 +491,8 @@ status}` is the range's `windows[r].browser_overall` ("Browser scores" below),
 null when the range has none.
 
 The answer also carries `targets {all, measured, cards}` (the dataset's
-targets, the measured ones, and the cards: targets of no group), the dataset's
+targets, the measured ones, and the cards: measured targets of no group, as
+`/v1/meta` `targetCounts`), the dataset's
 `weights` and `profiles`, `fleet {requests, successes}` (the range's summed
 over the rows listed; a network without a value adds nothing) and `cost`, the
 true-cost summary over the rows listed with a `costPer1kSuccess`: `cheapest`
