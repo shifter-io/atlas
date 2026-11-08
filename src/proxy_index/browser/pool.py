@@ -12,11 +12,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import subprocess
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+
+from . import procstats
 
 
 class Pooled(Protocol):
@@ -35,28 +36,10 @@ class _Slot:
 def resident_bytes() -> int | None:
     """Resident memory of this process's descendants (browsers and their drivers), from ps;
     None when ps cannot tell."""
-    try:
-        listing = subprocess.run(
-            ["ps", "-A", "-o", "pid=,ppid=,rss="],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=True,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
+    table = procstats.read_ps()
+    if table is None:
         return None
-    children: dict[int, list[int]] = defaultdict(list)
-    rss: dict[int, int] = {}
-    for line in listing.splitlines():
-        pid, ppid, kb = (int(value) for value in line.split())
-        children[ppid].append(pid)
-        rss[pid] = kb
-    total, stack = 0, list(children[os.getpid()])
-    while stack:
-        pid = stack.pop()
-        total += rss[pid] * 1024
-        stack.extend(children[pid])
-    return total
+    return sum(table[pid].rss_bytes for pid in procstats.descendants(table, os.getpid()))
 
 
 class BrowserPool:
