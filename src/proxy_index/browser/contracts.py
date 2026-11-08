@@ -6,6 +6,8 @@ is a contract change. No I/O. Errors name the field, never the value (it can be 
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -174,6 +176,11 @@ TRY_FIELDS = tuple(
     "i input source verdict error"
     " status final_url timings_ms bytes_down_est reason screenshot".split()
 )
+# A Chrome try's optional `fingerprint` (chrome.Fingerprint.record()): values and their SHA-256.
+FINGERPRINT_FIELDS = tuple(
+    "screen_width screen_height device_scale_factor locale accept_language timezone_id"
+    " hardware_concurrency device_memory".split()
+)
 
 
 def page_url(url: str) -> str:
@@ -195,10 +202,25 @@ def _input(value: Any) -> str | dict[str, str]:
     return {name: check_string(text, f"input.{name}", size=2048) for name, text in table.items()}
 
 
+def _fingerprint(value: Any) -> dict[str, Any]:
+    fingerprint = check_fields(value, ("values", "sha256"), "fingerprint")
+    values = check_fields(fingerprint["values"], FINGERPRINT_FIELDS, "fingerprint.values")
+    for key, item in values.items():
+        check = check_int if type(item) is int else check_string
+        check(item, f"fingerprint.values.{key}")
+    text = json.dumps(values, sort_keys=True, separators=(",", ":"))
+    if fingerprint["sha256"] != hashlib.sha256(text.encode()).hexdigest():
+        raise ValueError("fingerprint.sha256: must be the SHA-256 of the values")
+    return {"values": values, "sha256": fingerprint["sha256"]}
+
+
 def try_record(**fields: Any) -> dict[str, Any]:
-    """One validated tries.jsonl line (K-BP4); every field is required, absent values None. The
-    verdict is the one its error code implies (ok: no error); a screenshot is the try's own."""
-    record = check_fields(fields, TRY_FIELDS, "try")
+    """One validated tries.jsonl line (K-BP4); every field but a Chrome try's `fingerprint` is
+    required, absent values None. The verdict is the one its error code implies (ok: no
+    error); a screenshot is the try's own."""
+    record = check_fields(fields, TRY_FIELDS, "try", ("fingerprint",))
+    if "fingerprint" in record:
+        record["fingerprint"] = _fingerprint(record["fingerprint"])
     check_int(record["i"], "i", 0, MAX_TRIES - 1)
     record["input"] = _input(record["input"])
     optional(check_string, record["source"], "source", TOKEN)

@@ -154,7 +154,7 @@ class BrowserTransport:
         timings: dict[str, int | None] = dict.fromkeys(TIMINGS)
         # The try's facts as its steps learn them (timings_ms, main status, URL, bytes, shot).
         state: dict[str, Any] = {"timings": timings, "status": None, "final_url": None}
-        state |= {"bytes": None, "shot": None, "found": {}, "view": None}
+        state |= {"bytes": None, "shot": None, "found": {}, "view": None, "fingerprint": None}
         budget = self._budget()
         try:
             async with budget:
@@ -210,6 +210,7 @@ class BrowserTransport:
             assessment = PageAssessment(error=code, verdict=verdict, reason=_reason(exc.name))
         state["final_url"] = _page_url(await page.url())
         state["bytes"] = await page.bytes_down_est()
+        state["fingerprint"] = getattr(page, "fingerprint", None)  # a Chrome try's
         failure = assessment.error is not None
         # Privacy: a screenshot of an AI source that showed answer text would hold the answer.
         answered = target.id in AI_SOURCES and state["found"].get(ANSWER_CHARS, 0) > 0
@@ -257,6 +258,7 @@ class BrowserTransport:
         state: dict,
     ) -> None:
         i, shot = context.request_index, state["shot"]
+        fingerprint = state["fingerprint"]
         record = try_record(
             i=i,
             **target.try_fields(context, self.inputs),
@@ -268,5 +270,6 @@ class BrowserTransport:
             bytes_down_est=state["bytes"],
             reason=reason,
             screenshot=bundle_members().screenshot(i) if shot is not None else None,
+            **({"fingerprint": fingerprint} if fingerprint is not None else {}),
         )
         self.recorder.try_done(record, shot)

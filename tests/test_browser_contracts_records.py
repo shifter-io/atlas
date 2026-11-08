@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from browser_contracts_cases import RUN_ID, SHA, SLOT, try_fields
 
+from proxy_index.browser import chrome
 from proxy_index.browser import contracts as c
 from proxy_index.browser.settings import load_settings
 
@@ -29,6 +30,23 @@ def test_try_record():
     # LinkedIn's block answers 999 (K-BP2: block): its record is kept, so the run is not lost.
     blocked = try_fields(verdict="block", error="blocked", status=999, reason="block_status")
     assert c.try_record(**blocked)["status"] == 999
+
+
+def test_try_record_keeps_a_chrome_fingerprint():
+    fingerprint = chrome.fingerprint("run:0", "US").record()
+    assert c.try_record(**try_fields(fingerprint=fingerprint))["fingerprint"] == fingerprint
+    assert "fingerprint" not in c.try_record(**try_fields())
+    assert set(c.FINGERPRINT_FIELDS) == set(fingerprint["values"])
+    values = fingerprint["values"]
+    for value, message in [
+        (fingerprint | {"sha256": "0" * 64}, "fingerprint.sha256"),
+        ({"values": values}, r"fingerprint: missing fields \['sha256'\]"),
+        (fingerprint | {"values": {**values, "platform": "Win32"}}, "fingerprint.values: unknown"),
+        (fingerprint | {"values": {**values, "locale": ""}}, "fingerprint.values.locale"),
+        (fingerprint | {"values": {**values, "device_memory": -8}}, "values.device_memory"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            c.try_record(**try_fields(fingerprint=value))
 
 
 def test_try_record_takes_every_run_target_input_from_the_settings():
