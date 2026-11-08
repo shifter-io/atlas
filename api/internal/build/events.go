@@ -28,6 +28,7 @@ type EventWindow struct {
 	LateJSON     []EventRow
 	LateComplete bool
 	text         eventText
+	marks        cursorMarks
 }
 
 // EventRow is one /v1/events row: the framework's TestEvent and the live
@@ -55,8 +56,9 @@ func (r *EventRow) hasWords(words []string) bool {
 
 // EventsAnswer is the /v1/events body. Cursor is the largest event_id the
 // answer covers: its largest row id, else the request's after; or, when a q
-// read past after stopped at store.TextScan rows, the last row read. More is
-// true when more rows match past Cursor. UpdatedAt is the newest event's at.
+// read past after stopped at store.TextScan rows, the last row read; never
+// above the cursor bound (cursorMarks) unless after is. More is true when
+// more rows match past Cursor. UpdatedAt is the newest event's at.
 type EventsAnswer struct {
 	Events    []EventRow `json:"events"`
 	Cursor    *int64     `json:"cursor"`
@@ -100,7 +102,8 @@ func (t eventText) render(rows []store.Event) []EventRow {
 func newEventWindow(in *store.Inputs, text eventText) EventWindow {
 	return EventWindow{Raw: in.Events, JSON: text.render(in.Events), Complete: in.EventsComplete,
 		Notable: in.Notable, NotableJSON: text.render(in.Notable), NotableComplete: in.NotableComplete,
-		Late: in.Late, LateJSON: text.render(in.Late), LateComplete: in.LateComplete, text: text}
+		Late: in.Late, LateJSON: text.render(in.Late), LateComplete: in.LateComplete, text: text,
+		marks: cursorMarks{}.next(in.EventsRead)}
 }
 
 // Provider is the framework provider of a network's site slug (network=).
@@ -114,13 +117,15 @@ func (w *EventWindow) Provider(slug string) (string, bool) {
 }
 
 // WithEvents is res with the events of in (store.LoadEvents: Events,
-// Notable, their completeness and Fingerprint.MaxEventID) in place of its own,
+// Notable, their completeness, Fingerprint.MaxEventID and the read's
+// snapshot, added to res's cursor marks) in place of its own,
 // for an events-only change. It is a shallow copy that shares every other
 // answer: the dataset's tape and the network answers' tapes were built from
 // res's events and keep them until the next full build.
 func WithEvents(res *Result, in *store.Inputs) *Result {
 	out := *res
 	out.Events = newEventWindow(in, res.Events.text)
+	out.Events.marks = res.Events.marks.next(in.EventsRead)
 	out.Fingerprint.MaxEventID = in.Fingerprint.MaxEventID
 	return &out
 }
@@ -216,8 +221,9 @@ func (w *EventWindow) FromRows(f store.EventFilter, rows []store.Event) *EventsA
 }
 
 // answer picks f's rows among refs (newest first, or with after in any order):
-// with after the oldest by id, for a prioritized filter the store.Prioritize
-// choice, else the newest. bounded means refs stop at a q read's bound.
+// with after the oldest by id up to the cursor bound (cursorMarks), for a
+// prioritized filter the store.Prioritize choice, else the newest. No cursor
+// passes the bound. bounded means refs stop at a q read's bound.
 func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool) *EventsAnswer {
 	matched := []eventRef{}
 	for _, r := range refs {
@@ -225,10 +231,14 @@ func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool)
 			matched = append(matched, r)
 		}
 	}
+	bound, settled := w.marks.bound, matched
 	if f.After != nil {
 		slices.SortFunc(matched, func(a, b eventRef) int { return cmp.Compare(a.e.ID, b.e.ID) })
+		if n := slices.IndexFunc(matched, func(r eventRef) bool { return r.e.ID > bound }); n >= 0 {
+			settled = matched[:n]
+		}
 	}
-	out := matched[:min(len(matched), f.Limit)]
+	out := settled[:min(len(settled), f.Limit)]
 	if f.Prioritized() {
 		out = []eventRef{}
 		for _, k := range store.Prioritize(len(matched), f.Limit, func(k int) string { return matched[k].e.Kind }) {
@@ -242,11 +252,15 @@ func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool)
 			a.Cursor = &r.e.ID
 		}
 	}
+	if f.After == nil && a.Cursor != nil && *a.Cursor > bound {
+		a.Cursor = &bound
+	}
 	for _, r := range matched {
 		a.More = a.More || (a.Cursor != nil && r.e.ID > *a.Cursor)
 	}
 	if bounded && !a.More {
 		last := slices.MaxFunc(refs, func(a, b eventRef) int { return cmp.Compare(a.e.ID, b.e.ID) }).e.ID
+		last = max(min(last, bound), *a.Cursor)
 		a.Cursor, a.More = &last, true
 	}
 	return a

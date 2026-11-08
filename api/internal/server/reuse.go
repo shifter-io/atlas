@@ -39,12 +39,13 @@ const (
 
 // change classifies a polled fingerprint against the serving Version: nothing
 // served yet, force or a changed data part needs a full build; a change of the
-// newest event id alone needs only the events answers.
+// newest event id alone, or events above the cursor bound (which a later read
+// raises), needs only the events answers.
 func change(cur *Version, fp store.Fingerprint, force bool) changeKind {
 	switch {
 	case force || cur == nil || cur.Result.Fingerprint.DataKey() != fp.DataKey():
 		return changeData
-	case cur.Result.Fingerprint.EventsKey() != fp.EventsKey():
+	case cur.Result.Fingerprint.EventsKey() != fp.EventsKey(), cur.Result.Events.Pending():
 		return changeEvents
 	}
 	return changeNone

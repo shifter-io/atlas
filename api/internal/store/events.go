@@ -1,8 +1,10 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -303,6 +305,27 @@ func afterQuery(clauses []string, args []any, limit int) (string, []any) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// MinEventID is the smallest id of rows (0 for none).
+func MinEventID(rows []Event) int64 {
+	if len(rows) == 0 {
+		return 0
+	}
+	return slices.MinFunc(rows, func(a, b Event) int { return cmp.Compare(a.ID, b.ID) }).ID
+}
+
+// EventsRead is what one events read saw (EV-CURSOR-SETTLE-1): its
+// snapshot's xmin and xmax, as xid8, and the largest event_id (0 for none).
+// Once a later read's xmin reaches Xmax, every transaction running at this
+// read has ended, so no id up to MaxID can still appear: the /v1/events
+// cursor may pass them (build.EventWindow). A zero Xmax is a read without a
+// snapshot (a source other than Postgres), which bounds nothing.
+type EventsRead struct{ MaxID, Xmin, Xmax int64 }
+
+// eventsReadSQL reads EventsRead from the statement's snapshot: in Load's and
+// LoadEvents' REPEATABLE READ transaction, the one their events are read in.
+const eventsReadSQL = `SELECT coalesce((SELECT max(event_id) FROM public.test_events), 0),
+ pg_snapshot_xmin(pg_current_snapshot())::text::bigint, pg_snapshot_xmax(pg_current_snapshot())::text::bigint`
 
 // EventJSON is detect.event_json: the shape of /v1/events rows and of the
 // snapshot's `events` (src/lib/measured-types.ts TestEvent).

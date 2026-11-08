@@ -12,14 +12,17 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
+	"github.com/jackc/pgx/v5"
 )
 
-// EV-CURSOR-SETTLE-1 against the database: while a transaction that wrote an
-// event is open, a later committed event is held back from after answers
-// (more stays true), from memory and from the fallback alike; once it commits
-// and the rows settle, the next read returns both in id order, with no new
-// event to trigger it. A burst of 300 rows in one transaction reads whole.
-func TestAfterHoldsBackRowsBehindAnOpenTransaction(t *testing.T) {
+// EV-CURSOR-SETTLE-1 against the database, the case one snapshot cannot
+// catch: B gets its xid first (it writes another row), A inserts event 1 and
+// stays open, B inserts event 2 and commits. While A is open no poll passes
+// id 1, from memory or the fallback, and the default poll's cursor stops
+// below it; once A commits, both arrive in id order, through the default
+// poll's cursor too, with no new event to trigger the read. A burst of 300
+// rows in one transaction then reads whole across pages.
+func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)
 	ctx := context.Background()
@@ -34,6 +37,12 @@ func TestAfterHoldsBackRowsBehindAnOpenTransaction(t *testing.T) {
 	}
 	defer pool.Close()
 	s := newTestServer(t, DBSource{Pool: pool})
+	refresh := func() {
+		t.Helper()
+		if _, err := s.Refresh(ctx, false); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// poll reads after= from memory and from the fallback; both must agree.
 	poll := func(after int64) tapeBody {
 		t.Helper()
@@ -51,47 +60,55 @@ func TestAfterHoldsBackRowsBehindAnOpenTransaction(t *testing.T) {
 		return b
 	}
 	insert := `INSERT INTO test_events(at,kind,signal,severity) SELECT '2026-11-09T12:00:00Z','pulse_finished',0,'info' FROM generate_series(1,$1::int)`
-	c := db.Conn(t)
-	defer c.Close(ctx)
-	txA, err := c.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
+	begin := func() *pgxTx {
+		t.Helper()
+		c := db.Conn(t)
+		t.Cleanup(func() { c.Close(ctx) })
+		tx, err := c.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { tx.Rollback(ctx) }) //nolint:errcheck
+		return &pgxTx{t, tx}
 	}
-	defer txA.Rollback(ctx) //nolint:errcheck
-	// Event 1 in transaction A, which stays open; event 2 committed after it.
-	if _, err := txA.Exec(ctx, insert, 1); err != nil {
-		t.Fatal(err)
+	b, a := begin(), begin()
+	b.exec("INSERT INTO providers VALUES ('writer-b')") // B's xid, older than A's
+	a.exec(insert, 1)                                   // event 1, A stays open
+	b.exec(insert, 1)                                   // event 2
+	b.commit()
+	refresh()
+	var handOff *int64
+	for i := 0; i < 3; i++ { // a few refreshes while A is open
+		if p := poll(0); len(p.Events) != 0 || *p.Cursor != 0 || !p.More {
+			t.Fatalf("with A open, poll %d: %v cursor %d more %v", i, p.ids(), *p.Cursor, p.More)
+		}
+		def := readTape(t, s, "/v1/events")
+		if !slices.Equal(def.ids(), []int64{2}) || *def.Cursor != 0 || !def.More {
+			t.Fatalf("the default poll with A open: %v cursor %d more %v", def.ids(), *def.Cursor, def.More)
+		}
+		handOff = def.Cursor
+		refresh()
 	}
-	db.Exec(t, insert, 1)
-	if refreshed, err := s.Refresh(ctx, false); err != nil || !refreshed {
-		t.Fatalf("not refreshed: %v %v", refreshed, err)
-	}
-	if b := poll(0); len(b.Events) != 0 || *b.Cursor != 0 || !b.More {
-		t.Fatalf("with A open: %v cursor %d more %v", b.ids(), *b.Cursor, b.More)
-	}
-	if b := readTape(t, s, "/v1/events"); !slices.Equal(b.ids(), []int64{2}) {
-		t.Fatalf("the default poll: %v", b.ids())
-	}
-	if err := txA.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
+	a.commit()
 	db.Settle(t)
-	if refreshed, err := s.Refresh(ctx, false); err != nil || !refreshed {
-		t.Fatalf("held-back rows not read again: %v %v", refreshed, err)
+	refresh() // no new event: the held ids alone make the server read again
+	if s.Current().Result.Events.Pending() {
+		t.Fatal("still pending once every transaction ended")
 	}
-	if b := poll(0); !slices.Equal(b.ids(), []int64{1, 2}) || *b.Cursor != 2 || b.More {
-		t.Fatalf("after A commits: %v cursor %d more %v", b.ids(), *b.Cursor, b.More)
+	if p := poll(*handOff); !slices.Equal(p.ids(), []int64{1, 2}) || *p.Cursor != 2 || p.More {
+		t.Fatalf("after A commits, from the default poll's cursor: %v cursor %d more %v", p.ids(), *p.Cursor, p.More)
 	}
 	db.Exec(t, insert, 300) // events 3 to 302, one transaction
+	refresh()
 	db.Settle(t)
-	s.Refresh(ctx, false) //nolint:errcheck
+	refresh()
 	ids := []int64{}
 	for after, more := int64(2), true; more; {
-		b := poll(after)
-		if len(ids) > 300 || len(b.Events) == 0 {
-			t.Fatalf("the burst stalls at %d: %v", after, b.ids())
+		p := poll(after)
+		if len(ids) > 300 || len(p.Events) == 0 {
+			t.Fatalf("the burst stalls at %d: %v", after, p.ids())
 		}
-		ids, after, more = append(ids, b.ids()...), *b.Cursor, b.More
+		ids, after, more = append(ids, p.ids()...), *p.Cursor, p.More
 	}
 	for i, id := range ids {
 		if id != int64(i+3) {
@@ -100,6 +117,26 @@ func TestAfterHoldsBackRowsBehindAnOpenTransaction(t *testing.T) {
 	}
 	if len(ids) != 300 {
 		t.Fatalf("the burst read %d rows", len(ids))
+	}
+}
+
+// pgxTx is an open transaction that fails the test on an error.
+type pgxTx struct {
+	t  *testing.T
+	tx pgx.Tx
+}
+
+func (x *pgxTx) exec(sql string, args ...any) {
+	x.t.Helper()
+	if _, err := x.tx.Exec(context.Background(), sql, args...); err != nil {
+		x.t.Fatal(err)
+	}
+}
+
+func (x *pgxTx) commit() {
+	x.t.Helper()
+	if err := x.tx.Commit(context.Background()); err != nil {
+		x.t.Fatal(err)
 	}
 }
 

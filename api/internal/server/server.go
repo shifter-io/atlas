@@ -269,6 +269,9 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build: %w", err)
 	}
+	if prev != nil {
+		build.FollowEvents(res, prev.Result)
+	}
 	t2 := time.Now()
 	v, err := renderVersion(s.nextID.Add(1), res, s.opts, prev)
 	if err != nil {

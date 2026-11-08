@@ -25,32 +25,37 @@ Every parameter is optional; any other parameter answers 400.
 ## Order and choice
 
 - With `after`: the rows past it by `event_id`, oldest first, up to `limit`, stopping before the
-  first row that is not yet settled (below). A poll that passes the last answer's `cursor` walks
+  cursor bound (below). A poll that passes the last answer's `cursor` walks
   forward through a burst that shares one `at` without losing a row.
 - With `since`, `kind` or `category`: exactly the newest matching rows, newest first.
 - Otherwise (the tape's first read): prioritized, newest first. Routine rows (the census tab and
   `pulse_finished`) never push other rows off the page: the newest other rows take up to half of
   `limit`, the newest rows of any kind fill the rest.
 
-## Settled rows (the `after` cursor)
+## Settled rows (the cursor bound)
 
-`event_id` is taken when a row is inserted, not when its transaction commits. A slow transaction
-can therefore commit a row with a smaller id after a poll has already returned larger ones; a
-cursor past them would skip it. So an `after` answer, and the `cursor` it returns, covers only
-**settled** rows: rows whose inserting transaction is older than the oldest transaction still
-running when the API read the events (the row's `xmin` below `pg_snapshot_xmin` of the read's own
-snapshot, compared through `xid8`, without 32-bit wraparound: `store.unsettledSQL`).
+`event_id` is taken when a row is inserted, not when its transaction commits, and a writer's
+transaction id often comes earlier still (the framework's writers insert events after other rows).
+So neither id order nor transaction order tells whether a row with a smaller id can still commit,
+and a cursor past it would skip it. The API therefore moves a cursor only over ids that can no
+longer appear behind it (`build.cursorMarks`):
 
-- The answer stops before the first matching row that is not settled, and `more` stays true while
-  such rows wait. They come in a later answer, in id order, once a read settles them.
-- The in-memory window keeps each row's mark from the read that loaded it (`store.LoadEvents`, in
-  the same read-only transaction as the rows, in the same statement). While it holds an unsettled
-  row, every refresh (10 s) reads the events again, even without a new event. So a just-written
-  event can show up through `after` one refresh (10 s) later than in the default poll, longer
-  while any transaction of the database server that started before it is still open.
-- The database fallback reads the same mark in its query.
-- No time lag is used: no fixed delay can bound a slow transaction, the snapshot can.
-- The default poll, without a cursor, is unchanged: it returns unsettled rows too.
+- Each events read (`store.LoadEvents`, and `Load` for a full build) records, in the same
+  REPEATABLE READ transaction as its rows, its snapshot's `xmin` and `xmax` (`xid8`, so no 32-bit
+  wraparound) and the largest event id it sees (`store.EventsRead`, `load.events_read`).
+- Once a later read's `xmin` reaches a read's `xmax`, every transaction running at that read has
+  ended, so no id up to its largest can still appear. The largest such id is the **bound**. The
+  window keeps the last reads still waiting (at most 16) and carries them across full builds.
+- An `after` answer returns no row above the bound, and `more` stays true while such rows wait.
+  They come in a later answer, in id order. The database fallback takes the bound from the window.
+- Every `cursor` stops at the bound, the default poll's too (it still returns the newest rows). A
+  poll with that cursor may return some of those rows again: **clients deduplicate by `id`**.
+- While the window holds ids above the bound, every refresh (10 s) reads the events again, even
+  without a new event. So a just-written event shows up through `after` one refresh (10 s) later
+  than in the default poll, or longer while a transaction of the database server that was open at
+  the read stays open (transaction ids are the whole server's). When nothing is running at a read,
+  the bound is that read's largest id at once.
+- No time lag is used: no fixed delay can bound a slow transaction, the snapshots can.
 
 ## Body
 
@@ -61,9 +66,9 @@ snapshot, compared through `xid8`, without 32-bit wraparound: `store.unsettledSQ
 | `events[]` | The rows: every `TestEvent` field (`id`, `at`, `kind`, `category`, `product`, `provider`, `country`, `region`, `target`, `signal`, `severity`, `data`) and the five below. | `test_events` |
 | `events[].title`, `.detail`, `.value` | The tape's text, the mapping `Dataset.tape` uses (`build/tape.go` `TapeFromEvents`): `detail` starts with the network name. Rendered once per event when the event window loads. | `test_events.kind`, `.data`, `.country`, `.region` |
 | `events[].providerSlug`, `.providerName` | The network's site slug and display name; null for a provider without a network. | the build's framework-provider-to-slug map and catalog names |
-| `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. With `after`, it never passes a row that is not settled. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
+| `cursor` | The largest `event_id` the answer covers: its largest row id, else the request's `after`, else null. Never above the bound (above), unless `after` is. When a `q` read of the database fallback past `after` stops at its bound (below), the last row it read. | `test_events.event_id` |
 | `updatedAt` | The newest event's `at` (of every event, not only the matching ones), null without events. | `test_events.at` |
-| `more` | True when more matching rows follow `cursor`, settled or not: pass it as the next `after`. | |
+| `more` | True when more matching rows follow `cursor`, above the bound or not: pass it as the next `after`. | |
 
 ## Speed
 
@@ -79,16 +84,18 @@ snapshot, compared through `xid8`, without 32-bit wraparound: `store.unsettledSQ
   `p.name`) and `after` as `e.event_id > $n ORDER BY e.event_id`, reading `limit + 1` rows to tell
   `more`. `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
   passing the other filters (`store.TextScan`) and matches `q` among them. Every shape is in
-  `siteapi explain` (`load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
+  `siteapi explain` (`load.events_read`, `load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
   `.proxy_kind`, `.after`, `.q`).
 - The rendered answer is kept in the version's 256-entry LRU; `Cache-Control` is
   `public, max-age=15, s-maxage=15`.
 
 ## Tests
 
-`build/events_settle_test.go` (an `after` answer stops before the first unsettled row, from memory
-and from the fallback), `server/events_settle_db_test.go` (a row held back behind an open
-transaction, returned once it commits; a 300-row burst in one transaction read whole),
+`build/events_cursor_test.go` (the bound over a series of reads; an `after` answer and the default
+poll's cursor stop at it, from memory and from the fallback; the hand-off from the default poll),
+`server/events_settle_db_test.go` (a writer whose transaction id came first commits a larger id
+while another transaction holds a smaller one: no poll passes it, and both arrive once it commits,
+through the default poll's cursor too; a 300-row burst in one transaction read whole),
 `build/events_tape_test.go` (a 300-event burst read with `limit=100` and `after` loses none, from
 memory and from the fallback; a late row an `after` poll returns; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
 a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate, the late read),
