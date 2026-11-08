@@ -53,8 +53,7 @@ def monthly(table, moment):
 
 
 def holder(table, moment, existing):
-    """The partition partition() puts this moment in, given the names that exist: (name, start,
-    end). The month's when it exists or the table is not DAILY; otherwise the day's."""
+    """(name, start, end) of the month's partition when it exists (or not DAILY), else the day's."""
     name, start, end = monthly(table, moment)
     if name in existing or table not in DAILY:
         return name, start, end

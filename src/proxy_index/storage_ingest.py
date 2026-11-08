@@ -160,11 +160,12 @@ def run_row(run, batch_id):
 def insert_runs(conn):
     """Insert the new runs' test_runs rows in batch order; each gets its run_key."""
     conn.execute(
-        "WITH added AS (INSERT INTO test_runs (run_id,scope_id,started_at,finished_at,status,"
-        "summary_sha256,summary,batch_id) SELECT run_id,scope_id,started_at,finished_at,status,"
-        "summary_sha256,summary,batch_id FROM incoming_runs ORDER BY idx "
-        "RETURNING run_id,run_key) UPDATE incoming_runs i SET run_key=a.run_key "
-        "FROM added a WHERE a.run_id=i.run_id"
+        "INSERT INTO test_runs (run_id,scope_id,started_at,finished_at,status,summary_sha256,"
+        "summary,batch_id) SELECT run_id,scope_id,started_at,finished_at,status,summary_sha256,"
+        "summary,batch_id FROM incoming_runs ORDER BY idx"
+    )
+    conn.execute(
+        "UPDATE incoming_runs i SET run_key=t.run_key FROM test_runs t WHERE t.run_id=i.run_id"
     )
 
 

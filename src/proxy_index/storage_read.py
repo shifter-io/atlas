@@ -87,11 +87,11 @@ LOCATION_FIELDS = (
 NETWORK_FIELDS = ("isp", "organization", "asn", "asn_organization", "connection_type", "usage_type")
 
 
-def connect(credentials_file, *, autocommit=False):
+def connect(credentials_file):
     credentials = read_credentials(credentials_file, "postgres")
     if set(credentials) - {"host", "port", "dbname", "user", "password", "sslmode"}:
         raise ValueError("Unsupported database connection field")
-    return psycopg.connect(**credentials, connect_timeout=5, autocommit=autocommit)
+    return psycopg.connect(**credentials, connect_timeout=5)
 
 
 def _digest(path):

@@ -210,10 +210,12 @@ def _read(idx, directory, batch_id, ip_rows):
 def _store(runs, credentials_file):
     """Store read runs in one transaction and three round trips: the lock with the reads under it,
     every statement of the batch, the scope totals with COMMIT."""
-    with connect(credentials_file, autocommit=True) as conn, conn.pipeline() as pipeline:
+    conn = connect(credentials_file)
+    conn.autocommit = True  # BEGIN below: psycopg's own would take a round trip in pipeline mode
+    with conn, conn.pipeline() as pipeline:
         # Serialize ingestion; measurements and website reads run independently.
         # The entire history/enrichment/cache update commits together.
-        conn.execute("BEGIN")  # psycopg's own BEGIN would take a round trip in pipeline mode
+        conn.execute("BEGIN")
         conn.execute("SELECT pg_advisory_xact_lock(817452901)")
         version = conn.execute("SELECT max(version) FROM schema_versions")
         stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
@@ -254,8 +256,7 @@ def _read_all(directories, batch_ids, ip_rows):
     if len(batch_ids) != len(directories):
         raise ValueError("Give one batch id per run directory")
     pairs = enumerate(zip(directories, batch_ids, strict=True))
-    runs = [_read(n, directory, batch_id, ip_rows) for n, (directory, batch_id) in pairs]
-    return runs
+    return [_read(n, directory, batch_id, ip_rows) for n, (directory, batch_id) in pairs]
 
 
 def ingest_many(directories, credentials_file, *, batch_ids=None, ip_rows=True):

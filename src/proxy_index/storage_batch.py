@@ -17,9 +17,8 @@ POOL = (
     "proxy_protocol gateway_host gateway_port adapter adapter_version account_pool parameters "
     "session_policy ttl_seconds extra_flags extra"
 ).split()
-# Rows fill each table's leading columns. incoming_runs takes its types from the tables its rows
-# go to; upsert_scopes fills product_id, pool_id and scope_id, insert_runs run_key. A report to
-# add (incoming_releases) has the run_key of a stored run, a new one's after insert_runs.
+# Rows fill each table's leading columns; incoming_runs takes its types from the tables its rows
+# go to. A report to add has the run_key of a stored run, a new one's after insert_runs.
 TABLES = {
     "incoming_runs": "ON COMMIT DROP AS SELECT 0 AS idx,t.run_id,t.started_at,t.finished_at,"
     "t.status,t.summary_sha256,t.summary,t.batch_id,p.provider,p.name AS product,s.scope_hash,"
