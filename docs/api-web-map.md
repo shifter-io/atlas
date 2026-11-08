@@ -2086,7 +2086,9 @@ Data cadence: section 14.
 ## 11. Gap index by work item
 
 Every `missing` and `exists-but-different-shape` row of sections 1 to 9, grouped by the API change
-that closes it. Gap IDs are the ones in each page's "Gaps summary". Each work item is computed
+that closes it. Gap IDs are the ones in each page's "Gaps summary". `docs/api-web-map-gaps.json`
+lists every gap ID with the class this section, section 12 or section 13 gives it, and for an API
+gap the requests and fields that show it closed (`siteapi bench --gaps`, `api/README.md`). Each work item is computed
 once per build, from data the build already reads, and served from memory like every other
 answer; only W9 reads the database per refresh, from a summary table kept on insert.
 
