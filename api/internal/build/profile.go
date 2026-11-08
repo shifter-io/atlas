@@ -71,6 +71,10 @@ type ChartAnswer struct {
 	Latency      []model.LatencyPoint `json:"latency"`
 	Pool         []model.SeriesPoint  `json:"pool"`
 	Bands        []IncidentBand       `json:"bands"`
+	// LatencyUnderLoad is the latency under load per bucket (every-request
+	// snapshots; null points elsewhere).
+	LatencyUnderLoad []model.LatencyPoint `json:"latencyUnderLoad"`
+	Labels           HistoryLabels        `json:"labels"`
 }
 
 func networkProfile(p *model.Provider, kind string) *NetworkProfile {
@@ -100,8 +104,10 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 		ans.Changelog, ans.Tape = newest(d.Changelog), newest(d.Tape)
 		ans.Records = RecordCounts{Reviews: len(d.Reviews), CommunityRuns: len(d.CommunityRuns), Changelog: len(d.Changelog), Tape: len(d.Tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
-			pg.Charts[key+"/"+rangeID] = &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
-				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands}
+			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
+				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
+			c.label()
+			pg.Charts[key+"/"+rangeID] = c
 			ans.Stats[rangeID] = &RangeStats{WindowStats: ws}
 		}
 	}
@@ -132,7 +138,8 @@ func newest[T any](rows []T) []T {
 func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 	for _, r := range Ranges {
 		c := &ChartAnswer{GeneratedAt: generatedAt, Network: AllNetworks, Kind: AllNetworks, Range: r.ID, Success: []model.SeriesPoint{},
-			Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}, Bands: []IncidentBand{}}
+			Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}, Bands: []IncidentBand{},
+			LatencyUnderLoad: []model.LatencyPoint{}}
 		if f := fleetAll(s, r.ID); f != nil {
 			ref := snap.Ms(s.AsOf)
 			for _, row := range f.Series {
@@ -145,6 +152,7 @@ func (pg *Pages) allCharts(generatedAt string, s *snap.Snapshot) {
 				c.Pool = append(c.Pool, model.SeriesPoint{T: t, V: row.UniqueIps})
 			}
 		}
+		c.label()
 		pg.Charts[AllNetworks+"/"+AllNetworks+"/"+r.ID] = c
 	}
 }

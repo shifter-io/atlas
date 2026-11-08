@@ -188,6 +188,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 		UniqueIps: ipsOf(w), ChurnRate: w.Pool.ChurnRate, RecurringShare: w.Pool.RecurringShare,
 		Requests: m.Completed, BandwidthMb: nan, CostPer1kSuccess: wireCostPer1k(listRate(p.Pricing), m), UptimePct: uptime, DowntimeMinutes: weightedDowntimeMinutes(w.Uptime),
 		IncidentCount: nan, Bands: []IncidentBand{}, Success: []model.SeriesPoint{}, Availability: []model.SeriesPoint{}, Latency: []model.LatencyPoint{}, Pool: []model.SeriesPoint{}}
+	ws.WindowFigures = windowFigures(sp, w, rangeID, ws)
 	// Outages (snapshot v2) shade the charts and count as incidents; uptime
 	// and downtime stay the framework's own time-based figures.
 	if sp.Outages != nil {
@@ -202,6 +203,7 @@ func measuredWindowStats(p *model.Provider, sp *snap.Product, rangeID string, me
 		ws.Latency = append(ws.Latency, model.LatencyPoint{T: t, P50: l.P50, P90: l.P90, P99: l.P99})
 	}
 	ws.Pool = ipPoints(w, rangeID, w.Series, age)
+	ws.UnderLoad = underLoadSeries(w, age)
 	return ws
 }
 
@@ -214,8 +216,9 @@ func published24hStats(p *model.Provider, meta RangeMeta, av availability) *Wind
 		LatencyDeltaPct: p.Performance.LatencyDelta24h, UniqueIps: p.Pool.UniqueIps24h, ChurnRate: p.Pool.ChurnRate,
 		RecurringShare: nan, Requests: p.Performance.Requests24h, BandwidthMb: p.Performance.BandwidthMb24h,
 		CostPer1kSuccess: p.Pricing.CostPer1kSuccess, UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
-		IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(p.Series.Success24h), Availability: incidentAvailabilitySeries(p.Incidents, meta.Days),
-		Latency: nonNilLatency(p.Series.Latency24h), Pool: nonNilSeries(p.Series.UniqueIps24h)}
+		IncidentCount: Num(av.incidentCount), WindowFigures: noFigures(), Bands: av.bands, Success: nonNilSeries(p.Series.Success24h),
+		Availability: incidentAvailabilitySeries(p.Incidents, meta.Days), Latency: nonNilLatency(p.Series.Latency24h), Pool: nonNilSeries(p.Series.UniqueIps24h),
+		UnderLoad: []model.LatencyPoint{}}
 }
 
 // publishedWindowStats is a longer range's stats of a provider without a
@@ -255,7 +258,8 @@ func publishedWindowStats(p *model.Provider, meta RangeMeta, av availability) *W
 		RecurringShare: recurringShareAt(p.Pool.RecurringShare.F(), days),
 		Requests:       p.Performance.Requests24h * Num(days), BandwidthMb: Num(jsnum.FixedNum(p.Performance.BandwidthMb24h.F()*float64(days), 1)),
 		CostPer1kSuccess: Num(cost), UptimePct: Num(av.uptimePct), DowntimeMinutes: Num(av.downtimeMinutes),
-		IncidentCount: Num(av.incidentCount), Bands: av.bands, Success: nonNilSeries(success), Availability: incidentAvailabilitySeries(p.Incidents, meta.Days), Latency: lat, Pool: nonNilSeries(pool)}
+		IncidentCount: Num(av.incidentCount), WindowFigures: noFigures(), Bands: av.bands, Success: nonNilSeries(success),
+		Availability: incidentAvailabilitySeries(p.Incidents, meta.Days), Latency: lat, Pool: nonNilSeries(pool), UnderLoad: []model.LatencyPoint{}}
 }
 
 func incidentAvailabilitySeries(incidents []model.Incident, days int) []model.SeriesPoint {
