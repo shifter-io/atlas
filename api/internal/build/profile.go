@@ -27,13 +27,18 @@ type NetworkProfile struct {
 	Website         model.Str               `json:"website"`
 	Products        []model.ProviderProduct `json:"products"`
 	MeasuredProduct string                  `json:"measuredProduct"`
-	Score           model.ScoreView         `json:"score"`
-	Reviews         model.ReviewSummary     `json:"reviews"`
-	Framework       *model.FrameworkLink    `json:"framework"`
+	Score           ProfileScore            `json:"score"`
+	// Reviews summarises the category's reviews (the answer's reviews).
+	Reviews   ProfileReviews       `json:"reviews"`
+	Framework *model.FrameworkLink `json:"framework"`
+	// Schedule is the schedule part of the generated tagline (what the
+	// category is measured on); null when it is not measured.
+	Schedule model.Str `json:"schedule"`
+	Protocol Protocol  `json:"protocol"`
 	// The category's measured blocks (Provider.productMeasurements.<kind>).
 	Pool        model.PoolStats         `json:"pool"`
 	Performance model.PerformanceStats  `json:"performance"`
-	Pricing     model.Pricing           `json:"pricing"`
+	Pricing     ProfilePricing          `json:"pricing"`
 	Trust       model.TrustSignals      `json:"trust"`
 	Targets     []model.TargetBenchmark `json:"targets"`
 	IPSamples   []model.IPSample        `json:"ipSamples"`
@@ -48,9 +53,15 @@ type NetworkProfile struct {
 }
 
 // RangeStats is a range's WindowStats without its histories, which are the
-// chart answer's (the five shadowing fields are always nil, so omitted).
+// chart answer's (the five shadowing fields are always nil, so omitted), with
+// the network's ranks among its kind, its alternative and its claim share.
 type RangeStats struct {
 	*WindowStats
+	Ranks       RangeRanks   `json:"ranks"`
+	Alternative *Alternative `json:"alternative"`
+	// ClaimShare is the range's unique IPs ÷ the claimed pool size (null
+	// without a claimed size).
+	ClaimShare   Num       `json:"claimShare"`
 	Success      *struct{} `json:"success,omitempty"`
 	Availability *struct{} `json:"availability,omitempty"`
 	Latency      *struct{} `json:"latency,omitempty"`
@@ -84,15 +95,15 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 	}
 	return &NetworkProfile{Source: p.Source, Slug: p.Slug, Name: p.Name, Tagline: p.Tagline, Kinds: p.Kinds, PrimaryKind: p.PrimaryKind,
 		HQ: p.HQ, Founded: p.Founded, Claim: p.Claim, Verdict: p.Verdict, Strengths: p.Strengths, Weaknesses: p.Weaknesses,
-		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: p.Score,
-		Reviews: p.Reviews, Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: m.Pricing, Trust: m.Trust,
+		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
+		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
 		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
 		TileRanks: p.TileRanks[kind], NA: p.NA}
 }
 
 // addDetails completes every network answer with its profile, its window
-// statistics without their histories, and its records, and adds a chart
-// answer per range holding those histories.
+// statistics without their histories, and its records of the answer's kind,
+// and adds a chart answer per range holding those histories.
 func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDetail) {
 	for key, ans := range pg.Network {
 		d := details[ans.Network.Slug]
@@ -100,15 +111,19 @@ func (pg *Pages) addDetails(generatedAt string, details map[string]*ProviderDeta
 			continue
 		}
 		ans.Profile = networkProfile(d.Provider, ans.Kind)
-		ans.Reviews, ans.CommunityRuns = newest(d.Reviews), newest(d.CommunityRuns)
-		ans.Changelog, ans.Tape = newest(d.Changelog), newest(d.Tape)
-		ans.Records = RecordCounts{Reviews: len(d.Reviews), CommunityRuns: len(d.CommunityRuns), Changelog: len(d.Changelog), Tape: len(d.Tape)}
+		reviews := ofKind(d.Reviews, ans.Kind, func(r model.UserReview) string { return r.Product })
+		runs := ofKind(d.CommunityRuns, ans.Kind, func(r model.CommunityRun) string { return r.Product })
+		tape := ofKind(d.Tape, ans.Kind, func(r model.TapeEvent) string { return r.Product })
+		ans.Profile.Reviews = profileReviews(d.Provider.Slug, reviews)
+		ans.Reviews, ans.CommunityRuns = newest(reviews), newest(runs)
+		ans.Changelog, ans.Tape = newest(d.Changelog), newest(tape)
+		ans.Records = RecordCounts{Reviews: len(reviews), CommunityRuns: len(runs), Changelog: len(d.Changelog), Tape: len(tape)}
 		for rangeID, ws := range d.Windows[ans.Kind] {
 			c := &ChartAnswer{GeneratedAt: generatedAt, Network: ans.Network.Slug, Kind: ans.Kind, Range: rangeID,
 				Success: ws.Success, Availability: ws.Availability, Latency: ws.Latency, Pool: ws.Pool, Bands: ws.Bands, LatencyUnderLoad: ws.UnderLoad}
 			c.label()
 			pg.Charts[key+"/"+rangeID] = c
-			ans.Stats[rangeID] = &RangeStats{WindowStats: ws}
+			ans.Stats[rangeID] = &RangeStats{WindowStats: ws, Ranks: noRanks(), ClaimShare: claimShare(ws.UniqueIps, ans.Profile.Pool.ClaimedPoolSize)}
 		}
 	}
 }

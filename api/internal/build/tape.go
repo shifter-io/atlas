@@ -339,6 +339,18 @@ func describeIPOverlap(f *tapeFacts) tapeText {
 
 var tapeCategory = map[string]string{"census": "census", "pulse": "pulse", "incident": "incident", "audit": "audit"}
 
+// tapeEvents renames the raw event kinds no answer may print as they are: an
+// hour's release reads as an hourly update (API-ESTIMATES-1); every other kind
+// is published as it is.
+var tapeEvents = map[string]string{"estimate_hour_released": "hour_released"}
+
+func tapeEvent(kind string) string {
+	if name, ok := tapeEvents[kind]; ok {
+		return name
+	}
+	return kind
+}
+
 func tapeKind(e *store.EventJSON, products []TapeProduct) string {
 	if _, suffix, ok := strings.Cut(e.Product, "/"); ok && model.IsProxyKind(suffix) {
 		return suffix
@@ -397,7 +409,7 @@ func TapeFromEvents(events []store.EventJSON, products []TapeProduct, generatedA
 			}
 		}
 		at := e.At
-		out = append(out, model.TapeEvent{ID: "event-" + jsnum.ToFixed(float64(e.ID), 0), Kind: kind, ProviderSlug: slug,
+		out = append(out, model.TapeEvent{ID: "event-" + jsnum.ToFixed(float64(e.ID), 0), Kind: kind, Event: tapeEvent(e.Kind), ProviderSlug: slug,
 			ProviderName: providerName, Product: tapeKind(e, products), Title: text.title, Detail: detail,
 			Signal: Num(e.Signal), Value: text.value, AgoSeconds: Num(ago), At: &at, Source: model.SourceMeasured, NA: []string{}})
 	}

@@ -127,7 +127,6 @@ func scoreView(score snap.Score) model.ScoreView {
 // what is really still missing.
 func writeMeasuredCopy(mv *measuredView, p *snap.Product, score snap.Score) {
 	w := p.Window("30d")
-	m := w.Metrics
 	census := productCensus(p)
 	pulses := 0.0
 	if w.Uptime != nil && w.Uptime.Batches.OK() {
@@ -136,14 +135,7 @@ func writeMeasuredCopy(mv *measuredView, p *snap.Product, score snap.Score) {
 	mv.Verdict = verdict(w, census, score)
 	mv.Strengths = strengths(w, census)
 	mv.Weaknesses = weaknesses(p, w, pulses)
-	switch {
-	case m.EveryRequest():
-		mv.Tagline = model.KindLabels[mv.Kind] + " proxies · measured on a census, pulse and load schedule"
-	case census != nil || pulses > 0:
-		mv.Tagline = model.KindLabels[mv.Kind] + " proxies · measured on a census and pulse schedule"
-	default:
-		mv.Tagline = model.KindLabels[mv.Kind] + " proxies · measured HTTP pool sample"
-	}
+	mv.Tagline = model.KindLabels[mv.Kind] + " proxies · " + measuredSchedule(p)
 }
 
 func verdict(w snap.Window, census *censusTotals, score snap.Score) string {
