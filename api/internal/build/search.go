@@ -3,13 +3,16 @@ package build
 import (
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/jsnum"
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
-// SearchItem is src/lib/search.ts SearchItem; every field is always written.
+// SearchItem is one palette item, with pi-palette.tsx's ids (net:, page:,
+// target:, act:); every field is always written. Command is what the website
+// runs instead of following Href, and Download marks a file to download.
 type SearchItem struct {
 	ID       string  `json:"id"`
 	Group    string  `json:"group"`
@@ -25,89 +28,92 @@ type SearchItem struct {
 	lowTitle, lowSubtitle, lowKeywords string
 }
 
-// SearchIndex is /v1/search-index.
+// SearchIndex is /v1/search-index: the server half of the website's
+// palette (pi-palette.tsx). Sections and guides stay website-local; the
+// website merges its own items with these.
 type SearchIndex struct {
-	GeneratedAt      string         `json:"generatedAt"`
-	Items            []SearchItem   `json:"items"`
-	StartingPointIDs []string       `json:"startingPointIds"`
-	TopNetworkIDs    []string       `json:"topNetworkIds"`
-	GroupBonus       map[string]int `json:"groupBonus"`
-	MaxResults       int            `json:"maxResults"`
-	PerGroup         int            `json:"perGroup"`
-	byID             map[string]*SearchItem
+	GeneratedAt   string         `json:"generatedAt"`
+	Items         []SearchItem   `json:"items"`
+	TopNetworkIDs []string       `json:"topNetworkIds"`
+	GroupBonus    map[string]int `json:"groupBonus"`
+	PerGroup      int            `json:"perGroup"`
+	byID          map[string]*SearchItem
 }
 
-// GroupBonus, MaxResults and PerGroup are CommandPalette.astro's constants;
-// Countries is new in the API index. The index has no articles (guides and
-// network reviews), so there is no Guides group.
-var GroupBonus = map[string]int{"Networks": 6, "Pages": 3, "Targets": 2, "Countries": 2, "Actions": 1}
+// GroupBonus and PerGroup are pi-palette.tsx's GROUP_BONUS and PER_GROUP,
+// with its Sections and Guides groups, whose items the website adds. The
+// palette has no cap on the results beyond PerGroup.
+var GroupBonus = map[string]int{"Networks": 6, "Pages": 5, "Sections": 3, "Guides": 2, "Targets": 2, "Actions": 1}
 
 const (
-	MaxResults = 16
-	PerGroup   = 5
+	PerGroup = 5
+	// topNetworks is the palette's "Top networks" before typing.
+	topNetworks = 5
+	// searchRanking is the ranking the palette's networks come from: the
+	// residential networks (pi-data.ts MEASURED) of the 30-day leaderboard.
+	searchRanking = "30d/residential"
 )
 
-// startingPointIDs drops the palette's action:dataset, which downloaded the
-// old website's demo file (/data/design-preview.json).
-var startingPointIDs = []string{"page:/networks", "page:/compare", "page:/overlap", "page:/pricing"}
+type pageItem struct{ path, title, subtitle, icon, keywords string }
 
-type navItem struct{ href, label, icon, match string }
-type navGroup struct {
-	name  string
-	items []navItem
-}
-
-// navGroups is src/lib/nav.ts NAV_GROUPS with the English labels of src/i18n/ui/en.ts,
-// without the pages only the old website had: Guides (its articles),
-// Contribute (its run submission form) and Disclosure (its editorial page).
-var navGroups = []navGroup{
-	{"Measure", []navItem{{"/", "Overview", "grid", "overview"}, {"/networks", "Networks", "server", "networks"}, {"/compare", "Compare", "scale", "compare"}, {"/overlap", "Pool overlap", "percent", "overlap"}, {"/pricing", "True cost", "tag", "pricing"}}},
-	{"Method", []navItem{{"/targets", "Targets", "flag", "targets"}, {"/methodology", "Methodology", "beaker", "methodology"}}},
-	{"Record", []navItem{{"/changelog", "What changed", "clock", "changelog"}}},
-}
-
-func pageBlurbs(targets int) map[string]string {
-	return map[string]string{
-		"overview":    "Fleet-wide headline numbers and the live request tape",
-		"networks":    "Every measured network, ranked by MILF Score",
-		"compare":     "Put two networks side by side on the same run",
-		"overlap":     "How much of each pool turns up inside a rival network",
-		"pricing":     "Dollars per 1,000 successful requests, not sticker price",
-		"targets":     "The " + jsnum.Locale(float64(targets)) + " endpoints every network is tested against",
-		"methodology": "Scoring formula, request schedule and window",
-		"changelog":   "What moved since the previous run",
-	}
+// pages are pi-palette.tsx PAGES, the Proxy Index pages the API serves; the
+// editorial ones (alternatives, guides, changelog, contribute, disclosure)
+// stay website-local.
+var pages = []pageItem{
+	{"/proxy-index", "Overview", "Rankings, market figures and the live dashboard", "gauge", "home index dashboard market leaderboard ranking rankings score best top"},
+	{"/proxy-index/networks", "Networks", "Every network in the Index, filtered and sorted", "layout-grid", "providers directory list all reviews profiles"},
+	{"/proxy-index/compare", "Compare", "Up to four networks side by side", "columns-3", "comparison side by side vs versus"},
+	{"/proxy-index/overlap", "Pool overlap", "Which networks share the same IPs", "layers", "shared pool resellers reseller exclusive exclusivity ips duplicate"},
+	{"/proxy-index/true-cost", "True cost", "The price of 1,000 successful requests", "coins", "price pricing per gb gigabyte success retries retry bill budget money cheap expensive"},
+	{"/proxy-index/live-tape", "Live tape", "Test events as they land", "activity", "feed events realtime real time incidents stream json"},
+	{"/proxy-index/methodology", "Methodology", "How every network is tested and scored", "flask-conical", "method how we test testing latency speed success rate score scoring index score weights benchmark p50 p99 pipeline reproduce limits"},
+	{"/proxy-index/targets", "Targets", "Success rate on each test website", "crosshair", "websites sites success by website difficulty anti bot hard"},
 }
 
 func sp(s string) *string { return &s }
 
-var actions = []SearchItem{
-	{ID: "action:apply", Group: "Actions", Title: "List your proxy network", Subtitle: "Apply to be measured and published", Href: "#", Icon: "plus", Keywords: "submit apply listing add provider vendor join measure register signup sign up", Command: sp("apply")},
-	{ID: "action:theme", Group: "Actions", Title: "Toggle dark / light theme", Subtitle: "Switch the colour scheme for this browser", Href: "#", Icon: "moon", Keywords: "dark light appearance colour color scheme contrast", Command: sp("theme")},
-	{ID: "action:copy", Group: "Actions", Title: "Copy link to this page", Subtitle: "Puts the current URL on the clipboard", Href: "#", Icon: "copy", Keywords: "share url clipboard permalink", Command: sp("copy")},
+// actions are pi-palette.tsx's dataset and range actions. A range action's
+// command is "range:<r>", which the website runs on a page with windowed
+// figures; its href is the home, the first such page.
+func actions() []SearchItem {
+	items := []SearchItem{{ID: "act:dataset", Group: "Actions", Title: "Download the dataset", Subtitle: "Every figure in the Index, as JSON",
+		Href: "/proxy-index/dataset.json", Icon: "download", Keywords: terms("download export json data dataset api"), Download: true}}
+	titles := map[string]string{"24h": "Show the last 24 hours", "7d": "Show the last 7 days", "30d": "Show the last 30 days"}
+	for _, r := range Ranges {
+		items = append(items, SearchItem{ID: "act:range:" + r.ID, Group: "Actions", Title: titles[r.ID], Subtitle: "Measurement window for every figure",
+			Href: "/proxy-index", Icon: "calendar-range", Keywords: terms("range window period time day days week month", r.ID), Command: sp("range:" + r.ID)})
+	}
+	return items
 }
 
-func dash(s string) string  { return strings.ReplaceAll(s, "-", " ") }
-func under(s string) string { return strings.ReplaceAll(s, "_", " ") }
+// terms is pi-palette.tsx terms(): the parts lowercased, every run of
+// characters that are not letters or digits one space.
+func terms(parts ...string) string {
+	f := func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) }
+	return strings.Join(strings.FieldsFunc(strings.ToLower(strings.Join(parts, " ")), f), " ")
+}
 
-// buildSearchIndex ports search.ts buildSearchIndex (English paths) without
-// its articles (guides and network reviews), plus a Countries group built from
-// where measured exits were seen.
-func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta, generatedAt string) *SearchIndex {
-	idx := &SearchIndex{GeneratedAt: generatedAt, StartingPointIDs: startingPointIDs, GroupBonus: GroupBonus, MaxResults: MaxResults, PerGroup: PerGroup, TopNetworkIDs: []string{}}
+// buildSearchIndex is the palette's networks (the residential ranking's
+// rows), the Proxy Index pages, the card targets and the actions. Item text
+// is English; the website translates it by item id.
+func buildSearchIndex(networks []RankingRow, targets []model.TargetMeta, generatedAt string) *SearchIndex {
+	idx := &SearchIndex{GeneratedAt: generatedAt, GroupBonus: GroupBonus, PerGroup: PerGroup, TopNetworkIDs: []string{}}
 	items := []SearchItem{}
-	for i, p := range leaderboard {
-		if i < 5 {
-			idx.TopNetworkIDs = append(idx.TopNetworkIDs, "network:"+p.Slug)
+	for i, row := range networks {
+		if i < topNetworks {
+			idx.TopNetworkIDs = append(idx.TopNetworkIDs, "net:"+row.Slug)
 		}
-		items = append(items, networkItem(p))
+		items = append(items, networkItem(row))
 	}
-	items = append(items, pageItems(len(targets))...)
+	for _, p := range pages {
+		items = append(items, SearchItem{ID: "page:" + p.path, Group: "Pages", Title: p.title, Subtitle: p.subtitle, Href: p.path, Icon: p.icon, Keywords: terms(p.keywords)})
+	}
 	for _, t := range targets {
-		items = append(items, targetItem(t))
+		if isCard(t) {
+			items = append(items, targetItem(t))
+		}
 	}
-	items = append(items, countryItems(leaderboard)...)
-	items = append(items, actions...)
+	items = append(items, actions()...)
 	idx.byID = map[string]*SearchItem{}
 	for i := range items {
 		it := &items[i]
@@ -118,117 +124,29 @@ func buildSearchIndex(leaderboard []*model.Provider, targets []model.TargetMeta,
 	return idx
 }
 
-func networkItem(p *model.Provider) SearchItem {
-	// The network's standing (every-request.ts kindStanding): a measured
-	// network alone in its kind with a ready score is "#1 of 1 in its kind".
-	rank := p.Score.KindStanding()
-	composite := jsnum.NA // format.ts fixed()
-	if p.Score.Composite.OK() {
-		composite = jsnum.ToFixed(p.Score.Composite.F(), 1)
+// networkItem is a palette network: its tagline, and the meta "score · #rank"
+// with the rank of its standing (W2), or "Unranked". The website draws a
+// monogram, so it has no icon.
+func networkItem(row RankingRow) SearchItem {
+	score := jsnum.NA // format.ts fixed()
+	if row.Score.OK() {
+		score = jsnum.ToFixed(row.Score.F(), 1)
 	}
-	hq := jsnum.NA
-	if p.HQ != nil {
-		hq = *p.HQ
+	rank := "Unranked"
+	if row.Standing.Rank.OK() {
+		rank = "#" + jsnum.ToFixed(row.Standing.Rank.F(), 0)
 	}
-	grade := jsnum.NA
-	if p.Score.Grade != nil {
-		grade = *p.Score.Grade
-	}
-	kw := []string{dash(p.Slug), model.SV(p.Tagline), "grade " + grade}
-	for _, k := range p.Kinds {
-		kw = append(kw, model.KindLabels[k])
-	}
-	kw = append(kw, p.BestFor...)
-	for i, g := range p.Geo {
-		if i >= 8 {
-			break
-		}
-		kw = append(kw, model.SV(g.Country))
-	}
-	return SearchItem{ID: "network:" + p.Slug, Group: "Networks", Title: p.Name,
-		Subtitle: model.KindLabels[p.PrimaryKind] + " · " + model.ProductLabels[p.MeasuredProduct] + " · " + hq,
-		Href:     "/networks/" + p.Slug, Icon: "server", Meta: sp(rank + " · " + composite), Keywords: strings.Join(kw, " ")}
+	return SearchItem{ID: "net:" + row.Slug, Group: "Networks", Title: row.Name, Subtitle: model.SV(row.Tagline),
+		Href: "/proxy-index/networks/" + row.Slug, Meta: sp(score + " · " + rank), Keywords: terms(row.Slug, row.Name)}
 }
 
-func pageItems(targets int) []SearchItem {
-	items := []SearchItem{}
-	blurbs := pageBlurbs(targets)
-	for _, g := range navGroups {
-		for _, it := range g.items {
-			sub, ok := blurbs[it.match]
-			if !ok {
-				sub = g.name
-			}
-			items = append(items, SearchItem{ID: "page:" + it.href, Group: "Pages", Title: it.label, Subtitle: sub, Href: it.href, Icon: it.icon, Keywords: g.name + " " + it.match})
-		}
-	}
-	return items
-}
-
+// targetItem is a card target: its catalog summary, else its pass condition
+// (the catalog has no summary today), linking to its card on the targets page.
 func targetItem(t model.TargetMeta) SearchItem {
-	meta := sp("difficulty " + jsnum.NA + "/5")
-	if t.Difficulty.OK() {
-		meta = sp("difficulty " + jsnum.ToFixed(t.Difficulty.F(), 0) + "/5")
-	}
-	cat, pass := jsnum.NA, jsnum.NA
-	if t.Category != nil {
-		cat = *t.Category
-	}
-	if t.PassCondition != nil {
-		pass = *t.PassCondition
-	}
-	return SearchItem{ID: "target:" + t.ID, Group: "Targets", Title: model.SV(t.Label), Subtitle: cat + " · " + pass,
-		Href: "/targets", Icon: "flag", Meta: meta, Keywords: under(t.ID) + " test target endpoint"}
-}
-
-// searchCountry is one country with exits in at least one network.
-type searchCountry struct {
-	code, name string
-	networks   []string
-	ips        float64
-}
-
-// searchCountries gathers every country with exits in at least one network.
-func searchCountries(leaderboard []*model.Provider) map[string]*searchCountry {
-	countries := map[string]*searchCountry{}
-	for _, p := range leaderboard {
-		for _, g := range p.Geo {
-			c := countries[g.CountryCode]
-			if c == nil {
-				c = &searchCountry{code: g.CountryCode, name: model.SV(g.Country)}
-				countries[g.CountryCode] = c
-			}
-			c.networks = append(c.networks, p.Name)
-			if g.Ips.OK() {
-				c.ips += g.Ips.F()
-			}
-		}
-	}
-	return countries
-}
-
-// countryItems is the Countries group, sorted by country code.
-func countryItems(leaderboard []*model.Provider) []SearchItem {
-	countries := searchCountries(leaderboard)
-	codes := make([]string, 0, len(countries))
-	for code := range countries {
-		codes = append(codes, code)
-	}
-	sort.Strings(codes)
-	items := make([]SearchItem, 0, len(codes))
-	for _, code := range codes {
-		c := countries[code]
-		n := float64(len(c.networks))
-		word := "networks"
-		if n == 1 {
-			word = "network"
-		}
-		items = append(items, SearchItem{ID: "country:" + code, Group: "Countries", Title: c.name,
-			Subtitle: jsnum.Locale(n) + " " + word + " with exits here · " + jsnum.Locale(c.ips) + " exit IPs",
-			Href:     "/networks?country=" + code, Icon: "globe", Meta: sp(code),
-			Keywords: strings.ToLower(code) + " country geo exits " + strings.Join(c.networks, " ")})
-	}
-	return items
+	sub := model.SV(t.PassCondition)
+	return SearchItem{ID: "target:" + t.ID, Group: "Targets", Title: model.SV(t.Label), Subtitle: sub,
+		Href: "/proxy-index/targets#" + t.ID, Icon: "crosshair",
+		Keywords: terms(model.SV(t.Label), model.SV(t.Category), sub, t.ID, "target website site")}
 }
 
 // looseMatch is the palette's dropped-letter match, on runes.
@@ -246,7 +164,7 @@ func looseMatch(needle, haystack []rune) bool {
 		}
 		i++
 		if i == len(needle) {
-			return at-start < len(needle)*3
+			return at-start < len(needle)*2
 		}
 	}
 	return false
@@ -274,10 +192,10 @@ func (it *SearchItem) score(tokens []string) int {
 			total += 120
 		case at > 0:
 			total += 90 - min(at, 40)
+		case startsWord(it.lowKeywords, t):
+			total += 55
 		case strings.Contains(it.lowSubtitle, t):
 			total += 45
-		case startsWord(it.lowKeywords, t):
-			total += 30
 		case looseMatch([]rune(t), []rune(it.lowTitle)):
 			total += 18
 		default:
@@ -306,33 +224,19 @@ func Tokens(q string) []string {
 	return strings.Fields(strings.ToLower(q))
 }
 
-// Search ranks the index like CommandPalette.astro sectionsFor. An empty
-// query returns the palette's default sections (starting points, top networks).
+// Search ranks the index like pi-palette.tsx. An empty query returns the
+// palette's "Top networks"; its "Recent" and "Jump to" are website-local.
 func (idx *SearchIndex) Search(q string) SearchResult {
 	tokens := Tokens(q)
-	res := SearchResult{Query: q, Tokens: tokens}
+	res := SearchResult{Query: q, Tokens: tokens, Sections: []SearchSection{}}
 	if len(tokens) == 0 {
-		res.Sections, res.Total = idx.defaultSections()
+		if top := idx.itemsByID(idx.TopNetworkIDs); len(top) > 0 {
+			res.Sections, res.Total = []SearchSection{{Group: "Top networks", Items: top}}, len(top)
+		}
 	} else {
 		res.Sections, res.Total = groupHits(idx.rankedHits(tokens))
 	}
 	return res
-}
-
-// defaultSections are the non-empty sections of an empty query and their item count.
-func (idx *SearchIndex) defaultSections() ([]SearchSection, int) {
-	sections, total := []SearchSection{}, 0
-	for _, s := range []struct {
-		label string
-		ids   []string
-	}{{"Jump to", idx.StartingPointIDs}, {"Top networks", idx.TopNetworkIDs}} {
-		sec := SearchSection{Group: s.label, Items: idx.itemsByID(s.ids)}
-		if len(sec.Items) > 0 {
-			sections = append(sections, sec)
-			total += len(sec.Items)
-		}
-	}
-	return sections, total
 }
 
 // itemsByID are the items of ids in order, skipping ids not in the index.
@@ -363,16 +267,13 @@ func (idx *SearchIndex) rankedHits(tokens []string) []searchHit {
 	return hits
 }
 
-// groupHits takes at most MaxResults hits, at most PerGroup per group, into
-// sections in the order their groups first appear, and returns their count.
+// groupHits takes at most PerGroup hits of each group into sections in the
+// order their groups first appear, and returns their count.
 func groupHits(hits []searchHit) ([]SearchSection, int) {
 	groups := []string{}
 	byGroup := map[string][]SearchItem{}
 	taken := 0
 	for _, h := range hits {
-		if taken >= MaxResults {
-			break
-		}
 		g := h.it.Group
 		if len(byGroup[g]) >= PerGroup {
 			continue

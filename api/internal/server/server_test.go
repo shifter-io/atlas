@@ -345,7 +345,7 @@ func TestSearchIsServedFromABoundedLRU(t *testing.T) {
 	if err := json.Unmarshal(r.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.Query != "alpha" || len(res.Sections) == 0 || res.Sections[0].Group != "Networks" || res.Sections[0].Items[0].ID != "network:alpha-net" {
+	if res.Query != "alpha" || len(res.Sections) == 0 || res.Sections[0].Group != "Networks" || res.Sections[0].Items[0].ID != "net:alpha-net" {
 		t.Fatalf("search result %+v", res)
 	}
 	v := s.Current()
@@ -368,7 +368,7 @@ func TestSearchIsServedFromABoundedLRU(t *testing.T) {
 		t.Fatal("unknown parameter accepted")
 	}
 	empty := get(h, "/v1/search")
-	if !strings.Contains(empty.Body.String(), `"Jump to"`) {
+	if !strings.Contains(empty.Body.String(), `"Top networks"`) {
 		t.Fatalf("empty query: %s", empty.Body.String())
 	}
 	// A new version starts with a fresh LRU.

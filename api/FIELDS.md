@@ -397,12 +397,12 @@ the website lived in the old `proxy-index-api` repository; it went with the webs
 8. **The tape is merged.** `Dataset.tape` holds the measured events from
    `public.test_events` first, then the editorial `site.tape_events` rows (what
    `LiveTape.astro` shows).
-9. **Search.** The meta of an unscored network is `"Unranked · N/A"`, and there is
-   a new `Countries` group. There are no articles: guides and network reviews are
-   not searched and `groupBonus` has no `Guides` group. The Pages group lists
-   no page only the old website had (`/guides`, `/contribute`, `/disclosure`), and
-   the old site's "Download the raw dataset" action (`/data/design-preview.json`)
-   is gone, from the items and from `startingPointIds`.
+9. **Search.** The index is the website palette's (`pi-palette.tsx`), not the
+   old site's: `net:` and `act:` ids, `/proxy-index/...` links, the residential
+   networks with their taglines, the card targets only, the Proxy Index pages,
+   the dataset and range actions. There is no `Countries` group, no apply, theme
+   or copy action, no `startingPointIds` and no `maxResults` (the palette caps
+   only each group).
 
 `measuredTotals` uses the same fields as `totals`, aggregated by the API over
 every provider without the record counts (with the demo fixtures gone, every
