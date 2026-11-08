@@ -3,18 +3,14 @@
 
 Usage:
   profile.py build --enrich <LC-ENRICH-1 out dir> --browser <BP-VERIFY-3 hours dir> \
-                   --out <profile.json> [--formulas formulas]
+                   [--browser <BP-VERIFY-4 hours dir>] --out <profile.json> [--formulas formulas]
   profile.py reference --database <toml> --runs <marker:<summary key> | batches:<id>-<id>> \
-                       --out <profile.json>
+                       --out <profile.json> [--basis real|modelled]
 
-`build` writes the profile (mode 600, profile_version 1) of every network with a formula
-(formulas/*.json): its hours, requests per IP, recurrence and places from the LC-ENRICH-1 hour
-files (profile_hours.py), its browser targets from BP-VERIFY-3's hour folders
-(profile_browser.py), the real_24h totals and the gaps. `reference` adds, per run kind (daily,
-browser), the selected runs' rows per table and bytes per run, read from the database in one
-read-only transaction (profile_reference.py); a later call replaces only the kinds it read.
-The output holds aggregate figures and DB-IP's public labels only: no IP, host name, credential
-or path. SIMULATE.md documents every field. The real profile is never committed or posted.
+`build` writes the profile (mode 600) from the hour files (profile_hours.py) and the browser
+hour folders (profile_browser.py); `reference` adds the database's sizes per run kind
+(profile_reference.py). Aggregates and DB-IP labels only, never an IP, host name or path;
+SIMULATE.md documents every field. The real profile is never committed or posted.
 """
 
 from __future__ import annotations
@@ -71,7 +67,7 @@ def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]
     return entries, totals, gaps
 
 
-def build(enrich: Path, browser: Path, out: Path, formulas: Path = FORMULAS) -> dict:
+def build(enrich: Path, browser: list[Path], out: Path, formulas: Path = FORMULAS) -> dict:
     wanted = networks(formulas)
     entries, totals, gaps = enrich_part(enrich, wanted)
     targets, browser_totals, browser_gaps = profile_browser.profile(browser, wanted)
@@ -88,13 +84,15 @@ def build(enrich: Path, browser: Path, out: Path, formulas: Path = FORMULAS) -> 
     return profile
 
 
-def reference(database: Path, runs: str, out: Path) -> dict:
+def reference(database: Path, runs: str, out: Path, basis: str = "real") -> dict:
     profile = json.loads(out.read_bytes()) if out.exists() else {"profile_version": 1}
     if profile.get("profile_version") != PROFILE_VERSION:
         raise ProfileError(f"profile_version {profile.get('profile_version')!r} is not 1")
     entries = profile_reference.read(database, runs)
     if not entries:
         raise ProfileError(f"--runs {runs!r}: no daily or browser run")
+    for entry in entries.values():
+        entry["basis"] = basis  # modelled: runs ingested from a modelled bundle, not real ones
     profile.setdefault("reference", {}).update(entries)
     write(out, profile)
     return entries
@@ -105,20 +103,21 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     built = commands.add_parser("build")
     built.add_argument("--enrich", type=Path, required=True)
-    built.add_argument("--browser", type=Path, required=True)
+    built.add_argument("--browser", type=Path, action="append", required=True)
     built.add_argument("--out", type=Path, required=True)
     built.add_argument("--formulas", type=Path, default=FORMULAS)
     referenced = commands.add_parser("reference")
     referenced.add_argument("--database", type=Path, required=True)
     referenced.add_argument("--runs", required=True)
     referenced.add_argument("--out", type=Path, required=True)
+    referenced.add_argument("--basis", choices=("real", "modelled"), default="real")
     args = parser.parse_args(argv)
     try:
         if args.command == "build":
             profile = build(args.enrich, args.browser, args.out, args.formulas)
             done = f"{len(profile['networks'])} networks, {len(profile['gaps'])} gaps"
         else:
-            entries = reference(args.database, args.runs, args.out)
+            entries = reference(args.database, args.runs, args.out, args.basis)
             done = ", ".join(f"{kind}: {entry['runs']} runs" for kind, entry in entries.items())
     except (ProfileError, OSError, ValueError, psycopg.Error) as error:
         print(f"profile: {error}", file=sys.stderr)

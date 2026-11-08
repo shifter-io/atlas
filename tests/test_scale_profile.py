@@ -171,6 +171,14 @@ def browser_fixture(root: Path) -> None:
         (folder / "browser-1.json").write_text(json.dumps({"runs": [], "host": HOSTS[0]}))
 
 
+def second_source(root: Path) -> None:
+    """BP-VERIFY-4-like: a later batch in an hour folder of the same shape."""
+    folder = root / "2026-11-15T00"
+    folder.mkdir(parents=True)
+    runs = [run(20, "alpha", "linkedin_public", "done", 50, ok=5, bytes=50_000_000)]
+    (folder / "mgr.json").write_text(json.dumps({"hour": "x", "runs": runs}))
+
+
 @pytest.fixture
 def built(tmp_path, monkeypatch):
     monkeypatch.setattr(profile_hours, "TOP_PLACES", 2)
@@ -180,8 +188,10 @@ def built(tmp_path, monkeypatch):
         (formulas / f"{name}.json").write_text("{}")
     enrich_fixture(tmp_path / "enrich")
     browser_fixture(tmp_path / "hours")
+    second_source(tmp_path / "hours4")
     out = tmp_path / "profile.json"
     argv = ["build", "--enrich", str(tmp_path / "enrich"), "--browser", str(tmp_path / "hours")]
+    argv += ["--browser", str(tmp_path / "hours4")]
     assert profile.main([*argv, "--out", str(out), "--formulas", str(formulas)]) == 0
     return out
 
@@ -217,9 +227,9 @@ def test_hours_requests_per_ip_and_totals(built):
         "unique_ips_distinct": 9,
         "request_rows": 28,
         "attempted_requests": 37,
-        "browser_runs": 3,
-        "browser_tries": 250,
-        "browser_bytes_down": 500_000_000,
+        "browser_runs": 4,
+        "browser_tries": 300,
+        "browser_bytes_down": 550_000_000,
         "bundle_bytes_sampled": 3_500_000,
         "bundle_samples": 2,
     }
@@ -229,6 +239,11 @@ def test_hours_requests_per_ip_and_totals(built):
         "unique_ips_distinct": 1,
         "request_rows": 2,
         "attempted_requests": 23 * 50 + 5,
+        "browser_runs": 0,  # its one run never finished
+        "browser_tries": 0,
+        "browser_bytes_down": 0,
+        "bundle_bytes_sampled": 0,
+        "bundle_samples": 0,
     }
 
 
@@ -277,7 +292,12 @@ def test_places_top_tail_and_unmatched(built):
 
 def test_browser_targets_from_the_last_state_of_each_run(built):
     browser = json.loads(built.read_bytes())["networks"]["alpha"]["browser"]
-    assert set(browser) == {"amazon_pdp", "google_search"}
+    assert set(browser) == {"ai_chatgpt", "amazon_pdp", "google_search", "linkedin_public"}
+    assert browser["linkedin_public"][DEFAULT_ENGINE]["runs"] == 1  # from the second source
+    chatgpt = browser["ai_chatgpt"][DEFAULT_ENGINE]
+    assert chatgpt["runs"] == 0 and chatgpt["tries"]["count"] == 0
+    failed = {"runs": 1, "stored": 0, "test_runs": 0, "statuses": {"failed": 1}}
+    assert chatgpt["ingest"] == failed
     google = browser["google_search"][DEFAULT_ENGINE]
     assert google["runs"] == 1 and google["tries"]["p50"] == 100
     assert google["outcomes"] == {
@@ -293,6 +313,7 @@ def test_browser_targets_from_the_last_state_of_each_run(built):
         "unsplit": 5,
     }
     assert google["page_load_ms"] == {"p50": None, "p90": None}
+    assert google["ingest"] == {"runs": 1, "stored": 1, "test_runs": 1, "statuses": {"done": 1}}
     assert google["bytes_per_load"]["p50"] == 1_500_000
     assert google["bundle_bytes"]["count"] == 1 and google["bundle_bytes"]["p50"] == 1_500_000
     amazon = browser["amazon_pdp"][DEFAULT_ENGINE]
@@ -398,12 +419,13 @@ async def test_reference_rows_and_bytes_per_run_in_one_read_only_transaction(
     out.write_text(json.dumps({"profile_version": 1, "networks": {}}))
     base = ["reference", "--database", str(database), "--out", str(out)]
     assert profile.main([*base, "--runs", "marker:scale_replay"]) == 0
-    assert profile.main([*base, "--runs", f"batches:{batch}"]) == 0
+    assert profile.main([*base, "--runs", f"batches:{batch}", "--basis", "modelled"]) == 0
     assert seen == [(("on", "repeatable read"), "INTRANS")] * 2
     data = json.loads(out.read_bytes())
     assert stat.S_IMODE(out.stat().st_mode) == 0o600 and data["networks"] == {}
     reference = data["reference"]
     assert set(reference) == {"daily", "browser"}
+    assert (reference["daily"]["basis"], reference["browser"]["basis"]) == ("real", "modelled")
     rows = {name: stats["p50"] for name, stats in reference["daily"]["rows_per_run"].items()}
     assert rows == {
         "test_runs": 1,

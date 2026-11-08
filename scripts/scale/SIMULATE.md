@@ -15,18 +15,24 @@ never in CI with real data.
 
 ```sh
 uv run python scripts/scale/profile.py build --enrich <LC-ENRICH-1 out dir> \
-  --browser <BP-VERIFY-3 hours dir> --out <profile.json> [--formulas formulas]
+  --browser <BP-VERIFY-3 hours dir> [--browser <BP-VERIFY-4 hours dir>] \
+  --out <profile.json> [--formulas formulas]
 uv run python scripts/scale/profile.py reference --database <toml> \
-  --runs <marker:<summary key> | batches:<id>-<id>[,<id>...]> --out <profile.json>
+  --runs <marker:<summary key> | batches:<id>-<id>[,<id>...]> --out <profile.json> \
+  [--basis real|modelled]
 ```
 
 - `build` writes `<profile.json>` (mode 600) and prints the number of networks and gaps.
+  `--browser` is repeated for BP-VERIFY-4's hour folders, when given. All the folders are read
+  into one set of runs: BP-VERIFY-3's first, then BP-VERIFY-4's.
 - `reference` adds the `reference` section to the profile (it creates the file when it is
-  missing). A later call replaces only the run kinds it read. SIM-RUN-1 runs it twice:
-  - on staging, with `--runs marker:scale_replay`, for REPLAY-RUN-1's real hour 0 (190 real
-    daily tests), before that hour is wiped;
-  - on production, read-only, with `--runs batches:<first>-<last>`, for BP-VERIFY-3's browser
-    batches (and BP-VERIFY-4's, once it has run with the daily queue).
+  missing). A later call replaces only the run kinds it read. `--basis` (default `real`) is
+  written as each kind's `basis`. SIM-RUN-1 (#718) runs it twice, on staging only (nothing in
+  this phase touches production):
+  - with `--runs marker:scale_replay`, for REPLAY-RUN-1's real hour 0 (190 real daily tests),
+    before that hour is wiped;
+  - with `--runs batches:<id>` and `--basis modelled`, for one modelled browser bundle of
+    BP-VERIFY-3's tries and bytes, ingested on staging through the real node API ingest.
 - Exit 0 on success. Exit 1 with one line on stderr when a source does not have the expected
   shape (the line names the file), or no run matches `--runs`.
 
@@ -102,6 +108,10 @@ A spread is `{count, p10, p50, p90, mean}` (nearest rank; `null` values when the
     `reference.browser.targets`.
   - `bytes_down`: the sum. `bytes_per_load`: a spread of each run's bytes_down over its tries.
   - `bundle_bytes`: a spread of the archived bundle bytes of the runs the manager sampled.
+  - `ingest`: what the manager recorded of every run of the target, stored or not. It gives
+    `runs`, `stored` (final status with a `test_runs` row or a run key), `test_runs` (the
+    rows) and `statuses` (runs per final `run_status`). The figures above count the stored
+    runs only.
 
 ### `real_24h.<network>`
 
@@ -123,7 +133,7 @@ One entry per thing a source lacks: `{source, network?, hour?, target?, what}`, 
 - an hour without IPs, such as byteful's 23 hours of `requests_no_ips`;
 - a network without a folder, or a folder without a formula, which is not profiled;
 - runs left out because they were not stored or were unfinished at the end;
-- a network without a stored browser run;
+- a network without a stored browser run (its targets still show the `ingest` of its runs);
 - the two source limits above: the outcome split and page loads, and the sampled bundle bytes.
 
 Nothing is invented to fill a gap.
@@ -133,6 +143,8 @@ Nothing is invented to fill a gap.
 Everything is read in one read-only, repeatable-read transaction. A run is `daily` when its
 summary has `test_kind` `daily`, and `browser` when its batch is a browser batch. Other runs
 are left out.
+- `basis`: `real`, or `modelled` when the runs were ingested from a modelled bundle (the
+  browser reference on staging). A modelled size is never a measured one.
 - `runs_filter`, `database`, `read_at` and `runs`.
 - `rows_per_run.<table>`: a spread over the runs, for `test_runs`, `run_buckets`,
   `run_geo_buckets`, `ip_observations`, `run_enrichments`, `ip_enrichment`, `ip_addresses`,

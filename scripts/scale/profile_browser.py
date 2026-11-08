@@ -1,12 +1,6 @@
-"""SIM-PROFILE-1: the browser figures of BP-VERIFY-3's hour folders (SIMULATE.md, "browser").
-
-Each hour folder holds the manager's mgr.json: every browser run the manager knew that hour
-(batch, target, provider, product, run_status, requests, successes, challenges, blocks,
-timeouts, proxy_errors, bytes_down, run_key, test_runs) and up to three archive samples (batch,
-network, bytes). A run appears in every hour it was open; its state in the last folder (by name)
-is its final one. The browser hosts' files (browser-<n>.json) repeat the tries and add host
-timing, which the profile does not need.
-"""
+"""SIM-PROFILE-1: the browser figures of BP-VERIFY-3's (and BP-VERIFY-4's) hour folders: each
+folder's mgr.json lists the runs the manager knew that hour and archive samples; a run's state
+in the last folder is its final one (SIMULATE.md, "Inputs")."""
 
 from __future__ import annotations
 
@@ -49,20 +43,21 @@ def spread(values) -> dict:
     return {"count": len(values), "p10": rank(10), "p50": rank(50), "p90": rank(90), "mean": mean}
 
 
-def read(hours: Path) -> tuple[dict[tuple, dict], dict[tuple, int], list[str]]:
+def read(sources: list[Path]) -> tuple[dict[tuple, dict], dict[tuple, int]]:
     """(each run's last state by (batch, provider, product), the archive sample bytes by
-    (batch, provider), the hour folders read)."""
-    runs, samples, folders = {}, {}, []
-    for path in sorted(hours.glob("*/mgr.json")):
-        where = f"{path.parent.name}/{path.name}"
-        try:
-            _read_hour(json.loads(path.read_bytes()), runs, samples)
-        except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-            raise ProfileError(f"{where}: {error}") from None
-        folders.append(path.parent.name)
-    if not folders:
-        raise ProfileError("no hour folder with a mgr.json")
-    return runs, samples, folders
+    (batch, provider)) of the hour folders of every source (BP-VERIFY-3, then BP-VERIFY-4),
+    each source's folders in name order."""
+    runs, samples = {}, {}
+    for hours in sources:
+        paths = sorted(hours.glob("*/mgr.json"))
+        if not paths:
+            raise ProfileError(f"{hours.name}: no hour folder with a mgr.json")
+        for path in paths:
+            try:
+                _read_hour(json.loads(path.read_bytes()), runs, samples)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+                raise ProfileError(f"{path.parent.name}/{path.name}: {error}") from None
+    return runs, samples
 
 
 def _read_hour(data: dict, runs: dict, samples: dict) -> None:
@@ -99,20 +94,33 @@ def target_entry(runs: list[dict], samples: list[int]) -> dict:
     }
 
 
+def ingest(runs: list[dict]) -> dict:
+    """What the manager recorded of the runs' ingest: stored runs, test_runs rows, statuses."""
+    statuses: dict[str, int] = {}
+    for run in runs:
+        statuses[run["run_status"]] = statuses.get(run["run_status"], 0) + 1
+    test_runs = sum(int(run.get("test_runs") or 0) for run in runs)
+    kept = sum(map(stored, runs))
+    return {"runs": len(runs), "stored": kept, "test_runs": test_runs, "statuses": statuses}
+
+
 def network(runs: list[dict], samples: dict[tuple, int]) -> tuple[dict, dict]:
-    """(target -> engine -> target_entry(), the network's real_24h browser totals) of one
-    network's stored runs."""
+    """(target -> engine -> target_entry() of the stored runs with the ingest() of all, the
+    network's real_24h browser totals) of one network's runs."""
     grouped: dict[tuple[str, str], list[dict]] = {}
     for run in runs:
         grouped.setdefault((run["target"], run.get("engine") or DEFAULT_ENGINE), []).append(run)
     targets: dict[str, dict] = {}
     for (target, engine), own in sorted(grouped.items()):
-        targets.setdefault(target, {})[engine] = target_entry(own, sampled(own, samples))
-    bundles = sampled(runs, samples)
+        kept = [run for run in own if stored(run)]
+        entry = target_entry(kept, sampled(kept, samples)) | {"ingest": ingest(own)}
+        targets.setdefault(target, {})[engine] = entry
+    kept = [run for run in runs if stored(run)]
+    bundles = sampled(kept, samples)
     totals = {
-        "browser_runs": len(runs),
-        "browser_tries": sum(run["requests"] for run in runs),
-        "browser_bytes_down": sum(run["bytes_down"] for run in runs),
+        "browser_runs": len(kept),
+        "browser_tries": sum(run["requests"] for run in kept),
+        "browser_bytes_down": sum(run["bytes_down"] for run in kept),
         "bundle_bytes_sampled": sum(bundles),
         "bundle_samples": len(bundles),
     }
@@ -124,16 +132,15 @@ def sampled(runs: list[dict], samples: dict[tuple, int]) -> list[int]:
     return [samples[key] for key in keys if key in samples]
 
 
-def profile(hours: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]]:
+def profile(sources: list[Path], wanted: list[str]) -> tuple[dict, dict, list[dict]]:
     """(network -> browser targets, network -> real_24h browser totals, gaps) of the wanted
     networks."""
-    runs, samples, _ = read(hours)
+    runs, samples = read(sources)
     by_network: dict[str, list[dict]] = {}
     left_out: dict[tuple[str, str, str], int] = {}
     for run in runs.values():
-        if stored(run):
-            by_network.setdefault(run["provider"], []).append(run)
-        else:
+        by_network.setdefault(run["provider"], []).append(run)
+        if not stored(run):
             state = "not stored" if run["run_status"] in FINAL else "unfinished"
             key = (run["provider"], run["target"], state)
             left_out[key] = left_out.get(key, 0) + 1
@@ -142,9 +149,9 @@ def profile(hours: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]]:
         what = f"runs left out ({state}): {count}"
         gaps.append({"source": "browser", "network": name, "target": target, "what": what})
     targets, totals = {}, {}
+    for name in (name for name in wanted if name in by_network):
+        targets[name], totals[name] = network(by_network[name], samples)
     for name in wanted:
-        if name in by_network:
-            targets[name], totals[name] = network(by_network[name], samples)
-        else:
+        if not totals.get(name, {}).get("browser_runs"):
             gaps.append({"source": "browser", "network": name, "what": "no stored browser run"})
     return targets, totals, gaps

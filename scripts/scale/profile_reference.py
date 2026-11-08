@@ -1,11 +1,5 @@
-"""SIM-PROFILE-1: the `reference` section, the real runs' sizes in a database (SIMULATE.md).
-
-Everything is read in one read-only, repeatable-read transaction. A run's kind is `daily` (its
-summary has test_kind daily) or `browser` (its batch's kind); other runs are left out. Rows per
-run: the run's own rows of the tables keyed by run_key; of the shared tables (ip_addresses,
-product_ips, pool_ips, ip_enrichment) the rows its observations reference; test_events: the
-events of its batch and product.
-"""
+"""SIM-PROFILE-1: the `reference` section, the runs' rows and bytes in a database, read in one
+read-only, repeatable-read transaction (SIMULATE.md, "reference")."""
 
 from __future__ import annotations
 

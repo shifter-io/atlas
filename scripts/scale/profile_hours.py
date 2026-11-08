@@ -1,9 +1,6 @@
-"""SIM-PROFILE-1: one network's figures from its LC-ENRICH-1 hour files (SIMULATE.md).
-
-One pass per hour file, gzip read line by line. IPs are kept only as the process's salted
-64-bit hashes (hash(bytes)), in sorted arrays per hour and requested country, to count the
-day's distinct IPs and the recurrence; no IP, hash or address leaves this module.
-"""
+"""SIM-PROFILE-1: one network's figures from its LC-ENRICH-1 hour files (SIMULATE.md). IPs are
+kept only as the process's salted hash(bytes), in sorted arrays per hour and country, never
+written."""
 
 from __future__ import annotations
 
@@ -20,6 +17,9 @@ from proxy_index.formula.aggregate import HOURS, FormulaError, load_manifest, pa
 TOP_PLACES = 500
 PLACE = ("country_code", "region", "city", "asn", "usage_type")
 DAY_HOURS = 24
+# An hour's figures from its manifest slot: output name -> slot key.
+SLOT_FIELDS = {"unique_ips": "unique_ips", "request_rows": "request_rows"}
+SLOT_FIELDS |= {"attempted_requests": "requests", "successes": "successes"}
 _ENRICHMENT = re.compile(rb'"enrichment":(\{[^{}]*\})')
 _FILE_HOUR = re.compile(r"hour-(\d{8}T\d{2})Z")
 
@@ -180,24 +180,15 @@ class Network:
         for key, slot in self.slots():
             errors, kinds = _errors(slot)
             start = slot_time(slot)
-            countries = {
+            entry = {"hour": key, "status": slot.get("status", "missing")}
+            entry["hour_start"] = start.isoformat() if start else None
+            entry |= {name: int(slot.get(field, 0)) for name, field in SLOT_FIELDS.items()}
+            entry |= {"errors": errors, "errors_by_kind": kinds}
+            entry["countries"] = {
                 code: {"unique_ips": len(values), "request_rows": self.rows[key][code]}
                 for code, values in sorted(self.hourly.get(key, {}).items())
             }
-            found.append(
-                {
-                    "hour": key,
-                    "status": slot.get("status", "missing"),
-                    "hour_start": start.isoformat() if start else None,
-                    "unique_ips": int(slot.get("unique_ips", 0)),
-                    "request_rows": int(slot.get("request_rows", 0)),
-                    "attempted_requests": int(slot.get("requests", 0)),
-                    "successes": int(slot.get("successes", 0)),
-                    "errors": errors,
-                    "errors_by_kind": kinds,
-                    "countries": countries,
-                }
-            )
+            found.append(entry)
         return found
 
     def summary(self) -> tuple[dict, dict]:
