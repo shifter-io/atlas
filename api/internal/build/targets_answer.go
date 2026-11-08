@@ -144,19 +144,24 @@ func buildTargets(c *Context) (map[string]any, error) {
 	out := map[string]any{}
 	for _, kind := range model.ProxyKinds {
 		for _, r := range Ranges {
-			ans := &TargetsAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Kind: kind, Targets: []TargetEntry{},
-				Networks: targetNetworks(c.Entries, measured, kind, r.ID)}
-			for _, t := range c.Dataset.Targets {
-				te := targetEntry(t, weights, ans.Networks)
-				if te.Card {
-					ans.CardCount++
-				}
-				ans.Targets = append(ans.Targets, te)
-			}
-			out[targetsPath(kind, r.ID)] = ans
+			out[targetsPath(kind, r.ID)] = targetsAnswer(c, weights, measured, kind, r.ID)
 		}
 	}
 	return out, nil
+}
+
+// targetsAnswer is one kind's and range's body.
+func targetsAnswer(c *Context, weights map[string]Num, measured []model.TargetMeta, kind, rangeID string) *TargetsAnswer {
+	ans := &TargetsAnswer{GeneratedAt: c.GeneratedAt, Range: rangeID, Kind: kind, Targets: []TargetEntry{},
+		Networks: targetNetworks(c.Entries, measured, kind, rangeID)}
+	for _, t := range c.Dataset.Targets {
+		te := targetEntry(t, weights, ans.Networks)
+		if te.Card {
+			ans.CardCount++
+		}
+		ans.Targets = append(ans.Targets, te)
+	}
+	return ans
 }
 
 // scoreWeights is each target's [browser_difficulty] in the snapshot's
@@ -289,8 +294,8 @@ func targetEntry(t model.TargetMeta, weights map[string]Num, nets []TargetNetwor
 // on a network target, whose engine is http) and each engine's shared score status.
 func fleetOf(id string, nets []TargetNetwork) (map[string]FleetMean, map[string]ScoreStatus) {
 	fleet, status, sum := map[string]FleetMean{}, map[string]ScoreStatus{}, map[string]float64{}
-	add := func(engine string, rate Num) {
-		if rate.OK() {
+	add := func(engine string, requests, rate Num) {
+		if requests > 0 && rate.OK() {
 			f := fleet[engine]
 			f.Networks++
 			fleet[engine], sum[engine] = f, sum[engine]+rate.F()
@@ -301,17 +306,11 @@ func fleetOf(id string, nets []TargetNetwork) (map[string]FleetMean, map[string]
 		switch {
 		case c == nil:
 		case c.BrowserCell == nil:
-			if c.Requests > 0 {
-				add(model.EngineHTTP, c.SuccessRate)
-			}
+			add(model.EngineHTTP, c.Requests, c.SuccessRate)
 		default:
 			for name, e := range c.Engines {
-				if e.Requests > 0 {
-					add(name, e.Successes/e.Requests)
-				}
-				if e.Scores != nil {
-					shareStatus(status, name, e.Scores.Success)
-				}
+				add(name, e.Requests, e.Successes/e.Requests)
+				shareStatus(status, name, e.Scores)
 			}
 		}
 	}
@@ -325,7 +324,12 @@ func fleetOf(id string, nets []TargetNetwork) (map[string]FleetMean, map[string]
 // shareStatus keeps an engine's target-level status: the first network's,
 // replaced by the first one ranked for the target (a status that is not
 // not_enough_data, which every such network shares).
-func shareStatus(status map[string]ScoreStatus, engine string, m model.MetricScore) {
+// Scores nil (a snapshot without scores) leaves it unchanged.
+func shareStatus(status map[string]ScoreStatus, engine string, scores *model.TargetScores) {
+	if scores == nil {
+		return
+	}
+	m := scores.Success
 	if cur, seen := status[engine]; !seen || cur.Status == notEnoughData && m.Status != notEnoughData {
 		status[engine] = ScoreStatus{Status: m.Status, RankedOf: m.RankedOf}
 	}
