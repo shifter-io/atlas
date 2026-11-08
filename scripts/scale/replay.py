@@ -5,6 +5,7 @@ Usage:
   replay.py --database <toml> --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --slices <dir>
             --days 7 --first-day <YYYY-MM-DD> --out <dir> [--hour-timeout 3000]
             [--siteapi URL] [--siteapi-timeout S] [--no-scope]
+  replay.py --database <toml> --slices <dir> --days 7 --first-day <YYYY-MM-DD> --plan-only
 
 REPLAY.md describes the steps of an hour, the guards, the order, the retries and the outputs.
 """
@@ -29,6 +30,7 @@ import cycle
 import generate
 import measure
 import replay_baseline
+import replay_plan
 import replay_report
 import statement_source
 import target
@@ -281,6 +283,21 @@ class Replay:
             print(f"replay: no report after hour {record['start']}: {exc}", file=sys.stderr)
 
 
+def starts(args) -> list[datetime]:
+    """The start of every simulated hour, in order (Replay.record)."""
+    hours = range(args.days * args.hours_per_day)
+    every = (divmod(index, args.hours_per_day) for index in hours)
+    return [first_start(args) + timedelta(days=day, hours=hour) for day, hour in every]
+
+
+def plan_only(args) -> dict:
+    """The runs each simulated hour would plan, in one read-only transaction (replay_plan)."""
+    with storage.connect(args.database) as conn:
+        conn.read_only = True
+        with conn.transaction():
+            return replay_plan.plan(conn, args, starts(args))
+
+
 def run(args) -> dict:
     with storage.connect(args.database) as conn:
         conn.autocommit = True
@@ -290,17 +307,20 @@ def run(args) -> dict:
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--database", required=True, help="credentials TOML of the database")
-    parser.add_argument("--owner-go", required=True, help=f"the owner's go: {target.GO_FORM}")
+    parser.add_argument("--owner-go", help=f"the owner's go: {target.GO_FORM}")
     parser.add_argument("--slices", required=True, help="SLICES-1's output directory")
     parser.add_argument("--days", required=True, type=int, help="simulated days")
     parser.add_argument("--first-day", required=True, help="date of simulated day 0 (UTC)")
-    parser.add_argument("--out", required=True, help="directory of the state and the events")
+    parser.add_argument("--out", help="directory of the state and the events")
     parser.add_argument("--hour-timeout", type=float, default=3000.0, help="seconds")
     parser.add_argument(
         "--siteapi", help="base URL of a siteapi reading the target database, to wait for builds"
     )
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
     parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
+    parser.add_argument(
+        "--plan-only", action="store_true", help="print the runs each hour plans; write nothing"
+    )
     parser.add_argument("--methodology", default=str(cycle.METHODOLOGY))
     parser.add_argument("--formulas", default=str(generate.FORMULAS))
     # For tests and smoke runs: hours per simulated day, the first retry's pause in seconds.
@@ -310,12 +330,17 @@ def arguments(argv=None):
     args = parser.parse_args(argv)
     if args.days < 1 or not 1 <= args.hours_per_day <= 24:
         parser.error("--days is at least 1 and the hours of a day 1..24")
+    if not args.plan_only and not (args.owner_go and args.out):
+        parser.error("--owner-go and --out are required, except with --plan-only")
     return args
 
 
 def main(argv=None) -> int:
     args = arguments(argv)
     signal.signal(signal.SIGTERM, signal.default_int_handler)  # a stop, as Ctrl-C
+    if args.plan_only:
+        print(replay_plan.table(plan_only(args)), end="")
+        return 0
     try:
         result = run(args)
     except Refused as exc:

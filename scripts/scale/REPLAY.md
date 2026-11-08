@@ -27,6 +27,43 @@ uv run python scripts/scale/replay.py --database proxy_reviews_staging.toml \
   create scopes).
 - Exit codes: 0 done, 2 refused (nothing written), 130 stopped (Ctrl-C or SIGTERM).
 
+## Before the run: production's plan and its volume (REPLAY-FIX-2)
+
+The replay plans with the target database's own settings, targets and countries. Staging is
+seeded with the defaults (every country enabled, every pulse target every 30 minutes), which
+plans far more than production does. So, first:
+
+```sh
+uv run python scripts/scale/copy_plan.py --from proxy_reviews.toml --to proxy_reviews_staging.toml
+```
+
+`copy_plan.py` reads production's scheduling inputs in one read-only transaction: the countries
+(`enabled`, `census_time`, the region by its slug), the schedule fields of the targets
+(`census`, `census_concurrency`, `pulse_enabled`, `pulse_interval_minutes`, `pulse_requests`,
+`pulse_concurrency`) and the `settings` rows `scheduler.*`, `census.*`, `load.*` and `pulse.*`.
+It writes them in one transaction to `proxy_reviews_staging` (`target.STAGING`) and refuses any
+other database. Staging then plans what production plans: a country or target production does
+not have is switched off in staging, and a settings row of those groups production does not have
+is deleted (production uses the default). A country or target production schedules that staging
+lacks, or a region staging lacks, is refused (seed staging first). It prints every row it
+changed as a JSON line (`table`, `key`, `before`, `after`; `null`: no row); a second run changes
+nothing.
+
+Then the volume, before anything is written:
+
+```sh
+uv run python scripts/scale/replay.py --database proxy_reviews_staging.toml \
+  --slices <slices dir> --days 7 --first-day <YYYY-MM-DD> --plan-only
+```
+
+`--plan-only` (`replay_plan.py`) reads the database in one read-only transaction and prints, for
+each simulated hour, the runs it would plan by kind: `daily` (the tests of its slice), `pulse`
+and `load` (the batch_runs rows of `batches.pulse_plan` at the hour's 5-minute moments) and
+`browser` (BROWSER-MODEL-1's hour), then the totals of the `--days`. It counts with the planners'
+own slot rules (`pulse_slots.spread`, `browser.slot_starts`) and the products that take part
+once the replay's nodes are registered; it needs no `--owner-go` or `--out`. REPLAY-RUN-1 (#614)
+posts this with its first status.
+
 ## Guards
 
 Checked at every start, before anything is written:
@@ -42,7 +79,8 @@ Checked at every start, before anything is written:
   on the replay's data, and its planners would plan work for the replay's nodes.
 - **Days:** the last simulated hour must have ended.
 
-The replay writes no settings row. It reads the database's own settings and targets.
+The replay writes no settings row. It reads the database's own settings and targets (copied
+from production beforehand, above).
 
 ## One simulated hour
 
@@ -64,7 +102,10 @@ Hour h of day d (`replay_steps.py`):
    and load-wave run of the replay's nodes uploaded to an in-process node API (`POST
    /v1/results`, the real ingest). The runs are modelled (no real pulse data exists): 100
    requests, 0 to 3 timeouts, geo rows from the slice's enrichment of the country; a load-wave
-   run also carries IP rows (the slice's IPs of the country), as its ingest requires.
+   run also carries IP rows (the slice's IPs of the country), as its ingest requires. The
+   timeouts are a geo row with no place and network; a country with no rows in the hour has
+   that one row alone, with every request and the timeouts (a second row with the same empty
+   key would be refused as a duplicate geo bucket).
 3. **Browser.** BROWSER-MODEL-1's `browser_step` for the slices' networks.
 4. **Release.** `cycle_steps.Steps.release`: the estimated hours that ended are released.
 5. **Calculate.** `proxy-index calculate --as-of <hour end> --publish --incremental` in a child
@@ -305,3 +346,12 @@ with doubling pauses until it succeeds and flagged; an ingest failure that keeps
 a stopped run resumed from its state file (with a stand-in siteapi); and the refusals (a recent
 `job_runs` row, a malformed go, unended days). `--hours-per-day` and `--pause` (hidden options)
 shorten the days and the pauses for the tests.
+
+`tests/test_scale_replay_plan.py` checks the pulse runs of an hour whose countries have no slice
+rows (one empty geo key each, ingested through the node API), that `--plan-only`'s counts per
+hour equal the batch_runs and daily runs the hour's steps then plan (with a 7-minute census
+target: late slots and load waves), and that `--plan-only` prints the table in a read-only
+transaction and writes nothing. `tests/test_scale_copy_plan.py` copies between two test
+databases standing in for production and staging: the rows changed, a second run changing
+nothing, production read in one read-only repeatable-read transaction, and the refusals (a
+database other than staging, a scheduled target staging lacks).
