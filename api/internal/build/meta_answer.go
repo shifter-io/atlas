@@ -61,13 +61,6 @@ type MetaTarget struct {
 	Card bool `json:"card"`
 }
 
-// TargetCounts counts the targets: every one, the measured ones and the cards.
-type TargetCounts struct {
-	All      int `json:"all"`
-	Measured int `json:"measured"`
-	Cards    int `json:"cards"`
-}
-
 func buildMeta(c *Context) (map[string]any, error) {
 	ds := c.Dataset
 	if ds == nil {
