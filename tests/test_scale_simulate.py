@@ -45,9 +45,14 @@ BROWSER = (
     "WHERE b.kind='browser'"
 )
 OWN = "SELECT count(*) FROM {} WHERE run_key IN (SELECT run_key FROM test_runs WHERE {})"
-WINDOWS = (
-    "SELECT p.provider,w.completed FROM calculated_windows w JOIN products p USING(product_id) "
-    "WHERE w.build_id=%s AND w.window_hours=24 AND w.target='generic_http' AND w.cohort=%s"
+WINDOWS = (  # a network's daily tests in a build's 24h windows, over its product cohorts
+    "SELECT p.provider,sum(w.completed) FROM calculated_windows w JOIN products p "
+    "USING(product_id) WHERE w.build_id=%s AND w.window_hours=24 AND w.target='generic_http' "
+    "AND w.cohort<>%s GROUP BY 1"
+)
+ALL_WINDOWS = (
+    "SELECT p.provider,w.cohort,w.target,w.completed FROM calculated_windows w JOIN products p "
+    "USING(product_id) WHERE w.build_id=%s AND w.window_hours=24"
 )
 
 
@@ -145,7 +150,8 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
     windows = dict(query(staging, WINDOWS, (full["build_id"], netlists.COHORT)))
     for network in cases.NETWORKS:
         requests = sum(test[3] for test in daily_figures(found, 1) if test[0] == network)
-        assert windows[network] == requests > 0
+        found = query(staging, ALL_WINDOWS, (full["build_id"],))
+        assert windows.get(network) == requests > 0, found
     payload = query(
         staging, "SELECT payload FROM calculated_snapshots WHERE build_id=%s", (full["build_id"],)
     )[0][0]
