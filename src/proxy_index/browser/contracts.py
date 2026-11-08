@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..models import VERDICTS, ErrorCode, VerdictName
+from .engines import CAMOUFOX, ENGINES, check_engine
 from .field_checks import (  # noqa: F401 (callers import them here)
     FORBIDDEN_FIELDS,
     check_fields,
@@ -133,6 +134,8 @@ class BundleMembers:
     manifest: str = "browser/manifest.json"
     tries: str = "browser/tries.jsonl"
     screenshots: str = "browser/screenshots"
+    # The run's procstats samples, one per line, then {"summary": procstats.summary()}.
+    samples: str = "browser/samples.jsonl"
 
     def screenshot(self, i: int) -> str:
         """The screenshot of try i (zero-based): `browser/screenshots/NNNN.jpg`."""
@@ -140,7 +143,8 @@ class BundleMembers:
 
     def is_member(self, name: str) -> bool:
         screenshot = re.escape(self.screenshots) + r"/\d{4}\.jpg"
-        return name in (self.manifest, self.tries) or re.fullmatch(screenshot, name) is not None
+        fixed = (self.manifest, self.tries, self.samples)
+        return name in fixed or re.fullmatch(screenshot, name) is not None
 
 
 # bundle_members() is the member layout every bundle uses.
@@ -215,12 +219,14 @@ def _fingerprint(value: Any) -> dict[str, Any]:
 
 
 def try_record(**fields: Any) -> dict[str, Any]:
-    """One validated tries.jsonl line (K-BP4); every field but a Chrome try's `fingerprint` is
-    required, absent values None. The verdict is the one its error code implies (ok: no
-    error); a screenshot is the try's own."""
-    record = check_fields(fields, TRY_FIELDS, "try", ("fingerprint",))
+    """One validated tries.jsonl line (K-BP4); every field but the `engine` (from manifest v2)
+    and a Chrome try's `fingerprint` is required, absent values None. The verdict is the one
+    its error code implies (ok: no error); a screenshot is the try's own."""
+    record = check_fields(fields, TRY_FIELDS, "try", ("engine", "fingerprint"))
     if "fingerprint" in record:
         record["fingerprint"] = _fingerprint(record["fingerprint"])
+    if record.get("engine", CAMOUFOX) not in ENGINES:
+        raise ValueError(f"engine: must be one of {list(ENGINES)}")
     check_int(record["i"], "i", 0, MAX_TRIES - 1)
     record["input"] = _input(record["input"])
     optional(check_string, record["source"], "source", TOKEN)
@@ -242,12 +248,16 @@ def try_record(**fields: Any) -> dict[str, Any]:
 
 
 MANIFEST_FORMAT = "proxy-index-browser-raw"
-MANIFEST_VERSION = 1
+# Version 2 adds the `engine` block; its `camoufox` block is a Camoufox bundle's only. Ingest
+# reads both versions; a version 1 bundle is a Camoufox one.
+MANIFEST_VERSION = 2
+MANIFEST_VERSIONS = (1, 2)
 CAMOUFOX_FIELDS = ("release", "engine_version", "user_agent")
 MANIFEST_FIELDS = tuple(
     "format version run_id batch_id network target country requested_country geo_targeting"
     " slot started_at finished_at tries outcomes settings_sha256 camoufox host files".split()
 )
+MANIFEST_V2_FIELDS = (*(name for name in MANIFEST_FIELDS if name != "camoufox"), "engine")
 
 
 def _timestamp(value: Any, what: str) -> str:
@@ -314,11 +324,15 @@ def _identity(doc: dict[str, Any]) -> None:
 
 
 def check_manifest(document: Any) -> dict[str, Any]:
-    """A validated browser/manifest.json document (K-BP4), as read back from a bundle."""
-    doc = check_fields(document, MANIFEST_FIELDS, "manifest")
-    version = doc["version"]
-    if doc["format"] != MANIFEST_FORMAT or type(version) is not int or version != MANIFEST_VERSION:
-        raise ValueError("manifest: not a version 1 browser manifest")
+    """A validated browser/manifest.json document (K-BP4), version 1 or 2, as read back from a
+    bundle."""
+    version = document.get("version") if isinstance(document, dict) else None
+    v1 = type(version) is int and version == 1
+    names, extra = (MANIFEST_FIELDS, ()) if v1 else (MANIFEST_V2_FIELDS, ("camoufox",))
+    doc = check_fields(document, names, "manifest", extra)
+    known = type(version) is int and version in MANIFEST_VERSIONS
+    if doc["format"] != MANIFEST_FORMAT or not known:
+        raise ValueError("manifest: not a version 1 or 2 browser manifest")
     _identity(doc)
     for key in ("slot", "started_at", "finished_at"):
         doc[key] = _timestamp(doc[key], key)
@@ -327,13 +341,26 @@ def check_manifest(document: Any) -> dict[str, Any]:
         raise ValueError("started_at: must not be after finished_at")
     doc["outcomes"] = _outcomes(doc["outcomes"], check_int(doc["tries"], "tries", 0, MAX_TRIES))
     check_string(doc["settings_sha256"], "settings_sha256", SHA256, "a lower-case SHA-256")
-    camoufox = check_fields(doc["camoufox"], CAMOUFOX_FIELDS, "camoufox")
+    if "camoufox" in doc:
+        doc["camoufox"] = _camoufox(doc["camoufox"])
+    if not v1:
+        doc["engine"] = check_engine(doc["engine"], doc.get("camoufox"))
+    doc["files"] = _files(doc["files"])
+    return doc
+
+
+def _camoufox(value: Any) -> dict[str, str]:
+    camoufox = check_fields(value, CAMOUFOX_FIELDS, "camoufox")
     for key, text in camoufox.items():
         check_string(text, f"camoufox.{key}")
     if user_agent_major(camoufox["user_agent"]) != engine_major(camoufox["engine_version"]):
         raise ValueError("camoufox.user_agent: Firefox version must equal the engine's major")
-    doc["files"] = _files(doc["files"])
-    return doc
+    return camoufox
+
+
+def manifest_engine(doc: dict[str, Any]) -> str:
+    """The engine of a validated manifest: its engine block's, Camoufox for a version 1."""
+    return doc["engine"]["name"] if "engine" in doc else CAMOUFOX
 
 
 def manifest(**fields: Any) -> dict[str, Any]:

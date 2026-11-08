@@ -14,6 +14,10 @@ any process (a PostgreSQL advisory try-lock; 429, Retry-After 10). A run the rea
 without a run_key (`stale`, `not_started`) is a late upload: it is ingested, becomes done, and
 its batch is closed again with it. A replay of a finished run whose object holds the same
 sha256 is answered again without touching the database.
+
+Manifests of version 1 (Camoufox, no engine block) and 2 are read. The run's engine is its
+summary's `browser_engine` (none in a version 1 bundle: Camoufox), which must be the manifest's;
+it is part of the run's config, so runs of different engines are stored in different scopes.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ from ..archive import ArchiveError as StoreError
 from ..archive.export import file_digests
 from ..archive.spaces import ArchiveChanged, Spaces
 from ..browser import contracts as bc
+from ..browser.engines import DEFAULT_ENGINE
 from . import nodework
 from .api import (
     DB_KEY,
@@ -243,13 +248,13 @@ def bundle_member(name: str) -> bool:
 
 def unpack_bundle(source: Path, directory: Path, limit: int) -> list[str]:
     """orchestrator.archive.unpack of a browser bundle: the run archive's limits, its `browser/`
-    members (at most a manifest, the tries and one screenshot per try) besides."""
+    members (at most a manifest, the tries, the samples and one screenshot per try) besides."""
     return unpack(
         source,
         directory,
         max_bytes=limit,
         nested=bundle_member,
-        max_members=MAX_MEMBERS + 2 + bc.MAX_TRIES,
+        max_members=MAX_MEMBERS + 3 + bc.MAX_TRIES,
     )
 
 
@@ -275,7 +280,8 @@ def _open_bundle(work: Path, limit: int) -> tuple[dict, dict]:
 
 
 def _check(summary: Any, manifest: dict, bundle_id: str | None, state: dict, node: dict):
-    """The bundle belongs to this node's run: network, target, batch, run id and country."""
+    """The bundle belongs to this node's run: network, target, batch, run id, country and
+    engine."""
     config = summary.get("config") if isinstance(summary, dict) else None
     target = summary.get("target") if isinstance(summary, dict) else None
     if not isinstance(config, dict) or not isinstance(target, dict):
@@ -294,6 +300,8 @@ def _check(summary: Any, manifest: dict, bundle_id: str | None, state: dict, nod
     requested = requested.upper() if isinstance(requested, str) else requested
     if manifest["requested_country"] != requested or manifest["geo_targeting"] != bool(requested):
         raise ValueError("the manifest's geo targeting disagrees with summary.json")
+    if bc.manifest_engine(manifest) != config.get("browser_engine", DEFAULT_ENGINE):
+        raise ValueError("the manifest's engine disagrees with summary.json")
 
 
 def _key(config: dict, node: dict, summary: dict, manifest: dict) -> str:

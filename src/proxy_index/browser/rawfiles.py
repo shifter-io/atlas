@@ -1,7 +1,8 @@
 """A browser host's raw files (K-BP4) and their outbox (K-BP7; docs/browser.html, Bundles).
 
 Every try of a run goes to `<run dir>/browser/tries.jsonl` and its screenshot, if any, to
-`browser/screenshots/NNNN.jpg`, inside the node's run directory. When the run ends, seal()
+`browser/screenshots/NNNN.jpg`, inside the node's run directory; the host's process samples of
+the run (procstats) go to `browser/samples.jsonl` when it ends. When the run ends, seal()
 writes `browser/manifest.json`, packs the directory deterministically into
 `<outbox>/<run_id>.tar.gz` with the sidecar `<run_id>.json`, and only then removes the run
 directory. The Outbox sends a bundle through its network's node agent and deletes it on the
@@ -34,6 +35,7 @@ import aiohttp
 
 from ..archive.export import file_digests
 from . import contracts as bc
+from . import procstats
 from .rawfiles_seal import BATCH_FILE as BATCH_FILE
 from .rawfiles_seal import LOCK_NAME as LOCK_NAME
 from .rawfiles_seal import MEMBERS as MEMBERS
@@ -114,6 +116,21 @@ class FileRecorder:
         line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
         with (run_dir / MEMBERS.tries).open("ab") as stream:
             stream.write(line.encode())
+
+    def samples(self, lines: list[dict[str, Any]]) -> None:
+        """browser/samples.jsonl: the run's procstats lines, then {"summary": their summary}.
+        Nothing before bind() (a run that never started has no directory); a failed write
+        loses only the samples."""
+        if self.directory is None:
+            return
+        rows = [*lines, {"summary": procstats.summary(lines)}]
+        text = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+        path = self.directory.parent / MEMBERS.samples
+        try:
+            _write(path, text.encode())
+        except OSError as exc:
+            log.warning("samples not written (%s)", type(exc).__name__)
+            path.unlink(missing_ok=True)
 
     def _shot(self, run_dir: Path, name: str | None, screenshot: bytes | None) -> bool:
         """Whether the try's screenshot was written: not above the disk limit, and a failed

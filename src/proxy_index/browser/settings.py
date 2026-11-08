@@ -21,6 +21,7 @@ from ..regions import load_countries, load_targets
 from . import contracts as c
 from .chrome import DEFAULT_EXECUTABLE
 from .contracts import check_fields, check_int, check_string
+from .engines import DEFAULT_ENGINE, ENGINES
 
 SCHEMA = 2
 SCREENSHOTS = ("failures", "all", "none")
@@ -48,6 +49,8 @@ class BrowserOptions:
     block_resources: tuple[str, ...]
     screenshots: str
     locale: str
+    # The engine of every target without its own (K-BP3; engines.py).
+    engine: str = DEFAULT_ENGINE
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +78,7 @@ class TargetSettings:
     block_resources: tuple[str, ...] | None = None
     challenge_wait_s: int | None = None
     answer_wait_s: int | None = None
+    engine: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +107,16 @@ class BrowserSettings:
                 untargeted = tuple(n for n in self.untargeted if n in host.networks)
                 return replace(self, hosts=(host,), untargeted=untargeted)
         raise UserError("host: no [[host]] has this name")
+
+    def engine(self, target_id: str) -> str:
+        """The engine a run of this target uses: its [[target]]'s, else [browser] engine."""
+        own = next((t.engine for t in self.targets if t.id == target_id), None)
+        return own or self.browser.engine
+
+    def engines(self) -> tuple[str, ...]:
+        """The engines this settings' targets use, in ENGINES order."""
+        used = {self.engine(target.id) for target in self.targets}
+        return tuple(engine for engine in ENGINES if engine in used)
 
     def targets_for_planner(self) -> tuple[tuple[str, int, int], ...]:
         """(id, tries, every_minutes) per target, in start order."""
@@ -184,6 +198,7 @@ TARGET_CHECKS = {
     "block_resources": _resources,
     "challenge_wait_s": partial(check_int, low=0, high=600),
     "answer_wait_s": partial(check_int, low=0, high=600),
+    "engine": partial(_choice, options=ENGINES),
 }
 TARGET_OPTIONAL = tuple(TARGET_CHECKS)
 
@@ -242,7 +257,9 @@ def _schedule(value: Any, countries: dict[str, str]) -> Schedule:
 
 
 def _browser(value: Any) -> BrowserOptions:
-    entry = check_fields(value, tuple(f.name for f in fields(BrowserOptions)), "browser")
+    names = tuple(f.name for f in fields(BrowserOptions) if f.name != "engine")
+    entry = check_fields(value, names, "browser", ("engine",))
+    engine = _choice(entry.get("engine", DEFAULT_ENGINE), "browser.engine", ENGINES)
     return BrowserOptions(
         check_int(entry["browsers_per_host"], "browser.browsers_per_host", 1, 16),
         check_int(entry["recycle_after"], "browser.recycle_after", 1, c.MAX_TRIES),
@@ -251,6 +268,7 @@ def _browser(value: Any) -> BrowserOptions:
         _resources(entry["block_resources"], "browser.block_resources"),
         _choice(entry["screenshots"], "browser.screenshots", SCREENSHOTS),
         check_string(entry["locale"], "browser.locale", "[a-z]{2,3}(-[A-Z]{2})?", "like en-US"),
+        engine,
     )
 
 

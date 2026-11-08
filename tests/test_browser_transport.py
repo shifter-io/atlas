@@ -192,7 +192,7 @@ async def test_a_refused_user_agent_stops_the_run():
     async def refuse():
         raise UserAgentRefused("no")
 
-    harness.pool._launch = refuse
+    harness.pool._launches = {None: refuse}
     with pytest.raises(UserAgentRefused):
         await harness.execute()
 
@@ -210,7 +210,7 @@ async def test_a_country_without_a_table_stops_the_run():
     async def refuse():
         raise GeoRefused("no browser geography for country 'zz'")
 
-    harness.pool._launch = refuse
+    harness.pool._launches = {None: refuse}
     with pytest.raises(GeoRefused):
         await harness.execute()
 

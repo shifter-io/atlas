@@ -238,6 +238,11 @@ CASES = [
     (lambda d: d.update(target=[]), r"^target: must be a list"),
     (lambda d: d.update(chrome={"executable": "Google Chrome"}), r"chrome\.executable: .*absolute"),
     (lambda d: d.update(chrome={"path": "/x"}), r"^chrome: unknown fields \['path'\]"),
+    # The engine: Camoufox or Chrome, for every target or one; nothing else.
+    (lambda d: d["browser"].update(engine="firefox"), r"^browser\.engine: must be one of"),
+    (lambda d: d["browser"].update(engine=True), r"^browser\.engine: must be one of"),
+    (lambda d: target(d, "amazon_pdp").update(engine="edge"), r"^target\[0\]\.engine: must be"),
+    (lambda d: target(d, "amazon_pdp").update(engine=""), r"^target\[0\]\.engine: must be"),
 ]
 
 
@@ -281,3 +286,20 @@ def test_minimal_settings(tmp_path):
     assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert settings.targets_for_planner() == (("ai_chatgpt", 33, 60),)
     assert settings.untargeted == () and not settings.is_untargeted("example-a/residential")
+
+
+def test_the_engine_defaults_to_camoufox_and_a_target_overrides_it(tmp_path):
+    settings = load_settings(EXAMPLE)
+    assert settings.browser.engine == "camoufox" and settings.engines() == ("camoufox",)
+    assert {settings.engine(t.id) for t in settings.targets} == {"camoufox"}
+    doc = document()
+    target(doc, "amazon_pdp")["engine"] = "chrome"
+    settings = load_settings(write(tmp_path, doc))
+    assert settings.engine("amazon_pdp") == "chrome" and settings.engine("ai_chatgpt") == "camoufox"
+    assert settings.engines() == ("camoufox", "chrome")
+    doc["browser"]["engine"] = "chrome"
+    target(doc, "ai_chatgpt")["engine"] = "camoufox"
+    settings = load_settings(write(tmp_path, doc))
+    assert settings.browser.engine == "chrome" and settings.engine("ai_chatgpt") == "camoufox"
+    assert settings.engine("google_search") == "chrome"
+    assert settings.host("browser-1").engine("amazon_pdp") == "chrome"

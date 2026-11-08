@@ -106,8 +106,8 @@ async def test_a_waiter_cancelled_after_its_grant_passes_the_slot_on():
     granted = []
     lease = pool.browser()
     await lease.__aenter__()
-    first = asyncio.create_task(pool._acquire())
-    second = asyncio.create_task(pool._acquire())
+    first = asyncio.create_task(pool._acquire(None))
+    second = asyncio.create_task(pool._acquire(None))
     await asyncio.sleep(0)
     await lease.__aexit__(None, None, None)
     first.cancel()
