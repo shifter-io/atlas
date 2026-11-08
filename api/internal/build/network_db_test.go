@@ -44,7 +44,7 @@ type statementLog struct {
 // networkCountsSQL is the store's statement reading network lists' row
 // counts: the lists a v4 load reads (store.NetLists).
 var networkCountsSQL = func() string {
-	for _, s := range store.Statements {
+	for _, s := range store.Statements() {
 		if s.Name == "load.network_counts" {
 			sql, _ := s.Query(&store.ExplainParams{})
 			return sql

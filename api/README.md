@@ -65,12 +65,13 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 database with `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, in one REPEATABLE READ read-only
 transaction. Run it as the API's read-only role: a role that can write (a superuser, or
 one with `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a `public` or `site` table) is
-refused. The statements are the registry `store.Statements`, built from the same SQL the
+refused. The statements are the registry `store.Statements()`, built from the same SQL the
 call sites run: the poll (site layout, fingerprint), the full rebuild in `LoadLists`
 (site tables, framework tables, snapshot head, network list counts), the v4 network-list
 row and label reads of a row-cache miss, and the events reads (the load's window and
 notable reads, `LoadEvents`, and the `/v1/events` database fallback for the default,
-product, kinds, category and since filters). The API reads no build before v4, so
+product, kinds, category and since filters), then each page answer's own statements
+(`store.RegisterStatement`, `api/answers/`). The API reads no build before v4, so
 there is no statement shape for one.
 
 The arguments come from the current build: the network list with the most rows (and its
@@ -130,6 +131,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 | `/v1/networks/{slug}/coverage?kind=&range=&q=&page=` | A v4 build only: one page (50 rows) of the network's City × ASN rows with IPs, most IPs first, with `total`, `pages` and, with `q`, `totals` (FIELDS.md, "Payload v4 list answers"). |
 | `/v1/places/region/{key}?range=` and `/v1/places/city/{key}?range=` | A v4 build only: every network's row in that region or city, ranked among the networks of the same kind; 404 for an unknown key. |
 | `/v1/version` | `{revision, builtAt}`: what open pages poll (through the website's passthrough) to learn that the data changed. `revision` is the hex SHA-256 of the dataset file (its ETag without quotes, and the hash in its name), so it changes exactly when a new dataset file is written (see "The dataset file"; a rebuild with identical bytes keeps it) and a build from a `siteapi dump` file can compute it from the bytes. `public, max-age=5, s-maxage=5`; answer `If-None-Match` with `304`. |
+| Page answers added from Phase 3 | See `api/answers/`: each one's route, query and body in `api/answers/<name>.md`. |
 | `/healthz` | `no-store`. `status` (`ok`, `degraded` after a failed rebuild or while `unserved` is not empty, `starting`, `unavailable` while the current build is older than payload v4), version, build timings, fingerprint, `lastError`, `lastErrorAt`, `reason`, cache sizes, `unserved`, `siteGaps` and `binary`. `reason` is null unless nothing serves because the current build is older than payload v4: then it is `calculation older than payload v4: recalculate`, `/healthz` answers 503 like every data route (each with that reason as its `error`), and the answers of an earlier v4 build are no longer served; `serve` starts anyway, and the next v4 build serves again. `unserved` lists, after every build, each page that does not answer 200 among `/v1/networks`, `/v1/countries`, `/v1/rankings`, `/v1/networks/all` and, for every product group of the published snapshot, its network's `/v1/networks/{slug}`, `/chart` and `/places` (with and without `?kind=`); a product whose provider has no network is a line too, unless a catalog row hides it (`listed = false`). At most 50 lines, then `and N more`; the same list is logged as a warning (`published products without their network pages`). `siteGaps` lists the site tables (or columns) the database lacks and that are served empty (see "Where the site schema comes from"); informational, it does not degrade the status. `binary` is the git `revision`, `time` and `modified` flag the running siteapi was built from (null when built outside a checkout); `serve` logs it at start. |
 
 Every answer is at most 200 KB (`build.MaxAnswerBytes`): `TestEveryAnswerFitsTheCap` renders the QA-1
@@ -422,8 +424,9 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
 - `server`:
   - every answer of a v4 build (`testdb.PublishV4`): the every-request fixture and
     QA-1 as payload v4 (18 networks with every exit country, the tails and 2,000
-    City × ASN rows per window) match a per-route SHA-256 golden
-    (`testdata/answers-v4-scale.json`)
+    City × ASN rows per window) match a per-route SHA-256 golden, one file per
+    answer family (`testdata/answers-v4-scale/<family>.json`, `GOLDEN_WRITE=1`
+    rewrites them; `api/answers/README.md`)
   - the committed fixtures as v4 builds answer as main did before browser targets
     (`testdata/answers-v4.json`)
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404

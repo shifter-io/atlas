@@ -54,12 +54,13 @@ func TestExplainTimesEveryStatement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Statements) != len(store.Statements) {
-		t.Fatalf("%d statements explained, %d registered", len(report.Statements), len(store.Statements))
+	want := store.Statements()
+	if len(report.Statements) != len(want) {
+		t.Fatalf("%d statements explained, %d registered", len(report.Statements), len(want))
 	}
 	for i, e := range report.Statements {
-		if e.Name != store.Statements[i].Name || e.SQL == "" {
-			t.Errorf("statement %d is %q (SQL %q), want %q", i, e.Name, e.SQL, store.Statements[i].Name)
+		if e.Name != want[i].Name || e.SQL == "" {
+			t.Errorf("statement %d is %q (SQL %q), want %q", i, e.Name, e.SQL, want[i].Name)
 		}
 		switch pre := e.Only == "pre-v4"; {
 		case e.Error != "":

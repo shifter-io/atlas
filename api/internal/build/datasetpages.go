@@ -16,7 +16,8 @@ import (
 // "/v1/countries/<CC>" (contract K11: the country pages are pages of the
 // site's design). The network lists' first pages are the dataset's lists
 // (DatasetLists); further pages, the answers with q and the region and city
-// pages are read from the API; search is not a page.
+// pages are read from the API; search is not a page. A registered answer
+// with InDataset adds its bodies under their stored paths.
 type DatasetPages map[string]any
 
 // datasetPages is pg's page answers by request.
@@ -36,6 +37,16 @@ func datasetPages(pg *Pages) DatasetPages {
 	for key, ans := range pg.Charts {
 		parts := strings.SplitN(key, "/", 3)
 		out["/v1/networks/"+parts[0]+"/chart?kind="+parts[1]+"&range="+parts[2]] = ans
+	}
+	for _, a := range Answers() {
+		if !a.InDataset {
+			continue
+		}
+		for path, ans := range pg.Registered {
+			if a.Owns(path) {
+				out[path] = ans
+			}
+		}
 	}
 	return out
 }

@@ -22,7 +22,8 @@ var (
 	rangeIDs       = map[string]bool{"24h": true, "7d": true, "30d": true}
 )
 
-// pageAnswers is every precomputed per-page body of a build by its path.
+// pageAnswers is every precomputed per-page body of a build by its path,
+// the registered answers' (registered.go) among them.
 // A network's answer for each category is stored under /v1/networks/{slug}/{kind};
 // /v1/networks/{slug} without ?kind= serves the headline one.
 func pageAnswers(pg *build.Pages) map[string]any {
@@ -38,6 +39,9 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	}
 	for key, ans := range pg.Charts {
 		out["/v1/charts/"+key] = ans
+	}
+	for path, ans := range pg.Registered {
+		out[path] = ans
 	}
 	return out
 }
@@ -85,6 +89,7 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/countries/{cc}/cities", s.serveCountryCities)
 	mux.HandleFunc("GET /v1/countries/{cc}/regions", s.serveCountryCities)
 	mux.HandleFunc("GET /v1/places/{dimension}/{key}", s.servePlace)
+	s.installRegistered(mux)
 }
 
 // onlyParams answers 400 and returns false when the query has a parameter

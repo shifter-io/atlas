@@ -36,6 +36,11 @@ type Pages struct {
 	// network that should serve it. It is not an answer: the server checks
 	// after each build that each one has its network pages.
 	Published []PublishedProduct
+	// Registered is every registered answer's body by its stored path
+	// (answers_registry.go); Unbuilt is each answer left out, with why.
+	// Neither is part of the encoded Pages: each body is its own answer.
+	Registered map[string]any    `json:"-"`
+	Unbuilt    map[string]string `json:"-"`
 	// lists and coverage are read from the network lists (placelists.go).
 	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList

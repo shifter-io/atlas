@@ -13,9 +13,9 @@ import (
 const MaxUnserved = 50
 
 // unservedPages asks the serving version, through the API's own routes, for
-// the index pages and every page a published product's network should have,
-// and returns one line per page that does not answer 200 (at most
-// MaxUnserved, then a count of the rest). A product with no network at all
+// the index pages, every page a published product's network should have and
+// every registered answer's samples, and returns one line per page that does
+// not answer 200 (at most MaxUnserved, then a count of the rest). A product with no network at all
 // is a line too, unless its provider is hidden on purpose.
 func (s *Server) unservedPages(v *Version) []string {
 	c := &pageCheck{h: s.Handler(), out: []string{}, seen: map[string]bool{}}
@@ -25,6 +25,7 @@ func (s *Server) unservedPages(v *Version) []string {
 	for _, p := range v.Result.Pages.Published {
 		c.product(p)
 	}
+	c.checkRegistered(v.Result.Pages)
 	if c.more > 0 {
 		c.out = append(c.out, fmt.Sprintf("and %d more", c.more))
 	}
