@@ -990,8 +990,19 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.successRate",
-      "networks[].cells.*.engines.*.scores.success.status"
+      "networks[].cells.*.successRate"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
      ]
     },
     {
@@ -1149,9 +1160,21 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.engines.*.requests",
-      "networks[].cells.*.engines.*.outcomes",
       "networks[].cells.*.engine?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.requests",
+      "networks[].cells.*.outcomes"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.requests",
+      "networks[].cells.*.outcomes"
      ]
     },
     {
@@ -1720,8 +1743,19 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.generic_http.latencyP50",
-      "networks[].cells.*.engines.*.pageLoadP50"
+      "networks[].cells.generic_http.latencyP50"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.pageLoadP50?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.pageLoadP50?"
      ]
     }
    ]
@@ -2238,9 +2272,15 @@
    "issue": 705,
    "checks": [
     {
-     "request": "/v1/targets?kind=residential&range={range}",
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
      "paths": [
-      "networks[].cells.*.engines.*.scores.success.status"
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
      ]
     },
     {
@@ -2334,7 +2374,7 @@
    "id": "CMP-17",
    "page": 6,
    "class": "website",
-   "reason": "By-target best mark can compare a Chrome rate with a Camoufox rate (C61, C63): Website marks the best only among cells of the same `engine`, or compares `engines.<e>` of a shared engine; W4 already carries `engine` and `engines`."
+   "reason": "By-target best mark can compare a Chrome rate with a Camoufox rate (C61, C63): Website marks the best only among cells of the same `engine`, or reads one engine's body (`/v1/targets?engine=<e>`); W4 carries `engine`, `otherEngines` and the per-engine bodies (#735)."
   },
   {
    "id": "CMP-18",
@@ -2958,9 +2998,15 @@
    "issue": 705,
    "checks": [
     {
-     "request": "/v1/targets?kind=residential&range={range}",
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
      "paths": [
-      "networks[].cells.*.engines.*.scores.success.status"
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
      ]
     }
    ]
