@@ -6,7 +6,6 @@
 //	siteapi migrate      [--database-file F]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //	siteapi explain --out DIR [--database-file F]
-//	siteapi bench --base-url URL --out DIR [--warm 200] [--concurrency 8] [--budgets F]
 //
 // The database comes from DATABASE_URL, --database-file, or
 // .secrets/database.toml in the repository root (the working directory or its
@@ -30,7 +29,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Zeus-Development/proxy-index/api/internal/bench"
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
@@ -45,7 +43,6 @@ commands:
   migrate      create or upgrade the "site" schema (catalog, pricing, trust, reviews)
   dump         write one response (default /v1/dataset) to a file, for static builds
   explain      time every API statement with EXPLAIN ANALYZE (read-only role)
-  bench        time every page's requests against a running siteapi
 
 run "siteapi <command> -h" for flags`)
 }
@@ -93,8 +90,6 @@ func main() {
 		err = dump(args)
 	case "explain":
 		err = explain(args)
-	case "bench":
-		err = runBench(args)
 	case "-h", "--help", "help":
 		usage()
 		return
@@ -339,40 +334,6 @@ func writeExplain(dir string, report *store.ExplainReport) error {
 		return err
 	}
 	printJSON(map[string]any{"out": dir, "statements": len(report.Statements), "build": report.Params.Build})
-	return nil
-}
-
-// runBench writes bench.json and bench.md to --out: every page's requests
-// timed against the siteapi at --base-url. It fails when a budget is
-// exceeded or a request does not answer 200.
-func runBench(args []string) error {
-	fs := flag.NewFlagSet("bench", flag.ExitOnError)
-	base := fs.String("base-url", "", "the running siteapi, such as http://127.0.0.1:8090 (required)")
-	out := fs.String("out", "", "output directory (required): bench.json and bench.md are written there")
-	warm := fs.Int("warm", 200, "warm requests per request, after the cold one")
-	conc := fs.Int("concurrency", 8, "workers, each with its own keep-alive connection")
-	budgets := fs.String("budgets", "", "JSON budgets file laid over the defaults (api/README.md, \"siteapi bench\")")
-	fs.Parse(args) //nolint:errcheck
-	if *base == "" || *out == "" {
-		return errors.New("--base-url and --out are required")
-	}
-	b, err := bench.LoadBudgets(*budgets)
-	if err != nil {
-		return err
-	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	report, err := bench.Run(ctx, bench.Options{BaseURL: *base, Warm: *warm, Concurrency: *conc, Budgets: b})
-	if err != nil {
-		return err
-	}
-	if err := report.Write(*out); err != nil {
-		return err
-	}
-	printJSON(map[string]any{"out": *out, "pages": len(report.Pages), "requests": len(report.Requests), "failures": len(report.Failures)})
-	if report.Failed() {
-		return fmt.Errorf("%d over budget or failed; see %s", len(report.Failures), filepath.Join(*out, "bench.md"))
-	}
 	return nil
 }
 

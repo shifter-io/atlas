@@ -8,8 +8,6 @@ from datetime import timedelta
 from .aggregate import OUTCOMES, SeriesSpec, series, timed
 
 SUMMED = ("completed", "successes", "response_body_bytes", *OUTCOMES)
-# Cohort prefix of the per-kind fleet totals (fleet_totals()).
-KIND = "*:"
 
 
 def merged(rows):
@@ -70,26 +68,12 @@ def _entry(cohort, label, members, joined, timing):
 def fleet_totals(fleet_groups, as_of, minimum, slot_minutes, timed_target):
     """Every product group of every cohort together, per window: fleet entries with cohort "*",
     plus a series of the window's buckets (5 minutes for 24h, days otherwise) with distinct IPs
-    per bucket. It has no availability, which is a per-product fact. Then the same entries over
-    each kind's groups alone (cohort "*:<kind>", kinds by name), for the market totals per kind.
-    """
-    timing = (as_of, minimum, slot_minutes, timed_target)
-    out = _totals("*", fleet_groups, timing)
-    for kind in sorted({p["kind"] for ms in fleet_groups.values() for p, *_ in ms}):
-        own = {key: [m for m in ms if m[0]["kind"] == kind] for key, ms in fleet_groups.items()}
-        out += _totals(f"{KIND}{kind}", {key: ms for key, ms in own.items() if ms}, timing)
-    return out
-
-
-def _totals(cohort, fleet_groups, timing):
-    """The members of fleet_groups together per window, as cohort; timing: (as_of, minimum,
-    slot_minutes, timed_target)."""
-    as_of, minimum, slot_minutes, timed_target = timing
+    per bucket. It has no availability, which is a per-product fact."""
     out = []
     for label in dict.fromkeys(label for _, label in fleet_groups):
         members = [m for (_, w), ms in fleet_groups.items() if w == label for m in ms]
         rows, seen, hours = joined = together(members, label)
-        entry = _entry(cohort, label, members, joined, (minimum, slot_minutes))
+        entry = _entry("*", label, members, joined, (minimum, slot_minutes))
         since = as_of - timedelta(hours=hours)
         spec = SeriesSpec(since, as_of, hours, latency_target=timed_target, minimum=minimum)
         entry["series"] = series(rows, seen, spec)

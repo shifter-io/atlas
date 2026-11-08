@@ -222,8 +222,7 @@ func netPayloads(t *testing.T, c *pgx.Conn, nc netCase) (v4 []byte, groups [][]b
 
 // netAnswers is every answer of a build as the server renders them, and
 // pages and searches of every place list of its networks, of all networks
-// and of its countries. The registered page answers are left out: their
-// goldens are their own families' (server TestEveryV4Answer).
+// and of its countries.
 func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	t.Helper()
 	res.BuiltAt = time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
@@ -234,7 +233,7 @@ func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	}
 	out := map[string][]byte{}
 	for p, r := range v.Static {
-		if p != "/v1/version" && !registered(p) {
+		if p != "/v1/version" {
 			out[p] = r.Identity
 		}
 	}
@@ -426,14 +425,4 @@ func must(b []byte, err error) []byte {
 		panic(err)
 	}
 	return b
-}
-
-// registered reports whether path is a registered page answer's.
-func registered(path string) bool {
-	for _, a := range build.Answers() {
-		if a.Owns(path) {
-			return true
-		}
-	}
-	return false
 }

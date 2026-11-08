@@ -259,7 +259,12 @@ func (d *DB) insertParts(ctx context.Context, id int64, products, runs [][]byte)
 		_, err := c.Exec(ctx, insert, id, "product", i, g.ID, g.ProductID, g.Cohort, products[i])
 		return err
 	}
-	n := len(products) + len(runs)
+	return d.inParallel(ctx, len(products)+len(runs), write)
+}
+
+// inParallel calls write for every index below n from up to partWriters
+// connections at once and returns the first error.
+func (d *DB) inParallel(ctx context.Context, n int, write func(*pgx.Conn, int) error) error {
 	work := make(chan int, n)
 	for i := range n {
 		work <- i
