@@ -42,11 +42,13 @@ async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():
     assert browser.timeouts == [20_000]
 
 
-async def test_a_chrome_try_records_its_fingerprint(monkeypatch):
+@pytest.mark.parametrize("error", [None, RuntimeError("crashed"), NavigationError("ERR_FAILED")])
+async def test_a_chrome_try_records_its_fingerprint_however_it_ends(monkeypatch, error):
     fingerprint = chrome.fingerprint("run:0", "US").record()
     monkeypatch.setattr(browser_transport_cases.FakePage, "fingerprint", fingerprint, raising=False)
-    harness = Harness()
-    await harness.execute()
+    harness = Harness(Script(error=error))
+    outcome = await harness.execute()
+    assert outcome.error == (None if error is None else "browser_error")
     [(record, _)] = harness.recorder.tries
     assert record["fingerprint"] == fingerprint
 

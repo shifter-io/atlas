@@ -203,6 +203,8 @@ class BrowserTransport:
                 return await self._on_page(page, target, spec, state)
 
     async def _on_page(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
+        # First, so a try that fails in any way still records its fingerprint (a Chrome try's).
+        state["fingerprint"] = getattr(page, "fingerprint", None)
         try:
             assessment = await self._load(page, target, spec, state)
         except NavigationError as exc:
@@ -210,7 +212,6 @@ class BrowserTransport:
             assessment = PageAssessment(error=code, verdict=verdict, reason=_reason(exc.name))
         state["final_url"] = _page_url(await page.url())
         state["bytes"] = await page.bytes_down_est()
-        state["fingerprint"] = getattr(page, "fingerprint", None)  # a Chrome try's
         failure = assessment.error is not None
         # Privacy: a screenshot of an AI source that showed answer text would hold the answer.
         answered = target.id in AI_SOURCES and state["found"].get(ANSWER_CHARS, 0) > 0
