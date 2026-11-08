@@ -239,6 +239,7 @@ var reasons = map[string]string{
 	"targets[].delta24h":                   "Per-target 24h deltas are not published by the framework snapshot",
 	"targets[].pageLoadP50":                "Browser target not measured for this product in the published snapshot, or no successful try",
 	"targets[].pageLoadP90":                "Browser target not measured for this product in the published snapshot, or no successful try",
+	"targets[].engine":                     "Browser target not measured for this product, or a snapshot from before the engine split",
 	"targets[].sources[].label":            "No label in public.targets for this source target",
 	"targets[].sources[].successRate":      "Source target not measured for this product in the published snapshot",
 	"series.pricePerGb90d":                 "Price history is not collected",
@@ -282,6 +283,9 @@ func reasonFor(path string) string {
 	}
 	if strings.HasPrefix(p, "targets[].outcomes.") || strings.HasPrefix(p, "targets[].sources[].outcomes.") {
 		return "Browser target not measured for this product in the published snapshot (no completed tries)"
+	}
+	if strings.HasPrefix(p, "targets[].engines.") {
+		return "No completed (or, for page loads, successful) try of this engine in the window"
 	}
 	if strings.HasPrefix(p, "score.breakdown.") {
 		return "Score component unavailable in the published snapshot"

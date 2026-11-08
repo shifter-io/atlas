@@ -74,15 +74,33 @@ type TargetResult struct {
 // BrowserResult is a browser target's targets.<id>.browser: its outcome
 // shares, the page-load times of its successful tries, the group target it is
 // a source of (nil when none) and, on a group target, its sources in order.
+// The shares and page loads are those of one engine, Engine (the one with the
+// most completed tries); Engines holds each engine's own, never added
+// together. Both are empty in a snapshot from before the engine split.
 type BrowserResult struct {
-	OutcomeRates OutcomeRates `json:"outcome_rates"`
-	PageLoadMs   Latency      `json:"page_load_ms"`
-	Group        *string      `json:"group"`
-	Sources      []string     `json:"sources"`
+	OutcomeRates OutcomeRates            `json:"outcome_rates"`
+	PageLoadMs   Latency                 `json:"page_load_ms"`
+	Group        *string                 `json:"group"`
+	Sources      []string                `json:"sources"`
+	Engine       string                  `json:"engine"`
+	Engines      map[string]EngineResult `json:"engines"`
 }
 
 func (v *BrowserResult) UnmarshalJSON(d []byte) error {
 	type plain BrowserResult
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// EngineResult is one engine's figures of a browser target (browser.engines.<name>).
+type EngineResult struct {
+	Completed    Num          `json:"completed"`
+	Successes    Num          `json:"successes"`
+	OutcomeRates OutcomeRates `json:"outcome_rates"`
+	PageLoadMs   Latency      `json:"page_load_ms"`
+}
+
+func (v *EngineResult) UnmarshalJSON(d []byte) error {
+	type plain EngineResult
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 

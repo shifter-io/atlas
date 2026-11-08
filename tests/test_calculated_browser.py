@@ -12,7 +12,7 @@ from calculated_browser_cases import GROUP, SOURCES, row
 
 from proxy_index import traffic
 from proxy_index.browser import contracts
-from proxy_index.calculated import browser
+from proxy_index.calculated import browser, calculator
 from proxy_index.calculated.aggregate import timed
 from proxy_index.calculated.policy import load as load_policy
 from proxy_index.calculated.policy import validate
@@ -203,3 +203,107 @@ def test_group_rate_is_timed_over_the_union():
     # Slot one: 10 of 40 succeeded; slot two: none of 10. Each slot weighs the same.
     assert m["success_rate"] == (10 / 40 + 0) / 2
     assert m["request_success_rate"] == 10 / 50
+
+
+# --- engines (BROWSER-ENGINE-FIGURES-1) -------------------------------------------------------
+
+
+def before_engines(target, rows, groups):
+    """The K-BP6 browser object as it was before the engine split: every row summed."""
+    return {
+        "outcome_rates": browser.outcome_rates(rows),
+        "page_load_ms": browser.page_load(rows),
+        "group": next((g for g, sources in groups.items() if target in sources), None),
+        "sources": list(groups[target]) if target in groups else None,
+    }
+
+
+def test_camoufox_only_windows_keep_every_figure():
+    since = datetime(2026, 11, 4, tzinfo=UTC)
+    rows = [
+        row(since, 4, 3, [(100, 3)], {"tls": 1}, target="ai_overview"),
+        row(since, 5, 1, [(300, 1)], {"no_answer": 4}, target="ai_chatgpt", engine="camoufox"),
+        row(since + timedelta(hours=1), 6, 6, [(200, 6)], target="amazon_pdp"),
+    ]
+    config = {"required_targets": [], "target_groups": {GROUP: SOURCES}}
+    listed = browser.targets(config, [], rows, since, since + timedelta(hours=2))
+    found = browser.browser_targets(rows, since, since + timedelta(hours=2), {GROUP: SOURCES})
+    assert [(t, own) for t, own, _ in listed] == list(found.items())  # every row, as before
+    for target, own, extra in listed:
+        b = extra["browser"]
+        assert {k: b[k] for k in list(b)[:4]} == before_engines(target, own, {GROUP: SOURCES})
+        assert b["engine"] == "camoufox" and list(b["engines"]) == ["camoufox"]
+        assert b["engines"]["camoufox"] == {
+            "completed": sum(r["counters"]["completed"] for r in own),
+            "successes": sum(r["counters"]["successes"] for r in own),
+            "outcome_rates": b["outcome_rates"],
+            "page_load_ms": b["page_load_ms"],
+        }
+    assert list(listed[0][2]["browser"]) == [
+        *("outcome_rates", "page_load_ms", "group", "sources"),
+        *("engine", "engines"),
+    ]
+
+
+def test_two_engines_are_never_added_together():
+    since = datetime(2026, 11, 4, tzinfo=UTC)
+    camoufox = [row(since, 10, 9, [(100, 9)], {"tls": 1}), row(since, 2, 0, engine="camoufox")]
+    chrome = [
+        row(since, 20, 5, [(900, 5)], {"challenge": 15}, challenges=15, engine="chrome"),
+        row(since + timedelta(hours=1), 1, 1, [(800, 1)], engine="chrome"),
+    ]
+    rows = [camoufox[0], chrome[0], camoufox[1], chrome[1]]
+    config = {"required_targets": [], "target_groups": {}}
+    ((target, own, extra),) = browser.targets(config, [], rows, since, since + timedelta(hours=2))
+    b = extra["browser"]
+    assert (target, own, b["engine"]) == ("amazon_pdp", chrome, "chrome")  # 21 tries beat 12
+    assert b["outcome_rates"] == browser.outcome_rates(chrome)
+    assert b["outcome_rates"]["challenge"] == 15 / 21
+    assert b["page_load_ms"] == browser.page_load(chrome)
+    assert list(b["engines"]) == ["camoufox", "chrome"]
+    assert b["engines"]["camoufox"] == browser.engine_fields(camoufox)
+    assert b["engines"]["camoufox"]["completed"] == 12
+    assert b["engines"]["chrome"]["successes"] == 6
+    assert b["engines"]["camoufox"]["page_load_ms"]["p50"] == 100
+    # The first hour alone: 20 Chrome tries against 12 Camoufox ones; a tie goes to Camoufox.
+    ((_, own, extra),) = browser.targets(config, [], rows, since, since + timedelta(hours=1))
+    assert own == [chrome[0]] and extra["browser"]["engine"] == "chrome"
+    tie = [row(since, 3, 3, engine="chrome"), row(since, 3, 0)]
+    ((_, own, extra),) = browser.targets(config, [], tie, since, since + timedelta(hours=1))
+    assert own == [tie[1]] and extra["browser"]["engine"] == "camoufox"
+    assert browser.lead_engine({}) == "camoufox"
+    assert browser.fields("amazon_pdp", [], {})["engines"] == {}
+
+
+def test_a_group_target_is_split_per_engine_over_its_sources():
+    since = datetime(2026, 11, 4, tzinfo=UTC)
+    rows = [
+        row(since, 4, 4, [(100, 4)], target="ai_overview"),
+        row(since, 6, 3, [(500, 3)], target="ai_chatgpt", engine="chrome"),
+        row(since, 2, 1, [(200, 1)], target="ai_gemini", engine="camoufox"),
+        row(since, 3, 0, target="ai_gemini", engine="chrome"),
+    ]
+    config = {"required_targets": [], "target_groups": {GROUP: SOURCES}}
+    listed = browser.targets(config, [], rows, since, since + timedelta(hours=1))
+    found = {t: (own, extra["browser"]) for t, own, extra in listed}
+    own, group = found[GROUP]
+    assert group["engine"] == "chrome" and own == [rows[1], rows[3]]  # 9 tries against 6
+    assert group["engines"]["chrome"] == browser.engine_fields([rows[1], rows[3]])
+    assert group["engines"]["camoufox"] == browser.engine_fields([rows[0], rows[2]])
+    assert group["outcome_rates"]["ok"] == 3 / 9 and group["sources"] == SOURCES
+    # Each source keeps its own lead: ai_gemini's Chrome tries (3) beat its Camoufox ones (2).
+    assert found["ai_gemini"][0] == [rows[3]] and found["ai_overview"][1]["engine"] == "camoufox"
+
+
+def test_each_row_carries_its_runs_engine():
+    run = {
+        "scope": {"target": {"id": "amazon_pdp"}, "config": {"browser_engine": "chrome"}},
+        "role": "browser",
+        "test": "browser",
+        "light": False,
+        "finished_at": datetime(2026, 11, 4, tzinfo=UTC),
+    }
+    assert calculator._run_fields(run, [], 1800).fields["engine"] == "chrome"
+    del run["scope"]["config"]["browser_engine"]  # a run from before the engine choice
+    assert calculator._run_fields(run, [], 1800).fields["engine"] == "camoufox"
+    assert browser.run_engine({"browser_engine": None}) == "camoufox"

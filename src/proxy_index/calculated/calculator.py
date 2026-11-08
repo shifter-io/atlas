@@ -304,6 +304,8 @@ def _run_fields(r, overlapped, slot_seconds):
         "country": country.strip().upper() if country else None,
         "region": r.get("batch_region"),
         "concurrency": r["scope"]["config"].get("concurrency"),
+        # A browser run's engine (K-BP3): its figures are never added to another engine's.
+        "engine": browser.run_engine(r["scope"]["config"]),
     }
     return RunFields(fields, at, slot_seconds, r["finished_at"])
 
