@@ -77,6 +77,8 @@ type TargetResult struct {
 // The shares and page loads are those of one engine, Engine (the one with the
 // most completed tries); Engines holds each engine's own, never added
 // together. Both are empty in a snapshot from before the engine split.
+// Scores are Engine's rank-based scores (TARGET-SCORES-1), nil in a snapshot
+// from before them.
 type BrowserResult struct {
 	OutcomeRates OutcomeRates            `json:"outcome_rates"`
 	PageLoadMs   Latency                 `json:"page_load_ms"`
@@ -84,6 +86,7 @@ type BrowserResult struct {
 	Sources      []string                `json:"sources"`
 	Engine       string                  `json:"engine"`
 	Engines      map[string]EngineResult `json:"engines"`
+	Scores       *TargetScores           `json:"scores"`
 }
 
 func (v *BrowserResult) UnmarshalJSON(d []byte) error {
@@ -93,14 +96,63 @@ func (v *BrowserResult) UnmarshalJSON(d []byte) error {
 
 // EngineResult is one engine's figures of a browser target (browser.engines.<name>).
 type EngineResult struct {
-	Completed    Num          `json:"completed"`
-	Successes    Num          `json:"successes"`
-	OutcomeRates OutcomeRates `json:"outcome_rates"`
-	PageLoadMs   Latency      `json:"page_load_ms"`
+	Completed    Num           `json:"completed"`
+	Successes    Num           `json:"successes"`
+	OutcomeRates OutcomeRates  `json:"outcome_rates"`
+	PageLoadMs   Latency       `json:"page_load_ms"`
+	Scores       *TargetScores `json:"scores"`
 }
 
 func (v *EngineResult) UnmarshalJSON(d []byte) error {
 	type plain EngineResult
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// TargetScores are one engine's rank-based 1-10 scores of a browser target
+// in one window, among the networks ranked for it (TARGET-SCORES-1): success
+// (ok, higher is better), challenge and block (hard block, lower is better).
+type TargetScores struct {
+	Success   MetricScore `json:"success"`
+	Challenge MetricScore `json:"challenge"`
+	Block     MetricScore `json:"block"`
+}
+
+// MetricScore is one metric's score. Score, Rank (fractional on a tie) and
+// RankedOf (M, the networks ranked) are null unless Status is "ranked"; the
+// other statuses are "not_enough_data", "too_few_networks" and "all_similar".
+type MetricScore struct {
+	Rate     Num    `json:"rate"`
+	Score    Num    `json:"score"`
+	Rank     Num    `json:"rank"`
+	RankedOf Num    `json:"ranked_of"`
+	Status   string `json:"status"`
+}
+
+func (v *MetricScore) UnmarshalJSON(d []byte) error {
+	type plain MetricScore
+	return jsnum.DecodeNA(d, (*plain)(v))
+}
+
+// BrowserOverall is a network's overall browser score for one engine: the
+// difficulty-weighted mean of its ranked targets' success scores, over
+// Targets with Weights (each target's difficulty).
+type BrowserOverall struct {
+	Success OverallScore   `json:"success"`
+	Targets []string       `json:"targets"`
+	Weights map[string]Num `json:"weights"`
+}
+
+// OverallScore is the overall success score, its rank among the networks
+// with one and how many those are.
+type OverallScore struct {
+	Score    Num    `json:"score"`
+	Rank     Num    `json:"rank"`
+	RankedOf Num    `json:"ranked_of"`
+	Status   string `json:"status"`
+}
+
+func (v *OverallScore) UnmarshalJSON(d []byte) error {
+	type plain OverallScore
 	return jsnum.DecodeNA(d, (*plain)(v))
 }
 
@@ -239,6 +291,9 @@ type Window struct {
 	// Estimated is the window's released hourly estimates (nil when it has
 	// none: census-pulse groups, or no hour released inside the window).
 	Estimated *Estimated `json:"estimated"`
+	// BrowserOverall is each engine's overall browser score of the network
+	// (TARGET-SCORES-1); nil in a snapshot from before it.
+	BrowserOverall map[string]BrowserOverall `json:"browser_overall"`
 }
 
 // Estimated is a window's `estimated` block (proxy-index

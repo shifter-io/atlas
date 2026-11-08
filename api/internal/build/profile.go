@@ -39,6 +39,9 @@ type NetworkProfile struct {
 	IPSamples   []model.IPSample        `json:"ipSamples"`
 	Incidents   []model.Incident        `json:"incidents"`
 	Overlap     model.OverlapSummary    `json:"overlap"`
+	// BrowserOverall is the category's overall browser score per engine (not
+	// written when the snapshot has none).
+	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall,omitempty"`
 	// TileRanks is the category's precomputed ranks by range.
 	TileRanks map[string]model.TileRanks `json:"tileRanks"`
 	NA        []string                   `json:"na"`
@@ -79,7 +82,8 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 		HQ: p.HQ, Founded: p.Founded, Claim: p.Claim, Verdict: p.Verdict, Strengths: p.Strengths, Weaknesses: p.Weaknesses,
 		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: p.Score,
 		Reviews: p.Reviews, Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: m.Pricing, Trust: m.Trust,
-		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, TileRanks: p.TileRanks[kind], NA: p.NA}
+		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
+		TileRanks: p.TileRanks[kind], NA: p.NA}
 }
 
 // addDetails completes every network answer with its profile, its window

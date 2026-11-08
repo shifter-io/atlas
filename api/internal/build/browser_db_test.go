@@ -126,6 +126,14 @@ func TestANetworkAnswerCarriesTheBrowserCardFields(t *testing.T) {
 			t.Errorf("%s has %d fields: %s", b.Target, len(keys), jsonOf(t, b))
 		}
 	}
+	// The network's overall browser score, only when the snapshot has one.
+	overall := res.Pages.Network["shifter/residential"].Profile.BrowserOverall["camoufox"].Success
+	if overall.Score != 8.2 || overall.Rank != 2.5 || overall.RankedOf != 18 || len(overall.Targets) != 3 || overall.Weights[testscale.GroupTarget] != 4 {
+		t.Errorf("overall %s", jsonOf(t, overall))
+	}
+	if o := plain.Pages.Network["shifter/residential"].Profile.BrowserOverall; o != nil {
+		t.Errorf("overall without browser entries %s", jsonOf(t, o))
+	}
 	if !targets[0].LatencyP50.OK() || jsonOf(t, targets[0]) != jsonOf(t, before[0]) {
 		t.Errorf("generic_http latency changed: %s", jsonOf(t, targets[0]))
 	}
@@ -171,6 +179,11 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 	}
 	if b.SuccessRate != model.Num(counts[0]/total) || b.CaptchaRate != model.Num(counts[1]/total) || b.BlockRate != model.Num(counts[2]/total) || b.Requests != model.Num(total) {
 		t.Errorf("%s rates %+v", b.Target, b)
+	}
+	s := b.Scores
+	if s == nil || s.Success.Status != "ranked" || s.Success.RankedOf != 18 || !s.Success.Score.OK() || s.Challenge.Status != "all_similar" ||
+		s.Block.Status != "not_enough_data" || s.Block.Score.OK() || jsonOf(t, b.Engines["camoufox"].Scores) != jsonOf(t, s) {
+		t.Errorf("%s scores %s", b.Target, jsonOf(t, b.BrowserBenchmark))
 	}
 	if b.Target != testscale.GroupTarget {
 		if b.Sources != nil {

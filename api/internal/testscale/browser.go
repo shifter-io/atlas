@@ -90,9 +90,10 @@ func PageLoad(id string) (p50, p90 float64) {
 
 // AddBrowser adds every browser target to a snapshot document: each product
 // window gets a K-BP6 entry (metrics from BrowserCounts, the browser object
-// with outcome rates, page loads, group and sources) next to its network
-// targets, the methodology its target_groups and the document's target list
-// the nine targets. Network
+// with outcome rates, page loads, group and sources, its Camoufox engine and
+// BrowserScores) next to its network targets and BrowserOverallScore, the
+// methodology its target_groups and the document's target list the nine
+// targets. Network
 // metrics are untouched, as the framework keeps browser runs out of them.
 func AddBrowser(doc map[string]any) error {
 	products := doc["products"].([]any)
@@ -128,6 +129,7 @@ func addBrowser(p map[string]any) error {
 			browserEntry(entry, t)
 			targets[t.ID] = entry
 		}
+		w.(map[string]any)["browser_overall"] = map[string]any{"camoufox": BrowserOverallScore()}
 	}
 	return nil
 }
@@ -154,8 +156,42 @@ func browserEntry(entry map[string]any, t BrowserTarget) {
 	if t.ID == GroupTarget {
 		sources = GroupSources()
 	}
-	entry["browser"] = map[string]any{"outcome_rates": rates, "page_load_ms": map[string]any{"p50": p50, "p90": p90, "p95": p90 + 100, "p99": p90 + 200},
-		"group": group, "sources": sources}
+	loads := map[string]any{"p50": p50, "p90": p90, "p95": p90 + 100, "p99": p90 + 200}
+	scores := BrowserScores(t.ID)
+	entry["browser"] = map[string]any{"outcome_rates": rates, "page_load_ms": loads, "group": group, "sources": sources,
+		"engine": "camoufox", "scores": scores, "engines": map[string]any{"camoufox": map[string]any{
+			"completed": completed, "successes": counts[0], "outcome_rates": rates, "page_load_ms": loads, "scores": scores}}}
+}
+
+// BrowserScores is a browser target's TARGET-SCORES-1 scores in every window:
+// success ranked (score 10 minus its BrowserTargets position, among 18
+// networks), challenge all_similar and block not_enough_data.
+func BrowserScores(id string) map[string]any {
+	counts := BrowserCounts(id)
+	total := 0.0
+	for _, n := range counts {
+		total += n
+	}
+	k := 0.0
+	for i, t := range BrowserTargets {
+		if t.ID == id {
+			k = float64(i)
+		}
+	}
+	unranked := func(rate float64, status string) map[string]any {
+		return map[string]any{"rate": rate, "score": nil, "rank": nil, "ranked_of": nil, "status": status}
+	}
+	return map[string]any{
+		"success":   map[string]any{"rate": counts[0] / total, "score": 10 - k, "rank": 1 + k/2, "ranked_of": 18, "status": "ranked"},
+		"challenge": unranked(counts[1]/total, "all_similar"),
+		"block":     unranked(counts[2]/total, "not_enough_data"),
+	}
+}
+
+// BrowserOverallScore is every window's Camoufox overall browser score.
+func BrowserOverallScore() map[string]any {
+	return map[string]any{"success": map[string]any{"score": 8.2, "rank": 2.5, "ranked_of": 18, "status": "ranked"},
+		"targets": []any{"amazon_pdp", "google_search", GroupTarget}, "weights": map[string]any{"amazon_pdp": 2, "google_search": 3, GroupTarget: 4}}
 }
 
 // WithBrowser is a snapshot payload with AddBrowser applied.
