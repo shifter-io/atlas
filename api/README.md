@@ -41,6 +41,7 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from 
 /tmp/siteapi dump --out dataset.json        # write /v1/dataset to a file (an offline website build)
 /tmp/siteapi dump --endpoint /v1/coverage --out coverage.json --pretty
 /tmp/siteapi explain --database-file .secrets/database.toml --out /tmp/explain   # time every API statement
+/tmp/siteapi bench --base-url http://127.0.0.1:8090 --out /tmp/bench             # time every page's requests
 ```
 
 Never run a prebuilt or older binary (`api/bin/` is ignored by git and nothing
@@ -57,7 +58,9 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
-| `--out` | (required) | dump: the output file; explain: the output directory |
+| `--out` | (required) | dump: the output file; explain, bench: the output directory |
+| `--base-url` | (required) | bench: the running siteapi |
+| `--warm`, `--concurrency`, `--budgets` | `200`, `8`, none | bench: warm requests per request, workers, a budgets file |
 
 ### Timing the API's statements: `siteapi explain`
 
@@ -88,6 +91,61 @@ city in it are reported with them.
   the skipped and failed ones.
 
 A statement that fails runs in a savepoint and is reported; the others still run.
+
+### Timing every page's requests: `siteapi bench`
+
+`siteapi bench --base-url <url> --out <dir> [--warm 200] [--concurrency 8] [--budgets <file>]`
+measures a running siteapi from the outside, the way the website calls it. It reads
+`/healthz` (the last build's load, assemble, render and total times, and the version's age),
+`/v1/version` (the revision) and `/v1/networks` and `/v1/countries` (the real slugs, kinds
+and a country code for the list search), then expands every page's request list.
+
+The pages are `bench.Specs` (`internal/bench/pages.go`), the "After section 11" column of
+`docs/api-web-map.md` section 10: each page's existing routes, plus the `Samples` of every
+registered answer (`api/answers/`) whose path the page draws (`/v1/home`, `/v1/targets`,
+`/v1/meta`, `/v1/overlap`, `/v1/events/stats`, `/v1/networks/{slug}/...`). The network
+page is one page per network and kind. A sample's `{slug}` segment (by its `Route`) is set
+to the page's network, its `kind=` to the page's kind, and a sample with `range=` is
+requested once per range of the page; a sample no page draws goes to the page "other
+registered answers". The same specs are what PAGE-LATENCY-1's CI test expands, so the two
+never disagree. The dataset file is not requested: no page needs it after section 11.
+
+Every distinct request is sent once cold (in order, on one keep-alive connection, after
+`/v1/version`: the first request since the current version appeared, unless someone else
+asked first, hence the version's age in the report), once with `Accept-Encoding: identity`
+for its size, then `--warm` times over `--concurrency` workers, each with its own
+keep-alive transport, with `Accept-Encoding: br`. It records the status, the identity and
+encoded bytes, the cold time and the warm p50, p95, p99 (nearest rank) and max, each time
+including reading the whole body. A page's figures are the sums over its requests.
+
+Budgets (ms) are PAGE-LATENCY-1's CI budgets plus 20 ms of network time per request:
+
+| Class | Requests | Cold | p99 |
+|---|---|---|---|
+| `answer` | a precomputed answer (every other route) | 22 | 22 |
+| `events` | `/v1/events` | 22 | 22 |
+| `search` | `/v1/search?q=` | 25 | 25 |
+| `list` | a long-list page (`/v1/networks/{slug}/places` and `/coverage`, `/v1/countries/{cc}/cities` and `/regions`, `/v1/places/...`): cold is its first render | 70 | 22 |
+| `list-search` | the same with `q=` | 70 | 70 |
+
+A page's p99 sum may be 10 ms plus 20 ms per request. A `--budgets` JSON file is laid over
+the defaults; a class or request it names replaces that budget whole, and a 0 (or missing)
+limit is not checked:
+
+```json
+{"classes": {"answer": {"coldMs": 30, "p99Ms": 25}},
+ "requests": {"/v1/events?limit=200": {"coldMs": 40, "p99Ms": 30}},
+ "pageMs": 10, "pageRequestMs": 20}
+```
+
+- `bench.json`: the run (base URL, revision, whether the version changed during the run),
+  the build timings, every page and every request with its budget and why it failed.
+- `bench.md`: the build timings, every request or page over its budget, the pages slowest
+  first, then every request.
+
+Both are written to `<dir>` (created mode 700), mode 600. The command exits 1 when a
+request or page is over its budget or a request does not answer 200 (a 404 or 500 fails),
+0 otherwise.
 
 ### Where the site schema comes from
 
