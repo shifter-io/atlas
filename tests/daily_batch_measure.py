@@ -91,10 +91,10 @@ def batches(directories, runs, credentials, batch):
 
 def estimated(conn) -> list:
     return conn.execute(
-        "SELECT p.name,e.country_code,e.day,e.hour,t.run_id,e.measured_at,e.measured_ips,"
-        "e.measured_requests,e.hour_factor,e.unique_ips,e.requests,e.day_unique_ips,e.curve,"
+        "SELECT p.provider,p.name,e.country_code,e.day,e.hour,t.run_id,e.measured_at,"
+        "e.measured_ips,e.measured_requests,e.hour_factor,e.unique_ips,e.requests,e.day_unique_ips,e.curve,"
         "e.formula_version FROM estimated_hours e JOIN products p USING(product_id) "
-        "JOIN test_runs t USING(run_key) ORDER BY 1,2,3,4"
+        "JOIN test_runs t USING(run_key) ORDER BY 1,2,3,4,5"
     ).fetchall()
 
 
