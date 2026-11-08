@@ -117,6 +117,17 @@ def test_each_try_writes_its_view_verdict_and_screenshot(tmp_path):
     assert "browser-1" in summary and "country: US" in summary
 
 
+def test_without_a_launch_the_hosts_camoufox_is_launched(tmp_path, monkeypatch):
+    fleet, used = Fleet(Script()), []
+    monkeypatch.setattr(capture, "camoufox_launch", lambda *a: used.append(a) or fleet.launch)
+    state = make_state(tmp_path)
+    argv = ["--settings", str(state / "settings.toml"), "--state", str(state), "--host"]
+    argv += ["browser-1", "--network", "shifter/residential", "--target", "amazon_pdp"]
+    argv += ["--tries", "1", "--country", "us", "--out", str(tmp_path / "out")]
+    assert capture.main(argv) == 0 and len(fleet.browsers) == 1
+    assert used[0][0] == state and used[0][1].locale == "en-US"
+
+
 def test_a_navigation_error_has_no_view(tmp_path):
     status, _ = run(tmp_path, script=Script(error=NavigationError("NS_ERROR_NET_TIMEOUT")), tries=1)
     directory = tmp_path / "out/shifter/residential/amazon_pdp"

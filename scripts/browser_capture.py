@@ -214,16 +214,18 @@ async def capture(plan: Plan, directory: Path, launch: Any, host: str) -> list[d
     return recorder.records
 
 
-def check_request(tries: int, country: str, allowed: str | None) -> None:
-    if not 1 <= tries <= MAX_TRIES:
-        raise UserError(f"--tries must be 1 to {MAX_TRIES}")
+def check_request(
+    tries: int, country: str, allowed: str | None, max_tries: int = MAX_TRIES
+) -> None:
+    if not 1 <= tries <= max_tries:
+        raise UserError(f"--tries must be 1 to {max_tries}")
     if country not in (*COUNTRIES, allowed):
         raise UserError(f"--country {country} needs --allow-country {country}")
 
 
-def prepare(args: argparse.Namespace) -> Plan:
+def prepare(args: argparse.Namespace, max_tries: int = MAX_TRIES) -> Plan:
     """The host's own settings view, network files and bound target, read only."""
-    check_request(args.tries, args.country, args.allow_country)
+    check_request(args.tries, args.country, args.allow_country, max_tries)
     settings = load_settings(args.settings).host(args.host)
     if args.network not in settings.hosts[0].networks:
         raise UserError(f"{args.network} is not a network of {args.host}")
@@ -243,6 +245,12 @@ def prepare(args: argparse.Namespace) -> Plan:
         tries=args.tries,
         proxy=network.proxy_factory(country),
     )
+
+
+def camoufox_launch(state: Path, browser: BrowserOptions) -> Any:
+    """The host's pinned Camoufox, launched as the host does (driver.launch)."""
+    executable = release.executable(state / "camoufox")
+    return partial(driver.launch, executable, locale=browser.locale, headless=browser.headless)
 
 
 def output_dir(out: Path, plan: Plan) -> Path:
@@ -282,9 +290,7 @@ def main(argv: list[str] | None = None, launch: Any = None) -> int:
         print(f"browser_capture: {error}", file=sys.stderr)
         return 2
     if launch is None:
-        executable = release.executable(args.state / "camoufox")
-        options = {"locale": plan.browser.locale, "headless": plan.browser.headless}
-        launch = partial(driver.launch, executable, **options)
+        launch = camoufox_launch(args.state, plan.browser)
     records = asyncio.run(capture(plan, directory, launch, args.host))
     print(f"{len(records)} tries written to {directory}")
     return 0
