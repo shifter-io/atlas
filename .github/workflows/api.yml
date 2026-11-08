@@ -246,7 +246,7 @@ jobs:
           grep -E '^(--- |ok)|p99|published|rebuild' "$log"
           # Never an empty pass: the test ran, measured and passed.
           grep -qE '^--- PASS: TestPageLatency ' "$log"
-          grep -qE 'first render .* p99' "$log"
+          grep -qE 'list cold .* p99' "$log"
       - name: CI time (slowest Go tests, budgets)
         # Also after a failed test step: the summary is there for failed runs too. Fails
         # the job when a test takes 90 s or more or the test steps over 240 s (CI-TIME-1).
