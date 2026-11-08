@@ -21,6 +21,9 @@ func TestRegisterAnswerRefusesABadAnswer(t *testing.T) {
 		"no build":  func(a *PageAnswer) { a.Build = nil },
 		"no key":    func(a *PageAnswer) { a.Key = nil },
 		"not a GET": func(a *PageAnswer) { a.Route = "POST /v1/fine" },
+		"cut in the dataset": func(a *PageAnswer) {
+			a.Cut, a.InDataset = func(map[string]any, string) (any, bool) { return nil, false }, true
+		},
 	} {
 		a := ok
 		edit(&a)
@@ -60,7 +63,12 @@ func TestBuildRegisteredLeavesOutAFailedAnswer(t *testing.T) {
 		}},
 		{Name: "failed", Build: func(*Context) (map[string]any, error) { return nil, errors.New("no rows") }},
 		{Name: "outside", Build: func(*Context) (map[string]any, error) { return map[string]any{"/v1/networks": 1}, nil }},
+		{Name: "held", Build: func(*Context) (map[string]any, error) { return map[string]any{"/v1/held/x": 2}, nil },
+			Cut: func(map[string]any, string) (any, bool) { return nil, false }},
 	})
+	if pg.Held["held"]["/v1/held/x"] != 2 || len(pg.Held) != 1 {
+		t.Errorf("held %v", pg.Held)
+	}
 	if len(pg.Registered) != 2 || pg.Registered["/v1/good/7d"] != "now" {
 		t.Errorf("registered %v", pg.Registered)
 	}

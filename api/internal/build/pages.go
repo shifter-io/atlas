@@ -41,6 +41,9 @@ type Pages struct {
 	// Neither is part of the encoded Pages: each body is its own answer.
 	Registered map[string]any    `json:"-"`
 	Unbuilt    map[string]string `json:"-"`
+	// Held is, per registered answer with Cut, what its Build returned, by
+	// path: the server cuts that answer's bodies from it on request.
+	Held map[string]map[string]any `json:"-"`
 	// lists and coverage are read from the network lists (placelists.go).
 	lists    map[listKey]*placeIndex
 	coverage map[listKey]*coverageList

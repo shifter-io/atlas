@@ -392,6 +392,7 @@ rewrites them to the current one (`rechecked` in its output).
 | `site.providers` | Provider presentation (slug PK, name, tagline, kinds, primary kind, measured product, hq, founded, claim, verdict, strengths, weaknesses, best_for, website, listed, sort order) plus `framework_provider` (= `public.providers.id`). The score columns and `headline_overlap` were used only by the removed demo fixtures and are not read. |
 | `site.provider_products` | Everything a provider sells, `measured`, url, price label, note, `framework_product` (= `public.products.name`). |
 | `site.pricing`, `site.pricing_plans` | List pricing per category: billing model, $/GB entry and at scale, minimum commit, trial, cost per 1k success, average payload, cost basis, ranks, and the plans. |
+| `site.pricing_history` | Published list rates over time (migration 0003): one row per category and `effective_from` date, $/GB entry and at scale, `source`. The price history answer (`api/answers/pricing-history.md`) reads it; `scripts/pricing-history.sql` is its template. |
 | `site.trust_signals` | Trust per category: authenticity, DC ASN share, claim gap, blocklist, stickiness, leak checks, KYC, consent, `claimed_pool_size`. |
 | `site.measurements` | Unused: the removed demo fixtures' measurement documents. Not read. |
 | `site.reviews`, `site.community_runs`, `site.changelog`, `site.tape_events` | Records, with absolute timestamps (`posted_at`, `submitted_at`, `occurred_at`). The API turns them back into `agoSeconds`. |
@@ -400,7 +401,7 @@ rewrites them to the current one (`rechecked` in its output).
 The API reads `site.targets`, `scopes`, `score_weights`, `ranking_profiles` (the
 dataset), and `providers`, `provider_products`, `pricing`, `pricing_plans`,
 `trust_signals`, `reviews`, `community_runs`, `changelog` and `tape_events` (the network
-pages and the dataset). Every row has `is_demo`; rows with `is_demo = true` (left by the
+pages and the dataset), and `pricing_history` (the price history answer). Every row has `is_demo`; rows with `is_demo = true` (left by the
 removed `seed-demo`) are never read. Columns the site sorts, filters or joins on are
 typed. There are no foreign keys into the framework schema, so neither side can block
 the other's migrations. The runtime pool sets `default_transaction_read_only=on`. Only
