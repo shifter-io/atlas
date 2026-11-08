@@ -2202,3 +2202,4 @@ How the windows come out of one test a day:
   - 7d holds about 7 runs (700 tries) per network × target, and 30d about 30.
   - PERF-REPORT-1 counts how often each case occurs in the generated week.
 - **7d windows** hold 7 daily tests per network × country, and 7 browser runs per network × target.
+
