@@ -254,34 +254,10 @@ type Methodology struct {
 		// Grades is each grade's lowest score (methodology [grades], such
 		// as "A+": 88); nil when the snapshot does not publish them.
 		Grades map[string]float64 `json:"grades"`
-		// BrowserDifficulty is each browser target's difficulty from 1 to 5
-		// (methodology [browser_difficulty]; nil before it).
+		// BrowserDifficulty is each browser target's difficulty, 1 to 5, its
+		// weight in the overall browser score ([browser_difficulty]; nil before it).
 		BrowserDifficulty map[string]float64 `json:"browser_difficulty"`
 	} `json:"settings"`
-}
-
-// Difficulty is each browser target's scoring difficulty, as the framework
-// weights it (policy.py browser_difficulty): [browser_difficulty], plus each
-// group without one the highest of its sources'. Nil without the table.
-func (m Methodology) Difficulty() map[string]float64 {
-	if len(m.Settings.BrowserDifficulty) == 0 {
-		return nil
-	}
-	out := make(map[string]float64, len(m.Settings.BrowserDifficulty))
-	for id, v := range m.Settings.BrowserDifficulty {
-		out[id] = v
-	}
-	for group, sources := range m.Settings.TargetGroups {
-		if _, ok := out[group]; ok {
-			continue
-		}
-		for _, s := range sources {
-			if v, ok := m.Settings.BrowserDifficulty[s]; ok && v > out[group] {
-				out[group] = v
-			}
-		}
-	}
-	return out
 }
 
 type Snapshot struct {

@@ -30,7 +30,8 @@ workstation.
   breaks the API's database tests fixes them in the same pull request. It is one job on
   a 32-CPU server: `gofmt` and `go vet` in the background while every package's tests
   run in parallel, then the latency test `TestServeFromDatabase` (p99 < 2 ms) alone in
-  its own process, after everything else. See "Tests" in `api/README.md`.
+  its own process, after everything else, and after it the page latency test
+  `TestPageLatency` the same way. See "Tests" in `api/README.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
   ./cmd/siteapi`); `api/bin/` is ignored and never committed. An old binary serves
   only the routes it was built with and writes its own migration checksums.

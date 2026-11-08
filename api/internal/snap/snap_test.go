@@ -36,23 +36,16 @@ func TestTheHeadLatencyMeanIsOptional(t *testing.T) {
 	}
 }
 
-// Difficulty is [browser_difficulty] decoded from the settings, plus each
-// group without one the highest of its sources' (policy.py
-// browser_difficulty); a group with no weighed source gets none, and a
-// methodology without the table gives nil.
-func TestMethodologyDifficulty(t *testing.T) {
+// The settings' [grades] decode by label; a methodology without them has nil.
+func TestMethodologyGrades(t *testing.T) {
 	var m Methodology
-	if err := json.Unmarshal([]byte(`{"id":"m","settings":{"grades":{"A+":88,"D":0},
-		"browser_difficulty":{"amazon_pdp":2,"ai_overview":4,"ai_gemini":3,"kept":1},
-		"target_groups":{"ai_answers":["ai_overview","ai_gemini"],"kept":["ai_overview"],"empty":["unknown"]}}}`), &m); err != nil {
+	if err := json.Unmarshal([]byte(`{"id":"m","settings":{"grades":{"A+":88,"B":64,"D":0}}}`), &m); err != nil {
 		t.Fatal(err)
 	}
-	got := m.Difficulty()
-	want := map[string]float64{"amazon_pdp": 2, "ai_overview": 4, "ai_gemini": 3, "kept": 1, "ai_answers": 4}
-	if !maps.Equal(got, want) || m.Settings.Grades["A+"] != 88 {
-		t.Errorf("difficulty %v, grades %v", got, m.Settings.Grades)
+	if want := map[string]float64{"A+": 88, "B": 64, "D": 0}; !maps.Equal(m.Settings.Grades, want) {
+		t.Errorf("grades %v", m.Settings.Grades)
 	}
-	if (Methodology{}).Difficulty() != nil {
-		t.Error("a methodology without the table has a difficulty")
+	if (Methodology{}).Settings.Grades != nil {
+		t.Error("a methodology without grades has some")
 	}
 }

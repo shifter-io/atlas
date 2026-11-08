@@ -336,12 +336,11 @@ func wireCostPer1k(price Num, m snap.Metrics) Num {
 	if !rate.OK() {
 		rate = m.SuccessRate
 	}
-	bytes := m.BytesUp + m.BytesDown
-	if !price.OK() || !bytes.OK() || !m.Completed.OK() || m.Completed <= 0 || !rate.OK() || rate <= 0 {
+	gb := wireGbPer1k(m)
+	if !price.OK() || !gb.OK() || !rate.OK() || rate <= 0 {
 		return nan
 	}
-	gb := float64(bytes.F() / m.Completed.F() * 1000 / 1073741824)
-	return Num(math.Round(float64(gb*price.F()/rate.F())*10000) / 10000)
+	return Num(math.Round(float64(gb.F()*price.F()/rate.F())*10000) / 10000)
 }
 
 func costBasisText(price Num, m snap.Metrics) string {

@@ -44,9 +44,12 @@ func GroupSources() []string {
 
 // BrowserTargetsSQL inserts BrowserTargets into public.targets the way the
 // framework seeds them: engine browser, never in a census or a pulse.
-func BrowserTargetsSQL() string {
-	rows := make([]string, 0, len(BrowserTargets))
-	for _, t := range BrowserTargets {
+func BrowserTargetsSQL() string { return targetsSQL(BrowserTargets) }
+
+// targetsSQL inserts browser targets into public.targets.
+func targetsSQL(targets []BrowserTarget) string {
+	rows := make([]string, 0, len(targets))
+	for _, t := range targets {
 		rows = append(rows, fmt.Sprintf("('%s','%s','%s','browser',false,false,%d)", t.ID, t.Label, t.URL, t.Sort))
 	}
 	return "INSERT INTO targets(target_id,label,url,engine,census,pulse_enabled,sort_order) VALUES " + strings.Join(rows, ",")

@@ -75,13 +75,11 @@ func buildMeta(c *Context) (map[string]any, error) {
 	}
 	m := MetaAnswer{GeneratedAt: c.GeneratedAt, Weights: ds.Weights, Profiles: ds.Profiles, Ranges: Ranges, Scopes: ds.Scopes,
 		Snapshot: MetaSnapshot{ID: ds.Snapshot.SnapshotID, AsOf: ds.Snapshot.AsOf, MethodologyID: ds.Snapshot.MethodologyID}}
-	var difficulty map[string]float64
 	if c.Snapshot != nil {
 		m.Grades = gradeBands(c.Snapshot.Methodology.Settings.Grades)
-		difficulty = c.Snapshot.Methodology.Difficulty()
 	}
 	var err error
-	if m.Targets, m.TargetCounts, err = metaTargets(ds.Targets, difficulty); err != nil {
+	if m.Targets, m.TargetCounts, err = metaTargets(ds.Targets, scoreWeights(c.Snapshot)); err != nil {
 		return nil, err
 	}
 	if m.NA, err = naOf(m, nil, false, "profiles", "targets", "ranges", "scopes"); err != nil {
@@ -112,13 +110,13 @@ func gradeBands(grades map[string]float64) []GradeBand {
 // order, and counts them. A target the browser score does not weigh (an HTTP
 // or catalog-only one) has a null weight by design, so only a browser
 // target's missing weight is in its na.
-func metaTargets(targets []model.TargetMeta, difficulty map[string]float64) ([]MetaTarget, TargetCounts, error) {
+func metaTargets(targets []model.TargetMeta, weights map[string]Num) ([]MetaTarget, TargetCounts, error) {
 	out := make([]MetaTarget, 0, len(targets))
 	counts := TargetCounts{All: len(targets)}
 	for _, t := range targets {
 		mt := MetaTarget{TargetMeta: t, ScoreWeight: nan, Card: t.Source == model.SourceMeasured && t.Group == nil}
-		if w, ok := difficulty[t.ID]; ok {
-			mt.ScoreWeight = Num(w)
+		if w, ok := weights[t.ID]; ok {
+			mt.ScoreWeight = w
 		}
 		var skip []string
 		if model.SV(t.Engine) != model.EngineBrowser {
