@@ -95,7 +95,7 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 	base := strings.TrimRight(o.BaseURL, "/")
 	clients := make([]*http.Client, o.Concurrency)
 	for i := range clients {
-		clients[i] = &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 1}}
+		clients[i] = newClient()
 	}
 	r := &Report{BaseURL: base, StartedAt: time.Now().UTC(), Warm: o.Warm, Concurrency: o.Concurrency}
 	c := clients[0]
@@ -121,6 +121,11 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 	return r, nil
 }
 
+// newClient is one keep-alive connection that asks for no compression.
+func newClient() *http.Client {
+	return &http.Client{Timeout: 30 * time.Second, Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 1}}
+}
+
 // shape reads the networks and country codes of the running server.
 func shape(ctx context.Context, c *http.Client, base string) (Shape, error) {
 	var nets build.NetworksAnswer
@@ -136,7 +141,8 @@ func shape(ctx context.Context, c *http.Client, base string) (Shape, error) {
 	}
 	sh := Shape{Search: nets.Networks[0].Slug, Query: "as"}
 	if len(countries.Countries) > 0 {
-		sh.Query = strings.ToLower(countries.Countries[0].CountryCode)
+		sh.Country = countries.Countries[0].CountryCode
+		sh.Query = strings.ToLower(sh.Country)
 	}
 	for _, n := range nets.Networks {
 		kinds := n.Kinds
