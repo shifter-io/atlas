@@ -76,12 +76,17 @@ class Plan:
 def load_plan(database, start: date, formulas=FORMULAS, browser=BROWSER_SETTINGS, pulses=False):
     """The plan of a database, read once: its enabled countries and, with pulses, its pulse
     targets (as replay_plan.py reads them), with the formulas and the browser queue settings."""
+    with connect(database) as conn:
+        return read_plan(conn, start, formulas, browser, pulses)
+
+
+def read_plan(conn, start: date, formulas=FORMULAS, browser=BROWSER_SETTINGS, pulses=False):
+    """load_plan on an open connection, in its transaction."""
     settings = load_settings(browser)
     if settings.schedule.plan != "queue":
         raise ValueError(f"{Path(browser).name}: schedule.plan must be queue")
-    with connect(database) as conn:
-        countries = tuple(sorted(row[0] for row in conn.execute(COUNTRIES).fetchall()))
-        targets = conn.execute(TARGETS).fetchall() if pulses else []
+    countries = tuple(sorted(row[0] for row in conn.execute(COUNTRIES).fetchall()))
+    targets = conn.execute(TARGETS).fetchall() if pulses else []
     names = sorted(path.stem for path in Path(formulas).glob("*.json"))
     found = [compute.load_formula(Path(formulas), name) for name in names]
     targets = tuple((row[0], row[1]) for row in targets)
