@@ -699,7 +699,8 @@
     {
      "request": "/v1/networks/{slug}/chart?kind={kind}&range={range}",
      "paths": [
-      "labels"
+      "labels.success",
+      "labels.latency"
      ]
     }
    ]
@@ -1060,12 +1061,12 @@
      "paths": [
       "targets[].id",
       "targets[].label",
-      "targets[].category",
+      "targets[].category?",
       "targets[].difficulty",
       "targets[].passCondition",
-      "targets[].engine",
+      "targets[].engine?",
       "targets[].group?",
-      "targets[].sources?"
+      "targets[].sources"
      ]
     },
     {
@@ -1093,7 +1094,7 @@
       "networks[].cells.*.captchaRate",
       "networks[].cells.*.blockRate",
       "networks[].cells.*.requests",
-      "networks[].cells.*.engine",
+      "networks[].cells.*.engine?",
       "kind",
       "range"
      ]
@@ -1150,7 +1151,7 @@
      "paths": [
       "networks[].cells.*.engines.*.requests",
       "networks[].cells.*.engines.*.outcomes",
-      "networks[].cells.*.engine"
+      "networks[].cells.*.engine?"
      ]
     },
     {
@@ -1686,7 +1687,7 @@
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
       "targets[].label",
-      "targets[].category",
+      "targets[].category?",
       "targets[].difficulty",
       "targets[].passCondition"
      ]
@@ -1719,7 +1720,7 @@
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].cells.*.latencyP50",
+      "networks[].cells.generic_http.latencyP50",
       "networks[].cells.*.engines.*.pageLoadP50"
      ]
     }
@@ -2203,9 +2204,9 @@
      "paths": [
       "targets[].id",
       "targets[].label",
-      "targets[].category",
+      "targets[].category?",
       "targets[].difficulty",
-      "targets[].engine",
+      "targets[].engine?",
       "targets[].group?"
      ]
     }
