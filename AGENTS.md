@@ -93,9 +93,11 @@ no CI. What the checks run and how long they may take: the CI paragraph in
 
 1. Open a ready (not draft) pull request. On its head these must pass: `tier1`
    (`ci.yml`), `maestro-policy` (size, privacy, attribution; `maestro-policy.yml`),
-   `api` (`api.yml`) when it touches `api/` or the framework's SQL, and the
-   `maestro/review` and `maestro/qa` statuses the reviewer and QA set on that same
-   commit. A new push, a merge of `main` into the branch included, needs review and
+   `api` (`api.yml`), and the `maestro/review` and `maestro/qa` statuses the reviewer
+   and QA set on that same commit. `api` runs and is required on every pull request
+   and every queue test (CI-GATE-1): when the change touches neither `api/`, the
+   framework's SQL nor `api.yml`, it finishes green in seconds on GitHub's runner,
+   without a CI server or database; otherwise it runs the Go build and tests. A new push, a merge of `main` into the branch included, needs review and
    QA again for the new head.
 2. Join the queue: `gh pr merge <pr> --auto`. The queue's merge method is squash, so
    pass no method flag. It enters the queue once every check is green.
@@ -109,8 +111,8 @@ no CI. What the checks run and how long they may take: the CI paragraph in
    `maestro-wait pr --repo Zeus-Development/proxy-index --pr <pr> --head <sha>`
    reports `merged`, `checks-failed`, `conflict` or `left-queue`.
 
-`tier1` and `api` each run as one job on their own fresh 32-CPU CI server
-(`ci-32cpu`), all their work in parallel there. Both write their slowest tests and
+`tier1` and `api`'s build and tests each run as one job on their own fresh 32-CPU CI
+server (`ci-32cpu`), all their work in parallel there. Both write their slowest tests and
 their test step's time to the job summary and the `ci-timing` / `api-timing` artifact;
 they warn when a test takes over 60 s or the step over 90 s, and fail when a test takes
 90 s or more or the step over 240 s. Every test runs on every event, pull requests

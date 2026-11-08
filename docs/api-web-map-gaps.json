@@ -3065,14 +3065,14 @@
    "id": "EV-RAWKIND",
    "page": 9,
    "class": "api",
-   "work": "W8",
-   "issue": 708,
+   "work": "W3",
+   "issue": 711,
    "checks": [
     {
-     "request": "/v1/events?limit=200",
+     "request": "/v1/networks/{slug}?kind={kind}",
      "paths": [
-      "events[].kind",
-      "events[].title"
+      "tape[].kind",
+      "tape[].event"
      ]
     }
    ]
@@ -3093,8 +3093,8 @@
    "id": "EV-EDITORIAL",
    "page": 9,
    "class": "api",
-   "work": "W8",
-   "issue": 708,
+   "work": "W3",
+   "issue": 711,
    "checks": [
     {
      "request": "/v1/networks/{slug}?kind={kind}",

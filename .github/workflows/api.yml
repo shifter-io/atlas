@@ -1,15 +1,19 @@
-# The API's Tier 1 (api/), on every ready pull request that touches api/, the
-# framework's SQL (src/proxy_index/**/*.sql, the schema the database tests load) or
-# this file, on every merge-queue test, nightly and on owner dispatches: gofmt, go vet
-# and the Go tests, database tests included. main only ever gets what the queue
-# tested, so pushes to main run nothing. GitHub ignores paths: for merge_group, so a
-# queue test compares its merge commit with the queue's base and runs the build and
-# tests only when the entry changes those files. The commit-message, identity, secret
-# and privacy checks run for every change in ci.yml's tier1.
+# The API's Tier 1 (api/), on every ready pull request, every merge-queue test,
+# nightly and on owner dispatches: gofmt, go vet and the Go tests, database tests
+# included. main only ever gets what the queue tested, so pushes to main run nothing.
+# `api` is a required check of the merge queue (CI-GATE-1), so it reports on every
+# pull request and queue test: a first job, `api-changes`, on GitHub's runner (seconds,
+# no CI server), compares the head with the base (a pull request's base branch, a queue
+# test's base commit) and decides whether the change touches api/, the framework's SQL
+# (src/proxy_index/**/*.sql, the schema the database tests load) or this file. When it
+# does not, `api` ends green in seconds on GitHub's runner, without the server or the
+# database; when it does, `api` runs the build and tests below. If `api-changes` fails,
+# `api` fails. The commit-message, identity, secret and privacy checks run for every
+# change in ci.yml's tier1.
 #
-# One job on one fresh one-job CI-SelfHosted server per run, labelled ci-32cpu, with
-# all its work in parallel there (CI-SPEED-2): gofmt and go vet in the background, while
-# the Go tests run every package at once (-p = the CPU count) against a throwaway
+# The build and tests run on one fresh one-job CI-SelfHosted server per run, labelled
+# ci-32cpu, with all their work in parallel there (CI-SPEED-2): gofmt and go vet in the
+# background, while the Go tests run every package at once (-p = the CPU count) against a throwaway
 # PostgreSQL 17 (the framework CI's pinned build, kept in the server cache) loaded with the
 # framework schema from the same checkout (src/proxy_index). The slowest tests run in
 # their own process beside them, so the rest of their package does not wait for them. When
@@ -37,7 +41,6 @@ name: api
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths: ['api/**', 'src/proxy_index/**/*.sql', '.github/workflows/api.yml']
   merge_group:
     types: [checks_requested]
   schedule:
@@ -68,15 +71,16 @@ env:
   PAGE_LATENCY_TEST: ^TestPageLatency$
 
 jobs:
-  api:
-    name: api
+  api-changes:
+    name: api-changes
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: [self-hosted, ci-32cpu]
-    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     defaults:
       run:
         shell: bash
-        working-directory: api
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -85,7 +89,6 @@ jobs:
           persist-credentials: false
       - id: diff
         name: Changed files
-        working-directory: .
         env:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.before }}
         run: |
@@ -108,12 +111,37 @@ jobs:
           # The nightly run and a dispatch test whatever the last commit changed.
           case "$GITHUB_EVENT_NAME" in schedule|workflow_dispatch) code=true ;; esac
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
-      - name: Docs-only change
-        if: steps.diff.outputs.code != 'true'
+
+  api:
+    name: api
+    needs: api-changes
+    # Also when api-changes failed, so `api` fails instead of being skipped (a skipped
+    # required check counts as passed).
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    # GitHub's runner when the API is untouched: green in seconds, no CI server.
+    runs-on: ${{ fromJSON(needs.api-changes.outputs.code == 'true' && '["self-hosted", "ci-32cpu"]' || '"ubuntu-latest"') }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: api
+    steps:
+      - name: Changed files decided
         working-directory: .
-        run: echo "docs-only change; nothing to test"
+        env:
+          RESULT: ${{ needs.api-changes.result }}
+        run: '[ "$RESULT" = success ] || { echo "api-changes ended $RESULT"; exit 1; }'
+      - name: API untouched
+        if: needs.api-changes.outputs.code != 'true'
+        working-directory: .
+        run: echo "no change to api/, the framework SQL or api.yml; nothing to test"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.api-changes.outputs.code == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - name: Pinned Go in the server cache
-        if: steps.diff.outputs.code == 'true'
+        if: needs.api-changes.outputs.code == 'true'
         working-directory: .
         run: |
           cache=$CI_CACHE_DIR/${GITHUB_REPOSITORY#*/}
@@ -138,7 +166,7 @@ jobs:
             echo "GOTELEMETRY=off"
           } >> "$GITHUB_ENV"
       - name: PostgreSQL 17
-        if: steps.diff.outputs.code == 'true'
+        if: needs.api-changes.outputs.code == 'true'
         working-directory: .
         run: |
           cache=$CI_CACHE_DIR/${GITHUB_REPOSITORY#*/}
@@ -172,7 +200,7 @@ jobs:
           } >> "$GITHUB_ENV"
       - name: Checks in the background, tests in parallel (database)
         id: tests
-        if: steps.diff.outputs.code == 'true'
+        if: needs.api-changes.outputs.code == 'true'
         run: |
           EV=$RUNNER_TEMP/ev
           mkdir -p "$EV"
@@ -222,7 +250,7 @@ jobs:
           grep -qE "^--- PASS: TestEveryV4Answer " "$EV/slow.log" || { echo "TestEveryV4Answer did not pass"; failed=1; }
           exit "$failed"
       - name: go test, the latency test alone (database)
-        if: steps.diff.outputs.code == 'true'
+        if: needs.api-changes.outputs.code == 'true'
         run: |
           log=$EV/latency.log
           status=0
@@ -234,7 +262,7 @@ jobs:
           grep -qE '^--- PASS: TestServeFromDatabase ' "$log"
           grep -qE 'p50 .* p99' "$log"
       - name: go test, the page latency test alone (database)
-        if: steps.diff.outputs.code == 'true'
+        if: needs.api-changes.outputs.code == 'true'
         run: |
           log=$EV/page-latency.log
           start=$(date +%s)
@@ -254,7 +282,7 @@ jobs:
         # Also after a failed test step: the summary is there for failed runs too. Fails
         # the job when a test takes 90 s or more or the test steps over 240 s (CI-TIME-1).
         id: timing
-        if: always() && steps.diff.outputs.code == 'true' && steps.tests.outcome != 'skipped'
+        if: always() && needs.api-changes.outputs.code == 'true' && steps.tests.outcome != 'skipped'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >-
@@ -272,7 +300,7 @@ jobs:
         # After the timed test steps, so they measure only the normal tests; also
         # after a failed one. Not a merge gate: its time is reported, without limits.
         if: >-
-          !cancelled() && steps.diff.outputs.code == 'true' && steps.tests.outcome != 'skipped'
+          !cancelled() && needs.api-changes.outputs.code == 'true' && steps.tests.outcome != 'skipped'
           && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         run: |
           log=$EV/race.log
