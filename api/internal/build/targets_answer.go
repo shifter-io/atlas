@@ -3,6 +3,7 @@ package build
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -10,15 +11,18 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 )
 
-// TargetsAnswer is /v1/targets?kind=&range= (api/answers/targets.md): every
-// target's meta and, for each network of one kind, every measured target's
-// figures in one range, so a page draws the network x target matrix from one
-// request. Rates, means and ranks are per engine: Chrome and Camoufox tries
-// are never added together.
+// TargetsAnswer is /v1/targets?kind=&range=&engine= (api/answers/targets.md):
+// every target's meta and, for each network of one kind, every measured
+// target's figures in one range, so a page draws the network x target matrix
+// from one request. A browser cell is one engine's: each network's main
+// engine's, or with engine= the named one's. Rates, means and ranks are per
+// engine: Chrome and Camoufox tries are never added together.
 type TargetsAnswer struct {
 	GeneratedAt string `json:"generatedAt"`
 	Range       string `json:"range"`
 	Kind        string `json:"kind"`
+	// Engine is the request's engine; null in the default body.
+	Engine model.Str `json:"engine"`
 	// CardCount is how many targets are cards (TargetEntry.Card).
 	CardCount int             `json:"cardCount"`
 	Targets   []TargetEntry   `json:"targets"`
@@ -74,18 +78,18 @@ type TargetNetwork struct {
 	Cells map[string]*TargetCell `json:"cells"`
 }
 
-// TargetCell is one network's figures on one target in the range: a network
-// page's targets[] entry (latency on generic_http only) without the copies of
-// the main engine's figures, which are its engines.<engine>, and without a
+// TargetCell is one network's figures on one target in the range, in one
+// engine: a network page's targets[] entry (FIELDS.md "Browser targets")
+// without the other engines' figures, which are its engines, and without a
 // group's breakdown, which is its sources' own cells; with its cost and ranks.
 type TargetCell struct {
 	SuccessRate Num `json:"successRate"`
 	CaptchaRate Num `json:"captchaRate"`
 	BlockRate   Num `json:"blockRate"`
 	Requests    Num `json:"requests"`
-	LatencyP50  Num `json:"latencyP50"`
-	LatencyP90  Num `json:"latencyP90"`
-	// *BrowserCell is set exactly on browser targets.
+	// *NetworkCell is set exactly on network targets, *BrowserCell exactly
+	// on browser targets.
+	*NetworkCell
 	*BrowserCell
 	// CostPer1kSuccess is the window cost rule on the target's own wire bytes;
 	// null when the target has none.
@@ -96,25 +100,44 @@ type TargetCell struct {
 	CostRank    model.Rank `json:"costRank"`
 }
 
-// BrowserCell is a browser target's engines: Engine (the one with the most
-// tries, whose figures the cell's rates are; null when none) and each
-// engine's own figures, by name.
+// NetworkCell is a network target's latency (generic_http only).
+type NetworkCell struct {
+	LatencyP50 Num `json:"latencyP50"`
+	LatencyP90 Num `json:"latencyP90"`
+}
+
+// BrowserCell is a browser target's figures in Engine (null when none):
+// OtherEngines names the engines with tries besides it.
 type BrowserCell struct {
-	Engine  model.Str                        `json:"engine"`
-	Engines map[string]model.EngineBenchmark `json:"engines"`
+	Engine       model.Str           `json:"engine"`
+	OtherEngines []string            `json:"otherEngines"`
+	Outcomes     model.Outcomes      `json:"outcomes"`
+	PageLoadP50  Num                 `json:"pageLoadP50"`
+	PageLoadP90  Num                 `json:"pageLoadP90"`
+	Scores       *model.TargetScores `json:"scores"`
+	// engines is each engine's own figures, by name: the views' source.
+	engines map[string]model.EngineBenchmark
 }
 
 const notEnoughData = "not_enough_data"
 
 func init() {
 	RegisterAnswer(PageAnswer{Name: "targets", Route: "GET /v1/targets", Key: targetsKey, Build: buildTargets,
-		Samples: []string{"/v1/targets", "/v1/targets?range=24h", "/v1/targets?kind=residential&range=7d", "/v1/targets?kind=datacenter"}})
+		Samples: []string{"/v1/targets", "/v1/targets?range=24h", "/v1/targets?kind=residential&range=7d", "/v1/targets?kind=datacenter",
+			"/v1/targets?kind=residential&range=30d&engine=camoufox", "/v1/targets?kind=residential&range=30d&engine=chrome"}})
 }
 
-func targetsPath(kind, rangeID string) string { return "/v1/targets/" + kind + "/" + rangeID }
+// targetsPath is a body's stored path; engine "" is the default body.
+func targetsPath(kind, rangeID, engine string) string {
+	p := "/v1/targets/" + kind + "/" + rangeID
+	if engine != "" {
+		p += "/" + engine
+	}
+	return p
+}
 
 func targetsKey(r *http.Request) (string, error) {
-	q, err := Query(r, "kind", "range")
+	q, err := Query(r, "kind", "range", "engine")
 	if err != nil {
 		return "", err
 	}
@@ -125,11 +148,15 @@ func targetsKey(r *http.Request) (string, error) {
 	if !model.IsProxyKind(kind) {
 		return "", BadRequest("kind must be " + strings.Join(model.ProxyKinds, ", "))
 	}
+	engine := q.Get("engine")
+	if engine != "" && !slices.Contains(TargetEngines, engine) {
+		return "", BadRequest("engine must be " + strings.Join(TargetEngines, " or "))
+	}
 	rangeID, err := QueryRange(q)
-	return targetsPath(kind, rangeID), err
+	return targetsPath(kind, rangeID, engine), err
 }
 
-// buildTargets is one body per proxy kind and range.
+// buildTargets is one body per proxy kind, range and engine view.
 func buildTargets(c *Context) (map[string]any, error) {
 	if c.Dataset == nil {
 		return nil, errors.New("no dataset")
@@ -144,24 +171,32 @@ func buildTargets(c *Context) (map[string]any, error) {
 	out := map[string]any{}
 	for _, kind := range model.ProxyKinds {
 		for _, r := range Ranges {
-			out[targetsPath(kind, r.ID)] = targetsAnswer(c, weights, measured, kind, r.ID)
+			nets := targetNetworks(c.Entries, measured, kind, r.ID)
+			targets, cards := targetEntries(c.Dataset.Targets, weights, nets)
+			for _, engine := range append([]string{""}, TargetEngines...) {
+				ans := &TargetsAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Kind: kind, CardCount: cards, Targets: targets,
+					Networks: engineView(nets, measured, engine)}
+				if engine != "" {
+					ans.Engine = model.S(engine)
+				}
+				out[targetsPath(kind, r.ID, engine)] = ans
+			}
 		}
 	}
 	return out, nil
 }
 
-// targetsAnswer is one kind's and range's body.
-func targetsAnswer(c *Context, weights map[string]Num, measured []model.TargetMeta, kind, rangeID string) *TargetsAnswer {
-	ans := &TargetsAnswer{GeneratedAt: c.GeneratedAt, Range: rangeID, Kind: kind, Targets: []TargetEntry{},
-		Networks: targetNetworks(c.Entries, measured, kind, rangeID)}
-	for _, t := range c.Dataset.Targets {
-		te := targetEntry(t, weights, ans.Networks)
+// targetEntries is every dataset target's entry over nets and how many are cards.
+func targetEntries(targets []model.TargetMeta, weights map[string]Num, nets []TargetNetwork) ([]TargetEntry, int) {
+	out, cards := []TargetEntry{}, 0
+	for _, t := range targets {
+		te := targetEntry(t, weights, nets)
 		if te.Card {
-			ans.CardCount++
+			cards++
 		}
-		ans.Targets = append(ans.Targets, te)
+		out = append(out, te)
 	}
-	return ans
+	return out, cards
 }
 
 // scoreWeights is each target's [browser_difficulty] in the snapshot's
@@ -190,7 +225,7 @@ func scoreWeights(s *snap.Snapshot) map[string]Num {
 }
 
 // targetNetworks is every network measured in kind, in the rankings' order
-// (range score, highest first, then name), with its cells ranked.
+// (range score, highest first, then name), with its cells unranked.
 func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID string) []TargetNetwork {
 	type ranked struct {
 		row RankingRow
@@ -218,9 +253,6 @@ func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID 
 		out[i] = list[i].net
 		out[i].Position = i + 1
 	}
-	for _, t := range targets {
-		rankCells(out, t.ID)
-	}
 	return out
 }
 
@@ -230,9 +262,12 @@ func targetCells(w snap.Window, targets []model.TargetMeta, price Num) map[strin
 	cells := make(map[string]*TargetCell, len(targets))
 	for _, b := range targetBenchmarks(w, targets) {
 		cell := &TargetCell{SuccessRate: b.SuccessRate, CaptchaRate: b.CaptchaRate, BlockRate: b.BlockRate, Requests: b.Requests,
-			LatencyP50: b.LatencyP50, LatencyP90: b.LatencyP90, CostPer1kSuccess: nan}
+			CostPer1kSuccess: nan}
 		if bb := b.BrowserBenchmark; bb != nil {
-			cell.BrowserCell = &BrowserCell{Engine: bb.Engine, Engines: bb.Engines}
+			cell.BrowserCell = &BrowserCell{Engine: bb.Engine, Outcomes: bb.Outcomes, PageLoadP50: bb.PageLoadP50,
+				PageLoadP90: bb.PageLoadP90, Scores: bb.Scores, engines: bb.Engines}
+		} else {
+			cell.NetworkCell = &NetworkCell{LatencyP50: b.LatencyP50, LatencyP90: b.LatencyP90}
 		}
 		if m := w.Targets[b.Target].Metrics; (m.BytesUp + m.BytesDown) > 0 {
 			cell.CostPer1kSuccess = wireCostPer1k(price, m)
@@ -308,7 +343,7 @@ func fleetOf(id string, nets []TargetNetwork) (map[string]FleetMean, map[string]
 		case c.BrowserCell == nil:
 			add(model.EngineHTTP, c.Requests, c.SuccessRate)
 		default:
-			for name, e := range c.Engines {
+			for name, e := range c.engines {
 				add(name, e.Requests, e.Successes/e.Requests)
 				shareStatus(status, name, e.Scores)
 			}
