@@ -209,6 +209,7 @@ def network_only(payload):
     payload["traffic"]["by_test"].pop("browser", None)
     for p in [*payload["products"], *payload["networks"]]:
         for w in p["windows"].values():
+            w.pop("browser_overall", None)  # browser target scores (TARGET-SCORES-1)
             for target in contracts.BROWSER_TARGETS:
                 w["targets"].pop(target, None)
     for n in payload["networks"]:  # each build writes its own network lists (NET-SUM-1)
