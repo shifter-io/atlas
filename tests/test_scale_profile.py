@@ -32,9 +32,13 @@ _spec.loader.exec_module(profile)
 
 pytest_plugins = ["test_storage"]
 
+READ_ONLY, LEVEL = "transaction_read_only", "transaction_isolation"
+
+HOUR_FOLDERS = ("2026-11-08T00", "2026-11-08T01")
 HOSTS = ("mini-alpha.example.net", "browser-1", "browser-files/alpha/residential/x.tar.gz")
 TOKYO = {"country_code": "JP", "region": "Tokyo", "city": "Tokyo", "asn": 64500}
 TOKYO |= {"usage_type": "consumer", "latitude": 35.68, "longitude": 139.76}
+TOKYO |= {"asn_organization": "Tokyo } Org"}  # a brace: parsed from the whole line
 OSAKA = TOKYO | {"region": "Osaka", "city": "Osaka", "latitude": 34.69, "longitude": 135.5}
 US = {"country_code": "US", "region": "New York", "city": "New York", "asn": 64501}
 US |= {"usage_type": "hosting", "latitude": 40.71, "longitude": -74.0}
@@ -104,7 +108,7 @@ def write_network(root: Path, name: str, hours: dict, other: dict | None = None)
     folder = root / name
     folder.mkdir(parents=True)
     slots = dict(other or {})
-    slots |= {key: hour_slot(folder, key, start, records) for key, (start, records) in hours.items()}
+    slots |= {key: hour_slot(folder, key, *hour) for key, hour in hours.items()}
     manifest = {"schema_version": 2, "network": name, "product": "residential", "slots": slots}
     (folder / "manifest.json").write_text(json.dumps(manifest))
 
@@ -159,7 +163,7 @@ def browser_fixture(root: Path) -> None:
         [sample | {"batch": 10, "network": "alpha", "bytes": 1_500_000}],
         [sample | {"batch": 11, "network": "alpha/residential", "bytes": 2_000_000}],
     )
-    for hour, runs, archive in zip(("2026-11-08T00", "2026-11-08T01"), (first, last), samples):
+    for hour, runs, archive in zip(HOUR_FOLDERS, (first, last), samples, strict=True):
         folder = root / hour
         folder.mkdir(parents=True)
         mgr = {"hour": hour, "runs": runs, "archive_sample": archive}
@@ -263,6 +267,7 @@ def test_places_top_tail_and_unmatched(built):
     assert us["ips"] == 9 and us["unmatched_share"] == 0.111111 and us["tail_share"] == 0.0
     assert us["top"][0] == US | {"asn_name": None, "share": 0.777778}
     assert us["top"][1]["city"] == "Tokyo" and us["top"][1]["share"] == 0.111111
+    assert us["top"][1]["asn_name"] == "Tokyo } Org"
     de = places["DE"]  # New York (.4), no enrichment (.10), Osaka (.11, .10), Tokyo (db8::1)
     assert de["ips"] == 5 and de["unmatched_share"] == 0.2
     # Osaka first; New York and Tokyo tie at one IP: the lower tuple (JP) is kept.
@@ -334,6 +339,10 @@ def test_a_source_that_does_not_match_its_manifest_fails(tmp_path, capsys):
     error = "alpha/hour-20260102T00Z.jsonl.gz: 2 IPs / 9 rows, manifest 3 / 9"
     assert error in capsys.readouterr().err
     assert not (tmp_path / "p.json").exists()
+    manifest["schema_version"] = 1
+    (root / "alpha" / "manifest.json").write_text(json.dumps(manifest))
+    assert profile.main([*argv, str(tmp_path / "p.json"), "--formulas", str(formulas)]) == 1
+    assert "alpha/manifest.json: manifest schema 1 is not 2" in capsys.readouterr().err
 
 
 def test_run_filters():
@@ -357,9 +366,8 @@ async def test_reference_rows_and_bytes_per_run_in_one_read_only_transaction(
     daily, browser = keys
     with connect(database) as conn:
         conn.execute(
-            "UPDATE test_runs SET summary=summary||'{\"test_kind\":\"daily\",\"scale_replay\":1}'"
-            " WHERE run_key=%s",
-            (daily,),
+            "UPDATE test_runs SET summary=summary||%s::jsonb WHERE run_key=%s",
+            (json.dumps({"test_kind": "daily", "scale_replay": 1}), daily),
         )
         batch = conn.execute(
             "INSERT INTO test_batches(kind,country_code,region_id,target_id,scheduled_for,"
@@ -380,9 +388,8 @@ async def test_reference_rows_and_bytes_per_run_in_one_read_only_transaction(
     real, seen = profile_reference._read, []
 
     def read_once(conn, text):
-        mode = conn.execute(
-            "SELECT current_setting('transaction_read_only'),current_setting('transaction_isolation')"
-        ).fetchone()
+        mode = conn.execute(f"SELECT current_setting('{READ_ONLY}'),current_setting('{LEVEL}')")
+        mode = mode.fetchone()
         seen.append((mode, conn.info.transaction_status.name))
         return real(conn, text)
 
@@ -401,7 +408,7 @@ async def test_reference_rows_and_bytes_per_run_in_one_read_only_transaction(
     assert rows == {
         "test_runs": 1,
         "run_buckets": 1,
-        "run_geo_buckets": 1,
+        "run_geo_buckets": 0,  # the fixture's ingest writes no geography bucket
         "ip_observations": 1,
         "run_enrichments": 1,
         "ip_enrichment": 1,
@@ -431,3 +438,32 @@ def test_reference_without_a_matching_run_fails(database, tmp_path, capsys):
     argv = ["reference", "--database", str(database), "--runs", "marker:none", "--out", str(out)]
     assert profile.main(argv) == 1
     assert "no daily or browser run" in capsys.readouterr().err and not out.exists()
+
+
+def test_a_browser_summary_without_a_run_field_fails(tmp_path, capsys):
+    browser_fixture(tmp_path / "hours")
+    mgr = tmp_path / "hours" / HOUR_FOLDERS[1] / "mgr.json"
+    data = json.loads(mgr.read_text())
+    del data["runs"][0]["bytes_down"]
+    mgr.write_text(json.dumps(data))
+    formulas = tmp_path / "formulas"
+    formulas.mkdir()
+    (formulas / "alpha.json").write_text("{}")
+    argv = ["build", "--enrich", str(tmp_path), "--browser", str(tmp_path / "hours"), "--out"]
+    assert profile.main([*argv, str(tmp_path / "p.json"), "--formulas", str(formulas)]) == 1
+    assert f"{HOUR_FOLDERS[1]}/mgr.json: a run lacks bytes_down" in capsys.readouterr().err
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    argv[4] = str(empty)
+    assert profile.main([*argv, str(tmp_path / "p.json"), "--formulas", str(formulas)]) == 1
+    assert "no hour folder with a mgr.json" in capsys.readouterr().err
+    assert profile.main([*argv, str(tmp_path / "p.json"), "--formulas", str(empty)]) == 1
+    assert "no formula" in capsys.readouterr().err
+
+
+def test_reference_refuses_another_profile_version(tmp_path, capsys):
+    out = tmp_path / "profile.json"
+    out.write_text(json.dumps({"profile_version": 2}))
+    argv = ["reference", "--database", str(tmp_path / "db.toml"), "--runs", "marker:x"]
+    assert profile.main([*argv, "--out", str(out)]) == 1
+    assert "profile_version 2 is not 1" in capsys.readouterr().err

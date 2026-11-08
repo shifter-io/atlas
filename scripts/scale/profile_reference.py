@@ -37,7 +37,8 @@ COUNTS = {
     "WHERE o.run_key=r.run_key)",
     "product_ips": "(SELECT count(*) FROM product_ips m WHERE m.product_id=r.product_id "
     f"AND m.ip_id IN {_IPS})",
-    "pool_ips": f"(SELECT count(*) FROM pool_ips m WHERE m.pool_id=r.pool_id AND m.ip_id IN {_IPS})",
+    "pool_ips": "(SELECT count(*) FROM pool_ips m WHERE m.pool_id=r.pool_id "
+    f"AND m.ip_id IN {_IPS})",
     "estimated_hours": _OWN.format("estimated_hours"),
     "batch_runs": _OWN.format("batch_runs"),
 }
@@ -50,9 +51,7 @@ RUNS = (
     "SELECT r.run_key,r.kind,r.provider,r.batch_id,r.product_id,{counts} FROM r "
     "WHERE r.kind IS NOT NULL ORDER BY r.run_key"
 )
-EVENTS = (
-    "SELECT batch_id,product_id,count(*) FROM test_events WHERE batch_id=ANY(%s) GROUP BY 1,2"
-)
+EVENTS = "SELECT batch_id,product_id,count(*) FROM test_events WHERE batch_id=ANY(%s) GROUP BY 1,2"
 # Each table with its partitions: its own bytes (with TOAST) and its indexes' bytes.
 SIZES = (
     "SELECT c.relname,sum(pg_table_size(coalesce(t.relid,c.oid)))::bigint,"

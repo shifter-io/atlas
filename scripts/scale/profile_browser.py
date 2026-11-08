@@ -56,21 +56,23 @@ def read(hours: Path) -> tuple[dict[tuple, dict], dict[tuple, int], list[str]]:
     for path in sorted(hours.glob("*/mgr.json")):
         where = f"{path.parent.name}/{path.name}"
         try:
-            data = json.loads(path.read_bytes())
-            for run in data["runs"]:
-                missing = [field for field in RUN_FIELDS if field not in run]
-                if missing:
-                    raise ProfileError(f"{where}: a run lacks {', '.join(missing)}")
-                runs[(run["batch"], run["provider"], run["product"])] = run
-            for sample in data.get("archive_sample", []):
-                key = (sample["batch"], sample["network"].split("/")[0])
-                samples[key] = int(sample["bytes"])
+            _read_hour(json.loads(path.read_bytes()), runs, samples)
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             raise ProfileError(f"{where}: {error}") from None
         folders.append(path.parent.name)
     if not folders:
         raise ProfileError("no hour folder with a mgr.json")
     return runs, samples, folders
+
+
+def _read_hour(data: dict, runs: dict, samples: dict) -> None:
+    for run in data["runs"]:
+        missing = [field for field in RUN_FIELDS if field not in run]
+        if missing:
+            raise ProfileError(f"a run lacks {', '.join(missing)}")
+        runs[(run["batch"], run["provider"], run["product"])] = run
+    for sample in data.get("archive_sample", []):
+        samples[(sample["batch"], sample["network"].split("/")[0])] = int(sample["bytes"])
 
 
 def stored(run: dict) -> bool:

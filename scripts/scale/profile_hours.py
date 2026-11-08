@@ -151,7 +151,9 @@ class Network:
                 f"{self.name}/{path.name}: {hour.records} IPs / {hour.seen} rows, manifest "
                 f"{slot['unique_ips']} / {slot['request_rows']}"
             )
-        self.hourly[key] = {code: array("q", sorted(values)) for code, values in hour.hashes.items()}
+        self.hourly[key] = {
+            code: array("q", sorted(values)) for code, values in hour.hashes.items()
+        }
         self.rows[key] = hour.rows
 
     def _add(self, line: bytes, hour: _Hour) -> None:

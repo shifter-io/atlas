@@ -63,7 +63,9 @@ def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]
         for hour in entries[name]["hours"]:
             if hour["status"] != "present":
                 what = f"no IPs ({hour['status']})"
-                gaps.append({"source": "enrich", "network": name, "hour": hour["hour"], "what": what})
+                gaps.append(
+                    {"source": "enrich", "network": name, "hour": hour["hour"], "what": what}
+                )
     for name in sorted(set(folders) - set(wanted)):
         gaps.append({"source": "enrich", "network": name, "what": "no formula: not profiled"})
     return entries, totals, gaps
