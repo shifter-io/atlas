@@ -1945,6 +1945,8 @@ Buckets: `WINDOWS[range].bars`: 24h → 48 × 30 min, 7d → 56 × 3 h, 30d → 
 
 So ~50 events/min. About 12 events land per 15 s poll (worst ~80), all stamped with the minute's detection time. 24h is ~50k-130k rows, 30d ~1.5M-4M. More than 90% are routine (`pulse_finished` + census tab).
 
+The event volume above assumes HTTP pulses; production has none, see section 14 (about 5,000 to 8,000 events a day).
+
 **What the API holds.** `EventWindow` = 2,000 newest rows (~20-60 min at production volume) + 500 notable. `Dataset.tape` = 200 rows (~2-6 min; 100 notable + 100 newest). The page's 24h/7d/30d figures can never be computed from rows on the client. All metric cards, the heatmap, the rail and the counts need server aggregates (EV-STATS, gaps 1-9).
 
 **Calls per view today (if wired to the API as is).** One SSR read of `Dataset.tape` (the 9.2 MB / 0.5 MB gzip dataset file, or its cached copy). The rail would take 18 × `/v1/events?product=` (last event + 24 beats). The search box has no server call possible. Then 1 poll / 15 s / viewer (4 req/min/viewer). Target: one SSR `/v1/events?limit=200` (rendered rows), one `/v1/events/stats?range=` per range change (and every ~60 s to refresh figures), and the 15 s poll.
@@ -1977,6 +1979,8 @@ answer is requested once per range.
 Answer sizes stay far under the 200 KB cap: `/v1/home` about 40 to 70 KB per range, `/v1/targets`
 40 to 60 KB, `/v1/overlap` 20 to 30 KB, `/v1/events/stats` 10 to 20 KB, RK with the new fields
 about 30 KB (identity; gzip 5 to 8 times smaller).
+
+Data cadence: section 14.
 
 ## 11. Gap index by work item
 
@@ -2041,3 +2045,47 @@ answer; only W9 reads the database per refresh, from a summary table kept on ins
   `Access-Control-Allow-Origin: *` (`api/internal/server/server.go`, `write`).
 - Every API field cited as `exists` was checked against the JSON tags and keys of
   `api/internal/model` and `api/internal/build`.
+
+## 14. Test cadence in production, and how the 24h and 7d windows are built
+
+The data behind every page has a cadence. Each kind of test below is generated at its real
+production cadence (SIM-GEN-1 and SIM-LOAD-1), never more often. The API's 24h and 7d figures then
+come from those tests, through the calculator's existing windows and the hour formula: the same
+window logic the API and the scores use today. Nothing is interpolated to fill an hourly grid.
+
+| Test | Production cadence | Size of one run | Source in the code |
+|---|---|---|---|
+| Daily test (HTTP, `generic_http`) | Once per 24 h per network × country, at the country's test hour from the network's formula. 3,848 tests a day for the 18 networks; the busiest hour (13:00 UTC) has 442. | About 4,300 unique IPs on average (REPLAY-RUN-1's real hour 0: 190 tests, 825k IPs, 1.2M observation rows), with 2 to 4 five-minute buckets | `formulas/<network>.json` `schedule`; `daily/planner.py` (one droplet per network and region with countries due); `daily/hourly.py` (the manager's hourly timer) |
+| Estimated hours | 24 per daily test, released hourly as each hour ends | 24 `estimated_hours` rows per test | `estimates/compute.py` `hours`; the release step |
+| Browser targets | Once per 24 h per network × target, 100 tries, in each host's interleaved queue: 18 networks × 8 targets = 144 runs, 14,400 tries a day. The three AI sources are targets of their own; `ai_answers` is their group. | 100 tries; bundle bytes as measured by BP-VERIFY-3 (BP-VERIFY-4 once it reports) | #691 (merged): `orchestrator/browser_queue.py`, `[schedule] plan = "queue"`, `queue_period_minutes = 1440` |
+| HTTP pulses (`generic_http`, `generic_https`), census and load waves | **None in production.** The targets are configured with 30-minute pulses (`configs/targets.toml`), but pulses run only on pulse nodes, and no pulse node exists: DigitalOcean has no `pi-pulse-node` droplet (checked 2026-11-08). Census and load waves are off in production (`scripts/scale/README.md`). | (not generated) | `orchestrator/batches.py` `pulse_plan` (plans only networks with a node in the region) |
+| Test events (live tape) | From the tests above:<br>- `daily_test_started` and `daily_test_finished` per network × region cell, at most about 6,900 a day;<br>- one `estimate_hour_released` per network and hour, 432 a day;<br>- the daily ingest's audits (`new_hosting_asn`, `ip_overlap`).<br>The detector evaluates pulse batches only (`detect.py`), so without pulses there are no `pulse_finished`, down, recovered or latency events. That is about 5,000 to 8,000 events a day, not the 50k to 130k section 9 estimated from HTTP pulses. | | `daily/ingest.py` `emit_cell`; `orchestrator/events.py`; `detect.py` (`b.kind='pulse'`) |
+
+**Assumption.** The owner could not be asked, so this is decided from the code and configs: production
+tests each country with one daily test per network per 24 hours, and each network × browser target
+once per 24 hours (100 tries). It has no HTTP pulse fleet. The generator therefore produces no
+pulses, no census and no load waves. It keeps a switch, off by default, that adds them at
+`configs/targets.toml`'s cadence (30 minutes) for the day a pulse fleet starts.
+
+How the windows come out of one test a day:
+
+- **IP counts in 24h and 7d** (unique IPs, place and ASN rows, the 24h IP chart) come from the hour
+  formula's released estimates (API-ESTIMATES-1, `api/FIELDS.md` "IP numbers from the hour
+  formula"). The 24h chart has one point per released hour. A 7d point is the measured day's IPs ×
+  `breakdown_scale`.
+- **Success, latency and errors in 24h** come from the daily tests whose runs fall in the window.
+  That is one test per network × country, so a network's 24h figure mixes its countries' tests at
+  their own hours. Its 24h success series has points only in the 5-minute buckets where a test
+  ran. With 2 to 4 buckets per test, spread over about 214 countries a network, most of the 288
+  buckets have a point.
+- **Uptime and availability** come from the buckets with a started test (the calculator's rule:
+  no evidence, no value).
+- **Browser figures and scores in 24h** cover one run per network × target. That is 100 tries,
+  exactly the score's minimum (`MIN_REQUESTS = 100` completed tries; `target_scores.py`).
+  - A run cut short by its deadline, or a failed upload, leaves that network `not_enough_data` in
+    the 24h window.
+  - Because the queue rotates each day, a 24h window ending at a given hour may hold 0, 1 or 2
+    runs of one network × target. So a 24h browser figure can be empty, or cover 200 tries.
+  - 7d holds about 7 runs (700 tries) per network × target, and 30d about 30.
+  - PERF-REPORT-1 counts how often each case occurs in the generated week.
+- **7d windows** hold 7 daily tests per network × country, and 7 browser runs per network × target.
