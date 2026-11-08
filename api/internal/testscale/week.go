@@ -41,14 +41,33 @@ var Engines = []string{"camoufox", "chrome"}
 // it), one product group per network; testdb.PublishV4With publishes it
 // with Requested countries and the Lists rows.
 func (w WeekShape) Payload() ([]byte, error) {
-	doc, _, err := shapeDoc(w.Shape, weekGroup)
+	doc, _, err := weekDoc(w.Shape)
 	if err != nil {
 		return nil, err
+	}
+	return json.Marshal(doc)
+}
+
+// WeekInputs is Inputs with the week's browser targets and engines: shape's
+// windows hold the week's browser figures, without its database lists.
+func WeekInputs(shape Shape) (*store.Inputs, error) {
+	doc, places, err := weekDoc(shape)
+	if err != nil {
+		return nil, err
+	}
+	return docInputs(shape, doc, places)
+}
+
+// weekDoc is shape's snapshot document with the week's browser targets.
+func weekDoc(shape Shape) (map[string]any, map[store.PlaceWindow]*store.List, error) {
+	doc, places, err := shapeDoc(shape, weekGroup)
+	if err != nil {
+		return nil, nil, err
 	}
 	for _, t := range weekTargets {
 		doc["targets"] = append(doc["targets"].([]any), map[string]any{"id": t.ID, "url": t.URL, "label": t.Label, "version": "1", "engine": "browser"})
 	}
-	return json.Marshal(doc)
+	return doc, places, nil
 }
 
 // weekGroup gives a product group the week's extra browser targets, every
