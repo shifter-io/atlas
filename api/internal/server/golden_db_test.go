@@ -46,6 +46,14 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string][]byte {
 	t.Helper()
 	out := renderedAnswers(t, db, id, goldenPages, func(res *build.Result) { withoutLatencyMeanGaps(res.Coverage) })
 	delete(out, versionPath)
+	// A registered answer (api/answers/) has a golden of its own.
+	for name := range out {
+		for _, a := range build.Answers() {
+			if path, _, _ := strings.Cut(name, "?"); a.Owns(path) {
+				delete(out, name)
+			}
+		}
+	}
 	for _, name := range []string{"dataset", "details"} {
 		out[name] = withoutKeys(t, out[name], droppedKeys)
 	}

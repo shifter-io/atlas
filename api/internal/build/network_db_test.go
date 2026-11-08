@@ -233,7 +233,7 @@ func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	}
 	out := map[string][]byte{}
 	for p, r := range v.Static {
-		if p != "/v1/version" {
+		if p != "/v1/version" && !registered(p) {
 			out[p] = r.Identity
 		}
 	}
@@ -300,6 +300,18 @@ func TestANetworkOfOneGroupAnswersAsTheGroup(t *testing.T) {
 
 // oneGroupAnswers is a v4 build's answers (netAnswers) and its City x ASN
 // lists (cityAsnLists).
+// registered reports whether path is a registered answer's (api/answers/):
+// those have golden files of their own (answers-v4-scale/<name>.json), so the
+// goldens of the answers from before the registry leave them out.
+func registered(path string) bool {
+	for _, a := range build.Answers() {
+		if a.Owns(path) {
+			return true
+		}
+	}
+	return false
+}
+
 func oneGroupAnswers(t *testing.T, res *build.Result) map[string][]byte {
 	t.Helper()
 	out := netAnswers(t, res)
