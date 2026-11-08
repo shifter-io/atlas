@@ -253,10 +253,6 @@ type Event struct {
 	Signal   int16
 	Severity string
 	Data     json.RawMessage
-	// Unsettled is true when the row's inserting transaction is not older
-	// than the oldest one running when it was read (unsettledSQL): a row
-	// with a smaller id may still commit, so an after read stops before it.
-	Unsettled bool
 }
 
 // Inputs is everything one cache build reads, taken in one REPEATABLE READ
@@ -372,4 +368,31 @@ func collect[T any](ctx context.Context, tx pgx.Tx, sql string, scan func(pgx.Ro
 		out = append(out, v)
 	}
 	return out, rows.Err()
+}
+
+// EventColumns is the SELECT list shared by Load and the events fallback query.
+const EventColumns = `e.event_id, e.at, e.kind, p.provider, p.name, e.country_code,
+ coalesce(r.slug, e.data->>'region'), e.target_id, e.signal, e.severity, e.data
+ FROM public.test_events e LEFT JOIN public.products p ON p.product_id = e.product_id
+ LEFT JOIN public.runner_regions r ON r.region_id = e.region_id`
+
+// ScanEvent reads one EventColumns row.
+func ScanEvent(r pgx.Rows, e *Event) error {
+	var country *string
+	if err := r.Scan(&e.ID, &e.At, &e.Kind, &e.Provider, &e.Product, &country, &e.Region, &e.Target, &e.Signal, &e.Severity, &e.Data); err != nil {
+		return err
+	}
+	if country != nil {
+		c := trimSpace(*country)
+		country = &c
+	}
+	e.Country = country
+	return nil
+}
+
+func trimSpace(s string) string {
+	for len(s) > 0 && s[len(s)-1] == ' ' {
+		s = s[:len(s)-1]
+	}
+	return s
 }
