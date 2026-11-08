@@ -258,6 +258,10 @@ async def launch(
 
 # navigator.userAgentData is missing outside secure contexts: then no brands.
 CLAIMS = "() => [navigator.userAgent, (navigator.userAgentData || {brands: []}).brands]"
+# The secure context CLAIMS is read in (about:blank is not one): a page fulfilled locally under
+# the reserved .invalid domain, so neither the network nor the try's proxy ever sees it.
+CHECK_URL = "https://user-agent-check.invalid/"
+CHECK_PAGE = "<!doctype html><title>user agent check</title>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,9 +333,19 @@ class ChromeBrowser:
         return chrome.user_agent_major(user_agent) == chrome.brands_major(brands) == major
 
     async def _agree(self, context: Any, page: Any, fingerprint: chrome.Fingerprint) -> None:
-        """D7: the user agent and the brands claim the detected major; a headless Chrome is
-        made to (and its Sec-CH-UA headers with it) through CDP, else UserAgentRefused."""
-        if self._agrees(await page.evaluate(CLAIMS)):
+        """D7: the user agent and the brands claim the detected major on CHECK_URL; a headless
+        Chrome is made to (and its Sec-CH-UA headers with it) through CDP, else
+        UserAgentRefused."""
+        await page.route(CHECK_URL, _fulfil_check)
+        try:
+            await self._agree_on_check(context, page, fingerprint)
+        finally:
+            await page.unroute(CHECK_URL)
+
+    async def _agree_on_check(
+        self, context: Any, page: Any, fingerprint: chrome.Fingerprint
+    ) -> None:
+        if self._agrees(await _check_claims(page)):
             return
         session = await context.new_cdp_session(page)
         version, os_name = self.setup.version, self.setup.os_name
@@ -341,12 +355,22 @@ class ChromeBrowser:
             "userAgentMetadata": chrome.user_agent_metadata(version, os_name),
         }
         await session.send("Emulation.setUserAgentOverride", override)
-        if not self._agrees(await page.evaluate(CLAIMS)):
+        if not self._agrees(await _check_claims(page)):
             raise UserAgentRefused(f"the user agent cannot claim Chrome {version.split('.')[0]}")
 
     async def close(self) -> None:
         self._closed = True
         await self._playwright.stop()
+
+
+async def _fulfil_check(route: Any) -> None:
+    await route.fulfill(status=200, content_type="text/html", body=CHECK_PAGE)
+
+
+async def _check_claims(page: Any) -> Any:
+    """CLAIMS on a fresh load of CHECK_URL (page-routed by _agree), a secure context."""
+    await page.goto(CHECK_URL)
+    return await page.evaluate(CLAIMS)
 
 
 async def launch_chrome(

@@ -38,25 +38,53 @@ class CDPSession:
             self.chromium.claims = list(REAL)
 
 
+class Route:
+    def __init__(self) -> None:
+        self.fulfilled: dict | None = None
+
+    async def fulfill(self, **response):
+        self.fulfilled = response
+
+
 class PWPage:
+    """Like a real Chrome: about:blank is no secure context, so it has no userAgentData."""
+
     url = "about:blank"
 
     def __init__(self, chromium: Chromium) -> None:
         self.chromium = chromium
+        self.routes: dict = {}
+        self.loads: list[str] = []
 
     async def evaluate(self, expression):
-        if expression == driver.CLAIMS:
-            return self.chromium.claims
-        return self.chromium.claims[0]
+        claims = self.chromium.claims
+        if expression != driver.CLAIMS:
+            return claims[0]
+        if isinstance(claims, list) and not self.url.startswith("https://"):
+            return [claims[0], []]
+        return claims
 
-    async def goto(self, url, timeout):  # noqa: ASYNC109 - Playwright's signature
-        raise RuntimeError("page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at https://x/")
+    async def route(self, url, handler):
+        self.routes[url] = handler
+
+    async def unroute(self, url):
+        del self.routes[url]
+
+    async def goto(self, url, timeout=None):  # noqa: ASYNC109 - Playwright's signature
+        if url not in self.routes:  # the network: the proxy here
+            raise RuntimeError(f"page.goto: net::ERR_TUNNEL_CONNECTION_FAILED at {url}")
+        route = Route()
+        await self.routes[url](route)
+        assert route.fulfilled is not None
+        self.url = url
+        self.loads.append(url)
 
 
 class PersistentContext:
     def __init__(self, chromium: Chromium, profile: str, options: dict) -> None:
         self.chromium, self.profile, self.options = chromium, profile, options
         self.pages = [PWPage(chromium)] if chromium.default_page else []
+        self.opened = list(self.pages)
         self.scripts: list[str] = []
         self.routes: list = []
         self.closed = False
@@ -74,7 +102,8 @@ class PersistentContext:
         self.scripts.append(script)
 
     async def new_page(self):
-        return PWPage(self.chromium)
+        self.opened.append(PWPage(self.chromium))
+        return self.opened[-1]
 
     async def new_cdp_session(self, page):
         return CDPSession(self.chromium)
@@ -158,10 +187,23 @@ async def test_a_crashed_start_leaves_no_profile():
     assert len(chromium.started) == 1 and profiles(chromium) == []
 
 
+async def test_the_check_reads_a_local_secure_page_never_the_network():
+    chromium = Chromium()
+    proxy = ProxyConfig("http", "192.0.2.1", 8080, "u", "p")
+    async with handle(chromium).context(proxy, ("document", "image")) as page:
+        [checked] = chromium.contexts[0].opened
+        assert checked.loads == [driver.CHECK_URL] and checked.routes == {}
+        with pytest.raises(NavigationError):  # the check page's route is gone
+            await page.goto(driver.CHECK_URL, 1000)
+    assert driver.CHECK_URL.startswith("https://") and ".invalid/" in driver.CHECK_URL
+    assert chromium.overrides == []
+
+
 async def test_headless_is_made_to_agree_through_cdp():
     chromium = Chromium(HEADLESS)
     async with handle(chromium).context(None) as page:
         assert await page.evaluate("navigator.userAgent") == REAL[0]
+        assert chromium.contexts[0].opened[0].loads == [driver.CHECK_URL] * 2
     [(method, params)] = chromium.overrides
     assert method == "Emulation.setUserAgentOverride"
     assert params["userAgent"] == REAL[0] and "platform" not in params
