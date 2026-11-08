@@ -52,6 +52,15 @@ def _errors(slot: dict) -> tuple[int, dict]:
     return int(errors), {}
 
 
+def place(enrichment: dict | None) -> tuple | None:
+    """(PLACE tuple, latitude, longitude, ASN name) of a matched enrichment; None: unmatched."""
+    if not enrichment or not enrichment.get("matched", bool(enrichment.get("country_code"))):
+        return None
+    key = tuple(enrichment.get(field) for field in PLACE)
+    coordinates = (enrichment.get("latitude"), enrichment.get("longitude"))
+    return key, *coordinates, enrichment.get("asn_organization")
+
+
 class _Places:
     """The (country, region, city, ASN, usage type) tuples of one requested country, by IPs."""
 
@@ -60,16 +69,14 @@ class _Places:
         self.ips = 0
         self.unmatched = 0
 
-    def add(self, enrichment: dict | None) -> None:
+    def add(self, found: tuple | None) -> None:
         self.ips += 1
-        if not enrichment or not enrichment.get("matched", bool(enrichment.get("country_code"))):
+        if found is None:
             self.unmatched += 1
             return
-        key = tuple(enrichment.get(field) for field in PLACE)
-        entry = self.tuples.get(key)
+        entry = self.tuples.get(found[0])
         if entry is None:
-            coordinates = (enrichment.get("latitude"), enrichment.get("longitude"))
-            self.tuples[key] = [1, *coordinates, enrichment.get("asn_organization")]
+            self.tuples[found[0]] = [1, *found[1:]]
         else:
             entry[0] += 1
 
@@ -113,7 +120,7 @@ class Network:
         self.rows: dict[str, dict[str, int]] = {}  # hour -> country -> request rows
         self.seen: dict[int, int] = {}
         self.places: dict[str, _Places] = {}
-        self._enrichments: dict[bytes, dict] = {}
+        self._places: dict[bytes, tuple | None] = {}  # enrichment text -> place()
 
     def slots(self):
         for key in HOURS:
@@ -124,17 +131,18 @@ class Network:
             if slot.get("status") == "present":
                 self._read_hour(key, slot)
 
-    def _enrichment(self, line: bytes) -> dict | None:
+    def _place(self, line: bytes) -> tuple | None:
         found = _ENRICHMENT.search(line)
         raw = found[1] if found else None
-        if raw is not None and raw in self._enrichments:
-            return self._enrichments[raw]
+        if raw is not None and raw in self._places:
+            return self._places[raw]
         try:
-            value = json.loads(raw) if raw is not None else json.loads(line).get("enrichment")
+            enrichment = json.loads(raw) if raw is not None else json.loads(line).get("enrichment")
         except ValueError:
-            value = json.loads(line).get("enrichment")
-        if raw is not None and len(self._enrichments) < 1 << 18:
-            self._enrichments[raw] = value
+            enrichment = json.loads(line).get("enrichment")
+        value = place(enrichment)
+        if raw is not None and len(self._places) < 1 << 18:
+            self._places[raw] = value
         return value
 
     def _read_hour(self, key: str, slot: dict) -> None:
@@ -160,12 +168,12 @@ class Network:
         ip, seen, countries = parse_record(line)
         hour.records, hour.seen = hour.records + 1, hour.seen + seen
         self.seen[seen.bit_length()] = self.seen.get(seen.bit_length(), 0) + 1
-        enrichment = self._enrichment(line)
+        found = self._place(line)
         for code, count in countries.items():
             if count > 0:
                 hour.hashes.setdefault(code, array("q")).append(hash(ip))
                 hour.rows[code] = hour.rows.get(code, 0) + count
-                self.places.setdefault(code, _Places()).add(enrichment)
+                self.places.setdefault(code, _Places()).add(found)
 
     def hours(self) -> list[dict]:
         found = []
