@@ -315,17 +315,22 @@ func MinEventID(rows []Event) int64 {
 }
 
 // EventsRead is what one events read saw (EV-CURSOR-SETTLE-1): its
-// snapshot's xmin and xmax, as xid8, and the largest event_id (0 for none).
-// Once a later read's xmin reaches Xmax, every transaction running at this
-// read has ended, so no id up to MaxID can still appear: the /v1/events
-// cursor may pass them (build.EventWindow). A zero Xmax is a read without a
-// snapshot (a source other than Postgres), which bounds nothing.
-type EventsRead struct{ MaxID, Xmin, Xmax int64 }
+// snapshot's xmin, Next (the first xid not yet handed out when it ran; both
+// as xid8) and the largest event_id (0 for none). Once a later read's xmin
+// reaches Next, every transaction that had an xid at this read has ended, so
+// no id up to MaxID can still appear: the /v1/events cursor may pass them
+// (build.EventWindow). A zero Next is a read without a snapshot (a source
+// other than Postgres), which bounds nothing.
+type EventsRead struct{ MaxID, Xmin, Next int64 }
 
-// eventsReadSQL reads EventsRead from the statement's snapshot: in Load's and
+// eventsReadSQL reads EventsRead in the statement's snapshot: in Load's and
 // LoadEvents' REPEATABLE READ transaction, the one their events are read in.
-const eventsReadSQL = `SELECT coalesce((SELECT max(event_id) FROM public.test_events), 0),
- pg_snapshot_xmin(pg_current_snapshot())::text::bigint, pg_snapshot_xmax(pg_current_snapshot())::text::bigint`
+// The snapshot's xmax is not Next: it is the newest finished xid + 1, and a
+// running transaction may hold it or a later one. age(x) is the next xid
+// minus x for a transaction without an xid, so xmin + age(xmin) is Next,
+// read just after the snapshot was taken, without taking an xid.
+const eventsReadSQL = `SELECT coalesce((SELECT max(event_id) FROM public.test_events), 0), x::text::bigint, x::text::bigint + age(xid(x))
+ FROM (SELECT pg_snapshot_xmin(pg_current_snapshot()) AS x) s`
 
 // EventJSON is detect.event_json: the shape of /v1/events rows and of the
 // snapshot's `events` (src/lib/measured-types.ts TestEvent).

@@ -17,7 +17,9 @@ import (
 
 // EV-CURSOR-SETTLE-1 against the database, the case one snapshot cannot
 // catch: B gets its xid first (it writes another row), A inserts event 1 and
-// stays open, B inserts event 2 and commits. While A is open no poll passes
+// stays open, B inserts event 2 and commits. Alone on the server, the read
+// then sees a snapshot whose xmin and xmax are A's xid, so the mark of a
+// read is checked against A's xid directly. While A is open no poll passes
 // id 1, from memory or the fallback, and the default poll's cursor stops
 // below it; once A commits, both arrive in id order, through the default
 // poll's cursor too, with no new event to trigger the read. A burst of 300
@@ -42,6 +44,12 @@ func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 		if _, err := s.Refresh(ctx, false); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// A bound is known (0, the table is empty) once a read follows the first
+	// one with every transaction of it ended: a full build carries the reads.
+	db.Settle(t)
+	if _, err := s.Refresh(ctx, true); err != nil {
+		t.Fatal(err)
 	}
 	// poll reads after= from memory and from the fallback; both must agree.
 	poll := func(after int64) tapeBody {
@@ -76,6 +84,19 @@ func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 	a.exec(insert, 1)                                   // event 1, A stays open
 	b.exec(insert, 1)                                   // event 2
 	b.commit()
+	// Whatever else the server runs, a read while A is open marks a Next
+	// above A's xid, and its xmin is not above it: A was handed its xid.
+	var xidA int64
+	if err := a.tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text::bigint").Scan(&xidA); err != nil {
+		t.Fatal(err)
+	}
+	in, err := store.LoadEvents(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := in.EventsRead; r.MaxID != 2 || r.Next <= xidA || r.Xmin > xidA {
+		t.Fatalf("a read with A (xid %d) open: %+v", xidA, r)
+	}
 	refresh()
 	var handOff *int64
 	for i := 0; i < 3; i++ { // a few refreshes while A is open

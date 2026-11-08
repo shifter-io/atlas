@@ -13,40 +13,41 @@ import (
 // never goes down, and a read without a snapshot bounds nothing.
 func TestCursorMarksPassOnlyReadsEveryTransactionOfWhichEnded(t *testing.T) {
 	steps := []struct {
-		read    store.EventsRead
-		bound   int64
-		open    int
-		pending bool
+		read           store.EventsRead
+		bound          int64
+		open           int
+		known, pending bool
 	}{
-		{store.EventsRead{MaxID: 10, Xmin: 100, Xmax: 105}, 0, 1, true},
-		{store.EventsRead{MaxID: 12, Xmin: 103, Xmax: 110}, 0, 2, true},   // 100..104 still running
-		{store.EventsRead{MaxID: 15, Xmin: 105, Xmax: 112}, 10, 2, true},  // the first read's transactions ended
-		{store.EventsRead{MaxID: 15, Xmin: 112, Xmax: 112}, 15, 0, false}, // nothing running
-		{store.EventsRead{MaxID: 14, Xmin: 113, Xmax: 113}, 15, 0, false}, // a deleted newest row does not lower it
+		{store.EventsRead{MaxID: 10, Xmin: 100, Next: 105}, 0, 1, false, true},
+		{store.EventsRead{MaxID: 12, Xmin: 103, Next: 110}, 0, 2, false, true},  // 100..104 may still run
+		{store.EventsRead{MaxID: 15, Xmin: 105, Next: 112}, 10, 2, true, true},  // every xid of the first read ended
+		{store.EventsRead{MaxID: 15, Xmin: 112, Next: 112}, 15, 0, true, false}, // no xid handed out is running
+		{store.EventsRead{MaxID: 14, Xmin: 113, Next: 113}, 15, 0, true, false}, // a deleted newest row does not lower it
 	}
 	m := cursorMarks{}
 	for i, s := range steps {
 		m = m.next(s.read)
 		w := EventWindow{marks: m}
-		if m.bound != s.bound || len(m.open) != s.open || w.Pending() != s.pending {
-			t.Fatalf("read %d: bound %d, %d open, pending %v; want %d, %d, %v", i, m.bound, len(m.open), w.Pending(), s.bound, s.open, s.pending)
+		if m.bound != s.bound || len(m.open) != s.open || m.known != s.known || w.Pending() != s.pending {
+			t.Fatalf("read %d: bound %d, %d open, known %v, pending %v; want %d, %d, %v, %v", i, m.bound, len(m.open), m.known,
+				w.Pending(), s.bound, s.open, s.known, s.pending)
 		}
 	}
 	if m := m.next(store.EventsRead{MaxID: 20}); m.bound != math.MaxInt64 || (&EventWindow{marks: m}).Pending() {
 		t.Fatalf("a read without a snapshot: bound %d", m.bound)
 	}
-	if m := (cursorMarks{bound: math.MaxInt64}).next(store.EventsRead{MaxID: 3, Xmin: 7, Xmax: 9}); m.bound != 0 {
+	if m := (cursorMarks{bound: math.MaxInt64}).next(store.EventsRead{MaxID: 3, Xmin: 7, Next: 9}); m.bound != 0 {
 		t.Fatalf("a snapshot after none starts from 0: %d", m.bound)
 	}
 	// A transaction open over many reads keeps the oldest and the newest.
 	m = cursorMarks{}
 	for i := int64(0); i < 40; i++ {
-		m = m.next(store.EventsRead{MaxID: i + 1, Xmin: 50, Xmax: 100 + i})
+		m = m.next(store.EventsRead{MaxID: i + 1, Xmin: 50, Next: 100 + i})
 	}
 	if len(m.open) != openReads || m.open[0].MaxID != 1 || m.open[openReads-1].MaxID != 40 {
 		t.Fatalf("%d open reads: %+v", len(m.open), m.open)
 	}
-	if m = m.next(store.EventsRead{MaxID: 41, Xmin: 140, Xmax: 141}); m.bound != 40 || len(m.open) != 1 {
+	if m = m.next(store.EventsRead{MaxID: 41, Xmin: 140, Next: 141}); m.bound != 40 || len(m.open) != 1 {
 		t.Fatalf("once it ends: bound %d, %d open", m.bound, len(m.open))
 	}
 }
@@ -58,9 +59,9 @@ func TestCursorMarksPassOnlyReadsEveryTransactionOfWhichEnded(t *testing.T) {
 // keeps the marks of the one before it.
 func TestTheCursorStopsAtTheBound(t *testing.T) {
 	rows := burst(10)
-	read := store.EventsRead{MaxID: 10, Xmin: 100, Xmax: 104}
+	read := store.EventsRead{MaxID: 10, Xmin: 100, Next: 104}
 	w := newEventWindow(&store.Inputs{Events: rows, EventsComplete: true, EventsRead: read}, acmeText)
-	w.marks.bound = 6
+	w.marks.bound, w.marks.known = 6, true
 	check := func(name string, f store.EventFilter, ids []int64, cursor int64, more bool) {
 		t.Helper()
 		memory, ok := w.Answer(f)
@@ -83,8 +84,18 @@ func TestTheCursorStopsAtTheBound(t *testing.T) {
 	if a, _ := w.Answer(store.EventFilter{After: def.Cursor, Limit: 100}); !slices.Equal(eventIDs(a), []int64{7, 8, 9, 10}) || a.More {
 		t.Fatalf("the hand-off from the default poll: %v more %v", eventIDs(a), a.More)
 	}
-	prev := &Result{Events: newEventWindow(&store.Inputs{EventsRead: store.EventsRead{MaxID: 8, Xmin: 90, Xmax: 95}}, acmeText)}
-	res := &Result{Events: newEventWindow(&store.Inputs{EventsRead: store.EventsRead{MaxID: 10, Xmin: 96, Xmax: 99}}, acmeText)}
+	// Before any bound is known (a first window after a restart), the
+	// default poll's cursor stops below its smallest row, and after it the
+	// bound (0) still holds every row back.
+	first := newEventWindow(&store.Inputs{Events: rows[:6], NotableComplete: true, LateComplete: true, EventsRead: read}, acmeText)
+	if a, ok := first.Answer(store.EventFilter{Limit: 6}); !ok || len(a.Events) != 6 || *a.Cursor != 4 || !a.More || !first.Pending() || first.marks.known {
+		t.Fatalf("the default poll of a first window: %v cursor %d more %v", eventIDs(a), *a.Cursor, a.More)
+	}
+	if a, ok := first.Answer(store.EventFilter{After: sp64(4), Limit: 100}); !ok || len(a.Events) != 0 || !a.More {
+		t.Fatalf("after the first window's cursor: %v more %v", eventIDs(a), a.More)
+	}
+	prev := &Result{Events: newEventWindow(&store.Inputs{EventsRead: store.EventsRead{MaxID: 8, Xmin: 90, Next: 95}}, acmeText)}
+	res := &Result{Events: newEventWindow(&store.Inputs{EventsRead: store.EventsRead{MaxID: 10, Xmin: 96, Next: 99}}, acmeText)}
 	if FollowEvents(res, prev); res.Events.marks.bound != 8 || !res.Events.Pending() {
 		t.Fatalf("a full build after a read: bound %d", res.Events.marks.bound)
 	}

@@ -57,7 +57,8 @@ func (r *EventRow) hasWords(words []string) bool {
 // EventsAnswer is the /v1/events body. Cursor is the largest event_id the
 // answer covers: its largest row id, else the request's after; or, when a q
 // read past after stopped at store.TextScan rows, the last row read; never
-// above the cursor bound (cursorMarks) unless after is. More is true when
+// above the cursor bound (cursorMarks) unless after is, or before any bound
+// is known, the smallest row id minus one (capCursor). More is true when
 // more rows match past Cursor. UpdatedAt is the newest event's at.
 type EventsAnswer struct {
 	Events    []EventRow `json:"events"`
@@ -252,8 +253,8 @@ func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool)
 			a.Cursor = &r.e.ID
 		}
 	}
-	if f.After == nil && a.Cursor != nil && *a.Cursor > bound {
-		a.Cursor = &bound
+	if f.After == nil {
+		w.capCursor(a)
 	}
 	for _, r := range matched {
 		a.More = a.More || (a.Cursor != nil && r.e.ID > *a.Cursor)

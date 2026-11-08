@@ -298,7 +298,7 @@ type Inputs struct {
 // loadEvents reads the newest EventWindow events and, past them, the newest
 // NotableWindow non-routine ones and the LateWindow late ones.
 func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
-	if err := tx.QueryRow(ctx, eventsReadSQL).Scan(&in.EventsRead.MaxID, &in.EventsRead.Xmin, &in.EventsRead.Xmax); err != nil {
+	if err := tx.QueryRow(ctx, eventsReadSQL).Scan(&in.EventsRead.MaxID, &in.EventsRead.Xmin, &in.EventsRead.Next); err != nil {
 		return fmt.Errorf("events read: %w", err)
 	}
 	in.Events, err = collect(ctx, tx, eventsNewestSQL, ScanEvent, EventWindow+1)
