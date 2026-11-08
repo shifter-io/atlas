@@ -20,9 +20,10 @@
 # all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
 # within 2 ms) runs alone, so no other test shares the CPUs while it measures, then the
 # page latency test (TestPageLatency, PAGE-LATENCY-1: every request of every Proxy Index
-# page against a production week, within its budgets; its time in the job summary). Every go
-# test run writes go test -json; then scripts/ci/timing.py writes the 20 slowest tests
-# and subtests and the test steps' time to the job summary and the api-timing artifact
+# page against a production week, within bench.CIGuard, 5 times the staging budgets; a
+# request or page over it is measured once more; its time, STAGING-BUDGET warnings and
+# largest p99 ratios in the job summary). Every go test run writes go test -json; then
+# scripts/ci/timing.py writes the 20 slowest tests and subtests and the test steps' time to the job summary and the api-timing artifact
 # (90 days), and fails the job when a test takes 90 s or more or the steps over 240 s
 # (CI-TIME-1). Nightly and on dispatches only, after the tests (passed or not), go test
 # -race without the database runs in its own step (RACE-1; it reports its time, without
@@ -270,6 +271,8 @@ jobs:
           python3 ../scripts/ci/timing.py --go --log "$EV/go-page-latency.json" >> "$log"
           seconds=$(( $(date +%s) - start ))
           echo "Page latency test (TestPageLatency, a production week): $seconds s, exit $status" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Within the CI guard but over a staging budget: warnings, so drift shows early.
+          grep -oE '(STAGING-BUDGET|LATENCY-RATIO).*' "$log" | sed 's/^/- /' | tee -a "$GITHUB_STEP_SUMMARY" || true
           if [ "$status" -ne 0 ]; then tail -n 300 "$log"; exit 1; fi
           grep -E '^(--- |ok)|p99|published|rebuild' "$log"
           # Never an empty pass: the test ran, measured and passed.

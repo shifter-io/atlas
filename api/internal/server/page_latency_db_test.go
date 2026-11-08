@@ -20,7 +20,8 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
-// The test's own limits; every request's and page's are bench.CIBudgets.
+// The test's own limits; every request's and page's are bench.CIGuard, with
+// bench.StagingBudgets as warnings.
 const (
 	rebuildLimit = 30 * time.Second // the full rebuild of testscale.Week
 	testLimit    = 60 * time.Second // the whole test
@@ -33,10 +34,12 @@ var weekRanges = []string{"24h", "7d", "30d"}
 // TestPageLatency times every request of every Proxy Index page (bench.Specs:
 // docs/api-web-map.md section 10, after section 11, with every registered
 // answer's samples) against testscale.Week as a v4 build, over loopback with
-// keep-alive and brotli, within bench.CIBudgets: first the cold ones, each asked
+// keep-alive and brotli, within bench.CIGuard: first the cold ones, each asked
 // once (a City x ASN list page's first render, its rows not read yet, and
 // searches), then every page's requests, each repeated. The p99 of one page's
-// requests add up to at most the budgets' PageMs.
+// requests add up to at most the guard's page budget. A measurement over the
+// guard is taken once more (meter.within); one over the staging budget only
+// is a STAGING-BUDGET warning.
 func TestPageLatency(t *testing.T) {
 	// Serial and alone: api.yml runs it in its own process after the other tests.
 	start := time.Now()
@@ -48,18 +51,14 @@ func TestPageLatency(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 	m := &meter{t: t, base: ts.URL, client: &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4, DisableCompression: true}}}
-	budgets := bench.CIBudgets()
+	guard, staging := bench.CIGuard(), bench.StagingBudgets()
 	sh, slugs := weekShape(t, s)
-	for _, c := range []struct {
-		class       string
-		warm, paths []string
-	}{
-		// Page 2 of each list, its rows not read yet (the first network's pages warm up).
-		{bench.ClassList, coveragePages(slugs[:1], 2, 18)[:warmups], coveragePages(slugs[1:], 2, 2)},
-		{bench.ClassListSearch, nil, listSearches(slugs, warmups+timed)},
-		{bench.ClassSearch, nil, searches(warmups + timed)},
-	} {
-		m.distinct(c.class+" cold", ms(budgets.Classes[c.class].ColdMs), c.warm, c.paths)
+	for _, class := range []string{bench.ClassList, bench.ClassListSearch, bench.ClassSearch} {
+		l := limits{ms(guard.Classes[class].ColdMs), ms(staging.Classes[class].ColdMs)}
+		m.within(class+" cold", l, func(round int) timing {
+			warm, paths := coldPaths(class, slugs, round)
+			return m.distinct(class+" cold", warm, paths)
+		})
 	}
 	pages := bench.Expand(bench.Specs, sh, build.Answers())
 	p99 := map[string]time.Duration{}
@@ -67,11 +66,14 @@ func TestPageLatency(t *testing.T) {
 		for _, u := range p.Requests {
 			if _, done := p99[u]; !done {
 				class := bench.Class(u)
-				p99[u] = m.repeat(u, class, ms(budgets.Classes[class].P99Ms))
+				l := limits{ms(guard.Classes[class].P99Ms), ms(staging.Classes[class].P99Ms)}
+				p99[u] = m.within(u+" ("+class+")", l, func(int) timing { return m.repeat(u) })
 			}
 		}
 	}
-	checkPageTotals(t, pages, p99, ms(budgets.PageMs))
+	checkPageTotals(m, pages, p99, guard, staging)
+	t.Logf("LATENCY-RATIO largest p99 to CI guard %.2f (%s), to staging budget %.2f (%s)",
+		m.toGuard.of, m.toGuard.name, m.toStaging.of, m.toStaging.name)
 	if took := time.Since(start); took > testLimit {
 		t.Errorf("the test took %v, over its %v budget", took, testLimit)
 	}
@@ -130,6 +132,21 @@ func weekServer(t *testing.T, db *testdb.DB) *server.Server {
 	return s
 }
 
+// coldPaths are the warm-ups and the timed paths of class's cold measurement
+// in round 0, or 1 for its retry, each round's timed paths never read before:
+// page 2, then 3, of each list after the first network's pages warm up; for
+// searches, the round's first warmups paths warm up.
+func coldPaths(class string, slugs []string, round int) (warm, paths []string) {
+	n := warmups + timed
+	switch class {
+	case bench.ClassList:
+		return coveragePages(slugs[:1], 2, 18)[:warmups], coveragePages(slugs[1:], 2+round, 2+round)
+	case bench.ClassListSearch:
+		return nil, listSearches(slugs, round*n, n)
+	}
+	return nil, searches(round*n, n)
+}
+
 // coveragePages is pages from to last of each network's City x ASN list
 // (COV, the only long list a page asks for), in every range.
 func coveragePages(slugs []string, from, last int) []string {
@@ -144,39 +161,46 @@ func coveragePages(slugs []string, from, last int) []string {
 	return out
 }
 
-// listSearches is n searches of the networks' City x ASN lists, each its own.
-func listSearches(slugs []string, n int) []string {
+// listSearches is n searches of the networks' City x ASN lists from the
+// from-th, each its own.
+func listSearches(slugs []string, from, n int) []string {
 	out := []string{}
-	for i := range n {
+	for i := from; i < from+n; i++ {
 		out = append(out, fmt.Sprintf("/v1/networks/%s/coverage?range=%s&q=city+%d", slugs[i%len(slugs)], weekRanges[i%3], 100+i))
 	}
 	return out
 }
 
-// searches is n searches of the search palette, each its own.
-func searches(n int) []string {
+// searches is n searches of the search palette from the from-th, each its own.
+func searches(from, n int) []string {
 	out := []string{}
-	for i := range n {
+	for i := from; i < from+n; i++ {
 		out = append(out, fmt.Sprintf("/v1/search?q=net%02d+%d", i%testscale.Week.Networks, i))
 	}
 	return out
 }
 
 // checkPageTotals checks that each page's requests' p99 add up to at most
-// limit (the registered samples no page draws are not a page).
-func checkPageTotals(t *testing.T, pages []bench.Page, p99 map[string]time.Duration, limit time.Duration) {
+// the guard's page budget (the registered samples no page draws are not a
+// page); a page's retry measures each of its requests again.
+func checkPageTotals(m *meter, pages []bench.Page, p99 map[string]time.Duration, guard, staging bench.Budgets) {
 	for _, p := range pages {
 		if p.Name == bench.OtherAnswers {
 			continue
 		}
-		var sum time.Duration
-		for _, u := range p.Requests {
-			sum += p99[u]
-		}
-		t.Logf("page %-46s %2d requests, p99 sum %v", p.Name, len(p.Requests), sum)
-		if sum > limit && os.Getenv("SITEAPI_SKIP_LATENCY") == "" {
-			t.Errorf("page %s: its %d requests' p99 add up to %v, over the %v budget", p.Name, len(p.Requests), sum, limit)
-		}
+		n := len(p.Requests)
+		l := limits{ms(guard.PageBudgetMs(n)), ms(staging.PageBudgetMs(n))}
+		m.within("page "+p.Name, l, func(round int) timing {
+			var sum time.Duration
+			for _, u := range p.Requests {
+				if round > 0 {
+					p99[u] = m.repeat(u).took
+				}
+				sum += p99[u]
+			}
+			m.t.Logf("page %-46s %2d requests, p99 sum %v", p.Name, n, sum)
+			return timing{"its requests' p99 sum", sum}
+		})
 	}
 }
 
@@ -185,6 +209,20 @@ type meter struct {
 	t      *testing.T
 	base   string
 	client *http.Client
+	// The largest kept p99 to its guard and to its staging budget.
+	toGuard, toStaging ratio
+}
+
+// ratio is a p99 over its limit, and the measurement's name.
+type ratio struct {
+	of   float64
+	name string
+}
+
+func (r *ratio) keep(name string, took, limit time.Duration) {
+	if of := float64(took) / float64(limit); of > r.of {
+		*r = ratio{of, name}
+	}
 }
 
 // get asks for path, fails the test unless it answers 200, and returns how
@@ -215,23 +253,22 @@ type timing struct {
 	took time.Duration
 }
 
-// repeat asks for path warmups times, then times it timed times, and checks
-// its p99 against the limit of its budget class.
-func (m *meter) repeat(path, class string, limit time.Duration) time.Duration {
+// repeat asks for path warmups times, then times it timed times: its p99.
+func (m *meter) repeat(path string) timing {
 	all := make([]timing, 0, timed)
 	for i := range warmups + timed {
 		if took := m.get(path); i >= warmups {
 			all = append(all, timing{path, took})
 		}
 	}
-	got := m.check(class, limit, all)
-	m.t.Logf("%-72s p99 %v", path, got)
+	got := nearestP99(all)
+	m.t.Logf("%-72s p99 %v", path, got.took)
 	return got
 }
 
-// distinct asks for each of warm, then times each of paths once, and checks
-// their p99 against limit; without warm, the first warmups paths warm up.
-func (m *meter) distinct(name string, limit time.Duration, warm, paths []string) {
+// distinct asks for each of warm, then times each of paths once: their p99.
+// Without warm, the first warmups paths warm up.
+func (m *meter) distinct(name string, warm, paths []string) timing {
 	if warm == nil {
 		warm, paths = paths[:warmups], paths[warmups:]
 	}
@@ -242,17 +279,36 @@ func (m *meter) distinct(name string, limit time.Duration, warm, paths []string)
 	for _, p := range paths {
 		all = append(all, timing{p, m.get(p)})
 	}
-	got := m.check(name, limit, all)
-	m.t.Logf("%-28s %3d requests such as %s: p99 %v", name, len(paths), paths[0], got)
+	got := nearestP99(all)
+	m.t.Logf("%-28s %3d requests such as %s: p99 %v", name, len(paths), paths[0], got.took)
+	return got
 }
 
-// check is the p99 of timings, an error naming its request when it is over
-// limit, the budget of class.
-func (m *meter) check(class string, limit time.Duration, all []timing) time.Duration {
+// nearestP99 is the p99 of all, with its request.
+func nearestP99(all []timing) timing {
 	sort.Slice(all, func(i, j int) bool { return all[i].took < all[j].took })
-	p := all[len(all)*99/100]
-	if p.took > limit && os.Getenv("SITEAPI_SKIP_LATENCY") == "" {
-		m.t.Errorf("%s: p99 %v, over its %v budget (%s)", p.path, p.took, limit, class)
+	return all[len(all)*99/100]
+}
+
+// within measures name once (round 0) and, over its CI guard, once more the
+// same way (round 1), and returns the p99 it keeps, the last. It fails only
+// when both are over the guard, and logs a STAGING-BUDGET warning when the
+// last is within the guard but over the staging budget.
+func (m *meter) within(name string, l limits, measure func(round int) timing) time.Duration {
+	first := measure(0)
+	last := first
+	if first.took > l.guard {
+		m.t.Logf("RETRY %s: p99 %v (%s), over its %v CI guard; measuring once more", name, first.took, first.path, l.guard)
+		last = measure(1)
 	}
-	return p.took
+	m.toGuard.keep(name, last.took, l.guard)
+	m.toStaging.keep(name, last.took, l.staging)
+	fail, warn := verdict(name, l, first, last)
+	if warn != "" {
+		m.t.Log(warn)
+	}
+	if fail != "" && os.Getenv("SITEAPI_SKIP_LATENCY") == "" {
+		m.t.Error(fail)
+	}
+	return last.took
 }

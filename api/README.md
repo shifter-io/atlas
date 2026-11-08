@@ -119,7 +119,10 @@ keep-alive transport, with `Accept-Encoding: br`. It records the status, the ide
 encoded bytes, the cold time and the warm p50, p95, p99 (nearest rank) and max, each time
 including reading the whole body. A page's figures are the sums over its requests.
 
-Budgets (ms) are PAGE-LATENCY-1's CI budgets plus 20 ms of network time per request:
+Budgets (ms) are the staging budgets (`bench.StagingBudgets`, PAGE-LATENCY-1's targets over
+loopback) plus 20 ms of network time per request. They are the strict targets: the bench
+measures them on the staging siteapi (#716) and the final report gives each endpoint's pass
+or fail against them (#720); CI checks only a guard 5 times looser (see "Tests"):
 
 | Class | Requests | Cold | p99 |
 |---|---|---|---|
@@ -545,14 +548,23 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
     and window 30,000 City × ASN rows, 30,000 cities and 9,000 ASNs, 2,500 events), as a
     v4 build; its full rebuild within 30 s, then every request of every page as
     `siteapi bench` expands them (`bench.Specs`, with every registered answer's
-    `Samples`) over loopback with keep-alive and brotli, within `bench.CIBudgets`: first
-    the cold requests, each once after 50 warm-up requests (a City × ASN list page's
-    first render, its rows not read yet, 50 ms; list searches 50 ms; `/v1/search?q=`
+    `Samples`) over loopback with keep-alive and brotli, within `bench.CIGuard`: the
+    staging budgets (`bench.StagingBudgets`) times `bench.CIGuardFactor`, 5, as a shared
+    CI server's noise alone can double a 2 ms p99, so CI catches an order-of-magnitude
+    regression, not noise. The strict staging budgets are measured on the staging
+    siteapi by `siteapi bench` (#716) and judged in the final report (#720). First the
+    cold requests, each once after 50 warm-up requests (a City × ASN list page's first
+    render, its rows not read yet, staging 50 ms; list searches 50 ms; `/v1/search?q=`
     5 ms), then every page's requests 50 times to warm up and 200 times timed (p99: a
     precomputed answer, `/v1/events` and a cached list page 2 ms); one page's requests'
-    p99 add up to at most 10 ms, and the whole test takes under 60 s. A failure names
-    the request, its p99 and the budget. CI runs it alone in its own process after
-    `TestServeFromDatabase` and reports its time in the job summary.
+    p99 add up to at most 10 ms; the guard is 5 times each. A request or page over the
+    guard is measured once more the same way (cold requests on paths not read yet, a
+    page by timing each of its requests again) and fails only if that is over too, the
+    message giving both; one over the staging budget but within the guard is a
+    `STAGING-BUDGET` warning in the test output and the `api` job summary. A wrong
+    status, the 30 s rebuild and the test's own 60 s never retry. CI runs it alone in
+    its own process after `TestServeFromDatabase` and reports its time in the job
+    summary.
   - a fresh database with one published product as a v4 build (site schema migrated by an older
     build, missing, or missing tables and a column) answers 200 on every page, logs
     the missing site tables once and lists them in `/healthz` `siteGaps`

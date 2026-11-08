@@ -105,7 +105,7 @@ func (r *Report) judge(b Budgets) {
 			q := by[u]
 			p.ColdMs, p.P50Ms, p.P95Ms, p.P99Ms, p.MaxMs = p.ColdMs+q.ColdMs, p.P50Ms+q.P50Ms, p.P95Ms+q.P95Ms, p.P99Ms+q.P99Ms, p.MaxMs+q.MaxMs
 		}
-		p.BudgetMs = b.PageMs + b.PageRequestMs*float64(len(p.Requests))
+		p.BudgetMs = b.PageBudgetMs(len(p.Requests))
 		if p.Over = b.PageMs > 0 && p.P99Ms > p.BudgetMs; p.Over {
 			r.Failures = append(r.Failures, fmt.Sprintf("page %s: p99 sum %.2f ms over its %.2f ms budget", p.Name, p.P99Ms, p.BudgetMs))
 		}

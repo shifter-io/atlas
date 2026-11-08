@@ -31,7 +31,12 @@ workstation.
   a 32-CPU server: `gofmt` and `go vet` in the background while every package's tests
   run in parallel, then the latency test `TestServeFromDatabase` (p99 < 2 ms) alone in
   its own process, after everything else, and after it the page latency test
-  `TestPageLatency` the same way. See "Tests" in `api/README.md`.
+  `TestPageLatency` the same way. `TestPageLatency` enforces `bench.CIGuard`, 5 times
+  the staging budgets, with one retry of a request or page over it; a shared CI server
+  is too noisy for the strict ones. The strict `bench.StagingBudgets` are measured on
+  the staging siteapi by `siteapi bench` (#716) and judged in the final report (#720);
+  over one in CI is only a `STAGING-BUDGET` warning in the job summary. See "Tests" in
+  `api/README.md`.
 - Always build `siteapi` from the current checkout (`cd api && go build
   ./cmd/siteapi`); `api/bin/` is ignored and never committed. An old binary serves
   only the routes it was built with and writes its own migration checksums.
