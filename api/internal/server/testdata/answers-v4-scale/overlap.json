@@ -1,0 +1,20 @@
+{
+ "QA-1": {
+  "/v1/overlap/residential/24h": "f09c4f219c25acd5741ccd73fe94df144b7a25e8733ce930ad8e66430c152a59",
+  "/v1/overlap/residential/30d": "5cd39e3adecbce5ccad8108c86b221b68e1eb501b9a54b4261bd42de4ccfa596",
+  "/v1/overlap/residential/7d": "deb5d58b1a7f29b2ae2a059545c6940ff5584f1a469dd2e5a7ec2c055cf0cf5f",
+  "GET /v1/overlap": "3ca1330069df3524c6f24b55773cad2489c321a9fbe52a53c6eb1a8d3c09e496",
+  "GET /v1/overlap?kind=residential\u0026range=30d": "3ca1330069df3524c6f24b55773cad2489c321a9fbe52a53c6eb1a8d3c09e496",
+  "GET /v1/overlap?kind=residential\u0026range=7d": "660166a04c089da07fc7d944a8168dc1848e3386ef611d8d881acdc46686d465",
+  "GET /v1/overlap?range=24h": "3033c2b018cb6cb42bd758b6d10881410a829869975b8d3549d263b38fad070e"
+ },
+ "every-request": {
+  "/v1/overlap/residential/24h": "5d5b63b0fef493812e4c7503c68c5c161e3a7b92db916a3f190d48165984842b",
+  "/v1/overlap/residential/30d": "30efd3f92afa9f2083d97f008210eb4cfcd41b2877b8a78b413448c5da57df72",
+  "/v1/overlap/residential/7d": "39402aea63132a90ec1a8eb0fe3bd163a4b148e72af0d242f1e76ba70beb9d75",
+  "GET /v1/overlap": "77d0f50fe2dec01a6ddd86bb01b9ef0204e9a5e690f7fabedb6cab044507f930",
+  "GET /v1/overlap?kind=residential\u0026range=30d": "77d0f50fe2dec01a6ddd86bb01b9ef0204e9a5e690f7fabedb6cab044507f930",
+  "GET /v1/overlap?kind=residential\u0026range=7d": "dbb9e251359a6e2b307a7a6ebc1dd023c23a1ebf87e06440fdf96dd2dc4619c5",
+  "GET /v1/overlap?range=24h": "40eebd7361d91ab1d000d8f1b0a35760a0259e66df67d4b3df11d94e0b8ef973"
+ }
+}
