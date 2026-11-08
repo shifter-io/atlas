@@ -209,21 +209,7 @@ class Model:
 
     def _measured(self, formula, country, fallback):
         """The test hour, scaled unique IPs, requests per IP and formula entry of a country."""
-        entry, hour = formula["countries"].get(country), formula["schedule"].get(country)
-        if entry and hour is not None and entry["unique_ips"][hour] and entry["hour_factors"][hour]:
-            ips, requests = entry["unique_ips"][hour], entry["requests"][hour] or 0
-        else:
-            curve = formula["network_curve"]
-            valid = [h for h in range(24) if curve["hour_factors"][h]]
-            hour = valid[key(self.settings.seed, "hour", formula["network"], country) % len(valid)]
-            ips, requests = fallback
-            entry = {
-                "hour_factors": curve["hour_factors"],
-                "daily_factor": curve["daily_factor"],
-                "requests": curve["requests"],
-                "curve": "network",
-                "hour_basis": ["borrowed"] * 24,
-            }
+        hour, ips, requests, entry = measured(formula, country, fallback, self.settings.seed)
         scaled = max(1, round(ips * self.settings.scale))
         return hour, scaled, max(1.0, requests / ips), entry
 
@@ -349,6 +335,25 @@ class Model:
         if errors:
             rows.append((1, 1, errors, 0, None))
         return errors, rows
+
+
+def measured(formula: dict, country: str, fallback, seed) -> tuple[int, int, float, dict]:
+    """The test hour, unique IPs, requests and formula entry of a country: the formula's own when
+    it measured the country's test hour, else `fallback` (_fallback) at a network-curve hour."""
+    entry, hour = formula["countries"].get(country), formula["schedule"].get(country)
+    if entry and hour is not None and entry["unique_ips"][hour] and entry["hour_factors"][hour]:
+        return hour, entry["unique_ips"][hour], entry["requests"][hour] or 0, entry
+    curve = formula["network_curve"]
+    valid = [h for h in range(24) if curve["hour_factors"][h]]
+    hour = valid[key(seed, "hour", formula["network"], country) % len(valid)]
+    entry = {
+        "hour_factors": curve["hour_factors"],
+        "daily_factor": curve["daily_factor"],
+        "requests": curve["requests"],
+        "curve": "network",
+        "hour_basis": ["borrowed"] * 24,
+    }
+    return hour, *fallback, entry
 
 
 def _fallback(formula: dict) -> tuple[int, float]:
