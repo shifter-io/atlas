@@ -29,9 +29,12 @@ var (
 		"success_series", "latency_series", "submitted_at"}, "submitted_at DESC, position NULLS LAST, run_id"}
 	readChangelog = siteRead{"changelog", []string{"change_id", "kind", "provider_slug", "headline", "detail", "delta", "unit", "severity", "occurred_at"}, "occurred_at DESC, position NULLS LAST, change_id"}
 	readTape      = siteRead{"tape_events", []string{"tape_id", "kind", "provider_slug", "product", "title", "detail", "signal", "value", "occurred_at"}, "occurred_at DESC, position NULLS LAST, tape_id"}
+	// readPriceHistory is the newest site table (migration 0003).
+	readPriceHistory = siteRead{"pricing_history", []string{"provider_slug", "category", "effective_from", "price_per_gb", "price_per_gb_at_scale", "source"},
+		"provider_slug, category, effective_from"}
 
 	siteReads = []siteRead{readTargets, readScopes, readWeights, readProfiles, readProviders, readProducts, readPricing, readPlans, readTrust,
-		readReviews, readRuns, readChangelog, readTape}
+		readReviews, readRuns, readChangelog, readTape, readPriceHistory}
 )
 
 // readSite reads one optional site table, or nothing when the layout cannot serve it.
@@ -176,8 +179,8 @@ func (in *Inputs) catalogSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []f
 	}
 }
 
-// providerSteps reads the providers with their products, pricing, plans and
-// trust signals.
+// providerSteps reads the providers with their products, pricing, plans,
+// price history and trust signals.
 func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []func() error {
 	return []func() error{
 		func() (err error) {
@@ -201,6 +204,12 @@ func (in *Inputs) providerSteps(ctx context.Context, tx pgx.Tx, l SiteLayout) []
 		func() (err error) {
 			in.Plans, err = readSite(ctx, tx, l, readPlans, func(r pgx.Rows, v *PlanRow) error {
 				return r.Scan(&v.ProviderSlug, &v.Category, &v.Position, &v.Name, &v.Price, &v.Gb, &v.Ips, &v.Note, &v.Recommended, &v.DiscountPct, &v.Catalog)
+			})
+			return
+		},
+		func() (err error) {
+			in.PricingHistory, err = readSite(ctx, tx, l, readPriceHistory, func(r pgx.Rows, v *PricingHistoryRow) error {
+				return r.Scan(&v.ProviderSlug, &v.Category, &v.EffectiveFrom, &v.PricePerGb, &v.PricePerGbAtScale, &v.Source)
 			})
 			return
 		},

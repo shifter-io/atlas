@@ -2,6 +2,7 @@ package snap
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 )
 
@@ -32,5 +33,19 @@ func TestTheHeadLatencyMeanIsOptional(t *testing.T) {
 		if m.LatencyMs.Mean.OK() {
 			t.Errorf("%s: light-load latency without a mean decodes as %v", c.name, m.LatencyMs.Mean)
 		}
+	}
+}
+
+// The settings' [grades] decode by label; a methodology without them has nil.
+func TestMethodologyGrades(t *testing.T) {
+	var m Methodology
+	if err := json.Unmarshal([]byte(`{"id":"m","settings":{"grades":{"A+":88,"B":64,"D":0}}}`), &m); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]float64{"A+": 88, "B": 64, "D": 0}; !maps.Equal(m.Settings.Grades, want) {
+		t.Errorf("grades %v", m.Settings.Grades)
+	}
+	if (Methodology{}).Settings.Grades != nil {
+		t.Error("a methodology without grades has some")
 	}
 }

@@ -9,17 +9,29 @@ import (
 
 // installRegistered installs every registered answer's route
 // (api/answers/README.md): Key gives the stored path, which serves as every
-// other answer does; a request Key refuses answers 400.
+// other answer does, or, for an answer with Cut, the body cut on request; a
+// request Key refuses answers 400.
 func (s *Server) installRegistered(mux *http.ServeMux) {
 	for _, a := range build.Answers() {
-		key := a.Key
 		mux.HandleFunc(a.Route, func(w http.ResponseWriter, r *http.Request) {
-			path, err := key(r)
+			path, err := a.Key(r)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			s.serveStatic(w, r, path)
+			if a.Cut == nil {
+				s.serveStatic(w, r, path)
+				return
+			}
+			v := s.current.Load()
+			if v == nil {
+				s.unavailable(w)
+				return
+			}
+			s.serveCut(w, r, v, "answer\x00"+path, func() (any, bool, error) {
+				body, found := a.Cut(v.Result.Pages.Held[a.Name], path)
+				return body, found, nil
+			})
 		})
 	}
 }

@@ -1,9 +1,11 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -150,6 +152,15 @@ type PricingRow struct {
 	HeadlinePriceRank, ValueRank             *int32
 }
 
+// PricingHistoryRow is one site.pricing_history row: the list rates a
+// category's catalog published from EffectiveFrom (a date, UTC midnight).
+type PricingHistoryRow struct {
+	ProviderSlug, Category        string
+	EffectiveFrom                 time.Time
+	PricePerGb, PricePerGbAtScale *float64
+	Source                        *string
+}
+
 type PlanRow struct {
 	Catalog                json.RawMessage
 	ProviderSlug, Category string
@@ -258,6 +269,7 @@ type Inputs struct {
 	Products           []ProductRow
 	Pricing            []PricingRow
 	Plans              []PlanRow
+	PricingHistory     []PricingHistoryRow
 	Trust              []TrustRow
 	Reviews            []ReviewRow
 	CommunityRuns      []CommunityRunRow
@@ -274,29 +286,49 @@ type Inputs struct {
 	// NotableComplete is true when it holds every such row.
 	Notable         []Event
 	NotableComplete bool
+	// Late holds the events with an id above the smallest of Events that are
+	// older than Events (a writer stamps a row with its test's own time), by
+	// id, at most LateWindow; LateComplete is true when it holds every such row.
+	Late         []Event
+	LateComplete bool
 	// SiteGaps is one line per site table read as empty because the table or
 	// a column it reads is missing (SiteLayout); none on a migrated database.
 	SiteGaps []string
 }
 
 // loadEvents reads the newest EventWindow events and, past them, the newest
-// NotableWindow non-routine ones.
+// NotableWindow non-routine ones and the LateWindow late ones.
 func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
 	in.Events, err = collect(ctx, tx, eventsNewestSQL, ScanEvent, EventWindow+1)
 	if err != nil {
 		return err
 	}
-	in.EventsComplete, in.NotableComplete = len(in.Events) <= EventWindow, true
+	in.EventsComplete, in.NotableComplete, in.LateComplete = len(in.Events) <= EventWindow, true, true
 	if in.EventsComplete {
 		return nil
 	}
 	in.Events = in.Events[:EventWindow]
 	last := in.Events[EventWindow-1]
 	in.Notable, err = collect(ctx, tx, eventsNotableSQL, ScanEvent, last.At, last.ID, NotableWindow+1)
+	if err != nil {
+		return err
+	}
 	if len(in.Notable) > NotableWindow {
 		in.Notable, in.NotableComplete = in.Notable[:NotableWindow], false
 	}
+	in.Late, err = collect(ctx, tx, eventsLateSQL, ScanEvent, MinEventID(in.Events), last.At, last.ID, LateWindow+1)
+	if len(in.Late) > LateWindow {
+		in.Late, in.LateComplete = in.Late[:LateWindow], false
+	}
 	return err
+}
+
+// MinEventID is the smallest id of rows (0 for none).
+func MinEventID(rows []Event) int64 {
+	if len(rows) == 0 {
+		return 0
+	}
+	return slices.MinFunc(rows, func(a, b Event) int { return cmp.Compare(a.ID, b.ID) }).ID
 }
 
 // eventsNewestSQL reads the newest $1 events; eventsNotableSQL the newest $3
@@ -306,6 +338,10 @@ const (
 	eventsNewestSQL  = `SELECT ` + EventColumns + eventsOrder + `$1`
 	eventsNotableSQL = `SELECT ` + EventColumns + ` WHERE NOT ` + routineSQL +
 		` AND e.at <= $1 AND (e.at, e.event_id) < ($1, $2)` + eventsOrder + `$3`
+	// eventsLateSQL reads, by id, the $4 first events with an id above $1
+	// older than the event at $2 with id $3.
+	eventsLateSQL = `SELECT ` + EventColumns + ` WHERE e.event_id > $1 AND e.at <= $2 AND (e.at, e.event_id) < ($2, $3)` +
+		afterOrder + `$4`
 )
 
 // EventWindow is how many of the newest events are held in memory.
@@ -313,6 +349,9 @@ const EventWindow = 2000
 
 // NotableWindow is how many non-routine events older than the window are held.
 const NotableWindow = 500
+
+// LateWindow is how many late events (Inputs.Late) are held.
+const LateWindow = 500
 
 func collect[T any](ctx context.Context, tx pgx.Tx, sql string, scan func(pgx.Rows, *T) error, args ...any) ([]T, error) {
 	rows, err := tx.Query(ctx, sql, args...)

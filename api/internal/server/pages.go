@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 )
 
 // PagesLRU bounds the rendered pages of long place lists kept per version.
@@ -37,6 +38,9 @@ func pageAnswers(pg *build.Pages) map[string]any {
 	for r, ans := range pg.Rankings {
 		out["/v1/rankings/"+r] = ans
 	}
+	for key, ans := range pg.RankingsByKind {
+		out["/v1/rankings/"+key] = ans
+	}
 	for key, ans := range pg.Charts {
 		out["/v1/charts/"+key] = ans
 	}
@@ -59,10 +63,10 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /v1/rankings", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		if !onlyParams(w, q, "range") {
+		if !onlyParams(w, q, "range", "kind") {
 			return
 		}
-		rangeID := q.Get("range")
+		rangeID, kind := q.Get("range"), q.Get("kind")
 		if rangeID == "" {
 			rangeID = "30d"
 		}
@@ -70,7 +74,15 @@ func (s *Server) pageRoutes(mux *http.ServeMux) {
 			writeError(w, http.StatusBadRequest, "range must be 24h, 7d or 30d")
 			return
 		}
-		s.serveStatic(w, r, "/v1/rankings/"+rangeID)
+		path := "/v1/rankings/" + rangeID
+		if kind != "" {
+			if !model.IsProxyKind(kind) {
+				writeError(w, http.StatusBadRequest, "kind must be residential, datacenter, mobile or isp")
+				return
+			}
+			path += "/" + kind
+		}
+		s.serveStatic(w, r, path)
 	})
 	mux.HandleFunc("GET /v1/networks/{slug}", s.serveNetwork)
 	mux.HandleFunc("GET /v1/networks/{slug}/places", s.serveNetworkPlaces)

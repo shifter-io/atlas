@@ -10,6 +10,7 @@ import (
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
 	"github.com/Zeus-Development/proxy-index/api/internal/config"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testdb"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
@@ -59,7 +60,26 @@ func strippedAnswers(t *testing.T, db *testdb.DB, id int64) map[string][]byte {
 	for name, b := range out {
 		out[name] = testscale.WithoutLatencyMean(bytes.ReplaceAll(b, newTargetFields, nil))
 	}
+	out["GET /v1/events"] = asTestEvents(t, out["GET /v1/events"])
 	return out
+}
+
+// asTestEvents is a rendered "200 <body>" /v1/events answer as it was before
+// TAPE-ROWS-1: {events: TestEvent[]}, without the rows' text and the cursor.
+func asTestEvents(t *testing.T, answer []byte) []byte {
+	t.Helper()
+	status, body, _ := bytes.Cut(answer, []byte(" "))
+	var b struct {
+		Events []store.EventJSON `json:"events"`
+	}
+	if err := json.Unmarshal(body, &b); err != nil {
+		t.Fatalf("events answer %s: %v", answer, err)
+	}
+	out, err := Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(append(status, ' '), out...)
 }
 
 // registeredAnswer reports whether golden name (a stored path, or "GET " and

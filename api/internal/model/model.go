@@ -238,15 +238,22 @@ type ScoreView struct {
 	Peers Num `json:"-"`
 }
 
+// StandingRank is every-request.ts kindStanding's rank: the framework's rank,
+// or 1 for a network with a ready score alone in its kind (the framework
+// leaves it unranked); NaN otherwise.
+func StandingRank(rank, score, peers Num) Num {
+	if !rank.OK() && score.OK() && peers == 1 {
+		return 1
+	}
+	return rank
+}
+
 // KindStanding is every-request.ts kindStanding's label: "#1 of 1 in its kind"
 // for a measured network with a ready score alone in its kind (the framework
 // leaves it unranked), "#r of N in its kind" with a rank and peers, "#r", or
 // "Unranked".
 func (s ScoreView) KindStanding() string {
-	rank := s.Rank
-	if !rank.OK() && s.Composite.OK() && s.Peers == 1 {
-		rank = 1
-	}
+	rank := StandingRank(s.Rank, s.Composite, s.Peers)
 	switch {
 	case !rank.OK():
 		return "Unranked"

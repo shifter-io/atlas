@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -59,7 +61,32 @@ func init() {
 		Samples:   []string{"/v1/throwaway-dataset"},
 		InDataset: true,
 	})
+	// A cut answer: the build holds the number of pages, a request cuts one.
+	build.RegisterAnswer(build.PageAnswer{
+		Name:  "throwaway-cut",
+		Route: "GET /v1/throwaway-cut",
+		Key: func(r *http.Request) (string, error) {
+			q, err := build.Query(r, "page")
+			if err != nil {
+				return "", err
+			}
+			page, err := build.QueryPage(q)
+			return fmt.Sprintf("/v1/throwaway-cut/%d", page), err
+		},
+		Build: func(*build.Context) (map[string]any, error) {
+			return map[string]any{"/v1/throwaway-cut": 2}, nil
+		},
+		Cut: func(held map[string]any, path string) (any, bool) {
+			cuts++
+			page, _ := strconv.Atoi(strings.TrimPrefix(path, "/v1/throwaway-cut/"))
+			return map[string]int{"page": page}, page <= held["/v1/throwaway-cut"].(int)
+		},
+		Samples: []string{"/v1/throwaway-cut?page=2"},
+	})
 }
+
+// cuts counts the throwaway-cut answer's cuts.
+var cuts int
 
 // source is a two-network v4 build in memory.
 type source struct{}
@@ -149,6 +176,34 @@ func TestARegisteredAnswerIsServedLikeEveryAnswer(t *testing.T) {
 	pages, _ := s.Current().Result.Dataset.Pages.(build.DatasetPages)
 	if _, ok := pages["/v1/throwaway-dataset"]; !ok || pages["/v1/throwaway/7d"] != nil {
 		t.Errorf("dataset pages hold %v and %v", pages["/v1/throwaway-dataset"], pages["/v1/throwaway/7d"])
+	}
+}
+
+// A cut answer's body is cut on the first request and kept: the second
+// is served without a cut, with the same ETag; nothing is stored at build.
+func TestACutAnswerIsCutOnRequestAndKept(t *testing.T) {
+	s, err := built(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+	before := cuts
+	// Page 1 (page 2, the sample, was cut by the build's check of the samples).
+	first, second := get(h, "/v1/throwaway-cut"), get(h, "/v1/throwaway-cut?page=1", "Accept-Encoding", "br")
+	etag := strings.TrimSuffix(first.Header().Get("ETag"), `"`)
+	if first.Code != http.StatusOK || first.Body.String() != `{"page":1}` || etag == "" || !strings.HasPrefix(second.Header().Get("ETag"), etag) ||
+		second.Header().Get("Content-Encoding") != "br" || cuts != before+1 {
+		t.Errorf("%d %s, then %v (%d cuts)", first.Code, first.Body, second.Header(), cuts-before)
+	}
+	for path, want := range map[string]int{"/v1/throwaway-cut?page=3": 404, "/v1/throwaway-cut?page=0": 400, "/v1/throwaway-cut?q=x": 400} {
+		if r := get(h, path); r.Code != want {
+			t.Errorf("%s: %d %s, want %d", path, r.Code, r.Body, want)
+		}
+	}
+	for path := range s.Current().Static {
+		if strings.HasPrefix(path, "/v1/throwaway-cut") {
+			t.Errorf("%s was stored at build", path)
+		}
 	}
 }
 

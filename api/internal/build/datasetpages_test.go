@@ -29,6 +29,10 @@ func TestTheDatasetFileRegeneratesEveryPageAnswer(t *testing.T) {
 	for rangeID, ans := range pg.Rankings {
 		want["/v1/rankings?range="+rangeID] = ans
 	}
+	for key, ans := range pg.RankingsByKind {
+		rangeID, kind, _ := strings.Cut(key, "/")
+		want["/v1/rankings?range="+rangeID+"&kind="+kind] = ans
+	}
 	for _, ans := range pg.Network {
 		want["/v1/networks/"+ans.Network.Slug+"?kind="+ans.Kind] = ans
 	}

@@ -179,7 +179,7 @@ func (b *builder) tape() error {
 	for _, fp := range in.FrameworkProducts {
 		products = append(products, TapeProduct{Provider: fp.Provider, Name: b.nameOrSlug(b.slugOfFramework[fp.Provider]), Kind: fp.Name})
 	}
-	b.res.Events = newEventWindow(in)
+	b.res.Events = newEventWindow(in, eventText{products: products, slugs: b.slugOfFramework})
 	tapeEvents := b.res.Events.measuredTape()
 	tapeRef := ds.GeneratedAt
 	if s != nil {
@@ -374,9 +374,10 @@ func (b *builder) assemble() error {
 	if res.Pages, err = buildPages(ds.GeneratedAt, b.entries, b.stats, res.Details, s, in.Snapshot); err != nil {
 		return err
 	}
+	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	res.Pages.buildRegistered(&Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
-		Dataset: ds, Events: &res.Events, Inputs: in})
+		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages})
 	ds.Pages = datasetPages(res.Pages)
 	ds.Lists = datasetLists(res.Pages, s, b.entries)
 	res.Search = buildSearchIndex(b.leader, ds.Targets, ds.GeneratedAt)

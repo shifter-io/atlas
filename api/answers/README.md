@@ -27,11 +27,14 @@ samples by itself.
 | `Key func(*http.Request) (string, error)` | Validates the request and gives the stored path it serves. An error answers 400 with its text. The helpers `build.Query` (refuses unknown parameters), `build.QueryRange` (`24h`, `7d` or `30d`, default `30d`), `build.QueryKind` and `build.PathSlug` give the usual checks. |
 | `Samples []string` | Request URLs (path and query) that must answer 200: the tests, `/healthz` and the bench ask for them. |
 | `InDataset bool` | Adds the bodies to the dataset file's `pages` under their stored paths. False until DATASET-PAGES-2. |
+| `Cut func(held map[string]any, path string) (any, bool)` | Optional, for answers with many filtered pages: `Build`'s values are held instead of rendered, and a request is answered with `Cut(held, Key(r))` (404 when not found), rendered at the fast level and kept in the version's page LRU, as the place pages are. Not with `InDataset`. The reviews, runs and pricing-history answers use it. |
 
 `build.Context` is what the build already holds: `GeneratedAt`, the published `Snapshot`, the
 networks (`Entries`), the window `Stats`, the provider `Details`, the `Dataset` (its targets,
-providers and measured market), the `Events` window and the `Inputs` the build read (the site
-catalog rows and the framework's). Building an answer reads no database.
+providers and measured market), the `Events` window, the `Inputs` the build read (the site
+catalog rows and the framework's) and the `Pages` built before the registered answers (the
+rankings and the network answers, the all-networks one included). Building an answer reads no
+database.
 
 ## What the server does with it
 
@@ -42,6 +45,8 @@ catalog rows and the framework's). Building an answer reads no database.
 - A `Build` error leaves only that answer out: its samples answer 404 and `/healthz`
   `unserved` lists them with the error.
 - The route serves the body stored under `Key(r)`; a path the build has none for answers 404.
+  With `Cut`, the body is cut from what the build holds on the first request and kept in the
+  page LRU; its golden hashes are then its samples only.
 
 ## Golden hashes
 
@@ -51,4 +56,6 @@ of the answers served before the registry are `rankings`, `networks`, `charts`, 
 `places` (the long-list pages), `coverage`, `search`, `events` and `dataset` (the dataset file,
 the encoded pages and details, and `/v1/version`). A registered answer's family is its `Name`:
 its stored bodies and its samples, rendered on request. `GOLDEN_WRITE=1` rewrites each file
-(a case skipped with `-short` is left out, so write without it).
+(a case skipped with `-short` is left out, so write without it). The goldens of the answers from before the
+registry (`testdata/answers-v4.json` and the build package's `network-one-group` and
+`network-long-lists`) leave registered answers out, so a new answer changes only its own file.

@@ -432,7 +432,7 @@ The dataset file holds every answer below that a page of the site draws, so a
 download alone regenerates them (owner decision on DATASET-SIZE-1: the dataset
 carries what the pages use). `pages` maps each request to its body, byte for byte
 what the server serves for it: `/v1/networks`, `/v1/rankings?range=<r>` for 24h, 7d
-and 30d, `/v1/networks/<slug>?kind=<kind>` for every network and category (the
+and 30d (and `&kind=<kind>` for each proxy kind), `/v1/networks/<slug>?kind=<kind>` for every network and category (the
 all-networks answer is `/v1/networks/all?kind=all`) and
 `/v1/networks/<slug>/chart?kind=<kind>&range=<r>`. The request without `kind`
 serves the network's `primaryKind`. Not in it: the country answers
@@ -442,35 +442,88 @@ and the N/A manifest, which no page of the site's design draws
 file against the answers. A rebuild that keeps the file (see "The dataset file"
 in `README.md`) keeps its pages too: they are the build's that wrote it.
 
-### `/v1/rankings?range=24h|7d|30d`
+### `/v1/rankings?range=24h|7d|30d&kind=`
 
-The overview list in its final order, so a page renders it at once. One row
-per network. `position` is the list order: measured
-networks by the `balanced` score of their headline product group for that
+The list pages' rankings in their final order, so a page renders its list
+(home leaderboard, network directory, compare table, true cost, the strip) at
+once, without a request per network. One row per network. Without `kind` the
+rows are every network with its headline product group; `kind` (`residential`,
+`datacenter`, `mobile` or `isp`, else 400) lists only the networks whose
+`kinds` hold it, each with that kind's product group (its score, window
+statistics, pricing and trust; `kind` is the kind asked for). A kind no network
+was measured in answers an empty list. One answer per range and kind is built
+per build (3 + 12), each under 200 KB.
+
+`position` is the list order: measured
+networks by the `balanced` score of their product group for that
 range (`windows[range].scores.balanced`: `score`, `grade`, `rank`,
 `previous_rank`, the component values as `breakdown`, `peers` from the
 components' `inputs.peers`), highest first; networks without a score follow by
 name. `rank` stays the framework's rank among the ready networks of the same
-kind, so two kinds can each have a `rank` 1. A catalog network without a
-snapshot product has no score or rank. The other numbers are that
-range's `windowStats` (see "Window statistics of a measured provider"):
-`successRate`, `successDeltaPts`, `latencyP50` (the headline basis, under load
-in every-request snapshots), `latencyDeltaPct`, `uniqueIps` (the headline
-group's distinct IPs), `costPer1kSuccess`, `valueRank` (the position in that
-range's cost board, null when unpriced), `trend` (the window's success
-history thinned to at most 26 values); `countries` and `datacenterAsnShare` are
-the provider's `pool.countries` and `trust.datacenterAsnShare`.
+kind, so two kinds can each have a `rank` 1. `standing {rank, peers}` is
+the old site's `kindStanding`: `rank`, or 1 for a network with a score alone in
+its kind (`peers` 1), which the framework leaves unranked ("#1 of 1"). A
+catalog network without a snapshot product has no score or rank.
+
+Row fields, from that range's `windowStats` (see "Window statistics of a
+measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`,
+`latencyP99` (the headline basis, under load in every-request snapshots),
+`latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
+`uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
+(`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
+`cities`, `asns`, `datacenterAsnShare`, `exclusiveShare`, `sharedShare`,
+`observedDays`, `latencyUnderLoad`, `latencyNote`, `wireGbPer1k`; all of that
+range, null without a snapshot product), `trend` (the window's success history
+thinned to at most 26 values) and `trendT` (each trend point's time, minutes
+before the build). `valueRank` is the position on the cost board of the row's
+kind (cheapest `costPer1kSuccess` first, null when unpriced).
+
+From the provider's blocks (the kind's with `kind`): `tagline`; `listRate`
+(`pricePerGbAtScale`, else `pricePerGb`), `pricePerGb`, `pricePerGbAtScale`,
+`priceLabel` (the list-rate range, as a product's), `trial` (`site.pricing.trial`),
+`hasTrial` (the trial text is not "none"; null without one), `trialKind` read
+from the trial text: `none`, `sales` (a sales call or contact), `paid` (a price
+or a refund window), `card` (free, card required), else `free`; null without
+one; `authenticity` (`trust.residentialAuthenticity`), `kycVerified`,
+`consentDisclosed`, `stickinessAdvertised`, `stickinessHoldRate`,
+`blacklistHitRate`. `browserOverall.<engine>.success {score, rank, rankedOf,
+status}` is the range's `windows[r].browser_overall` ("Browser scores" below),
+null when the range has none.
+
+The answer also carries `targets {all, measured, cards}` (the dataset's
+targets, the measured ones, and the cards: measured targets of no group, as
+`/v1/meta` `targetCounts`), the dataset's
+`weights` and `profiles`, `fleet {requests, successes}` (the range's summed
+over the rows listed; a network without a value adds nothing) and `cost`, the
+true-cost summary over the rows listed with a `costPer1kSuccess`: `cheapest`
+and `dearest` (`{slug, name, costPer1kSuccess}`, ties in list order), `median`,
+`spreadX` (dearest ÷ cheapest) and `priced` (how many); `cheapest`, `dearest`,
+`median` and `spreadX` are null when none is priced.
 
 ```json
-{"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced","networks":[
+{"generatedAt":"2026-11-03T09:00:00.000Z","range":"24h","profile":"balanced",
+ "targets":{"all":19,"measured":17,"cards":10},"weights":{"reliability":22,"speed":14,"...":0},"profiles":[],
+ "fleet":{"requests":1840000,"successes":1802000},
+ "cost":{"cheapest":{"slug":"net00","name":"Net 00","costPer1kSuccess":0.31},"median":0.52,
+  "dearest":{"slug":"net07","name":"Net 07","costPer1kSuccess":1.12},"spreadX":3.61,"priced":12},
+ "networks":[
  {"position":1,"slug":"net00","name":"Net 00","source":"measured","kind":"residential","kinds":["residential"],
-  "rank":1,"peers":18,"previousRank":2,"score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
-  "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyDeltaPct":-2.1,"uniqueIps":15320,"countries":212,
-  "datacenterAsnShare":0.012,"costPer1kSuccess":0.31,"valueRank":3,"trend":[0.97,0.98,0.99]},
+  "tagline":"Residential proxies in 190 countries","rank":1,"peers":18,"standing":{"rank":1,"peers":18},"previousRank":2,
+  "score":91.4,"grade":"A","breakdown":{"reliability":96,"speed":88,"uptime":null,"...":null},
+  "successRate":0.982,"successDeltaPts":0.4,"latencyP50":1113,"latencyP90":2210,"latencyP99":4120,"latencyDeltaPct":-2.1,
+  "uniqueIps":15320,"requests":102000,"uptimePct":99.9,"downtimeMinutes":1.4,"costPer1kSuccess":0.31,"valueRank":1,
+  "listRate":3,"pricePerGb":4,"pricePerGbAtScale":3,"priceLabel":"$3.00–$4.00/GB","trial":"1 GB free, no card",
+  "hasTrial":true,"trialKind":"free","authenticity":0.97,"kycVerified":true,"consentDisclosed":null,
+  "stickinessAdvertised":"30 min","stickinessHoldRate":0.94,"blacklistHitRate":0.02,
+  "captchaRate":0.01,"blockRate":0.004,"requestSuccessRate":0.981,"countries":212,"regions":1800,"cities":9100,"asns":2400,
+  "datacenterAsnShare":0.012,"exclusiveShare":0.71,"sharedShare":0.29,"observedDays":null,"latencyUnderLoad":true,
+  "latencyNote":"HTTP, under load","wireGbPer1k":0.09,"trend":[0.97,0.98,0.99],"trendT":[1380,720,0],
+  "browserOverall":{"camoufox":{"success":{"score":7.4,"rank":2,"rankedOf":9,"status":"ranked"}}}},
  {"position":21,"slug":"net20","name":"Net 20","source":"measured","kind":"residential","kinds":["residential"],
-  "rank":null,"peers":null,"previousRank":null,"score":null,"grade":null,"breakdown":{"reliability":null,"...":null},
-  "successRate":null,"successDeltaPts":null,"latencyP50":null,"latencyDeltaPct":null,"uniqueIps":null,"countries":null,
-  "datacenterAsnShare":null,"costPer1kSuccess":null,"valueRank":null,"trend":[]}]}
+  "tagline":null,"rank":null,"peers":null,"standing":{"rank":null,"peers":null},"previousRank":null,"score":null,
+  "grade":null,"breakdown":{"reliability":null,"...":null},"successRate":null,"...":null,"valueRank":null,
+  "listRate":null,"priceLabel":null,"trial":null,"hasTrial":null,"trialKind":null,"trend":[],"trendT":[],
+  "browserOverall":null}]}
 ```
 
 ### `/v1/networks/all`

@@ -11,10 +11,12 @@ from pathlib import Path
 import psycopg as psycopg  # re-exported: scripts catch storage.psycopg errors
 from psycopg.types.json import Jsonb
 
-from . import storage_ingest, storage_migrate
+from . import storage_batch, storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
+from .partitions import holder, monthly
 from .partitions import partition as partition
 from .stats import Histogram
+from .storage_batch import POOL
 from .storage_ingest import ADAPTER as ADAPTER
 from .storage_ingest import _profile, column
 from .storage_migrate import MIGRATION_CHECKS as MIGRATION_CHECKS
@@ -101,6 +103,14 @@ def _add_run_metrics(metrics, summary, attempted, new_ips, histogram):
     )
 
 
+class IngestBatchError(Exception):
+    """A batch rolled back (its cause stopped it); retry its runs (run_ids) one at a time."""
+
+    def __init__(self, run_ids):
+        super().__init__("Ingest batch rolled back: " + ", ".join(run_ids))
+        self.run_ids = run_ids
+
+
 def _lock(conn, action):
     """Take the ingestion lock and require the current schema before the action."""
     conn.execute("SELECT pg_advisory_xact_lock(817452901)")
@@ -108,20 +118,8 @@ def _lock(conn, action):
         raise ValueError(f"Database schema requires db-migrate or a rebuild before {action}")
 
 
-def _upsert_product(conn, provider, product):
-    """Add the provider and product where new; return the product_id."""
-    conn.execute("INSERT INTO providers VALUES (%s) ON CONFLICT DO NOTHING", (provider,))
-    conn.execute(
-        "INSERT INTO products(provider,name) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-        (provider, product),
-    )
-    return conn.execute(
-        "SELECT product_id FROM products WHERE provider=%s AND name=%s", (provider, product)
-    ).fetchone()[0]
-
-
-def _upsert_pool(conn, run, product_id):
-    """Add the run's target and pool where new; return the pool_id."""
+def _pool(run):
+    """The run's target url and engine (for a target nobody seeded), pool hash and pool columns."""
     summary, scope = run.summary, run.scope
     pool_definition = {
         "target": scope["target"],
@@ -129,52 +127,13 @@ def _upsert_pool(conn, run, product_id):
     }
     pool_hash = hashlib.sha256(json.dumps(pool_definition, sort_keys=True).encode()).hexdigest()
     profile = _profile(pool_definition, run.provider, run.product)
-    # Pools and scopes reference targets; a target nobody seeded joins unscheduled.
     target = summary["target"]
-    conn.execute(
-        "INSERT INTO targets(target_id,url,engine,census,pulse_enabled) "
-        "VALUES (%s,%s,%s,false,false) ON CONFLICT DO NOTHING",
-        (
-            profile["target_id"],
-            target["url"] if type(target.get("url")) is str else "",
-            target["engine"] if type(target.get("engine")) is str else "http",
-        ),
+    return (
+        target["url"] if type(target.get("url")) is str else "",
+        target["engine"] if type(target.get("engine")) is str else "http",
+        pool_hash,
+        *(profile[name] for name in POOL),
     )
-    conn.execute(
-        "INSERT INTO pool_stats(product_id,pool_hash,"
-        + ",".join(profile)
-        + ") VALUES ("
-        + ",".join(["%s"] * (len(profile) + 2))
-        + ") ON CONFLICT DO NOTHING",
-        (product_id, pool_hash, *profile.values()),
-    )
-    return conn.execute(
-        "SELECT pool_id FROM pool_stats WHERE product_id=%s AND pool_hash=%s",
-        (product_id, pool_hash),
-    ).fetchone()[0]
-
-
-def _upsert_scope(conn, run, performance):
-    """Add the run's provider, product, target, pool and scope where new.
-
-    Returns product_id, pool_id and the scope's (scope_id, metrics, histogram_steps,
-    histogram_counts).
-    """
-    product_id = _upsert_product(conn, run.provider, run.product)
-    pool_id = _upsert_pool(conn, run, product_id)
-    scope_key = (product_id, run.summary["target"]["id"], run.scope_hash)
-    conn.execute(
-        "INSERT INTO scope_stats(product_id,target,scope_hash,pool_id,"
-        + ",".join(PERFORMANCE)
-        + ") VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-        (*scope_key, pool_id, *performance),
-    )
-    scope_row = conn.execute(
-        "SELECT scope_id,metrics,histogram_steps,histogram_counts FROM scope_stats WHERE "
-        "product_id=%s AND target=%s AND scope_hash=%s",
-        scope_key,
-    ).fetchone()
-    return product_id, pool_id, scope_row
 
 
 def _performance(scope):
@@ -191,40 +150,128 @@ def _performance(scope):
     return performance
 
 
-def _existing(conn, run, batch_id):
-    """The run's stored (summary_sha256, run_key, batch_id), linked to batch_id; None if new."""
-    existing = conn.execute(
-        "SELECT summary_sha256,run_key,batch_id FROM test_runs WHERE run_id=%s", (run.run_id,)
-    ).fetchone()
-    if existing and existing[0] != run.summary_hash:
-        raise ValueError("Run ID already exists with different content")
-    if existing and batch_id is not None and existing[2] != batch_id:
-        if existing[2] is not None:
-            raise ValueError("Run already belongs to another batch")
-        conn.execute("UPDATE test_runs SET batch_id=%s WHERE run_key=%s", (batch_id, existing[1]))
-    return existing
+def _rows(runs):
+    """The temp tables' rows: new runs with their buckets and IPs, every run's reports to add."""
+    rows = {table: [] for table in storage_batch.TABLES}
+    for idx, run in enumerate(runs):
+        for release, metadata, checksum, enriched in run.added:
+            rows["incoming_releases"].append((idx, release, metadata, checksum, run.run_key))
+            rows["incoming_enrichment"] += [(idx, release, *row) for row in enriched]
+        if run.stored:
+            continue
+        run_row = storage_ingest.run_row(run, run.batch_id)
+        named = (run.provider, run.product, run.scope_hash, *run.performance)
+        rows["incoming_runs"].append((idx, *run_row, *named, *_pool(run)))
+        rows["incoming_buckets"] += [(idx, b, *values) for b, values in run.bucket_rows.items()]
+        rows["incoming_ips"] += [(idx, *row) for row in run.ips]
+    return rows
 
 
-def _store_run(conn, run, performance, batch_id):
-    """Store a new run with its buckets, geo rows, addresses and scope totals; return run_key."""
-    histogram = run.histogram
-    product_id, pool_id, scope_row = _upsert_scope(conn, run, performance)
-    scope_id, metrics, histogram_steps, histogram_counts = scope_row
-    run_key = storage_ingest.insert_run(conn, run, scope_id, batch_id)
-    storage_ingest.insert_buckets(conn, run, run_key)
-    storage_ingest.store_geo(conn, run_key, run.geo_rows)
-    storage_ingest.check_stored(conn, run, run_key)
-    new_ips = _add_addresses(conn, run.provider, product_id, scope_id)
-    storage_ingest.add_observations(conn, run_key, pool_id)
-    lifetime = zip(accumulate(histogram_steps), histogram_counts, strict=True)
-    histogram.merge(Histogram(Counter(dict(lifetime))))
-    _add_run_metrics(metrics, run.summary, run.attempted, new_ips, histogram)
-    conn.execute(
-        "UPDATE scope_stats SET metrics=%s,histogram_steps=%s,histogram_counts=%s,"
-        "updated_at=now() WHERE scope_id=%s",
-        (Jsonb(metrics), *_steps(histogram.export()["bins"]), scope_id),
-    )
-    return run_key
+def _store_runs(conn, runs, fresh, existing):
+    """Queue the batch's statements after the lock's round trip; the cursors to read after it."""
+    storage_batch.load(conn, _rows(runs))
+    # A stored run without a batch joins the one it is imported with.
+    unlinked = [r for r in runs if r.stored and r.stored.get("batch_id") is None]
+    links = [(r.run_key, r.batch_id) for r in unlinked if r.batch_id is not None]
+    storage_batch.link(conn, links)
+    storage_batch.upsert_scopes(conn)
+    storage_ingest.insert_runs(conn)
+    storage_ingest.insert_buckets(conn, fresh, existing)
+    storage_ingest.store_geo(conn, fresh)
+    scopes = conn.execute(storage_batch.SCOPES)
+    new_ips = _add_addresses(conn) if any(run.ips for run in fresh) else None
+    enriched = storage_ingest.enrich(conn) if any(run.added for run in runs) else None
+    return scopes, new_ips, enriched
+
+
+def _scope_totals(runs, scopes, new_ips):
+    """(scope_id, metrics, histogram_steps, histogram_counts) after the new runs, in batch order."""
+    totals = {}
+    for idx, _, scope_id, metrics, histogram_steps, histogram_counts, _ in scopes:
+        run, histogram = runs[idx], runs[idx].histogram
+        metrics, steps, counts = totals.get(scope_id, (metrics, histogram_steps, histogram_counts))
+        lifetime = zip(accumulate(steps), counts, strict=True)
+        histogram.merge(Histogram(Counter(dict(lifetime))))
+        _add_run_metrics(metrics, run.summary, run.attempted, new_ips.get(idx, 0), histogram)
+        totals[scope_id] = (metrics, *_steps(histogram.export()["bins"]))
+    return [(scope_id, Jsonb(m), *bins) for scope_id, (m, *bins) in totals.items()]
+
+
+def _read(idx, directory, batch_id, ip_rows):
+    """Read and check a run directory with its IP rows and enrichment reports: no file I/O later."""
+    run = _read_run(Path(directory))
+    run.performance = _performance(run.scope)
+    run.ips = storage_ingest.read_ips(run, ip_rows)
+    run.reports = storage_ingest.read_enrichments(run) if ip_rows else []
+    run.idx, run.batch_id = idx, batch_id
+    return run
+
+
+def _store(runs, credentials_file):
+    """Store read runs in one transaction and three round trips: the lock with the reads under it,
+    every statement of the batch, the scope totals with COMMIT."""
+    conn = connect(credentials_file)
+    conn.autocommit = True  # BEGIN below: psycopg's own would take a round trip in pipeline mode
+    with conn, conn.pipeline() as pipeline:
+        # Serialize ingestion; measurements and website reads run independently.
+        # The entire history/enrichment/cache update commits together.
+        conn.execute("BEGIN")
+        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
+        version = conn.execute("SELECT max(version) FROM schema_versions")
+        stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
+        # The names partition() looks for: the month's partition, then the day's.
+        wanted = storage_ingest.partitions(runs)
+        names = sorted({n for t, m in wanted for n in (monthly(t, m)[0], holder(t, m, ())[0])})
+        found = conn.execute(
+            "SELECT n FROM unnest(%s::text[]) n WHERE to_regclass(n) IS NOT NULL", (names,)
+        )
+        pipeline.sync()
+        if version.fetchone()[0] != SCHEMA_VERSION:
+            raise ValueError("Database schema requires db-migrate or a rebuild before import")
+        fresh = storage_batch.existing(runs, stored.fetchall())
+        scopes, new_ips, enriched = _store_runs(conn, runs, fresh, {n for (n,) in found})
+        pipeline.sync()
+        scopes = scopes.fetchall()
+        for idx, run_key, *_, summary in scopes:
+            storage_ingest.check_stored(runs[idx], summary)
+            runs[idx].run_key = run_key
+        if enriched and enriched[0].fetchall():
+            raise ValueError("Conflicting enrichment for the same IP")
+        if enriched and enriched[1].fetchone()[0]:
+            raise ValueError("Enrichment release conflicts with prior data")
+        new_ips = dict(new_ips.fetchall()) if new_ips else {}
+        storage_batch.update_scopes(conn, _scope_totals(runs, scopes, new_ips))
+        conn.execute("COMMIT")  # sent with the scope totals; the pipeline's end waits for both
+    return [
+        {"run_id": run.run_id, "run_key": run.run_key, "imported": not run.stored}
+        | {"observation_rows": len(run.ips), "enrichment_releases_added": len(run.added)}
+        | {"scope_hash": run.scope_hash}
+        for run in runs
+    ]
+
+
+def _read_all(directories, batch_ids, ip_rows):
+    directories = list(directories)
+    batch_ids = [None] * len(directories) if batch_ids is None else list(batch_ids)
+    if len(batch_ids) != len(directories):
+        raise ValueError("Give one batch id per run directory")
+    pairs = enumerate(zip(directories, batch_ids, strict=True))
+    return [_read(n, directory, batch_id, ip_rows) for n, (directory, batch_id) in pairs]
+
+
+def ingest_many(directories, credentials_file, *, batch_ids=None, ip_rows=True):
+    """Import run directories in one transaction and a fixed number of round trips, storing what
+    importing them one at a time in this order does; per directory, what ingest returns.
+
+    batch_ids holds one batch id (or None) per directory. Each directory is checked first and
+    raises its own error; any error in the transaction rolls the batch back and raises
+    IngestBatchError naming its run ids, to retry one at a time with ingest.
+    """
+    runs = _read_all(directories, batch_ids, ip_rows)
+    try:
+        return _store(runs, credentials_file)
+    except (psycopg.Error, ValueError) as error:
+        raise IngestBatchError([run.run_id for run in runs]) from error
 
 
 def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
@@ -232,79 +279,63 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
 
     batch_id links the run to its test_batches row; ip_rows=False (pulse) stores no per-IP rows.
     A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
+    It is ingest_many of one directory, raising the run's own error, not IngestBatchError.
     """
-    directory = Path(directory)
-    run = _read_run(directory)
-    run_id = run.run_id
-    performance = _performance(run.scope)
-    with connect(credentials_file) as conn:
-        # Serialize ingestion; measurements and website reads run independently.
-        # The entire history/enrichment/cache update commits together.
-        _lock(conn, "import")
-        existing = _existing(conn, run, batch_id)
-        rows = storage_ingest.load_ips(conn, run, ip_rows)
-        run_key = existing[1] if existing else _store_run(conn, run, performance, batch_id)
-        enriched = storage_ingest.enrich(conn, directory, run_id, run_key, rows) if ip_rows else 0
-    return {
-        "run_id": run_id,
-        "run_key": run_key,
-        "imported": not bool(existing),
-        "observation_rows": rows,
-        "enrichment_releases_added": enriched,
-        "scope_hash": run.scope_hash,
-    }
+    return _store(_read_all([directory], [batch_id], ip_rows), credentials_file)[0]
 
 
-def _add_addresses(conn, provider, product_id, scope_id):
-    """Add the new addresses and product memberships; return the IPs new to this scope."""
+def _add_addresses(conn):
+    """Add the new addresses and product memberships; the cursor of (idx, IPs new to its scope)."""
     conn.execute(
         "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips "
         "ON CONFLICT(ip) DO NOTHING"
     )
-    _membership(conn, provider, product_id)
+    conn.execute(
+        "CREATE TEMP TABLE incoming_observations ON COMMIT DROP AS SELECT i.idx,i.bucket,a.ip_id,"
+        "i.count,i.first_seen,i.last_seen,r.run_key,r.provider,r.product_id,r.pool_id,r.scope_id "
+        "FROM incoming_ips i JOIN incoming_runs r USING(idx) JOIN ip_addresses a USING(ip)"
+    )
+    conn.execute("ANALYZE incoming_observations")
+    _membership(conn)
     # Avoid another persisted membership set per performance configuration.
-    # First presence within this exact scope: the anti-join reads via test_runs_scope.
-    return conn.execute(
-        "SELECT count(*) FROM (SELECT DISTINCT a.ip_id FROM incoming_ips i "
-        "JOIN ip_addresses a USING(ip)) n WHERE NOT EXISTS (SELECT 1 FROM "
+    # First presence within this exact scope (first run of the batch): reads via test_runs_scope.
+    new_ips = conn.execute(
+        "SELECT idx,count(*) FROM (SELECT scope_id,ip_id,min(idx) AS idx FROM "
+        "incoming_observations GROUP BY scope_id,ip_id) n WHERE NOT EXISTS (SELECT 1 FROM "
         "ip_observations o JOIN test_runs r USING(run_key) "
-        "WHERE o.ip_id=n.ip_id AND r.scope_id=%s)",
-        (scope_id,),
-    ).fetchone()[0]
+        "WHERE o.ip_id=n.ip_id AND r.scope_id=n.scope_id) GROUP BY idx"
+    )
+    storage_ingest.add_observations(conn)
+    return new_ips
 
 
-def _membership(conn, provider, product_id):
+def _membership(conn):
     # Only first-ever presence at this provider contributes to lifetime overlap.
     conn.execute(
         "CREATE TEMP TABLE new_provider_ips ON COMMIT DROP AS "
-        "SELECT DISTINCT a.ip_id FROM incoming_ips i JOIN ip_addresses a USING(ip) "
+        "SELECT DISTINCT n.provider,n.ip_id FROM incoming_observations n "
         "WHERE NOT EXISTS (SELECT 1 FROM product_ips m JOIN products p USING(product_id) "
-        "WHERE m.ip_id=a.ip_id AND p.provider=%s)",
-        (provider,),
+        "WHERE m.ip_id=n.ip_id AND p.provider=n.provider)"
     )
-    peers = conn.execute(
-        "SELECT p.provider,count(DISTINCT n.ip_id) FROM new_provider_ips n "
-        "JOIN product_ips m USING(ip_id) JOIN products p USING(product_id) "
-        "WHERE p.provider<>%s GROUP BY p.provider",
-        (provider,),
-    ).fetchall()
-    for peer, count in peers:
-        a, b = sorted((provider, peer))
-        conn.execute(
-            "INSERT INTO provider_overlap(provider_a,provider_b,shared_ips) "
-            "VALUES (%s,%s,%s) ON CONFLICT(provider_a,provider_b) DO UPDATE SET "
-            "shared_ips=provider_overlap.shared_ips+excluded.shared_ips,updated_at=now()",
-            (a, b, count),
-        )
+    # Once per other provider with the IP, stored or in the batch; pairs in codepoint order.
+    pair = 'n.provider COLLATE "C",o.provider COLLATE "C"'
     conn.execute(
-        "INSERT INTO product_ips SELECT %s,a.ip_id,min(i.first_seen),max(i.last_seen),"
-        "sum(i.count),1 FROM incoming_ips i JOIN ip_addresses a USING(ip) GROUP BY a.ip_id "
+        f"INSERT INTO provider_overlap(provider_a,provider_b,shared_ips) SELECT least({pair}),"
+        f"greatest({pair}),count(DISTINCT n.ip_id) FROM new_provider_ips n JOIN (SELECT "
+        "p.provider,m.ip_id FROM (SELECT DISTINCT ip_id FROM new_provider_ips) x JOIN product_ips "
+        "m USING(ip_id) JOIN products p USING(product_id) UNION ALL SELECT provider,ip_id FROM "
+        "new_provider_ips) o ON o.ip_id=n.ip_id AND o.provider<>n.provider GROUP BY 1,2 "
+        "ON CONFLICT(provider_a,provider_b) DO UPDATE SET "
+        "shared_ips=provider_overlap.shared_ips+excluded.shared_ips,updated_at=now()"
+    )
+    conn.execute(
+        "INSERT INTO product_ips SELECT product_id,ip_id,min(first_seen),max(last_seen),"
+        "sum(count),count(DISTINCT idx) FROM incoming_observations GROUP BY product_id,ip_id "
         "ON CONFLICT(product_id,ip_id) DO UPDATE SET "
         "first_seen=least(product_ips.first_seen,excluded.first_seen),"
         "last_seen=greatest(product_ips.last_seen,excluded.last_seen),"
         "observation_count=product_ips.observation_count+excluded.observation_count,"
-        "run_count=product_ips.run_count+1",
-        (product_id,),
+        "run_count=product_ips.run_count+excluded.run_count"
     )
 
 

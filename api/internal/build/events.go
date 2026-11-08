@@ -1,6 +1,10 @@
 package build
 
 import (
+	"cmp"
+	"slices"
+	"strings"
+
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
 
@@ -11,25 +15,102 @@ import (
 // incident out of memory, off the tape or off the first page of /v1/events.
 type EventWindow struct {
 	Raw      []store.Event
-	JSON     []store.EventJSON
+	JSON     []EventRow
 	Complete bool // Raw holds every row of test_events
 	// Notable and NotableJSON are the non-routine rows older than Raw, newest
 	// first; NotableComplete is true when they are all of them.
 	Notable         []store.Event
-	NotableJSON     []store.EventJSON
+	NotableJSON     []EventRow
 	NotableComplete bool
+	// Late and LateJSON are the rows with an id above Raw's smallest that are
+	// older than Raw (store.Inputs.Late), so an after read sees them too.
+	Late         []store.Event
+	LateJSON     []EventRow
+	LateComplete bool
+	text         eventText
 }
 
-func newEventWindow(in *store.Inputs) EventWindow {
-	render := func(rows []store.Event) []store.EventJSON {
-		out := make([]store.EventJSON, len(rows))
-		for i := range rows {
-			out[i] = rows[i].JSON()
+// EventRow is one /v1/events row: the framework's TestEvent and the live
+// tape's text (TapeFromEvents), rendered once when the row is loaded.
+// ProviderSlug and ProviderName are null for a provider without a network.
+type EventRow struct {
+	store.EventJSON
+	Title        string  `json:"title"`
+	Detail       string  `json:"detail"`
+	Value        string  `json:"value"`
+	ProviderSlug *string `json:"providerSlug"`
+	ProviderName *string `json:"providerName"`
+	text         string  // q's text: title, detail, network name, country and target, lower case
+}
+
+// hasWords reports whether every word occurs in the row's text.
+func (r *EventRow) hasWords(words []string) bool {
+	for _, w := range words {
+		if !strings.Contains(r.text, w) {
+			return false
 		}
-		return out
 	}
-	return EventWindow{Raw: in.Events, JSON: render(in.Events), Complete: in.EventsComplete,
-		Notable: in.Notable, NotableJSON: render(in.Notable), NotableComplete: in.NotableComplete}
+	return true
+}
+
+// EventsAnswer is the /v1/events body. Cursor is the largest event_id the
+// answer covers: its largest row id, else the request's after; or, when a q
+// read past after stopped at store.TextScan rows, the last row read. More is
+// true when more rows match past Cursor. UpdatedAt is the newest event's at.
+type EventsAnswer struct {
+	Events    []EventRow `json:"events"`
+	Cursor    *int64     `json:"cursor"`
+	UpdatedAt *string    `json:"updatedAt"`
+	More      bool       `json:"more"`
+}
+
+// eventText renders rows with one build's names: products for TapeFromEvents
+// and slugs, each network's site slug by its framework provider.
+type eventText struct {
+	products []TapeProduct
+	slugs    map[string]string
+}
+
+func (t eventText) render(rows []store.Event) []EventRow {
+	js := make([]store.EventJSON, len(rows))
+	for i := range rows {
+		js[i] = rows[i].JSON()
+	}
+	tape := TapeFromEvents(js, t.products, "", t.slugs)
+	out := make([]EventRow, len(rows))
+	for i := range js {
+		r := EventRow{EventJSON: js[i], Title: tape[i].Title, Detail: tape[i].Detail, Value: tape[i].Value}
+		name := ""
+		if slug, ok := t.slugs[js[i].Provider]; ok {
+			name = tape[i].ProviderName
+			r.ProviderSlug, r.ProviderName = &slug, &name
+		}
+		parts := []string{r.Title, r.Detail, name}
+		for _, p := range []*string{js[i].Country, js[i].Target} {
+			if p != nil {
+				parts = append(parts, *p)
+			}
+		}
+		r.text = strings.ToLower(strings.Join(parts, "\n"))
+		out[i] = r
+	}
+	return out
+}
+
+func newEventWindow(in *store.Inputs, text eventText) EventWindow {
+	return EventWindow{Raw: in.Events, JSON: text.render(in.Events), Complete: in.EventsComplete,
+		Notable: in.Notable, NotableJSON: text.render(in.Notable), NotableComplete: in.NotableComplete,
+		Late: in.Late, LateJSON: text.render(in.Late), LateComplete: in.LateComplete, text: text}
+}
+
+// Provider is the framework provider of a network's site slug (network=).
+func (w *EventWindow) Provider(slug string) (string, bool) {
+	for provider, s := range w.text.slugs {
+		if s == slug {
+			return provider, true
+		}
+	}
+	return "", false
 }
 
 // WithEvents is res with the events of in (store.LoadEvents: Events,
@@ -39,7 +120,7 @@ func newEventWindow(in *store.Inputs) EventWindow {
 // res's events and keep them until the next full build.
 func WithEvents(res *Result, in *store.Inputs) *Result {
 	out := *res
-	out.Events = newEventWindow(in)
+	out.Events = newEventWindow(in, res.Events.text)
 	out.Fingerprint.MaxEventID = in.Fingerprint.MaxEventID
 	return &out
 }
@@ -48,7 +129,7 @@ func WithEvents(res *Result, in *store.Inputs) *Result {
 // notable rows past them, newest first.
 func (w *EventWindow) held() int { return len(w.Raw) + len(w.Notable) }
 
-func (w *EventWindow) row(i int) (*store.Event, *store.EventJSON) {
+func (w *EventWindow) row(i int) (*store.Event, *EventRow) {
 	if i < len(w.Raw) {
 		return &w.Raw[i], &w.JSON[i]
 	}
@@ -63,61 +144,130 @@ func (w *EventWindow) measuredTape() []store.EventJSON {
 	out := make([]store.EventJSON, 0, len(pick))
 	for _, i := range pick {
 		_, j := w.row(i)
-		out = append(out, *j)
+		out = append(out, j.EventJSON)
 	}
 	return out
 }
 
-// Answer answers a /v1/events filter from memory when the rows held provably
-// contain its whole answer; ok=false means the database must be asked.
-func (w *EventWindow) Answer(f store.EventFilter) (out []store.EventJSON, ok bool) {
-	if f.Prioritized() {
-		return w.prioritized(f)
-	}
-	out = []store.EventJSON{}
-	for i := range w.Raw {
-		if f.Match(&w.Raw[i]) {
-			out = append(out, w.JSON[i])
-			if len(out) == f.Limit {
-				return out, true
-			}
-		}
-	}
-	return out, w.Complete || sinceCovers(f, w.Raw)
+// eventRef is one candidate row of an answer.
+type eventRef struct {
+	e *store.Event
+	j *EventRow
 }
 
-// prioritized is store.Pick from memory. It needs the newest f.Limit matching
-// rows (from the window) and the newest store.NotableQuota non-routine ones
-// (from the window, then the notable rows past it).
-func (w *EventWindow) prioritized(f store.EventFilter) ([]store.EventJSON, bool) {
-	matched := []int{}
+// Answer answers a /v1/events filter from memory when the rows held provably
+// contain its whole answer; ok=false means the database must be asked.
+func (w *EventWindow) Answer(f store.EventFilter) (*EventsAnswer, bool) {
+	if f.After != nil {
+		// Every row past after is in the window or among the late rows once
+		// after reaches below the window's smallest id.
+		held := w.Complete || (w.LateComplete && len(w.Raw) > 0 && *f.After >= store.MinEventID(w.Raw)-1)
+		if !held {
+			return nil, false
+		}
+		return w.answer(f, append(refsOf(w.Raw, w.JSON), refsOf(w.Late, w.LateJSON)...), false), true
+	}
+	refs := append(refsOf(w.Raw, w.JSON), refsOf(w.Notable, w.NotableJSON)...)
 	inWindow, notable := 0, 0
-	for i := 0; i < w.held(); i++ {
-		e, _ := w.row(i)
-		if !f.Match(e) {
+	for i, r := range refs {
+		if !f.Match(r.e) || !r.j.hasWords(f.Words) {
 			continue
 		}
-		matched = append(matched, i)
 		if i < len(w.Raw) {
 			inWindow++
 		}
-		if !store.Routine(e.Kind) {
+		if !store.Routine(r.e.Kind) {
 			notable++
 		}
 	}
-	newest := w.Complete || inWindow >= f.Limit || sinceCovers(f, w.Raw)
-	notableHeld := w.Complete || w.NotableComplete || notable >= store.NotableQuota(f.Limit) ||
-		sinceCovers(f, w.Raw) || sinceCovers(f, w.Notable)
-	if !newest || !notableHeld {
+	if !w.covers(f, inWindow, notable) {
 		return nil, false
 	}
-	kind := func(k int) string { e, _ := w.row(matched[k]); return e.Kind }
-	out := []store.EventJSON{}
-	for _, k := range store.Prioritize(len(matched), f.Limit, kind) {
-		_, j := w.row(matched[k])
-		out = append(out, *j)
+	return w.answer(f, refs, false), true
+}
+
+func refsOf(rows []store.Event, js []EventRow) []eventRef {
+	out := make([]eventRef, len(rows))
+	for i := range rows {
+		out[i] = eventRef{&rows[i], &js[i]}
 	}
-	return out, true
+	return out
+}
+
+// covers reports whether the rows held contain the whole answer of f (without
+// after), given its matches in the window and its non-routine matches held:
+// f.Limit matches, or since reaching past the window; a prioritized filter
+// also its newest store.NotableQuota non-routine matches.
+func (w *EventWindow) covers(f store.EventFilter, inWindow, notable int) bool {
+	switch {
+	case w.Complete, sinceCovers(f, w.Raw):
+		return true
+	case !f.Prioritized():
+		return inWindow >= f.Limit
+	}
+	return inWindow >= f.Limit && (w.NotableComplete || notable >= store.NotableQuota(f.Limit))
+}
+
+// FromRows answers f from the rows of the database fallback
+// (store.QueryEvents), rendered with the build's names.
+func (w *EventWindow) FromRows(f store.EventFilter, rows []store.Event) *EventsAnswer {
+	refs := refsOf(rows, w.text.render(rows))
+	return w.answer(f, refs, len(f.Words) > 0 && f.After != nil && len(rows) >= store.TextScan)
+}
+
+// answer picks f's rows among refs (newest first, or with after in any order):
+// with after the oldest by id, for a prioritized filter the store.Prioritize
+// choice, else the newest. bounded means refs stop at a q read's bound.
+func (w *EventWindow) answer(f store.EventFilter, refs []eventRef, bounded bool) *EventsAnswer {
+	matched := []eventRef{}
+	for _, r := range refs {
+		if f.Match(r.e) && r.j.hasWords(f.Words) {
+			matched = append(matched, r)
+		}
+	}
+	if f.After != nil {
+		slices.SortFunc(matched, func(a, b eventRef) int { return cmp.Compare(a.e.ID, b.e.ID) })
+	}
+	out := matched[:min(len(matched), f.Limit)]
+	if f.Prioritized() {
+		out = []eventRef{}
+		for _, k := range store.Prioritize(len(matched), f.Limit, func(k int) string { return matched[k].e.Kind }) {
+			out = append(out, matched[k])
+		}
+	}
+	a := &EventsAnswer{Events: make([]EventRow, len(out)), Cursor: f.After, UpdatedAt: w.updatedAt(out)}
+	for i, r := range out {
+		a.Events[i] = *r.j
+		if a.Cursor == nil || r.e.ID > *a.Cursor {
+			a.Cursor = &r.e.ID
+		}
+	}
+	for _, r := range matched {
+		a.More = a.More || (a.Cursor != nil && r.e.ID > *a.Cursor)
+	}
+	if bounded && !a.More {
+		last := slices.MaxFunc(refs, func(a, b eventRef) int { return cmp.Compare(a.e.ID, b.e.ID) }).e.ID
+		a.Cursor, a.More = &last, true
+	}
+	return a
+}
+
+// updatedAt is the newest at of the events held and the rows returned.
+func (w *EventWindow) updatedAt(out []eventRef) *string {
+	var newest *store.Event
+	if len(w.Raw) > 0 {
+		newest = &w.Raw[0]
+	}
+	for _, r := range out {
+		if newest == nil || r.e.At.After(newest.At) {
+			newest = r.e
+		}
+	}
+	if newest == nil {
+		return nil
+	}
+	at := store.PyTime(newest.At)
+	return &at
 }
 
 // sinceCovers reports whether rows (newest first) reach back to f.Since, so
