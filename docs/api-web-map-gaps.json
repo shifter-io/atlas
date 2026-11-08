@@ -1,0 +1,3127 @@
+{
+ "map": "docs/api-web-map.md",
+ "about": "One entry per gap ID of the map's Gaps summary lists: how it is closed, and for an API gap the requests and JSON paths that show it closed. Checked by tests/test_api_web_map_gaps.py; run against a siteapi with `siteapi bench --gaps` (api/README.md).",
+ "workItems": {
+  "W1": 704,
+  "W2": 710,
+  "W3": 711,
+  "W4": 705,
+  "W5": 706,
+  "W6": 712,
+  "W7": 707,
+  "W8": 708,
+  "W9": 713,
+  "W10": 714,
+  "W11": 703,
+  "W12": 709
+ },
+ "gaps": [
+  {
+   "id": "HOME-1",
+   "page": 1,
+   "class": "website",
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+  },
+  {
+   "id": "HOME-2",
+   "page": 1,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].subtitle",
+      "items[].href"
+     ],
+     "match": {
+      "items[].href": "^/proxy-index(/|#|$)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "HOME-3",
+   "page": 1,
+   "class": "website",
+   "reason": "\"Download the dataset\" serves the website's `home.json`: The website route redirects to `/v1/dataset` (already immutable and precompressed)."
+  },
+  {
+   "id": "HOME-4",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.targets"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-5",
+   "page": 1,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.observedDays?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-6",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.targets"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-7",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.curve.values",
+      "market.curve.labels"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-8",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.medianSuccess"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-9",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.uniqueIps"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-10",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.bandwidthGb"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-11",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.authenticity"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-12",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.countries"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-13",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.incidents"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-14",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.misSold"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-15",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.medianLatency",
+      "market.fastest.slug",
+      "market.latencySpark"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-16",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.mostReliable.slug",
+      "market.successSpark"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-17",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.cheapest.slug",
+      "market.cheapest.value",
+      "market.dearest.slug",
+      "market.dearest.value"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-18",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.spread.value",
+      "market.spread.best",
+      "market.spread.worst"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-19",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].standing.rank?",
+      "networks[].standing.peers?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-20",
+   "page": 1,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.schedule"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-21",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "networks[].curve"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-22",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "networks[].latencySpark",
+      "networks[].successSpark"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-23",
+   "page": 1,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.latencyUnderLoad?",
+      "stats.*.latencyNote?"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].latencyUnderLoad?",
+      "networks[].latencyNote?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-24",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-25",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.cheapest.value"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-26",
+   "page": 1,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.claimShare"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-27",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "insights.value.best",
+      "insights.value.worst",
+      "insights.value.spreadX",
+      "insights.value.rows"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-28",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].authenticity"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-29",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "insights.hardest.id",
+      "insights.hardest.label",
+      "insights.hardest.difficulty",
+      "insights.hardest.passCondition",
+      "insights.hardest.engine"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-30",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "insights.hardestRates[].slug",
+      "insights.hardestRates[].successRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-31",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "insights.hardestRates[].engine",
+      "insights.hardestRates[].scores.success.status"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-32",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.duplication"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-33",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.likelyResellers"
+     ]
+    },
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "market.likelyResellers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-34",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].exclusiveShare"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-35",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "insights.exclusivity[].upstream?"
+     ]
+    },
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].likelyUpstream?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-36",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "profiles[].id",
+      "profiles[].label",
+      "profiles[].weights"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-37",
+   "page": 1,
+   "class": "api",
+   "work": "W7",
+   "issue": 707,
+   "checks": [
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "grades[].grade",
+      "grades[].min"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-38",
+   "page": 1,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].latencyNote?",
+      "networks[].latencyUnderLoad?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-39",
+   "page": 1,
+   "class": "website",
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+  },
+  {
+   "id": "HOME-40",
+   "page": 1,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].observedDays?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-41",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].browserOverall.*.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-42",
+   "page": 1,
+   "class": "api",
+   "work": "W7",
+   "issue": 707,
+   "checks": [
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "targetCounts.measured"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-43",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "tape[].title",
+      "tape[].at?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-44",
+   "page": 1,
+   "class": "website",
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+  },
+  {
+   "id": "HOME-45",
+   "page": 1,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/chart?kind={kind}&range={range}",
+     "paths": [
+      "labels.success",
+      "labels.latency"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-46",
+   "page": 1,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].tagline"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-47",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "insights.value",
+      "insights.authenticity",
+      "insights.hardest",
+      "insights.hardestRates",
+      "insights.exclusivity"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-48",
+   "page": 1,
+   "class": "website",
+   "reason": "Demo networks in every home list (`SHOW_DEMO = true`): Website sets `SHOW_DEMO = false` when it reads the API (as OVL-8)."
+  },
+  {
+   "id": "HOME-49",
+   "page": 1,
+   "class": "owner",
+   "reason": "Headline score, grade, rank and sub-scores do not follow the dock (C19, C22-C25, C31, C32): Decide whether they follow the range; RK already serves each range, no API change."
+  },
+  {
+   "id": "HOME-50",
+   "page": 1,
+   "class": "website",
+   "reason": "Network incidents counted over the whole list; hero and market request totals from two helpers: Website reads `stats.<r>.incidentCount` and one requests field for both tiles."
+  },
+  {
+   "id": "HOME-51",
+   "page": 1,
+   "class": "api",
+   "work": "W6",
+   "issue": 712,
+   "checks": [
+    {
+     "request": "/v1/home?range={range}",
+     "paths": [
+      "market.authenticity",
+      "market.countries",
+      "market.misSold"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HOME-52",
+   "page": 1,
+   "class": "website",
+   "reason": "Network incidents counted over the whole list; hero and market request totals from two helpers: Website reads `stats.<r>.incidentCount` and one requests field for both tiles."
+  },
+  {
+   "id": "HOME-53",
+   "page": 1,
+   "class": "website",
+   "reason": "Gauge label \"Non-hosting\", card 3 lead over no rows, empty tape filter, hero range phrase, \"0.0\" for a null score, rank \"–\": Website copy and null states (\"N/A\", empty-state sentences, \"Exit IPs in the requested country\" label)."
+  },
+  {
+   "id": "HC-1",
+   "page": 2,
+   "class": "api",
+   "work": "W7",
+   "issue": 707,
+   "checks": [
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "weights",
+      "profiles[].id",
+      "profiles[].label",
+      "profiles[].weights",
+      "targets[].id",
+      "ranges",
+      "grades"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-2",
+   "page": 2,
+   "class": "api",
+   "work": "W7",
+   "issue": 707,
+   "checks": [
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "grades[].grade",
+      "grades[].min"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-3",
+   "page": 2,
+   "class": "api",
+   "work": "W7",
+   "issue": 707,
+   "checks": [
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "targetCounts.all",
+      "targetCounts.measured",
+      "targetCounts.cards"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-4",
+   "page": 2,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].cities"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-5",
+   "page": 2,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-6",
+   "page": 2,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].tagline"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-7",
+   "page": 2,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].browserOverall.*.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "HC-8",
+   "page": 2,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].href"
+     ],
+     "match": {
+      "items[].href": "^/proxy-index(/|#|$)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "HC-9",
+   "page": 2,
+   "class": "website",
+   "reason": "\"Download the dataset\" serves the website's `home.json`: The website route redirects to `/v1/dataset` (already immutable and precompressed)."
+  },
+  {
+   "id": "HC-10",
+   "page": 2,
+   "class": "website",
+   "reason": "Gauge label \"Non-hosting\", card 3 lead over no rows, empty tape filter, hero range phrase, \"0.0\" for a null score, rank \"–\": Website copy and null states (\"N/A\", empty-state sentences, \"Exit IPs in the requested country\" label)."
+  },
+  {
+   "id": "HC-11",
+   "page": 2,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].group",
+      "groupBonus.Pages"
+     ],
+     "match": {
+      "items[].group": "^(Networks|Pages|Targets|Actions)$",
+      "groupBonus.Pages": "^5$"
+     }
+    }
+   ]
+  },
+  {
+   "id": "HC-12",
+   "page": 2,
+   "class": "website",
+   "reason": "\"Live\" hard-coded in the dock, `IndexHero` window and Overview hero; no page polls `/v1/version`: Website change: show data age from `generatedAt` and poll `/v1/version` (304 when unchanged), refetching on a new `revision`; extends HOME-1 to every page."
+  },
+  {
+   "id": "HC-13",
+   "page": 2,
+   "class": "website",
+   "reason": "JSON-LD `dateModified` from three export dates; none on `/networks` and the network page: Website change: one `generatedAt` per build from any answer the page fetches; add it to the two network pages."
+  },
+  {
+   "id": "HC-14",
+   "page": 2,
+   "class": "website",
+   "reason": "`SHOW_DEMO` demo networks and re-numbered ranks on every page: Website change: delete the switch and demo branches with the API switch-over; ranks from RK `rank`, `peers`."
+  },
+  {
+   "id": "HC-15",
+   "page": 2,
+   "class": "website",
+   "reason": "Hard-coded `INDEX_NETWORK_SLUGS` for redirects, footer, sitemaps, llms.txt: Website change: build the slug table and the footer's provider lists from `/v1/networks` at build time; link only listed slugs; keep the `smartproxy` alias."
+  },
+  {
+   "id": "HC-16",
+   "page": 2,
+   "class": "website",
+   "reason": "`NetworkStrip` crashes on 0 networks (server render): Website guards the empty list (hide the strip or an empty-state line); no API change."
+  },
+  {
+   "id": "TGT-1",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.successRate"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].browserOverall.*.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-2",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].fleet.*.meanSuccess",
+      "targets[].fleet.*.networks"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-3",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].scoreStatus.*.status",
+      "targets[].scoreStatus.*.rankedOf?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-4",
+   "page": 3,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].browserOverall.*.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-5",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].id",
+      "targets[].label",
+      "targets[].category?",
+      "targets[].difficulty",
+      "targets[].passCondition",
+      "targets[].engine?",
+      "targets[].group?",
+      "targets[].sources"
+     ]
+    },
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "targets[].id"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-6",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].slug",
+      "networks[].position",
+      "networks[].rank?",
+      "networks[].cells.*.successRate",
+      "networks[].cells.*.captchaRate",
+      "networks[].cells.*.blockRate",
+      "networks[].cells.*.requests",
+      "networks[].cells.*.engine?",
+      "kind",
+      "range"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-7",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].scoreWeight",
+      "targets[].difficulty"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-8",
+   "page": 3,
+   "class": "owner",
+   "reason": "`category` (and catalog `difficulty`) of the browser targets without a `site.targets` row: Catalog rows (owner content), written with SQL as `api/scripts/*.sql`; W4 defaults the difficulty to the scoring weight meanwhile."
+  },
+  {
+   "id": "TGT-9",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "cardCount",
+      "targets[].card"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-10",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.engine?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.requests",
+      "networks[].cells.*.outcomes"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.requests",
+      "networks[].cells.*.outcomes"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].fleet.*.meanSuccess"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-11",
+   "page": 3,
+   "class": "owner",
+   "reason": "Target scores rank every product group of a window together, not per proxy kind: All 18 networks are residential today, so the ranks are the residential ones; per-kind ranking waits until a second kind is measured."
+  },
+  {
+   "id": "TGT-12",
+   "page": 3,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.successRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TGT-13",
+   "page": 3,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].subtitle",
+      "items[].href"
+     ],
+     "match": {
+      "items[].href": "^/proxy-index(/|#|$)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "TGT-14",
+   "page": 3,
+   "class": "website",
+   "reason": "Data strings (`label`, `category`, `passCondition`) used as translation keys on the targets page: Website keys target copy by `targets[].id`; the API keeps serving English catalog wording."
+  },
+  {
+   "id": "TGT-15",
+   "page": 3,
+   "class": "website",
+   "reason": "Hard-coded \"Eight\"/\"eight\" and \"ticketing queue\" in the targets page's window title, meta and JSON-LD description and keywords: Website copy built from the card count (TGT-9 field once W4/W7 serve it), ticketing mention removed."
+  },
+  {
+   "id": "TGT-16",
+   "page": 3,
+   "class": "website",
+   "reason": "Targets page still built on the mock suite (`ticketing_queue`, no `ai_answers`, no group filter, no sources breakdown): Website change when it switches to the API; reads `targets[].group`, `.source`, `.difficulty` and `sources[]` (W4 adds `sources` to its cells)."
+  },
+  {
+   "id": "NETS-1",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-2",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].tagline"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-3",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].standing.rank?",
+      "networks[].standing.peers?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-4",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}&kind=residential",
+     "paths": [
+      "networks[].kind",
+      "networks[].standing.rank?"
+     ],
+     "match": {
+      "networks[].kind": "^residential$"
+     }
+    }
+   ]
+  },
+  {
+   "id": "NETS-5",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "targets.all",
+      "targets.measured",
+      "targets.cards"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-6",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "fleet.requests",
+      "fleet.successes"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-7",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "weights"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-8",
+   "page": 4,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].trendT"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-9",
+   "page": 4,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].href",
+      "items[].subtitle"
+     ],
+     "match": {
+      "items[].href": "^/proxy-index(/|#|$)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "NETS-10",
+   "page": 4,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].browserOverall.*.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NETS-11",
+   "page": 4,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].href"
+     ],
+     "match": {
+      "items[].href": "^/proxy-index(/|#|$)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "NETS-12",
+   "page": 4,
+   "class": "website",
+   "reason": "\"Download the dataset\" serves the website's `home.json`: The website route redirects to `/v1/dataset` (already immutable and precompressed)."
+  },
+  {
+   "id": "NETS-13",
+   "page": 4,
+   "class": "website",
+   "reason": "\"00\" rank and blank grade for unscored networks; FAQ promises cost per 1,000 successes on every card; 30d score, grade and rank beside per-range figures: Website changes over fields RK already serves: print \"N/A\"; add `costPer1kSuccess` as a card figure (recommended, the FAQ's argument is the page's) or reword FAQ answers 3 and 4; read score, grade and rank from `?range=30d` and label them \"30 days\", or follow the range (owner decision)."
+  },
+  {
+   "id": "NETS-14",
+   "page": 4,
+   "class": "website",
+   "reason": "\"00\" rank and blank grade for unscored networks; FAQ promises cost per 1,000 successes on every card; 30d score, grade and rank beside per-range figures: Website changes over fields RK already serves: print \"N/A\"; add `costPer1kSuccess` as a card figure (recommended, the FAQ's argument is the page's) or reword FAQ answers 3 and 4; read score, grade and rank from `?range=30d` and label them \"30 days\", or follow the range (owner decision)."
+  },
+  {
+   "id": "NETS-15",
+   "page": 4,
+   "class": "owner",
+   "reason": "\"00\" rank and blank grade for unscored networks; FAQ promises cost per 1,000 successes on every card; 30d score, grade and rank beside per-range figures: Website changes over fields RK already serves: print \"N/A\"; add `costPer1kSuccess` as a card figure (recommended, the FAQ's argument is the page's) or reword FAQ answers 3 and 4; read score, grade and rank from `?range=30d` and label them \"30 days\", or follow the range (owner decision)."
+  },
+  {
+   "id": "NETS-16",
+   "page": 4,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.countries",
+      "stats.*.datacenterAsnShare"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].countries",
+      "networks[].datacenterAsnShare"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-PEERS",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.score.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-LISTRATE",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.pricing.listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-LEADS",
+   "page": 5,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].authenticity",
+      "networks[].listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-PROTOCOL",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.protocol.label",
+      "profile.protocol.targets",
+      "profile.protocol.summary",
+      "profile.protocol.schedule"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-SEARCH-REVIEWS",
+   "page": 5,
+   "class": "api",
+   "work": "W10",
+   "issue": 714,
+   "checks": [
+    {
+     "request": "/v1/search-index",
+     "paths": [
+      "items[].href"
+     ],
+     "match": {
+      "items[].href": "^/proxy-index(/|#|$)"
+     }
+    }
+   ]
+  },
+  {
+   "id": "NET-RANK-SUCCESS",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.ranks.successRate.rank",
+      "stats.*.ranks.successRate.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-RANK-PRICE",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.ranks.listRate.rank",
+      "stats.*.ranks.listRate.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-RANK-AVAIL",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.ranks.uptimePct.rank",
+      "stats.*.ranks.uptimePct.peers"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].uptimePct"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-DC-RANGE",
+   "page": 5,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.datacenterAsnShare"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-RANK-DC",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.ranks.datacenterAsnShare.rank",
+      "stats.*.ranks.datacenterAsnShare.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-LAT-LOAD",
+   "page": 5,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/chart?kind={kind}&range={range}",
+     "paths": [
+      "latencyUnderLoad"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-USAGE-LABEL",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/coverage?kind={kind}&range={range}",
+     "paths": [
+      "rows"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-COUNTRY-RANK-NOTE",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/coverage?kind={kind}&range={range}",
+     "paths": [
+      "rows"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-TARGETS-RANGE",
+   "page": 5,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.successRate",
+      "networks[].cells.*.captchaRate",
+      "networks[].cells.*.blockRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-TARGET-META",
+   "page": 5,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].label",
+      "targets[].category?",
+      "targets[].difficulty",
+      "targets[].passCondition"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-TARGET-RANK",
+   "page": 5,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.successRank.rank",
+      "networks[].cells.*.successRank.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-TARGET-LATRANK",
+   "page": 5,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.generic_http.latencyP50"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.pageLoadP50?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.pageLoadP50?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-OVERLAP-RANGE",
+   "page": 5,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].exclusiveShare",
+      "networks[].sharedShare",
+      "networks[].peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-OWNERSHIP-LABEL",
+   "page": 5,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].label"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-TRIAL-BOOL",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.pricing.hasTrial"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-VALUE-RANK",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.ranks.valueRank.rank",
+      "stats.*.ranks.valueRank.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-PRICE-HISTORY",
+   "page": 5,
+   "class": "api",
+   "work": "W12",
+   "issue": 709,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/pricing-history?kind={kind}",
+     "paths": [
+      "points",
+      "lastChangePct",
+      "daysSinceChange",
+      "basis"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-ALTERNATIVE",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.alternative.slug?",
+      "stats.*.alternative.cheaperBy?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-ARTICLE",
+   "page": 5,
+   "class": "website",
+   "reason": "The editorial review article (verdict, bottom line, body): Stays website content (it is editorial, written per network); no API source."
+  },
+  {
+   "id": "NET-SCOPE-COPY",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.protocol.summary"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-BUCKET-TEXT",
+   "page": 5,
+   "class": "withdrawn",
+   "reason": "NET-BUCKET-TEXT (network page row 131) was withdrawn: the stored facts and the 24h series are 5-minute buckets (proxy-index `calculated/aggregate.py` `coverage_basis`, `series`); the 30-minute value is the every-request scoring slot."
+  },
+  {
+   "id": "NET-ASN-LEADER",
+   "page": 5,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].asns"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-ALT-PRICE",
+   "page": 5,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-ANALYSIS-ARCHIVE",
+   "page": 5,
+   "class": "owner",
+   "reason": "Stored weekly analyses beyond 30 days: No source yet; out of scope until analyses are written."
+  },
+  {
+   "id": "NET-RANK-SENTENCE",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.score.rank",
+      "profile.score.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-REVIEW-COUNTS",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.reviews.runVerifiedCount"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-REVIEWS-PAGED",
+   "page": 5,
+   "class": "api",
+   "work": "W12",
+   "issue": 709,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/reviews?page=1",
+     "paths": [
+      "total",
+      "pages",
+      "counts.published",
+      "counts.runVerified",
+      "rows"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-VERIFY-LABEL",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "reviews[].verificationLabel"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-SCORE-NOTE",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.score.standing.note"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-SCOPE-UNUSED",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.protocol.schedule",
+      "profile.protocol.cadence"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-RECORDS-KIND",
+   "page": 5,
+   "class": "api",
+   "work": "W3",
+   "issue": 711,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "records.reviews",
+      "records.communityRuns",
+      "records.tape",
+      "tape[].event"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-RUNS-PAGED",
+   "page": 5,
+   "class": "api",
+   "work": "W12",
+   "issue": 709,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}/runs?kind={kind}&page=1",
+     "paths": [
+      "total",
+      "pages",
+      "counts.accepted",
+      "agreement",
+      "rows"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NET-TWO-SOURCES",
+   "page": 5,
+   "class": "website",
+   "reason": "Network page reads two mock files that disagree on the score; a null grade prints blank or \"Grade null\"; the mock `ticketing_queue` row, three demo networks and the `?demo-checks` numbers: Website changes when the page reads the API: one source (`P.score`, `S[r]`), print \"N/A\" for a null grade (as NETS-13), drop `ticketing_queue` (as TGT-16), set `SHOW_DEMO = false` (as HOME-48) and remove `?demo-checks` or wire it to `S[\"30d\"].latencyP90`, `P.performance.captchaRate` / `.blockRate` and `communityRuns[].targets[]`."
+  },
+  {
+   "id": "NET-NA-GRADE",
+   "page": 5,
+   "class": "website",
+   "reason": "Network page reads two mock files that disagree on the score; a null grade prints blank or \"Grade null\"; the mock `ticketing_queue` row, three demo networks and the `?demo-checks` numbers: Website changes when the page reads the API: one source (`P.score`, `S[r]`), print \"N/A\" for a null grade (as NETS-13), drop `ticketing_queue` (as TGT-16), set `SHOW_DEMO = false` (as HOME-48) and remove `?demo-checks` or wire it to `S[\"30d\"].latencyP90`, `P.performance.captchaRate` / `.blockRate` and `communityRuns[].targets[]`."
+  },
+  {
+   "id": "NET-MOCK-DATA",
+   "page": 5,
+   "class": "website",
+   "reason": "Network page reads two mock files that disagree on the score; a null grade prints blank or \"Grade null\"; the mock `ticketing_queue` row, three demo networks and the `?demo-checks` numbers: Website changes when the page reads the API: one source (`P.score`, `S[r]`), print \"N/A\" for a null grade (as NETS-13), drop `ticketing_queue` (as TGT-16), set `SHOW_DEMO = false` (as HOME-48) and remove `?demo-checks` or wire it to `S[\"30d\"].latencyP90`, `P.performance.captchaRate` / `.blockRate` and `communityRuns[].targets[]`."
+  },
+  {
+   "id": "CMP-1",
+   "page": 6,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.captchaRate",
+      "stats.*.blockRate"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].captchaRate",
+      "networks[].blockRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-2",
+   "page": 6,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.countries",
+      "stats.*.regions",
+      "stats.*.cities",
+      "stats.*.asns"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].countries",
+      "networks[].regions",
+      "networks[].cities",
+      "networks[].asns"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-3",
+   "page": 6,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.datacenterAsnShare"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].datacenterAsnShare"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-4",
+   "page": 6,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.exclusiveShare",
+      "stats.*.sharedShare"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].exclusiveShare"
+     ]
+    },
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].exclusiveShare",
+      "networks[].sharedShare",
+      "networks[].peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-5",
+   "page": 6,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].likelyUpstream?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-6",
+   "page": 6,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].listRate",
+      "networks[].pricePerGb",
+      "networks[].pricePerGbAtScale",
+      "networks[].priceLabel"
+     ]
+    },
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.pricing.listRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-7",
+   "page": 6,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].trendT"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-8",
+   "page": 6,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "targets[].id",
+      "targets[].label",
+      "targets[].category?",
+      "targets[].difficulty",
+      "targets[].engine?",
+      "targets[].group?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-9",
+   "page": 6,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.successRate",
+      "networks[].cells.*.captchaRate",
+      "networks[].cells.*.blockRate",
+      "networks[].cells.*.requests"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-10",
+   "page": 6,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].browserOverall.*.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-11",
+   "page": 6,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].latencyP90",
+      "networks[].latencyP99",
+      "networks[].requests",
+      "networks[].uptimePct",
+      "networks[].downtimeMinutes",
+      "networks[].regions",
+      "networks[].cities",
+      "networks[].asns",
+      "networks[].exclusiveShare",
+      "networks[].kycVerified",
+      "networks[].consentDisclosed",
+      "networks[].stickinessAdvertised",
+      "networks[].trial",
+      "networks[].hasTrial"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CMP-12",
+   "page": 6,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].trialKind"
+     ],
+     "match": {
+      "networks[].trialKind": "^(free|card|paid|sales|none)$"
+     }
+    },
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "profile.pricing.trialKind"
+     ],
+     "match": {
+      "profile.pricing.trialKind": "^(free|card|paid|sales|none)$"
+     }
+    }
+   ]
+  },
+  {
+   "id": "CMP-13",
+   "page": 6,
+   "class": "website",
+   "reason": "Compare picks are not in the URL or stored: Website reads and writes `?networks=a,b,c,d`; no API change (every network is pre-rendered)."
+  },
+  {
+   "id": "CMP-14",
+   "page": 6,
+   "class": "website",
+   "reason": "Null grade, consent, difficulty and price states (C22, C51, C67b, C70, C74b): Website maps each null to \"N/A\" before formatting (also every other `gradeTone` call on the home and network pages); no API change."
+  },
+  {
+   "id": "CMP-15",
+   "page": 6,
+   "class": "owner",
+   "reason": "Shifter's trial text and order URL are hard-coded in the website: Owner fills `site.pricing.trial` and the measured product's `url` for Shifter (`api/scripts/*.sql`); the website then drops both fallbacks."
+  },
+  {
+   "id": "CMP-16",
+   "page": 6,
+   "class": "owner",
+   "reason": "Headline score, grade, rank and sub-scores do not follow the dock (C19, C22-C25, C31, C32): Decide whether they follow the range; RK already serves each range, no API change."
+  },
+  {
+   "id": "CMP-17",
+   "page": 6,
+   "class": "website",
+   "reason": "By-target best mark can compare a Chrome rate with a Camoufox rate (C61, C63): Website marks the best only among cells of the same `engine`, or reads one engine's body (`/v1/targets?engine=<e>`); W4 carries `engine`, `otherEngines` and the per-engine bodies (#735)."
+  },
+  {
+   "id": "CMP-18",
+   "page": 6,
+   "class": "website",
+   "reason": "Success rate hint misdescribes the figure (C33): Website copy: \"Mean of time-slot success rates, browser targets excluded\" (as HOME-42)."
+  },
+  {
+   "id": "OVL-1",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].slug",
+      "networks[].poolIps",
+      "networks[].exclusiveShare",
+      "networks[].sharedShare",
+      "networks[].exclusiveIps",
+      "networks[].label",
+      "networks[].likelyUpstream?",
+      "networks[].peers[].sharedIps",
+      "networks[].peers[].shareOfOurs",
+      "networks[].peers[].shareOfTheirs"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OVL-2",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "market.networks",
+      "market.sumOfPools",
+      "market.sharedIps",
+      "market.distinctIps",
+      "market.basis",
+      "market.duplicatedShare"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OVL-3",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].likelyUpstream?",
+      "market.likelyResellers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OVL-4",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].label"
+     ],
+     "match": {
+      "networks[].label": "^(fully_exclusive|mostly_exclusive|mixed|resale)$"
+     }
+    }
+   ]
+  },
+  {
+   "id": "OVL-5",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].exclusiveIps"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OVL-6",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "networks[].poolIps",
+      "networks[].poolBasis"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OVL-7",
+   "page": 7,
+   "class": "api",
+   "work": "W5",
+   "issue": 706,
+   "checks": [
+    {
+     "request": "/v1/overlap?kind=residential&range={range}",
+     "paths": [
+      "market.distinctIps",
+      "market.duplicatedShare",
+      "market.basis"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "OVL-8",
+   "page": 7,
+   "class": "website",
+   "reason": "Demo overlap data (3 of 4 networks, inconsistent shares), the blank `[data-ov-empty]` state and the untranslated \"N/A\" on the overlap page: Website changes: read measured networks from the API with `SHOW_DEMO` off, add the empty-state copy, use the shared \"N/A\"."
+  },
+  {
+   "id": "OVL-9",
+   "page": 7,
+   "class": "website",
+   "reason": "Demo overlap data (3 of 4 networks, inconsistent shares), the blank `[data-ov-empty]` state and the untranslated \"N/A\" on the overlap page: Website changes: read measured networks from the API with `SHOW_DEMO` off, add the empty-state copy, use the shared \"N/A\"."
+  },
+  {
+   "id": "OVL-10",
+   "page": 7,
+   "class": "website",
+   "reason": "Demo overlap data (3 of 4 networks, inconsistent shares), the blank `[data-ov-empty]` state and the untranslated \"N/A\" on the overlap page: Website changes: read measured networks from the API with `SHOW_DEMO` off, add the empty-state copy, use the shared \"N/A\"."
+  },
+  {
+   "id": "TC-1",
+   "page": 8,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "cost.cheapest.slug",
+      "cost.cheapest.costPer1kSuccess",
+      "cost.median",
+      "cost.dearest.slug",
+      "cost.spreadX",
+      "cost.priced"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-2",
+   "page": 8,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "cost.spreadX"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-3",
+   "page": 8,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.costPer1kSuccess"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-4",
+   "page": 8,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.successRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-5",
+   "page": 8,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].listRate",
+      "networks[].pricePerGb",
+      "networks[].pricePerGbAtScale",
+      "networks[].priceLabel"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-6",
+   "page": 8,
+   "class": "api",
+   "work": "W2",
+   "issue": 710,
+   "checks": [
+    {
+     "request": "/v1/rankings?range={range}&kind=residential",
+     "paths": [
+      "networks[].valueRank",
+      "networks[].kind"
+     ],
+     "match": {
+      "networks[].kind": "^residential$"
+     }
+    }
+   ]
+  },
+  {
+   "id": "TC-7",
+   "page": 8,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.requestSuccessRate"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].requestSuccessRate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-8",
+   "page": 8,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}",
+     "paths": [
+      "networks[].cells.*.costRank.rank",
+      "networks[].cells.*.costRank.peers"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "TC-9",
+   "page": 8,
+   "class": "api",
+   "work": "W1",
+   "issue": 704,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "stats.*.wireGbPer1k"
+     ]
+    },
+    {
+     "request": "/v1/rankings?range={range}",
+     "paths": [
+      "networks[].wireGbPer1k"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-COUNT",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "totals.events",
+      "totals.byCategory"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-REPORTING",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "totals.reporting",
+      "totals.tracked"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-RANGE",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "totals.events",
+      "buckets"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-SPARK",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "buckets[].start",
+      "buckets[].total",
+      "buckets[].byCategory",
+      "buckets[].networks"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-PASSRATE",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "pass.requests",
+      "pass.successes",
+      "pass.rate"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-PASS-SPARK",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/networks/all/chart?range={range}",
+     "paths": [
+      "success"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-INCIDENTS",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "totals.byCategory",
+      "totals.bad"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-HEATMAP",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "heatmap[].start",
+      "heatmap[].byCategory"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-RAIL",
+   "page": 9,
+   "class": "api",
+   "work": "W9",
+   "issue": 713,
+   "checks": [
+    {
+     "request": "/v1/events/stats?range={range}",
+     "paths": [
+      "networks[].slug",
+      "networks[].events",
+      "networks[].good",
+      "networks[].bad",
+      "networks[].lastAt?",
+      "networks[].recent"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-SLUG",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?limit=200",
+     "paths": [
+      "events[].providerSlug?",
+      "events[].providerName?"
+     ]
+    },
+    {
+     "request": "/v1/events?network={slug}&limit=20",
+     "paths": [
+      "events"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-TEXT",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?limit=200",
+     "paths": [
+      "events[].title",
+      "events[].detail",
+      "events[].value?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-KINDS",
+   "page": 9,
+   "class": "website",
+   "reason": "Event kinds `request`, `rotation`, `pricing`, a \"clean audit\" event, the other network of an `ip_overlap` event: No framework source; the website maps the kinds it gets."
+  },
+  {
+   "id": "EV-SEARCH",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?q={cc}&limit=20",
+     "paths": [
+      "events"
+     ]
+    },
+    {
+     "request": "/v1/events?country={cc}&limit=20",
+     "paths": [
+      "events"
+     ]
+    },
+    {
+     "request": "/v1/events?target=generic_http&limit=20",
+     "paths": [
+      "events"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-CATEGORY-TAB",
+   "page": 9,
+   "class": "website",
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+  },
+  {
+   "id": "EV-CURSOR",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?after=0&limit=100",
+     "paths": [
+      "events",
+      "cursor?",
+      "updatedAt?",
+      "more"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-CATCHUP",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?after=0&limit=100",
+     "paths": [
+      "more"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-INITIAL",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?limit=200",
+     "paths": [
+      "events[].title",
+      "events[].detail"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-CORS",
+   "page": 9,
+   "class": "withdrawn",
+   "reason": "EV-CORS (live tape rows 3 and 80) was withdrawn: `/v1/events`, like every API answer, sends `Access-Control-Allow-Origin: *` (`api/internal/server/server.go`, `write`)."
+  },
+  {
+   "id": "EV-MONOGRAM",
+   "page": 9,
+   "class": "website",
+   "reason": "Data age in the dock, tape ages from `at`, per-tab `category=` requests, two-letter monograms, the 26-point `trend`: Website changes; the API already serves the inputs."
+  },
+  {
+   "id": "EV-TARGETS-COUNT",
+   "page": 9,
+   "class": "api",
+   "work": "W7",
+   "issue": 707,
+   "checks": [
+    {
+     "request": "/v1/meta",
+     "paths": [
+      "targetCounts.measured"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-SCORE",
+   "page": 9,
+   "class": "api",
+   "work": "W4",
+   "issue": 705,
+   "checks": [
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    },
+    {
+     "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
+     "paths": [
+      "networks[].cells.*.scores.success.status?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-AUDIT-VERDICT",
+   "page": 9,
+   "class": "website",
+   "reason": "Event kinds `request`, `rotation`, `pricing`, a \"clean audit\" event, the other network of an `ip_overlap` event: No framework source; the website maps the kinds it gets."
+  },
+  {
+   "id": "EV-OVERLAP-PEER",
+   "page": 9,
+   "class": "website",
+   "reason": "Event kinds `request`, `rotation`, `pricing`, a \"clean audit\" event, the other network of an `ip_overlap` event: No framework source; the website maps the kinds it gets."
+  },
+  {
+   "id": "EV-BASELINE",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?limit=200",
+     "paths": [
+      "events[].kind",
+      "events[].value?"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-AGO",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?limit=200",
+     "paths": [
+      "events[].at",
+      "events[].title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-NETTAPE",
+   "page": 9,
+   "class": "website",
+   "reason": "Per-network tape cap 20 (page shows 30): Website shows 20, or W8's `network=` filter."
+  },
+  {
+   "id": "EV-RAWKIND",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?limit=200",
+     "paths": [
+      "events[].kind",
+      "events[].title"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "EV-NEWEST",
+   "page": 9,
+   "class": "website",
+   "reason": "Newest event(s) from a prioritized `/v1/events` answer (dateModified, hero rows, rail last event and beats): Website requests `limit` ≥ 2 (≥ 2k for the k newest); the rail uses W9."
+  },
+  {
+   "id": "EV-FEED-STATIC",
+   "page": 9,
+   "class": "website",
+   "reason": "The website feed route serves a build-time snapshot with per-build ids: Website route proxies `/v1/events` once W8 lands (EV-TEXT, EV-CURSOR); no API change beyond W8."
+  },
+  {
+   "id": "EV-EDITORIAL",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/networks/{slug}?kind={kind}",
+     "paths": [
+      "tape[].event",
+      "tape[].source"
+     ],
+     "match": {
+      "tape[].source": "^(measured|editorial)$"
+     }
+    }
+   ]
+  },
+  {
+   "id": "EV-PROXYKIND",
+   "page": 9,
+   "class": "api",
+   "work": "W8",
+   "issue": 708,
+   "checks": [
+    {
+     "request": "/v1/events?proxyKind=residential&limit=20",
+     "paths": [
+      "events"
+     ]
+    }
+   ]
+  }
+ ]
+}
