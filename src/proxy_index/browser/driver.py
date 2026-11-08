@@ -367,7 +367,7 @@ class ChromeBrowser:
         version, os_name = self.setup.version, self.setup.os_name
         override = {
             "userAgent": chrome.user_agent(version, os_name),
-            "acceptLanguage": fingerprint.accept_language,
+            "acceptLanguage": fingerprint.languages,
             "userAgentMetadata": chrome.user_agent_metadata(version, os_name),
         }
         await session.send("Emulation.setUserAgentOverride", override)

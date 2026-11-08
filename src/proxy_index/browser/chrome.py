@@ -89,6 +89,13 @@ class Fingerprint:
         text = json.dumps(values, sort_keys=True, separators=(",", ":"))
         return {"values": values, "sha256": hashlib.sha256(text.encode()).hexdigest()}
 
+    @property
+    def languages(self) -> str:
+        """The Accept-Language's tags without weights (US: `en-US,en`): what CDP's
+        acceptLanguage takes, since Chrome adds the weights itself (and to navigator.languages
+        would add them twice)."""
+        return ",".join(tag.split(";")[0] for tag in self.accept_language.split(","))
+
     def context_options(self) -> dict[str, Any]:
         """Playwright's context options for this fingerprint."""
         return {

@@ -74,6 +74,11 @@ def test_fingerprint_is_drawn_from_the_seed_and_the_tables():
     assert len({p.timezone_id for p in prints}) == 4 and len({p.screen_width for p in prints}) == 5
 
 
+def test_fingerprint_languages_are_the_tags_without_weights():
+    assert chrome.fingerprint("run:0", "US").languages == "en-US,en"
+    assert chrome.fingerprint("run:0", "DE").languages == "de-DE,de,en"
+
+
 def test_fingerprint_refuses_a_country_without_a_table():
     with pytest.raises(ChromeRefused, match="'ZZ'"):
         chrome.fingerprint("run:0", "ZZ")

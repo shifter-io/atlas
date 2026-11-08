@@ -217,7 +217,7 @@ async def test_headless_is_made_to_agree_through_cdp():
     [(method, params)] = chromium.overrides
     assert method == "Emulation.setUserAgentOverride"
     assert params["userAgent"] == REAL[0] and "platform" not in params
-    assert params["acceptLanguage"] == chrome.fingerprint("run:0", "US").accept_language
+    assert params["acceptLanguage"] == "en-US,en"  # Chrome adds the weights itself
     assert params["userAgentMetadata"] == chrome.user_agent_metadata(VERSION, "macos")
 
 
