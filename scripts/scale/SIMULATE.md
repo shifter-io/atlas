@@ -260,8 +260,8 @@ the browser settings, which must be in queue mode. The result is a plain value (
 ### Addresses and recurrence
 
 Every network × scheduled country is a lane with its own block of IP indexes, as in
-`synthetic.py`: 3 of every 4 indexes are IPv4 addresses in 240.0.0.0/4 while that space lasts,
-the others IPv6 in 2001:db8::/32. No real address is used. Day `d`'s window starts the
+`synthetic.py`: 3 of every 4 indexes are IPv4 addresses in the reserved block 240/4 while that
+space lasts, the others IPv6 in 2001:db8::/32. No real address is used. Day `d`'s window starts the
 network's `recurrence.share` of its size before the end of day `d − 1`'s, so that share of its
 IPs were seen the day before and the rest are new; a network without one draws it from
 `REUSE` (30–60%).

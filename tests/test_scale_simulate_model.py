@@ -231,11 +231,9 @@ def test_a_days_ips_recur_from_the_day_before_at_the_profile_share(tmp_path):
         assert len(before & after) / len(after) == pytest.approx(0.45, abs=0.002)
     other = {n for n, *_ in found.daily(found.lanes["beta", "US"], 1).ips()}
     assert not other & days[0]  # each lane keeps its own block
-    for n in days[0]:
-        address = ipaddress.ip_address(model.address(n))
-        assert address in ipaddress.ip_network("240.0.0.0/4") or address in ipaddress.ip_network(
-            "2001:db8::/32"
-        )
+    reserved = (ipaddress.ip_network((0xF0000000, 4)), ipaddress.ip_network("2001:db8::/32"))
+    for n in days[0]:  # class E (240/4) or the IPv6 documentation prefix
+        assert any(ipaddress.ip_address(model.address(n)) in block for block in reserved)
 
 
 def test_pulses_only_when_switched_on(tmp_path):
