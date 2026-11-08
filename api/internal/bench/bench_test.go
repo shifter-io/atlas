@@ -279,6 +279,21 @@ func TestBudgets(t *testing.T) {
 	}
 }
 
+func TestCIGuard(t *testing.T) {
+	s, g := StagingBudgets(), CIGuard()
+	if s.Classes[ClassAnswer] != (Budget{ColdMs: 2, P99Ms: 2}) || s.PageMs != 10 || s.PageBudgetMs(40) != 10 {
+		t.Errorf("staging %+v", s)
+	}
+	for k, c := range s.Classes {
+		if g.Classes[k] != (Budget{ColdMs: c.ColdMs * CIGuardFactor, P99Ms: c.P99Ms * CIGuardFactor}) {
+			t.Errorf("%s: guard %+v, staging %+v", k, g.Classes[k], c)
+		}
+	}
+	if g.PageBudgetMs(40) != 50 || DefaultBudgets().PageBudgetMs(2) != 50 {
+		t.Errorf("page budgets %v %v", g.PageBudgetMs(40), DefaultBudgets().PageBudgetMs(2))
+	}
+}
+
 func TestQuantiles(t *testing.T) {
 	ms := make([]float64, 100)
 	for i := range ms {

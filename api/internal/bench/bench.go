@@ -34,21 +34,43 @@ type Budgets struct {
 	PageRequestMs float64 `json:"pageRequestMs"`
 }
 
-// NetworkMs is the network time the bench adds to every CI budget: it goes
-// over a real socket, the CI test over loopback.
+// NetworkMs is the network time the bench adds to every staging budget: it
+// goes over a real socket, the CI test over loopback.
 const NetworkMs = 20
 
-// CIBudgets are PAGE-LATENCY-1's budgets, over loopback.
-func CIBudgets() Budgets {
+// CIGuardFactor is how much looser CI's guard is than the staging budgets.
+// The CI test runs on a shared server whose timing noise alone can double a
+// 2 ms p99, so the guard catches an order-of-magnitude regression, not noise;
+// the strict budgets are measured on the staging siteapi (siteapi bench).
+const CIGuardFactor = 5
+
+// StagingBudgets are PAGE-LATENCY-1's budgets over loopback: the targets the
+// bench measures on the staging siteapi and the final report judges.
+func StagingBudgets() Budgets {
 	return Budgets{Classes: map[string]Budget{
 		ClassAnswer: {ColdMs: 2, P99Ms: 2}, ClassEvents: {ColdMs: 2, P99Ms: 2}, ClassSearch: {ColdMs: 5, P99Ms: 5},
 		ClassList: {ColdMs: 50, P99Ms: 2}, ClassListSearch: {ColdMs: 50, P99Ms: 50},
 	}, Requests: map[string]Budget{}, PageMs: 10}
 }
 
-// DefaultBudgets are the CI budgets plus NetworkMs per request.
+// CIGuard is what the CI page latency test enforces: every staging limit,
+// the page sum's included, CIGuardFactor times over.
+func CIGuard() Budgets {
+	b := StagingBudgets()
+	for k, c := range b.Classes {
+		b.Classes[k] = Budget{ColdMs: c.ColdMs * CIGuardFactor, P99Ms: c.P99Ms * CIGuardFactor}
+	}
+	b.PageMs *= CIGuardFactor
+	b.PageRequestMs *= CIGuardFactor
+	return b
+}
+
+// PageBudgetMs is the most a page of n requests may sum to.
+func (b Budgets) PageBudgetMs(n int) float64 { return b.PageMs + b.PageRequestMs*float64(n) }
+
+// DefaultBudgets are the staging budgets plus NetworkMs per request.
 func DefaultBudgets() Budgets {
-	b := CIBudgets()
+	b := StagingBudgets()
 	for k, c := range b.Classes {
 		b.Classes[k] = Budget{ColdMs: c.ColdMs + NetworkMs, P99Ms: c.P99Ms + NetworkMs}
 	}
