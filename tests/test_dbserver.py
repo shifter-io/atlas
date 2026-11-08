@@ -227,6 +227,47 @@ def test_check_reports_a_missing_temporary_privilege_and_its_statement_closes_it
         conn.execute("CREATE TEMP TABLE incoming_ips (ip text)")
 
 
+def test_check_reports_the_site_read_grants_and_its_statements_close_them(server):
+    """Schema site, made by `siteapi migrate` as the admin role: the API and run-time roles read."""
+    roles, files = server.roles, server.files
+    before = check(files["superuser"], roles)  # a database before `siteapi migrate`
+    assert before["site"] is None and "site_read" not in [g["kind"] for g in before["gaps"]]
+    with dbserver.connect(files["superuser"], autocommit=True) as conn:
+        admin = sql.Identifier(roles.admin)
+        conn.execute(sql.SQL("CREATE SCHEMA site AUTHORIZATION {}").format(admin))
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:
+        conn.execute("CREATE TABLE site.providers (name text)")
+        conn.execute("INSERT INTO site.providers VALUES ('nimbus')")
+    report = check(files["superuser"], roles)
+    assert report["site"]["api"]["unreadable"] == ["site.providers"]
+    gap = {g["kind"]: g for g in report["gaps"]}["site_read"]
+    assert gap["run_as"] == "admin"
+    defaults = f'ALTER DEFAULT PRIVILEGES FOR ROLE "{roles.admin}" IN SCHEMA "site" '
+    assert gap["statements"] == [
+        statement
+        for who in (f'"{roles.api}"', f'"{roles.runtime}"')
+        for statement in (
+            f'GRANT USAGE ON SCHEMA "site" TO {who};',
+            f'GRANT SELECT ON ALL TABLES IN SCHEMA "site" TO {who};',
+            f"{defaults}GRANT SELECT ON TABLES TO {who};",
+        )
+    ]
+    for role in (roles.api, roles.runtime):
+        with dbserver.connect(files[role]) as conn:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege, match="schema site"):
+                conn.execute("SELECT name FROM site.providers")
+
+    apply(server, report["gaps"])
+    assert check(files["superuser"], roles)["gaps"] == []
+    with dbserver.connect(files[roles.admin], autocommit=True) as conn:
+        conn.execute("CREATE TABLE site.products (name text)")  # a later `siteapi migrate`
+        conn.execute("INSERT INTO site.products VALUES ('residential')")
+    for role in (roles.api, roles.runtime):
+        with dbserver.connect(files[role]) as conn:
+            assert conn.execute("SELECT name FROM site.providers").fetchall() == [("nimbus",)]
+            assert conn.execute("SELECT name FROM site.products").fetchall() == [("residential",)]
+
+
 def test_analyze_reports_a_lock_timeout_and_a_database_without_the_tables(server, databases):
     files = server.files
     with dbserver.connect(files["superuser"]) as holder:
