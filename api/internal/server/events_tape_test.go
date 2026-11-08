@@ -102,14 +102,19 @@ func TestEventsServesTapeRowsAndTheCursor(t *testing.T) {
 	src.complete = false
 	src.set(2, nil)
 	s.Refresh(context.Background(), false) //nolint:errcheck
+	// The window holds every row past its smallest id but one, and no late row.
+	if b := readTape(t, s, "/v1/events?after=0&limit=5"); !slices.Equal(b.ids(), []int64{1, 2, 3, 4, 5}) || src.dbQueries.Load() != 0 {
+		t.Fatalf("after 0 from memory: %v, %d database queries", b.ids(), src.dbQueries.Load())
+	}
+	// With the late rows cut, a row past after may be outside the window.
+	src.lateCut = true
+	src.set(3, nil)
+	s.Refresh(context.Background(), false) //nolint:errcheck
 	if b := readTape(t, s, "/v1/events?after=0&limit=5"); !slices.Equal(b.ids(), []int64{1, 2, 3, 4, 5}) || *b.Cursor != 5 || !b.More {
 		t.Fatalf("after 0 from the database: %v cursor %v more %v", b.ids(), b.Cursor, b.More)
 	}
 	if b := readTape(t, s, "/v1/events?q=pulse&after=0&limit=5"); !slices.Equal(b.ids(), []int64{1, 2, 4, 5, 7}) || *b.Cursor != 7 || !b.More {
 		t.Fatalf("q after 0 from the database: %v cursor %v more %v", b.ids(), b.Cursor, b.More)
-	}
-	if b := readTape(t, s, "/v1/events?after=20&limit=5"); !slices.Equal(b.ids(), []int64{21, 22, 23, 24, 25}) {
-		t.Fatalf("after 20 from memory: %v", b.ids())
 	}
 	if n := src.dbQueries.Load(); n != 2 {
 		t.Fatalf("%d database queries, want 2", n)

@@ -22,7 +22,12 @@ type EventWindow struct {
 	Notable         []store.Event
 	NotableJSON     []EventRow
 	NotableComplete bool
-	text            eventText
+	// Late and LateJSON are the rows with an id above Raw's smallest that are
+	// older than Raw (store.Inputs.Late), so an after read sees them too.
+	Late         []store.Event
+	LateJSON     []EventRow
+	LateComplete bool
+	text         eventText
 }
 
 // EventRow is one /v1/events row: the framework's TestEvent and the live
@@ -94,7 +99,8 @@ func (t eventText) render(rows []store.Event) []EventRow {
 
 func newEventWindow(in *store.Inputs, text eventText) EventWindow {
 	return EventWindow{Raw: in.Events, JSON: text.render(in.Events), Complete: in.EventsComplete,
-		Notable: in.Notable, NotableJSON: text.render(in.Notable), NotableComplete: in.NotableComplete, text: text}
+		Notable: in.Notable, NotableJSON: text.render(in.Notable), NotableComplete: in.NotableComplete,
+		Late: in.Late, LateJSON: text.render(in.Late), LateComplete: in.LateComplete, text: text}
 }
 
 // Provider is the framework provider of a network's site slug (network=).
@@ -152,18 +158,25 @@ type eventRef struct {
 // Answer answers a /v1/events filter from memory when the rows held provably
 // contain its whole answer; ok=false means the database must be asked.
 func (w *EventWindow) Answer(f store.EventFilter) (*EventsAnswer, bool) {
-	refs := make([]eventRef, w.held())
+	if f.After != nil {
+		// Every row past after is in the window or among the late rows once
+		// after reaches below the window's smallest id.
+		held := w.Complete || (w.LateComplete && len(w.Raw) > 0 && *f.After >= store.MinEventID(w.Raw)-1)
+		if !held {
+			return nil, false
+		}
+		return w.answer(f, append(refsOf(w.Raw, w.JSON), refsOf(w.Late, w.LateJSON)...), false), true
+	}
+	refs := append(refsOf(w.Raw, w.JSON), refsOf(w.Notable, w.NotableJSON)...)
 	inWindow, notable := 0, 0
-	for i := range refs {
-		e, j := w.row(i)
-		refs[i] = eventRef{e, j}
-		if !f.Match(e) || !j.hasWords(f.Words) {
+	for i, r := range refs {
+		if !f.Match(r.e) || !r.j.hasWords(f.Words) {
 			continue
 		}
 		if i < len(w.Raw) {
 			inWindow++
 		}
-		if !store.Routine(e.Kind) {
+		if !store.Routine(r.e.Kind) {
 			notable++
 		}
 	}
@@ -173,19 +186,21 @@ func (w *EventWindow) Answer(f store.EventFilter) (*EventsAnswer, bool) {
 	return w.answer(f, refs, false), true
 }
 
-// covers reports whether the rows held contain f's whole answer, given its
-// matches in the window and its non-routine matches held. With after, the
-// window holds every row past it once after reaches its smallest id (rows are
-// stamped when written, so a newer id is never older than the window).
-// Without, it needs f.Limit matches, or since reaching past the window; a
-// prioritized filter also its newest store.NotableQuota non-routine matches.
+func refsOf(rows []store.Event, js []EventRow) []eventRef {
+	out := make([]eventRef, len(rows))
+	for i := range rows {
+		out[i] = eventRef{&rows[i], &js[i]}
+	}
+	return out
+}
+
+// covers reports whether the rows held contain the whole answer of f (without
+// after), given its matches in the window and its non-routine matches held:
+// f.Limit matches, or since reaching past the window; a prioritized filter
+// also its newest store.NotableQuota non-routine matches.
 func (w *EventWindow) covers(f store.EventFilter, inWindow, notable int) bool {
 	switch {
-	case w.Complete:
-		return true
-	case f.After != nil:
-		return len(w.Raw) > 0 && *f.After >= slices.MinFunc(w.Raw, func(a, b store.Event) int { return cmp.Compare(a.ID, b.ID) }).ID
-	case sinceCovers(f, w.Raw):
+	case w.Complete, sinceCovers(f, w.Raw):
 		return true
 	case !f.Prioritized():
 		return inWindow >= f.Limit
@@ -196,11 +211,7 @@ func (w *EventWindow) covers(f store.EventFilter, inWindow, notable int) bool {
 // FromRows answers f from the rows of the database fallback
 // (store.QueryEvents), rendered with the build's names.
 func (w *EventWindow) FromRows(f store.EventFilter, rows []store.Event) *EventsAnswer {
-	js := w.text.render(rows)
-	refs := make([]eventRef, len(rows))
-	for i := range rows {
-		refs[i] = eventRef{&rows[i], &js[i]}
-	}
+	refs := refsOf(rows, w.text.render(rows))
 	return w.answer(f, refs, len(f.Words) > 0 && f.After != nil && len(rows) >= store.TextScan)
 }
 

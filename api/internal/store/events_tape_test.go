@@ -79,3 +79,31 @@ func TestCursorsAreNotPrioritized(t *testing.T) {
 		t.Fatal("only a cursor turns prioritizing off")
 	}
 }
+
+// A row written after the window's rows but stamped older (the daily ingest
+// writes a test's own times) is read as a late row, by id; rows older by id
+// are not.
+func TestLoadReadsLateEvents(t *testing.T) {
+	t.Parallel()
+	db := testdb.New(t)
+	ctx := context.Background()
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T10:00:00Z','daily_test_finished',0,'info')")
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) SELECT '2026-11-02T16:00:00Z','pulse_finished',0,'info'"+
+		" FROM generate_series(1,$1::int)", store.EventWindow+1)
+	db.Exec(t, "INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T09:00:00Z','daily_test_finished',0,'info')")
+	pool, err := store.OpenReadOnly(ctx, db.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	in, err := store.LoadEvents(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The window is ids 2002 down to 3; ids 2 and 1 are cut and older by id, and
+	// the late row is the 09:00 one, id 2003.
+	want := int64(store.EventWindow + 3)
+	if in.EventsComplete || !in.LateComplete || !slices.Equal(idsOf(in.Late), []int64{want}) {
+		t.Fatalf("late %v complete %v (window %d to %d)", idsOf(in.Late), in.LateComplete, in.Events[0].ID, store.MinEventID(in.Events))
+	}
+}

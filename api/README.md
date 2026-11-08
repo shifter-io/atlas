@@ -232,7 +232,7 @@ editorial ones.
 
   A full rebuild only happens when the fingerprint's data part (everything but
   `max(test_events.event_id)`) changed. When only the newest event id changed, the
-  events alone are read (one read-only transaction, the same 2,000 + 500 rows as a
+  events alone are read (one read-only transaction, the same 2,000 + 500 + 500 rows as a
   full read) and a new version is swapped in that shares every other rendered answer
   with the serving one: the dataset file, the network and page answers, search and
   coverage are not read, built, rendered or compressed again, and `/v1/events` (its
@@ -250,12 +250,15 @@ editorial ones.
   stale results.
 - **Events.** The newest 2,000 events are held in memory, and past them the newest
   500 non-routine events (so a burst of hourly estimate releases never evicts a
-  pulse down or an incident). The default query is pre-rendered. Other filters are
+  pulse down or an incident), and up to 500 late events: rows with an id above the
+  window's smallest but stamped older than it (the daily ingest writes a test's own
+  times), so an `after` poll sees them. The default query is pre-rendered. Other filters are
   answered from memory when the window provably contains the whole answer:
   - `limit` matches were found,
   - or the table has no more rows,
   - or `since` is newer than the window's oldest event;
-  - or `after` is at least the window's smallest event id;
+  - or `after` is at least the window's smallest event id minus one, and every late
+    event is held;
   - and for a prioritized filter (no `kind`, `category`, `since` or `after`), also
     the newest half-`limit` non-routine matches were found (or all of them are held).
 

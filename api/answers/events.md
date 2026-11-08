@@ -46,17 +46,19 @@ Every parameter is optional; any other parameter answers 400.
 
 ## Speed
 
-- **Memory.** The build holds the newest 2,000 events and past them the newest 500 non-routine
-  ones, each rendered once (text, slug, name and `q`'s lower-case text). A filter is answered from
-  them when they provably hold its whole answer (README "Events"); with `after`, when `after` is at
-  least the smallest id of the 2,000 (rows are stamped when written, so a newer id is not older
-  than the window).
+- **Memory.** The build holds the newest 2,000 events, past them the newest 500 non-routine ones,
+  and up to 500 late ones: rows with an id above the 2,000's smallest but an older `at` (the daily
+  ingest stamps a row with its test's own times, hours before it writes it). Each is rendered once
+  (text, slug, name and `q`'s lower-case text). A filter is answered from them when they provably
+  hold its whole answer (README "Events"); with `after`, when `after` is at least the 2,000's
+  smallest id minus one and every late row is held, since every row past it is then among the
+  2,000 or the late ones.
 - **Database fallback.** Otherwise one read-only query (`store.QueryEvents`) runs, with `network`,
   `country`, `target` and `proxyKind` as predicates (`p.provider`, `e.country_code`, `e.target_id`,
   `p.name`) and `after` as `e.event_id > $n ORDER BY e.event_id`, reading `limit + 1` rows to tell
   `more`. `q` matches the rendered text, so it is not SQL: the fallback reads up to 2,000 rows
   passing the other filters (`store.TextScan`) and matches `q` among them. Every shape is in
-  `siteapi explain` (`events.query.network`, `.network_notable`, `.country`, `.target`,
+  `siteapi explain` (`load.events_late`, `events.query.network`, `.network_notable`, `.country`, `.target`,
   `.proxy_kind`, `.after`, `.q`).
 - The rendered answer is kept in the version's 256-entry LRU; `Cache-Control` is
   `public, max-age=15, s-maxage=15`.
@@ -64,7 +66,7 @@ Every parameter is optional; any other parameter answers 400.
 ## Tests
 
 `build/events_tape_test.go` (a 300-event burst read with `limit=100` and `after` loses none, from
-memory and from the fallback; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
-a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate),
+memory and from the fallback; a late row an `after` poll returns; `network=` against `product=`; `q=`; `more`, `cursor`, `updatedAt`;
+a bounded `q` read), `store/events_tape_test.go` (each new filter as a database predicate, the late read),
 `server/events_tape_test.go` and `server/events_tape_db_test.go` (the every-request build), and the
 golden family `server/testdata/answers-v4-scale/events.json`.

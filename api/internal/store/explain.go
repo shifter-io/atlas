@@ -57,6 +57,8 @@ type ExplainParams struct {
 	// where the notable read starts, and the since filter.
 	CursorAt time.Time `json:"cursor_at"`
 	CursorID int64     `json:"cursor_id"`
+	// WindowMinID is those events' smallest id, where the late read starts.
+	WindowMinID int64 `json:"window_min_id"`
 	// EventCountry and EventTarget are the newest of those events' country
 	// and target, the country= and target= filters.
 	EventCountry string `json:"event_country"`
@@ -126,6 +128,9 @@ func registry() []Statement {
 		Statement{"load.events_newest", "Inputs.loadEvents", everyLayout, func(*ExplainParams) (string, []any) { return eventsNewestSQL, []any{EventWindow + 1} }},
 		Statement{"load.events_notable", "Inputs.loadEvents", everyLayout, func(p *ExplainParams) (string, []any) {
 			return eventsNotableSQL, []any{p.CursorAt, p.CursorID, NotableWindow + 1}
+		}},
+		Statement{"load.events_late", "Inputs.loadEvents", everyLayout, func(p *ExplainParams) (string, []any) {
+			return eventsLateSQL, []any{p.WindowMinID, p.CursorAt, p.CursorID, LateWindow + 1}
 		}},
 		Statement{"events.max_id", "LoadEvents", everyLayout, fixed(maxEventSQL)},
 		Statement{"events.query.default", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Limit: 100} })},
@@ -254,6 +259,7 @@ func (p *ExplainParams) readCursor(ctx context.Context, tx pgx.Tx) error {
 	if len(rows) > 0 {
 		p.CursorAt, p.CursorID = rows[len(rows)-1].At, rows[len(rows)-1].ID
 	}
+	p.WindowMinID = MinEventID(rows)
 	for i := len(rows) - 1; i >= 0; i-- {
 		if c := rows[i].Country; c != nil {
 			p.EventCountry = *c

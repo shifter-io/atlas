@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 )
@@ -80,9 +81,15 @@ func TestABurstReadWithAfterLosesNone(t *testing.T) {
 	if !slices.Equal(memory, want) || reads != 3 {
 		t.Fatalf("from memory: %d rows in %d reads", len(memory), reads)
 	}
-	incomplete := newEventWindow(&store.Inputs{Events: rows[:150]}, acmeText)
+	incomplete := newEventWindow(&store.Inputs{Events: rows[:150], LateComplete: true}, acmeText)
 	if _, ok := incomplete.Answer(store.EventFilter{After: sp64(0), Limit: 100}); ok {
 		t.Fatal("after older than the window answered from memory")
+	}
+	if _, ok := incomplete.Answer(store.EventFilter{After: sp64(149), Limit: 100}); ok {
+		t.Fatal("after below the window's smallest id but one answered from memory")
+	}
+	if a, ok := incomplete.Answer(store.EventFilter{After: sp64(150), Limit: 1}); !ok || !slices.Equal(eventIDs(a), []int64{151}) {
+		t.Fatalf("after the window's smallest id but one: %v %v", eventIDs(a), ok)
 	}
 	if a, ok := incomplete.Answer(store.EventFilter{After: sp64(151), Limit: 100}); !ok || len(a.Events) != 100 || a.Events[0].ID != 152 || !a.More {
 		t.Fatalf("after inside the window: %v %v", eventIDs(a), ok)
@@ -194,5 +201,26 @@ func TestABoundedQReadMovesTheCursor(t *testing.T) {
 	a = w.FromRows(store.EventFilter{After: sp64(0), Words: []string{"acme", "us"}, Limit: 10}, rows[:20])
 	if !slices.Equal(eventIDs(a), []int64{1, 3, 7, 9, 11, 13, 17, 19}) || *a.Cursor != 19 || a.More {
 		t.Fatalf("an unbounded read: %v cursor %d more %v", eventIDs(a), *a.Cursor, a.More)
+	}
+}
+
+// A late row (a new id stamped older than the window, as the daily ingest
+// writes a test's own times) is held past the window, and an after poll
+// returns it; with the late rows cut, after goes to the database.
+func TestAnAfterPollReturnsALateRow(t *testing.T) {
+	rows := burst(10)
+	late := store.Event{ID: 11, At: windowBase.Add(-3 * time.Hour), Kind: "daily_test_finished", Provider: sp("acme"), Product: sp("residential"),
+		Country: sp("DE"), Severity: "info", Data: json.RawMessage(`{"status":"ok"}`)}
+	w := newEventWindow(&store.Inputs{Events: rows[:5], Late: []store.Event{late}, LateComplete: true}, acmeText)
+	a, ok := w.Answer(store.EventFilter{After: sp64(8), Limit: 10})
+	if !ok || !slices.Equal(eventIDs(a), []int64{9, 10, 11}) || *a.Cursor != 11 || a.More || a.Events[2].Title != "Daily test done in DE" {
+		t.Fatalf("after 8: %v %v", eventIDs(a), ok)
+	}
+	if a, _ := w.Answer(store.EventFilter{Limit: 10, Since: &windowBase}); len(a.Events) != 0 {
+		t.Fatalf("a late row is not in the newest rows: %v", eventIDs(a))
+	}
+	w.LateComplete = false
+	if _, ok := w.Answer(store.EventFilter{After: sp64(8), Limit: 10}); ok {
+		t.Fatal("a cut late list answered after from memory")
 	}
 }
