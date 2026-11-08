@@ -91,9 +91,7 @@ def test_each_kind_is_the_fleet_totals_of_its_groups_alone():
 def two_kinds(tmp_path):
     """The lenient policy with beta's product a datacenter one."""
     policy = lenient_policy(tmp_path)
-    policy.write_text(
-        policy.read_text() + '\n[products."beta/residential"]\nkind = "datacenter"\n'
-    )
+    policy.write_text(policy.read_text() + '\n[products."beta/residential"]\nkind = "datacenter"\n')
     return policy
 
 
@@ -148,7 +146,8 @@ def assert_target_bytes(conn, payload, end):
 @pytest.mark.asyncio
 async def test_nothing_else_changes(database, tmp_path, monkeypatch):
     """Per mode, a build without the kind entries, then one with them: equal, field by field,
-    but for the added entries."""
+    but for the added entries. The first has its own implementation id, as the code before this
+    change had, so the second is built anew instead of reusing it."""
     end = floor_hour(datetime.now(UTC)) + HOUR
     await history(database, tmp_path, end)
     policy = two_kinds(tmp_path)
@@ -160,9 +159,12 @@ async def test_nothing_else_changes(database, tmp_path, monkeypatch):
     for mode in ("incremental", "full"):
         with monkeypatch.context() as patched:
             patched.setattr(calculator, "fleet_totals", without_kinds)
+            patched.setattr(calculator, "IMPLEMENTATION_ID", f"before-{mode}")
             before = read_back(database, calculate(database, policy, as_of=end, mode=mode))
         after = read_back(database, calculate(database, policy, as_of=end, mode=mode))
+        assert before.pop("implementation_id") != after["implementation_id"]
         added = [f for f in after["fleet"] if f["cohort"].startswith(KIND)]
         assert {f["cohort"] for f in added} == {"*:datacenter", "*:residential"}
-        kept = after | {"fleet": [f for f in after["fleet"] if f not in added]}
+        kept = {k: v for k, v in after.items() if k != "implementation_id"}
+        kept["fleet"] = [f for f in after["fleet"] if f not in added]
         assert json.dumps(kept) == json.dumps(before), (mode, first_difference(kept, before))
