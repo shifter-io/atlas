@@ -16,6 +16,7 @@ headless = true
 block_resources = ["image", "media", "font"]   # default; a target may override it
 screenshots = "failures"        # failures | all | none
 locale = "en-US"
+engine = "camoufox"             # default camoufox | chrome; a target may override it
 
 [chrome]                        # optional, read by the hosts: the second engine
 executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # the default
@@ -27,7 +28,7 @@ max_pending_gb = 20             # above this, the host stops taking screenshots
 # One [[target]] per run target, in start order within a slot. tries (1..10000, per network
 # per run) and every_minutes (5..1440, slots aligned to the epoch) are required per target;
 # there is no global budget. Optional per target: timeout_s, block_resources,
-# challenge_wait_s, answer_wait_s.
+# challenge_wait_s, answer_wait_s, engine ("camoufox" or "chrome", over [browser] engine).
 
 [[target]]
 id = "amazon_pdp"

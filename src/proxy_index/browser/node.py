@@ -2,7 +2,11 @@
 
 One process per browser host runs every network the settings assign to that host (K-BP3
 [[host]]): one ordinary NodeAgent per network, each with its own token, all sharing one
-BrowserPool. A `browser` assignment runs with its target's settings, never the assignment's
+BrowserPool, of which each engine the targets use has its own pool (pool.EnginePool): the host
+never has more than `browsers_per_host` browsers open, whatever their engines, and leases them
+first in, first out. A run uses its target's engine (settings.engine) and records it in its
+summary's config (`browser_engine`, part of its scope), its tries and its manifest. A `browser`
+assignment runs with its target's settings, never the assignment's
 pulse values: `tries` requests, `browsers_per_host` concurrency (the pool, not the run, limits
 the browsers), the page timeout plus the answer or challenge wait as the try timeout, and the
 deadline slot end minus 2 minutes (D8): no try starts after it. Any other kind, or a target the
@@ -11,8 +15,10 @@ settings do not list, is refused and reported failed. A network in `[networks] u
 
 Every finished run writes one JSON timing line, and the host one line an hour, to
 <state>/logs/browser-node.jsonl (size-rotated). A run's tries and screenshots go into its run
-directory (rawfiles.FileRecorder); when it ends it is sealed into the outbox and sent from
-there (rawfiles.Outbox): after every run, at start and every 5 minutes, at most 2 at a time.
+directory (rawfiles.FileRecorder), with the host's process samples of the run
+(procstats.TreeSampler, browser/samples.jsonl); when it ends it is sealed into the outbox
+and sent from there (rawfiles.Outbox): after every run, at start and every 5 minutes, at most
+2 at a time.
 An unconfirmed upload never fails the run: the bundle stays and is sent again (K-BP7).
 """
 
@@ -22,8 +28,9 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from datetime import UTC, datetime
 from functools import partial
@@ -45,11 +52,11 @@ from ..node_tls import check_private as _check_private
 from ..node_tls import client_tls
 from ..sinks import JsonSink
 from ..targets import TargetRegistry, registry
-from . import rawfiles, release
+from . import chrome, engines, procstats, rawfiles, release
 from .contracts import BROWSER_KIND, BROWSER_REGION, user_agent
 from .contracts import CAMOUFOX_FIELDS as CAMOUFOX
 from .driver import host_os
-from .pool import BrowserPool, Pooled
+from .pool import BrowserPool, Launch, Pooled
 from .run import BundleSink as BundleSink
 from .run import JsonLog as JsonLog
 from .run import RunTiming as RunTiming
@@ -125,6 +132,15 @@ def load_network(state: Path, name: str, settings: BrowserSettings) -> Network:
 def load_networks(state: str | Path, settings: BrowserSettings) -> list[Network]:
     """Every network of the host view `settings` (BrowserSettings.host)."""
     return [load_network(Path(state), name, settings) for name in settings.hosts[0].networks]
+
+
+def detected_chrome(settings: BrowserSettings) -> dict[str, str]:
+    """The Chrome engine block before any Chrome launched: the [chrome] executable's version
+    (chrome.detect: a missing or too old Chrome refuses the host's start) and its user agent."""
+    version = chrome.detect(settings.chrome.executable)
+    return engines.from_chrome(
+        {"version": version, "user_agent": chrome.user_agent(version, host_os())}
+    )
 
 
 def bound_registry(settings: BrowserSettings) -> TargetRegistry:
@@ -206,7 +222,8 @@ class BrowserAgent(NodeAgent):
 
 
 class BrowserHost:
-    """Every network of one host (`settings` is its BrowserSettings.host view) on one pool."""
+    """Every network of one host (`settings` is its BrowserSettings.host view) on one pool.
+    `launch` is the launch of each engine (one launch alone serves every engine)."""
 
     def __init__(
         self,
@@ -214,7 +231,7 @@ class BrowserHost:
         state: str | Path,
         orchestrator: str,
         *,
-        launch: Callable[[], Awaitable[Pooled]],
+        launch: Launch | Mapping[str, Launch],
         **agent_options: Any,
     ) -> None:
         self.settings, self.state = settings, Path(state)
@@ -222,16 +239,24 @@ class BrowserHost:
         self.targets: dict[str, TargetSettings] = {t.id: t for t in settings.targets}
         self.registry = bound_registry(settings)
         options = settings.browser
-        self._launch = launch
-        self.pool = BrowserPool(
-            options.browsers_per_host, self._launch_one, recycle_after=options.recycle_after
+        self._launch = (
+            launch if isinstance(launch, Mapping) else dict.fromkeys(engines.ENGINES, launch)
         )
+        used = settings.engines()
+        launches = {engine: partial(self._launch_one, engine) for engine in used}
+        self.pool = BrowserPool(
+            options.browsers_per_host, launches, recycle_after=options.recycle_after
+        )
+        self.pools = {engine: self.pool.engine(engine) for engine in used}
+        self.read_ps = procstats.read_ps  # each run's TreeSampler reads `ps` through it
         # The manifest's camoufox block: the last launched browser's, else the pinned one's.
         self.identity = {
             "release": release.RELEASE,
             "engine_version": release.ENGINE_VERSION,
             "user_agent": user_agent(release.ENGINE_VERSION, host_os()),
         }
+        # A Chrome run's engine block: the last launched Chrome's, else the detected one's.
+        self.chrome = detected_chrome(settings) if engines.CHROME in used else None
         self.hour_interval = HOUR_S
         self.outbox_interval = OUTBOX_EVERY_S
         self.busy_ms = 0
@@ -251,15 +276,21 @@ class BrowserHost:
         self.agents = [BrowserAgent(self, n, orchestrator, **agent_options) for n in self.networks]
         self.by_network = {agent.network.name: agent for agent in self.agents}
 
-    async def _launch_one(self) -> Pooled:
-        handle = await self._launch()
+    async def _launch_one(self, engine: str) -> Pooled:
+        handle = await self._launch[engine]()
         identity = getattr(handle, "identity", None)
-        if isinstance(identity, dict) and set(CAMOUFOX) <= set(identity):
+        if not isinstance(identity, dict):
+            return handle
+        if engine == engines.CAMOUFOX and set(CAMOUFOX) <= set(identity):
             self.identity = {key: identity[key] for key in CAMOUFOX}
             log.info(
                 "browser launched: Camoufox %s, engine %s, user agent %s",
                 *(self.identity[key] for key in CAMOUFOX),
             )
+        elif engine == engines.CHROME and {"version", "user_agent"} <= set(identity):
+            self.chrome = engines.from_chrome(identity)
+            version, agent = self.chrome["version"], self.chrome["user_agent"]
+            log.info("browser launched: Chrome %s, user agent %s", version, agent)
         return handle
 
     def _full_line(self, line: dict[str, Any]) -> None:
@@ -281,9 +312,23 @@ class BrowserHost:
     def seal_run(
         self, run_dir: Path, batch: rawfiles.Batch, summary: dict, settings_sha256: str
     ) -> rawfiles.Bundle:
-        camoufox = self.identity
+        """Seal with the identity of the run's engine (its summary's config); a Chrome run
+        while this host runs no Chrome target has none: kept unsealed (ValueError)."""
+        if summary["config"].get("browser_engine") != engines.CHROME:
+            camoufox = self.identity
+            return rawfiles.seal(
+                run_dir, batch, summary, settings_sha256, camoufox, outbox=self.outbox_dir
+            )
+        if self.chrome is None:
+            raise ValueError("a Chrome run, and this host runs no Chrome")
         return rawfiles.seal(
-            run_dir, batch, summary, settings_sha256, camoufox, outbox=self.outbox_dir
+            run_dir,
+            batch,
+            summary,
+            settings_sha256,
+            None,
+            outbox=self.outbox_dir,
+            engine=self.chrome,
         )
 
     def wake_outbox(self) -> None:
@@ -336,6 +381,7 @@ class BrowserHost:
             "requests": entry.tries,
             "concurrency": self.settings.browser.browsers_per_host,
             "timeout_seconds": try_seconds(self.registry.get(entry.id), page_timeout_s),
+            "browser_engine": self.settings.engine(entry.id),
         }
         if network.untargeted:
             options["requested_country"] = None
@@ -344,14 +390,14 @@ class BrowserHost:
     def run_options(
         self, network: Network, assignment: dict[str, Any], recorder: Recorder
     ) -> dict[str, Any]:
-        """runner.run's deadline and this run's transport on the shared pool."""
+        """runner.run's deadline and this run's transport on its engine's pool, sampled."""
         entry = self.targets[assignment["target_id"]]
         deadline = slot_deadline(assignment["start_at"], entry.every_minutes)
-        timing = RunTiming(recorder)
+        timing = RunTiming(recorder, procstats.TreeSampler(os.getpid(), read=self.read_ps))
         finished = partial(self._run_line, network, assignment, timing, deadline)
         transport = partial(
             RunTransport,
-            pool=self.pool,
+            pool=self.pools[self.settings.engine(entry.id)],
             browser=self.settings.browser,
             settings=entry,
             recorder=timing,
@@ -370,6 +416,8 @@ class BrowserHost:
     ) -> None:
         now = time.time()
         self.busy_ms += timing.busy_ms
+        if isinstance(timing.inner, rawfiles.FileRecorder) and timing.sampler is not None:
+            timing.inner.samples(timing.sampler.lines)
         self.log.write(
             {
                 "kind": "run",
@@ -377,6 +425,7 @@ class BrowserHost:
                 "batch": assignment["batch_id"],
                 "network": network.name,
                 "target": assignment["target_id"],
+                "engine": config.browser_engine,
                 "country": assignment["country_code"],
                 "geo_targeting": not network.untargeted,
                 "tries_requested": config.requests,
@@ -535,16 +584,27 @@ def dispatch(args) -> int:
 
     settings = load_settings(args.settings).host(args.host)
     state = args.state.expanduser()
-    launch = partial(
-        driver.launch,
-        release.executable(state / "camoufox"),
-        locale=settings.browser.locale,
-        headless=settings.browser.headless,
-    )
+    headless = settings.browser.headless
+    launch = {
+        engines.CAMOUFOX: partial(
+            driver.launch,
+            release.executable(state / "camoufox"),
+            locale=settings.browser.locale,
+            headless=headless,
+        ),
+        # The launch check's fingerprint country; each try draws its own run's (driver).
+        engines.CHROME: partial(
+            driver.launch_chrome,
+            settings.chrome.executable,
+            country=settings.schedule.countries[0],
+            headless=headless,
+        ),
+    }
     if args.check:
         if not 1 <= args.browsers <= 16:
             raise UserError("--browsers must be 1 to 16")
-        print(json.dumps(asyncio.run(check(settings, state, launch, args.browsers)), indent=2))
+        camoufox = launch[engines.CAMOUFOX]
+        print(json.dumps(asyncio.run(check(settings, state, camoufox, args.browsers)), indent=2))
         return 0
     if not args.orchestrator:
         raise UserError("--orchestrator is required unless --check")

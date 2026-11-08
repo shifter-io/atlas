@@ -3,11 +3,13 @@ browser, through PostgreSQL, ARCHIVE-1's fake S3 bucket and the aiohttp test cli
 and refused bundles; concurrency and run states are in test_browser_ingest_runs.py."""
 
 import json
+from datetime import timedelta
 
 import pytest
 from browser_ingest_cases import (
     KEY,
     MEMBERS,
+    SLOT,
     assert_nothing_kept,
     browser_run,
     make_bundle,
@@ -138,6 +140,8 @@ async def test_other_kinds_verify_a_checksum_when_sent(database, db, client, tmp
         ({"manifest": {"network": {"provider": "beta", "product": "res"}}}, "another provider"),
         ({"no_manifest": True}, "no browser/manifest.json"),
         ({"extra": [("browser/screenshots/0000.jpg", b"jpeg")]}, "files differ"),
+        ({"engine": "chrome", "config_engine": "camoufox"}, "engine disagrees"),
+        ({"version": 1, "config_engine": "chrome"}, "engine disagrees"),
     ],
 )
 async def test_a_bundle_that_does_not_match_its_run_is_refused_400(
@@ -150,6 +154,49 @@ async def test_a_bundle_that_does_not_match_its_run_is_refused_400(
     assert world["bucket"].objects == {} and query(database, "SELECT * FROM test_runs") == []
     assert query(database, "SELECT kind FROM alerts") == [("results_rejected",)]
     assert run_rows(database, batch_id)[0][0] == "failed"
+    assert_nothing_kept(world, scratch)
+
+
+# --- manifest versions and engines ---------------------------------------------------------
+
+
+def scopes(database):
+    """{run id: (scope id, the scope's browser_engine)} of every stored run."""
+    rows = query(
+        database,
+        "SELECT r.run_id::text,s.scope_id,s.scope->'config'->>'browser_engine' "
+        "FROM test_runs r JOIN scope_details s USING(scope_id)",
+    )
+    return {run_id: (scope_id, engine) for run_id, scope_id, engine in rows}
+
+
+async def test_a_version_1_bundle_still_ingests(database, client, world, scratch):
+    batch_id = browser_run(database, "alpha")
+    data, run_id = await make_bundle(world["tmp"], batch_id, version=1)
+    status, body, _ = await upload(client, world["tokens"]["alpha"], batch_id, data, run_id)
+    assert status == 200, body
+    assert body["ingested"] is True and body["archived"]["key"] == KEY
+    assert [engine for _, engine in scopes(database).values()] == [None]
+    assert_nothing_kept(world, scratch)
+
+
+async def test_a_chrome_bundle_ingests_into_its_own_scope(database, client, world, scratch):
+    engines = {}
+    for hour, engine in enumerate(("camoufox", "chrome", "camoufox")):
+        slot = SLOT + timedelta(hours=hour)
+        batch_id = browser_run(database, "alpha", slot=slot)
+        data, run_id = await make_bundle(world["tmp"], batch_id, engine=engine, slot=slot)
+        status, body, _ = await upload(client, world["tokens"]["alpha"], batch_id, data, run_id)
+        assert status == 200, body
+        engines[run_id] = engine
+    found = scopes(database)
+    assert {run_id: engine for run_id, (_, engine) in found.items()} == engines
+    by_engine = {
+        engine: {s for r, (s, e) in found.items() if e == engine} for engine in engines.values()
+    }
+    # The two Camoufox runs share a scope; the Chrome run has its own.
+    assert len(by_engine["camoufox"]) == len(by_engine["chrome"]) == 1
+    assert by_engine["camoufox"] != by_engine["chrome"]
     assert_nothing_kept(world, scratch)
 
 

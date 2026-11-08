@@ -15,7 +15,7 @@ from typing import Any
 from ..models import RunConfig
 from ..sinks import JsonSink
 from ..targets import Target
-from . import rawfiles
+from . import procstats, rawfiles
 from .transport import BrowserTransport, Recorder
 
 DEADLINE_MARGIN_S = 120
@@ -52,10 +52,11 @@ def _percentile(values: list[int], share: float) -> int | None:
 
 
 class RunTiming:
-    """One run's recorder: keeps the timing of every try and passes it on to `inner`."""
+    """One run's recorder: keeps the timing of every try and passes it on to `inner`. Its
+    `sampler`, if any, samples the host's process tree while the run's transport is open."""
 
-    def __init__(self, inner: Recorder) -> None:
-        self.inner = inner
+    def __init__(self, inner: Recorder, sampler: procstats.TreeSampler | None = None) -> None:
+        self.inner, self.sampler = inner, sampler
         self.tries = self.ok = self.busy_ms = 0
         self.latency: list[int] = []
         self.queue: list[int] = []
@@ -73,13 +74,22 @@ class RunTiming:
 
 
 class RunTransport(BrowserTransport):
-    """BrowserTransport that reports when its run ends (the runner leaves the transport)."""
+    """BrowserTransport that reports when its run ends (the runner leaves the transport), its
+    recorder's sampler running from the run's start to its end."""
 
     def __init__(self, config: RunConfig, *, finished: Callable[[RunConfig], None], **options):
         super().__init__(config, **options)
         self._finished = finished
+        self.sampler = getattr(self.recorder, "sampler", None)
+
+    async def __aenter__(self) -> RunTransport:
+        if self.sampler is not None:
+            self.sampler.start()
+        return self
 
     async def __aexit__(self, *args: object) -> None:
+        if self.sampler is not None:
+            await self.sampler.stop()
         self._finished(self.config)
 
 

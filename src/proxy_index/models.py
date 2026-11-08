@@ -214,6 +214,8 @@ class RunConfig:
     # Census rule 4 and count runs (answers.py): rate-limited answers are replaced and never
     # count toward the goal; no-IP and other-country answers count like duplicates.
     answer_classes: AnswerClasses | None = None
+    # A browser run's engine (browser/engines.py), part of its scope; None (omitted) otherwise.
+    browser_engine: str | None = None
 
     def _check_policies(self) -> None:
         if type(self.retry_http_469) is not bool:
@@ -256,6 +258,7 @@ class RunConfig:
                 for name in self.__dataclass_fields__
                 if name not in ("proxy", "answer_classes")
                 and not (name == "retry_http_469" and not self.retry_http_469)
+                and not (name == "browser_engine" and self.browser_engine is None)
                 and not (name in STOP_RULE_FIELDS and self.stop_rule == "count")
             }
             | ({"answer_classes": self.answer_classes.public()} if self.answer_classes else {})

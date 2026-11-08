@@ -29,6 +29,7 @@ from ..errors import UserError
 from ..models import VERDICTS
 from ..orchestrator.archive import pack
 from . import contracts as bc
+from . import engines
 
 log = logging.getLogger(__name__)
 
@@ -114,12 +115,26 @@ def _members(run_dir: Path) -> list[dict[str, Any]]:
 
 
 def build_manifest(
-    run_dir: Path, batch: Batch, summary: dict, settings_sha256: str, camoufox: dict
+    run_dir: Path,
+    batch: Batch,
+    summary: dict,
+    settings_sha256: str,
+    camoufox: dict | None,
+    engine: dict | None = None,
 ) -> dict[str, Any]:
-    """The run's K-BP4 manifest; requested_country and geo_targeting from its config (D11)."""
+    """The run's K-BP4 manifest; requested_country and geo_targeting from its config (D11).
+    `engine` is the engine block (engines.from_chrome), a Camoufox run's the `camoufox`
+    identity's by default; it must be the engine the summary's config names."""
     lines = (run_dir / MEMBERS.tries).read_bytes().splitlines()
     records = [bc.try_record(**json.loads(line)) for line in lines]
     config = summary["config"]
+    if engine is None and camoufox is not None:
+        engine = engines.from_camoufox(camoufox)
+    if engine is None or engine["name"] != config.get("browser_engine", engines.DEFAULT_ENGINE):
+        raise ValueError("engine: not the engine of the run's config")
+    identity = {"engine": engine}
+    if camoufox is not None and engine["name"] == engines.CAMOUFOX:
+        identity["camoufox"] = {key: camoufox[key] for key in bc.CAMOUFOX_FIELDS}
     requested = config.get("requested_country")
     requested = requested.upper() if isinstance(requested, str) else None
     return bc.manifest(
@@ -136,9 +151,9 @@ def build_manifest(
         tries=len(records),
         outcomes=_outcomes(records),
         settings_sha256=settings_sha256,
-        camoufox={key: camoufox[key] for key in bc.CAMOUFOX_FIELDS},
         host=batch.host,
         files=_members(run_dir),
+        **identity,
     )
 
 
@@ -147,14 +162,16 @@ def seal(
     batch: Batch,
     summary: dict,
     settings_sha256: str,
-    camoufox: dict,
+    camoufox: dict | None,
     *,
     outbox: Path,
+    engine: dict | None = None,
 ) -> Bundle:
-    """Manifest, deterministic tar.gz and sidecar, each fsynced; the tar.gz re-hashed against
-    the sidecar; then, and only then, the run directory is removed."""
+    """Manifest (build_manifest: `camoufox` and `engine`), deterministic tar.gz and sidecar,
+    each fsynced; the tar.gz re-hashed against the sidecar; then, and only then, the run
+    directory is removed."""
     run_dir = Path(run_dir)
-    document = build_manifest(run_dir, batch, summary, settings_sha256, camoufox)
+    document = build_manifest(run_dir, batch, summary, settings_sha256, camoufox, engine)
     _write(run_dir / MEMBERS.manifest, json.dumps(document, indent=2).encode() + b"\n")
     outbox.mkdir(parents=True, exist_ok=True, mode=0o700)
     archive, sidecar = bc.outbox_paths(outbox, summary["run_id"])

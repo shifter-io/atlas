@@ -33,7 +33,7 @@ from .contracts import (
 from .driver import NavigationError, Page, UserAgentRefused
 from .geo import GeoRefused
 from .judge import PageAssessment, failed, selectors
-from .pool import BrowserPool
+from .pool import BrowserPool, EnginePool
 from .settings import BrowserOptions, TargetSettings
 from .targets.ai import ANSWER_CHARS
 
@@ -98,7 +98,8 @@ async def _accept_consent(page: Page, target: Any) -> None:
 
 
 class BrowserTransport:
-    """A run's browser tries on the host's shared pool. `settings` is the target's [[target]]:
+    """A run's browser tries on the host's shared pool, or on one engine's pool of it (then
+    every try record names that `engine`). `settings` is the target's [[target]]:
     its inputs, and its timeout_s and block_resources overriding the [browser] defaults.
     `view_sink`, if given, receives (request index, the PageView judge() got) after the try is
     recorded, once per try that reached a view; only scripts/browser_capture.py passes one."""
@@ -107,7 +108,7 @@ class BrowserTransport:
         self,
         config: RunConfig,
         *,
-        pool: BrowserPool,
+        pool: BrowserPool | EnginePool,
         browser: BrowserOptions,
         settings: TargetSettings,
         recorder: Recorder | None = None,
@@ -115,6 +116,7 @@ class BrowserTransport:
         view_sink: Callable[[int, PageView], None] | None = None,
     ) -> None:
         self.config, self.pool, self.deadline = config, pool, deadline
+        self.engine = pool.name if isinstance(pool, EnginePool) else None
         self.view_sink = view_sink
         self.recorder = recorder if recorder is not None else NullRecorder()
         self.inputs = settings.inputs
@@ -126,7 +128,7 @@ class BrowserTransport:
 
     @classmethod
     def factory(
-        cls, pool: BrowserPool, recorder: Recorder | None = None, **options: Any
+        cls, pool: BrowserPool | EnginePool, recorder: Recorder | None = None, **options: Any
     ) -> Callable[[RunConfig], BrowserTransport]:
         """The runner's transport_factory; `options` are browser, settings and deadline."""
         return functools.partial(cls, pool=pool, recorder=recorder, **options)
@@ -275,5 +277,6 @@ class BrowserTransport:
             reason=reason,
             screenshot=bundle_members().screenshot(i) if shot is not None else None,
             **({"fingerprint": fingerprint} if fingerprint is not None else {}),
+            **({"engine": self.engine} if self.engine is not None else {}),
         )
         self.recorder.try_done(record, shot)

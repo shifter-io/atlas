@@ -25,6 +25,7 @@ from archive_job_cases import KEY_ID, SECRET, Bucket
 from orchestrator_cases import bearer, prepare, query
 from test_storage import measurement
 
+from proxy_index.browser import chrome, engines
 from proxy_index.browser import contracts as bc
 from proxy_index.models import VERDICTS
 from proxy_index.orchestrator import browser_ingest
@@ -39,6 +40,22 @@ SLOT = datetime(2026, 10, 1, 12, tzinfo=UTC)
 MEMBERS = bc.bundle_members()
 HOSTS = {"alpha": "browser-1", "beta": "browser-2", "gamma": "browser-3"}
 KEY = "browser-files/alpha.res/amazon_pdp/de/2026-10-01T1200Z.tar.gz"
+CAMOUFOX = {
+    "release": "v135.0.1-beta.24",
+    "engine_version": "135.0.1",
+    "user_agent": bc.user_agent("135.0.1", "macos"),
+}
+CHROME = {
+    "name": "chrome",
+    "version": "151.0.7",
+    "user_agent": chrome.user_agent("151.0.7", "macos"),
+}
+# The manifest's identity fields by (version, engine): a version 1 manifest is Camoufox's.
+IDENTITIES = {
+    (1, "camoufox"): {"camoufox": CAMOUFOX},
+    (2, "camoufox"): {"camoufox": CAMOUFOX, "engine": engines.from_camoufox(CAMOUFOX)},
+    (2, "chrome"): {"engine": CHROME},
+}
 
 
 class ListingBucket(Bucket):
@@ -177,9 +194,13 @@ def tries_line():
 
 
 async def make_bundle(tmp_path, batch_id, provider="alpha", **options):
-    """A K-BP4 bundle for the batch: a real run directory (target, country and network set as
-    the browser runner sets them) plus browser/manifest.json and browser/tries.jsonl."""
+    """A K-BP4 bundle for the batch: a real run directory (target, country, network and, from
+    manifest version 2, engine set as the browser runner sets them) plus browser/manifest.json
+    and browser/tries.jsonl. Options: `version` (2) and `engine` (camoufox) of the manifest,
+    `config_engine` (the summary's, by default the manifest's), `slot`."""
     target, requested = options.get("target", "amazon_pdp"), options.get("requested", "de")
+    version, engine = options.get("version", 2), options.get("engine", "camoufox")
+    slot = options.get("slot", SLOT)
     work = tmp_path / f"bundle-{batch_id}-{provider}-{time.monotonic_ns()}"
     work.mkdir()
     directory = await measurement(
@@ -187,32 +208,35 @@ async def make_bundle(tmp_path, batch_id, provider="alpha", **options):
     )
     summary = json.loads((directory / "summary.json").read_text())
     summary["target"]["id"] = target
+    config_engine = options.get("config_engine", engine if version == 2 else None)
+    if config_engine is not None:
+        summary["config"]["browser_engine"] = config_engine
     (directory / "summary.json").write_text(json.dumps(summary))
     tries = tries_line()
-    manifest = bc.manifest(
-        run_id=summary["run_id"],
-        batch_id=batch_id,
-        network={"provider": provider, "product": "res"},
-        target=target,
-        country="DE",
-        requested_country=requested.upper() if requested else None,
-        geo_targeting=requested is not None,
-        slot=SLOT,
-        started_at=SLOT,
-        finished_at=SLOT + timedelta(minutes=1),
-        tries=1,
-        outcomes={
-            "verdicts": dict.fromkeys(VERDICTS, 0) | {"ok": 1},
-            "errors": dict.fromkeys(bc.CODE_VERDICTS, 0),
-        },
-        settings_sha256="a" * 64,
-        camoufox={
-            "release": "v135.0.1-beta.24",
-            "engine_version": "135.0.1",
-            "user_agent": bc.user_agent("135.0.1", "macos"),
-        },
-        host=options.get("host") or HOSTS[provider],
-        files=[{"name": MEMBERS.tries, "bytes": len(tries), "sha256": sha256(tries)}],
+    manifest = bc.check_manifest(
+        {
+            "format": bc.MANIFEST_FORMAT,
+            "version": version,
+            "run_id": summary["run_id"],
+            "batch_id": batch_id,
+            "network": {"provider": provider, "product": "res"},
+            "target": target,
+            "country": "DE",
+            "requested_country": requested.upper() if requested else None,
+            "geo_targeting": requested is not None,
+            "slot": slot,
+            "started_at": slot,
+            "finished_at": slot + timedelta(minutes=1),
+            "tries": 1,
+            "outcomes": {
+                "verdicts": dict.fromkeys(VERDICTS, 0) | {"ok": 1},
+                "errors": dict.fromkeys(bc.CODE_VERDICTS, 0),
+            },
+            "settings_sha256": "a" * 64,
+            "host": options.get("host") or HOSTS[provider],
+            "files": [{"name": MEMBERS.tries, "bytes": len(tries), "sha256": sha256(tries)}],
+        }
+        | IDENTITIES[version, engine]
     ) | options.get("manifest", {})
     members = [(MEMBERS.tries, tries), (MEMBERS.manifest, json.dumps(manifest).encode())]
     members = members[: 1 if options.get("no_manifest") else 2]
