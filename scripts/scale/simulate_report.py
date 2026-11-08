@@ -28,7 +28,10 @@ BASIS = {
 }
 # (label, the generated day's figure, real_24h's figure)
 REAL = (("unique IPs", "unique_ips", "unique_ips_hour_sum"), ("tries", "tries", "browser_tries"))
-REAL += (("requests", "requests", "attempted_requests"), ("runs", "browser", "browser_runs"))
+REAL += (
+    ("requests", "requests", "attempted_requests"),
+    ("browser runs", "browser", "browser_runs"),
+)
 REAL += (("bundle bytes", "bundle_bytes", "bundle_bytes_sampled"),)
 
 
