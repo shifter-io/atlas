@@ -1,11 +1,9 @@
 package store
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strconv"
 	"time"
 
@@ -291,6 +289,7 @@ type Inputs struct {
 	// id, at most LateWindow; LateComplete is true when it holds every such row.
 	Late         []Event
 	LateComplete bool
+	EventsRead   EventsRead // the events read's snapshot and largest id
 	// SiteGaps is one line per site table read as empty because the table or
 	// a column it reads is missing (SiteLayout); none on a migrated database.
 	SiteGaps []string
@@ -299,6 +298,9 @@ type Inputs struct {
 // loadEvents reads the newest EventWindow events and, past them, the newest
 // NotableWindow non-routine ones and the LateWindow late ones.
 func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
+	if err := tx.QueryRow(ctx, eventsReadSQL).Scan(&in.EventsRead.MaxID, &in.EventsRead.Xmin, &in.EventsRead.Next); err != nil {
+		return fmt.Errorf("events read: %w", err)
+	}
 	in.Events, err = collect(ctx, tx, eventsNewestSQL, ScanEvent, EventWindow+1)
 	if err != nil {
 		return err
@@ -321,14 +323,6 @@ func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
 		in.Late, in.LateComplete = in.Late[:LateWindow], false
 	}
 	return err
-}
-
-// MinEventID is the smallest id of rows (0 for none).
-func MinEventID(rows []Event) int64 {
-	if len(rows) == 0 {
-		return 0
-	}
-	return slices.MinFunc(rows, func(a, b Event) int { return cmp.Compare(a.ID, b.ID) }).ID
 }
 
 // eventsNewestSQL reads the newest $1 events; eventsNotableSQL the newest $3

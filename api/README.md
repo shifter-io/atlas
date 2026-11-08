@@ -357,7 +357,10 @@ editorial ones.
     the newest half-`limit` non-routine matches were found (or all of them are held).
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
-  in a 256-entry LRU for that version (a new event starts a new one).
+  in a 256-entry LRU for that version (a new event starts a new one). No cursor
+  passes an id that may still have a smaller one behind it: the bound of the reads
+  whose every running transaction has ended (`answers/events.md`, "Settled rows").
+  While the window holds ids above it, each refresh reads the events again.
 - **Network lists** (contracts K10, K11; read for a payload v4 build; API-MEM-1).
   `store.NetLists` holds only each network window's list id and row count per
   dimension, reading the counts only of list ids it does not hold. A dimension's rows

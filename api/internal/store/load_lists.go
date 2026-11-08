@@ -51,7 +51,6 @@ func readSite[T any](ctx context.Context, tx pgx.Tx, l SiteLayout, r siteRead, s
 
 // The statements of LoadEvents and LoadLists that take no layout.
 const (
-	maxEventSQL           = `SELECT max(event_id) FROM public.test_events`
 	nowSQL                = `SELECT now()`
 	frameworkTargetsSQL   = `SELECT target_id, label, pass_condition, sort_order, engine FROM public.targets ORDER BY sort_order, target_id`
 	frameworkProvidersSQL = `SELECT id FROM public.providers ORDER BY id`
@@ -70,10 +69,10 @@ type TxBeginner interface {
 }
 
 // LoadEvents reads only what an events-only change refreshes, in one
-// REPEATABLE READ read-only transaction: the newest event id
-// (Fingerprint.MaxEventID, the fingerprint's events part) and the events
-// exactly as Load reads them (Events, Notable and their completeness). Every
-// other field is empty.
+// REPEATABLE READ read-only transaction: the events exactly as Load reads
+// them (EventsRead, Events, Notable and their completeness) and the newest
+// event id (Fingerprint.MaxEventID, the fingerprint's events part), which is
+// EventsRead's. Every other field is empty.
 func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -81,11 +80,11 @@ func LoadEvents(ctx context.Context, db TxBeginner) (*Inputs, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	in := &Inputs{}
-	if err := tx.QueryRow(ctx, maxEventSQL).Scan(&in.Fingerprint.MaxEventID); err != nil {
-		return nil, fmt.Errorf("newest event: %w", err)
-	}
 	if err := in.loadEvents(ctx, tx); err != nil {
 		return nil, fmt.Errorf("events: %w", err)
+	}
+	if id := in.EventsRead.MaxID; id > 0 {
+		in.Fingerprint.MaxEventID = &id
 	}
 	return in, nil
 }

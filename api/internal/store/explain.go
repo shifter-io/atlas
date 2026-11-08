@@ -132,7 +132,7 @@ func registry() []Statement {
 		Statement{"load.events_late", "Inputs.loadEvents", everyLayout, func(p *ExplainParams) (string, []any) {
 			return eventsLateSQL, []any{p.WindowMinID, p.CursorAt, p.CursorID, LateWindow + 1}
 		}},
-		Statement{"events.max_id", "LoadEvents", everyLayout, fixed(maxEventSQL)},
+		Statement{"load.events_read", "Inputs.loadEvents", everyLayout, fixed(eventsReadSQL)},
 		Statement{"events.query.default", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Limit: 100} })},
 		Statement{"events.query.default_notable", "QueryEvents", everyLayout, eventsShape(true, func(*ExplainParams) EventFilter { return EventFilter{Limit: 100} })},
 		Statement{"events.query.product", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Product: p.Provider, Limit: 100} })},

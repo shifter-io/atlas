@@ -72,6 +72,13 @@ func TestEventAnswersAfterAnEventsOnlyRefresh(t *testing.T) {
 		if refreshed, err := s.Refresh(ctx, false); err != nil || !refreshed {
 			t.Fatalf("%d events: not refreshed: %v %v", total, refreshed, err)
 		}
+		// The cursor bound (EV-CURSOR-SETTLE-1) depends on the reads before:
+		// once the rows settle, a read raises it to the newest id, here and
+		// in the full build below, so their cursors agree.
+		db.Settle(t)
+		if _, err := s.Refresh(ctx, false); err != nil {
+			t.Fatal(err)
+		}
 		cur := s.Current()
 		if src.loads.Load() != 1 || cur.Dataset != first.Dataset {
 			t.Fatalf("%d events: %d full loads, dataset kept %v", total, src.loads.Load(), cur.Dataset == first.Dataset)
@@ -82,8 +89,11 @@ func TestEventAnswersAfterAnEventsOnlyRefresh(t *testing.T) {
 			}
 		}
 		full := server.New(server.DBSource{Pool: pool}, quiet)
-		if _, err := full.Refresh(ctx, true); err != nil {
-			t.Fatal(err)
+		for range 2 {
+			if _, err := full.Refresh(ctx, true); err != nil {
+				t.Fatal(err)
+			}
+			db.Settle(t)
 		}
 		for _, q := range eventQueries {
 			got, want := identity(t, s, q), identity(t, full, q)
