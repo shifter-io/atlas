@@ -106,7 +106,7 @@ func (r siteRead) missing(l SiteLayout) []string {
 // SiteTables is every site table the API reads, the order the fingerprint
 // lists them in.
 var SiteTables = []string{"targets", "scopes", "score_weights", "ranking_profiles", "providers", "provider_products",
-	"pricing", "pricing_plans", "trust_signals", "reviews", "community_runs", "changelog", "tape_events"}
+	"pricing", "pricing_plans", "trust_signals", "reviews", "community_runs", "changelog", "tape_events", "pricing_history"}
 
 // siteFingerprintSQL is the part of the fingerprint the site schema supplies:
 // the revision counter its triggers bump, the newest updated_at of the tables

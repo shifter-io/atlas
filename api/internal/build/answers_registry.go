@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -36,6 +37,12 @@ type PageAnswer struct {
 	Samples []string
 	// InDataset adds the bodies to the dataset file's pages (DATASET-PAGES-2).
 	InDataset bool
+	// Cut, when set, cuts each body on request instead of rendering every
+	// one at build: Build's values are held (Pages.Held), and a request is
+	// answered with Cut(held, Key(r)), 404 when not found, rendered and kept
+	// in the version's page LRU as the place pages are. For answers with
+	// many filtered pages; not with InDataset.
+	Cut func(held map[string]any, path string) (body any, found bool)
 }
 
 // Owns reports whether path is one of a's stored paths.
@@ -76,8 +83,8 @@ func RegisterAnswer(a PageAnswer) {
 		panic(fmt.Sprintf("build: answer name %q is invalid or reserved", a.Name))
 	case answers[a.Name].Name != "":
 		panic(fmt.Sprintf("build: answer %q registered twice", a.Name))
-	case a.Build == nil || a.Key == nil || !strings.HasPrefix(a.Route, "GET /v1/"):
-		panic(fmt.Sprintf("build: answer %q needs Build, Key and a GET /v1/ route", a.Name))
+	case a.Build == nil || a.Key == nil || !strings.HasPrefix(a.Route, "GET /v1/") || a.Cut != nil && a.InDataset:
+		panic(fmt.Sprintf("build: answer %q needs Build, Key and a GET /v1/ route, and no Cut with InDataset", a.Name))
 	}
 	answers[a.Name] = a
 }
@@ -92,15 +99,15 @@ func Answers() []PageAnswer {
 	return out
 }
 
-// buildRegistered fills pg.Registered from every registered answer. A failed
-// answer, or one with a path outside its family, is left out and noted in
-// pg.Unbuilt.
+// buildRegistered fills pg.Registered (pg.Held for an answer with Cut) from
+// every registered answer. A failed answer, or one with a path outside its
+// family, is left out and noted in pg.Unbuilt.
 func (pg *Pages) buildRegistered(c *Context) {
 	pg.buildFrom(c, Answers())
 }
 
 func (pg *Pages) buildFrom(c *Context, all []PageAnswer) {
-	pg.Registered, pg.Unbuilt = map[string]any{}, map[string]string{}
+	pg.Registered, pg.Held, pg.Unbuilt = map[string]any{}, map[string]map[string]any{}, map[string]string{}
 	for _, a := range all {
 		bodies, err := a.Build(c)
 		for path := range bodies {
@@ -110,6 +117,10 @@ func (pg *Pages) buildFrom(c *Context, all []PageAnswer) {
 		}
 		if err != nil {
 			pg.Unbuilt[a.Name] = err.Error()
+			continue
+		}
+		if a.Cut != nil {
+			pg.Held[a.Name] = bodies
 			continue
 		}
 		for path, body := range bodies {
@@ -166,6 +177,22 @@ func QueryKind(q url.Values, def string) (string, error) {
 		return "", BadRequest("invalid kind")
 	}
 	return k, nil
+}
+
+// MaxPage is the highest page a paged answer's request may ask for.
+const MaxPage = 100000
+
+// QueryPage is q's page, 1 by default.
+func QueryPage(q url.Values) (int, error) {
+	p := q.Get("page")
+	if p == "" {
+		return 1, nil
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil || n < 1 || n > MaxPage {
+		return 0, BadRequest("page must be a positive number")
+	}
+	return n, nil
 }
 
 // PathSlug is the route's {slug}.

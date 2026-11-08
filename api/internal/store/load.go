@@ -150,6 +150,15 @@ type PricingRow struct {
 	HeadlinePriceRank, ValueRank             *int32
 }
 
+// PricingHistoryRow is one site.pricing_history row: the list rates a
+// category's catalog published from EffectiveFrom (a date, UTC midnight).
+type PricingHistoryRow struct {
+	ProviderSlug, Category        string
+	EffectiveFrom                 time.Time
+	PricePerGb, PricePerGbAtScale *float64
+	Source                        *string
+}
+
 type PlanRow struct {
 	Catalog                json.RawMessage
 	ProviderSlug, Category string
@@ -258,6 +267,7 @@ type Inputs struct {
 	Products           []ProductRow
 	Pricing            []PricingRow
 	Plans              []PlanRow
+	PricingHistory     []PricingHistoryRow
 	Trust              []TrustRow
 	Reviews            []ReviewRow
 	CommunityRuns      []CommunityRunRow

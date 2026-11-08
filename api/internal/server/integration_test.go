@@ -178,9 +178,9 @@ func TestAFreshDatabaseServesEveryPageOfOnePublishedProduct(t *testing.T) {
 		{"no site schema", func(t *testing.T) *testdb.DB { return testdb.NewFramework(t) }, 1},
 		{"site tables missing", func(t *testing.T) *testdb.DB {
 			db := testdb.New(t)
-			db.Exec(t, "DROP TABLE site.reviews, site.tape_events, site.ranking_profiles; ALTER TABLE site.pricing_plans DROP COLUMN catalog")
+			db.Exec(t, "DROP TABLE site.reviews, site.tape_events, site.ranking_profiles, site.pricing_history; ALTER TABLE site.pricing_plans DROP COLUMN catalog")
 			return db
-		}, 4},
+		}, 5},
 		{"browser targets", func(t *testing.T) *testdb.DB {
 			db := testdb.NewFramework(t)
 			db.Exec(t, testscale.BrowserTargetsSQL())
@@ -220,7 +220,8 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 	defer ts.Close()
 	for _, p := range []string{"/v1/networks", "/v1/networks/shifter", "/v1/networks/shifter/chart", "/v1/networks/shifter/places",
 		"/v1/countries", "/v1/countries/us", "/v1/countries/us/cities", "/v1/rankings", "/v1/networks/all", "/v1/dataset",
-		"/v1/search-index", "/v1/search?q=shifter", "/v1/coverage", "/v1/coverage/shifter", "/v1/events", "/v1/version"} {
+		"/v1/search-index", "/v1/search?q=shifter", "/v1/coverage", "/v1/coverage/shifter", "/v1/events", "/v1/version",
+		"/v1/networks/shifter/reviews", "/v1/networks/shifter/runs?kind=residential", "/v1/networks/shifter/pricing-history"} {
 		resp, err := http.Get(ts.URL + p)
 		if err != nil {
 			t.Fatal(err)
@@ -229,6 +230,10 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 		resp.Body.Close()
 		if resp.StatusCode != 200 {
 			t.Errorf("%s: %d %s", p, resp.StatusCode, body)
+		}
+		// No database here has price history rows (or the table at all).
+		if strings.HasSuffix(p, "/pricing-history") && !strings.Contains(string(body), `"points":[]`) {
+			t.Errorf("%s: %s", p, body)
 		}
 	}
 	resp, err := http.Get(ts.URL + "/healthz")
@@ -239,6 +244,9 @@ func freshDatabaseServesEveryPage(t *testing.T, db *testdb.DB, gaps int) {
 	var h server.Health
 	if err := json.NewDecoder(resp.Body).Decode(&h); err != nil || h.Status != "ok" || len(h.Unserved) != 0 || len(h.SiteGaps) != gaps {
 		t.Fatalf("healthz %+v (%v)", h, err)
+	}
+	if missing := strings.Contains(strings.Join(h.SiteGaps, "\n"), "site.pricing_history: table missing"); missing != (gaps == 5) {
+		t.Errorf("site gaps %v", h.SiteGaps)
 	}
 }
 
