@@ -2,6 +2,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,5 +47,37 @@ func TestExplainNeedsOutAndADatabase(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://nobody@127.0.0.1:1/none?connect_timeout=1&sslmode=disable")
 	if err := explain([]string{"--out", t.TempDir()}); err == nil {
 		t.Error("explain without a database: no error")
+	}
+}
+
+func TestBenchFailsOnAServerError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz":
+			fmt.Fprint(w, `{"status":"ok","version":1,"builtAt":"2026-11-08T00:00:00Z"}`)
+		case "/v1/version":
+			fmt.Fprint(w, `{"revision":"abc"}`)
+		case "/v1/networks":
+			fmt.Fprint(w, `{"networks":[{"slug":"a","kind":"residential","kinds":["residential"]}]}`)
+		case "/v1/countries":
+			fmt.Fprint(w, `{"countries":[]}`)
+		default:
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}
+	}))
+	defer ts.Close()
+	if err := runBench([]string{"--base-url", ts.URL}); err == nil || !strings.Contains(err.Error(), "--out are required") {
+		t.Errorf("bench without --out: %v", err)
+	}
+	dir := filepath.Join(t.TempDir(), "out")
+	err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--warm", "2", "--concurrency", "2"})
+	if err == nil || !strings.Contains(err.Error(), "over budget or failed") {
+		t.Fatalf("bench against 500s: %v", err)
+	}
+	if md, err := os.ReadFile(filepath.Join(dir, "bench.md")); err != nil || !strings.Contains(string(md), "answers 500") {
+		t.Errorf("bench.md: %v\n%s", err, md)
+	}
+	if err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--budgets", filepath.Join(dir, "none.json")}); err == nil {
+		t.Error("a missing budgets file: no error")
 	}
 }
