@@ -136,10 +136,15 @@ func (r *Report) Write(dir string) error {
 	if err != nil {
 		return err
 	}
+	return writeFiles(dir, map[string][]byte{"bench.json": append(body, '\n'), "bench.md": r.Markdown()})
+}
+
+// writeFiles writes each file to dir (created 0700), mode 600.
+func writeFiles(dir string, files map[string][]byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for name, b := range map[string][]byte{"bench.json": append(body, '\n'), "bench.md": r.Markdown()} {
+	for name, b := range files {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, b, 0o600); err != nil {
 			return err

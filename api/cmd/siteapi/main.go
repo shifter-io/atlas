@@ -6,7 +6,7 @@
 //	siteapi migrate      [--database-file F]
 //	siteapi dump --out dataset.json [--endpoint /v1/dataset] [--pretty]
 //	siteapi explain --out DIR [--database-file F]
-//	siteapi bench --base-url URL --out DIR [--warm 200] [--concurrency 8] [--budgets F]
+//	siteapi bench --base-url URL --out DIR [--warm 200] [--concurrency 8] [--budgets F] [--gaps F]
 //
 // The database comes from DATABASE_URL, --database-file, or
 // .secrets/database.toml in the repository root (the working directory or its
@@ -344,7 +344,9 @@ func writeExplain(dir string, report *store.ExplainReport) error {
 
 // runBench writes bench.json and bench.md to --out: every page's requests
 // timed against the siteapi at --base-url. It fails when a budget is
-// exceeded or a request does not answer 200.
+// exceeded or a request does not answer 200. With --gaps it first writes
+// gaps.json and gaps.md there, the verdict of every map gap, and also fails
+// when a gap fails.
 func runBench(args []string) error {
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
 	base := fs.String("base-url", "", "the running siteapi, such as http://127.0.0.1:8090 (required)")
@@ -352,6 +354,7 @@ func runBench(args []string) error {
 	warm := fs.Int("warm", 200, "warm requests per request, after the cold one")
 	conc := fs.Int("concurrency", 8, "workers, each with its own keep-alive connection")
 	budgets := fs.String("budgets", "", "JSON budgets file laid over the defaults (api/README.md, \"siteapi bench\")")
+	gaps := fs.String("gaps", "", "gap manifest (docs/api-web-map-gaps.json): check every API gap and write gaps.json and gaps.md")
 	fs.Parse(args) //nolint:errcheck
 	if *base == "" || *out == "" {
 		return errors.New("--base-url and --out are required")
@@ -362,6 +365,10 @@ func runBench(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	gapErr, err := checkGaps(ctx, *gaps, *base, *out)
+	if err != nil {
+		return err
+	}
 	report, err := bench.Run(ctx, bench.Options{BaseURL: *base, Warm: *warm, Concurrency: *conc, Budgets: b})
 	if err != nil {
 		return err
@@ -371,9 +378,33 @@ func runBench(args []string) error {
 	}
 	printJSON(map[string]any{"out": *out, "pages": len(report.Pages), "requests": len(report.Requests), "failures": len(report.Failures)})
 	if report.Failed() {
-		return fmt.Errorf("%d over budget or failed; see %s", len(report.Failures), filepath.Join(*out, "bench.md"))
+		return errors.Join(fmt.Errorf("%d over budget or failed; see %s", len(report.Failures), filepath.Join(*out, "bench.md")), gapErr)
 	}
-	return nil
+	return gapErr
+}
+
+// checkGaps writes gaps.json and gaps.md to out for the manifest (none when
+// manifest is ""). failed is not nil when a gap fails.
+func checkGaps(ctx context.Context, manifest, base, out string) (failed, err error) {
+	if manifest == "" {
+		return nil, nil
+	}
+	m, err := bench.LoadManifest(manifest)
+	if err != nil {
+		return nil, err
+	}
+	r, err := bench.CheckGaps(ctx, base, m)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.Write(out); err != nil {
+		return nil, err
+	}
+	printJSON(map[string]any{"out": out, "gapsPassed": r.Passed, "gapsFailed": r.Failed, "gapsListed": r.Listed})
+	if r.Failed > 0 {
+		return fmt.Errorf("%d map gaps fail; see %s", r.Failed, filepath.Join(out, "gaps.md")), nil
+	}
+	return nil, nil
 }
 
 // deref is *p, or def when p is nil.

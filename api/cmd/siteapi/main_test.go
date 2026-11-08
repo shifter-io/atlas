@@ -80,4 +80,18 @@ func TestBenchFailsOnAServerError(t *testing.T) {
 	if err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--budgets", filepath.Join(dir, "none.json")}); err == nil {
 		t.Error("a missing budgets file: no error")
 	}
+	gaps := filepath.Join(dir, "gaps-manifest.json")
+	if err := os.WriteFile(gaps, []byte(`{"gaps":[{"id":"G","page":1,"class":"api","work":"W6","issue":712,"checks":[{"request":"/v1/home","paths":["market"]}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = runBench([]string{"--base-url", ts.URL, "--out", dir, "--warm", "1", "--concurrency", "1", "--gaps", gaps})
+	if err == nil || !strings.Contains(err.Error(), "1 map gaps fail") || !strings.Contains(err.Error(), "over budget or failed") {
+		t.Fatalf("bench --gaps against 500s: %v", err)
+	}
+	if md, err := os.ReadFile(filepath.Join(dir, "gaps.md")); err != nil || !strings.Contains(string(md), "answers 500") {
+		t.Errorf("gaps.md: %v\n%s", err, md)
+	}
+	if err := runBench([]string{"--base-url", ts.URL, "--out", dir, "--gaps", filepath.Join(dir, "none.json")}); err == nil {
+		t.Error("a missing gap manifest: no error")
+	}
 }

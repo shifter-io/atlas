@@ -63,8 +63,9 @@ type Network struct {
 type Shape struct {
 	Networks []Network
 	// Query is the q= of a list search (a country code); Search is the
-	// q= of /v1/search (a network slug).
-	Query, Search string
+	// q= of /v1/search (a network slug); Country is that country code as
+	// /v1/countries gives it.
+	Query, Search, Country string
 }
 
 // Page is one page view and its request URLs (path and query), in order.
