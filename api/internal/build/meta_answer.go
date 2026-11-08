@@ -61,13 +61,6 @@ type MetaTarget struct {
 	Card bool `json:"card"`
 }
 
-// TargetCounts counts the targets: every one, the measured ones and the cards.
-type TargetCounts struct {
-	All      int `json:"all"`
-	Measured int `json:"measured"`
-	Cards    int `json:"cards"`
-}
-
 func buildMeta(c *Context) (map[string]any, error) {
 	ds := c.Dataset
 	if ds == nil {
@@ -107,14 +100,14 @@ func gradeBands(grades map[string]float64) []GradeBand {
 }
 
 // metaTargets adds each target's scoring weight and card flag, in dataset
-// order, and counts them. A target the browser score does not weigh (an HTTP
-// or catalog-only one) has a null weight by design, so only a browser
-// target's missing weight is in its na.
+// order, and counts them (targetCounts). A target the browser score does not
+// weigh (an HTTP or catalog-only one) has a null weight by design, so only a
+// browser target's missing weight is in its na.
 func metaTargets(targets []model.TargetMeta, weights map[string]Num) ([]MetaTarget, TargetCounts, error) {
 	out := make([]MetaTarget, 0, len(targets))
-	counts := TargetCounts{All: len(targets)}
+	counts := targetCounts(targets)
 	for _, t := range targets {
-		mt := MetaTarget{TargetMeta: t, ScoreWeight: nan, Card: t.Source == model.SourceMeasured && t.Group == nil}
+		mt := MetaTarget{TargetMeta: t, ScoreWeight: nan, Card: isCard(t)}
 		if w, ok := weights[t.ID]; ok {
 			mt.ScoreWeight = w
 		}
@@ -125,12 +118,6 @@ func metaTargets(targets []model.TargetMeta, weights map[string]Num) ([]MetaTarg
 		var err error
 		if mt.NA, err = naOf(mt, nil, false, skip...); err != nil {
 			return nil, counts, err
-		}
-		if t.Source == model.SourceMeasured {
-			counts.Measured++
-		}
-		if mt.Card {
-			counts.Cards++
 		}
 		out = append(out, mt)
 	}
