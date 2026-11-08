@@ -22,6 +22,12 @@ from .field_checks import (  # noqa: F401 (callers import them here)
     check_string,
     optional,
 )
+from .net_errors import (  # noqa: F401 (callers import the Firefox tables here)
+    ERROR_PREFIXES,
+    ERRORS,
+    FIREFOX_ERROR_PREFIXES,
+    FIREFOX_ERRORS,
+)
 
 # K-BP1 and K-BP5: the engine, the batch kind and the one runner region of the browser hosts.
 BROWSER_ENGINE = "browser"
@@ -68,33 +74,18 @@ OUTCOMES: dict[str, tuple[VerdictName, tuple[ErrorCode | None, ...]]] = {
 CODE_VERDICTS: dict[str, VerdictName] = {
     code: verdict for verdict, codes in OUTCOMES.values() for code in codes if code
 }
-# Firefox network errors by exact name; the exact names win over the prefixes below.
-FIREFOX_ERRORS: dict[str, ErrorCode] = {
-    "NS_ERROR_UNKNOWN_PROXY_HOST": "proxy_connect",
-    "NS_ERROR_PROXY_AUTHENTICATION_FAILED": "proxy_auth",
-    "NS_ERROR_NET_RESET": "connection",
-    "NS_ERROR_NET_INTERRUPT": "connection",
-    "NS_ERROR_CONNECTION_REFUSED": "connection",
-    "NS_ERROR_UNKNOWN_HOST": "dns",
-    "NS_ERROR_NET_TIMEOUT": "timeout",
-    "TimeoutError": "timeout",  # Playwright's navigation and wait timeouts
-    "NS_ERROR_NET_INADEQUATE_SECURITY": "tls",
-}
-FIREFOX_ERROR_PREFIXES: tuple[tuple[str, ErrorCode], ...] = (
-    ("NS_ERROR_PROXY_", "proxy_connect"),
-    ("SEC_ERROR_", "tls"),
-    ("SSL_ERROR_", "tls"),
-)
 # A main document answered with 407 is the gateway refusing the credentials: proxy_auth.
 PROXY_AUTH_STATUS = 407
 
 
 def classify_navigation_error(name: str | None) -> tuple[ErrorCode, VerdictName]:
-    """(code, verdict) of a failed navigation by the browser's error name; else browser_error."""
+    """(code, verdict) of a failed navigation by the browser's error name (Firefox's, or
+    Chrome's with or without `net::`; net_errors.py); else browser_error."""
     name = name if isinstance(name, str) else ""
-    code = FIREFOX_ERRORS.get(name)
+    name = name.removeprefix("net::")
+    code = ERRORS.get(name)
     if code is None:
-        prefixed = (mapped for start, mapped in FIREFOX_ERROR_PREFIXES if name.startswith(start))
+        prefixed = (mapped for start, mapped in ERROR_PREFIXES if name.startswith(start))
         code = next(prefixed, "browser_error")
     return code, CODE_VERDICTS[code]
 
