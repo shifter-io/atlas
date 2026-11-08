@@ -14,7 +14,10 @@ not judged (the server's owner tunes it). Gaps are judged against `Roles`:
 - the admin role runs migrations, so new tables and functions get default privileges for both
   roles (with no global entry for its functions, PostgreSQL's built-in default gives EXECUTE
   to PUBLIC), it keeps acting on the tables the run-time role owns through membership in that
-  role, and it needs CREATEDB for scratch databases.
+  role, and it needs CREATEDB for scratch databases;
+- once schema `site` exists (`siteapi migrate`, as the admin role), the API role and the run-time
+  role read it (the Go API's catalog queries, the replay's baseline counts): USAGE on it, SELECT
+  on its tables and views, and SELECT on the admin role's new tables there.
 
 Each gap carries its statements in the order they must run and who runs them: `admin` (the
 admin config) or `superuser` (role attributes and memberships the admin role cannot grant
@@ -47,6 +50,7 @@ NAMED_SETTINGS = [
 DEFAULT_ROLES = Roles()
 WRITE = ["SELECT", "INSERT", "UPDATE", "DELETE"]
 LARGEST = 10
+SITE = "site"  # the site API's catalog, read by the API and the run-time roles
 
 SERVER = """
 SELECT current_setting('server_version') AS version, current_database() AS database,
@@ -151,6 +155,15 @@ SELECT w AS privilege FROM unnest(%(privileges)s::text[]) w WHERE NOT EXISTS (
   SELECT 1 FROM acl CROSS JOIN LATERAL aclexplode(acl.acl) a
   WHERE a.privilege_type = w
     AND (a.grantee = 0 OR pg_has_role(%(grantee)s::name, a.grantee, 'USAGE')))"""
+# What `grantee` lacks on schema `site`: no row before `siteapi migrate` makes it.
+SITE_READ = """
+SELECT has_schema_privilege(%(grantee)s::name, n.oid, 'USAGE') AS usage,
+       ARRAY(SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname) FROM pg_class c
+             WHERE c.relnamespace = n.oid AND c.relkind IN ('r', 'p', 'v', 'm')
+               AND NOT c.relispartition
+               AND NOT has_table_privilege(%(grantee)s::name, c.oid, 'SELECT')
+             ORDER BY 1) AS unreadable
+FROM pg_namespace n WHERE n.nspname = %(site)s::name"""
 # What each role needs on the admin role's new objects: (type in pg_default_acl, privileges).
 DEFAULTS_WANTED = {
     "TABLES": ("r", {"api": ["SELECT"], "runtime": WRITE}),
@@ -177,7 +190,7 @@ def _collect(cur, roles: Roles) -> dict:
     missing = set(roles) - {r["name"] for r in role_rows}
     if missing:
         raise UserError(f"No such role on this server: {', '.join(sorted(missing))}")
-    names = roles._asdict() | {"schema": SCHEMA, "write": WRITE}
+    names = roles._asdict() | {"schema": SCHEMA, "site": SITE, "write": WRITE}
     preload = settings.get("shared_preload_libraries")
     return {
         "server": cur.execute(SERVER).fetchone(),
@@ -195,6 +208,7 @@ def _collect(cur, roles: Roles) -> dict:
         "functions": [r for r in cur.execute(FUNCTIONS, names).fetchall() if r["missing"]],
         "default_privileges": cur.execute(DEFAULTS).fetchall(),
         "default_privileges_missing": _defaults_missing(cur, names),
+        "site": _site(cur, names),
     }
 
 
@@ -215,6 +229,20 @@ def _defaults_missing(cur, names: dict) -> dict:
     }
 
 
+def _site(cur, names: dict) -> dict | None:
+    """Per reading role, what it lacks on schema `site` and its new tables; None without it."""
+    site = {}
+    for role in ("api", "runtime"):
+        lacks = cur.execute(SITE_READ, names | {"grantee": names[role]}).fetchone()
+        if lacks is None:
+            return None
+        new = {"schema": SITE, "type": "r", "grantee": names[role], "privileges": ["SELECT"]}
+        missing = cur.execute(DEFAULTS_MISSING, names | new).fetchall()
+        lacks["defaults_missing"] = [r["privilege"] for r in missing]
+        site[role] = lacks
+    return site
+
+
 def _lacks(row) -> bool:
     return not row["api_select"] or bool(row["runtime_missing"])
 
@@ -227,6 +255,7 @@ def _gaps(conn, report: dict, roles: Roles) -> list[dict]:
         *_role_gaps(report, admin_role, runtime, api, admin),
         *_grant_gaps(report, runtime, api),
         *_default_gaps(report, runtime, api, admin),
+        *_site_gaps(report, runtime, api, admin),
         *_partition_gaps(report, admin_role["superuser"], runtime, admin),
     ]
     return [
@@ -320,6 +349,22 @@ def _default_gaps(report, runtime, api, admin):
             if missing
         ],
     )
+
+
+def _site_gaps(report, runtime, api, admin):
+    """Read rights on schema `site`, run by its owner, the admin role (`siteapi migrate`)."""
+    site, grantees, statements = sql.Identifier(SITE), {"api": api, "runtime": runtime}, []
+    for role, lacks in (report["site"] or {}).items():
+        names = {"site": site, "role": grantees[role], "admin": admin}
+        if not lacks["usage"]:
+            statements.append(sql.SQL("GRANT USAGE ON SCHEMA {site} TO {role}").format(**names))
+        if lacks["unreadable"]:
+            grant = sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {site} TO {role}")
+            statements.append(grant.format(**names))
+        if lacks["defaults_missing"]:
+            defaults = "ALTER DEFAULT PRIVILEGES FOR ROLE {admin} IN SCHEMA {site} GRANT SELECT"
+            statements.append(sql.SQL(defaults + " ON TABLES TO {role}").format(**names))
+    yield "site_read", "the API and run-time roles cannot read schema site", "admin", statements
 
 
 def _list(privileges):
