@@ -2,8 +2,9 @@
 Runner).
 
 launch() starts one pinned Camoufox process and checks its user agent; Browser.context() opens
-a fresh context per try with the try's proxy and resource blocking and yields a Page, the
-PageDriver the targets act through. launch_chrome() detects the host's Google Chrome instead;
+a fresh context per try with the try's proxy, resource blocking and the run country's place
+(geo: locale, languages, time zone, geolocation) and yields a Page, the PageDriver the targets
+act through. launch_chrome() detects the host's Google Chrome instead;
 its ChromeBrowser.context() starts a new Chrome with a fresh profile and fingerprint per try.
 A failed navigation raises NavigationError with the browser's error name, which the transport
 maps with contracts.classify_navigation_error.
@@ -25,7 +26,7 @@ from typing import Any
 
 from ..errors import UserError
 from ..models import ProxyConfig
-from . import chrome, contracts, release
+from . import chrome, contracts, geo, release
 
 # Firefox's error names, or Chrome's `net::ERR_*` (the name is the part after `net::`).
 ERROR_NAME = re.compile(
@@ -146,6 +147,7 @@ class Browser:
     def __init__(self, playwright: Any, browser: Any) -> None:
         self._playwright, self._browser = playwright, browser
         self._user_agent: str | None = None
+        self._seed, self._tries = str(uuid.uuid4()), 0
         self.identity: dict[str, str] = {}
 
     def alive(self) -> bool:
@@ -153,13 +155,25 @@ class Browser:
 
     @contextlib.asynccontextmanager
     async def context(
-        self, proxy: ProxyConfig | None, block: Collection[str] = (), timeout_ms: int = 30_000
+        self,
+        proxy: ProxyConfig | None,
+        block: Collection[str] = (),
+        timeout_ms: int = 30_000,
+        *,
+        country: str | None = None,
+        seed: str | None = None,
     ) -> AsyncIterator[Page]:
         """A fresh context through `proxy` that aborts requests of the `block` resource types,
-        with `timeout_ms` as every action's default timeout; closed however the try ends."""
+        with `timeout_ms` as every action's default timeout; closed however the try ends.
+        With a `country`, its place is drawn from `seed` (default: this handle's seed and try
+        count); without one, the launch's `[browser] locale` stays."""
         options: dict[str, Any] = {"proxy": proxy_option(proxy)} if proxy else {}
         if self._user_agent is not None:
             options["user_agent"] = self._user_agent
+        if country is not None:
+            if seed is None:
+                seed, self._tries = f"{self._seed}:{self._tries}", self._tries + 1
+            options |= geo.place(geo.seeded(seed), country).camoufox_options()
         context = await self._browser.new_context(**options)
         async with _try_page(context, context.new_page, block, timeout_ms) as page:
             yield page
@@ -297,14 +311,16 @@ class ChromeBrowser:
         block: Collection[str] = (),
         timeout_ms: int = 30_000,
         *,
+        country: str | None = None,
         seed: str | None = None,
     ) -> AsyncIterator[Page]:
         """Chrome on a new temporary profile (mode 700, deleted however the try ends) through
-        `proxy`, with the fingerprint drawn from `seed` (default: the launch's seed and this
-        handle's try count) and `block` resource types aborted."""
+        `proxy`, with the fingerprint for `country` (default: the launch's) drawn from `seed`
+        (default: the launch's seed and this handle's try count) and `block` resource types
+        aborted."""
         if seed is None:
             seed, self._tries = f"{self.setup.seed}:{self._tries}", self._tries + 1
-        fingerprint = chrome.fingerprint(seed, self.setup.country)
+        fingerprint = chrome.fingerprint(seed, country or self.setup.country)
         options = fingerprint.context_options() | ({"proxy": proxy_option(proxy)} if proxy else {})
         profile = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
         try:
@@ -351,7 +367,7 @@ class ChromeBrowser:
         version, os_name = self.setup.version, self.setup.os_name
         override = {
             "userAgent": chrome.user_agent(version, os_name),
-            "acceptLanguage": fingerprint.accept_language,
+            "acceptLanguage": fingerprint.languages,
             "userAgentMetadata": chrome.user_agent_metadata(version, os_name),
         }
         await session.send("Emulation.setUserAgentOverride", override)

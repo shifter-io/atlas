@@ -1,8 +1,9 @@
 """Google Chrome's helpers that need no Playwright: detection, fingerprints, user agent (D7).
 
 driver.launch_chrome() runs the host's own Chrome (docs/browser.html, Runner): detect() refuses
-a missing or too old one, fingerprint() draws each try's screen, language, time zone and
-hardware from a seed, and the user-agent helpers make a headless Chrome claim the real one.
+a missing or too old one, fingerprint() draws each try's screen, hardware and (from geo's
+table) language, time zone and geolocation from a seed, and the user-agent helpers make a
+headless Chrome claim the real one.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ import json
 import logging
 import os
 import platform
-import random
 import re
 import subprocess
 from dataclasses import asdict, dataclass
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..errors import UserError
+from . import geo
 
 log = logging.getLogger(__name__)
 
@@ -67,20 +68,6 @@ SCREENS = ((1440, 900, 2), (1512, 982, 2), (1680, 1050, 1), (1920, 1080, 1), (25
 CHROME_HEIGHT = 120
 HARDWARE_CONCURRENCY = (4, 6, 8, 10, 12)
 DEVICE_MEMORY = (8, 16)
-# By country: the locale, its Accept-Language and the time zones a user there has.
-COUNTRIES: dict[str, tuple[str, str, tuple[str, ...]]] = {
-    "US": (
-        "en-US",
-        "en-US,en;q=0.9",
-        ("America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles"),
-    ),
-    "CA": ("en-CA", "en-CA,en;q=0.9", ("America/Toronto", "America/Vancouver")),
-    "GB": ("en-GB", "en-GB,en;q=0.9", ("Europe/London",)),
-    "DE": ("de-DE", "de-DE,de;q=0.9,en;q=0.8", ("Europe/Berlin",)),
-    "FR": ("fr-FR", "fr-FR,fr;q=0.9,en;q=0.8", ("Europe/Paris",)),
-    "NL": ("nl-NL", "nl-NL,nl;q=0.9,en;q=0.8", ("Europe/Amsterdam",)),
-    "AU": ("en-AU", "en-AU,en;q=0.9", ("Australia/Sydney", "Australia/Melbourne")),
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +89,13 @@ class Fingerprint:
         text = json.dumps(values, sort_keys=True, separators=(",", ":"))
         return {"values": values, "sha256": hashlib.sha256(text.encode()).hexdigest()}
 
+    @property
+    def languages(self) -> str:
+        """The Accept-Language's tags without weights (US: `en-US,en`): what CDP's
+        acceptLanguage takes, since Chrome adds the weights itself (and to navigator.languages
+        would add them twice)."""
+        return ",".join(tag.split(";")[0] for tag in self.accept_language.split(","))
+
     def context_options(self) -> dict[str, Any]:
         """Playwright's context options for this fingerprint."""
         return {
@@ -110,6 +104,7 @@ class Fingerprint:
             "device_scale_factor": self.device_scale_factor,
             "locale": self.locale,
             "timezone_id": self.timezone_id,
+            "geolocation": geo.geolocation(self.timezone_id),
             "extra_http_headers": {"Accept-Language": self.accept_language},
         }
 
@@ -122,20 +117,19 @@ class Fingerprint:
 
 def fingerprint(seed: str, country: str) -> Fingerprint:
     """The fingerprint drawn from `seed` (run id plus try index) for the run's `country`;
-    the same seed always gives the same one. A country without a table entry is refused."""
-    if country not in COUNTRIES:
+    the same seed always gives the same one. A country without a geo table entry is refused."""
+    if country.upper() not in geo.COUNTRIES:
         raise ChromeRefused(f"no Chrome fingerprint table for country {country!r}")
-    locale, accept_language, zones = COUNTRIES[country]
-    # Reproducible, not secret: the seed is the run id and try index.
-    draw = random.Random(hashlib.sha256(seed.encode()).digest())
+    draw = geo.seeded(seed)
     width, height, scale = draw.choice(SCREENS)
+    place = geo.place(draw, country)
     return Fingerprint(
         screen_width=width,
         screen_height=height,
         device_scale_factor=scale,
-        locale=locale,
-        accept_language=accept_language,
-        timezone_id=draw.choice(zones),
+        locale=place.locale,
+        accept_language=place.accept_language,
+        timezone_id=place.timezone_id,
         hardware_concurrency=draw.choice(HARDWARE_CONCURRENCY),
         device_memory=draw.choice(DEVICE_MEMORY),
     )

@@ -88,14 +88,16 @@ class FakeBrowser:
         self.clicks: list[str] = []
         self.timeouts: list[int] = []
         self.contexts: list[tuple[Any, tuple[str, ...]]] = []
+        self.countries: list[str | None] = []
         self.open_contexts = 0
 
     def alive(self) -> bool:
         return self.connected
 
     @contextlib.asynccontextmanager
-    async def context(self, proxy, block=(), timeout_ms=30_000):
+    async def context(self, proxy, block=(), timeout_ms=30_000, *, country=None):
         self.contexts.append((proxy, tuple(block)))
+        self.countries.append(country)
         self.timeouts.append(timeout_ms)
         self.open_contexts += 1
         try:
@@ -133,7 +135,10 @@ class Harness:
         self.browsers: list[FakeBrowser] = []
         self.pool = BrowserPool(size, self.launch, recycle_after=50, memory=lambda: None)
         self.recorder = Recorder()
-        self.config = RunConfig(target="browser_site", proxy=proxy, provider="p", product="q")
+        country = kw.pop("country", None)
+        self.config = RunConfig(
+            target="browser_site", proxy=proxy, provider="p", product="q", requested_country=country
+        )
         settings = kw.pop("settings", SETTINGS)
         factory = BrowserTransport.factory(
             self.pool, self.recorder, browser=options, settings=settings, **kw

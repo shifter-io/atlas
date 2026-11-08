@@ -8,7 +8,7 @@ import re
 
 import pytest
 
-from proxy_index.browser import chrome
+from proxy_index.browser import chrome, geo
 from proxy_index.browser.chrome import ChromeRefused
 from proxy_index.errors import UserError
 
@@ -69,9 +69,14 @@ def test_fingerprint_is_drawn_from_the_seed_and_the_tables():
         assert (p.screen_width, p.screen_height, p.device_scale_factor) in chrome.SCREENS
         assert p.hardware_concurrency in chrome.HARDWARE_CONCURRENCY
         assert p.device_memory in chrome.DEVICE_MEMORY
-        assert (p.locale, p.accept_language) == chrome.COUNTRIES["US"][:2]
-        assert p.timezone_id in chrome.COUNTRIES["US"][2]
+        assert (p.locale, p.accept_language) == ("en-US", geo.country("US").accept_language)
+        assert p.timezone_id in geo.country("US").zones
     assert len({p.timezone_id for p in prints}) == 4 and len({p.screen_width for p in prints}) == 5
+
+
+def test_fingerprint_languages_are_the_tags_without_weights():
+    assert chrome.fingerprint("run:0", "US").languages == "en-US,en"
+    assert chrome.fingerprint("run:0", "DE").languages == "de-DE,de,en"
 
 
 def test_fingerprint_refuses_a_country_without_a_table():
