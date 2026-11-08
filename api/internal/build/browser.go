@@ -11,6 +11,7 @@ import (
 // Browser targets (browser pulse, K-BP1 and K-BP6). A browser target's
 // benchmark adds its outcome shares and page-load times to the network
 // target figures; a group target (ai_answers) adds its sources' breakdown.
+// The figures are one engine's (engine); engines holds each engine's own.
 // Network-level figures never read them: the snapshot keeps browser runs out
 // of every network metric, and the API maps only per-target fields here.
 
@@ -95,10 +96,17 @@ func isBrowser(t model.TargetMeta, tr snap.TargetResult, has bool) bool {
 // group target's breakdown over its sources (each N/A where the window does
 // not measure it). labels names the targets.
 func browserBenchmark(w snap.Window, t model.TargetMeta, labels map[string]model.Str) *model.BrowserBenchmark {
-	b := &model.BrowserBenchmark{Outcomes: naOutcomes, PageLoadP50: nan, PageLoadP90: nan}
+	b := &model.BrowserBenchmark{Outcomes: naOutcomes, PageLoadP50: nan, PageLoadP90: nan, Engines: map[string]model.EngineBenchmark{}}
 	if tr, ok := w.Targets[t.ID]; ok && tr.Browser != nil {
 		b.Outcomes = outcomesOf(tr.Browser.OutcomeRates)
 		b.PageLoadP50, b.PageLoadP90 = tr.Browser.PageLoadMs.P50, tr.Browser.PageLoadMs.P90
+		if tr.Browser.Engine != "" {
+			b.Engine = model.S(tr.Browser.Engine)
+		}
+		for name, e := range tr.Browser.Engines {
+			b.Engines[name] = model.EngineBenchmark{Requests: e.Completed, Successes: e.Successes,
+				Outcomes: outcomesOf(e.OutcomeRates), PageLoadP50: e.PageLoadMs.P50, PageLoadP90: e.PageLoadMs.P90}
+		}
 	}
 	for _, id := range t.Sources {
 		src := model.TargetSource{Target: id, Label: labels[id], SuccessRate: nan, Requests: 0, Outcomes: naOutcomes}

@@ -39,7 +39,7 @@ General rules:
   - community run `rejectionReason`, `overlapShare`.
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - target `group` for a target that is not a source of a group target.
-- Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`) are written
+- Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`) are written
   only on browser targets' entries; a network target's entry has exactly its
   older fields (see "Browser targets" below).
 - Reasons for every N/A path are in `/v1/coverage` (`build/na.go` `reasons`).
@@ -162,7 +162,7 @@ not read).
 | `trust.leakChecks[]` | `site.trust_signals.leak_checks` | always (not run by the framework) | |
 | `targets[<id>]` | one row per dataset target. `successRate`, `captchaRate`, `blockRate`, `requests` come from `w.targets[id].metrics` (`requests` is 0 when unmeasured); `latencyP50`/`P90` are set for `generic_http` only (its headline latency, under load in every-request snapshots) and null for every other target | data (every unmeasured target is listed) | ✱ |
 | `targets[<id>].delta24h` | none | always | ✱ |
-| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
+| `targets[<id>].outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines` | browser targets only, from `w.targets[id].browser` (below) | data | ✱ |
 | `series.success24h`/`success30d` | completed buckets of `day`/`w` `.series` → `{t: minutes before as_of, v: success_rate}` | data | ✱ (values) |
 | `series.latency24h` | `day.series` p50/p90/p99 when the window's latency is the HTTP target's alone (`windowLatencyIsHTTP`: `time_slots.latency_targets` is `["generic_http"]`, or no other target has requests), else null | data | ✱ |
 | `series.latency30d`, `uniqueIps24h`, `uniqueIps30d` | `series[].latency_ms.p50` (same rule) / `unique_ips` | data | ✱ |
@@ -295,6 +295,11 @@ On a browser target's `targets[<id>]` entry (network answers, providers and
 | `sources[].target`, `label` | | the source's id and its dataset target label | `label`: no label for the source |
 | `sources[].successRate`, `requests` | fraction, tries | `w.targets[source].metrics.success_rate` / `.completed` (`requests` is 0 when unmeasured) | `successRate`: the source is not measured for the product |
 | `sources[].outcomes.*` | fraction | `w.targets[source].browser.outcome_rates` | as `outcomes` |
+| `engine` | `"camoufox"` or `"chrome"`: the browser engine whose tries make `outcomes`, `pageLoadP50`/`P90`, `successRate`, `captchaRate`, `blockRate` and `requests` (the one with the most completed tries in the window; ties go to Camoufox) | `w.targets[id].browser.engine` | not measured, or a snapshot from before the engine split |
+| `engines` | an object by engine name, each engine's own figures, never added together (`{}` when the snapshot has none) | `w.targets[id].browser.engines` | |
+| `engines.<name>.requests`, `successes` | tries | `w.targets[id].browser.engines.<name>.completed` / `.successes` | |
+| `engines.<name>.outcomes.*` | fraction | `w.targets[id].browser.engines.<name>.outcome_rates` | no completed try of the engine |
+| `engines.<name>.pageLoadP50`, `pageLoadP90` | milliseconds, successful tries only | `w.targets[id].browser.engines.<name>.page_load_ms.p50` / `.p90` | no successful try of the engine |
 
 `latencyP50`/`P90` stay null on browser targets: latency is the Generic HTTP
 target's only, and browser cards show `pageLoadP50`/`P90` instead. A browser

@@ -7,6 +7,11 @@ run. targets() hands the calculator's per-target loop each browser target's rows
 network targets, with the K-BP6 browser object: outcome rates, page-load times, group and
 sources. A group target ([target_groups] of the methodology, ai_answers) is measured over the
 union of its sources' rows and is never scheduled itself.
+
+Engines are never added together. Each row carries its run's engine (K-BP3; a run that names
+none is Camoufox). A target's own figures in a window (its window metrics, outcome rates and
+page loads) are those of one engine, the one with the most completed tries (ties go to
+Camoufox), which the browser object names in `engine`; `engines` holds every engine's own.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from ..browser.contracts import BROWSER_ENGINE, BROWSER_KIND, BROWSER_TARGETS
+from ..browser.engines import DEFAULT_ENGINE
 from ..stats import Histogram
 from ..targets import registry
 
@@ -73,8 +79,31 @@ def targets(config, rows, browser_rows, since, end):
     found = [(t, [r for r in rows if r["target"] == t], {}) for t in sorted(ids)]
     groups = config.get("target_groups", {})
     for target, own in browser_targets(browser_rows, since, end, groups).items():
-        found.append((target, own, {"browser": fields(target, own, groups)}))
+        extra = {"browser": fields(target, own, groups)}
+        found.append((target, by_engine(own)[extra["browser"]["engine"]], extra))
     return found
+
+
+def run_engine(config):
+    """The engine of a run, from its scope's config (K-BP3 `browser_engine`); Camoufox when it
+    names none, as every run before the engine choice."""
+    return config.get("browser_engine") or DEFAULT_ENGINE
+
+
+def by_engine(rows):
+    """A target's rows per engine (each row's `engine`, Camoufox when it has none), by engine
+    name, each in its original order."""
+    found = defaultdict(list)
+    for row in rows:
+        found[row.get("engine") or DEFAULT_ENGINE].append(row)
+    return {name: found[name] for name in sorted(found)}
+
+
+def lead_engine(engines):
+    """The engine whose rows make a target's own figures: the most completed tries, ties going
+    to Camoufox (then the first by name). engines: engine_fields() by engine name."""
+    best = max(engines, key=lambda e: (engines[e]["completed"], e == DEFAULT_ENGINE), default=None)
+    return best or DEFAULT_ENGINE
 
 
 def browser_targets(rows, since, end, groups):
@@ -99,14 +128,31 @@ def group_target(rows, sources):
 
 
 def fields(target, rows, groups):
-    """The K-BP6 browser object of a browser target's bucket rows: outcome_rates, page_load_ms,
-    group (the group it is a source of, or null) and sources (a group's, in methodology order,
-    or null)."""
+    """The K-BP6 browser object of a browser target's bucket rows: outcome_rates and
+    page_load_ms of its lead engine (lead_engine()), group (the group it is a source of, or
+    null), sources (a group's, in methodology order, or null), engine (the lead engine) and
+    engines (engine_fields() of each engine with rows, by name)."""
+    engines = {name: engine_fields(own) for name, own in by_engine(rows).items()}
+    lead = lead_engine(engines)
+    own = engines.get(lead) or engine_fields([])
     return {
-        "outcome_rates": outcome_rates(rows),
-        "page_load_ms": page_load(rows),
+        "outcome_rates": own["outcome_rates"],
+        "page_load_ms": own["page_load_ms"],
         "group": next((g for g, sources in groups.items() if target in sources), None),
         "sources": list(groups[target]) if target in groups else None,
+        "engine": lead,
+        "engines": engines,
+    }
+
+
+def engine_fields(rows):
+    """One engine's figures of a target: completed and successful tries, outcome_rates and
+    page_load_ms."""
+    return {
+        "completed": sum(r["counters"]["completed"] for r in rows),
+        "successes": sum(r["counters"]["successes"] for r in rows),
+        "outcome_rates": outcome_rates(rows),
+        "page_load_ms": page_load(rows),
     }
 
 

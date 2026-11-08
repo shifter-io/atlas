@@ -54,8 +54,10 @@ def tries(target, hours):
 
 
 def row(at, completed, successes, bins=(), errors=None, *, target="amazon_pdp", **counters):
-    """A bucket row as build() makes it, of a browser run."""
-    return {
+    """A bucket row as build() makes it, of a browser run (of `engine`, when given; none is a
+    run from before the engine choice)."""
+    engine = counters.pop("engine", None)
+    return ({"engine": engine} if engine else {}) | {
         "bucket_start": at,
         "slot": at,
         "last_observed": at,
@@ -242,6 +244,11 @@ def check_browser_target(entry, target):
     source = target in SOURCES
     assert entry["browser"]["group"] == (GROUP if source else None)
     assert entry["browser"]["sources"] is None
+    # Camoufox runs only: its one engine holds every try.
+    assert entry["browser"]["engine"] == "camoufox" and list(entry["browser"]["engines"]) == [
+        "camoufox"
+    ]
+    assert entry["browser"]["engines"]["camoufox"]["completed"] == completed
 
 
 def check_group(found, rate):

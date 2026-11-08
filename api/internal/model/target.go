@@ -58,6 +58,21 @@ type BrowserBenchmark struct {
 	// Sources is a group target's breakdown, one entry per source target in
 	// the snapshot's order; nil (not written) on every other target.
 	Sources []TargetSource `json:"sources,omitempty"`
+	// Engine is the browser engine whose tries make the figures above (the
+	// one with the most completed tries); null when the snapshot names none.
+	Engine Str `json:"engine"`
+	// Engines is each engine's own figures, by engine name (never added
+	// together); empty when the snapshot has none.
+	Engines map[string]EngineBenchmark `json:"engines"`
+}
+
+// EngineBenchmark is one browser engine's figures of a browser target.
+type EngineBenchmark struct {
+	Requests    Num      `json:"requests"`
+	Successes   Num      `json:"successes"`
+	Outcomes    Outcomes `json:"outcomes"`
+	PageLoadP50 Num      `json:"pageLoadP50"`
+	PageLoadP90 Num      `json:"pageLoadP90"`
 }
 
 // Outcomes are shares of the completed tries per outcome; they sum to 1.
