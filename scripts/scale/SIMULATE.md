@@ -1,4 +1,4 @@
-# The profile of the real 24-hour data (SIM-PROFILE-1)
+# The profile of the real 24-hour data (SIM-PROFILE-1) and the generated days (SIM-GEN-1)
 
 `profile.py` turns the private 24-hour test data into one statistical **profile**: aggregate
 figures only, with no IP address, host name, credential or path. The generator (SIM-GEN-1)
@@ -182,3 +182,125 @@ network's memory is 8 bytes per (hour, country, IP), plus a set of one hour's IP
 recurrence is counted. Its places are bounded by its distinct DB-IP tuples. The PR (#700)
 gives the time per GB of hour files, and the peak memory, measured on a disposable server with
 a 1 GB fixture.
+
+## The generated days (SIM-GEN-1)
+
+`simulate_model.py` turns the profile and production's plan into the runs of 7 days, hour by
+hour, at production's cadence and size. `simulate_check.py` checks them against the profile.
+Nothing here touches a database but `load_plan`, and nothing is written but the run files a
+caller asks for.
+
+```python
+plan = simulate_model.load_plan(database, date(2026, 11, 2))  # once; pulses=True adds them
+hour = simulate_model.hour(profile, plan, seed, day, hour)  # day 1..7, hour 0..23 UTC
+simulate_check.size(profile, hours), simulate_check.stats(profile, hours)
+```
+
+### Cadence
+
+The cadence is `docs/api-web-map.md` section 14, an assumption decided from the code and
+configs: one daily test per network × country per day; one 100-try browser run per network ×
+target per day; no HTTP pulse fleet, so no pulses, census or load waves unless switched on.
+
+- **Daily tests:** every network × country whose formula `schedule` hour is this hour, in
+  `daily/planner.py` `plan_hour`'s cells (3,848 a day for the 18 formulas, 442 at 13:00 UTC).
+  `hour.daily` holds the tests; `hour.reports()` gives each cell's `region`, `countries`,
+  `status`, `requests`, `unique_ips`, `started_at` and `finished_at`, the keys
+  `daily/ingest.py` `emit_cell` reads. `test.write(directory)` writes the run directory as
+  `cycle_steps.daily_directory` builds one: `summary.json`, `ips.jsonl.gz`,
+  `enriched-<release>.jsonl.gz` and `enrichment-<release>.json`, for `storage.ingest`; the
+  test's `lane.formula` is what `estimates.compute.estimate_run` takes.
+- **Browser runs:** the entries of each host's queue (`orchestrator/browser_queue.py`, read,
+  never changed) that start this hour, with the plan's browser settings (`plan = "queue"`,
+  `queue_period_minutes = 1440`, 100 tries; by default
+  `configs/browser-pulse.production.example.toml`: 3 hosts × 6 networks × 8 targets, 144 runs a
+  day). `run.bundle(run_row, seed, outbox)` seals it through `browser_model.bundle` for its
+  planned batch run row. The bundle is BROWSER-MODEL-1's Camoufox bundle; the run's `engine`
+  is the settings' engine of the target, which the checks group by.
+- **Pulses:** none unless the plan is loaded with `pulses=True`. Then every pulse target
+  (`targets` with `pulse_enabled`, every 30 minutes in `configs/targets.toml`) gets a pulse per
+  network × enabled country and slot, with `replay_steps`' geo model: 0 to 3 timeouts and 47
+  to 92 place rows sharing 100 requests.
+
+### The plan
+
+`load_plan(database, start, formulas, browser, pulses=False)` reads the database once, as
+`replay_plan.py` does: the enabled countries (with an enabled runner region) and, with
+`pulses`, the `pulse_enabled` targets with their minutes. It adds every `formulas/*.json` and
+the browser settings, which must be in queue mode. The result is a plain value (`Plan`); day
+`d` starts at `start + d - 1` 00:00 UTC.
+
+### Size of a run
+
+- **Unique IPs** of a daily test: a country the profile requested takes its `unique_ips` at the
+  test hour (`networks.<n>.hours.<HH>.countries.<CC>`). Any other country takes its formula's
+  figure at its test hour (`synthetic.measured`), and a country the formula lacks the network's
+  10th-percentile country (`synthetic._fallback`). Each day varies it by up to ±10%
+  (`JITTER`).
+- **Request rows per IP** follow `seen_count_log2`; an IP is in 1 to all of the test's 2 to 4
+  five-minute buckets (never more than its rows), one `ip_observations` row each. The number
+  of buckets turns over the lanes, so a day averages 3 a test.
+- **Errors** are timeouts at the profile hour's error share (errors over attempts), varied by up
+  to ±10% a day; without a profile hour, one per `ERROR_SHARE` successes. Latency bins are
+  synthetic's, around a network median that varies by up to ±10% a day.
+- **Rows per table** (`test.tables()`), as the ingest and the estimate store them: 1
+  `test_runs` and `run_enrichments`; the buckets; the observation rows; one `ip_addresses`,
+  `ip_enrichment`, `product_ips` and `pool_ips` row per IP (the run's size, as `reference`
+  counts it); the estimated hours `estimates.compute.hours` gives; no `run_geo_buckets`,
+  `batch_runs` or `test_events`.
+- **A browser run** has the target's tries (100). Its outcomes are the reference's nine counts
+  (`reference.browser.targets`), else the profile's (the `unsplit` tries as `other_error`),
+  else BROWSER-MODEL-1's hour, apportioned with one try moved a day (about a point). Its bytes
+  follow `bytes_per_load`'s mean (±10% a day), its successful page loads a lognormal through
+  the reference's p50 and p90 (else 2.5 s and 4.5 s; the median ±3% a day), and its bundle
+  bytes `bundle_bytes`' mean (±5% a day): each failed try carries a screenshot of incompressible
+  bytes, together the mean less a 16 kB bundle without one. `run.tables()` counts the
+  `test_runs` and `batch_runs` row; the ingest decides the others.
+
+### Addresses and recurrence
+
+Every network × scheduled country is a lane with its own block of IP indexes, as in
+`synthetic.py`: 3 of every 4 indexes are IPv4 addresses in the reserved block 240/4 while that
+space lasts, the others IPv6 in 2001:db8::/32. No real address is used. Day `d`'s window starts the
+network's `recurrence.share` of its size before the end of day `d − 1`'s, so that share of its
+IPs were seen the day before and the rest are new; a network without one draws it from
+`REUSE` (30–60%).
+
+A window position's place and request rows come from evenly spread (Weyl) sequences, so a
+test takes each share almost exactly and an IP keeps its place from day to day. Places are the
+country's `places.<CC>.top` tuples by share, then 200 synthetic tail places (private ASNs
+4200000000 and up, names `Synthetic …`) for `tail_share`, then unmatched. A country the profile
+did not request has only tail places and synthetic's 0.5% unmatched.
+
+### Determinism
+
+The same profile, plan and seed give equal hours and byte-identical run files, whether an hour
+is generated alone or with others: every figure is a hash of the seed and its names, and each
+lane's block is fixed by the plan.
+
+### Checks
+
+Both return `{"pass", "compared", "checks"}`. Each check carries its group, `deviation`,
+`limit` and `pass`, never an absolute figure. Nothing compared does not pass.
+
+- `size(profile, hours)`:
+  - per run kind × network (daily), or network × target × engine (browser), each metric's
+    runs against the reference: their p50 inside its p10–p90 band (`in_band`), their mean
+    within 10% of its mean (`deviation` relative). The daily metrics are the rows per table of
+    `reference.daily.networks.<n>` (else `reference.daily`). The browser metrics are `tries`,
+    `bytes_per_load` and `bundle_bytes` of the profile's target entry, and the rows of
+    `reference.browser`.
+  - per kind and day, the day's rows per table against the reference's mean × the day's runs
+    (within 10%).
+- `stats(profile, hours)`, for one generated day, per network:
+  - requests per IP against `seen_count_log2`: total variation distance at most 0.05;
+  - `country`, `asn` and `city` shares over the profile's requested countries (top 500, tail,
+    unmatched): the IP-weighted distance at most 0.05;
+  - recurrence of the tests after day 1 against `recurrence.share`: within 5 points;
+  - per target and engine, each outcome's rate against the expected counts: within 2 points;
+    the successful tries' page-load p50 against the reference's: within 10%.
+
+`tests/test_scale_simulate_model.py` builds a synthetic profile (2 networks, 3 countries, 2
+browser targets) and checks the cadence, the sizes, the ingest of a generated test and bundle,
+determinism, recurrence, pulses only when switched on, and both checks passing on generated
+days and failing on shifted ones.

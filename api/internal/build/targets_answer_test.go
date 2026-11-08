@@ -97,7 +97,7 @@ func targetsBodies(t *testing.T) map[string]*TargetsAnswer {
 	for path, b := range bodies {
 		out[path] = b.(*TargetsAnswer)
 	}
-	if len(out) != len(model.ProxyKinds)*len(Ranges) {
+	if len(out) != len(model.ProxyKinds)*len(Ranges)*(1+len(TargetEngines)) {
 		t.Fatalf("%d bodies", len(out))
 	}
 	return out
@@ -187,19 +187,18 @@ func TestTheTargetsAnswerOrdersTheNetworksOfItsKind(t *testing.T) {
 	}
 }
 
-// A browser target with two engines: each network's cell is its main
-// engine's, each engine keeps its own figures, and the means, statuses and
-// ranks never add Chrome and Camoufox together.
+// A browser target with two engines: in the default body each network's cell
+// is its main engine's, naming the other; the means, statuses and ranks never
+// add Chrome and Camoufox together.
 func TestABrowserTargetKeepsItsEnginesApart(t *testing.T) {
 	t.Parallel()
 	ans := targetsBodies(t)["/v1/targets/residential/30d"]
 	b, a := ans.Networks[0].Cells["amazon_pdp"], ans.Networks[1].Cells["amazon_pdp"]
-	if model.SV(a.Engine) != "camoufox" || a.SuccessRate != 0.6 || a.Engines["camoufox"].PageLoadP50 != 2000 ||
-		a.Engines["camoufox"].Scores.Success.Status != "all_similar" || a.Engines["chrome"].Scores.Success.Status != "ranked" ||
-		a.Engines["chrome"].Successes != 90 || a.Engines["camoufox"].Requests != 200 || a.Engines["chrome"].Outcomes.Ok != 0.9 {
+	if ans.Engine != nil || model.SV(a.Engine) != "camoufox" || a.SuccessRate != 0.6 || a.Requests != 200 || a.PageLoadP50 != 2000 ||
+		a.Scores.Success.Status != "all_similar" || a.Outcomes.Ok != 0.6 || !reflect.DeepEqual(a.OtherEngines, []string{"chrome"}) {
 		t.Errorf("a amazon_pdp %+v", a)
 	}
-	if model.SV(b.Engine) != "chrome" || b.SuccessRate != 0.8 {
+	if model.SV(b.Engine) != "chrome" || b.SuccessRate != 0.8 || !reflect.DeepEqual(b.OtherEngines, []string{"camoufox"}) {
 		t.Errorf("b amazon_pdp %+v", b)
 	}
 	// Each is alone with its engine among the networks.
@@ -207,6 +206,9 @@ func TestABrowserTargetKeepsItsEnginesApart(t *testing.T) {
 		if c.SuccessRank != (model.Rank{Rank: 1, Peers: 1}) || c.CostRank.Rank.OK() || c.CostRank.Peers != 0 {
 			t.Errorf("ranks %+v %+v", c.SuccessRank, c.CostRank)
 		}
+	}
+	if s := ans.Networks[1].Cells["ai_overview"]; s.OtherEngines == nil || len(s.OtherEngines) != 0 {
+		t.Errorf("one engine: otherEngines %v", s.OtherEngines)
 	}
 	fleet := targetOf(ans, "amazon_pdp").Fleet
 	if len(fleet) != 2 || !near(fleet["camoufox"].MeanSuccess, 0.5) || fleet["camoufox"].Networks != 2 ||
@@ -221,6 +223,40 @@ func TestABrowserTargetKeepsItsEnginesApart(t *testing.T) {
 	}
 	if s := targetOf(ans, "generic_http").ScoreStatus; len(s) != 0 {
 		t.Errorf("http scoreStatus %+v", s)
+	}
+}
+
+// An engine body: every browser cell is that engine's (nulls without its
+// tries), ranked among the networks with tries of it; the meta is the same.
+func TestAnEngineBodyIsThatEnginesFigures(t *testing.T) {
+	t.Parallel()
+	bodies := targetsBodies(t)
+	month, chrome := bodies["/v1/targets/residential/30d"], bodies["/v1/targets/residential/30d/chrome"]
+	if model.SV(chrome.Engine) != "chrome" || !reflect.DeepEqual(chrome.Targets, month.Targets) || chrome.CardCount != 3 {
+		t.Errorf("chrome body %+v", chrome)
+	}
+	b, a := chrome.Networks[0].Cells["amazon_pdp"], chrome.Networks[1].Cells["amazon_pdp"]
+	if model.SV(a.Engine) != "chrome" || a.SuccessRate != 0.9 || a.Requests != 100 || a.Scores.Success.Status != "ranked" ||
+		a.PageLoadP50 != 1500 || !reflect.DeepEqual(a.OtherEngines, []string{"camoufox"}) || a.SuccessRank != (model.Rank{Rank: 1, Peers: 1}) {
+		t.Errorf("a chrome %+v", a)
+	}
+	// B's Chrome tries publish no outcome rates: no rate to rank.
+	if b.Requests != 150 || b.SuccessRate.OK() || b.SuccessRank.Rank.OK() || b.SuccessRank.Peers != 1 {
+		t.Errorf("b chrome %+v", b)
+	}
+	// A has no Chrome tries on ai_overview: nulls, 0 tries, the engine named.
+	if o := chrome.Networks[1].Cells["ai_overview"]; model.SV(o.Engine) != "chrome" || o.Requests != 0 || o.SuccessRate.OK() ||
+		o.Outcomes.Ok.OK() || o.PageLoadP50.OK() || o.Scores != nil || o.CostPer1kSuccess.OK() || !reflect.DeepEqual(o.OtherEngines, []string{"camoufox"}) {
+		t.Errorf("ai_overview chrome %+v", o)
+	}
+	camoufox := bodies["/v1/targets/residential/30d/camoufox"]
+	b, a = camoufox.Networks[0].Cells["amazon_pdp"], camoufox.Networks[1].Cells["amazon_pdp"]
+	if a.SuccessRate != 0.6 || a.Requests != 200 || b.Requests != 50 || b.Scores.Success.Status != "not_enough_data" {
+		t.Errorf("camoufox a %+v, b %+v", a, b)
+	}
+	// Network targets are the same in every body.
+	if h := camoufox.Networks[1].Cells["generic_http"]; h.LatencyP50 != 300 || h.CostPer1kSuccess != 5 || h.SuccessRank != (model.Rank{Rank: 2, Peers: 2}) {
+		t.Errorf("generic_http camoufox %+v", h)
 	}
 }
 
@@ -257,8 +293,8 @@ func TestANetworkTargetCellHasItsCostAndRanks(t *testing.T) {
 	}
 }
 
-// The JSON writes the engines on browser cells only, never a copy of the main
-// engine's figures; a group's sources are cells of their own.
+// The JSON writes one engine's figures, flat, on browser cells and latency on
+// network cells only; a group's sources are cells of their own.
 func TestTheTargetsAnswerJSON(t *testing.T) {
 	t.Parallel()
 	raw, err := json.Marshal(targetsBodies(t)["/v1/targets/residential/30d"])
@@ -274,12 +310,14 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	cells := ans.Networks[1].Cells
-	if _, ok := cells["generic_http"]["engines"]; ok || cells["generic_http"]["costPer1kSuccess"] != 5.0 {
+	if _, ok := cells["generic_http"]["engine"]; ok || cells["generic_http"]["costPer1kSuccess"] != 5.0 || len(cells["generic_http"]) != 9 {
 		t.Errorf("generic_http %v", cells["generic_http"])
 	}
 	for _, id := range []string{"amazon_pdp", "ai_answers"} {
 		c := cells[id]
-		if _, ok := c["engines"]; !ok || c["engine"] != "camoufox" || c["costPer1kSuccess"] != nil || len(c) != 11 {
+		_, engines := c["engines"]
+		_, latency := c["latencyP50"]
+		if engines || latency || c["engine"] != "camoufox" || c["costPer1kSuccess"] != nil || len(c) != 13 {
 			t.Errorf("%s %v", id, c)
 		}
 	}
@@ -294,12 +332,14 @@ func TestTheTargetsAnswerJSON(t *testing.T) {
 func TestTheTargetsKey(t *testing.T) {
 	t.Parallel()
 	for target, want := range map[string]string{"/v1/targets": "/v1/targets/residential/30d", "/v1/targets?range=24h": "/v1/targets/residential/24h",
-		"/v1/targets?kind=isp&range=7d": "/v1/targets/isp/7d", "/v1/targets?kind=mobile": "/v1/targets/mobile/30d"} {
+		"/v1/targets?kind=isp&range=7d": "/v1/targets/isp/7d", "/v1/targets?kind=mobile": "/v1/targets/mobile/30d",
+		"/v1/targets?engine=chrome": "/v1/targets/residential/30d/chrome", "/v1/targets?range=7d&engine=camoufox": "/v1/targets/residential/7d/camoufox"} {
 		if got, err := targetsKey(httptest.NewRequest(http.MethodGet, target, nil)); got != want || err != nil {
 			t.Errorf("%s: %s %v", target, got, err)
 		}
 	}
-	for _, target := range []string{"/v1/targets?range=90d", "/v1/targets?kind=browser", "/v1/targets?kind=Res!", "/v1/targets?slug=a"} {
+	for _, target := range []string{"/v1/targets?range=90d", "/v1/targets?kind=browser", "/v1/targets?kind=Res!", "/v1/targets?slug=a",
+		"/v1/targets?engine=http", "/v1/targets?engine=Chrome"} {
 		var bad BadRequest
 		if _, err := targetsKey(httptest.NewRequest(http.MethodGet, target, nil)); !errors.As(err, &bad) {
 			t.Errorf("%s: %v", target, err)

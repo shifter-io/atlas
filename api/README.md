@@ -42,6 +42,7 @@ cd api && go build -o /tmp/siteapi ./cmd/siteapi && cd ..   # always build from 
 /tmp/siteapi dump --endpoint /v1/coverage --out coverage.json --pretty
 /tmp/siteapi explain --database-file .secrets/database.toml --out /tmp/explain   # time every API statement
 /tmp/siteapi bench --base-url http://127.0.0.1:8090 --out /tmp/bench             # time every page's requests
+/tmp/siteapi bench --base-url http://127.0.0.1:8090 --out /tmp/bench --gaps ../docs/api-web-map-gaps.json  # and check every map gap
 ```
 
 Never run a prebuilt or older binary (`api/bin/` is ignored by git and nothing
@@ -94,7 +95,7 @@ A statement that fails runs in a savepoint and is reported; the others still run
 
 ### Timing every page's requests: `siteapi bench`
 
-`siteapi bench --base-url <url> --out <dir> [--warm 200] [--concurrency 8] [--budgets <file>]`
+`siteapi bench --base-url <url> --out <dir> [--warm 200] [--concurrency 8] [--budgets <file>] [--gaps <file>]`
 measures a running siteapi from the outside, the way the website calls it. It reads
 `/healthz` (the last build's load, assemble, render and total times, and the version's age),
 `/v1/version` (the revision) and `/v1/networks` and `/v1/countries` (the real slugs, kinds
@@ -146,6 +147,38 @@ limit is not checked:
 Both are written to `<dir>` (created mode 700), mode 600. The command exits 1 when a
 request or page is over its budget or a request does not answer 200 (a 404 or 500 fails),
 0 otherwise.
+
+#### Every map gap, pass or fail: `--gaps`
+
+`siteapi bench ... --gaps docs/api-web-map-gaps.json` also checks every gap of
+`docs/api-web-map.md`, after the bench (its requests would otherwise warm the list pages the
+bench times cold). The manifest has one entry per gap ID of the map's "Gaps summary"
+lists (`tests/test_api_web_map_gaps.py` keeps it in step with the map): its `page` (section),
+its `class` and how it is closed:
+
+- `api`: the work item (`work`, `W1` to `W12`) and its `issue`, and `checks`, each a `request`
+  template over `{slug}`, `{kind}`, `{range}` and `{cc}` and the `paths` its answer must have;
+- `website`, `owner`: the section 12 row and its recommendation, as the `reason`;
+- `withdrawn`: the section 13 line that withdrew it, as the `reason`.
+
+A check's request is expanded as the bench expands page requests: `{slug}` for every network
+(with `{kind}`, every kind of it), `{kind}` alone for every kind once, `{range}` for each range,
+`{cc}` for the first country of `/v1/countries`. Every request is sent once. A path uses dots
+for keys, `[]` for every element of a list and `*` for every key of an object (but `na`), such
+as `networks[].cells.*.engines.*.scores.success.status`. It passes in an answer when it reaches
+a value at least once (a list element or key without it is skipped, an empty list reaches
+nothing) and every null it reaches is explained: listed in the `na` of an object around it
+(by its path from that object, list positions and `[<id>]` keys compared as `[]`), or null by
+contract, which the path marks with a trailing `?`. `match` gives a regexp every value at a
+path must match (a number as its JSON text), such as `^residential$` for a `kind=` filter.
+
+A gap passes when every path passes in every answer of its checks; it fails with the first
+failing request of each path and why (`missing`, `null at <path>, not listed in na`, a value
+that does not match, or a request that does not answer 200). `gaps.json` and `gaps.md` are
+written beside `bench.json` and `bench.md`: the counts, then every gap with its verdict and
+evidence; `website`, `owner` and `withdrawn` gaps are listed with their reason and no verdict.
+The command also exits 1 when a gap fails. An issue whose PR names a field differently from
+the manifest updates its entries in the same PR.
 
 ### Where the site schema comes from
 
