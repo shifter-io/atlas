@@ -1,11 +1,12 @@
-"""The three AI answer sources of K-BP1 (D4): Google AI Overview, ChatGPT and Gemini.
+"""The AI answer sources of K-BP1 (D4): their shared bases, and Gemini.
 
-Each decides whether an AI answer appeared, logged out, and how long it took. interact() reads
-the answer's length and sentence count through the PageDriver and returns only those numbers
-(and the time), which the transport adds to PageView.found. The answer text never leaves
-interact(): it is not logged, recorded or returned, and an ok try gets no screenshot.
+Each source decides whether an AI answer appeared, logged out, and how long it took. interact()
+reads the answer's length and sentence count through the PageDriver and returns only those
+numbers (and the time), which the transport adds to PageView.found. The answer text never
+leaves interact(): it is not logged, recorded or returned, and an ok try gets no screenshot.
 The selectors and marks are this version's reading of the public pages; a change to one bumps
-the target's `version`.
+the target's `version`. Google AI Overview and ChatGPT live in their own modules (ai_overview,
+chatgpt); ai_types gathers all three, and proxy_index.targets registers them from there.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from urllib.parse import urlsplit
 
 from ...models import RequestContext
 from ...targets import PageDriver, PageSpec, PageView
-from ..contracts import AI_CHATGPT, AI_GEMINI, AI_OVERVIEW
+from ..contracts import AI_GEMINI
 from ..judge import (
     Mark,
     PageAssessment,
@@ -28,11 +29,9 @@ from ..judge import (
     failed,
     host_of,
     path_has,
-    selector_list,
     text_selector,
 )
 from . import PageTarget, choose
-from .pages import GoogleSearch
 
 # The numbers interact() returns; the judge reads them from PageView.found.
 ANSWER_CHARS = "answer_chars"
@@ -139,52 +138,6 @@ class AiSource(PageTarget):
 
 
 @dataclass(frozen=True, slots=True)
-class AiOverview(AiSource):
-    """Google results page for a rotating question: ok when an AI Overview block with at
-    least MIN_CHARS characters of text is shown."""
-
-    id: str = AI_OVERVIEW
-    url: str = "https://www.google.com/search"
-
-    ANSWER = ('div[aria-label="AI Overview"]', 'div[data-attrid="AI Overview"]')
-    # The results page is google_search's: its selectors, marks and URL have one owner.
-    RESULTS = GoogleSearch.RESULTS
-    CAPTCHA_FORM = GoogleSearch.CAPTCHA_FORM
-    CONSENT_FORM = GoogleSearch.CONSENT_FORM
-    MARKS = GoogleSearch.MARKS
-    # The overview loads after the results: wait this long for it to start.
-    APPEAR_S = 5
-
-    def address(self, value: Any) -> str:
-        return GoogleSearch.address(self, value)
-
-    def wanted(self, value: Any) -> tuple[str, ...]:
-        return (*self.ANSWER, self.RESULTS, self.CAPTCHA_FORM, self.CONSENT_FORM)
-
-    async def interact(self, driver: PageDriver, spec: PageSpec) -> dict[str, int] | None:
-        """With results shown, wait up to APPEAR_S for an overview, then for it to stop
-        growing. The whole wait, and answer_ms, run from the start of interact()."""
-        start, budget, overview = self.clock(), self.budget_s(), selector_list(*self.ANSWER)
-        if not await driver.count(overview):
-            if not await driver.count(self.RESULTS):
-                return None
-            if not await driver.wait_for(overview, round(min(self.APPEAR_S, budget) * 1000)):
-                return {ANSWER_CHARS: 0, ANSWER_SENTENCES: 0}
-        return await self.read_answer(driver, budget, start)
-
-    def rules(self, view: PageView) -> PageAssessment:
-        if host_of(view).startswith("consent."):
-            return failed("no_content", "consent_page")
-        if count(view, *self.ANSWER) or view.found.get(ANSWER_CHARS):
-            return failed("no_answer", "short_overview")
-        if count(view, self.RESULTS):
-            return failed("no_answer", "no_overview")
-        if count(view, self.CONSENT_FORM):
-            return failed("no_content", "consent_page")
-        return failed("no_content", "no_results")
-
-
-@dataclass(frozen=True, slots=True)
 class ChatSource(AiSource):
     """A chat app: open it, close a consent dialog if one covers the prompt, type the one
     fixed question, submit, and wait for the reply to stop growing. A sign-in before the
@@ -236,34 +189,6 @@ class ChatSource(AiSource):
         return failed("no_answer", "no_reply")
 
 
-TOO_MANY = "too many requests"
-
-
-@dataclass(frozen=True, slots=True)
-class ChatGpt(ChatSource):
-    """ChatGPT logged out: ok when the assistant's reply has at least MIN_CHARS characters
-    and at least 2 sentences."""
-
-    id: str = AI_CHATGPT
-    url: str = "https://chatgpt.com/"
-
-    PROMPT = "#prompt-textarea"
-    ANSWER = ('[data-message-author-role="assistant"]',)
-    LOGIN_HOSTS = ("auth.openai.com", "auth0.openai.com")
-    LOGIN_PATHS = ("/auth/login",)
-    LOGIN_DIALOGS = (
-        'div[role="dialog"]:has([data-testid="login-button"])',
-        'div[role="dialog"]:has-text("Log in or sign up")',
-    )
-    STOPS = (text_selector("Too many requests"), "#challenge-form")
-    DISMISS = ('button:has-text("Reject non-essential")', 'button:has-text("Accept all")')
-    MIN_SENTENCES = 2
-    MARKS = (
-        Mark("challenge", "challenge_page", found=("#challenge-form",)),
-        Mark("blocked", "too_many_requests", text=(TOO_MANY,)),
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class Gemini(ChatSource):
     """Gemini logged out: ok when the response has at least MIN_CHARS characters. No reply
@@ -297,6 +222,3 @@ class Gemini(ChatSource):
         if result.reason == "no_reply" and new_chat:
             return failed("browser_error", "send_failed")
         return result
-
-
-AI_TARGET_TYPES = (AiOverview, ChatGpt, Gemini)

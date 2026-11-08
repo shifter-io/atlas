@@ -17,13 +17,9 @@ from proxy_index.browser import contracts as c
 from proxy_index.browser import judge as j
 from proxy_index.browser.settings import INPUT_SHAPES, load_settings
 from proxy_index.browser.targets import PageTarget
-from proxy_index.browser.targets.ai import (
-    AI_TARGET_TYPES,
-    POLL_S,
-    AiOverview,
-    AskSpec,
-    sentence_count,
-)
+from proxy_index.browser.targets.ai import POLL_S, AskSpec, sentence_count
+from proxy_index.browser.targets.ai_overview import AiOverview
+from proxy_index.browser.targets.ai_types import AI_TARGET_TYPES
 from proxy_index.errors import UserError
 from proxy_index.models import RequestContext
 from proxy_index.targets import BrowserTarget, PageSpec, PageView, registry
@@ -288,30 +284,6 @@ def test_chat_sources_ask_the_one_fixed_question(tmp_path):
         refused = rf"target\[{index}\]\.inputs: must be a list of 1 to 1"
         with pytest.raises(UserError, match=refused):
             load_settings(path)
-
-
-def test_overview_rotates_its_questions():
-    target = registry.get(c.AI_OVERVIEW)
-    questions = ("why is the sky blue", "how do rainbows form", "what is a tide")
-    for i in range(7):
-        spec = target.page(context(i), questions)
-        query = questions[i % 3].replace(" ", "+")
-        assert spec.url == f"https://www.google.com/search?q={query}&hl=en&gl=us"
-        assert target.try_fields(context(i), questions) == {
-            "input": questions[i % 3],
-            "source": c.AI_OVERVIEW,
-        }
-    settings = load_settings(EXAMPLE)
-    overview = next(t for t in settings.targets if t.id == c.AI_OVERVIEW)
-    assert overview.answer_wait_s == 30
-
-
-def test_the_overview_shares_google_search_selectors_marks_and_url():
-    overview, search = registry.get(c.AI_OVERVIEW), registry.get(c.GOOGLE_SEARCH)
-    for name in ("RESULTS", "CAPTCHA_FORM", "CONSENT_FORM", "MARKS"):
-        assert getattr(overview, name) is getattr(search, name)
-    for query in ("why is the sky blue", "a & b"):
-        assert overview.address(query) == search.address(query)
 
 
 def test_registered_sources_match_the_targets_file():
