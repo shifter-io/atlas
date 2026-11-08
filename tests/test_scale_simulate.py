@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from orchestrator_cases import prepare, query
 
-from proxy_index.calculated import netlists, store
+from proxy_index.calculated import store
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "scale"))
@@ -45,15 +45,7 @@ BROWSER = (
     "WHERE b.kind='browser'"
 )
 OWN = "SELECT count(*) FROM {} WHERE run_key IN (SELECT run_key FROM test_runs WHERE {})"
-WINDOWS = (  # a network's daily tests in a build's 24h windows, over its product cohorts
-    "SELECT p.provider,sum(w.completed) FROM calculated_windows w JOIN products p "
-    "USING(product_id) WHERE w.build_id=%s AND w.window_hours=24 AND w.target='generic_http' "
-    "AND w.cohort<>%s GROUP BY 1"
-)
-ALL_WINDOWS = (
-    "SELECT p.provider,w.cohort,w.target,w.completed FROM calculated_windows w JOIN products p "
-    "USING(product_id) WHERE w.build_id=%s AND w.window_hours=24"
-)
+SNAPSHOT = "SELECT payload FROM calculated_snapshots WHERE build_id=%s"
 
 
 @pytest.fixture
@@ -147,16 +139,12 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
     current = query(staging, "SELECT build_id FROM current_calculation")[0][0]
     assert current == incremental["build_id"]
     # The full build's 24h window holds day 2's daily tests and its released hours.
-    windows = dict(query(staging, WINDOWS, (full["build_id"], netlists.COHORT)))
-    for network in cases.NETWORKS:
+    payload = query(staging, SNAPSHOT, (full["build_id"],))[0][0]
+    networks = {entry["provider"]: entry["windows"]["24h"] for entry in payload["networks"]}
+    for network in cases.NETWORKS:  # the network figures leave the browser rows out
         requests = sum(test[3] for test in daily_figures(found, 1) if test[0] == network)
-        found = query(staging, ALL_WINDOWS, (full["build_id"],))
-        assert windows.get(network) == requests > 0, found
-    payload = query(
-        staging, "SELECT payload FROM calculated_snapshots WHERE build_id=%s", (full["build_id"],)
-    )[0][0]
-    for entry in payload["networks"]:
-        assert entry["windows"]["24h"]["estimated"]["hours"] > 0
+        assert networks[network]["metrics"]["completed"] == requests > 0
+        assert networks[network]["estimated"]["hours"] > 0
     # Nodes disabled, no settings row written, the generated hours deleted.
     nodes = query(staging, "SELECT node_id,host,token_hash FROM nodes ORDER BY 1")
     assert sorted(found["nodes"]) == [node[0] for node in nodes]
