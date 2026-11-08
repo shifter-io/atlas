@@ -98,14 +98,22 @@ def problems(gap_map: Map, manifest: dict) -> list[str]:
     return out
 
 
+def work_issues(issues: dict, work: str | None) -> list:
+    """A work item's issues: one number, or a list when follow-up issues close some of its gaps."""
+    found = issues.get(work)
+    return found if isinstance(found, list) else [found]
+
+
 def api_problems(gap_map: Map, issues: dict, gap: dict) -> list[str]:
     gid, work, out = gap["id"], gap.get("work"), []
     if work not in gap_map.work.get(gid, set()):
         out.append(
             f"{gid}: work item {work}, section 11 has {sorted(gap_map.work.get(gid, set()))}"
         )
-    if gap.get("issue") != issues.get(work):
-        out.append(f"{gid}: issue {gap.get('issue')}, {work} is #{issues.get(work)}")
+    allowed = work_issues(issues, work)
+    if gap.get("issue") not in allowed:
+        named = " or ".join(f"#{i}" for i in allowed)
+        out.append(f"{gid}: issue {gap.get('issue')}, {work} is {named}")
     if not gap.get("checks"):
         out.append(f"{gid}: an api gap with no check")
     for check in gap.get("checks", []):
@@ -188,7 +196,13 @@ def test_bad_checks_are_found(gap_map, manifest):
         "HOME-4: bad path 'a..b'",
         "HOME-4: match on other, which the check does not list",
     ]
-    assert problems(gap_map, mutate(manifest, "HOME-4", issue=1)) == ["HOME-4: issue 1, W6 is #712"]
+    assert problems(gap_map, mutate(manifest, "HOME-4", issue=1)) == [
+        "HOME-4: issue 1, W6 is #712 or #751"
+    ]
+    assert problems(gap_map, mutate(manifest, "HOME-4", issue=751)) == []
+    assert problems(gap_map, mutate(manifest, "HOME-28", issue=751)) == [
+        "HOME-28: issue 751, W2 is #710"
+    ]
     assert problems(gap_map, mutate(manifest, "HOME-4", page=2)) == [
         "HOME-4: page 2, the map has it in section 1"
     ]
