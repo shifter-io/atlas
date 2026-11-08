@@ -162,7 +162,10 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
         assert runs["growth"]["table_bytes"] > 0 and day["rows_per_second"] > 0
         assert {row["metric"] for row in day["real_24h"]} >= {"unique IPs", "browser runs"}
         assert set(day["seconds"]) == {"daily", "browser", "release"}
-    assert report["final"]["tables"]["public.calculation_builds"]["growth"]["rows"] == 2
+    builds = report["final"]["tables"]["public.calculation_builds"]  # the full one is retired
+    assert (
+        builds["growth"]["rows"] == 1 and "public.calculated_snapshots" in report["final"]["tables"]
+    )
     assert [c["kind"] for c in report["calculation"]] == ["full", "incremental"]
     assert all(c["seconds"] > 0 and c["peak_rss_kb"] for c in report["calculation"])
     checks = report["checks"]
