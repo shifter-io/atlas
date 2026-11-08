@@ -224,7 +224,7 @@ async def test_cancelling_the_run_cancels_the_sampler():
 
 
 async def test_a_live_sample_sees_this_process_child():
-    child = subprocess.Popen(["sleep", "30"])
+    child = await asyncio.create_subprocess_exec("sleep", "30")
     try:
         sampler = TreeSampler(os.getpid(), interval=0.1)
         async with sampler:
@@ -232,7 +232,7 @@ async def test_a_live_sample_sees_this_process_child():
         table = procstats.read_ps()
     finally:
         child.kill()
-        child.wait()
+        await child.wait()
     assert table is not None and child.pid in procstats.descendants(table, os.getpid())
     assert len(sampler.lines) >= 3
     assert all(line["processes"] >= 1 and line["rss_bytes"] > 0 for line in sampler.lines)
