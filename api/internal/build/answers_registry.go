@@ -60,6 +60,9 @@ type Context struct {
 	// Dataset is the dataset (its Targets, providers and measured market).
 	Dataset *model.Dataset
 	Events  *EventWindow
+	// Pages is the answers built before the registered ones: the rankings
+	// and the network answers (the all-networks one included).
+	Pages *Pages
 	// Inputs is the rows the build read: the site catalog (Providers,
 	// Pricing, Plans, Scopes, Profiles, ...) and the framework's. Its
 	// snapshot's network lists read the database: an answer never calls them.

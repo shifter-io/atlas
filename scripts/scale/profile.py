@@ -48,6 +48,8 @@ def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]
     """(network entries, real_24h totals, gaps) from the LC-ENRICH-1 folders, one network at a
     time (its hashes are freed before the next)."""
     folders = {path.parent.name: path.parent for path in enrich.glob("*/manifest.json")}
+    if not folders:  # a mistyped or empty --enrich: not a profile where every network is a gap
+        raise ProfileError(f"{enrich.name}: no network folder with a manifest.json")
     entries, totals, gaps = {}, {}, []
     for name in wanted:
         if name not in folders:

@@ -1,4 +1,5 @@
-"""The steps of storage.ingest: each database step runs inside the one transaction ingest opens."""
+"""The steps of storage.ingest_many: a run's reads before the transaction, and the set-based
+statements over the batch's temp tables (storage_batch) inside it."""
 
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ from decimal import Decimal
 from psycopg.types.json import Jsonb
 
 from . import names
-from .partitions import partition
+from .partitions import DAILY, creation, holder
+from .storage_batch import many
 from .storage_read import (
     ENRICHMENT_FIELDS,
     LOCATION_FIELDS,
@@ -33,6 +35,10 @@ ADAPTER = {
     "effective_ttl_seconds": ("ttl_seconds", "integer"),
     "extra_flags": ("extra_flags", "json"),
 }
+BUCKET_COLUMNS = (
+    "completed,successes,response_body_bytes,errors,status_codes,histogram_steps,"
+    "histogram_counts,extra,outcome_counters," + ",".join(OUTCOME_KEYS)
+)
 
 
 def column(kind, value):
@@ -96,18 +102,10 @@ def _canonical(value):
     return json.dumps(value, sort_keys=True)
 
 
-def load_ips(conn, run, ip_rows):
-    """Copy the IP observations into incoming_ips and reconcile them; return their row count."""
-    summary, run_id, buckets = run.summary, run.run_id, run.buckets
-    conn.execute(
-        "CREATE TEMP TABLE incoming_ips (bucket timestamptz, ip inet, count bigint, "
-        "first_seen timestamptz, last_seen timestamptz, PRIMARY KEY(bucket,ip)) "
-        "ON COMMIT DROP"
-    )
-    with (
-        conn.cursor().copy("COPY incoming_ips FROM STDIN") as copy,
-        gzip.open(run.source, "rt") as f,
-    ):
+def read_ips(run, ip_rows):
+    """The run's IP observation rows, checked and reconciled with its summary; none for a pulse."""
+    summary, run_id, buckets, rows = run.summary, run.run_id, run.buckets, []
+    with gzip.open(run.source, "rt") as f:
         for line in f if ip_rows else ():
             row = json.loads(line)
             bucket, first, last = (
@@ -123,14 +121,10 @@ def load_ips(conn, run, ip_rows):
                 or row["count"] <= 0
             ):
                 raise ValueError("Invalid IP observation")
-            copy.write_row(
-                (bucket, str(ipaddress.ip_address(row["ip"])), row["count"], first, last)
-            )
-    rows, observations, unique = conn.execute(
-        "SELECT count(*),coalesce(sum(count),0),count(DISTINCT ip) FROM incoming_ips"
-    ).fetchone()
+            rows.append((bucket, str(ipaddress.ip_address(row["ip"])), row["count"], first, last))
+    observations, unique = sum(row[2] for row in rows), len({row[1] for row in rows})
     if ip_rows and (
-        rows != summary["artifacts"]["ips"]["rows"]
+        len(rows) != summary["artifacts"]["ips"]["rows"]
         or observations != (run.in_country if summary["pool_eligible"] else 0)
         or unique != (summary["unique_ips"] or 0)
     ):
@@ -138,8 +132,8 @@ def load_ips(conn, run, ip_rows):
     return rows
 
 
-def insert_run(conn, run, scope_id, batch_id):
-    """Insert the test_runs row with the summary keys its columns cannot rebuild; its run_key."""
+def run_row(run, batch_id):
+    """The test_runs values of a run, with the summary keys its columns cannot rebuild."""
     summary, run_id = run.summary, run.run_id
     compact = {
         key: value
@@ -159,102 +153,97 @@ def insert_run(conn, run, scope_id, batch_id):
     ):
         if compact[key] == value:
             del compact[key]
-    run_key = conn.execute(
-        "INSERT INTO test_runs (run_id,scope_id,"
-        "started_at,finished_at,status,summary_sha256,summary,batch_id) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING run_key",
-        (
-            run_id,
-            scope_id,
-            started_at,
-            finished_at,
-            summary["status"],
-            run.summary_hash,
-            Jsonb(compact),
-            batch_id,
-        ),
+    status, summary_hash = summary["status"], run.summary_hash
+    return run_id, started_at, finished_at, status, summary_hash, Jsonb(compact), batch_id
+
+
+def insert_runs(conn):
+    """Insert the new runs' test_runs rows in batch order; each gets its run_key."""
+    conn.execute(
+        "INSERT INTO test_runs (run_id,scope_id,started_at,finished_at,status,summary_sha256,"
+        "summary,batch_id) SELECT run_id,scope_id,started_at,finished_at,status,summary_sha256,"
+        "summary,batch_id FROM incoming_runs ORDER BY idx"
     )
-    return run_key.fetchone()[0]
+    conn.execute(
+        "UPDATE incoming_runs i SET run_key=t.run_key FROM test_runs t WHERE t.run_id=i.run_id"
+    )
 
 
-def insert_buckets(conn, run, run_key):
-    """Add the run's buckets, creating the daily partitions they and their IPs need."""
-    for bucket, values in run.bucket_rows.items():
-        partition(conn, "run_buckets", bucket)
-        partition(conn, "ip_observations", bucket)
-        conn.execute(
-            "INSERT INTO run_buckets(bucket_start,run_key,completed,successes,"
-            "response_body_bytes,errors,status_codes,histogram_steps,histogram_counts,"
-            "extra,outcome_counters,"
-            + ",".join(OUTCOME_KEYS)
-            + ") VALUES ("
-            + ",".join(["%s"] * (len(values) + 2))
-            + ")",
-            (bucket, run_key, *values),
-        )
+def partitions(runs):
+    """{(table, moment)} of the daily partitions the runs' buckets, IPs and geo rows need."""
+    found = {(t, b) for run in runs for b in run.bucket_rows for t in DAILY[:2]}
+    return found | {(DAILY[2], row[0]) for run in runs for row in run.geo_rows}
 
 
-def store_geo(conn, run_key, rows):
+def insert_buckets(conn, runs, existing):
+    """Add the new runs' buckets, creating the daily partitions they, their IPs and geo rows need
+    where partition() would: existing holds the names found under the lock."""
+    wanted = {(t, *holder(t, moment, existing)) for t, moment in partitions(runs)}
+    for table, name, start, end in sorted(wanted):
+        if name not in existing:
+            for query in creation(table, name, start, end):
+                conn.execute(query)
+    conn.execute(
+        f"INSERT INTO run_buckets(bucket_start,run_key,{BUCKET_COLUMNS}) SELECT b.bucket_start,"
+        f"r.run_key,b.{BUCKET_COLUMNS.replace(',', ',b.')} FROM incoming_buckets b "
+        "JOIN incoming_runs r USING(idx)"
+    )
+
+
+def store_geo(conn, runs):
     """Resolve each location and network to its enrichment id and add the geo buckets."""
+    rows = [(run.idx, *row) for run in runs for row in run.geo_rows]
     if not rows:
         return
     types = ",".join(
         f"{field} {ENRICHMENT_FIELDS[field]}" for field in (*LOCATION_FIELDS, *NETWORK_FIELDS)
     )
     conn.execute(
-        f"CREATE TEMP TABLE incoming_geo_buckets (bucket timestamptz, {types}, "
+        f"CREATE TEMP TABLE incoming_geo_buckets (idx integer, bucket timestamptz, {types}, "
         "completed bigint, successes bigint, challenges bigint, blocks bigint, timeouts bigint, "
         "bytes_up bigint, bytes_down bigint, histogram_steps integer[], "
         "histogram_counts integer[]) ON COMMIT DROP"
     )
-    with conn.cursor().copy("COPY incoming_geo_buckets FROM STDIN") as copy:
-        for row in rows:
-            copy.write_row(row)
-    for bucket in {row[0] for row in rows}:
-        partition(conn, "run_geo_buckets", bucket)
+    many(conn, "INSERT INTO incoming_geo_buckets VALUES ", "", None, rows)
     # The same lists as _enrich: the all-NULL rows are the unknown member.
     joins = names.resolve(conn, "incoming_geo_buckets g", lambda field: f"g.{field}")
     conn.execute(
         "INSERT INTO run_geo_buckets(bucket_start,run_key,location_id,network_id,completed,"
         "successes,challenges,blocks,timeouts,bytes_up,bytes_down,histogram_steps,"
-        "histogram_counts) SELECT g.bucket,%s,location_id.location_id,network_id.network_id,"
+        "histogram_counts) SELECT g.bucket,r.run_key,location_id.location_id,network_id.network_id,"
         "g.completed,g.successes,g.challenges,g.blocks,g.timeouts,g.bytes_up,g.bytes_down,"
-        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g " + joins,
-        (run_key,),
+        "g.histogram_steps,g.histogram_counts FROM incoming_geo_buckets g "
+        "JOIN incoming_runs r USING(idx) " + joins
     )
 
 
-def check_stored(conn, run, run_key):
-    """Raise unless the stored rows rebuild the summary exactly."""
+def check_stored(run, stored):
+    """Raise unless the stored rows (stored_run_summary) rebuild the summary exactly."""
     # The run histogram is stored only as bucket bins, exactly as in v4.
     expected = run.summary | {"latency_histogram": run.histogram.export()}
-    stored = conn.execute("SELECT stored_run_summary(%s)", (run_key,)).fetchone()[0]
     if _canonical(stored) != _canonical(expected):
         raise ValueError("Run summary cannot be stored losslessly")
 
 
-def add_observations(conn, run_key, pool_id):
-    """Add the run's IP observations and count the IPs new to its pool."""
+def add_observations(conn):
+    """Add the new runs' IP observations and count the IPs new to each pool."""
     conn.execute(
-        "INSERT INTO ip_observations SELECT i.bucket,%s,a.ip_id,i.count,"
-        "i.first_seen,i.last_seen FROM incoming_ips i JOIN ip_addresses a USING(ip)",
-        (run_key,),
+        "INSERT INTO ip_observations SELECT bucket,run_key,ip_id,count,first_seen,last_seen "
+        "FROM incoming_observations"
     )
-    pool_new = conn.execute(
-        "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT %s,a.ip_id FROM "
-        "incoming_ips i JOIN ip_addresses a USING(ip) ON CONFLICT DO NOTHING RETURNING 1) "
-        "SELECT count(*) FROM added",
-        (pool_id,),
-    ).fetchone()[0]
     conn.execute(
-        "UPDATE pool_stats SET unique_ips=unique_ips+%s WHERE pool_id=%s",
-        (pool_new, pool_id),
+        "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT pool_id,ip_id FROM "
+        "incoming_observations ON CONFLICT DO NOTHING RETURNING pool_id) "
+        "UPDATE pool_stats p SET unique_ips=p.unique_ips+a.n FROM (SELECT pool_id,count(*) AS n "
+        "FROM added GROUP BY pool_id) a WHERE p.pool_id=a.pool_id"
     )
 
 
-def enrich(conn, directory, run_id, run_key, expected_rows):
-    """Import each enrichment report of the run once; return how many releases were added."""
-    added = 0
+def read_enrichments(run):
+    """The run's enrichment reports checked against run.ips: (release, metadata, checksum, rows)."""
+    directory, run_id, expected = run.source.parent, run.run_id, len(run.ips)
+    observed = {(bucket, ip): count for bucket, ip, count, _, _ in run.ips}
+    reports = []
     for report_path in sorted(directory.glob("enrichment-*.json")):
         report = json.loads(report_path.read_text())
         release = report["release"]["sha256"]
@@ -262,80 +251,62 @@ def enrich(conn, directory, run_id, run_key, expected_rows):
             not re.fullmatch(r"[a-f0-9]{64}", release)
             or report["run_id"] != run_id
             or report["file"] != f"enriched-{release}.jsonl.gz"
-            or report["rows"] != expected_rows
+            or report["rows"] != expected
         ):
             raise ValueError("Invalid enrichment manifest")
         artifact = directory / report["file"]
-        checksum = _digest(artifact)
-        conn.execute(
-            "INSERT INTO dbip_releases(sha256,metadata) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-            (release, Jsonb(report["release"])),
-        )
-        release_id = conn.execute(
-            "SELECT release_id FROM dbip_releases WHERE sha256=%s", (release,)
-        ).fetchone()[0]
-        previous = conn.execute(
-            "SELECT artifact_sha256 FROM run_enrichments WHERE run_key=%s AND release_id=%s",
-            (run_key, release_id),
-        ).fetchone()
-        if previous:
-            if previous[0] != checksum:
-                raise ValueError("Previously imported enrichment has changed")
-            continue
-        _load_enrichment(conn, artifact, run_id, release, expected_rows)
-        _store_enrichment(conn, release_id)
-        countries = {
-            country: {"requests": int(requests), "unique_ips": unique}
-            for country, requests, unique in conn.execute(
-                "SELECT coalesce(attributes->>'country_code','Unknown'),sum(count),"
-                "count(DISTINCT ip) FROM incoming_geo GROUP BY 1 ORDER BY 1"
-            )
-        }
-        conn.execute(
-            "INSERT INTO run_enrichments VALUES (%s,%s,%s,%s)",
-            (run_key, release_id, checksum, Jsonb(countries)),
-        )
-        conn.execute("DROP TABLE incoming_geo")
-        added += 1
-    return added
+        rows = _enrichment_rows(artifact, run_id, release)
+        matched = sum(type(n) is int and observed.get((b, ip)) == n for b, ip, n, _ in rows)
+        if len(rows) != expected or matched != expected:
+            raise ValueError("Enrichment does not match IP observations")
+        reports.append((release, Jsonb(report["release"]), _digest(artifact), rows))
+    return reports
 
 
-def _load_enrichment(conn, artifact, run_id, release, expected_rows):
-    """Copy one enrichment artifact into incoming_geo; it must match incoming_ips row for row."""
-    conn.execute(
-        "CREATE TEMP TABLE incoming_geo (bucket timestamptz, ip inet, count bigint, "
-        "attributes jsonb, PRIMARY KEY(bucket,ip)) ON COMMIT DROP"
-    )
-    with (
-        conn.cursor().copy("COPY incoming_geo FROM STDIN") as copy,
-        gzip.open(artifact, "rt") as f,
-    ):
+def _enrichment_rows(artifact, run_id, release):
+    """The rows of one enrichment artifact; each must belong to the run and the release."""
+    rows = []
+    with gzip.open(artifact, "rt") as f:
         for line in f:
             row = json.loads(line)
             if row["run_id"] != run_id or row["dbip_release"] != release:
                 raise ValueError("Enrichment row belongs to another run or release")
-            copy.write_row(
-                (
-                    _time(row["bucket_start"]),
-                    str(ipaddress.ip_address(row["ip"])),
-                    row["count"],
-                    Jsonb(row["enrichment"]),
-                )
-            )
-    count, matched = conn.execute(
-        "SELECT count(*),count(i.ip) FROM incoming_geo g LEFT JOIN incoming_ips i "
-        "ON (g.bucket,g.ip,g.count)=(i.bucket,i.ip,i.count)"
-    ).fetchone()
-    if count != expected_rows or matched != expected_rows:
-        raise ValueError("Enrichment does not match IP observations")
-    if conn.execute(
-        "SELECT 1 FROM incoming_geo GROUP BY ip HAVING count(DISTINCT attributes)>1 LIMIT 1"
-    ).fetchone():
-        raise ValueError("Conflicting enrichment for the same IP")
+            ip = str(ipaddress.ip_address(row["ip"]))
+            rows.append((_time(row["bucket_start"]), ip, row["count"], Jsonb(row["enrichment"])))
+    return rows
 
 
-def _store_enrichment(conn, release_id):
-    """Add incoming_geo's per-IP enrichment for a release; it must agree with any stored."""
+def enrich(conn):
+    """Add the batch's new enrichment reports; the cursors of their two checks."""
+    conn.execute(
+        "INSERT INTO dbip_releases(sha256,metadata) SELECT DISTINCT ON(release) release,metadata "
+        "FROM incoming_releases ORDER BY release,idx ON CONFLICT DO NOTHING"
+    )
+    conn.execute(
+        "UPDATE incoming_releases i SET release_id=d.release_id FROM dbip_releases d "
+        "WHERE d.sha256=i.release"
+    )
+    conn.execute(
+        "UPDATE incoming_releases i SET run_key=r.run_key FROM incoming_runs r WHERE r.idx=i.idx"
+    )
+    conflicting = conn.execute(
+        "SELECT DISTINCT idx FROM incoming_enrichment GROUP BY idx,release,ip "
+        "HAVING count(DISTINCT attributes)>1"
+    )
+    conflicts = _store_enrichment(conn)
+    conn.execute(
+        "INSERT INTO run_enrichments SELECT r.run_key,r.release_id,r.checksum,coalesce((SELECT "
+        "jsonb_object_agg(c.country,jsonb_build_object('requests',c.requests,'unique_ips',c.ips)) "
+        "FROM (SELECT coalesce(g.attributes->>'country_code','Unknown') AS country,"
+        "sum(g.count) AS requests,count(DISTINCT g.ip) AS ips FROM incoming_enrichment g "
+        "WHERE (g.idx,g.release)=(r.idx,r.release) GROUP BY 1) c),'{}') FROM incoming_releases r"
+    )
+    return conflicting, conflicts
+
+
+def _store_enrichment(conn):
+    """Add incoming_enrichment's per-IP enrichment; the cursor of the check that it agrees with
+    any stored for its release, and the batch's reports of one release with each other."""
     # Cast and compare the same typed values used on insert; missing and null
     # known fields both map to SQL NULL. Unknown attributes remain lossless.
     values = [f"(g.attributes->>'{key}')::{kind}" for key, kind in ENRICHMENT_FIELDS.items()]
@@ -343,28 +314,30 @@ def _store_enrichment(conn, release_id):
         "g.attributes - ARRAY[" + ",".join(f"'{key}'" for key in ENRICHMENT_FIELDS) + "]::text[]"
     )
     comparisons = [
-        f"e.{key} IS DISTINCT FROM {value}"
-        for key, value in zip(ENRICHMENT_FIELDS, values, strict=True)
+        f"e.{key} IS DISTINCT FROM b.{key}" for key in (*ENRICHMENT_FIELDS, "extra_attributes")
     ]
-    comparisons.append(f"e.extra_attributes IS DISTINCT FROM ({extras})")
-    if conn.execute(
-        "SELECT 1 FROM incoming_geo g JOIN ip_addresses a USING(ip) "
-        "JOIN ip_enrichment_fields e USING(ip_id) WHERE e.release_id=%s AND ("
+    # Each IP's distinct typed values per release; more than one conflicts inside the batch.
+    # Each is looked up by key (LATERAL ... LIMIT 1), whatever the planner knows of the tables.
+    typed = [f"{value} AS {key}" for key, value in zip(ENRICHMENT_FIELDS, values, strict=True)]
+    conflicts = conn.execute(
+        "WITH b AS MATERIALIZED (SELECT DISTINCT a.ip_id,r.release_id,"
+        + ",".join(typed)
+        + f",({extras}) AS extra_attributes FROM incoming_enrichment g JOIN incoming_releases r "
+        "USING(idx,release) JOIN ip_addresses a USING(ip)) SELECT EXISTS (SELECT 1 FROM b, "
+        "LATERAL (SELECT 1 FROM ip_enrichment_fields e WHERE (e.ip_id,e.release_id)="
+        "(b.ip_id,b.release_id) AND ("
         + " OR ".join(comparisons)
-        + ") LIMIT 1",
-        (release_id,),
-    ).fetchone():
-        raise ValueError("Enrichment release conflicts with prior data")
+        + ") LIMIT 1) x) OR EXISTS (SELECT 1 FROM b GROUP BY ip_id,release_id HAVING count(*)>1)"
+    )
     joins = names.resolve(
-        conn, "incoming_geo g", lambda f: f"(g.attributes->>'{f}')::{ENRICHMENT_FIELDS[f]}"
+        conn, "incoming_enrichment g", lambda f: f"(g.attributes->>'{f}')::{ENRICHMENT_FIELDS[f]}"
     )
     conn.execute(
         "INSERT INTO ip_enrichment(ip_id,release_id,location_id,network_id,matched,"
-        "extra_attributes) SELECT DISTINCT a.ip_id,%s,location_id.location_id,"
+        "extra_attributes) SELECT DISTINCT a.ip_id,r.release_id,location_id.location_id,"
         "network_id.network_id,(g.attributes->>'matched')::boolean,nullif(("
         + extras
-        + "),'{}'::jsonb) FROM incoming_geo g JOIN ip_addresses a USING(ip) "
-        + joins
-        + " ON CONFLICT DO NOTHING",
-        (release_id,),
+        + "),'{}'::jsonb) FROM incoming_enrichment g JOIN incoming_releases r USING(idx,release) "
+        "JOIN ip_addresses a USING(ip) " + joins + " ON CONFLICT DO NOTHING"
     )
+    return conflicts

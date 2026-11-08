@@ -204,7 +204,7 @@ All `GET` (and `HEAD`), JSON, `Access-Control-Allow-Origin: *`.
 |---|---|
 | `/v1/dataset` | `302 Found` to the current dataset file, `Location: files/dataset-<sha256>.json` (relative, so it also resolves under a proxy's path prefix), `public, max-age=5, s-maxage=5`. Browsers and `fetch` follow it; `If-None-Match` travels with the redirect and the file answers `304`. |
 | `/v1/files/dataset-<sha256>.json` | The data the site's pages use, so a download regenerates them: the `Dataset` (types.ts) plus `snapshot` and `na` (see FIELDS.md, "Additions"), `pages`, the body of every page answer the site draws by its request, the country answers included (FIELDS.md, "Page answers in the dataset file"), and `lists`: of every network list (country, region, city, ASN and City × ASN) its first page as compact arrays, its exact `total` and its page count; every further page, search and cross-network list is read from the API (DATASET-SIZE-2; FIELDS.md, "The dataset file of a v4 build"). At 18 networks × 249 countries it is about 9.2 MB, gzip 0.5 MB (at most 15 MB, `TestTheRunADatasetFileIsSmallAndQuickToWrite`). The raw snapshot product (`measurement`) and the place ranks (`placeRanks`), which no page uses, are not in it (DATASET-SIZE-1). It is a static file on disk with its `.gz` and `.br` (see "The dataset file"), named by the SHA-256 of its bytes and cached for good (`public, max-age=31536000, immutable`). The current file and, for 10 minutes after it was replaced, the one before are served as they are (a client may hold the old redirect for 5 s or race a replacement); any other `dataset-<sha256>.json` name answers an uncached `302` to the current file, so a download or a build never gets a 404 because the data changed. Other names are 404. Not an answer: a download (the whole dataset) read in one piece. The website's old `/api/site/*` passthrough did not forward the redirect. |
-| `/v1/events?product=&kind=&category=&since=&limit=` | `{events: TestEvent[]}`, newest first, the exact shape of the framework's `/v1/events` (the website's `TestEvent`). Uses the same validation: `limit` 1-500 (default 100), `category` census, pulse, incident or audit, `since` an exclusive ISO time. Without `kind` or `category` (the live tape's polls) routine rows (the census tab and `pulse_finished`) never push other rows off the page: the newest other rows (pulse down and recovered, incidents, audits) take up to half of `limit`, the newest rows of any kind fill the rest, newest first. A `kind` or `category` filter gets exactly the newest matching rows. |
+| `/v1/events?product=&network=&kind=&category=&country=&target=&q=&proxyKind=&since=&after=&limit=` | `{events, cursor, updatedAt, more}`: the framework's `TestEvent` rows (its validation: `limit` 1-500, default 100; `category` census, pulse, incident or audit; `since` an exclusive ISO time) with the live tape's `title`, `detail`, `value`, `providerSlug` and `providerName`, and an id cursor: `after=<event_id>` gives the rows past it oldest first. Without a cursor, `kind` or `category` the pick is prioritized (routine rows never push the others off the page). See [answers/events.md](answers/events.md). |
 | `/v1/search?q=` | `{query, tokens, total, sections: [{group, items: SearchItem[]}]}`, ranked like the website's command palette (same scoring, 16 results, 5 per group). An empty `q` gives the palette's default sections. |
 | `/v1/search-index` | The precomputed index (`search.ts buildSearchIndex` without its articles: networks, pages, targets, actions, plus a new `Countries` group) and the palette's constants (`groupBonus` has no `Guides` group). Guides and network reviews are not searched, and the pages only the old website had (`/guides`, `/contribute`, `/disclosure`) are not listed, nor its "Download the raw dataset" action (`/data/design-preview.json`, the old site's demo file). |
 | `/v1/coverage` | The N/A report index: summary counts, dataset-level gaps, per-target/scope/profile gaps, record counts, a per-field index of which providers lack it, and one entry (`id`, `name`, `source`, `naCount`) per provider. |
@@ -323,7 +323,7 @@ editorial ones.
 
   A full rebuild only happens when the fingerprint's data part (everything but
   `max(test_events.event_id)`) changed. When only the newest event id changed, the
-  events alone are read (one read-only transaction, the same 2,000 + 500 rows as a
+  events alone are read (one read-only transaction, the same 2,000 + 500 + 500 rows as a
   full read) and a new version is swapped in that shares every other rendered answer
   with the serving one: the dataset file, the network and page answers, search and
   coverage are not read, built, rendered or compressed again, and `/v1/events` (its
@@ -341,13 +341,17 @@ editorial ones.
   stale results.
 - **Events.** The newest 2,000 events are held in memory, and past them the newest
   500 non-routine events (so a burst of hourly estimate releases never evicts a
-  pulse down or an incident). The default query is pre-rendered. Other filters are
+  pulse down or an incident), and up to 500 late events: rows with an id above the
+  window's smallest but stamped older than it (the daily ingest writes a test's own
+  times), so an `after` poll sees them. The default query is pre-rendered. Other filters are
   answered from memory when the window provably contains the whole answer:
   - `limit` matches were found,
   - or the table has no more rows,
   - or `since` is newer than the window's oldest event;
-  - and for a filter without `kind` or `category`, also the newest half-`limit`
-    non-routine matches were found (or all of them are held).
+  - or `after` is at least the window's smallest event id minus one, and every late
+    event is held;
+  - and for a prioritized filter (no `kind`, `category`, `since` or `after`), also
+    the newest half-`limit` non-routine matches were found (or all of them are held).
 
   Otherwise a single read-only query runs. Either way the rendered response is kept
   in a 256-entry LRU for that version (a new event starts a new one).

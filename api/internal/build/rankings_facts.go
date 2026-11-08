@@ -48,6 +48,14 @@ type RowBrowserScore struct {
 	Success model.MetricScore `json:"success"`
 }
 
+// TargetCounts counts the dataset's targets: every one, the measured ones
+// and the cards (targets of no group).
+type TargetCounts struct {
+	All      int `json:"all"`
+	Measured int `json:"measured"`
+	Cards    int `json:"cards"`
+}
+
 // RankingFleet is the range's requests and successful requests summed over
 // the networks listed.
 type RankingFleet struct {
