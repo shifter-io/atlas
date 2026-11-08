@@ -1,9 +1,12 @@
-"""Camoufox over Playwright: the only module that imports either (D7; docs/browser.html, Runner).
+"""Camoufox and Chrome over Playwright: the only module that imports either (D7; docs/browser.html,
+Runner).
 
-launch() starts one pinned browser process and checks its user agent; Browser.context() opens
+launch() starts one pinned Camoufox process and checks its user agent; Browser.context() opens
 a fresh context per try with the try's proxy and resource blocking and yields a Page, the
-PageDriver the targets act through. A failed navigation raises NavigationError with the
-browser's error name, which the transport maps with contracts.classify_navigation_error.
+PageDriver the targets act through. launch_chrome() detects the host's Google Chrome instead;
+its ChromeBrowser.context() starts a new Chrome with a fresh profile and fingerprint per try.
+A failed navigation raises NavigationError with the browser's error name, which the transport
+maps with contracts.classify_navigation_error.
 """
 
 from __future__ import annotations
@@ -11,16 +14,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
+import shutil
 import sys
-from collections.abc import AsyncIterator, Collection
+import tempfile
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ..errors import UserError
 from ..models import ProxyConfig
-from . import contracts, release
+from . import chrome, contracts, release
 
-ERROR_NAME = re.compile(r"\b((?:NS_ERROR|SEC_ERROR|SSL_ERROR)_[A-Z0-9_]+)\b")
+# Firefox's error names, or Chrome's `net::ERR_*` (the name is the part after `net::`).
+ERROR_NAME = re.compile(
+    r"\b((?:NS_ERROR|SEC_ERROR|SSL_ERROR)_[A-Z0-9_]+)\b|\bnet::(ERR_[A-Z0-9_]+)\b"
+)
+PROFILE_PREFIX = "proxy-index-chrome-"
 VERSION = re.compile(r"\d+(\.\d+)*")
 
 
@@ -33,7 +44,7 @@ class NavigationError(Exception):
 
 
 class UserAgentRefused(UserError):
-    """D7: the user agent's Firefox version cannot be made equal to the engine's major."""
+    """D7: the user agent's version cannot be made equal to the engine's major."""
 
 
 def host_os() -> str:
@@ -42,11 +53,12 @@ def host_os() -> str:
 
 
 def error_name(exc: BaseException) -> str | None:
-    """Playwright's timeouts are `TimeoutError`; network failures carry a Firefox error name."""
+    """Playwright's timeouts are `TimeoutError`; network failures carry a Firefox error name
+    or Chrome's `net::ERR_*`."""
     if type(exc).__name__ == "TimeoutError":
         return "TimeoutError"
     match = ERROR_NAME.search(str(exc))
-    return match.group(1) if match else None
+    return (match.group(1) or match.group(2)) if match else None
 
 
 def proxy_option(proxy: ProxyConfig) -> dict[str, str]:
@@ -60,10 +72,12 @@ def proxy_option(proxy: ProxyConfig) -> dict[str, str]:
 
 class Page:
     """One try's page: what a target may do to it (targets.PageDriver), plus the summed body
-    size of every response its context saw (`bytes_down_est`)."""
+    size of every response its context saw (`bytes_down_est`). A Chrome page carries its try's
+    `fingerprint` (chrome.Fingerprint.record()); a Camoufox page carries None."""
 
     def __init__(self, context: Any, page: Any) -> None:
         self._page = page
+        self.fingerprint: dict[str, Any] | None = None
         self._sizes: list[asyncio.Future] = []
         context.on("requestfinished", self._finished)
 
@@ -147,19 +161,8 @@ class Browser:
         if self._user_agent is not None:
             options["user_agent"] = self._user_agent
         context = await self._browser.new_context(**options)
-        page = None
-        try:
-            context.set_default_timeout(timeout_ms)
-            if block:
-                await context.route("**/*", _blocker(frozenset(block)))
-            page = Page(context, await context.new_page())
+        async with _try_page(context, context.new_page, block, timeout_ms) as page:
             yield page
-        finally:
-            try:
-                if page is not None:
-                    await page._drop_sizes()
-            finally:
-                await context.close()
 
     async def _user_agent_seen(self) -> str:
         async with self.context(None) as page:
@@ -188,6 +191,27 @@ class Browser:
             await self._browser.close()
         finally:
             await self._playwright.stop()
+
+
+@contextlib.asynccontextmanager
+async def _try_page(
+    context: Any, new_page: Callable[[], Awaitable[Any]], block: Collection[str], timeout_ms: int
+) -> AsyncIterator[Page]:
+    """The try's Page on `context`: default timeout and resource blocking set, the context
+    closed however the try ends."""
+    page = None
+    try:
+        context.set_default_timeout(timeout_ms)
+        if block:
+            await context.route("**/*", _blocker(frozenset(block)))
+        page = Page(context, await new_page())
+        yield page
+    finally:
+        try:
+            if page is not None:
+                await page._drop_sizes()
+        finally:
+            await context.close()
 
 
 def _blocker(blocked: frozenset[str]):
@@ -229,4 +253,125 @@ async def launch(
             await handle.close()
         else:
             await playwright.stop()
+        raise
+
+
+# navigator.userAgentData is missing outside secure contexts: then no brands.
+CLAIMS = "() => [navigator.userAgent, (navigator.userAgentData || {brands: []}).brands]"
+
+
+@dataclass(frozen=True, slots=True)
+class ChromeSetup:
+    """What every try of one ChromeBrowser shares: the detected executable and version, the
+    run's country, headless, the seed its tries' fingerprints are drawn from, the host OS."""
+
+    executable: str
+    version: str
+    country: str
+    headless: bool
+    seed: str
+    os_name: str
+
+
+class ChromeBrowser:
+    """The host's Google Chrome: one Playwright driver, and a new Chrome process with a fresh
+    profile and fingerprint per try. `identity` is {engine, version, user_agent} once
+    launch_chrome() has checked it."""
+
+    def __init__(self, playwright: Any, setup: ChromeSetup) -> None:
+        self._playwright, self.setup = playwright, setup
+        self._tries, self._closed = 0, False
+        self.identity: dict[str, str] = {}
+
+    def alive(self) -> bool:
+        return not self._closed
+
+    @contextlib.asynccontextmanager
+    async def context(
+        self,
+        proxy: ProxyConfig | None,
+        block: Collection[str] = (),
+        timeout_ms: int = 30_000,
+        *,
+        seed: str | None = None,
+    ) -> AsyncIterator[Page]:
+        """Chrome on a new temporary profile (mode 700, deleted however the try ends) through
+        `proxy`, with the fingerprint drawn from `seed` (default: the launch's seed and this
+        handle's try count) and `block` resource types aborted."""
+        if seed is None:
+            seed, self._tries = f"{self.setup.seed}:{self._tries}", self._tries + 1
+        fingerprint = chrome.fingerprint(seed, self.setup.country)
+        options = fingerprint.context_options() | ({"proxy": proxy_option(proxy)} if proxy else {})
+        profile = tempfile.mkdtemp(prefix=PROFILE_PREFIX)
+        try:
+            context = await self._playwright.chromium.launch_persistent_context(
+                profile,
+                executable_path=self.setup.executable,
+                headless=self.setup.headless,
+                **options,
+            )
+
+            async def first_page() -> Any:
+                await context.add_init_script(fingerprint.init_script())
+                page = context.pages[0] if context.pages else await context.new_page()
+                await self._agree(context, page, fingerprint)
+                return page
+
+            async with _try_page(context, first_page, block, timeout_ms) as page:
+                page.fingerprint = fingerprint.record()
+                yield page
+        finally:
+            shutil.rmtree(profile, ignore_errors=True)
+
+    def _agrees(self, claims: Any) -> bool:
+        major = int(self.setup.version.split(".")[0])
+        user_agent, brands = claims if isinstance(claims, list) and len(claims) == 2 else ("", [])
+        return chrome.user_agent_major(user_agent) == chrome.brands_major(brands) == major
+
+    async def _agree(self, context: Any, page: Any, fingerprint: chrome.Fingerprint) -> None:
+        """D7: the user agent and the brands claim the detected major; a headless Chrome is
+        made to (and its Sec-CH-UA headers with it) through CDP, else UserAgentRefused."""
+        if self._agrees(await page.evaluate(CLAIMS)):
+            return
+        session = await context.new_cdp_session(page)
+        version, os_name = self.setup.version, self.setup.os_name
+        override = {
+            "userAgent": chrome.user_agent(version, os_name),
+            "acceptLanguage": fingerprint.accept_language,
+            "userAgentMetadata": chrome.user_agent_metadata(version, os_name),
+        }
+        await session.send("Emulation.setUserAgentOverride", override)
+        if not self._agrees(await page.evaluate(CLAIMS)):
+            raise UserAgentRefused(f"the user agent cannot claim Chrome {version.split('.')[0]}")
+
+    async def close(self) -> None:
+        self._closed = True
+        await self._playwright.stop()
+
+
+async def launch_chrome(
+    executable: str | Path = chrome.DEFAULT_EXECUTABLE,
+    *,
+    country: str,
+    headless: bool,
+    seed: str | None = None,
+    os_name: str | None = None,
+) -> ChromeBrowser:
+    """The host's Chrome at `executable`: refused (chrome.ChromeRefused) when missing or too
+    old, and (UserAgentRefused) when a first profile cannot claim its version."""
+    from playwright.async_api import async_playwright
+
+    version = await asyncio.to_thread(chrome.detect, executable)
+    chrome.fingerprint("", country)  # refuses a country without a table entry
+    setup = ChromeSetup(
+        str(executable), version, country, headless, seed or str(uuid.uuid4()), os_name or host_os()
+    )
+    handle = ChromeBrowser(await async_playwright().start(), setup)
+    try:
+        async with handle.context(None, seed=f"{setup.seed}:launch") as page:
+            seen = await page.evaluate("navigator.userAgent")
+        handle.identity = {"engine": "chrome", "version": version, "user_agent": seen}
+        return handle
+    except BaseException:
+        await handle.close()
         raise

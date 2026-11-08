@@ -6,6 +6,8 @@ is a contract change. No I/O. Errors name the field, never the value (it can be 
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -21,6 +23,12 @@ from .field_checks import (  # noqa: F401 (callers import them here)
     check_int,
     check_string,
     optional,
+)
+from .net_errors import (  # noqa: F401 (callers import the Firefox tables here)
+    ERROR_PREFIXES,
+    ERRORS,
+    FIREFOX_ERROR_PREFIXES,
+    FIREFOX_ERRORS,
 )
 
 # K-BP1 and K-BP5: the engine, the batch kind and the one runner region of the browser hosts.
@@ -68,33 +76,18 @@ OUTCOMES: dict[str, tuple[VerdictName, tuple[ErrorCode | None, ...]]] = {
 CODE_VERDICTS: dict[str, VerdictName] = {
     code: verdict for verdict, codes in OUTCOMES.values() for code in codes if code
 }
-# Firefox network errors by exact name; the exact names win over the prefixes below.
-FIREFOX_ERRORS: dict[str, ErrorCode] = {
-    "NS_ERROR_UNKNOWN_PROXY_HOST": "proxy_connect",
-    "NS_ERROR_PROXY_AUTHENTICATION_FAILED": "proxy_auth",
-    "NS_ERROR_NET_RESET": "connection",
-    "NS_ERROR_NET_INTERRUPT": "connection",
-    "NS_ERROR_CONNECTION_REFUSED": "connection",
-    "NS_ERROR_UNKNOWN_HOST": "dns",
-    "NS_ERROR_NET_TIMEOUT": "timeout",
-    "TimeoutError": "timeout",  # Playwright's navigation and wait timeouts
-    "NS_ERROR_NET_INADEQUATE_SECURITY": "tls",
-}
-FIREFOX_ERROR_PREFIXES: tuple[tuple[str, ErrorCode], ...] = (
-    ("NS_ERROR_PROXY_", "proxy_connect"),
-    ("SEC_ERROR_", "tls"),
-    ("SSL_ERROR_", "tls"),
-)
 # A main document answered with 407 is the gateway refusing the credentials: proxy_auth.
 PROXY_AUTH_STATUS = 407
 
 
 def classify_navigation_error(name: str | None) -> tuple[ErrorCode, VerdictName]:
-    """(code, verdict) of a failed navigation by the browser's error name; else browser_error."""
+    """(code, verdict) of a failed navigation by the browser's error name (Firefox's, or
+    Chrome's with or without `net::`; net_errors.py); else browser_error."""
     name = name if isinstance(name, str) else ""
-    code = FIREFOX_ERRORS.get(name)
+    name = name.removeprefix("net::")
+    code = ERRORS.get(name)
     if code is None:
-        prefixed = (mapped for start, mapped in FIREFOX_ERROR_PREFIXES if name.startswith(start))
+        prefixed = (mapped for start, mapped in ERROR_PREFIXES if name.startswith(start))
         code = next(prefixed, "browser_error")
     return code, CODE_VERDICTS[code]
 
@@ -183,6 +176,11 @@ TRY_FIELDS = tuple(
     "i input source verdict error"
     " status final_url timings_ms bytes_down_est reason screenshot".split()
 )
+# A Chrome try's optional `fingerprint` (chrome.Fingerprint.record()): values and their SHA-256.
+FINGERPRINT_FIELDS = tuple(
+    "screen_width screen_height device_scale_factor locale accept_language timezone_id"
+    " hardware_concurrency device_memory".split()
+)
 
 
 def page_url(url: str) -> str:
@@ -204,10 +202,25 @@ def _input(value: Any) -> str | dict[str, str]:
     return {name: check_string(text, f"input.{name}", size=2048) for name, text in table.items()}
 
 
+def _fingerprint(value: Any) -> dict[str, Any]:
+    fingerprint = check_fields(value, ("values", "sha256"), "fingerprint")
+    values = check_fields(fingerprint["values"], FINGERPRINT_FIELDS, "fingerprint.values")
+    for key, item in values.items():
+        check = check_int if type(item) is int else check_string
+        check(item, f"fingerprint.values.{key}")
+    text = json.dumps(values, sort_keys=True, separators=(",", ":"))
+    if fingerprint["sha256"] != hashlib.sha256(text.encode()).hexdigest():
+        raise ValueError("fingerprint.sha256: must be the SHA-256 of the values")
+    return {"values": values, "sha256": fingerprint["sha256"]}
+
+
 def try_record(**fields: Any) -> dict[str, Any]:
-    """One validated tries.jsonl line (K-BP4); every field is required, absent values None. The
-    verdict is the one its error code implies (ok: no error); a screenshot is the try's own."""
-    record = check_fields(fields, TRY_FIELDS, "try")
+    """One validated tries.jsonl line (K-BP4); every field but a Chrome try's `fingerprint` is
+    required, absent values None. The verdict is the one its error code implies (ok: no
+    error); a screenshot is the try's own."""
+    record = check_fields(fields, TRY_FIELDS, "try", ("fingerprint",))
+    if "fingerprint" in record:
+        record["fingerprint"] = _fingerprint(record["fingerprint"])
     check_int(record["i"], "i", 0, MAX_TRIES - 1)
     record["input"] = _input(record["input"])
     optional(check_string, record["source"], "source", TOKEN)

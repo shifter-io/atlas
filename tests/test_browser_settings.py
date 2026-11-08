@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from proxy_index.browser.chrome import DEFAULT_EXECUTABLE
 from proxy_index.browser.settings import load_settings, settings_sha256
 from proxy_index.errors import UserError
 
@@ -21,6 +22,7 @@ def test_example_loads():
     assert settings.browser.browsers_per_host == 10
     assert settings.browser.block_resources == ("image", "media", "font")
     assert settings.outbox.dir == "outbox" and settings.outbox.max_pending_gb == 20.0
+    assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert settings.targets_for_planner() == (
         ("amazon_pdp", 100, 60),
         ("google_search", 100, 60),
@@ -234,6 +236,8 @@ CASES = [
     (lambda d: d.update(every_minutes=60), r"^settings: unknown fields"),
     (lambda d: d.pop("host"), r"^settings: missing fields \['host'\]"),
     (lambda d: d.update(target=[]), r"^target: must be a list"),
+    (lambda d: d.update(chrome={"executable": "Google Chrome"}), r"chrome\.executable: .*absolute"),
+    (lambda d: d.update(chrome={"path": "/x"}), r"^chrome: unknown fields \['path'\]"),
 ]
 
 
@@ -272,6 +276,8 @@ def test_minimal_settings(tmp_path):
     doc["target"] = [target(doc, "ai_chatgpt")]
     doc["host"] = [{"name": "browser-1", "networks": ["example-a/residential"]}]
     del doc["networks"]
+    doc.pop("chrome", None)
     settings = load_settings(write(tmp_path, doc))
+    assert settings.chrome.executable == DEFAULT_EXECUTABLE
     assert settings.targets_for_planner() == (("ai_chatgpt", 33, 60),)
     assert settings.untargeted == () and not settings.is_untargeted("example-a/residential")

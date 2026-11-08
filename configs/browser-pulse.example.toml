@@ -17,6 +17,9 @@ block_resources = ["image", "media", "font"]   # default; a target may override 
 screenshots = "failures"        # failures | all | none
 locale = "en-US"
 
+[chrome]                        # optional, read by the hosts: the second engine
+executable = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # the default
+
 [outbox]
 dir = "outbox"                  # relative to the host state directory
 max_pending_gb = 20             # above this, the host stops taking screenshots

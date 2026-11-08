@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 from ..errors import UserError
 from ..regions import load_countries, load_targets
 from . import contracts as c
+from .chrome import DEFAULT_EXECUTABLE
 from .contracts import check_fields, check_int, check_string
 
 SCHEMA = 2
@@ -47,6 +48,13 @@ class BrowserOptions:
     block_resources: tuple[str, ...]
     screenshots: str
     locale: str
+
+
+@dataclass(frozen=True, slots=True)
+class ChromeOptions:
+    """The optional [chrome] table: the host's Google Chrome (driver.launch_chrome)."""
+
+    executable: str = DEFAULT_EXECUTABLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +94,7 @@ class BrowserSettings:
     hosts: tuple[HostSettings, ...]
     untargeted: tuple[str, ...]
     sha256: str
+    chrome: ChromeOptions = ChromeOptions()
 
     def host(self, name: str) -> BrowserSettings:
         """One host's view: these settings with only its [[host]] and its untargeted networks."""
@@ -245,6 +254,12 @@ def _browser(value: Any) -> BrowserOptions:
     )
 
 
+def _chrome(value: Any) -> ChromeOptions:
+    entry = check_fields(value, (), "chrome", ("executable",))
+    executable = entry.get("executable", DEFAULT_EXECUTABLE)
+    return ChromeOptions(check_string(executable, "chrome.executable", "/.*", "an absolute path"))
+
+
 def _outbox(value: Any) -> Outbox:
     entry = check_fields(value, ("dir", "max_pending_gb"), "outbox")
     # Relative to the host state directory, with no '.' or '..' segment.
@@ -262,7 +277,8 @@ def settings_sha256(path: str | Path) -> str:
 
 def _parse(raw: bytes, targets_path: Any, countries_path: Any) -> BrowserSettings:
     top = ("schema", "enabled", "schedule", "browser", "outbox", "target", "host")
-    document = check_fields(tomllib.loads(raw.decode("utf-8")), top, "settings", ("networks",))
+    optional = ("networks", "chrome")
+    document = check_fields(tomllib.loads(raw.decode("utf-8")), top, "settings", optional)
     if type(document["schema"]) is not int or document["schema"] != SCHEMA:
         _fail("schema", f"must be {SCHEMA}")
     rows = load_targets(targets_path)
@@ -277,7 +293,16 @@ def _parse(raw: bytes, targets_path: Any, countries_path: Any) -> BrowserSetting
     enabled = _choice(document["enabled"], "enabled", (False, True))
     sha256 = hashlib.sha256(raw).hexdigest()
     return BrowserSettings(
-        SCHEMA, enabled, schedule, browser, outbox, targets, tuple(hosts), untargeted, sha256
+        SCHEMA,
+        enabled,
+        schedule,
+        browser,
+        outbox,
+        targets,
+        tuple(hosts),
+        untargeted,
+        sha256,
+        _chrome(document.get("chrome", {})),
     )
 
 

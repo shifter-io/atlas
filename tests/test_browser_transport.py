@@ -8,10 +8,12 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any
 
+import browser_transport_cases
 import pytest
 from browser_site import SiteTarget
 from browser_transport_cases import HTTP_PROXY, OPTIONS, SETTINGS, Harness, Script
 
+from proxy_index.browser import chrome
 from proxy_index.browser.contracts import FIREFOX_ERROR_PREFIXES, FIREFOX_ERRORS, TIMINGS
 from proxy_index.browser.driver import NavigationError, UserAgentRefused
 from proxy_index.browser.judge import OK, failed
@@ -38,6 +40,17 @@ async def test_a_successful_try_is_ok_with_timings_bytes_and_one_record():
     assert browser.contexts == [(HTTP_PROXY, ("image", "media"))]
     assert browser.gotos == [("http://site.invalid/ok", 20_000)] and browser.open_contexts == 0
     assert browser.timeouts == [20_000]
+
+
+@pytest.mark.parametrize("error", [None, RuntimeError("crashed"), NavigationError("ERR_FAILED")])
+async def test_a_chrome_try_records_its_fingerprint_however_it_ends(monkeypatch, error):
+    fingerprint = chrome.fingerprint("run:0", "US").record()
+    monkeypatch.setattr(browser_transport_cases.FakePage, "fingerprint", fingerprint, raising=False)
+    harness = Harness(Script(error=error))
+    outcome = await harness.execute()
+    assert outcome.error == (None if error is None else "browser_error")
+    [(record, _)] = harness.recorder.tries
+    assert record["fingerprint"] == fingerprint
 
 
 async def test_a_status_999_try_is_recorded_not_raised():

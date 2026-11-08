@@ -13,6 +13,7 @@ from proxy_index.browser.driver import Browser, NavigationError, Page, UserAgent
 from proxy_index.models import ProxyConfig
 
 REFUSED = "NS_ERROR_PROXY_CONNECTION_REFUSED"
+FAILED = "ERR_PROXY_CONNECTION_FAILED"
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:{0}.0) Gecko/20100101 Firefox/{0}.0"
 
 
@@ -154,6 +155,9 @@ class PWDriver:
         (TimeoutError("Timeout 30000ms exceeded"), "TimeoutError"),
         (RuntimeError(f"page.goto: {REFUSED} at x"), REFUSED),
         (RuntimeError("SSL_ERROR_RX_RECORD_TOO_LONG"), "SSL_ERROR_RX_RECORD_TOO_LONG"),
+        (RuntimeError(f"page.goto: net::{FAILED} at x"), FAILED),
+        (RuntimeError("net::ERR_CERT_DATE_INVALID"), "ERR_CERT_DATE_INVALID"),
+        (RuntimeError("ERR_NAME_NOT_RESOLVED without net::"), None),
         (RuntimeError("Target closed"), None),
     ],
 )

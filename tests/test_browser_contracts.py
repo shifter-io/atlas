@@ -13,6 +13,7 @@ import pytest
 from browser_contracts_cases import RUN_ID, SHA, SLOT
 
 from proxy_index.browser import contracts as c
+from proxy_index.browser import net_errors
 from proxy_index.models import ErrorCode, RequestContext
 from proxy_index.orchestrator import batches
 from proxy_index.orchestrator.db import Database
@@ -59,6 +60,25 @@ def test_outcome_table_matches_the_verdict_rules():
         ("SSL_ERROR_BAD_CERT_DOMAIN", "tls", "error"),
         ("NS_ERROR_NET_INADEQUATE_SECURITY", "tls", "error"),
         ("NS_ERROR_FAILURE", "browser_error", "error"),
+        ("ERR_PROXY_CONNECTION_FAILED", "proxy_connect", "proxy_error"),
+        ("ERR_TUNNEL_CONNECTION_FAILED", "proxy_connect", "proxy_error"),
+        ("ERR_PROXY_AUTH_UNSUPPORTED", "proxy_auth", "proxy_error"),
+        ("ERR_PROXY_AUTH_REQUESTED", "proxy_auth", "proxy_error"),
+        ("ERR_INVALID_AUTH_CREDENTIALS", "proxy_auth", "proxy_error"),
+        ("ERR_CONNECTION_RESET", "connection", "proxy_error"),
+        ("ERR_CONNECTION_CLOSED", "connection", "proxy_error"),
+        ("ERR_CONNECTION_REFUSED", "connection", "proxy_error"),
+        ("ERR_CONNECTION_ABORTED", "connection", "proxy_error"),
+        ("ERR_EMPTY_RESPONSE", "connection", "proxy_error"),
+        ("ERR_HTTP2_PROTOCOL_ERROR", "connection", "proxy_error"),
+        ("ERR_NAME_NOT_RESOLVED", "dns", "proxy_error"),
+        ("ERR_TIMED_OUT", "timeout", "timeout"),
+        ("ERR_CONNECTION_TIMED_OUT", "timeout", "timeout"),
+        ("ERR_SSL_PROTOCOL_ERROR", "tls", "error"),
+        ("ERR_CERT_AUTHORITY_INVALID", "tls", "error"),
+        ("net::ERR_NAME_NOT_RESOLVED", "dns", "proxy_error"),
+        ("ERR_ABORTED", "browser_error", "error"),
+        ("ERR_FAILED", "browser_error", "error"),
         ("", "browser_error", "error"),
         (None, "browser_error", "error"),
     ],
@@ -67,9 +87,10 @@ def test_navigation_error_map(name, code, verdict):
     assert c.classify_navigation_error(name) == (code, verdict)
 
 
-def test_every_mapped_firefox_name():
-    for name, code in c.FIREFOX_ERRORS.items():
+def test_every_mapped_name():
+    for name, code in (net_errors.FIREFOX_ERRORS | net_errors.CHROME_ERRORS).items():
         assert c.classify_navigation_error(name)[0] == code
+    assert not set(net_errors.FIREFOX_ERRORS) & set(net_errors.CHROME_ERRORS)
     assert c.PROXY_AUTH_STATUS == 407
 
 

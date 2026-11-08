@@ -154,7 +154,7 @@ class BrowserTransport:
         timings: dict[str, int | None] = dict.fromkeys(TIMINGS)
         # The try's facts as its steps learn them (timings_ms, main status, URL, bytes, shot).
         state: dict[str, Any] = {"timings": timings, "status": None, "final_url": None}
-        state |= {"bytes": None, "shot": None, "found": {}, "view": None}
+        state |= {"bytes": None, "shot": None, "found": {}, "view": None, "fingerprint": None}
         budget = self._budget()
         try:
             async with budget:
@@ -203,6 +203,8 @@ class BrowserTransport:
                 return await self._on_page(page, target, spec, state)
 
     async def _on_page(self, page: Page, target: BrowserTarget, spec: PageSpec, state: dict) -> Any:
+        # First, so a try that fails in any way still records its fingerprint (a Chrome try's).
+        state["fingerprint"] = getattr(page, "fingerprint", None)
         try:
             assessment = await self._load(page, target, spec, state)
         except NavigationError as exc:
@@ -257,6 +259,7 @@ class BrowserTransport:
         state: dict,
     ) -> None:
         i, shot = context.request_index, state["shot"]
+        fingerprint = state["fingerprint"]
         record = try_record(
             i=i,
             **target.try_fields(context, self.inputs),
@@ -268,5 +271,6 @@ class BrowserTransport:
             bytes_down_est=state["bytes"],
             reason=reason,
             screenshot=bundle_members().screenshot(i) if shot is not None else None,
+            **({"fingerprint": fingerprint} if fingerprint is not None else {}),
         )
         self.recorder.try_done(record, shot)
