@@ -257,7 +257,7 @@ async def launch(
 
 
 # navigator.userAgentData is missing outside secure contexts: then no brands.
-CLAIMS = "() => [navigator.userAgent, navigator.userAgentData ? navigator.userAgentData.brands : []]"
+CLAIMS = "() => [navigator.userAgent, (navigator.userAgentData || {brands: []}).brands]"
 
 
 @dataclass(frozen=True, slots=True)

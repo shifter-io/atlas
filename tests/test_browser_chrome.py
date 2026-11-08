@@ -128,7 +128,7 @@ def test_user_agent_helpers(monkeypatch):
 @pytest.mark.parametrize(
     ("brands", "major"),
     [
-        ([{"brand": "Chromium", "version": "9"}, {"brand": "Google Chrome", "version": "151"}], 151),
+        ([{"brand": "Chromium", "version": "9"}, {"brand": chrome.BRAND, "version": "151"}], 151),
         ([{"brand": "HeadlessChrome", "version": "151"}], None),
         ([{"brand": "Google Chrome", "version": "x"}], None),
         ([], None),

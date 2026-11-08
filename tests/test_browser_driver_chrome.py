@@ -13,8 +13,13 @@ import pytest
 
 from proxy_index.browser import chrome, driver
 from proxy_index.browser.chrome import ChromeRefused
-from proxy_index.browser.driver import ChromeBrowser, ChromeSetup, NavigationError, Page
-from proxy_index.browser.driver import UserAgentRefused
+from proxy_index.browser.driver import (
+    ChromeBrowser,
+    ChromeSetup,
+    NavigationError,
+    Page,
+    UserAgentRefused,
+)
 from proxy_index.models import ProxyConfig
 
 VERSION = f"{chrome.CHROME_MIN_MAJOR}.0.7922.34"
@@ -120,7 +125,7 @@ async def test_three_tries_three_profiles_none_left():
     browser = handle(chromium)
     proxy = ProxyConfig("http", "192.0.2.1", 8080, "u", "p")
     async with browser.context(proxy, ("image",), 5000) as page:
-        assert isinstance(page, Page) and Path(chromium.contexts[0].profile).is_dir()
+        assert isinstance(page, Page) and profiles(chromium) == chromium.started
         assert page.fingerprint == chrome.fingerprint("run:0", "US").record()
     with pytest.raises(NavigationError) as caught:
         async with browser.context(None) as page:
