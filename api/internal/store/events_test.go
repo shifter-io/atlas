@@ -218,6 +218,7 @@ func TestLoadEventsReadsTheEventsLoadReads(t *testing.T) {
 			t.Fatalf("%s: events key %q, load %q, fingerprint %q", stage, ev.Fingerprint.EventsKey(), in.Fingerprint.EventsKey(), fp.EventsKey())
 		}
 		if !slices.EqualFunc(ev.Events, in.Events, sameEvent) || !slices.EqualFunc(ev.Notable, in.Notable, sameEvent) ||
+			!slices.EqualFunc(ev.Late, in.Late, sameEvent) || ev.LateComplete != in.LateComplete ||
 			ev.EventsComplete != in.EventsComplete || ev.NotableComplete != in.NotableComplete || ev.Snapshot != nil || len(ev.FrameworkProducts) != 0 {
 			t.Fatalf("%s: LoadEvents read %d+%d rows (%v %v), Load %d+%d (%v %v)", stage, len(ev.Events), len(ev.Notable),
 				ev.EventsComplete, ev.NotableComplete, len(in.Events), len(in.Notable), in.EventsComplete, in.NotableComplete)

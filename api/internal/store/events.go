@@ -10,14 +10,27 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// EventFilter mirrors the framework's GET /v1/events parameters.
+// EventFilter mirrors the framework's GET /v1/events parameters, plus the
+// live tape's filters and its id cursor.
 type EventFilter struct {
 	Product  string // "provider" or "provider/product"
 	Kinds    []string
 	Category string
 	Since    *time.Time // exclusive
 	Limit    int
+	// Provider is the framework provider of network=<slug>; ProxyKind the
+	// product name (residential, datacenter, mobile, isp).
+	Provider, Country, Target, ProxyKind string
+	// After asks for the rows with a larger event_id, oldest first.
+	After *int64
+	// Words are q's lower-case words. They match the rendered text, so Match
+	// does not read them (build.EventWindow does).
+	Words []string
 }
+
+// TextScan is how many rows passing the other filters the database fallback
+// reads for a q filter, which it matches outside SQL.
+const TextScan = EventWindow
 
 // Category is detect.category: the live tape tab of an event kind. The daily
 // test and hour estimate kinds read as census rows; latency_rise is an incident.
@@ -63,7 +76,15 @@ func (f EventFilter) Match(e *Event) bool {
 	if f.Since != nil && !e.At.After(*f.Since) {
 		return false
 	}
-	return true
+	if f.After != nil && e.ID <= *f.After {
+		return false
+	}
+	return f.matchColumns(e)
+}
+
+func (f EventFilter) matchColumns(e *Event) bool {
+	is := func(want string, got *string) bool { return want == "" || (got != nil && *got == want) }
+	return is(f.Provider, e.Provider) && is(f.Country, e.Country) && is(f.Target, e.Target) && is(f.ProxyKind, e.Product)
 }
 
 // Routine reports whether a kind is a routine milestone: the census tab (census_*,
@@ -79,13 +100,19 @@ func Routine(kind string) bool {
 const routineSQL = `(left(e.kind,7)='census_' OR e.kind IN
  ('daily_test_started','daily_test_finished','estimate_hour_released','pulse_finished'))`
 
+// afterOrder is the order of an after read: oldest id first.
+const afterOrder = ` ORDER BY e.event_id LIMIT `
+
 // notableClause keeps the non-routine rows of the fallback's notable read.
 const notableClause = "NOT " + routineSQL
 
-// Prioritized reports whether f is answered with Prioritize: it names no kind and
-// no tab, as the live tape's polls do. A filter that names kinds or a tab gets
-// exactly the newest matching rows.
-func (f EventFilter) Prioritized() bool { return len(f.Kinds) == 0 && f.Category == "" }
+// Prioritized reports whether f is answered with Prioritize: it names no kind,
+// no tab and no cursor, as the live tape's first read does. A filter that names
+// kinds or a tab gets exactly the newest matching rows, and a client catching up
+// with since or after gets every row in order.
+func (f EventFilter) Prioritized() bool {
+	return len(f.Kinds) == 0 && f.Category == "" && f.Since == nil && f.After == nil
+}
 
 // NotableQuota is how many of a prioritized answer's `limit` rows the newest
 // non-routine rows may take before routine rows (half, rounded up).
@@ -166,7 +193,10 @@ func mergeNewest(a, b []Event) []Event {
 
 // QueryEvents is the database fallback when the in-memory window cannot
 // answer a filter on its own (read-only pool). A prioritized filter reads the
-// newest rows and the newest non-routine rows, and picks among both.
+// newest rows and the newest non-routine rows, and picks among both. With
+// after it reads the Limit+1 oldest rows past it by id (the extra one tells
+// whether more follow); with q, TextScan rows instead of Limit, unpicked, for
+// the caller to match the words and pick.
 func QueryEvents(ctx context.Context, db interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 }, f EventFilter) ([]Event, error) {
@@ -176,15 +206,41 @@ func QueryEvents(ctx context.Context, db interface {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	clauses, args := eventClauses(f)
-	rows, err := newestEvents(ctx, tx, clauses, args, f.Limit)
-	if err != nil || !f.Prioritized() {
-		return rows, err
+	limit, quota := readLimits(f)
+	if f.After != nil {
+		sql, args := afterQuery(clauses, args, limit)
+		return collect(ctx, tx, sql, ScanEvent, args...)
 	}
-	notable, err := newestEvents(ctx, tx, append(clauses, notableClause), args, NotableQuota(f.Limit))
+	rows, err := newestEvents(ctx, tx, clauses, args, limit)
+	if err != nil || !f.Prioritized() {
+		return pickUnlessWords(rows, f), err
+	}
+	notable, err := newestEvents(ctx, tx, append(clauses, notableClause), args, quota)
 	if err != nil {
 		return nil, err
 	}
-	return Pick(mergeNewest(rows, notable), f), nil
+	return pickUnlessWords(mergeNewest(rows, notable), f), nil
+}
+
+// readLimits is how many rows the fallback reads: the newest (or with after
+// the oldest past it) and the newest non-routine ones.
+func readLimits(f EventFilter) (rows, notable int) {
+	switch {
+	case len(f.Words) > 0:
+		return TextScan, TextScan
+	case f.After != nil:
+		return f.Limit + 1, 0
+	}
+	return f.Limit, NotableQuota(f.Limit)
+}
+
+// pickUnlessWords is Pick, or for a q filter the rows unpicked: Pick cannot
+// read the rendered text.
+func pickUnlessWords(rows []Event, f EventFilter) []Event {
+	if len(f.Words) > 0 {
+		return rows
+	}
+	return Pick(rows, f)
 }
 
 func eventClauses(f EventFilter) (clauses []string, args []any) {
@@ -211,6 +267,15 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
 	if f.Since != nil {
 		add("e.at>?", *f.Since)
 	}
+	for _, c := range []struct{ sql, v string }{{"p.provider=?", f.Provider}, {"e.country_code=?", f.Country},
+		{"e.target_id=?", f.Target}, {"p.name=?", f.ProxyKind}} {
+		if c.v != "" {
+			add(c.sql, c.v)
+		}
+	}
+	if f.After != nil {
+		add("e.event_id>?", *f.After)
+	}
 	return clauses, args
 }
 
@@ -228,6 +293,13 @@ func eventsQuery(clauses []string, args []any, limit int) (string, []any) {
 	}
 	args = append(args[:len(args):len(args)], limit)
 	return "SELECT " + EventColumns + where + eventsOrder + "$" + itoa(len(args)), args
+}
+
+// afterQuery is the fallback query of the limit oldest rows by id passing
+// every clause (one of them e.event_id > after), and its arguments.
+func afterQuery(clauses []string, args []any, limit int) (string, []any) {
+	sql, args := eventsQuery(clauses, args, limit)
+	return strings.Replace(sql, eventsOrder, afterOrder, 1), args
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

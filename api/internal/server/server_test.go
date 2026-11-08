@@ -37,8 +37,10 @@ type fakeSource struct {
 	// notableCut marks that list as truncated.
 	notable    []store.Event
 	notableCut bool
-	dbQueries  atomic.Int64
-	slowLoad   time.Duration
+	// lateCut marks the late rows (store.Inputs.Late) as truncated.
+	lateCut   bool
+	dbQueries atomic.Int64
+	slowLoad  time.Duration
 	// loaded, when set, receives each revision Load returns.
 	loaded chan int64
 }
@@ -67,6 +69,7 @@ func (f *fakeSource) Load(context.Context) (*store.Inputs, error) {
 	}
 	in := fixture(f.rev, f.events, f.complete)
 	in.Notable, in.NotableComplete = f.notable, !f.notableCut
+	in.LateComplete = !f.lateCut
 	if f.loaded != nil {
 		f.loaded <- f.rev
 	}
@@ -80,12 +83,23 @@ func (f *fakeSource) LoadEvents(context.Context) (*store.Inputs, error) {
 	if f.fail != nil {
 		return nil, f.fail
 	}
-	return &store.Inputs{Events: f.events, EventsComplete: f.complete, Notable: f.notable, NotableComplete: !f.notableCut}, nil
+	return &store.Inputs{Events: f.events, EventsComplete: f.complete, Notable: f.notable, NotableComplete: !f.notableCut, LateComplete: !f.lateCut}, nil
 }
 
 func (f *fakeSource) Events(_ context.Context, filter store.EventFilter) ([]store.Event, error) {
 	f.dbQueries.Add(1)
-	return store.Pick(append(append([]store.Event{}, f.events...), f.notable...), filter), nil
+	rows := append(append([]store.Event{}, f.events...), f.notable...)
+	if filter.After == nil && len(filter.Words) == 0 {
+		return store.Pick(rows, filter), nil
+	}
+	// With after or q, the rows the answer is chosen from, as store.QueryEvents reads them.
+	out := []store.Event{}
+	for i := range rows {
+		if filter.Match(&rows[i]) {
+			out = append(out, rows[i])
+		}
+	}
+	return out, nil
 }
 
 // fixture is two catalog networks without a measurement (unlinked site

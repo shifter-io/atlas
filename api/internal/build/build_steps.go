@@ -179,7 +179,7 @@ func (b *builder) tape() error {
 	for _, fp := range in.FrameworkProducts {
 		products = append(products, TapeProduct{Provider: fp.Provider, Name: b.nameOrSlug(b.slugOfFramework[fp.Provider]), Kind: fp.Name})
 	}
-	b.res.Events = newEventWindow(in)
+	b.res.Events = newEventWindow(in, eventText{products: products, slugs: b.slugOfFramework})
 	tapeEvents := b.res.Events.measuredTape()
 	tapeRef := ds.GeneratedAt
 	if s != nil {
