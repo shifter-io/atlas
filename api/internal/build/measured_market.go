@@ -17,10 +17,7 @@ type marketBucket struct {
 
 // measuredMarket is the public All market panel.
 func measuredMarket(fleet []*entry, stats map[string]map[string]*WindowStats, totals model.FleetTotals, targets []model.TargetMeta) (model.MeasuredMarket, error) {
-	views := fleetViews(fleet, stats, totals, "measured")
-	for i := range views {
-		measureView(&views[i], fleet, stats)
-	}
+	views := measuredViews(fleet, stats, totals)
 	ips, authentic := 0.0, 0.0
 	for _, e := range fleet {
 		if e.P.PrimaryKind != "datacenter" {
@@ -37,6 +34,15 @@ func measuredMarket(fleet []*entry, stats map[string]map[string]*WindowStats, to
 	}
 	body, err := json.Marshal(views)
 	return model.MeasuredMarket{Authenticity: Num(authentic / ips), TargetCount: Num(targetCount), Views: body}, err
+}
+
+// measuredViews is the fleet's view of each range (Ranges order), measured.
+func measuredViews(fleet []*entry, stats map[string]map[string]*WindowStats, totals model.FleetTotals) []FleetView {
+	views := fleetViews(fleet, stats, totals, "measured")
+	for i := range views {
+		measureView(&views[i], fleet, stats)
+	}
+	return views
 }
 
 // measureView fills one range's view from the fleet's measured figures.

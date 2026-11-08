@@ -31,8 +31,10 @@ samples by itself.
 
 `build.Context` is what the build already holds: `GeneratedAt`, the published `Snapshot`, the
 networks (`Entries`), the window `Stats`, the provider `Details`, the `Dataset` (its targets,
-providers and measured market), the `Events` window and the `Inputs` the build read (the site
-catalog rows and the framework's). Building an answer reads no database.
+providers and measured market), the `Events` window, the `Inputs` the build read (the site
+catalog rows and the framework's) and the `Pages` built before the registered answers (the
+rankings and the network answers, the all-networks one included). Building an answer reads no
+database.
 
 ## What the server does with it
 
