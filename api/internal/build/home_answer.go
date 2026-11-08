@@ -11,8 +11,8 @@ import (
 )
 
 // /v1/home?range= (api/answers/home.md): the Proxy Index home's live
-// dashboard in one body per range: the market panel, every network's panel
-// with its curve and sparks, and the first tape rows.
+// dashboard in one body per range: the market panel, the insight cards,
+// every network's panel with its curve and sparks, and the first tape rows.
 
 func homePath(rangeID string) string { return "/v1/home/" + rangeID }
 
@@ -41,6 +41,7 @@ type HomeAnswer struct {
 	GeneratedAt string        `json:"generatedAt"`
 	Range       string        `json:"range"`
 	Market      HomeMarket    `json:"market"`
+	Insights    HomeInsights  `json:"insights"`
 	Networks    []HomeNetwork `json:"networks"`
 	// Labels is every distinct label list of the networks' series, once: a
 	// series' labels is its index here.
@@ -162,6 +163,7 @@ func buildHome(c *Context) (map[string]any, error) {
 		ans := &HomeAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Networks: []HomeNetwork{}, Labels: [][]string{},
 			Tape: c.Dataset.Tape[:min(len(c.Dataset.Tape), homeTapeRows)], Profiles: c.Dataset.Profiles}
 		ans.Market = homeMarket(c, fleet, &views[i], r.ID)
+		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		for _, row := range rows.Networks {
 			ans.Networks = append(ans.Networks, ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r))
 		}

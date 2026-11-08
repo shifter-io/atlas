@@ -7,7 +7,10 @@
   "W3": 711,
   "W4": 705,
   "W5": 706,
-  "W6": 712,
+  "W6": [
+   712,
+   751
+  ],
   "W7": 707,
   "W8": 708,
   "W9": 713,
@@ -416,7 +419,7 @@
    "page": 1,
    "class": "api",
    "work": "W6",
-   "issue": 712,
+   "issue": 751,
    "checks": [
     {
      "request": "/v1/home?range={range}",
@@ -449,7 +452,7 @@
    "page": 1,
    "class": "api",
    "work": "W6",
-   "issue": 712,
+   "issue": 751,
    "checks": [
     {
      "request": "/v1/home?range={range}",
@@ -468,7 +471,7 @@
    "page": 1,
    "class": "api",
    "work": "W6",
-   "issue": 712,
+   "issue": 751,
    "checks": [
     {
      "request": "/v1/home?range={range}",
@@ -484,7 +487,7 @@
    "page": 1,
    "class": "api",
    "work": "W6",
-   "issue": 712,
+   "issue": 751,
    "checks": [
     {
      "request": "/v1/home?range={range}",
@@ -551,7 +554,7 @@
    "page": 1,
    "class": "api",
    "work": "W6",
-   "issue": 712,
+   "issue": 751,
    "checks": [
     {
      "request": "/v1/home?range={range}",
@@ -725,7 +728,7 @@
    "page": 1,
    "class": "api",
    "work": "W6",
-   "issue": 712,
+   "issue": 751,
    "checks": [
     {
      "request": "/v1/home?range={range}",
