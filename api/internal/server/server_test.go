@@ -85,7 +85,18 @@ func (f *fakeSource) LoadEvents(context.Context) (*store.Inputs, error) {
 
 func (f *fakeSource) Events(_ context.Context, filter store.EventFilter) ([]store.Event, error) {
 	f.dbQueries.Add(1)
-	return store.Pick(append(append([]store.Event{}, f.events...), f.notable...), filter), nil
+	rows := append(append([]store.Event{}, f.events...), f.notable...)
+	if filter.After == nil && len(filter.Words) == 0 {
+		return store.Pick(rows, filter), nil
+	}
+	// With after or q, the rows the answer is chosen from, as store.QueryEvents reads them.
+	out := []store.Event{}
+	for i := range rows {
+		if filter.Match(&rows[i]) {
+			out = append(out, rows[i])
+		}
+	}
+	return out, nil
 }
 
 // fixture is two catalog networks without a measurement (unlinked site

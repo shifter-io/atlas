@@ -57,6 +57,10 @@ type ExplainParams struct {
 	// where the notable read starts, and the since filter.
 	CursorAt time.Time `json:"cursor_at"`
 	CursorID int64     `json:"cursor_id"`
+	// EventCountry and EventTarget are the newest of those events' country
+	// and target, the country= and target= filters.
+	EventCountry string `json:"event_country"`
+	EventTarget  string `json:"event_target"`
 }
 
 func fixed(sql string) func(*ExplainParams) (string, []any) {
@@ -68,10 +72,14 @@ func eventsShape(notable bool, f func(p *ExplainParams) EventFilter) func(*Expla
 	return func(p *ExplainParams) (string, []any) {
 		filter := f(p)
 		clauses, args := eventClauses(filter)
-		if notable {
-			return eventsQuery(append(clauses, notableClause), args, NotableQuota(filter.Limit))
+		limit, quota := readLimits(filter)
+		switch {
+		case notable:
+			return eventsQuery(append(clauses, notableClause), args, quota)
+		case filter.After != nil:
+			return afterQuery(clauses, args, limit)
 		}
-		return eventsQuery(clauses, args, filter.Limit)
+		return eventsQuery(clauses, args, limit)
 	}
 }
 
@@ -128,6 +136,13 @@ func registry() []Statement {
 		})},
 		Statement{"events.query.category", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Category: "incident", Limit: 100} })},
 		Statement{"events.query.since", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Since: &p.CursorAt, Limit: 100} })},
+		Statement{"events.query.network", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Provider: p.Provider, Limit: 100} })},
+		Statement{"events.query.network_notable", "QueryEvents", everyLayout, eventsShape(true, func(p *ExplainParams) EventFilter { return EventFilter{Provider: p.Provider, Limit: 100} })},
+		Statement{"events.query.country", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Country: p.EventCountry, Limit: 100} })},
+		Statement{"events.query.target", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{Target: p.EventTarget, Limit: 100} })},
+		Statement{"events.query.proxy_kind", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{ProxyKind: "residential", Limit: 100} })},
+		Statement{"events.query.after", "QueryEvents", everyLayout, eventsShape(false, func(p *ExplainParams) EventFilter { return EventFilter{After: &p.CursorID, Limit: 100} })},
+		Statement{"events.query.q", "QueryEvents", everyLayout, eventsShape(false, func(*ExplainParams) EventFilter { return EventFilter{Words: []string{"pulse"}, Limit: 100} })},
 	)
 }
 
@@ -238,6 +253,14 @@ func (p *ExplainParams) readCursor(ctx context.Context, tx pgx.Tx) error {
 	p.CursorAt = time.Now()
 	if len(rows) > 0 {
 		p.CursorAt, p.CursorID = rows[len(rows)-1].At, rows[len(rows)-1].ID
+	}
+	for i := len(rows) - 1; i >= 0; i-- {
+		if c := rows[i].Country; c != nil {
+			p.EventCountry = *c
+		}
+		if t := rows[i].Target; t != nil {
+			p.EventTarget = *t
+		}
 	}
 	return err
 }

@@ -246,13 +246,14 @@ type v4ScaleCase struct {
 	name    string
 	payload func() ([]byte, error)
 	pages   []string
+	edit    func(*build.Result)
 }
 
 var v4ScaleCases = []v4ScaleCase{
-	{"every-request", testscale.EveryRequest, goldenPages},
+	{"every-request", testscale.EveryRequest, append(slices.Clone(goldenPages), tapePages...), withTapeBurst},
 	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
 		"/v1/networks/net03/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
-		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}},
+		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, asBuilt},
 }
 
 // v4ScaleAnswers stores the case as a v4 build and returns the SHA-256 of
@@ -269,7 +270,7 @@ func v4ScaleAnswers(t *testing.T, c v4ScaleCase) map[string]string {
 	for _, a := range build.Answers() {
 		pages = append(pages, a.Samples...)
 	}
-	return sums(renderedAnswers(t, db, db.PublishV4(t, payload), pages, asBuilt))
+	return sums(renderedAnswers(t, db, db.PublishV4(t, payload), pages, c.edit))
 }
 
 // sameSums reports each answer whose SHA-256 differs from the golden's.

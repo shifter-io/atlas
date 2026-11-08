@@ -515,8 +515,10 @@ const MaxEvents = 500
 
 var categories = map[string]bool{"census": true, "pulse": true, "incident": true, "audit": true}
 
-// ParseEventFilter validates /v1/events parameters like the framework does.
-func ParseEventFilter(q map[string][]string) (store.EventFilter, error) {
+// ParseEventFilter validates /v1/events parameters like the framework does,
+// and the live tape's: network (a site slug, mapped by provider to its
+// framework provider), country, target, q, proxyKind and after.
+func ParseEventFilter(q map[string][]string, provider func(slug string) (string, bool)) (store.EventFilter, error) {
 	f := store.EventFilter{Limit: 100}
 	get := func(k string) string {
 		if v := q[k]; len(v) > 0 {
@@ -526,7 +528,7 @@ func ParseEventFilter(q map[string][]string) (store.EventFilter, error) {
 	}
 	for k := range q {
 		switch k {
-		case "product", "kind", "category", "since", "limit":
+		case "product", "kind", "category", "since", "limit", "network", "country", "target", "q", "proxyKind", "after":
 		default:
 			return f, errors.New("Unknown query parameter")
 		}
@@ -555,9 +557,10 @@ func ParseEventFilter(q map[string][]string) (store.EventFilter, error) {
 		if err != nil {
 			return f, err
 		}
+		t = t.UTC()
 		f.Since = &t
 	}
-	return f, nil
+	return f, parseTapeFilters(&f, get, provider)
 }
 
 func parseSince(s string) (time.Time, error) {
@@ -571,30 +574,12 @@ func parseSince(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("since must be an ISO time")
 }
 
-func eventsKey(f store.EventFilter) string {
-	since := ""
-	if f.Since != nil {
-		since = f.Since.UTC().Format(time.RFC3339Nano)
-	}
-	return f.Product + "|" + strings.Join(f.Kinds, ",") + "|" + f.Category + "|" + since + "|" + strconv.Itoa(f.Limit)
-}
-
-type eventsResponse struct {
-	Events []store.EventJSON `json:"events"`
-}
-
-// eventsFromWindow answers from the build's in-memory events when they
-// provably hold the whole answer; ok=false means the database must be asked.
-func eventsFromWindow(res *build.Result, f store.EventFilter) (out []store.EventJSON, ok bool) {
-	return res.Events.Answer(f)
-}
-
-func eventsBody(res *build.Result, f store.EventFilter) (*eventsResponse, error) {
-	out, ok := eventsFromWindow(res, f)
+func eventsBody(res *build.Result, f store.EventFilter) (*build.EventsAnswer, error) {
+	out, ok := res.Events.Answer(f)
 	if !ok {
 		return nil, errNeedDB
 	}
-	return &eventsResponse{Events: out}, nil
+	return out, nil
 }
 
 var errNeedDB = errors.New("events window does not cover this filter")
@@ -605,7 +590,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 		s.unavailable(w)
 		return
 	}
-	f, err := ParseEventFilter(r.URL.Query())
+	f, err := ParseEventFilter(r.URL.Query(), v.Result.Events.Provider)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -623,10 +608,7 @@ func (s *Server) serveEvents(w http.ResponseWriter, r *http.Request) {
 				s.log.Error("events fallback query failed", "error", qerr)
 				return
 			}
-			resp = &eventsResponse{Events: make([]store.EventJSON, len(rows))}
-			for i := range rows {
-				resp.Events[i] = rows[i].JSON()
-			}
+			resp = v.Result.Events.FromRows(f, rows)
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
