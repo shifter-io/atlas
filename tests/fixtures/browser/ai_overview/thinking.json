@@ -1,0 +1,36 @@
+{
+  "page": {
+    "url": "https://www.google.com/search",
+    "status": 200,
+    "title": "what causes hiccups - Google Search",
+    "text_head": "AI Overview",
+    "counts": {
+      "#m-x-content": 1,
+      "[role=\"heading\"]:text-matches(\"^(thinking|searching|generating)[^a-z]*$\", \"i\")": 1,
+      "#search a h3": 8
+    },
+    "texts": {
+      "#m-x-content": "AI Overview Thinking"
+    }
+  },
+  "timeline": [
+    {
+      "t": 4.0,
+      "counts": {
+        "[role=\"heading\"]:text-matches(\"^(thinking|searching|generating)[^a-z]*$\", \"i\")": 0
+      },
+      "texts": {
+        "#m-x-content": "AI Overview PRIVATE-ANSWER-MARKER Hiccups are sudden contractions of the diaphragm. Eating quickly, carbonated drinks and stress can set them off."
+      }
+    }
+  ],
+  "expect": {
+    "verdict": "ok",
+    "error": null,
+    "reason": null,
+    "answer_chars": 146,
+    "answer_ms": 4000,
+    "asked": false,
+    "waited_s": 6.0
+  }
+}
