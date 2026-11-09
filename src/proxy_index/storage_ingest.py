@@ -231,12 +231,16 @@ def check_stored(run, stored):
 
 
 def add_observations(conn):
-    """Add the new runs' IP observations and count the IPs new to each pool (pool_ips in key
-    order, as every insert into a table imports share)."""
+    """Add the new runs' IP observations."""
     conn.execute(
         "INSERT INTO ip_observations SELECT bucket,run_key,ip_id,count,first_seen,last_seen "
         "FROM incoming_observations"
     )
+
+
+def add_pool_ips(conn):
+    """Count the IPs new to each pool (pool_ips in key order, as every insert into a table
+    imports share)."""
     conn.execute(
         "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT pool_id,ip_id FROM "
         "incoming_observations ORDER BY pool_id,ip_id ON CONFLICT DO NOTHING RETURNING pool_id) "

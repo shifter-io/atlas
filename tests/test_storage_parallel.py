@@ -8,6 +8,7 @@ import importlib
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 import psycopg
@@ -212,23 +213,64 @@ def test_updates_in_opposite_orders_deadlock_and_are_retried_sorted_ones_do_not(
     assert overlap_in_two_orders(databases(template=database_template), sort=True) == [0, 0]
 
 
-def test_the_caps_split_groups_and_spare_connections(database, tmp_path, monkeypatch, capsys):
+def test_the_caps_lower_n_and_never_split_a_group(database, tmp_path, monkeypatch, capsys):
     groups = [Group([pulse(tmp_path / f"p{n}", n) for n in range(k, k + 2)]) for k in (0, 2)]
-    monkeypatch.setattr(storage_parallel, "RESERVE", 10**6)  # nothing left to spare
-    parts = []
+    committed = []
     outcomes = storage_parallel.store(
-        groups, database, connections=4, memory_budget=1, on_commit=lambda p, _: parts.append(p)
+        groups, database, connections=4, memory_budget=1, on_commit=lambda g, _: committed.append(g)
     )
     err = capsys.readouterr().err
-    assert "warning: 1 connections, not 4" in err and "at most 1 runs a group" in err
-    assert len(parts) == 4  # each run its own transaction, as the budget allows
+    assert "warning: 1 connections, not 4" in err and "memory budget" in err
+    assert "2 groups over 1 connections" in err
+    assert committed == groups  # each whole, one after the other
     assert [[r["run_id"] for r in o.results] for o in outcomes] == [
         [run_id("pulse", 0), run_id("pulse", 1)],
         [run_id("pulse", 2), run_id("pulse", 3)],
     ]
+    monkeypatch.setattr(storage_parallel, "RESERVE", 10**6)  # nothing left to spare
+    storage_parallel.store(groups, database, connections=4)
+    assert "warning: 1 connections, not 4: max_connections" in capsys.readouterr().err
     with pytest.raises(ValueError, match="at least one connection"):
         storage_parallel.store(groups, database, connections=0)
     assert storage_parallel.store([], database) == []
+
+
+WAITING = (  # in this database only: other tests import at the same time
+    "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted AND objsubid=2 "
+    "AND classid::bigint=%s AND database=(SELECT oid FROM pg_database "
+    "WHERE datname=current_database())"
+)
+
+
+def test_groups_of_two_networks_count_at_the_same_time(database, tmp_path):
+    """While a group of net-a is held in its network step (its lock taken elsewhere), a group of
+    net-b goes through its own and through the overlap step, and commits."""
+    a, b = (  # pulses 0 and 5 share no IP: b never waits on a's rows
+        Group([pulse(tmp_path / name, n, provider=name)], networks=frozenset({name}))
+        for n, name in ((0, "net-a"), (5, "net-b"))
+    )
+    storage.ingest(pulse(tmp_path / "first", 2), database)  # the day's partitions
+    order, lock = [], (storage.NETWORK_LOCK, "net-a")
+    with connect(database) as blocker:
+        blocker.autocommit = True
+        blocker.execute("SELECT pg_advisory_lock(%s,hashtext(%s))", lock)
+        release = threading.Timer(30, blocker.execute, ("SELECT pg_advisory_unlock_all()",))
+        release.start()  # a stall fails the test instead of hanging it
+
+        def committed(group, outcome):
+            order.append(group.networks)
+            if group is b:
+                for _ in range(200):  # a reaches its network lock and waits there
+                    if blocker.execute(WAITING, (storage.NETWORK_LOCK,)).fetchone()[0]:
+                        break
+                    time.sleep(0.05)
+                assert blocker.execute(WAITING, (storage.NETWORK_LOCK,)).fetchone()[0] == 1
+                blocker.execute("SELECT pg_advisory_unlock(%s,hashtext(%s))", lock)
+
+        outcomes = storage_parallel.store([a, b], database, connections=2, on_commit=committed)
+        release.cancel()
+    assert order == [b.networks, a.networks]
+    assert [o.error for o in outcomes] == [None, None]
 
 
 def test_the_import_locks_are_no_other_lock():
@@ -240,6 +282,7 @@ def test_the_import_locks_are_no_other_lock():
     assert storage.INGEST_LOCK == purge.INGEST_LOCK
     others = {detect.LOCK, rollups.LOCK, batches.PLAN_LOCK, storage.INGEST_LOCK}
     assert storage.OVERLAP_LOCK not in others and len(others) == 3
+    assert storage.NETWORK_LOCK != storage.RUN_LOCK  # the two-integer keys
 
 
 def test_groups_of_one_network_are_not_handed_out_together():

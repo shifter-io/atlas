@@ -45,11 +45,12 @@ STORED = (
     "FROM run_enrichments e JOIN dbip_releases d USING(release_id) WHERE e.run_key=t.run_key) "
     "FROM test_runs t WHERE t.run_id=ANY(%s::uuid[])"
 )
-# Each new run's scope before the batch, and its summary as the stored rows rebuild it.
+# Each new run's key, and its summary as the stored rows rebuild it.
+SUMMARIES = "SELECT idx,run_key,stored_run_summary(run_key) FROM incoming_runs ORDER BY idx"
+# Each new run's scope before the batch (read under the network's lock).
 SCOPES = (
-    "SELECT r.idx,r.run_key,s.scope_id,s.metrics,s.histogram_steps,s.histogram_counts,"
-    "stored_run_summary(r.run_key) FROM incoming_runs r JOIN scope_stats s USING(scope_id) "
-    "ORDER BY r.idx"
+    "SELECT r.idx,s.scope_id,s.metrics,s.histogram_steps,s.histogram_counts FROM incoming_runs r "
+    "JOIN scope_stats s USING(scope_id) ORDER BY r.idx"
 )
 
 

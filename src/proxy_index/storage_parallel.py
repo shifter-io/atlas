@@ -3,8 +3,9 @@
 A group is what one `storage.ingest_many` transaction and then one `compute.estimate_runs`
 transaction store (daily.batches builds them). Each runs on one of N connections, a worker thread
 owning its connection for the whole store (psycopg releases the GIL while it waits on the
-network). Imports hold the ingest lock shared and take the overlap lock only for their
-cross-network step (storage.OVERLAP_LOCK), so N groups send their rows at the same time.
+network). Imports hold the ingest lock shared, each network's counts go under that network's lock
+(storage.NETWORK_LOCK) and only the cross-network overlap, their last statement, under the
+overlap lock (storage.OVERLAP_LOCK): N groups of different networks never wait for each other.
 
 The main thread hands the groups out, never two of one network at once while a group of another
 network can go instead, and reports each committed group (`on_commit`) as it finishes. A deadlock
@@ -13,9 +14,10 @@ backoff on a new connection while the others go on; a group that still fails get
 IngestBatchError naming its run ids, once the others finished, for the caller's own retry.
 
 Bounds: N (default 25, any number the server's free slots allow) is capped so that RESERVE
-(10) connection slots stay free for production, and groups are split so that N in flight fit
-the memory budget; both caps are printed. connections=1 stores the groups one after the other
-on one connection, with the statements of ingest_many and estimate_runs.
+(10) connection slots stay free for production, and so that N groups in flight fit the memory
+budget (a group is never split: N goes down instead); the N used is printed. connections=1
+stores the groups one after the other on one connection, with the statements of ingest_many and
+estimate_runs.
 """
 
 from __future__ import annotations
@@ -58,9 +60,8 @@ class Options:
 
 @dataclass
 class Group:
-    """One transaction's run directories (each named after its run id), the estimated hours to
-    store for those with a formula ([(run_id, country, formula)], compute.estimate_runs) and the
-    networks of its runs."""
+    """One transaction's run directories, the estimated hours to store for those with a formula
+    ([(run_id, country, formula)], compute.estimate_runs) and the networks of its runs."""
 
     directories: list
     estimates: list = field(default_factory=list)
@@ -160,44 +161,27 @@ def _bytes(directory) -> int:
     return sum(path.stat().st_size for path in Path(directory).iterdir() if path.is_file())
 
 
-def _split(groups: list[Group], connections: int, budget: int):
-    """The groups as parts of at most `cap` runs, so that N parts in flight fit the budget; each
-    part's group index, and the cap."""
-    largest = max((_bytes(d) for group in groups for d in group.directories), default=0)
-    cap = max(1, budget // max(1, connections * largest * EXPANSION))
-    parts, owners = [], []
-    for index, group in enumerate(groups):
-        for start in range(0, len(group.directories), cap):
-            own = {Path(d).name for d in group.directories[start : start + cap]}
-            estimates = [run for run in group.estimates if run[0] in own]
-            directories = group.directories[start : start + cap]
-            parts.append(Group(directories, estimates, group.networks))
-            owners.append(index)
-    return parts, owners, cap
-
-
-def _merged(outcomes: list[Outcome]) -> Outcome:
-    """One group's outcome from those of its parts, in order."""
-    if len(outcomes) == 1:
-        return outcomes[0]
-    merged, failed = Outcome(), []
-    for outcome in outcomes:
-        merged.results += outcome.results
-        merged.retries += outcome.retries
-        failed += outcome.error.run_ids if outcome.error else []
-        merged.estimate_error = merged.estimate_error or outcome.estimate_error
-    merged.error = storage.IngestBatchError(failed) if failed else None
-    return merged
+def _fitting(groups: list[Group], connections: int, budget: int) -> int:
+    """connections, or fewer: as many as the budget holds of the largest group in flight."""
+    largest = max(sum(_bytes(d) for d in group.directories) for group in groups) * EXPANSION
+    allowed = max(1, min(connections, budget // max(1, largest)))
+    if allowed < connections:
+        print(
+            f"storage_parallel: warning: {allowed} connections, not {connections}: a group takes "
+            f"about {largest / 2**20:.0f} MB of the {budget / 2**30:.1f} GB memory budget",
+            file=sys.stderr,
+        )
+    return allowed
 
 
 def _next(pending: list[int], parts: list[Group], running: dict) -> int:
-    """The first pending part of no network a running part holds; else the first pending."""
+    """The first pending group of no network a running group holds; else the first pending."""
     busy = frozenset().union(*(parts[k].networks for k in running.values()))
     return next((k for k in pending if not parts[k].networks & busy), pending[0])
 
 
 def _run(executor, pool, parts: list[Group], connections: int, on_commit) -> list[Outcome]:
-    """Hand the parts out, at most `connections` in flight; each one's Outcome."""
+    """Hand the groups (parts) out, at most `connections` in flight; each one's Outcome."""
     found: list[Outcome] = [Outcome()] * len(parts)
     pending, running = list(range(len(parts))), {}
     while pending or running:
@@ -224,28 +208,19 @@ def store(
 ) -> list[Outcome]:
     """Store the groups (Group) over `connections` connections at once; each one's Outcome.
 
-    on_commit(part, outcome) runs in this thread as each committed part (a group, or a piece of
-    one the memory budget split) finishes. A stop (KeyboardInterrupt) hands out no more groups
-    and waits for those in flight.
+    on_commit(group, outcome) runs in this thread as each committed group finishes. A stop
+    (KeyboardInterrupt) hands out no more groups and waits for those in flight.
     """
     if connections < 1:
         raise ValueError("at least one connection")
     if not groups:
         return []
+    connections = _fitting(groups, connections, memory_budget)
     connections = _capped(credentials_file, connections) if connections > 1 else 1
-    parts, owners, cap = _split(groups, connections, memory_budget)
-    print(
-        f"storage_parallel: {len(parts)} groups over {connections} connections, at most {cap} "
-        f"runs a group (memory budget {memory_budget / 2**30:.1f} GB)",
-        file=sys.stderr,
-    )
+    print(f"storage_parallel: {len(groups)} groups over {connections} connections", file=sys.stderr)
     pool = Connections(credentials_file)
     try:
-        with ThreadPoolExecutor(min(connections, len(parts))) as executor:
-            found = _run(executor, pool, parts, connections, on_commit)
+        with ThreadPoolExecutor(min(connections, len(groups))) as executor:
+            return _run(executor, pool, groups, connections, on_commit)
     finally:
         pool.close()
-    return [
-        _merged([found[k] for k, owner in enumerate(owners) if owner == index])
-        for index in range(len(groups))
-    ]

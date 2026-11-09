@@ -372,26 +372,29 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
    TCP receive window caps it at about 0.6 MB/s over the 77 ms link to the database, so the
    hour's batches go over `--connections` (default 25; 40 and more where the server has the slots) connections at once, one worker thread
    and one connection each. `--connections 1` is the serial path, statement for statement.
-   - *The lock, narrowed.* An import holds the ingest lock (817452901) shared, so imports run
+   - *The locks, narrowed.* An import holds the ingest lock (817452901) shared, so imports run
      side by side while a purge, seed, migration or rebuild (which take it exclusively) waits
-     for them, and a lock per run (817452904 with the run id's hash, in one order), so two
-     imports of one run still go one after the other. Its run's own rows (temp tables, runs,
-     buckets, geo rows, addresses, observations, `pool_ips`, enrichment) go in without a
-     global lock; only the last step
-     takes the overlap lock (817452905) and commits right after: the IPs first seen at their
-     network and the `provider_overlap` they add, `product_ips`, each scope's IPs new to it and
-     the scope totals (`scope_stats`), the read-modify-writes other imports' commits change.
-     Read after the lock, they see every committed import, as the serial path does.
+     for them, and a lock per run (817452904 with the run id's hash), so two imports of one run
+     still go one after the other. Its runs' own rows (temp tables, runs, buckets, geo rows,
+     addresses, observations, enrichment, and each run's summary as stored) go in under no
+     other lock. Each network's counts take that network's lock (817452906 with the provider's
+     hash, the batch's networks in one order): the IPs new to each pool (`pool_ips`), to the
+     provider (before its `product_ips` are added) and to each scope, and the scope totals
+     (`scope_stats`). Batches of different networks never wait for each other there. Only the
+     last statement before COMMIT, the `provider_overlap` increments for the batch's IPs new to
+     their provider, takes the global overlap lock (817452905): milliseconds. Each is read
+     after its lock (READ COMMITTED), so it sees every import committed before, as the serial
+     path does.
    - *No deadlocks.* Every multi-row insert into a table imports share goes in key order, and
      two batches of one network are not stored at the same time while one of another network
      can go instead. A deadlock (40P01) or serialization failure (40001) rolls back only that
      batch, retried 3 times with backoff on a new connection; one that still fails is retried
      one country at a time after the others (`daily/batches.py`).
-   - *Caps*, printed at the start of each hour: the connections are capped so that 10 of the server's
-     `max_connections` slots stay free for production (a capped count is a warning, not an
-     error), and a batch is split so that the batches in flight,
-     estimated at 20 times their run directories' bytes, stay within `--memory-budget` GB
-     (default 4, inside the 6G memory cap).
+   - *Caps*, printed at the start of each hour: the connections are capped so that 10 of the
+     server's `max_connections` slots stay free for production, and so that the batches in
+     flight, estimated at 20 times their run directories' bytes, stay within `--memory-budget`
+     GB (default 4, inside the 6G memory cap). A batch is never split: N goes down instead. A
+     capped count is a warning, not an error.
 2. **browser**: one browser node per network of the settings' hosts, bound to its host's
    name (the tokens are issued once a process, never saved). The real planner
    (`orchestrator/browser.py`, queue mode) runs at each run's start with the model's settings
