@@ -176,8 +176,10 @@ class Prefetcher:
         exported = export(self.conn)
         heavy_export = (exported[0], self.settings["heavy_work_mem"], exported[2])
         with ThreadPoolExecutor(h + n) as opener:
-            opening = [opener.submit(snapshot_connection, self.conn, heavy_export) for _ in range(h)]
-            opening += [opener.submit(snapshot_connection, self.conn, exported) for _ in range(n)]
+            opening = [
+                opener.submit(snapshot_connection, self.conn, heavy_export if i < h else exported)
+                for i in range(h + n)
+            ]
             wait(opening)
         self.connections = [f.result() for f in opening if f.exception() is None]
         for f in opening:

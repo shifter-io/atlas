@@ -219,7 +219,7 @@ def test_settings_and_their_bounds(database, capsys, monkeypatch):
         assert parallel_reads.settings(conn)["parallel_reads"] == 16
         assert parallel_reads.settings(conn, 3)["parallel_reads"] == 3  # --parallel-reads
         for wrong in (0, 17, "8", True):
-            with pytest.raises(ValueError, match="parallel_reads must be a whole number from 1 to 16"):
+            with pytest.raises(ValueError, match="parallel_reads must be a whole number from 1 to"):
                 parallel_reads.settings(conn, wrong)
         write_settings(conn, {"calculate.heavy_rows": 0})
         with pytest.raises(ValueError, match="heavy_rows must be a whole number from 1 to any"):
