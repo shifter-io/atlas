@@ -130,7 +130,7 @@ def write_lists(conn, build_id, prepared):
         return ids
     keys = [prepared[n].key for n in new]
     if len(set(k[:3] for k in keys)) < len(keys):
-        raise ValueError("New lists must differ in their product, cohort or window")
+        raise ValueError("New lists of a product and cohort must differ in their window")
     columns = [list(c) for c in zip(*keys, strict=True)]
     columns += [[prepared[n].content_hash for n in new]]
     columns += [[Jsonb(getattr(prepared[n], k)) for n in new] for k in ("entries", "figures")]

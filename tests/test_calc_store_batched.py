@@ -30,6 +30,7 @@ measure = importlib.import_module("measure")
 
 pytest_plugins = ["test_storage"]
 
+
 class OldWriter:
     """lists.persist() before CALC-WRITES-1: an INSERT per window, score, series point and
     overlap, two statements per cohort and a reason lookup per product group."""
