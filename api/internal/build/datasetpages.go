@@ -18,11 +18,12 @@ import (
 // site's design). The network lists' first pages are the dataset's lists
 // (DatasetLists); further pages, the answers with q and the region and city
 // pages are read from the API; search is not a page. A registered answer
-// with InDataset adds its bodies under their stored paths.
+// with InDataset adds its bodies under their requests (PageAnswer.Request).
 type DatasetPages map[string]any
 
-// datasetPages is pg's page answers by request.
-func datasetPages(pg *Pages) DatasetPages {
+// datasetPages is pg's page answers by request, with ev's for the answers
+// built from events.
+func datasetPages(pg *Pages, ev *EventWindow) DatasetPages {
 	out := DatasetPages{"/v1/networks": pg.Networks}
 	out["/v1/countries"] = pg.Countries
 	for cc, ans := range pg.Country {
@@ -44,16 +45,34 @@ func datasetPages(pg *Pages) DatasetPages {
 		out["/v1/networks/"+parts[0]+"/chart?kind="+parts[1]+"&range="+parts[2]] = ans
 	}
 	for _, a := range Answers() {
-		if !a.InDataset {
-			continue
-		}
-		for path, ans := range pg.Registered {
-			if a.Owns(path) {
-				out[path] = ans
-			}
+		if a.InDataset {
+			out.add(a, pg, ev)
 		}
 	}
 	return out
+}
+
+// add adds a's bodies under their requests: pg.Registered's, or with Cut the
+// cut of every held path (ev's for an answer with Events).
+func (p DatasetPages) add(a PageAnswer, pg *Pages, ev *EventWindow) {
+	bodies := pg.Registered
+	if a.Cut != nil {
+		held := pg.Held[a.Name]
+		if a.Events {
+			held = ev.Held[a.Name]
+		}
+		bodies = map[string]any{}
+		for path := range held {
+			if body, ok := a.Cut(held, path); ok {
+				bodies[path] = body
+			}
+		}
+	}
+	for path, body := range bodies {
+		if req := a.Request(path); req != "" && a.Owns(path) {
+			p[req] = body
+		}
+	}
 }
 
 // write streams p as encoding the map gives it (keys in order), one answer at

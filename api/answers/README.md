@@ -26,8 +26,9 @@ samples by itself.
 | `Route` | The mux pattern, such as `GET /v1/targets` or `GET /v1/networks/{slug}/reviews`. |
 | `Key func(*http.Request) (string, error)` | Validates the request and gives the stored path it serves. An error answers 400 with its text. The helpers `build.Query` (refuses unknown parameters), `build.QueryRange` (`24h`, `7d` or `30d`, default `30d`), `build.QueryKind` and `build.PathSlug` give the usual checks. |
 | `Samples []string` | Request URLs (path and query) that must answer 200: the tests, `/healthz` and the bench ask for them. |
-| `InDataset bool` | Adds the bodies to the dataset file's `pages` under their stored paths. False until DATASET-PAGES-2. |
-| `Cut func(held map[string]any, path string) (any, bool)` | Optional, for answers with many filtered pages: `Build`'s values are held instead of rendered, and a request is answered with `Cut(held, Key(r))` (404 when not found), rendered at the fast level and kept in the version's page LRU, as the place pages are. Not with `InDataset`. The reviews, runs and pricing-history answers use it. |
+| `InDataset bool` | Adds the bodies to the dataset file's `pages`, each under `Request(path)`; with `Cut`, the cut of every held path (for an answer with `Events`, those of the build's events). `api/FIELDS.md` "Page answers in the dataset file" lists them. |
+| `Request func(path string) string` | Needed with `InDataset`: the request URL that serves the body stored under `path`, every parameter spelled out (`/v1/home/7d` is `/v1/home?range=7d`); `""` leaves the body out of the file. |
+| `Cut func(held map[string]any, path string) (any, bool)` | Optional, for answers with many filtered pages: `Build`'s values are held instead of rendered, and a request is answered with `Cut(held, Key(r))` (404 when not found), rendered at the fast level and kept in the version's page LRU, as the place pages are. The reviews, runs and pricing-history answers use it. |
 | `Root string` | Optional: the stored paths' root in place of `/v1/<Name>`, for an answer under a reserved family's path (`/v1/events/stats`). |
 | `Events bool` | Optional, with `Cut`: `Build` also runs on every events refresh (`build.WithEvents`), with the new events (`Context.Events`, its `Stats` the event counts) and the last build's `GeneratedAt` and `Pages`, all of the `Context` it may read. Its values are held in `Result.Events.Held`, and each body cut is kept in the version's events LRU (which every refresh replaces) with the events' `Cache-Control`. The events-stats answer uses it. |
 
@@ -60,4 +61,6 @@ the encoded pages and details, and `/v1/version`). A registered answer's family 
 its stored bodies and its samples, rendered on request. `GOLDEN_WRITE=1` rewrites each file
 (a case skipped with `-short` is left out, so write without it). The goldens of the answers from before the
 registry (`testdata/answers-v4.json` and the build package's `network-one-group` and
-`network-long-lists`) leave registered answers out, so a new answer changes only its own file.
+`network-long-lists`) leave registered answers out, so a new answer changes only its own file;
+an answer with `InDataset` also changes `dataset.json`, whose file holds its bodies (the
+`/v1/events/stats` ones at the case's fixed time).

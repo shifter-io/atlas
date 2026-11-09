@@ -60,6 +60,7 @@ func init() {
 		},
 		Samples:   []string{"/v1/throwaway-dataset"},
 		InDataset: true,
+		Request:   func(path string) string { return path },
 	})
 	// A cut answer: the build holds the number of pages, a request cuts one.
 	build.RegisterAnswer(build.PageAnswer{

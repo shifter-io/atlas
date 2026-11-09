@@ -17,7 +17,9 @@ const eventsStatsPath = "/v1/events/stats"
 
 func init() {
 	RegisterAnswer(PageAnswer{Name: "events-stats", Root: eventsStatsPath, Events: true, Route: "GET " + eventsStatsPath,
-		Build: buildEventsStats, Key: eventsStatsKey,
+		Build: buildEventsStats, Key: eventsStatsKey, InDataset: true,
+		// The dataset file holds the ranges' bodies, not each network's.
+		Request: func(p string) string { return queryRequest(p, eventsStatsPath, "range") },
 		Samples: []string{eventsStatsPath + "?range=24h", eventsStatsPath + "?range=7d", eventsStatsPath},
 		Cut: func(held map[string]any, path string) (any, bool) {
 			body, ok := held[path]

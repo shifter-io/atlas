@@ -156,6 +156,7 @@ func renderedAnswers(t *testing.T, db *testdb.DB, id int64, pages []string, edit
 	res.BuiltAt = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	res.Coverage.BuiltAt = build.JSISO(res.BuiltAt)
 	edit(res)
+	withEventsInTheFile(res)
 	v, err := RenderVersion(1, res, Options{FilesDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -261,6 +262,23 @@ func atAFixedTime(res *build.Result) {
 	stats.End = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
 	*res = *build.WithEvents(res, &store.Inputs{Fingerprint: res.Fingerprint, Events: res.Events.Raw, EventsComplete: res.Events.Complete,
 		EventStats: stats})
+}
+
+// withEventsInTheFile puts the bodies of the registered answers built from
+// res's events in its dataset file in place of the build's: the build reads
+// the event counts at now(), a case's edit at a fixed time.
+func withEventsInTheFile(res *build.Result) {
+	pages := res.Dataset.Pages.(build.DatasetPages)
+	for _, a := range build.Answers() {
+		if !a.InDataset || !a.Events {
+			continue
+		}
+		for path, body := range res.Events.Held[a.Name] {
+			if req := a.Request(path); req != "" {
+				pages[req] = body
+			}
+		}
+	}
 }
 
 // v4ScaleAnswers stores the case as a v4 build and returns the SHA-256 of

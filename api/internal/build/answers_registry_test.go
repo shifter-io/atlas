@@ -16,14 +16,12 @@ func TestRegisterAnswerRefusesABadAnswer(t *testing.T) {
 	ok := PageAnswer{Name: "fine", Route: "GET /v1/fine", Build: func(*Context) (map[string]any, error) { return nil, nil },
 		Key: func(*http.Request) (string, error) { return "/v1/fine", nil }}
 	for name, edit := range map[string]func(*PageAnswer){
-		"reserved":  func(a *PageAnswer) { a.Name = "networks" },
-		"bad name":  func(a *PageAnswer) { a.Name = "Fine/1" },
-		"no build":  func(a *PageAnswer) { a.Build = nil },
-		"no key":    func(a *PageAnswer) { a.Key = nil },
-		"not a GET": func(a *PageAnswer) { a.Route = "POST /v1/fine" },
-		"cut in the dataset": func(a *PageAnswer) {
-			a.Cut, a.InDataset = func(map[string]any, string) (any, bool) { return nil, false }, true
-		},
+		"reserved":                  func(a *PageAnswer) { a.Name = "networks" },
+		"bad name":                  func(a *PageAnswer) { a.Name = "Fine/1" },
+		"no build":                  func(a *PageAnswer) { a.Build = nil },
+		"no key":                    func(a *PageAnswer) { a.Key = nil },
+		"not a GET":                 func(a *PageAnswer) { a.Route = "POST /v1/fine" },
+		"dataset without a request": func(a *PageAnswer) { a.InDataset = true },
 	} {
 		a := ok
 		edit(&a)
@@ -74,6 +72,25 @@ func TestBuildRegisteredLeavesOutAFailedAnswer(t *testing.T) {
 	}
 	if pg.Unbuilt["failed"] != "no rows" || !strings.Contains(pg.Unbuilt["outside"], "/v1/networks is outside /v1/outside") || len(pg.Unbuilt) != 2 {
 		t.Errorf("unbuilt %v", pg.Unbuilt)
+	}
+}
+
+// queryRequest spells a stored path's segments out as the query, and gives
+// "" for a path with more segments than names.
+func TestQueryRequestSpellsThePathOut(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		path, root, want string
+		names            []string
+	}{
+		{"/v1/meta", "/v1/meta", "/v1/meta", nil},
+		{"/v1/home/7d", "/v1/home", "/v1/home?range=7d", []string{"range"}},
+		{"/v1/targets/isp/24h/chrome", "/v1/targets", "/v1/targets?kind=isp&range=24h&engine=chrome", []string{"kind", "range", "engine"}},
+		{"/v1/events/stats/7d/net00", "/v1/events/stats", "", []string{"range"}},
+	} {
+		if got := queryRequest(c.path, c.root, c.names...); got != c.want {
+			t.Errorf("%s: %q, want %q", c.path, got, c.want)
+		}
 	}
 }
 
