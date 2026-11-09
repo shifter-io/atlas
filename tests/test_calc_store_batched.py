@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 from calculated_cases import benchmark_scenario, payload_mismatches
 
-from proxy_index.calculated import batch, lists, store
+from proxy_index.calculated import batch, lists
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.list_write import prepare, write_lists
 from proxy_index.storage import column, connect
@@ -56,9 +56,8 @@ class OldWriter:
         for p in payload["products"]:
             new = [(label, w) for label, w in p["windows"].items() if "lists" not in w]
             prepared = [prepare(p, w) for _, w in new]
-            ids = dict(
-                zip([label for label, _ in new], write_lists(self.conn, build_id, prepared))
-            )
+            written = write_lists(self.conn, build_id, prepared)
+            ids = dict(zip([label for label, _ in new], written, strict=True))
             for label, w in p["windows"].items():
                 list_id = w["lists"]["id"] if "lists" in w else ids[label]
                 self.results((build_id, list_id), p, w, reason_ids)
@@ -96,7 +95,7 @@ class OldWriter:
                 + ",".join(["%s"] * 31)
                 + ") RETURNING result_id",
                 row,
-            ).fetchone()["result_id"]
+            ).fetchone()[0]
             for profile, s in scores.items():
                 self.score(result, profile, s, not target, reason_ids)
             if not target:
@@ -144,10 +143,7 @@ class OldWriter:
             )
             cur.executemany(
                 "INSERT INTO calculated_score_reasons VALUES (%s,%s,%s,%s)",
-                [
-                    (result, profile, i, reason_ids[r])
-                    for i, r in lists.split_reasons(s, product)
-                ],
+                [(result, profile, i, reason_ids[r]) for i, r in lists.split_reasons(s, product)],
             )
 
 
@@ -197,7 +193,7 @@ def dump(conn, build_id, tag):
     for name, query in DUMPS.items():
         param = f"%#{tag}%" if name == "cohorts" else build_id
         rows = conn.execute(query.format(key=WINDOW_KEY), (param,)).fetchall()
-        found[name] = sorted(str(tuple(r.values())) for r in rows)
+        found[name] = sorted(str(r) for r in rows)
     return found
 
 
@@ -206,7 +202,7 @@ def new_build(conn, build_id, tag):
         "INSERT INTO calculation_builds(methodology_id,as_of,input_hash) SELECT methodology_id,"
         "as_of,input_hash||%s FROM calculation_builds WHERE build_id=%s RETURNING build_id",
         (tag, build_id),
-    ).fetchone()["build_id"]
+    ).fetchone()[0]
 
 
 def touched(tracer):
@@ -237,7 +233,7 @@ async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_p
             "SELECT count(*) FROM calculated_series JOIN calculated_windows USING(result_id) "
             "WHERE build_id=%s",
             (built,),
-        ).fetchone()["count"]
+        ).fetchone()[0]
         count = batch.CHUNK // points + 1  # copies: more than CHUNK series points
         old, new = new_build(conn, built, "-old"), new_build(conn, built, "-new")
         writer = OldWriter(conn)
@@ -254,7 +250,7 @@ async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_p
         solo = new_build(conn, built, "-solo")  # without a batch: written before it returns
         lists.persist(conn, copies(calls[:1], solo, "solo", 1)[0])
         query = "SELECT count(*) FROM calculated_windows WHERE build_id=%s"
-        assert conn.execute(query, (solo,)).fetchone()["count"] > 0
+        assert conn.execute(query, (solo,)).fetchone()[0] > 0
     assert len(after["series"]) == points * count > batch.CHUNK
     assert {k: len(v) for k, v in after.items()} == {k: len(v) for k, v in before.items()}
     assert after == before
@@ -264,4 +260,3 @@ async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_p
     for statement, calls_of in touched(tracer).items():
         limit = len(flushes) + chunks if "calculated_series" in statement else 3 * len(flushes)
         assert calls_of <= limit, statement
-
