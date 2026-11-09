@@ -1,12 +1,11 @@
 """Typed rows of a calculated payload, and the shared breakdown lists (contract K2).
 
-persist() writes a payload's cohorts, windows, scores, series and overlaps, a batch at a time
-(batch.py: a fixed number of statements per batch, never one per row). Each target-free
-window's full breakdowns are its list: one calculated_lists row and its calculated_list_rows,
-written per product group by list_write.write_lists() (one INSERT, one label lookup and one COPY
-for the group's new lists), never a round trip per row; the window row names the list in
-list_id. A list is written once and may outlive its build; store.collect() deletes the lists no
-window references.
+persist() writes a payload's cohorts, windows, scores, series and overlaps through a batch
+(batch.py: a fixed number of statements per build, never one per group, window or row). Each
+target-free window's full breakdowns are its list: one calculated_lists row and its
+calculated_list_rows, written for many product groups at once by list_write.write_lists() (one
+INSERT, one label lookup and one COPY); the window row names the list in list_id. A list is
+written once and may outlive its build; store.collect() deletes the lists no window references.
 
 A daily group's window has a list signature (signatures(), v1): every input its list is computed
 from. A build whose window has the signature of a stored list of the same product, cohort and
@@ -25,7 +24,7 @@ from psycopg.rows import tuple_row
 from ..storage import column
 from .batch import CRITERIA as CRITERIA
 from .batch import Batch, cohort_params
-from .list_write import prepare, write_lists
+from .list_write import prepare
 from .policy import digest
 
 
@@ -109,36 +108,36 @@ def reusing(conn, payload, runs, buckets):
 
 
 def persist(conn, payload, signed=None, batch=None):
-    """Write payload's typed rows; signed: the signatures() of its windows (none: NULL). Returns
-    each window's list_id by (group id, window label). The lists are written at once and the
-    other rows go to batch (batch.py), flushed once it is full; without one they are all written
-    before persist() returns."""
+    """Write payload's typed rows; signed: the signatures() of its windows (none: NULL).
+
+    The rows and new lists go to batch (batch.py), written a chunk at a time and at its flush;
+    without one they are all written before persist() returns. Returns the list_id of each
+    window (by group id and window label) known so far: all of them without a batch."""
     rows = Batch(conn) if batch is None else batch
     build_id = int(payload["snapshot_id"])
     for p in payload["products"]:
         rows.cohort(cohort_params(p["cohort"], p["criteria"]), p["criteria"])
-    lists = {}
     for p in payload["products"]:
         # A window that names a list already has it: the incremental calculation wrote it.
         new = [(label, w) for label, w in p["windows"].items() if "lists" not in w]
         keys = [(p["product_id"], p["cohort"], w["period"]["hours"]) for _, w in new]
         signatures = [(signed or {}).get(k) for k in keys]
         prepared = [prepare(p, w, s) for (_, w), s in zip(new, signatures, strict=True)]
-        written = write_lists(conn, build_id, prepared)
-        ids = dict(zip([label for label, _ in new], written, strict=True))
+        rows.lists(build_id, [(p["id"], label) for label, _ in new], prepared)
         for label, w in p["windows"].items():
-            list_id = lists[p["id"], label] = w["lists"]["id"] if "lists" in w else ids[label]
-            _results(rows, (build_id, list_id), p, w)
+            if "lists" in w:
+                rows.known((p["id"], label), w["lists"]["id"])
+            _results(rows, (build_id, (p["id"], label)), p, w)
     for o in payload["overlap"]:
         rows.add("overlaps", _overlap(build_id, payload["periods"], o))
-    if batch is None or batch.full():
+    if batch is None:
         rows.flush()
-    return lists
+    return rows.list_ids
 
 
 def _results(rows, ids, p, w):
-    """Add window w's result rows: its own on its list (ids: build id, list id) with its scores
-    and series, then one per target (no list) with its balanced score."""
+    """Add window w's result rows: its own on its list (ids: build id, list key or id) with its
+    scores and series, then one per target (no list) with its balanced score."""
     build_id, list_id = ids
     for target, scores in [
         ("", w["scores"]),

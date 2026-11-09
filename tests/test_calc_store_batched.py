@@ -1,11 +1,12 @@
-"""CALC-WRITES-1: the calculation's typed rows go in a batch at a time (batch.py), and they are
-the rows the former writer stored with one INSERT per row.
+"""CALC-WRITES-1: the calculation's typed rows and lists go through one batch per build
+(batch.py), and they are the rows the former writer stored with one INSERT per row.
 
 OldWriter below is that writer as it was (lists.py before CALC-WRITES-1), kept as the oracle. A
 real build's persist() calls are recorded and replayed, its product groups copied under new
 cohorts until the build has more than batch.CHUNK series points, once through the oracle and
 once through lists.persist() with one Batch, as store.write() does. Both builds' rows are equal,
-ids and timestamps aside, and the batched one costs a fixed number of statements per flush.
+ids and timestamps aside, and the batched one costs a fixed number of statements per build plus
+one COPY per chunk of rows.
 """
 
 import copy
@@ -21,25 +22,13 @@ from calculated_cases import benchmark_scenario, payload_mismatches
 from proxy_index.calculated import batch, lists
 from proxy_index.calculated.calculator import calculate
 from proxy_index.calculated.list_write import prepare, write_lists
+from proxy_index.calculated.policy import digest
 from proxy_index.storage import column, connect
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "scale"))
 measure = importlib.import_module("measure")
 
 pytest_plugins = ["test_storage"]
-
-BATCHED = (
-    "cohorts",
-    "cohort_criteria",
-    "score_reasons",
-    "calculated_windows",
-    "calculated_scores",
-    "calculated_score_components",
-    "calculated_score_reasons",
-    "calculated_series",
-    "calculated_overlaps",
-)
-
 
 class OldWriter:
     """lists.persist() before CALC-WRITES-1: an INSERT per window, score, series point and
@@ -51,7 +40,7 @@ class OldWriter:
     def persist(self, payload):
         build_id = int(payload["snapshot_id"])
         for p in payload["products"]:
-            lists.store_cohort(self.conn, p["cohort"], p["criteria"])
+            self.cohort(p["cohort"], p["criteria"])
         reason_ids = self.reasons(payload["products"])
         for p in payload["products"]:
             new = [(label, w) for label, w in p["windows"].items() if "lists" not in w]
@@ -70,6 +59,16 @@ class OldWriter:
                 "INSERT INTO calculated_overlaps VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (build_id, o["cohort"], hours, a, b, o["shared_ips"], na, nb),
             )
+
+    def cohort(self, cohort, criteria):
+        self.conn.execute(
+            f"INSERT INTO cohorts({batch.STAGE['cohorts'][0]}) VALUES ("
+            + ",".join(["%s"] * (len(batch.CRITERIA) + 2))
+            + ") ON CONFLICT DO NOTHING",
+            batch.cohort_params(cohort, criteria),
+        )
+        query = "SELECT criteria FROM cohort_criteria WHERE cohort=%s"
+        assert digest(self.conn.execute(query, (cohort,)).fetchone()[0]) == digest(criteria)
 
     def reasons(self, products):
         texts = set()
@@ -205,15 +204,6 @@ def new_build(conn, build_id, tag):
     ).fetchone()[0]
 
 
-def touched(tracer):
-    """Calls of each statement shape on the batched tables."""
-    return {
-        row["statement"]: row["calls"]
-        for row in tracer.summary()["shapes"]
-        if any(table in row["statement"] for table in BATCHED)
-    }
-
-
 @pytest.mark.asyncio
 async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_path, monkeypatch):
     policy, last, _ = await benchmark_scenario(database, tmp_path)
@@ -239,8 +229,6 @@ async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_p
         writer = OldWriter(conn)
         for payload in copies(calls, old, "old", count):
             writer.persist(payload)
-        flushes, flush = [], batch.Batch.flush
-        monkeypatch.setattr(batch.Batch, "flush", lambda self: flushes.append(1) or flush(self))
         rows = batch.Batch(conn)
         with measure.Tracer() as tracer:
             for payload in copies(calls, new, "new", count):
@@ -254,9 +242,11 @@ async def test_batched_rows_equal_the_rows_of_one_insert_per_row(database, tmp_p
     assert len(after["series"]) == points * count > batch.CHUNK
     assert {k: len(v) for k, v in after.items()} == {k: len(v) for k, v in before.items()}
     assert after == before
-    # A fixed number of statements per flush, however many rows: no INSERT per row.
-    chunks = math.ceil(points * count / batch.CHUNK)
-    assert 2 <= len(flushes) <= chunks + 1
-    for statement, calls_of in touched(tracer).items():
-        limit = len(flushes) + chunks if "calculated_series" in statement else 3 * len(flushes)
-        assert calls_of <= limit, statement
+    # A fixed number of statements per build, however many groups, windows or rows, plus one
+    # COPY per chunk of at most CHUNK rows.
+    shapes = tracer.summary()["shapes"]
+    copied = [row for row in shapes if row["statement"].startswith("COPY")]
+    others = sum(row["calls"] for row in shapes) - sum(row["calls"] for row in copied)
+    rows_copied = sum(row["rows"] for row in copied)
+    assert others <= 30, shapes
+    assert sum(row["calls"] for row in copied) <= len(copied) + math.ceil(rows_copied / batch.CHUNK)
