@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Provision or update the CAMP-1 manager (ubuntu-24-04-x64, lon1), as root.
+# Provision or update the CAMP-1 manager (ubuntu-24-04-x64; lon1, or the region `deploy --region`
+# chose), as root.
 # Inputs, next to this script: requirements.txt (hash-locked, from `uv export`), one wheel,
 # mac.pub (the only key allowed to log in) and units/ (the campaign's systemd units).
 # Output: one line "worker-key <public key>", then the verdict as the last line:

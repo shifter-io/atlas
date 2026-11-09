@@ -1,7 +1,8 @@
 """MANAGER-ORCH-1: the orchestrator on the campaign manager, the one ingest service (K7).
 
 `campaign manager resize` checks the recorded manager's size against DigitalOcean and records it
-(`s-8vcpu-16gb-amd` by default). It refuses a size not offered in lon1, and it never resizes a
+(`s-8vcpu-16gb-amd` by default). It refuses a size not offered in the manager's recorded region
+(`manager_region`, else lon1), and it never resizes a
 live manager by itself: a different size is refused with the manual step.
 
 `campaign manager orchestrator-enable` installs `proxy-index-orchestrator.service` and the
@@ -66,8 +67,9 @@ async def resize(
     """Check the manager's live size against `size` and, with `apply`, record it."""
     inventory = manager_daily.recorded(inventory_path)
     await deploy.check_account(cloud, inventory, inventory.get("account", ""))
-    if deploy.MANAGER_REGION not in (await cloud.sizes()).get(size, []):
-        raise deploy.DeployError(f"size {size} is not offered in {deploy.MANAGER_REGION}")
+    region = deploy.manager_region(inventory, None)
+    if region not in (await cloud.sizes()).get(size, []):
+        raise deploy.DeployError(f"size {size} is not offered in {region}")
     droplet = await cloud.get(str(inventory["manager_id"]))
     if droplet is None:
         raise deploy.DeployError("the recorded manager is gone")
