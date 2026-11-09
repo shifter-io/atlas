@@ -120,10 +120,10 @@ class Simulation(replay.Replay):
         first = next((i for i, r in enumerate(records) if not r["ingest"]["done"]), total + 1)
         given = (self.profile, self.shared, self.state["seed"], self.state["replay_id"])
         args, root = self.args, self.out / "generated"
-        limits = (args.ahead, int(args.spool_gb * 2**30))
-        producer = simulate_steps.Producer(args.jobs, root, given, slots, limits)
         options = storage_parallel.Options(args.connections, args.memory_budget, args.processes)
         self.steps.pool, finished = storage_parallel.Pool(args.database, options), False
+        limits = (args.ahead, int(args.spool_gb * 2**30))
+        producer = simulate_steps.Producer(args.jobs, root, given, slots, limits)
         if measure.has_statements(self.conn):
             self.counters = measure.snapshot(self.conn)
         try:

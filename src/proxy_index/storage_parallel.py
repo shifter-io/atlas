@@ -270,6 +270,7 @@ class Pool:
         lost = [key for key, owner in self.running.items() if owner is lane]
         if lost:
             names = [run for key in lost for run in self.parts[key].run_ids()]
+            lane.process.join(10)  # its pipe closed as it died: reaped in a moment
             code = lane.process.exitcode
             print(f"storage_parallel: worker process died ({code}): {names}", file=sys.stderr)
         for key in lost:
