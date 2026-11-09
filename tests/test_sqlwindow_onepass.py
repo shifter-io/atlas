@@ -234,5 +234,5 @@ async def test_the_plan_hashes_each_observation_once(scenario, database):
     # The day and per-IP levels; the output's GROUPING SETS have "Grouping Sets" instead.
     grouped = [n for n in _nodes(root) if n["Node Type"] == "Aggregate" and "Group Key" in n]
     assert len(grouped) == 2 and all(n["Strategy"] == "Hashed" for n in grouped), grouped
-    assert any(_raw_scans(grouped[0]) or _raw_scans(grouped[1]))
+    assert any(list(_raw_scans(n)) for n in grouped)  # the day level reads the scans
     assert not [n for n in _nodes(root) if n["Node Type"] == "Sort" and any(_raw_scans(n))]
