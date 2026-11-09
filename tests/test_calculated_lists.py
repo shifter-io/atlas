@@ -372,6 +372,7 @@ def test_implementation_id_hashes_the_list_writer():
     hashed += ("hourly_windows.py",)  # moved out of hourly.py (FILE-3)
     hashed += ("product_windows.py",)  # build()'s window steps, split out of calculator.py
     hashed += ("target_scores.py",)  # browser target scores (TARGET-SCORES-1)
+    hashed += ("batch.py",)  # the cohort criteria and the typed rows' writer (CALC-WRITES-1)
     here = Path(calculator.__file__).parent
     expected = hashlib.sha256(
         b"".join((here / name).read_bytes() for name in hashed)

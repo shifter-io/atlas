@@ -14,6 +14,7 @@ from ..storage import connect
 from ..storage import initialize as initialize_history
 from . import netlists, network, parts
 from .aggregate import EVIDENCE_RANGES, iso
+from .batch import Batch
 from .policy import digest
 from .slim import refer, slim
 from .store_retention import DERIVED_TABLES as DERIVED_TABLES
@@ -469,24 +470,27 @@ def write(conn, build_id, payload, config, persist):
     """Store a built payload as its head and parts (parts.py), one part at a time.
 
     Each product group is made JSON-ready, validated (its breakdown rows before they are
-    inserted), persisted (persist(conn, payload) writes its typed rows and returns its windows'
-    list ids) and slimmed (slim.py) on its own, and so is each part of the runs, so the whole
-    payload is never copied or serialized at once. A part is the payload v3 group: each window
-    names its list (slim.refer()). Then each network window gets its list (netlists.py, K10) and
-    the head its completed networks (network.attach(), K9). payload is not changed. Returns the
-    slimmed payload as read() assembles it (v2 windows).
+    inserted), persisted (persist(conn, payload, batch=) writes its lists, adds its other typed
+    rows to the build's one batch.Batch and returns its windows' list ids) and slimmed (slim.py)
+    on its own, and so is each part of the runs, so the whole payload is never copied or
+    serialized at once. The batch is flushed before the network lists. A part is the payload v3
+    group: each window names its list (slim.refer()). Then each network window gets its list
+    (netlists.py, K10) and the head its completed networks (network.attach(), K9). payload is not
+    changed. Returns the slimmed payload as read() assembles it (v2 windows).
     """
     head = jsonable({k: v for k, v in payload.items() if k not in (*parts.KINDS, "networks")})
     validate_payload(head, ())
-    groups, rows, members = [], [], {}
+    groups, rows, members, batch = [], [], {}, Batch(conn)
     for position, group in enumerate(payload["products"]):
         group = jsonable(group)
         validate_payload(head, [group])
-        members |= (lists := persist(conn, head | {"products": [group], "overlap": []}))
+        one = head | {"products": [group], "overlap": []}
+        members |= (lists := persist(conn, one, batch=batch))
         groups.append(kept := slim({"products": [group]}, config)["products"][0])
         part = refer(kept, {label: lists[group["id"], label] for label in group["windows"]})
         rows.append(("product", position, group["id"], group["product_id"], group["cohort"], part))
-    persist(conn, head | {"products": []})
+    persist(conn, head | {"products": []}, batch=batch)
+    batch.flush()
     written = netlists.write_network_lists(conn, build_id, payload, members)
     head |= jsonable(network.attach(conn, payload, written))  # payload v4 (contract K9)
     validate_payload(head, ())
