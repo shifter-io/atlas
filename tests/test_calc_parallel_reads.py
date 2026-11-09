@@ -148,7 +148,7 @@ def test_heavy_groups_are_read_largest_first_on_their_own_helpers(database, monk
             prefetch.start(range(10), read, rows)
             assert done.wait(30)
             found = [prefetch.take(key) for key in range(10)]
-        assert heavy == [7, 4, 2]  # largest first, one at a time: 7 started before the others
+        assert heavy == [7, 2, 4]  # largest first (9M, 5M, 2M rows), one at a time
         assert found == [(k, "1GB" if k in (2, 4, 7) else "256MB") for k in range(10)]
         assert all(c.closed for c in prefetch.connections)
         conn.rollback()
