@@ -50,12 +50,11 @@ def store(
     on_commit=None,
 ) -> None:
     """Import each group's countries not failed yet as one batch, the batches over
-    options.connections connections at once (storage_parallel.store, which passes on_commit),
+    options.connections connections at once over options.processes worker processes, or with
+    its open options.pool (storage_parallel.store, which passes on_commit),
     with the estimated hours of those with a formula; a group is (countries, their networks).
     Keep each imported run's raw files when `spool` is set."""
-    ready = [([c for c in own if c.issue is None], networks) for own, networks in groups]
-    ready = [(countries, networks) for countries, networks in ready if countries]
-    jobs = [storage_parallel.Group([c.directory for c in own], _runs(own), n) for own, n in ready]
+    ready, jobs = groups_of(groups)
     options = options or storage_parallel.Options()
     found = storage_parallel.store(jobs, credentials, **vars(options), on_commit=on_commit)
     for (countries, _), outcome in zip(ready, found, strict=True):
@@ -69,6 +68,15 @@ def store(
                 country.estimated = True
         else:
             _estimate(estimated, credentials)
+
+
+def groups_of(groups: list[tuple[list[Country], frozenset]]):
+    """Each group's countries not failed yet (groups with none left out), with its networks, and
+    its storage_parallel.Group."""
+    ready = [([c for c in own if c.issue is None], networks) for own, networks in groups]
+    ready = [(countries, networks) for countries, networks in ready if countries]
+    jobs = [storage_parallel.Group([c.directory for c in own], _runs(own), n) for own, n in ready]
+    return ready, jobs
 
 
 def _runs(countries: list[Country]) -> list[tuple]:

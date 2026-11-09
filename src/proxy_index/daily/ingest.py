@@ -7,8 +7,8 @@ each country that completed and reconciles becomes an ingestible run directory u
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
 sink writes) and enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
 are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
-transaction, `connections` (25) batches at once (daily.batches over storage_parallel; a batch
-that fails is retried one country at a time). Then each
+transaction, `connections` (25) batches at once over `processes` worker processes
+(daily.batches over storage_parallel; a batch that fails is retried one country at a time). Then each
 cell gets `daily_test_started` and `daily_test_finished` (done only when every due country was
 measured and imported, failed otherwise), in campaign order. A database error fails its country
 or its cell's events, never the other cells.
@@ -321,6 +321,19 @@ def _groups(chunks: list[list[Cell]], batch: int) -> list[tuple[list, frozenset]
     return groups
 
 
+def plan_groups(cells, batch: int) -> tuple[list[Cell], list[tuple[list, frozenset]]]:
+    """The cells in order and their groups: about `batch` countries each, whole cells per group
+    (a larger cell is split into groups of its own), with the networks they belong to."""
+    chunks, chunk = [], []
+    for cell in cells:
+        if chunk and sum(len(c.countries) for c in chunk) + len(cell.countries) > batch:
+            chunks.append(chunk)
+            chunk = []
+        chunk.append(cell)
+    chunks += [chunk] if chunk else []
+    return [cell for chunk in chunks for cell in chunk], _groups(chunks, batch)
+
+
 async def _finish(hour: CampaignHour, cells: list[Cell], known: set) -> None:
     """Finish the stored cells in order: each one's spool alert, its events (once) and the saved
     report."""
@@ -349,17 +362,9 @@ async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
     cell by cell: unless the row existed before the store, only a cell at or after the
     network's first import looks it up.
     """
-    chunks, chunk = [], []
-    for cell in cells:
-        if chunk and sum(len(c.countries) for c in chunk) + len(cell.countries) > batch:
-            chunks.append(chunk)
-            chunk = []
-        chunk.append(cell)
-    chunks += [chunk] if chunk else []
-    ordered = [cell for chunk in chunks for cell in chunk]
+    ordered, groups = plan_groups(cells, batch)
     networks = {cell.network: cell.manifest for cell in ordered}
     known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
-    groups = _groups(chunks, batch)
     batches.store(groups, hour.credentials, hour.spool, hour.options, hour.on_commit)
     await _finish(hour, ordered, known)
 
@@ -378,17 +383,21 @@ async def ingest_campaign(
 
     The cells' countries are stored about `batch` (sizes, default batches.BATCH) at a time,
     whole cells per batch (a larger cell is split into batches of its own), `connections`
-    (default storage_parallel.CONNECTIONS) batches at once. With `formulas`, store each
+    (default storage_parallel.CONNECTIONS) batches at once over `processes` worker processes
+    (default storage_parallel.default_processes). With `formulas`, store each
     imported country's estimated hours, then release the ended ones.
     """
     batch = sizes.pop("batch", batches.BATCH)
     connections = sizes.pop("connections", storage_parallel.CONNECTIONS)
+    processes = sizes.pop("processes", None)
     if sizes:
         raise TypeError(f"ingest_campaign() got unexpected sizes {sorted(sizes)}")
     if batch < 1:
         raise ValueError("the batch must hold at least one daily test")
     if connections < 1:
         raise ValueError("the batches need at least one connection")
+    if processes is not None and processes < 1:
+        raise ValueError("the batches need at least one process")
     spec = load_spec(root)
     path = root / REPORT
     previous = read_json(path) if path.exists() else {"cells": {}}
@@ -396,7 +405,7 @@ async def ingest_campaign(
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
     hour = CampaignHour(db, credentials, spool, path, previous, report, fallback)
-    hour.options.connections = connections
+    hour.options.connections, hour.options.processes = connections, processes
     try:
         await store_cells(hour, _prepared(root, spec, formulas, mmdb), batch)
         if formulas:

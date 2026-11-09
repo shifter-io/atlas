@@ -6,8 +6,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import multiprocessing
 import shutil
+import threading
+import time
 from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -23,13 +26,15 @@ from proxy_index import storage_parallel
 from proxy_index.browser.contracts import BROWSER_REGION, BROWSER_REGION_ID
 from proxy_index.browser.settings import load_settings
 from proxy_index.daily import batches, ingest
-from proxy_index.onboarding.files import read_json
+from proxy_index.onboarding.files import atomic_json, read_json
 from proxy_index.orchestrator.browser import browser_plan
 from proxy_index.orchestrator.db import Database
 from proxy_index.orchestrator.nodes import issue_token
 from proxy_index.stats import LOCATION_FIELDS, NETWORK_FIELDS
 
-AHEAD = 2  # hours generated ahead of the one being stored
+AHEAD = 2  # hours generated ahead of the one being stored (--ahead)
+SPOOL = 20 << 30  # bytes the generated hours not stored yet may take (--spool-gb)
+STORE_AHEAD = 6  # hours whose daily groups the store takes at once (--store-ahead)
 DAILY_REPORT = "daily-ingest.json"  # the hour's cells as store_cells saves them (events once)
 WORKER: dict[str, Any] = {}  # a worker process's model (start)
 Current = namedtuple("Current", "hour figures directory")  # the hour being stored
@@ -70,17 +75,47 @@ def start(profile: dict, plan, seed, replay_id: str) -> None:
     WORKER["model"].summaries.replay = replay_id
 
 
-def generate(day: int, hour: int, part: int, parts: int, directory: str) -> dict[str, dict]:
-    """Write part `part` of `parts` of the hour's daily tests, each in directory/<run id>; their
-    figures by run id: rows per table and requests (successes and timeouts)."""
-    found = {}
+def generate(day: int, hour: int, part: int, parts: int, directory: str) -> dict:
+    """Write part `part` of `parts` of the hour's daily tests, each in directory/<run id>, and
+    its manifest: each file's size and SHA-256, and the tests' figures by run id (rows per table
+    and requests: successes and timeouts). A part whose manifest finds its files complete (a
+    resumed load's spool) is not written again. Returns the figures, the files' bytes, the CPU
+    seconds it took and whether it was reused."""
+    began, manifest = time.process_time(), Path(directory, f"part-{part}-of-{parts}.json")
+    found = _complete(manifest)
+    if found is not None:
+        return found | {"cpu": time.process_time() - began, "reused": True}
+    figures, files = {}, {}
     for test in WORKER["model"].hour(day, hour).daily[part::parts]:
         path = Path(directory, test.run_id)
         path.mkdir(parents=True, exist_ok=True)
         test.write(path)
         requests = sum(test.successes[0]) + test.errors
-        found[test.run_id] = {"tables": test.tables(), "requests": requests}
-    return found
+        figures[test.run_id] = {"tables": test.tables(), "requests": requests}
+        for file in sorted(f for f in path.iterdir() if f.is_file()):
+            files[f"{test.run_id}/{file.name}"] = [file.stat().st_size, _sha256(file)]
+    atomic_json(manifest, {"figures": figures, "files": files}, indent=None)
+    found = {"figures": figures, "bytes": sum(size for size, _ in files.values())}
+    return found | {"cpu": time.process_time() - began, "reused": False}
+
+
+def _sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _complete(manifest: Path) -> dict | None:
+    """The part's figures and bytes when every file its manifest names has its size and
+    SHA-256; else None."""
+    try:
+        found = json.loads(manifest.read_text())
+        for name, (size, sha256) in found["files"].items():
+            path = manifest.parent / name
+            if path.stat().st_size != size or _sha256(path) != sha256:
+                return None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return {"figures": found["figures"], "bytes": sum(s for s, _ in found["files"].values())}
 
 
 def stats(day: int, hours: int) -> dict:
@@ -90,37 +125,97 @@ def stats(day: int, hours: int) -> dict:
 
 
 class Producer:
-    """The worker processes, generating hours (index -> (day, hour)) ahead of the store."""
+    """The worker processes, generating hours (index -> (day, hour)) up to `ahead` hours ahead
+    of the one being stored while the generated hours not stored yet take less than `spool`
+    bytes on disk (the hour being stored is always generated). A stopped load keeps them: the
+    next one reuses the complete parts (generate)."""
 
-    def __init__(self, jobs: int, root: Path, initargs: tuple, hours: list[tuple[int, int]]):
+    def __init__(self, jobs: int, root: Path, initargs: tuple, hours: list, limits=(AHEAD, SPOOL)):
         context = multiprocessing.get_context("spawn")  # never a fork of a threaded process
         self.pool = ProcessPoolExecutor(jobs, context, initializer=start, initargs=initargs)
         self.jobs, self.root, self.hours, self.pending = jobs, root, hours, {}
+        (self.ahead, self.spool), self.sizes, self.current = limits, {}, 0
+        self.lock, self.wake, self.closed = threading.RLock(), threading.Event(), False
+        self.counts = {"generated_tests": 0, "generation_cpu_seconds": 0.0, "reused_parts": 0}
+        # Submits from a thread of its own: never from the pool's thread that runs callbacks.
+        threading.Thread(target=self.feed, daemon=True).start()
 
     def directory(self, index: int) -> Path:
         return self.root / f"hour-{index:04d}"
 
     def submit(self, index: int) -> None:
-        if index in self.pending or index >= len(self.hours):
+        if index in self.pending or index >= len(self.hours) or self.closed:
             return
-        (day, hour), target = self.hours[index], self.directory(index)
-        shutil.rmtree(target, ignore_errors=True)  # what a stopped run left is written again
+        (day, hour), target = self.hours[index], str(self.directory(index))
         parts = range(self.jobs)
-        found = [self.pool.submit(generate, day, hour, k, self.jobs, str(target)) for k in parts]
+        found = [self.pool.submit(generate, day, hour, k, self.jobs, target) for k in parts]
         self.pending[index] = found
+        for future in found:
+            future.add_done_callback(lambda _, index=index: self.generated(index))
+
+    def generated(self, index: int) -> None:
+        """Once all parts of an hour are written: its bytes and costs; then more hours."""
+        with self.lock:
+            found = self.pending.get(index, [])
+            if index in self.sizes or not all(f.done() and not f.exception() for f in found):
+                return
+            parts = [future.result() for future in found]
+            self.sizes[index] = sum(part["bytes"] for part in parts)
+            self.counts["generated_tests"] += sum(len(part["figures"]) for part in parts)
+            self.counts["generation_cpu_seconds"] += sum(part["cpu"] for part in parts)
+            self.counts["reused_parts"] += sum(part["reused"] for part in parts)
+        self.wake.set()
+
+    def feed(self) -> None:
+        while not self.closed:
+            self.wake.wait()
+            self.wake.clear()
+            self.top_up()
+
+    def spooled(self) -> float:
+        """Bytes of the hours generated or generating and not stored yet: a generating hour
+        counts as large as the generated ones on average."""
+        known = [self.sizes[index] for index in self.pending if index in self.sizes]
+        average = sum(known) / len(known) if known else 0
+        return sum(known) + average * (len(self.pending) - len(known))
+
+    def top_up(self) -> None:
+        """Submit the next hours, two generating at a time (each keeps every job busy)."""
+        with self.lock:
+            for later in range(self.current, self.current + self.ahead + 1):
+                busy = len(self.pending) - len(self.sizes) >= 2 or self.spooled() >= self.spool
+                if later > self.current and later not in self.pending and busy:
+                    return  # the generator pauses at the cap
+                self.submit(later)
+
+    def ready(self, index: int) -> bool:
+        with self.lock:
+            found = self.pending.get(index)
+            return bool(found) and all(f.done() and not f.exception() for f in found)
 
     def take(self, index: int) -> dict[str, dict]:
         """The hour's figures by run id once its parts are written; the next hours start."""
-        for ahead in range(index, index + AHEAD + 1):
-            self.submit(ahead)
-        return {k: v for future in self.pending.pop(index) for k, v in future.result().items()}
+        self.current = index
+        self.top_up()
+        with self.lock:
+            found = list(self.pending[index])
+        return {k: v for future in found for k, v in future.result()["figures"].items()}
 
     def done(self, index: int) -> None:
+        with self.lock:
+            self.pending.pop(index, None)
+            self.sizes.pop(index, None)
         shutil.rmtree(self.directory(index), ignore_errors=True)
+        self.wake.set()
 
-    def close(self) -> None:
+    def close(self, finished: bool) -> None:
+        """Stop generating; the generated hours go once every hour is stored."""
+        with self.lock:
+            self.closed = True
+        self.wake.set()
         self.pool.shutdown(cancel_futures=True)
-        shutil.rmtree(self.root, ignore_errors=True)
+        if finished:
+            shutil.rmtree(self.root, ignore_errors=True)
 
 
 class SimSteps(ReplaySteps):
@@ -137,9 +232,22 @@ class SimSteps(ReplaySteps):
         self.slugs = dict(conn.execute(SLUGS).fetchall())
         self.current: Current | None = None
         self.tokens: dict[int, dict] | None = None  # the browser nodes, issued once a run
+        self.pool: storage_parallel.Pool | None = None  # the load's, open over its hours
 
     # Step 1: the daily tests, batched as the daily ingest stores them, --connections batches
-    # at once; state.json records each batch's run ids as it commits (step["groups"]).
+    # at once over --processes processes, with the next hours' (hand); state.json records each
+    # batch's run ids as its hour's step sees it committed (step["groups"]).
+
+    def hand(self, hour, directory: Path) -> None:
+        """Give the pool a later hour's daily groups, as its step builds them, to store while
+        this hour's are stored (--store-ahead); its step then waits for them."""
+        tests = {(t.lane.network, t.lane.country): t for t in hour.daily}
+        cells = []
+        for cell in hour.cells:
+            countries = self.countries(cell, tests, directory)
+            cells.append(ingest.Cell(cell.network, cell.network, {}, {}, countries))
+        groups = ingest.plan_groups(cells, self.args.batch_daily)[1]
+        self.pool.submit(batches.groups_of(groups)[1])
 
     def daily(self, day: int, start, step: dict) -> tuple[dict, bool]:
         hour, path = self.current.hour, Path(self.args.out) / DAILY_REPORT
@@ -155,7 +263,9 @@ class SimSteps(ReplaySteps):
             groups.append([result["run_id"] for result in outcome.results])
             self.save()
 
-        options = storage_parallel.Options(self.args.connections, self.args.memory_budget)
+        args = self.args
+        options = storage_parallel.Options(args.connections, args.memory_budget, args.processes)
+        options.pool = self.pool
 
         async def store():
             db = Database(str(self.args.database), size=2)
@@ -186,15 +296,22 @@ class SimSteps(ReplaySteps):
         report["finished_at"] = max(t.finished_at for t in own).isoformat()
         report |= {name: [] for name in ("ingested", "issues", "estimated", "estimate_issues")}
         report["spool_issues"] = []
-        directory, countries = self.current.directory, []
-        for t in own:
-            found = batches.Country(t.lane.country, {"unique_ips": t.size}, t.lane.formula)
-            countries.append(found)
-            found.directory = directory / t.run_id
+        countries = self.countries(cell, tests, self.current.directory)
         product = self.formulas[cell.network].get("product", "residential")
         manifest = {"provider": cell.network, "product": product}
         key = f"{cell.network}/{cell.region}"
         return ingest.Cell(key, cell.network, manifest, report, countries, complete=True)
+
+    @staticmethod
+    def countries(cell, tests: dict, directory: Path) -> list[batches.Country]:
+        """A planner cell's countries, each with its run directory under the hour's."""
+        found = []
+        for code in cell.countries:
+            test = tests[cell.network, code]
+            country = batches.Country(code, {"unique_ips": test.size}, test.lane.formula)
+            country.directory = directory / test.run_id
+            found.append(country)
+        return found
 
     # Step 2: the browser runs of the hosts' queues.
 

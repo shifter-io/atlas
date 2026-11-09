@@ -151,6 +151,8 @@ async def test_a_campaign_hour_goes_in_batches(monkeypatch, hour):
         await hour(batch=0)
     with pytest.raises(ValueError, match="at least one connection"):
         await hour(connections=0)
+    with pytest.raises(ValueError, match="at least one process"):
+        await hour(processes=0)
     with pytest.raises(TypeError, match="unexpected sizes"):
         await hour(batches=3)
 
@@ -194,7 +196,7 @@ def test_the_cli_passes_the_batch_size_and_connections(tmp_path, monkeypatch, ca
     seen = []
 
     async def fake_ingest(root, credentials, mmdb, **options):
-        seen.append((options.get("batch"), options.get("connections")))
+        seen.append((options.get("batch"), options.get("connections"), options.get("processes")))
         return {"campaign_id": "c", "complete": True}
 
     monkeypatch.setattr(daily_ingest, "ingest_campaign", fake_ingest)
@@ -203,5 +205,6 @@ def test_the_cli_passes_the_batch_size_and_connections(tmp_path, monkeypatch, ca
     (dest / collect.REPORT).write_text(json.dumps({"clean": True}))
     args = ["daily", "ingest", "--inventory", str(tmp_path / "inv"), "--campaign-id", "c"]
     args += ["--dest", str(dest), "--database-file", str(tmp_path / "db.toml")]
-    assert main([*args, "--batch", "5", "--connections", "3"]) == 0 and main(args) == 0
-    assert seen == [(5, 3), (None, None)]
+    sizes = ["--batch", "5", "--connections", "3", "--processes", "2"]
+    assert main([*args, *sizes]) == 0 and main(args) == 0
+    assert seen == [(5, 3, 2), (None, None, None)]

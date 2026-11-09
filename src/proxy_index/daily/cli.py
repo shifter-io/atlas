@@ -48,6 +48,11 @@ def register(commands) -> None:
     ingest.add_argument(
         "--connections", type=int, help="transactions at once (default 25, at least 1)"
     )
+    ingest.add_argument(
+        "--processes",
+        type=int,
+        help="worker processes the transactions go over (default min(7, CPUs - 1, connections))",
+    )
     hour = actions.add_parser("hour", help="Manager: run the next hour's test, then ingest it")
     check = actions.add_parser("check", help="Check formulas and template for all 24 hours")
     for action in (hour, check):
@@ -97,7 +102,7 @@ def _ingest(args) -> int:
     if not json.loads(collected.read_text())["clean"]:
         print("Not ingested: the download did not verify", file=sys.stderr)
         return 3
-    given = {"batch": args.batch, "connections": args.connections}
+    given = {"batch": args.batch, "connections": args.connections, "processes": args.processes}
     batch = {k: v for k, v in given.items() if v is not None}  # else ingest_campaign's
     report = asyncio.run(
         ingest_campaign(

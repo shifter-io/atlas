@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import multiprocessing
 import sys
 import threading
 import time
@@ -16,7 +17,7 @@ import pytest
 from estimates_cases import formula
 from ingest_cases import daily_test, dump, pulse, run_id
 
-from proxy_index import storage, storage_parallel
+from proxy_index import storage, storage_parallel, storage_worker
 from proxy_index.estimates import compute
 from proxy_index.storage import IngestBatchError, connect, seed
 from proxy_index.storage_parallel import Group
@@ -35,8 +36,9 @@ OVERLAP = (
 @pytest.fixture(autouse=True)
 def quick(monkeypatch):
     """Short retry pauses; the whole server free for the test's connections."""
-    monkeypatch.setattr(storage_parallel, "BACKOFF", 0.01)
+    monkeypatch.setattr(storage_worker, "BACKOFF", 0.01)
     monkeypatch.setattr(storage_parallel, "RESERVE", 0)
+    monkeypatch.setattr(storage_parallel, "RESERVE_SHARE", 0)
 
 
 def network(n: int) -> str:
@@ -116,26 +118,40 @@ def test_one_connection_runs_the_statements_of_ingest_many_and_estimate_runs(
         assert other.execute(hours).fetchone() == one.execute(hours).fetchone() != (0,)
 
 
+def single(tmp_path, tests: int) -> list[Group]:
+    """`tests` daily tests (as hour's), one a group."""
+    return [
+        Group(
+            [daily_test(tmp_path / run_id("daily", n), n, ips=300, repeats=100, provider=network(n))],
+            networks=frozenset({network(n)}),
+        )
+        for n in range(tests)
+    ]
+
+
+@pytest.mark.parametrize("processes", [1, 4])
 def test_a_stopped_store_resumes_to_the_rows_of_an_uninterrupted_one(
-    databases, database_template, tmp_path
+    databases, database_template, tmp_path, processes
 ):
-    groups = hour(tmp_path, tests=8, pulses=0)
-    assert len(groups) == 4
+    """Stopped (KeyboardInterrupt from on_commit) once a third of the groups committed: no more
+    groups go out, those in flight finish, and the resumed store ends with the same rows."""
+    groups = single(tmp_path, 12)
     whole, stopped = (databases(template=database_template) for _ in range(2))
-    storage_parallel.store(groups, whole, connections=2)
+    sizes = {"connections": 4, "processes": processes}
+    storage_parallel.store(groups, whole, **sizes)
     committed = []
 
-    def stop_after_two(group, outcome):
+    def stop_after_four(group, outcome):
         committed.append([result["run_id"] for result in outcome.results])
-        if len(committed) == 2:
+        if len(committed) == 4:
             raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        storage_parallel.store(groups, stopped, connections=2, on_commit=stop_after_two)
+        storage_parallel.store(groups, stopped, **sizes, on_commit=stop_after_four)
     with connect(stopped) as conn:
         before = {str(r) for (r,) in conn.execute("SELECT run_id FROM test_runs")}
-    assert {r for ids in committed for r in ids} <= before and len(before) < 8
-    outcomes = storage_parallel.store(groups, stopped, connections=2)
+    assert {r for ids in committed for r in ids} <= before and len(before) < 12
+    outcomes = storage_parallel.store(groups, stopped, **sizes)
     imported = {r["run_id"] for o in outcomes for r in o.results if r["imported"]}
     assert imported == {r["run_id"] for o in outcomes for r in o.results} - before
     with connect(whole) as one, connect(stopped) as other:
@@ -179,7 +195,7 @@ def overlap_in_two_orders(database, *, sort: bool) -> list[int]:
 
     def side(n):
         own = sorted(pairs) if sort else pairs[::-1] if n else pairs
-        pool, outcome = storage_parallel.Connections(database), storage_parallel.Outcome()
+        pool, outcome = storage_worker.Connections(database), storage_worker.Outcome()
 
         def work(conn):
             with conn.transaction():
@@ -189,7 +205,7 @@ def overlap_in_two_orders(database, *, sort: bool) -> list[int]:
                 conn.execute(OVERLAP, own[1])
 
         try:
-            assert storage_parallel.retried(work, pool, outcome) == (None, None)
+            assert storage_worker.retried(work, pool, outcome) == (None, None)
         finally:
             pool.close()
         retries[n] = outcome.retries
@@ -307,9 +323,146 @@ def test_the_import_locks_are_no_other_lock():
 
 def test_groups_of_one_network_are_not_handed_out_together():
     parts = [Group([], networks=frozenset(n)) for n in ("a", "a", "b", "ab", "c")]
-    running = {"f0": 0}  # a part of network a is in flight
+    running = [0]  # a part of network a is in flight
     assert storage_parallel._next([1, 2, 3, 4], parts, running) == 2
-    running["f2"] = 2
+    running.append(2)
     assert storage_parallel._next([1, 3, 4], parts, running) == 4
-    running["f4"] = 4
+    running.append(4)
     assert storage_parallel._next([1, 3], parts, running) == 1  # none free: the first
+
+
+def test_groups_store_the_same_rows_over_1_2_and_4_processes(databases, database_template, tmp_path):
+    groups = hour(tmp_path)
+    stored = {}
+    for processes in (1, 2, 4):
+        database = databases(template=database_template)
+        outcomes = storage_parallel.store(groups, database, connections=8, processes=processes)
+        assert [o.error for o in outcomes] == [None] * len(groups)
+        assert [len(o.results) for o in outcomes] == [len(g.directories) for g in groups]
+        with connect(database) as conn:
+            stored[processes] = dump(conn)
+    assert stored[2] == stored[1] and stored[4] == stored[1]
+    assert len(stored[1]["provider_overlap"]) == 3 and len(stored[1]["product_ips"]) > 2000
+
+
+def test_a_group_failing_in_a_worker_process_fails_alone_named(database, tmp_path, capsys):
+    good = [Group([pulse(tmp_path / f"p{n}", n)], networks=frozenset({f"n{n}"})) for n in range(3)]
+    bad = pulse(tmp_path / "p3", 3)
+    path = bad / "summary.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"status": "lost"}))
+    groups = [*good, Group([bad])]
+    outcomes = storage_parallel.store(groups, database, connections=4, processes=2)
+    assert [o.error for o in outcomes[:3]] == [None] * 3
+    assert outcomes[3].error.run_ids == [run_id("pulse", 3)]
+    assert isinstance(outcomes[3].error.__cause__, storage_worker.WorkerError)
+    assert "CheckViolation" in str(outcomes[3].error.__cause__)
+    assert "over 4 connections, 2 processes" in capsys.readouterr().err
+    with connect(database) as conn:
+        assert conn.execute("SELECT count(*) FROM test_runs").fetchone()[0] == 3
+
+
+def test_a_worker_serves_groups_until_none_its_errors_described(database, tmp_path, monkeypatch):
+    """serve, in a thread here: each group's outcome comes back with its errors as text, which
+    restored turns back into the IngestBatchError naming its run ids."""
+    good, bad = (pulse(tmp_path / f"p{n}", n) for n in (0, 1))
+
+    def no_formula(*_, **__):
+        raise ValueError("no formula")
+
+    monkeypatch.setattr(compute, "estimate_runs", no_formula)
+    path = bad / "summary.json"
+    path.write_text(json.dumps(json.loads(path.read_text()) | {"status": "lost"}))
+    mine, theirs = multiprocessing.Pipe()
+    worker = threading.Thread(target=storage_worker.serve, args=(theirs, database, 2))
+    worker.start()
+    mine.send(("good", Group([good], estimates=[(good.name, "US", {"version": 0})])))
+    mine.send(("bad", Group([bad])))
+    found = {}
+    for _ in range(2):
+        key, outcome, errors = mine.recv()
+        found[key] = storage_worker.restored(outcome, errors)
+    mine.send(None)
+    worker.join(30)
+    assert not worker.is_alive()
+    assert found["good"].error is None and found["good"].results[0]["imported"]
+    assert str(found["good"].estimate_error) == "ValueError: no formula"
+    assert found["bad"].error.run_ids == [run_id("pulse", 1)]
+    assert "CheckViolation" in str(found["bad"].error.__cause__)
+
+
+def test_a_dead_worker_process_fails_its_groups_named_and_the_others_finish(
+    database, tmp_path, capsys
+):
+    """net-a's group waits on its network lock (held here) in one process; that process is
+    killed: its group fails naming its run, the other process's group commits."""
+    a, b = (
+        Group([pulse(tmp_path / name, n, provider=name)], networks=frozenset({name}))
+        for n, name in ((0, "net-a"), (5, "net-b"))
+    )
+    storage.ingest(pulse(tmp_path / "first", 2), database)  # the day's partitions
+    lock = (storage.NETWORK_LOCK, "net-a")
+    options = storage_parallel.Options(connections=2, processes=2)
+    with connect(database) as blocker:
+        blocker.autocommit = True
+        blocker.execute("SELECT pg_advisory_lock(%s,hashtext(%s))", lock)
+        try:
+            with storage_parallel.Pool(database, options) as pool:
+                tickets = pool.submit([a, b])
+                assert tickets[1].result(60).error is None
+                for _ in range(200):  # a reaches its network lock and waits there
+                    if blocker.execute(WAITING, (storage.NETWORK_LOCK,)).fetchone()[0]:
+                        break
+                    time.sleep(0.05)
+                key = tuple(map(str, a.directories))
+                pool.running[key].process.kill()
+                outcomes = pool.wait([a, b], tickets)
+        finally:
+            blocker.execute("SELECT pg_advisory_unlock_all()")
+    assert outcomes[0].error.run_ids == [run_id("pulse", 0)]
+    assert "died" in str(outcomes[0].error.__cause__) and outcomes[1].error is None
+    assert f"worker process died (-9): ['{run_id('pulse', 0)}']" in capsys.readouterr().err
+    with connect(database) as conn:
+        found = {str(r) for (r,) in conn.execute("SELECT run_id FROM test_runs")}
+    assert run_id("pulse", 5) in found
+
+
+def test_an_open_pool_stores_groups_handed_ahead_once(database, tmp_path, monkeypatch):
+    """A pool open over several stores: the groups handed ahead (submit) are what a later store
+    of the same groups waits for, stored once; groups go out one at a time when the memory
+    budget holds only one, though the connections would take more."""
+    groups = single(tmp_path, 4)
+    sent, real = [], storage_parallel.ThreadLane.send
+
+    def send(self, key, group):
+        sent.append(len(self.running))  # groups already in flight
+        real(self, key, group)
+
+    monkeypatch.setattr(storage_parallel.ThreadLane, "send", send)
+    options = storage_parallel.Options(connections=4, memory_budget=1, processes=1)
+    with storage_parallel.Pool(database, options) as pool:
+        ahead = pool.submit(groups[2:])
+        committed = []
+        first = storage_parallel.store(groups[:2], database, pool=pool)
+        later = storage_parallel.store(
+            groups[2:], database, pool=pool, on_commit=lambda g, _: committed.append(g)
+        )
+        assert pool.submit(groups[2:]) != ahead  # waited for: a new submit stores again
+    assert sent == [0, 0, 0, 0, 0, 0] and committed == groups[2:]
+    assert [r["imported"] for o in first + later for r in o.results] == [True] * 4
+
+
+def test_the_default_processes_and_the_reserve(database, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(storage_parallel, "PROCESSES", 7)
+    monkeypatch.setattr(storage_parallel.os, "cpu_count", lambda: 4)
+    assert [storage_parallel.default_processes(n) for n in (1, 2, 25)] == [1, 2, 3]
+    monkeypatch.setattr(storage_parallel.os, "cpu_count", lambda: 32)
+    assert storage_parallel.default_processes(25) == 7
+    monkeypatch.setattr(storage_parallel.os, "cpu_count", lambda: None)
+    assert storage_parallel.default_processes(25) == 1
+    monkeypatch.setattr(storage_parallel, "RESERVE_SHARE", 1.0)  # all of max_connections
+    assert storage_parallel._capped(database, 4) == 1
+    with connect(database) as conn:
+        limit = int(conn.execute("SHOW max_connections").fetchone()[0])
+    err = capsys.readouterr().err
+    assert f"warning: 1 connections, not 4: max_connections {limit}" in err
+    assert f"{limit} kept free" in err

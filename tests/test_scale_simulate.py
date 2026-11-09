@@ -214,6 +214,13 @@ def test_a_stopped_load_resumes_to_the_rows_of_an_uninterrupted_one(
     assert simulate.main(argv(stopped, inputs, out, 1, *short)) == 0
     resumed = state(out)
     assert resumed["replay_id"] == first["replay_id"] and len(resumed["resumed"]) == 1
+    # Each start's options; the stopped load's spooled hours (hour 5's at least) are reused.
+    assert first["options"] == resumed["resumed"][0]["options"]
+    options = {"connections": 25, "processes": None, "store_ahead": 6, "jobs": 2, "ahead": 2}
+    assert first["options"] == options | {"spool_gb": 20.0}
+    assert resumed["counts"]["reused_parts"] >= 2 > first["counts"]["reused_parts"] == 0
+    assert resumed["counts"]["generated_tests"] > 0 < resumed["counts"]["generation_cpu_seconds"]
+    assert not (out / "generated").exists()  # once every hour is stored
     uninterrupted = staged(databases(template=database_template), monkeypatch)
     assert simulate.main(argv(uninterrupted, inputs, tmp_path / "whole", 1, *short)) == 0
     with simulate.storage.connect(stopped) as a, simulate.storage.connect(uninterrupted) as b:
