@@ -201,7 +201,8 @@ async def test_an_hour_without_new_tests_counts_none_of_them_again(database, tmp
     log = statements(monkeypatch)
     calculate(database, policy, as_of=end, mode="incremental")
     monkeypatch.undo()
-    counting = (hourly.BUCKET_IPS, hourly.FIRST_SEEN, sqlwindow.WINDOW, sqlwindow.RUN_BUCKETS)
+    window = sqlwindow.onepass(1).partition(" FROM unnest")[0]  # the head of every width
+    counting = (hourly.BUCKET_IPS, hourly.FIRST_SEEN, window, sqlwindow.RUN_BUCKETS)
     assert [q for q, _ in log if any(c in q for c in counting)] == []
 
 

@@ -22,6 +22,11 @@ Each IP of a window is counted once, as `aggregate.pool()` does:
 
 Combinations keep the raw label values (NULL and empty strings stay apart), so Python applies
 the calculator's own truthiness to them. A window's IPs partition exactly by combination.
+
+The windows of one group (a product's runs with their requested countries, as each calculated
+group's 24h, 7d and 30d windows are) are counted in one pass over the group's observation rows
+(`onepass()`): each row is read and hash-aggregated once and each IP joined to its first-seen
+bin once, instead of once per window with a sort per window (CALC-WINDOW-ONEPASS-1).
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from functools import cache
 from typing import Literal
 
 from psycopg.rows import dict_row
@@ -55,28 +61,61 @@ _RUN_RELEASE = (
     "WHERE e.run_key=k.run_key) END,%(release)s::int)"
 )
 _LABELS = ",".join(LABELS)
-# One row per (window, run): slot is the window's position in the batch, asked the run's
-# requested country in lower case (NULL when it asked for none).
-WINDOW = f"""WITH k AS (
- SELECT k.slot,k.run_key,k.since,k.until,k.product_id,k.asked,{_RUN_RELEASE} AS release_id
- FROM unnest(%(slots)s::int[],%(keys)s::bigint[],%(since)s::timestamptz[],
-  %(until)s::timestamptz[],%(products)s::int[],%(asked)s::text[])
-  AS k(slot,run_key,since,until,product_id,asked)
-), ip AS (
- SELECT k.slot,k.product_id,o.ip_id,sum(o.count)::bigint AS observations,
-  count(DISTINCT o.bucket_start::date) AS days,count(DISTINCT k.asked) AS asking,
-  min(k.asked) AS asked,(array_agg(k.release_id ORDER BY o.run_key))[1] AS release_id
- FROM k JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.since
-  AND o.bucket_start<k.until
- GROUP BY k.slot,k.product_id,o.ip_id
+# The most windows one pass counts; a group with more is counted in passes of this many.
+MAX_WINDOWS = 8
+
+
+@cache
+def onepass(width: int) -> str:
+    """The statement that counts up to `width` windows of each group (a product's runs with
+    their requested countries) in one pass over the group's observation rows.
+
+    k holds one row per (group, run): asked is the run's requested country in lower case (NULL
+    when it asked for none), [lo, hi) the group's widest range and [s<j>, u<j>) its window j.
+    Each observation row is read and aggregated once, into its IP's day (`day`), then its IP
+    (`per_ip`); every aggregate is hash-friendly and filtered per window. Each IP is joined to
+    its first-seen bin once, then unpivoted into one row per window it was seen in (slot:
+    group * width + j), labelled from the release of its lowest run_key in that window.
+    """
+    positions = range(width)
+    inside = [f"o.bucket_start>=k.s{j} AND o.bucket_start<k.u{j}" for j in positions]
+    days = ",".join(
+        f"sum(o.count) FILTER (WHERE {w}) AS c{j},min(k.asked) FILTER (WHERE {w}) AS a{j},"
+        f"max(k.asked) FILTER (WHERE {w}) AS b{j},min(o.run_key) FILTER (WHERE {w}) AS r{j}"
+        for j, w in enumerate(inside)
+    )
+    per_ip = ",".join(
+        f"sum(c{j})::bigint AS c{j},count(c{j}) AS d{j},min(a{j}) AS a{j},max(b{j}) AS b{j},"
+        f"min(r{j}) AS r{j}"
+        for j in positions
+    )
+    windows = ",".join(f"({j},p.c{j},p.d{j},p.a{j},p.b{j},p.r{j})" for j in positions)
+    bounds = ",".join(f"%(s{j})s::timestamptz[],%(u{j})s::timestamptz[]" for j in positions)
+    names = ",".join(f"s{j},u{j}" for j in positions)
+    return f"""WITH k AS (
+ SELECT k.*,{_RUN_RELEASE} AS release_id
+ FROM unnest(%(groups)s::int[],%(keys)s::bigint[],%(products)s::int[],%(asked)s::text[],
+  %(lo)s::timestamptz[],%(hi)s::timestamptz[],{bounds})
+  AS k(grp,run_key,product_id,asked,lo,hi,{names})
+), day AS (
+ SELECT k.grp,k.product_id,o.ip_id,{days}
+ FROM k JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.lo
+  AND o.bucket_start<k.hi
+ GROUP BY k.grp,k.product_id,o.ip_id,o.bucket_start::date
+), per_ip AS (
+ SELECT grp,product_id,ip_id,{per_ip} FROM day GROUP BY grp,product_id,ip_id
 ), labelled AS (
- SELECT ip.slot,ip.observations,ip.days,e.matched,
+ SELECT p.grp*{width}+w.j AS slot,w.observations,w.days,e.matched,
   {",".join(f"e.{f}" for f in LABELS)},
-  coalesce(e.country_code,'')<>'' AND ip.asking>0 AS located,
-  coalesce(e.country_code,'')<>'' AND ip.asking=1 AND ip.asked=lower(e.country_code) AS geo,
+  coalesce(e.country_code,'')<>'' AND w.asked IS NOT NULL AS located,
+  coalesce(e.country_code,'')<>'' AND w.asked=w.asked_max AND w.asked=lower(e.country_code)
+   AS geo,
   date_bin('5 minutes',m.first_seen,'1970-01-01 00:00:00+00'::timestamptz) AS bin
- FROM ip JOIN product_ips m ON m.product_id=ip.product_id AND m.ip_id=ip.ip_id
- LEFT JOIN ip_enrichment_fields e ON e.ip_id=ip.ip_id AND e.release_id=ip.release_id
+ FROM per_ip p JOIN product_ips m ON m.product_id=p.product_id AND m.ip_id=p.ip_id
+ CROSS JOIN LATERAL (VALUES {windows}) AS w(j,observations,days,asked,asked_max,first_run)
+ JOIN k r ON r.grp=p.grp AND r.run_key=w.first_run
+ LEFT JOIN ip_enrichment_fields e ON e.ip_id=p.ip_id AND e.release_id=r.release_id
+ WHERE w.days>0
 )
 SELECT slot,GROUPING(country_code,bin) AS part,{_LABELS},bin,count(*) AS ips,
  sum(observations)::bigint AS observations,count(*) FILTER (WHERE located) AS located,
@@ -84,6 +123,8 @@ SELECT slot,GROUPING(country_code,bin) AS part,{_LABELS},bin,count(*) AS ips,
  count(*) FILTER (WHERE matched) AS matched
 FROM labelled GROUP BY GROUPING SETS ((slot,{_LABELS}),(slot,bin),(slot))
 ORDER BY slot,part,{_LABELS},bin"""
+
+
 # GROUPING(country_code,bin): 1 a label combination, 2 a first-seen bin, 3 the window's totals.
 COMBO, BIN, TOTAL = 1, 2, 3
 
@@ -153,36 +194,59 @@ def _release_params(release_mode: ReleaseMode, release_id: int | None) -> dict:
     return {"per_run": release_mode == "per_run", "release": release_id}
 
 
-def window_query(specs, *, release_mode: ReleaseMode, release_id: int | None):
-    """The one statement that counts every spec of a batch, and its parameters."""
-    params = {name: [] for name in ("slots", "keys", "since", "until", "products", "asked")}
-    for slot, spec in enumerate(specs):
+def _passes(specs) -> list[tuple[tuple, list[int]]]:
+    """The specs' indices batched by group (product, runs and their requested countries, in
+    lower case), at most MAX_WINDOWS per pass."""
+    groups = defaultdict(list)
+    for n, spec in enumerate(specs):
         if spec.until <= spec.since:
             raise ValueError(f"window {spec.key!r} ends before it starts")
-        for run_key in sorted(set(spec.runs)):
-            asked = spec.asked.get(run_key)
-            params["slots"].append(slot)
-            params["keys"].append(run_key)
-            params["since"].append(spec.since)
-            params["until"].append(spec.until)
-            params["products"].append(spec.product_id)
-            params["asked"].append(asked.lower() if asked else None)
-    return WINDOW, params | _release_params(release_mode, release_id)
+        runs = tuple(sorted(set(spec.runs)))
+        asked = tuple((spec.asked.get(run) or "").lower() or None for run in runs)
+        groups[spec.product_id, runs, asked].append(n)
+    return [
+        (group, members[i : i + MAX_WINDOWS])
+        for group, members in groups.items()
+        for i in range(0, len(members), MAX_WINDOWS)
+    ]
+
+
+def window_query(specs, *, release_mode: ReleaseMode, release_id: int | None):
+    """The one statement that counts every spec of a batch, its parameters, and the spec index
+    of each result slot."""
+    specs = list(specs)
+    passes = _passes(specs)
+    width = max((len(members) for _, members in passes), default=1)
+    params, slots = defaultdict(list), {}
+    for grp, ((product, runs, asked), members) in enumerate(passes):
+        windows = [specs[n] for n in members]
+        slots |= {grp * width + j: n for j, n in enumerate(members)}
+        bounds = [(w.since, w.until) for w in windows] + [(None, None)] * (width - len(windows))
+        shared = {"groups": grp, "products": product, "lo": min(w.since for w in windows)}
+        shared["hi"] = max(w.until for w in windows)
+        for j, (since, until) in enumerate(bounds):
+            shared |= {f"s{j}": since, f"u{j}": until}
+        for run_key, country in zip(runs, asked, strict=True):
+            for name, value in (shared | {"keys": run_key, "asked": country}).items():
+                params[name].append(value)
+    return onepass(width), dict(params) | _release_params(release_mode, release_id), slots
 
 
 def window_inputs(
     conn, specs, *, release_mode: ReleaseMode, release_id: int | None
 ) -> dict[object, WindowInputs]:
-    """WindowInputs of every spec, counted in one statement; a window without observations
-    gets empty inputs. Spec keys must be distinct."""
+    """WindowInputs of every spec, counted in one statement that reads each observation row of
+    a group once; a window without observations gets empty inputs. Spec keys must be distinct."""
     specs = list(specs)
     if len({spec.key for spec in specs}) != len(specs):
         raise ValueError("window spec keys must be distinct")
     parts = [{"combos": [], "first_seen": {}, "totals": {}} for _ in specs]
-    statement, params = window_query(specs, release_mode=release_mode, release_id=release_id)
-    rows = conn.cursor(row_factory=dict_row).execute(statement, params) if params["slots"] else ()
+    statement, params, slots = window_query(specs, release_mode=release_mode, release_id=release_id)
+    rows = ()
+    if params.get("keys"):
+        rows = conn.cursor(row_factory=dict_row).execute(statement, params)
     for row in rows:
-        _add(parts[row["slot"]], row)
+        _add(parts[slots[row["slot"]]], row)
     return {spec.key: _inputs(part) for spec, part in zip(specs, parts, strict=True)}
 
 
