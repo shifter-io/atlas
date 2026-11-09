@@ -517,7 +517,8 @@ simulate.py --rerun browser --days 7 ... (the load's own arguments) [--apply]
   model; the daily tests stay as stored. It takes the load's arguments, the same guards and
   the owner's go (staging only), and needs the load's `state.json`.
   - Without `--apply`, a dry run: in one transaction it deletes the browser batches of the
-    simulated days run by the load's nodes only, their runs (marked with the load's id) and
+    simulated days that hold a run of the load and are run by its nodes only (a batch the
+    planner made ahead without a run stays), their runs (marked with the load's id) and
     every row that references them (`test_events`, `outages`, the runs' buckets,
     observations, enrichments, estimated hours and calculation roles, `batch_runs`), recounts
     the live tape's buckets as `wipe_replay.py` does, rolls it all back, and writes the rows

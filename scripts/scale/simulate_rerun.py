@@ -27,16 +27,17 @@ from proxy_index import storage
 KINDS = ("size", "stats")
 DRY_RUN = "rerun-browser-dry-run.json"
 STEP = "rerun_browser"  # the hour's step (SimSteps.rerun_browser) in its record
-# The browser batches of the simulated days run by the load's nodes only, and their runs.
+# The browser batches of the simulated days that hold a run of the load (marked with its id),
+# run by the load's nodes only (a batch planned ahead without a run stays), and their runs.
+MINE = f"t.summary->>'{REPLAY_MARKER}'=%(replay)s"
 SETS = (
     "CREATE TEMP TABLE wipe_batches ON COMMIT DROP AS SELECT batch_id FROM test_batches b "
     "WHERE kind='browser' AND scheduled_for>=%(first)s AND scheduled_for<%(end)s "
-    "AND EXISTS (SELECT FROM batch_runs r WHERE r.batch_id=b.batch_id) "
+    f"AND EXISTS (SELECT FROM test_runs t WHERE t.batch_id=b.batch_id AND {MINE}) "
     "AND NOT EXISTS (SELECT FROM batch_runs r WHERE r.batch_id=b.batch_id "
     "AND (r.node_id IS NULL OR r.node_id<>ALL(%(ids)s)))",
-    "CREATE TEMP TABLE wipe_runs ON COMMIT DROP AS SELECT run_key FROM test_runs "
-    "WHERE batch_id IN (SELECT batch_id FROM wipe_batches) "
-    f"AND summary->>'{REPLAY_MARKER}'=%(replay)s",
+    "CREATE TEMP TABLE wipe_runs ON COMMIT DROP AS SELECT run_key FROM test_runs t "
+    f"WHERE batch_id IN (SELECT batch_id FROM wipe_batches) AND {MINE}",
 )
 BUCKETS = (
     "CREATE TEMP TABLE wipe_event_buckets ON COMMIT DROP AS SELECT DISTINCT "
@@ -49,8 +50,8 @@ STORED = (
     "sum(k.bytes_down)::bigint FROM test_batches b JOIN test_runs t USING(batch_id) "
     "JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id) "
     "JOIN run_buckets k ON k.run_key=t.run_key WHERE b.kind='browser' "
-    f"AND b.scheduled_for>=%(first)s AND b.scheduled_for<%(end)s AND t.summary->>'{REPLAY_MARKER}'"
-    "=%(replay)s GROUP BY t.run_key,1,2,3 HAVING sum(k.completed)>0"
+    f"AND b.scheduled_for>=%(first)s AND b.scheduled_for<%(end)s AND {MINE} "
+    "GROUP BY t.run_key,1,2,3 HAVING sum(k.completed)>0"
 )
 RUN_ROWS = ("run_buckets", "run_geo_buckets", "ip_observations", "run_enrichments")
 RUN_ROWS += ("estimated_hours", "calculation_roles", "calculated_run_ranges")
