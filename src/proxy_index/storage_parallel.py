@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg
+from psycopg.rows import tuple_row
 
 from . import storage
 from .estimates import compute
@@ -279,14 +280,19 @@ def default_processes(connections: int) -> int:
 
 
 def _capped(credentials_file, wanted: int) -> int:
-    """wanted, or fewer: the connections the server has free beyond its reserve (at least 1)."""
     with storage.connect(credentials_file) as conn:
-        limit, used = conn.execute(CAPACITY).fetchone()
+        return capped(conn, wanted, "storage_parallel")
+
+
+def capped(conn, wanted: int, name: str) -> int:
+    """wanted, or fewer: the connections the server has free beyond its reserve (at least 1),
+    with a warning from name when fewer."""
+    limit, used = conn.cursor(row_factory=tuple_row).execute(CAPACITY).fetchone()
     reserve = max(RESERVE, math.ceil(limit * RESERVE_SHARE))
     allowed = max(1, min(wanted, limit - used - reserve))
     if allowed < wanted:
         print(
-            f"storage_parallel: warning: {allowed} connections, not {wanted}: max_connections "
+            f"{name}: warning: {allowed} connections, not {wanted}: max_connections "
             f"{limit}, {used} in use, {reserve} kept free",
             file=sys.stderr,
         )

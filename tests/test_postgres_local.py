@@ -12,7 +12,12 @@ _spec = importlib.util.spec_from_file_location("postgres_local", SCRIPT)
 postgres_local = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(postgres_local)
 
-SETTINGS = ("fsync = off", "synchronous_commit = off", "full_page_writes = off")
+SETTINGS = (
+    "fsync = off",
+    "synchronous_commit = off",
+    "full_page_writes = off",
+    "max_connections = 400",
+)
 
 
 @pytest.fixture

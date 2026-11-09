@@ -30,9 +30,9 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, timedelta
 from itertools import combinations
 
-import psycopg
-from psycopg import sql
-from psycopg.rows import dict_row, tuple_row
+from psycopg.rows import dict_row
+
+from .parallel_reads import export, snapshot_connection
 
 DAY = timedelta(days=1)
 KEEP = timedelta(days=31)
@@ -175,23 +175,19 @@ def bucket_ips(conn, start, end, fold):
 def count_spans(conn, spans):
     """count(DISTINCT ip_id) of every observation in each [start, end) of spans: {span: IPs}.
     At most PARALLEL queries run at once, each on its own connection importing the calculation's
-    snapshot (so they read exactly what the calculation reads)."""
+    snapshot (parallel_reads.py: so they read exactly what the calculation reads)."""
     spans = sorted(set(spans))
     if not spans:
         return {}
-    cursor = conn.cursor(row_factory=tuple_row)
-    snapshot = cursor.execute("SELECT pg_export_snapshot()").fetchone()[0]
+    exported = export(conn)
     shares = [spans[i::PARALLEL] for i in range(min(PARALLEL, len(spans)))]
     with ThreadPoolExecutor(len(shares)) as pool:
-        results = list(pool.map(lambda share: _count(conn, snapshot, share), shares))
+        results = list(pool.map(lambda share: _count(conn, exported, share), shares))
     return {span: ips for found in results for span, ips in found.items()}
 
 
-def _count(conn, snapshot, spans):
-    params = {"password": conn.info.password, "connect_timeout": 5}
-    with psycopg.connect(conn.info.dsn, **params) as other:
-        other.isolation_level, other.read_only = psycopg.IsolationLevel.REPEATABLE_READ, True
-        other.execute(sql.SQL("SET TRANSACTION SNAPSHOT {}").format(sql.Literal(snapshot)))
+def _count(conn, exported, spans):
+    with snapshot_connection(conn, exported) as other:
         return {span: other.execute(SPAN, span).fetchone()[0] for span in spans}
 
 
