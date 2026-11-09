@@ -17,7 +17,7 @@ import pytest
 from estimates_cases import formula
 from ingest_cases import daily_test, dump, pulse, run_id
 
-from proxy_index import storage, storage_parallel, storage_worker
+from proxy_index import storage, storage_parallel
 from proxy_index.estimates import compute
 from proxy_index.storage import IngestBatchError, connect, seed
 from proxy_index.storage_parallel import Group
@@ -36,7 +36,7 @@ OVERLAP = (
 @pytest.fixture(autouse=True)
 def quick(monkeypatch):
     """Short retry pauses; the whole server free for the test's connections."""
-    monkeypatch.setattr(storage_worker, "BACKOFF", 0.01)
+    monkeypatch.setattr(storage_parallel, "BACKOFF", 0.01)
     monkeypatch.setattr(storage_parallel, "RESERVE", 0)
     monkeypatch.setattr(storage_parallel, "RESERVE_SHARE", 0)
 
@@ -195,7 +195,7 @@ def overlap_in_two_orders(database, *, sort: bool) -> list[int]:
 
     def side(n):
         own = sorted(pairs) if sort else pairs[::-1] if n else pairs
-        pool, outcome = storage_worker.Connections(database), storage_worker.Outcome()
+        pool, outcome = storage_parallel.Connections(database), storage_parallel.Outcome()
 
         def work(conn):
             with conn.transaction():
@@ -205,7 +205,7 @@ def overlap_in_two_orders(database, *, sort: bool) -> list[int]:
                 conn.execute(OVERLAP, own[1])
 
         try:
-            assert storage_worker.retried(work, pool, outcome) == (None, None)
+            assert storage_parallel.retried(work, pool, outcome) == (None, None)
         finally:
             pool.close()
         retries[n] = outcome.retries
@@ -354,7 +354,7 @@ def test_a_group_failing_in_a_worker_process_fails_alone_named(database, tmp_pat
     outcomes = storage_parallel.store(groups, database, connections=4, processes=2)
     assert [o.error for o in outcomes[:3]] == [None] * 3
     assert outcomes[3].error.run_ids == [run_id("pulse", 3)]
-    assert isinstance(outcomes[3].error.__cause__, storage_worker.WorkerError)
+    assert isinstance(outcomes[3].error.__cause__, storage_parallel.WorkerError)
     assert "CheckViolation" in str(outcomes[3].error.__cause__)
     assert "over 4 connections, 2 processes" in capsys.readouterr().err
     with connect(database) as conn:
@@ -373,14 +373,14 @@ def test_a_worker_serves_groups_until_none_its_errors_described(database, tmp_pa
     path = bad / "summary.json"
     path.write_text(json.dumps(json.loads(path.read_text()) | {"status": "lost"}))
     mine, theirs = multiprocessing.Pipe()
-    worker = threading.Thread(target=storage_worker.serve, args=(theirs, database, 2))
+    worker = threading.Thread(target=storage_parallel._serve, args=(theirs, database, 2))
     worker.start()
     mine.send(("good", Group([good], estimates=[(good.name, "US", {"version": 0})])))
     mine.send(("bad", Group([bad])))
     found = {}
     for _ in range(2):
         key, outcome, errors = mine.recv()
-        found[key] = storage_worker.restored(outcome, errors)
+        found[key] = storage_parallel._restored(outcome, errors)
     mine.send(None)
     worker.join(30)
     assert not worker.is_alive()
