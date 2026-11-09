@@ -27,15 +27,17 @@ pytest_plugins = ["test_storage"]
 
 TABLES = (
     "SELECT table_name FROM information_schema.tables WHERE table_schema='public' "
-    "AND table_name LIKE 'calculated%%' AND table_name NOT LIKE 'calculated_snapshot_parts%%' "
+    "AND table_name LIKE 'calculated%%' AND table_name NOT LIKE 'calculated_snapshot%%' "
     "ORDER BY 1"
 )
-CLOCK = ("created_at", "last_used", "updated_at")  # now(): differs between the databases
+# now(), and what hashes it, differs between the databases: the slot memos' digests hash their
+# run ranges' created_at (hourly.py); the snapshots (store.read()) hold generated_at.
+CLOCK = ("created_at", "last_used", "updated_at", "digest")
 
 
 def rows(database):
-    """Every calculated_* row (but the payload parts, read with store.read()), without the
-    clock's columns, sorted."""
+    """Every calculated_* row (but the snapshots, read with store.read()), without the clock's
+    columns, sorted."""
     found = {}
     with connect(database) as conn:
         for (table,) in conn.execute(TABLES).fetchall():
@@ -88,7 +90,8 @@ async def test_parallel_reads_equal_the_serial_reads(
         a = without(store.read(database, serial["snapshot_id"]))
         b = without(store.read(other, parallel["snapshot_id"]))
         assert json.dumps(a) == json.dumps(b), as_of
-        assert rows(database) == rows(other), as_of
+        a, b = rows(database), rows(other)
+        assert [t for t in a if a[t] != b[t]] == [], as_of
     assert helpers[0] > 2, helpers  # the first build misses every group
 
 
@@ -132,7 +135,7 @@ def test_heavy_groups_are_read_largest_first_on_their_own_helpers(database, monk
     heavy, done = [], threading.Event()
 
     def read(c, key):
-        heavy.extend([key] if key in rows else [])  # in the order they start
+        heavy.extend([key] if key in (2, 4, 7) else [])  # in the order they start
         found = key, c.execute("SHOW work_mem").fetchone()[0]
         if len(heavy) == 3:
             done.set()
