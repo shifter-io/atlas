@@ -349,6 +349,11 @@ hours ahead of the hour being stored. The main process stores the hours strictly
 deletes each hour's directories once it is stored (all of them when the load ends). The model's
 seed is the load's id, so a resumed load generates the same hours again.
 
+The workers read the browser settings file by path: loaded settings do not pickle (their dict
+`inputs` are read-only mappings). Their plan carries the file's path and SHA-256, taken before
+the main process loads it for its own planning, and each worker loads the file once when it
+starts; a file changed since then is refused (`SettingsChanged`) and the load stops.
+
 ### One simulated hour
 
 replay.py's step loop runs each step until it is done; a failed part is recorded in
@@ -397,4 +402,7 @@ names and counts only, no IP, host name or path:
 
 `tests/test_scale_simulate.py` loads the synthetic profile of `test_scale_simulate_model.py`
 (2 networks × 3 countries × 2 browser targets) for 2 days, a stop and resume against an
-uninterrupted load, pulses switched on, `--plan-only` and the refusals.
+uninterrupted load, pulses switched on, `--plan-only` and the refusals. With the production
+example settings (`configs/browser-pulse.production.example.toml`, dict inputs) it checks that
+the workers' plan pickles, that a changed settings file is refused, and that one hour loads the
+same rows with `--jobs 1` and `--jobs 2`.

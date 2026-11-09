@@ -7,10 +7,12 @@ calculation out of a systemd scope and --pause makes the retry delays short.
 
 import importlib
 import json
+import pickle
 import re
 import stat
 import sys
 from collections import Counter
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -46,6 +48,8 @@ BROWSER = (
 )
 OWN = "SELECT count(*) FROM {} WHERE run_key IN (SELECT run_key FROM test_runs WHERE {})"
 SNAPSHOT = "SELECT payload FROM calculated_snapshots WHERE build_id=%s"
+PRODUCTION = ROOT / "configs" / "browser-pulse.production.example.toml"  # dict inputs
+BROWSER_DATA = ("test_runs", "run_buckets", "test_batches", "batch_runs", "test_events")
 
 
 @pytest.fixture
@@ -264,3 +268,35 @@ def test_refusals_write_nothing(staging, inputs, tmp_path, monkeypatch, capsys):
     assert exited.value.code == 2 and "--owner-go and --out are required" in capsys.readouterr().err
     assert not (out / "state.json").exists()
     assert query(staging, "SELECT count(*) FROM test_runs")[0][0] == 0
+
+
+def test_the_workers_plan_pickles_with_the_production_settings(tmp_path):
+    shared = simulate_steps.SettingsFile.of(PRODUCTION)
+    plan = replace(cases.plan(tmp_path), browser=shared, regions=None)
+    simulate_steps.start(cases.profile(), pickle.loads(pickle.dumps(plan)), 7, "run")
+    targets = simulate_steps.WORKER["model"].plan.browser.targets
+    assert {"instagram_web", "cloudflare_challenge"} <= {item.id for item in targets}
+
+
+def test_a_worker_refuses_a_settings_file_changed_since_the_plan(tmp_path):
+    path = tmp_path / "browser.toml"
+    path.write_bytes(PRODUCTION.read_bytes())
+    plan = replace(cases.plan(tmp_path), browser=simulate_steps.SettingsFile.of(path))
+    path.write_text(path.read_text().replace("tries = 100", "tries = 99", 1))
+    with pytest.raises(simulate_steps.SettingsChanged, match="browser.toml changed since"):
+        simulate_steps.start(cases.profile(), plan, 7, "run")
+
+
+def test_production_settings_load_the_same_rows_with_one_or_two_jobs(
+    databases, database_template, inputs, tmp_path, monkeypatch
+):
+    given, found = inputs | {"browser-settings": PRODUCTION}, []
+    for jobs in ("1", "2"):
+        loaded = staged(databases(template=database_template), monkeypatch)
+        hour = ("--hours-per-day", "1", "--jobs", jobs)  # one hour, then the extra one
+        assert simulate.main(argv(loaded, given, tmp_path / jobs, 1, *hour)) == 0
+        assert query(loaded, BROWSER)
+        with simulate.storage.connect(loaded) as conn:
+            found.append(replay_baseline.counts(conn))
+    one, two = ({name: rows[f"public.{name}"] for name in BROWSER_DATA} for rows in found)
+    assert one == two and one["test_runs"] > 0
