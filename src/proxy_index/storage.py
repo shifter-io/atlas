@@ -32,8 +32,8 @@ from .storage_seed import seed as seed
 from .storage_seed import seed_targets as seed_targets
 from .storage_status import status as status
 
-SCHEMA_VERSION = 13
-# Only an unmodified v4 to v12 schema (these checksums) is migrated in place; migrate().
+SCHEMA_VERSION = 14
+# Only an unmodified v4 to v13 schema (these checksums) is migrated in place; migrate().
 V4_CHECKSUM = "0ec5b6579c67bf883dead3e64312899dc6665cdb684ac617f06edb6d9cf1fee5"
 V5_CHECKSUM = "2e1d8e89ffcf0748a882e7c4cddfd3e33e86a0024cc757648a4cabb502e64e3b"
 V6_CHECKSUM = "1a06ee59c45bcaaaf14b11db107890a94dfc41b9f3b823472f7c8a22c984bc10"
@@ -45,9 +45,11 @@ V9_CHECKSUM = "bf4c540376649ecf841e5207e2581cda29cba76473761b7e5c27e72cee98b0ee"
 V10_CHECKSUM = "9e993488d6062b3a9082bdab5da44d5f1cf20ed849be641a6c6fd41a9ce9b9f9"
 V11_CHECKSUM = "e35fda97a06d674a160f277f0807408cbd7435f4eca571ab70773dd20715452c"
 V12_CHECKSUM = "f7c2e9be2e168ac30d0542a71ed1c243a398b0436c36a4e790c3ee8d38d6b7e2"
+V13_CHECKSUM = "1a654b6ad447dccaf5f3ab03e0a96383d879e547ebcf4b10b24e98f74a5af1f9"
 MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7, V7_CHECKSUM): 7}
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11, (12, V12_CHECKSUM): 12}
+MIGRATABLE |= {(13, V13_CHECKSUM): 13}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
 # seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Imports
@@ -381,16 +383,7 @@ def _network(conn):
         "observation_count=product_ips.observation_count+excluded.observation_count,"
         "run_count=product_ips.run_count+excluded.run_count"
     )
-    # Avoid another persisted membership set per performance configuration.
-    # First presence within this exact scope (first run of the batch), the batch's own
-    # observations left out: reads via test_runs_scope.
-    return conn.execute(
-        "SELECT idx,count(*) FROM (SELECT scope_id,ip_id,min(idx) AS idx FROM "
-        "incoming_observations GROUP BY scope_id,ip_id) n WHERE NOT EXISTS (SELECT 1 FROM "
-        "ip_observations o JOIN test_runs r USING(run_key) WHERE o.ip_id=n.ip_id AND "
-        "r.scope_id=n.scope_id AND o.run_key NOT IN (SELECT run_key FROM incoming_runs)) "
-        "GROUP BY idx"
-    )
+    return storage_ingest.add_scope_ips(conn)
 
 
 def _overlap(conn):
@@ -426,12 +419,13 @@ def _compact(credentials_file, tables):
 
 
 def migrate(credentials_file):
-    """Migrate an unmodified v4 to v12 database, and its calculated layer, in one transaction.
+    """Migrate an unmodified v4 to v13 database, and its calculated layer, in one transaction.
 
-    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v12_v13.sql in
-    turn; v5 to v12 start at the step for their version (v7 and v9 only add a table, v8 moves
+    v4 runs migrate_v4_v5.sql (and calculated v1 → v2), then migrate_v5_v6.sql to v13_v14.sql in
+    turn; v5 to v13 start at the step for their version (v7 and v9 only add a table, v8 moves
     names into the shared lists, v10 adds the batch kind browser, v11 swaps an index, v12 adds
-    the live tape's bucket counts, filled from the stored events, and their trigger). A
+    the live tape's bucket counts, filled from the stored events, and their trigger; v13 adds
+    scope_ips, filled from the stored observations). A
     calculated v2 layer then runs calculated/migrate_v2_v3.sql, then calculated v3 → v4
     (availability), v4 → v5 (city/network evidence), v5 → v6 (breakdowns partitioned by build),
     v6 → v7 (names), v7 → v8 (parts), v8 → v9 (lists), v9 → v10 (memo tables), v10 → v11 and

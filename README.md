@@ -122,10 +122,14 @@ the migration commits, which follows at once); schema v13 (`migrate_v12_v13.sql`
 (`good` counts `signal > 0`, `bad` `signal < 0`), kept by one statement-level `AFTER INSERT` trigger
 on `test_events` per insert statement or `COPY` (every partition fires it), and fills it from the
 stored events (the view `test_event_bucket_counts`) in the same transaction (creating the trigger blocks writes to `test_events` until
-the migration commits); the API's `/v1/events/stats` reads it (`api/answers/events-stats.md`).
-`db-init` verifies v13 and refuses other schemas.
-`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v12
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v13, in
+the migration commits); the API's `/v1/events/stats` reads it (`api/answers/events-stats.md`);
+schema v14 (`migrate_v13_v14.sql`) adds `scope_ips`, each scope's IP membership set (as
+`pool_ips` per pool), filled once from the stored observations in the migration's transaction:
+ingest counts the IPs new to a scope (its `unique_ips`) by inserting the batch's pairs into it,
+one key probe each, instead of scanning `ip_observations`, so the count no longer grows with the
+history. `db-init` verifies v14 and refuses other schemas.
+`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v13
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v14, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every

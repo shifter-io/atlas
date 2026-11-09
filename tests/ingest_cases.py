@@ -255,6 +255,8 @@ DUMP = {
     "product_ips": f"to_jsonb(t)-'product_id'-'ip_id'"
     f"||jsonb_build_object('product',{PRODUCT},'ip',{IP})",
     "pool_ips": f"jsonb_build_object('pool',{POOL},'ip',{IP})",
+    "scope_ips": "jsonb_build_object('scope',(SELECT scope_hash FROM scope_stats "
+    f"WHERE scope_id=t.scope_id),'ip',{IP})",
     "provider_overlap": "to_jsonb(t)-'updated_at'",
     "dbip_releases": "to_jsonb(t)-'release_id'",
     "run_enrichments": f"to_jsonb(t)-'run_key'-'release_id'"

@@ -80,7 +80,7 @@ FACTS = (
 LOOKUPS = ("scope_stats", "pool_stats", "products", "providers", "ip_addresses")
 LOOKUPS += ("dbip_releases", "enrichment_locations", "enrichment_networks", "asn_labels")
 LOOKUPS += ("place_names", "asn_names", "cohorts", "score_reasons")
-CACHES = ("product_ips", "pool_ips", "provider_overlap", "outages")
+CACHES = ("product_ips", "pool_ips", "scope_ips", "provider_overlap", "outages")
 # Caches of one lookup only: an IP's enrichment goes with the IP, but references its release,
 # location and network while the IP stays. calculated_ip_last_seen has no foreign key.
 OWN_CACHES = {"ip_addresses": [("ip_enrichment", "ip_id"), ("calculated_ip_last_seen", "ip_id")]}

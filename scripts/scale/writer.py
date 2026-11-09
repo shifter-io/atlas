@@ -177,6 +177,7 @@ class Writer:
             self.pulses(day, hour, lanes)
         conn.execute(PRODUCT_IPS, (network + 1, start, end))
         conn.execute(POOL_IPS, (network + 1, start, end))
+        conn.execute(SCOPE_IPS, (network + 1, start, end))
 
     def addresses(self, day: int, lanes):
         for lane in lanes:
@@ -381,4 +382,9 @@ POOL_IPS = (
     "ON CONFLICT DO NOTHING RETURNING pool_id) "
     "UPDATE pool_stats p SET unique_ips=p.unique_ips+a.n "
     "FROM (SELECT pool_id,count(*) AS n FROM added GROUP BY 1) a WHERE p.pool_id=a.pool_id"
+)
+SCOPE_IPS = (
+    "INSERT INTO scope_ips SELECT DISTINCT r.scope_id,o.ip_id FROM ip_observations o "
+    "JOIN test_runs r USING(run_key) JOIN scope_stats s USING(scope_id) "
+    "WHERE s.product_id=%s AND o.bucket_start>=%s AND o.bucket_start<%s ON CONFLICT DO NOTHING"
 )

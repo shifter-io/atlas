@@ -104,6 +104,11 @@ CREATE TABLE IF NOT EXISTS scope_stats (
  histogram_steps integer[] NOT NULL DEFAULT '{}', histogram_counts bigint[] NOT NULL DEFAULT '{}',
  UNIQUE(product_id,target,scope_hash)
 );
+-- Exact membership per scope, as pool_ips per pool: each scope's unique_ips counts its new rows.
+CREATE TABLE IF NOT EXISTS scope_ips (
+ scope_id bigint REFERENCES scope_stats(scope_id), ip_id bigint REFERENCES ip_addresses(ip_id),
+ PRIMARY KEY(scope_id,ip_id)
+);
 -- summary omits run_id, status and timestamps whenever the columns reproduce them exactly.
 CREATE TABLE IF NOT EXISTS test_runs (
  run_key bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, run_id uuid NOT NULL UNIQUE, scope_id bigint NOT NULL REFERENCES scope_stats(scope_id),
