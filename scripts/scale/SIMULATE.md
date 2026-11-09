@@ -316,12 +316,15 @@ waits for real time: the hours are generated ahead while earlier ones are stored
 ```sh
 uv run python scripts/scale/simulate.py --database <staging toml> \
   --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --profile <profile.json> --days 7 \
-  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--batch-daily 20] [--connections 25] \
+  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--ahead 2] [--spool-gb 20] \
+  [--batch-daily 20] [--connections 25] [--processes P] [--store-ahead 6] \
   [--memory-budget 4] [--pulses] [--siteapi URL] [--plan-only] [--no-scope]
 ```
 
 - The same command resumes from `<out>/state.json`; another database, first day, number of
-  days, `--pulses` or profile is refused. Exit 0 done, 2 refused (nothing written), 130
+  days, `--pulses` or profile is refused. The store and generation options (`--connections`,
+  `--processes`, `--store-ahead`, `--jobs`, `--ahead`, `--spool-gb`) may change: `options`
+  holds the first start's and each `resumed` entry its own. Exit 0 done, 2 refused (nothing written), 130
   stopped (Ctrl-C or SIGTERM).
 - **Guards**, checked before any write, are the replay's (`replay.guard`): `target.refusal`
   with the owner's go accepts `proxy_reviews_staging` only (production is refused, with or
@@ -344,10 +347,18 @@ per day; no HTTP pulse fleet, so no pulses, census or load waves unless switched
 ### Generation ahead, storage in order
 
 `--jobs` worker processes (spawned, never forked) build the model once each and write their
-share of an hour's daily tests as run directories under `<out>/generated/hour-<n>/`, at most 2
-hours ahead of the hour being stored. The main process stores the hours strictly in order and
-deletes each hour's directories once it is stored (all of them when the load ends). The model's
-seed is the load's id, so a resumed load generates the same hours again.
+share of an hour's daily tests as run directories under `<out>/generated/hour-<n>/`, up to
+`--ahead` hours (default 2; up to 168 to use idle cores) ahead of the hour being stored, two
+hours generating at a time, while the generated hours not stored yet take less than
+`--spool-gb` GB (default 20; the generator pauses at the cap, an hour still generating
+counted as large as the generated ones on average). Each worker's share of an hour ends with
+its manifest (`part-<k>-of-<jobs>.json`): every file's size and SHA-256, recorded at write,
+and the tests' figures. The main process stores the hours strictly in order and deletes each
+hour's directories once it is stored. A stopped load keeps the rest: the next start reuses
+every share whose files match its manifest and writes the others again (all of them go once
+the load ends). The model's seed is the load's id, so a resumed load generates the same hours
+again. `state.json`'s `counts` add up `generated_tests`, `generation_cpu_seconds` (the
+workers' CPU) and `reused_parts`.
 
 The workers read the browser settings file by path: loaded settings do not pickle (their dict
 `inputs` are read-only mappings). Their plan carries the file's path and SHA-256, taken before
@@ -365,13 +376,34 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
    each batch in one `storage.ingest_many` and one `compute.estimate_runs`, `--connections`
    batches at once (below), then each cell's `daily_test_started` and `daily_test_finished`
    (`emit_cell`), once (`<out>/daily-ingest.json` holds the hour's cells). `state.json`
-   records each batch's run ids as it commits (the daily step's `groups`), written by the
-   main process only; a stopped hour stores again only the runs not stored yet (by run id).
+   records each batch's run ids as the hour's step sees it committed (the daily step's
+   `groups`), written by the main process only; a stopped hour stores again only the runs not
+   stored yet (by run id).
 
    **Parallel connections** (INGEST-PARALLEL-1, `storage_parallel.py`): each connection's
    TCP receive window caps it at about 0.6 MB/s over the 77 ms link to the database, so the
-   hour's batches go over `--connections` (default 25; 40 and more where the server has the slots) connections at once, one worker thread
-   and one connection each. `--connections 1` is the serial path, statement for statement.
+   batches go over `--connections` (default 25; 40 and more where the server has the slots)
+   connections at once, one worker thread and one connection each. `--connections 1` is the
+   serial path, statement for statement.
+   - *Worker processes* (INGEST-PROCESSES-1): preparing a batch's rows costs about 0.4 s of
+     client CPU per daily test, and one Python process uses one core however many threads
+     wait on the network. The N connections therefore go over `--processes` P worker
+     processes (spawned; default `min(7, CPUs − 1, N)`), each of about N / P threads, which
+     receive only the batch's run-directory paths, estimates and the credentials path. P = 1
+     is the thread pool of one process, statement for statement. The main process hands the
+     batches out (never two of one network at once while one of another network can go), to
+     the least busy process; a process that dies fails only its batches in flight, named by
+     their run ids, which are then retried one country at a time, while the others go on.
+     The client statement trace (`measure.Tracer`) sees only P = 1's statements.
+   - *Store ahead* (`--store-ahead`, default 6): an hour has only 8 to 20 batches, too few
+     to keep N connections busy, so the load keeps one pool of connections open over all its
+     hours and gives it, at each hour's start, that hour's batches and then those of the next
+     `--store-ahead` − 1 hours already generated. The hours still finish in order: an hour's
+     events, its release and its `state.json` mark come once all its batches have committed
+     and the hour before is done, and a resume starts from the oldest hour not done (the
+     batches of later hours stored before the stop are no-ops then). A batch stored ahead
+     stores its estimated hours too, so an earlier hour's release can announce estimated
+     hours of a test stored ahead once they have ended.
    - *The locks, narrowed.* An import takes its locks at the start, before any write, in one
      order: the ingest lock (817452901) shared, so imports run side by side while a purge, seed,
      migration or rebuild (which take it exclusively) waits for them; its networks' locks
@@ -390,11 +422,11 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
      can go instead. A deadlock (40P01) or serialization failure (40001) rolls back only that
      batch, retried 3 times with backoff on a new connection; one that still fails is retried
      one country at a time after the others (`daily/batches.py`).
-   - *Caps*, printed at the start of each hour: the connections are capped so that 10 of the
-     server's `max_connections` slots stay free for production, and so that the batches in
-     flight, estimated at 20 times their run directories' bytes, stay within `--memory-budget`
-     GB (default 4, inside the 6G memory cap). A batch is never split: N goes down instead. A
-     capped count is a warning, not an error.
+   - *Caps*, printed when the pool opens: the connections are capped so that a quarter of
+     the server's `max_connections` slots (at least 20) stay free for production, and the
+     batches in flight over all processes, estimated at 20 times their run directories'
+     bytes, stay within `--memory-budget` GB (default 4, inside the 6G memory cap). A batch is
+     never split: it waits for room instead. A capped count is a warning, not an error.
 2. **browser**: one browser node per network of the settings' hosts, bound to its host's
    name (the tokens are issued once a process, never saved). The real planner
    (`orchestrator/browser.py`, queue mode) runs at each run's start with the model's settings

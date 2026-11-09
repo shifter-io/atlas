@@ -32,7 +32,7 @@ import simulate_steps
 import target
 from replay import Refused, now
 
-from proxy_index import storage
+from proxy_index import storage, storage_parallel
 
 SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256")
 # Each table of public and site with its partitions: its own bytes (with TOAST) and its indexes'.
@@ -81,6 +81,7 @@ class Simulation(replay.Replay):
         self.steps = simulate_steps.SimSteps(conn, args, self.state, self.model, self.save)
         self.names = ("daily", "browser", *(("pulses",) if args.pulses else ()), "release")
         self.stop, self.pool, self.counters = Event(), ThreadPoolExecutor(1), None
+        self.hours, self.handed = {}, set()  # the model's hours in use; those handed ahead
 
     def open(self, go: dict) -> dict:
         """The state of state.json, or a new one with its baseline. Its days count the extra
@@ -93,7 +94,7 @@ class Simulation(replay.Replay):
             state = json.loads(path.read_text())
             if {key: state.get(key) for key in SAME} != wanted:
                 raise Refused(f"{path.name} is the load of {[state.get(key) for key in SAME]}")
-            state["resumed"].append(go)
+            state["resumed"].append(go | {"options": self.options()})
             return state
         replay_id = uuid.uuid4().hex
         state = {"replay_id": replay_id, "seed": args.seed or replay_id, "go": go, **wanted}
@@ -101,9 +102,15 @@ class Simulation(replay.Replay):
         state |= {"baseline": replay_baseline.baseline(self.conn), "nodes": [], "hours": []}
         state["baseline"]["sizes"] = tables(self.conn)
         state |= {"sizes": {}, "resumed": [], "counts": {"retries": 0, "pause_seconds": 0}}
+        state["options"] = self.options()
         self.state = state
         self.save()
         return state
+
+    def options(self) -> dict:
+        """How this start stores and generates (a resume records its own)."""
+        names = ("connections", "processes", "store_ahead", "jobs", "ahead", "spool_gb")
+        return {name: getattr(self.args, name) for name in names}
 
     def run(self) -> dict:
         """Load every hour not stored yet, calculate, check; disable the nodes however it ends."""
@@ -112,7 +119,11 @@ class Simulation(replay.Replay):
         slots = [(r["day"] + 1, datetime.fromisoformat(r["start"]).hour) for r in records]
         first = next((i for i, r in enumerate(records) if not r["ingest"]["done"]), total + 1)
         given = (self.profile, self.shared, self.state["seed"], self.state["replay_id"])
-        producer = simulate_steps.Producer(self.args.jobs, self.out / "generated", given, slots)
+        args, root = self.args, self.out / "generated"
+        options = storage_parallel.Options(args.connections, args.memory_budget, args.processes)
+        self.steps.pool, finished = storage_parallel.Pool(args.database, options), False
+        limits = (args.ahead, int(args.spool_gb * 2**30))
+        producer = simulate_steps.Producer(args.jobs, root, given, slots, limits)
         if measure.has_statements(self.conn):
             self.counters = measure.snapshot(self.conn)
         try:
@@ -125,10 +136,14 @@ class Simulation(replay.Replay):
                 self.load(index, producer)
             self.calculated(total, incremental=True)
             self.checks(producer)
+            finished = True
         finally:
             self.stop.set()  # a calculation still running is killed
             self.pool.shutdown()
-            producer.close()
+            self.steps.pool.close()
+            producer.close(finished)
+            for key, value in producer.counts.items():
+                self.state["counts"][key] = self.state["counts"].get(key, 0) + value
             self.conn.execute(replay.DISABLE, (self.state["nodes"],))
             self.save()
             try:  # a stopped load has its report too
@@ -139,9 +154,11 @@ class Simulation(replay.Replay):
         return {"replay_id": self.state["replay_id"], "hours_done": hours, "hours": total + 1}
 
     def load(self, index: int, producer) -> None:
-        """Store one generated hour with the replay's step loop (Replay.ingest)."""
-        record, hour = self.record(index), self.model.hour(*producer.hours[index])
+        """Store one generated hour with the replay's step loop (Replay.ingest), the pool
+        given the daily groups of the next hours already generated (ahead)."""
         figures = producer.take(index)
+        record, hour = self.record(index), self.hour(index, producer)
+        self.ahead(index, producer)
         runs = (hour.daily, hour.browser, hour.pulses)
         record["runs"] = {
             kind: len(own) for kind, own in zip(simulate_report.KINDS, runs, strict=True)
@@ -150,8 +167,22 @@ class Simulation(replay.Replay):
         self.steps.current = simulate_steps.Current(hour, figures, producer.directory(index))
         self.ingest(index)
         producer.done(index)
+        self.hours.pop(index, None)
         self.mark(index, {"ingest": [index], "calculate": []})
         self.save()
+
+    def hour(self, index: int, producer):
+        if index not in self.hours:
+            self.hours[index] = self.model.hour(*producer.hours[index])
+        return self.hours[index]
+
+    def ahead(self, index: int, producer) -> None:
+        """The pool takes the daily groups of up to --store-ahead hours at once: this one's
+        first, then those of the next hours already generated, each hour's once (SIMULATE.md)."""
+        for later in range(index, min(index + self.args.store_ahead, len(producer.hours))):
+            if later not in self.handed and producer.ready(later):
+                self.handed.add(later)
+                self.steps.hand(self.hour(later, producer), producer.directory(later))
 
     def calculated(self, index: int, incremental: bool) -> None:
         """The hour's calculation (full, or incremental), retried until it succeeds; then the
@@ -201,8 +232,23 @@ def arguments(argv=None):
     parser.add_argument("--first-day", required=True, help="date of simulated day 1 (UTC)")
     parser.add_argument("--out", help="directory of the state, the report and the hours")
     parser.add_argument("--jobs", type=int, default=6, help="worker processes generating hours")
+    parser.add_argument(
+        "--ahead", type=int, default=simulate_steps.AHEAD, help="hours generated ahead of the store"
+    )
+    parser.add_argument(
+        "--spool-gb", type=float, default=20.0, help="GB the generated hours not stored may take"
+    )
     parser.add_argument("--batch-daily", type=int, default=20, help="daily tests a transaction")
     parser.add_argument("--connections", type=int, default=25, help="transactions at once")
+    parser.add_argument(
+        "--processes", type=int, help="processes the connections go over (default min(7, CPUs-1))"
+    )
+    parser.add_argument(
+        "--store-ahead",
+        type=int,
+        default=simulate_steps.STORE_AHEAD,
+        help="hours whose daily tests the store takes at once",
+    )
     parser.add_argument(
         "--memory-budget", type=float, default=4.0, help="GB the transactions in flight may take"
     )
@@ -222,8 +268,12 @@ def arguments(argv=None):
     parser.add_argument("--hour-timeout", type=float, default=86400.0, help=argparse.SUPPRESS)
     parser.set_defaults(pulse_concurrency=8, node_api=None, siteapi_pid=None)
     args = parser.parse_args(argv)
-    if min(args.days, args.jobs, args.batch_daily, args.connections) < 1:
-        parser.error("--days, --jobs, --batch-daily and --connections are at least 1")
+    if min(args.days, args.jobs, args.batch_daily, args.connections, args.store_ahead) < 1:
+        parser.error("--days, --jobs, --batch-daily, --connections, --store-ahead are at least 1")
+    if (args.processes is not None and args.processes < 1) or args.ahead < 0:
+        parser.error("--processes is at least 1, --ahead at least 0")
+    if args.spool_gb <= 0:
+        parser.error("the spool's GB are more than 0")
     if not 1 <= args.hours_per_day <= 24 or args.memory_budget <= 0:
         parser.error("the hours of a day are 1..24, the memory budget more than 0")
     args.memory_budget = int(args.memory_budget * 2**30)
