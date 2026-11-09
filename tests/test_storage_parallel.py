@@ -467,7 +467,11 @@ def test_an_open_pool_stores_groups_handed_ahead_once(database, tmp_path, monkey
             groups[2:], database, pool=pool, on_commit=lambda g, _: committed.append(g)
         )
         assert not pool.tickets  # waited for: a later submit would store them again
-    assert sent == [0, 0, 0, 0] and committed == groups[2:]  # the groups handed ahead, once
+    assert sent == [0, 0, 0, 0]  # the groups handed ahead, stored once
+    # Stored before their store waited: each one's on_commit then, in no set order.
+    assert sorted(str(g.directories) for g in committed) == sorted(
+        str(g.directories) for g in groups[2:]
+    )
     assert [r["imported"] for o in first + later for r in o.results] == [True] * 4
 
 
