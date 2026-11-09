@@ -372,19 +372,19 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
    TCP receive window caps it at about 0.6 MB/s over the 77 ms link to the database, so the
    hour's batches go over `--connections` (default 25; 40 and more where the server has the slots) connections at once, one worker thread
    and one connection each. `--connections 1` is the serial path, statement for statement.
-   - *The locks, narrowed.* An import holds the ingest lock (817452901) shared, so imports run
-     side by side while a purge, seed, migration or rebuild (which take it exclusively) waits
-     for them, and a lock per run (817452904 with the run id's hash), so two imports of one run
-     still go one after the other. Its runs' own rows (temp tables, runs, buckets, geo rows,
-     addresses, observations, enrichment, and each run's summary as stored) go in under no
-     other lock. Each network's counts take that network's lock (817452906 with the provider's
-     hash, the batch's networks in one order): the IPs new to each pool (`pool_ips`), to the
-     provider (before its `product_ips` are added) and to each scope, and the scope totals
-     (`scope_stats`). Batches of different networks never wait for each other there. Only the
-     last statement before COMMIT, the `provider_overlap` increments for the batch's IPs new to
-     their provider, takes the global overlap lock (817452905): milliseconds. Each is read
-     after its lock (READ COMMITTED), so it sees every import committed before, as the serial
-     path does.
+   - *The locks, narrowed.* An import takes its locks at the start, before any write, in one
+     order: the ingest lock (817452901) shared, so imports run side by side while a purge, seed,
+     migration or rebuild (which take it exclusively) waits for them; its networks' locks
+     (817452906 with each provider's hash, sorted), so imports of one network go one after the
+     other while imports of different networks never wait for each other; its runs' locks
+     (817452904 with each run id's hash), so two imports of one run go one after the other.
+     Only the last statement before COMMIT, the `provider_overlap` increments for the batch's
+     IPs new to their provider, takes the global overlap lock (817452905): milliseconds. Each
+     network's counts (`pool_ips`, the IPs new to the provider before its `product_ips` are
+     added, each scope's new IPs and totals) are read after its lock (READ COMMITTED), so they
+     see every import of the network committed before, as the serial path does. With N
+     connections, at most as many are busy as there are networks with a batch pending (18
+     networks: at most 18).
    - *No deadlocks.* Every multi-row insert into a table imports share goes in key order, and
      two batches of one network are not stored at the same time while one of another network
      can go instead. A deadlock (40P01) or serialization failure (40001) rolls back only that

@@ -243,8 +243,8 @@ WAITING = (  # in this database only: other tests import at the same time
 
 
 def test_groups_of_two_networks_count_at_the_same_time(database, tmp_path):
-    """While a group of net-a is held in its network step (its lock taken elsewhere), a group of
-    net-b goes through its own and through the overlap step, and commits."""
+    """While a group of net-a waits for its network's lock (taken elsewhere), a group of net-b
+    goes through its own network step and the overlap step, and commits."""
     a, b = (  # pulses 0 and 5 share no IP: b never waits on a's rows
         Group([pulse(tmp_path / name, n, provider=name)], networks=frozenset({name}))
         for n, name in ((0, "net-a"), (5, "net-b"))
@@ -271,6 +271,26 @@ def test_groups_of_two_networks_count_at_the_same_time(database, tmp_path):
         release.cancel()
     assert order == [b.networks, a.networks]
     assert [o.error for o in outcomes] == [None, None]
+
+
+def test_a_group_that_breaks_holding_its_locks_frees_them(database, tmp_path, monkeypatch):
+    """An unexpected error after the locks are taken closes the group's connection, so the next
+    group of its network (waiting for the same network lock) still finishes."""
+    storage.ingest(pulse(tmp_path / "first", 2), database)  # the day's partitions
+    a, b = (Group([pulse(tmp_path / f"p{n}", n, provider="net-a")]) for n in (0, 5))
+    real = storage._scope_totals
+
+    def broken(runs, scopes, new_ips):
+        if runs[0].run_id == run_id("pulse", 0):
+            raise RuntimeError("broken")
+        return real(runs, scopes, new_ips)
+
+    monkeypatch.setattr(storage, "_scope_totals", broken)
+    with pytest.raises(RuntimeError, match="broken"):
+        storage_parallel.store([a, b], database, connections=2)
+    with connect(database) as conn:
+        found = {str(r) for (r,) in conn.execute("SELECT run_id FROM test_runs")}
+    assert run_id("pulse", 5) in found and run_id("pulse", 0) not in found
 
 
 def test_the_import_locks_are_no_other_lock():

@@ -50,21 +50,23 @@ MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECK
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11, (12, V12_CHECKSUM): 12}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
-# seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Each
-# network's counts (_network) go one import of that network at a time, under its network lock;
-# only the cross-network overlap (_overlap), the last statement, under the overlap lock.
+# seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Imports
+# of one network go one at a time: each takes its networks' locks before any write (so its
+# network's counts, _network, see every earlier import of it); only the cross-network overlap
+# (_overlap), the last statement, takes the overlap lock.
 # 817452902 is the calculation's lock and 817452903 detect's (detect.LOCK).
 INGEST_LOCK, OVERLAP_LOCK = 817452901, 817452905
-# Locks of two integers (never equal to a one-number key), each set taken in one order: the
-# batch's runs' (two imports of one run go one after the other) and its networks'.
+# Locks of two integers (never equal to a one-number key), taken at the start in this order,
+# each set sorted: the batch's networks' (providers'), then its runs' (two imports of one run go
+# one after the other).
 RUN_LOCK, NETWORK_LOCK = 817452904, 817452906
+NETWORK_LOCKS = (
+    f"SELECT pg_advisory_xact_lock({NETWORK_LOCK},h) FROM (SELECT DISTINCT hashtext(p) h "
+    "FROM unnest(%s::text[]) p ORDER BY h) s"
+)
 RUN_LOCKS = (
     f"SELECT pg_advisory_xact_lock({RUN_LOCK},h) FROM (SELECT DISTINCT hashtext(r::text) h "
     "FROM unnest(%s::uuid[]) r ORDER BY h) s"
-)
-NETWORK_LOCKS = (
-    f"SELECT pg_advisory_xact_lock({NETWORK_LOCK},h) FROM (SELECT DISTINCT hashtext(provider) h "
-    "FROM incoming_runs ORDER BY h) s"
 )
 
 
@@ -187,7 +189,7 @@ def _rows(runs):
 
 def _store_runs(conn, runs, fresh, existing):
     """Queue the batch's statements after the first round trip, its runs' own rows first, then
-    each network's counts under its network lock; the cursors to read after it."""
+    each network's counts; the cursors to read after it."""
     storage_batch.load(conn, _rows(runs))
     # A stored run without a batch joins the one it is imported with.
     unlinked = [r for r in runs if r.stored and r.stored.get("batch_id") is None]
@@ -202,8 +204,6 @@ def _store_runs(conn, runs, fresh, existing):
         _add_addresses(conn)
     enriched = storage_ingest.enrich(conn) if any(run.added for run in runs) else None
     summaries = conn.execute(storage_batch.SUMMARIES)
-    # Read after the network's lock (READ COMMITTED): every import of it committed before is seen.
-    conn.execute(NETWORK_LOCKS)
     new_ips = _network(conn) if addresses else None
     scopes = conn.execute(storage_batch.SCOPES)
     return summaries, scopes, new_ips, enriched
@@ -233,10 +233,13 @@ def _read(idx, directory, batch_id, ip_rows):
 
 
 def _begin(conn, pipeline, runs):
-    """Open the import's transaction under the shared and the runs' locks; the stored runs
-    (STORED rows) and the names of the partitions found, after one round trip."""
+    """Open the import's transaction under its locks, taken before any write in one order: the
+    ingest lock shared, its networks', its runs'. The stored runs (STORED rows) and the names of
+    the partitions found, after one round trip; every read after the locks (READ COMMITTED)
+    sees every import of the networks committed before."""
     conn.execute("BEGIN")
     conn.execute(f"SELECT pg_advisory_xact_lock_shared({INGEST_LOCK})")
+    conn.execute(NETWORK_LOCKS, (sorted({run.provider for run in runs}),))
     conn.execute(RUN_LOCKS, ([run.run_id for run in runs],))
     version = conn.execute("SELECT max(version) FROM schema_versions")
     stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
@@ -358,8 +361,9 @@ def _add_addresses(conn):
 
 
 def _network(conn):
-    """Under the batch's network locks: the IPs new to each pool, to each provider (before its
-    product memberships are added) and to each scope; the cursor of (idx, IPs new to its scope)."""
+    """The network's counts (under its lock): the IPs new to each pool, to each provider (before
+    its product memberships are added) and to each scope; the cursor of (idx, IPs new to its
+    scope)."""
     storage_ingest.add_pool_ips(conn)
     # Only first-ever presence at this provider contributes to lifetime overlap (_overlap).
     conn.execute(

@@ -5,7 +5,7 @@ round trips: `tc qdisc add dev lo root netem delay 38.5ms limit 100000`):
     python tests/parallel_measure.py [--tests 200] [--batch 20] [--ips 2000] \
         [--connections 1 10 25 40]
 stores the same synthetic daily tests (ingest_cases.daily_test, 30% of each test's IPs shared
-with the next) in batches of `--batch`, each batch one network's (10 networks, as an hour's
+with the next) in batches of `--batch`, each batch one network's (`--networks` 18, as an hour's
 batches are whole cells), on a fresh database for each N, the day partitions made beforehand, as
 an hour's mostly are. One JSON line per N: wall seconds, rows stored a second, MB a second over
 the loopback link (both directions), daily tests a minute, the client's CPU (cores busy: this
@@ -41,26 +41,36 @@ WAITS = f"""SELECT CASE WHEN locktype<>'advisory' THEN locktype
  WHEN objsubid=2 AND classid::bigint={storage.NETWORK_LOCK} THEN 'network' ELSE 'advisory' END,
  count(*) FROM pg_locks WHERE NOT granted GROUP BY 1"""
 INTERVAL = 0.05
+# The import connections by state and wait (pg_stat_activity), this one left out.
+ACTIVITY = """SELECT state||' '||coalesce(wait_event_type||':'||wait_event,'-'),count(*)
+ FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() GROUP BY 1"""
 
 
 class Waits(threading.Thread):
-    """Seconds spent waiting per lock kind, sampled on a connection of its own."""
+    """Seconds spent waiting per lock kind, sampled on a connection of its own, and the
+    connections' states when the most were waiting on a lock."""
 
     def __init__(self, credentials: Path):
         super().__init__(daemon=True)
         self.credentials, self.seconds, self.stop = credentials, {}, threading.Event()
+        self.busiest: dict = {}
 
     def run(self) -> None:
         with storage.connect(self.credentials) as conn:
             conn.autocommit = True
             while not self.stop.wait(INTERVAL):
-                for kind, count in conn.execute(WAITS).fetchall():
+                found = dict(conn.execute(WAITS).fetchall())
+                for kind, count in found.items():
                     self.seconds[kind] = self.seconds.get(kind, 0) + count * INTERVAL
+                if sum(found.values()) > self.busiest.get("waiting", -1):
+                    self.busiest = dict(conn.execute(ACTIVITY).fetchall())
+                    self.busiest["waiting"] = sum(found.values())
 
-    def result(self) -> dict:
+    def result(self) -> tuple[dict, dict]:
         self.stop.set()
         self.join()
-        return {kind: round(value, 1) for kind, value in sorted(self.seconds.items())}
+        waits = {kind: round(value, 1) for kind, value in sorted(self.seconds.items())}
+        return waits, self.busiest
 
 
 def _partitions(credentials: Path, days: int) -> None:
@@ -97,7 +107,7 @@ def _measure(args) -> None:
     admin = read_credentials(args.admin, "postgres")
     work = Path(tempfile.mkdtemp(prefix="ingest-parallel-"))
     size = args.batch
-    networks = [f"n{i // size % 10}" for i in range(args.tests)]
+    networks = [f"n{i // size % args.networks}" for i in range(args.tests)]
     tests = [
         daily_test(work / f"d{i}", i, ips=args.ips, repeats=args.ips // 2, provider=network)
         for i, network in enumerate(networks)
@@ -117,7 +127,7 @@ def _measure(args) -> None:
         waits.start()
         outcomes = storage_parallel.store(groups, direct, connections=n)
         wall = time.monotonic() - began
-        record_waits = waits.result()
+        record_waits, busiest = waits.result()
         cpu, sent = time.process_time() - cpu, _link_bytes() - sent
         busy, total = (after - before for after, before in zip(_host_cpu(), host, strict=True))
         rows = sum(storage.status(direct)["counts"].values())
@@ -132,6 +142,7 @@ def _measure(args) -> None:
         record |= {"retries": sum(o.retries for o in outcomes)}
         record["failed"] = sum(o.error is not None for o in outcomes)
         record["lock_wait_seconds"] = record_waits
+        record["busiest_moment"] = busiest
         print(json.dumps(record), flush=True)
         helpers.drop_databases(admin, [database])
     print(json.dumps({"same_rows": len(set(stored.values())) == 1}), flush=True)
@@ -144,5 +155,6 @@ if __name__ == "__main__":
     parser.add_argument("--tests", type=int, default=200)
     parser.add_argument("--batch", type=int, default=20)
     parser.add_argument("--ips", type=int, default=2000)
+    parser.add_argument("--networks", type=int, default=18)
     parser.add_argument("--connections", type=int, nargs="+", default=[1, 10, 25, 40])
     sys.exit(_measure(parser.parse_args()))

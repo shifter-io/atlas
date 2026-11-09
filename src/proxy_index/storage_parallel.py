@@ -106,16 +106,22 @@ class Connections:
 
 def retried(work: Callable, pool: Connections, outcome: Outcome):
     """(work(conn), None) once it succeeds, else (None, its error): a deadlock or serialization
-    failure is retried RETRIES times with backoff, each time on a new connection."""
+    failure is retried RETRIES times with backoff (each retry printed with its SQLSTATE), each
+    time on a new connection. After any failure the connection is closed, which rolls its
+    transaction back and frees its locks."""
     attempt = 0
     while True:
         try:
             return work(pool.get()), None
         except ERRORS as error:
             pool.drop()
-            transient = isinstance(error, TRANSIENT) or isinstance(error.__cause__, TRANSIENT)
-            if not transient or attempt == RETRIES:
+            cause = error if isinstance(error, TRANSIENT) else error.__cause__
+            if not isinstance(cause, TRANSIENT) or attempt == RETRIES:
                 return None, error
+        except BaseException:  # its transaction's locks go with the connection, never kept
+            pool.drop()
+            raise
+        print(f"storage_parallel: retry {attempt + 1} ({cause.sqlstate})", file=sys.stderr)
         time.sleep(BACKOFF * 2**attempt)
         attempt += 1
         outcome.retries += 1
