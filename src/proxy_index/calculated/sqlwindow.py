@@ -65,6 +65,37 @@ _LABELS = ",".join(LABELS)
 MAX_WINDOWS = 8
 
 
+def _fragments(width: int) -> dict[str, str]:
+    """onepass()'s per-window SQL: r<j> is the IP's lowest [run_key, release] in window j, and
+    a release row of `releases` is first when no earlier window of the IP has its release."""
+    positions = range(width)
+    inside = [f"o.bucket_start>=k.s{j} AND o.bucket_start<k.u{j}" for j in positions]
+    same = "p.d{i}>0 AND p.r{i}[2] IS NOT DISTINCT FROM p.r{j}[2]"
+    first = [
+        f"p.d{j}>0" + "".join(f" AND NOT ({same.format(i=i, j=j)})" for i in range(j))
+        for j in positions
+    ]
+    return {
+        "bounds": ",".join(f"%(s{j})s::timestamptz[],%(u{j})s::timestamptz[]" for j in positions),
+        "names": ",".join(f"s{j},u{j}" for j in positions),
+        "days": ",".join(
+            f"sum(o.count) FILTER (WHERE {w}) AS c{j},min(k.asked) FILTER (WHERE {w}) AS a{j},"
+            f"max(k.asked) FILTER (WHERE {w}) AS b{j},"
+            f"min(ARRAY[o.run_key,k.release_id]) FILTER (WHERE {w}) AS r{j}"
+            for j, w in enumerate(inside)
+        ),
+        "per_ip": ",".join(
+            f"sum(c{j})::bigint AS c{j},count(c{j}) AS d{j},min(a{j}) AS a{j},max(b{j}) AS b{j},"
+            f"min(r{j}) AS r{j}"
+            for j in positions
+        ),
+        "releases": ",".join(
+            f"(p.r{j}[2],p.first_seen IS NOT NULL AND {first[j]})" for j in positions
+        ),
+        "windows": ",".join(f"({j},p.c{j},p.d{j},p.a{j},p.b{j},p.r{j}[2])" for j in positions),
+    }
+
+
 @cache
 def onepass(width: int) -> str:
     """The statement that counts up to `width` windows of each group (a product's runs with
@@ -73,49 +104,37 @@ def onepass(width: int) -> str:
     k holds one row per (group, run): asked is the run's requested country in lower case (NULL
     when it asked for none), [lo, hi) the group's widest range and [s<j>, u<j>) its window j.
     Each observation row is read and aggregated once, into its IP's day (`day`), then its IP
-    (`per_ip`); every aggregate is hash-friendly and filtered per window. Each IP is joined to
-    its first-seen bin once, then unpivoted into one row per window it was seen in (slot:
-    group * width + j), labelled from the release of its lowest run_key in that window.
+    (`per_ip`, with its first-seen time); every aggregate is hash-friendly and filtered per
+    window. Each IP is labelled once per distinct release of its windows (the release of its
+    lowest run_key in each), then unpivoted into one row per window it was seen in (slot:
+    group * width + j).
     """
-    positions = range(width)
-    inside = [f"o.bucket_start>=k.s{j} AND o.bucket_start<k.u{j}" for j in positions]
-    days = ",".join(
-        f"sum(o.count) FILTER (WHERE {w}) AS c{j},min(k.asked) FILTER (WHERE {w}) AS a{j},"
-        f"max(k.asked) FILTER (WHERE {w}) AS b{j},min(o.run_key) FILTER (WHERE {w}) AS r{j}"
-        for j, w in enumerate(inside)
-    )
-    per_ip = ",".join(
-        f"sum(c{j})::bigint AS c{j},count(c{j}) AS d{j},min(a{j}) AS a{j},max(b{j}) AS b{j},"
-        f"min(r{j}) AS r{j}"
-        for j in positions
-    )
-    windows = ",".join(f"({j},p.c{j},p.d{j},p.a{j},p.b{j},p.r{j})" for j in positions)
-    bounds = ",".join(f"%(s{j})s::timestamptz[],%(u{j})s::timestamptz[]" for j in positions)
-    names = ",".join(f"s{j},u{j}" for j in positions)
-    return f"""WITH k AS (
+    sql = _fragments(width)
+    return f"""WITH k AS MATERIALIZED (
  SELECT k.*,{_RUN_RELEASE} AS release_id
  FROM unnest(%(groups)s::int[],%(keys)s::bigint[],%(products)s::int[],%(asked)s::text[],
-  %(lo)s::timestamptz[],%(hi)s::timestamptz[],{bounds})
-  AS k(grp,run_key,product_id,asked,lo,hi,{names})
+  %(lo)s::timestamptz[],%(hi)s::timestamptz[],{sql["bounds"]})
+  AS k(grp,run_key,product_id,asked,lo,hi,{sql["names"]})
 ), day AS (
- SELECT k.grp,k.product_id,o.ip_id,{days}
+ SELECT k.grp,k.product_id,o.ip_id,{sql["days"]}
  FROM k JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.lo
   AND o.bucket_start<k.hi
  GROUP BY k.grp,k.product_id,o.ip_id,o.bucket_start::date
 ), per_ip AS (
- SELECT grp,product_id,ip_id,{per_ip} FROM day GROUP BY grp,product_id,ip_id
+ SELECT grp,ip_id,{sql["per_ip"]},(SELECT m.first_seen FROM product_ips m
+  WHERE m.product_id=day.product_id AND m.ip_id=day.ip_id) AS first_seen
+ FROM day GROUP BY grp,product_id,ip_id
 ), labelled AS (
  SELECT p.grp*{width}+w.j AS slot,w.observations,w.days,e.matched,
   {",".join(f"e.{f}" for f in LABELS)},
   coalesce(e.country_code,'')<>'' AND w.asked IS NOT NULL AS located,
   coalesce(e.country_code,'')<>'' AND w.asked=w.asked_max AND w.asked=lower(e.country_code)
    AS geo,
-  date_bin('5 minutes',m.first_seen,'1970-01-01 00:00:00+00'::timestamptz) AS bin
- FROM per_ip p JOIN product_ips m ON m.product_id=p.product_id AND m.ip_id=p.ip_id
- CROSS JOIN LATERAL (VALUES {windows}) AS w(j,observations,days,asked,asked_max,first_run)
- JOIN k r ON r.grp=p.grp AND r.run_key=w.first_run
- LEFT JOIN ip_enrichment_fields e ON e.ip_id=p.ip_id AND e.release_id=r.release_id
- WHERE w.days>0
+  date_bin('5 minutes',p.first_seen,'1970-01-01 00:00:00+00'::timestamptz) AS bin
+ FROM per_ip p CROSS JOIN LATERAL (VALUES {sql["releases"]}) AS x(release,first)
+ LEFT JOIN ip_enrichment_fields e ON e.ip_id=p.ip_id AND e.release_id=x.release
+ CROSS JOIN LATERAL (VALUES {sql["windows"]}) AS w(j,observations,days,asked,asked_max,release)
+ WHERE x.first AND w.days>0 AND w.release IS NOT DISTINCT FROM x.release
 )
 SELECT slot,GROUPING(country_code,bin) AS part,{_LABELS},bin,count(*) AS ips,
  sum(observations)::bigint AS observations,count(*) FILTER (WHERE located) AS located,
