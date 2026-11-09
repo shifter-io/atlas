@@ -144,9 +144,10 @@ class Full:
         return fleets, overlaps  # build() counted them from the IP sets
 
 
-def read(conn, config, method_id, as_of, mode="incremental"):
+def read(conn, config, method_id, as_of, mode="incremental", prefetch=None):
     """The inputs of a calculation at as_of (on the bucket grid) in mode ("full" or
-    "incremental"), read in the calculation's snapshot."""
+    "incremental"), read in the calculation's snapshot; prefetch (parallel_reads.Prefetcher):
+    the incremental mode reads its missed groups' window inputs ahead over its helpers."""
     if mode not in MODES:
         raise ValueError(f"calculation mode must be one of {MODES}, not {mode!r}")
     start = as_of - timedelta(days=RAW_DAYS)  # older raw rows are archived
@@ -181,7 +182,7 @@ def read(conn, config, method_id, as_of, mode="incremental"):
         signed = lists.signatures(conn, head | {"methodology": {"id": method_id}}, runs, buckets)
         hashed = {"runs": [{k: v for k, v in r.items() if k != "summary"} for r in runs]}
         hashed["signatures"] = sorted([*key, value] for key, value in signed.items())
-        source = Incremental(conn, config, as_of, runs, buckets, signed)
+        source = Incremental(conn, config, as_of, runs, buckets, signed, prefetch)
     hashed |= {"release": release, "buckets": buckets, "evidence": evidence}
     # The incremental mode hashes the geo rows' rollup marks, the full mode the rows.
     geo = [g.plain() for g in scheduled["geo"]] if signed is None else rollups.marks(conn, as_of)
@@ -222,7 +223,7 @@ class Incremental(Full):
     """build()'s source in the incremental mode: stored lists for the hit windows, the missed
     windows counted in the database, and the extension modules for the rest."""
 
-    def __init__(self, conn, config, as_of, runs, buckets, signed):
+    def __init__(self, conn, config, as_of, runs, buckets, signed, prefetch=None):
         active = {b["run_key"] for b in buckets}
         self.conn, self.as_of, self.limits = conn, as_of, payload_limits(config)
         self.signed, self.counted = signed, {}
@@ -239,11 +240,20 @@ class Incremental(Full):
         stale = hourly.stale_lists(conn, sorted({k for g, _ in missed for k in self.runs[g]}))
         missed |= {k for k, hit in self.hits.items() if hit["list_id"] in stale}
         self.hits = {k: hit for k, hit in self.hits.items() if k not in missed}
-        self.missed = defaultdict(list)  # group -> hours of its missed windows
-        for g, h in sorted(missed):
+        # group -> hours of its missed windows, the groups in the order build() measures them
+        # (calculator._measure(): product by product, each product's in the runs' order)
+        products = {p: n for n, p in enumerate(dict.fromkeys(groups.values()))}
+        measured = {g: n for n, g in enumerate(sorted(groups, key=lambda g: products[g[0]]))}
+        self.missed = defaultdict(list)
+        for g, h in sorted(missed, key=lambda m: (measured[m[0]], m[1])):
             self.missed[g].append(h)
         super().__init__(())  # no observation row: missed windows are counted in the database
         self._count(groups, windows, max(windows) // 24)
+        self.prefetch = prefetch
+        if prefetch is not None:  # each group's specs, made here: the helpers only read
+            specs = {g: self._specs(g) for g in self.missed}
+            read = lambda c, g: self._window_inputs(c, specs[g])  # noqa: E731
+            prefetch.start(self.missed, read, self._rows(runs, buckets))
 
     def _hits(self, signed, windows):
         """The stored lists of the windows' signatures: {(group, hours): list row}."""
@@ -333,15 +343,34 @@ class Incremental(Full):
 
     def _inputs(self, key, hours):
         """The window's sqlwindow inputs: on its group's first miss, every missed window of the
-        group is counted in one statement, and each is dropped once used."""
+        group is counted in one statement (read ahead by the prefetcher, if any), and each is
+        dropped once used."""
         if (key, hours) not in self.counted:
-            asked, end = self.runs[key], self.as_of
-            specs = [
-                WindowSpec((key, h), key[0], tuple(asked), end - timedelta(hours=h), end, asked)
-                for h in self.missed[key]
-            ]
-            self.counted |= window_inputs(self.conn, specs, release_mode="per_run", release_id=None)
+            if self.prefetch is None:
+                self.counted |= self._window_inputs(self.conn, self._specs(key))
+            else:
+                self.counted |= self.prefetch.take(key)
         return self.counted.pop((key, hours))
+
+    @staticmethod
+    def _rows(runs, buckets):
+        """Each group's estimated observation rows: its runs' successful requests in the window
+        (each gives at most one row), from the bucket rows read already."""
+        found, group = defaultdict(int), {r["run_key"]: r["group"] for r in runs}
+        for b in buckets:
+            found[group[b["run_key"]]] += b["counters"]["successes"]
+        return found
+
+    def _specs(self, key):
+        asked, end = self.runs[key], self.as_of
+        return [
+            WindowSpec((key, h), key[0], tuple(asked), end - timedelta(hours=h), end, asked)
+            for h in self.missed[key]
+        ]
+
+    @staticmethod
+    def _window_inputs(conn, specs):
+        return window_inputs(conn, specs, release_mode="per_run", release_id=None)
 
     def ips(self, key, hours, points):
         return fleetsql.fill(points, self.points.get((key, hours), {}))

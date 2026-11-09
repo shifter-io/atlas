@@ -27,6 +27,7 @@ from .inputs import (
     previous_products,
     tested_by_product,
 )
+from .parallel_reads import Prefetcher, temp_written
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
 from .policy import (
@@ -115,9 +116,13 @@ class _Groups:
     scheduled: dict
 
 
-def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
+def calculate(
+    database, methodology, *, as_of=None, publish=False, mode="full", parallel_reads=None
+):
     """Calculate (and publish) a build. mode "full" reads every observation of the window, the
-    oracle; "incremental" (`calculate --incremental`) reads only the missed windows'."""
+    oracle; "incremental" (`calculate --incremental`) reads only the missed windows', over
+    parallel_reads helper connections (else the calculate.parallel_reads setting; see
+    parallel_reads.py)."""
     if mode not in incremental.MODES:
         raise ValueError(f"calculation mode must be one of {incremental.MODES}, not {mode!r}")
     config, method_id = load(methodology)
@@ -128,12 +133,15 @@ def calculate(database, methodology, *, as_of=None, publish=False, mode="full"):
         raise ValueError("Measurement cutoff requires a timezone")
     if mode == "incremental":  # the geo rollups, a day per transaction (rollups.fill())
         rollups.fill(database, as_of)
-    with connect(database) as conn:
+    # The helpers close before the transaction ends, on success and on failure; the temp bytes
+    # written are printed once every connection is closed.
+    with temp_written(database), connect(database) as conn, Prefetcher(conn) as prefetch:
         conn.row_factory = dict_row
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         conn.execute(f"SELECT pg_advisory_xact_lock({rollups.LOCK})")
+        prefetch.configure(parallel_reads)  # the calculate.* settings; SET LOCAL work_mem
         as_of = cutoff(conn, as_of, latest)  # on the 5-minute grid of the stored facts
-        inputs = incremental.read(conn, config, method_id, as_of, mode)
+        inputs = incremental.read(conn, config, method_id, as_of, mode, prefetch)
         previous = previous_payload(conn)  # only the groups' ids and scores
         fingerprint = inputs.fingerprint
         conn.execute(
