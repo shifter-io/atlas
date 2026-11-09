@@ -175,14 +175,19 @@ def partitions(runs):
     return found | {(DAILY[2], row[0]) for run in runs for row in run.geo_rows}
 
 
-def insert_buckets(conn, runs, existing):
-    """Add the new runs' buckets, creating the daily partitions they, their IPs and geo rows need
-    where partition() would: existing holds the names found under the lock."""
+def missing(runs, existing):
+    """(table, name, start, end) of the daily partitions the runs' buckets, IPs and geo rows need
+    where partition() would put them, and existing (the names found) lacks."""
     wanted = {(t, *holder(t, moment, existing)) for t, moment in partitions(runs)}
-    for table, name, start, end in sorted(wanted):
-        if name not in existing:
-            for query in creation(table, name, start, end):
-                conn.execute(query)
+    return sorted(w for w in wanted if w[1] not in existing)
+
+
+def insert_buckets(conn, runs, existing):
+    """Add the new runs' buckets, creating any daily partition they, their IPs and geo rows need
+    that is still missing (storage._store creates them first): existing holds the names found."""
+    for table, name, start, end in missing(runs, existing):
+        for query in creation(table, name, start, end):
+            conn.execute(query)
     conn.execute(
         f"INSERT INTO run_buckets(bucket_start,run_key,{BUCKET_COLUMNS}) SELECT b.bucket_start,"
         f"r.run_key,b.{BUCKET_COLUMNS.replace(',', ',b.')} FROM incoming_buckets b "

@@ -316,7 +316,7 @@ waits for real time: the hours are generated ahead while earlier ones are stored
 ```sh
 uv run python scripts/scale/simulate.py --database <staging toml> \
   --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --profile <profile.json> --days 7 \
-  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--batch-daily 20] [--connections 20] \
+  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--batch-daily 20] [--connections 25] \
   [--memory-budget 4] [--pulses] [--siteapi URL] [--plan-only] [--no-scope]
 ```
 
@@ -370,7 +370,7 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
 
    **Parallel connections** (INGEST-PARALLEL-1, `storage_parallel.py`): each connection's
    TCP receive window caps it at about 0.6 MB/s over the 77 ms link to the database, so the
-   hour's batches go over `--connections` (default 20) connections at once, one worker thread
+   hour's batches go over `--connections` (default 25; 40 and more where the server has the slots) connections at once, one worker thread
    and one connection each. `--connections 1` is the serial path, statement for statement.
    - *The lock, narrowed.* An import holds the ingest lock (817452901) shared, so imports run
      side by side while a purge, seed, migration or rebuild (which take it exclusively) waits
@@ -387,9 +387,9 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
      can go instead. A deadlock (40P01) or serialization failure (40001) rolls back only that
      batch, retried 3 times with backoff on a new connection; one that still fails is retried
      one country at a time after the others (`daily/batches.py`).
-   - *Caps*, printed at the start of each hour: the connections are capped so that a quarter
-     of the server's `max_connections`, and at least 20, stay free for production (a capped
-     count is a warning, not an error), and a batch is split so that the batches in flight,
+   - *Caps*, printed at the start of each hour: the connections are capped so that 10 of the server's
+     `max_connections` slots stay free for production (a capped count is a warning, not an
+     error), and a batch is split so that the batches in flight,
      estimated at 20 times their run directories' bytes, stay within `--memory-budget` GB
      (default 4, inside the 6G memory cap).
 2. **browser**: one browser node per network of the settings' hosts, bound to its host's

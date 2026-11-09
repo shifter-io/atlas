@@ -46,7 +46,7 @@ def register(commands) -> None:
         "--batch", type=int, help="daily tests stored per transaction (default 20, at least 1)"
     )
     ingest.add_argument(
-        "--connections", type=int, help="transactions at once (default 20, at least 1)"
+        "--connections", type=int, help="transactions at once (default 25, at least 1)"
     )
     hour = actions.add_parser("hour", help="Manager: run the next hour's test, then ingest it")
     check = actions.add_parser("check", help="Check formulas and template for all 24 hours")

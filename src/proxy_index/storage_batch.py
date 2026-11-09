@@ -1,6 +1,7 @@
 """storage.ingest_many's session temp tables: each holds the rows of every run of a batch with
-the run's index in it (idx), and is dropped at commit. A multi-row statement carries at most ROWS
-rows; all go in pipeline mode, so filling the tables costs no round trip."""
+the run's index in it (idx), and is dropped at commit. A multi-row statement carries as many rows
+as PostgreSQL's PARAMETERS allow; all go in pipeline mode, so filling the tables costs no round
+trip."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from psycopg import RawCursor
 
 from .storage_read import OUTCOME_KEYS
 
-ROWS = 1000
+PARAMETERS = 65535  # the most a statement can bind (the protocol's 16-bit count)
 # pool_stats' typed pool columns (storage_ingest._profile).
 POOL = (
     "target_id target_url target_engine target_version requested_country runner_location "
@@ -61,13 +62,16 @@ def load(conn, rows):
 
 
 def many(conn, head, tail, types, rows):
-    """Run head + a VALUES list + tail over rows, ROWS at a time; types casts each value. The
-    placeholders are PostgreSQL's ($n): psycopg would parse thousands of %s again every time."""
+    """Run head + a VALUES list + tail over rows, as many at a time as PARAMETERS allows; types
+    casts each value. The placeholders are PostgreSQL's ($n): psycopg would parse thousands of
+    %s again every time."""
     if not rows:
         return
     casts = [f"::{kind}" for kind in types] if types else [""] * len(rows[0])
-    for start in range(0, len(rows), ROWS):
-        part, width = rows[start : start + ROWS], len(casts)
+    width = len(casts)
+    step = PARAMETERS // width
+    for start in range(0, len(rows), step):
+        part = rows[start : start + step]
         marks = ",".join(
             "(" + ",".join(f"${r * width + c + 1}{cast}" for c, cast in enumerate(casts)) + ")"
             for r in range(len(part))

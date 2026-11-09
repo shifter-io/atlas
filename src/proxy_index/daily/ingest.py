@@ -7,7 +7,7 @@ each country that completed and reconciles becomes an ingestible run directory u
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
 sink writes) and enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
 are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
-transaction, `connections` (20) batches at once (daily.batches over storage_parallel; a batch
+transaction, `connections` (25) batches at once (daily.batches over storage_parallel; a batch
 that fails is retried one country at a time). Then each
 cell gets `daily_test_started` and `daily_test_finished` (done only when every due country was
 measured and imported, failed otherwise), in campaign order. A database error fails its country

@@ -35,7 +35,7 @@ OVERLAP = (
 def quick(monkeypatch):
     """Short retry pauses; the whole server free for the test's connections."""
     monkeypatch.setattr(storage_parallel, "BACKOFF", 0.01)
-    monkeypatch.setattr(storage_parallel, "RESERVE", (0, 0))
+    monkeypatch.setattr(storage_parallel, "RESERVE", 0)
 
 
 def network(n: int) -> str:
@@ -56,7 +56,9 @@ def hour(tmp_path, tests=8, pulses=4):
         for n in (0, 1, 4, 5)
         if n + 2 < tests
     ]
-    found = [pulse(tmp_path / run_id("pulse", n), n, provider=f"net-{n % 3}") for n in range(pulses)]
+    found = [
+        pulse(tmp_path / run_id("pulse", n), n, provider=f"net-{n % 3}") for n in range(pulses)
+    ]
     return groups + ([Group(found, networks=frozenset(map(network, range(6))))] if found else [])
 
 
@@ -69,6 +71,8 @@ def test_groups_store_the_same_rows_over_1_4_and_20_connections(
         database = databases(template=database_template)
         outcomes = storage_parallel.store(groups, database, connections=n)
         assert [o.error for o in outcomes] == [None] * len(groups)
+        # The day's partitions are created before any import locks a table: no deadlock.
+        assert sum(o.retries for o in outcomes) == 0
         with connect(database) as conn:
             stored[n] = dump(conn)
             ips = conn.execute("SELECT count(*),count(DISTINCT ip) FROM ip_addresses").fetchone()
@@ -210,7 +214,7 @@ def test_updates_in_opposite_orders_deadlock_and_are_retried_sorted_ones_do_not(
 
 def test_the_caps_split_groups_and_spare_connections(database, tmp_path, monkeypatch, capsys):
     groups = [Group([pulse(tmp_path / f"p{n}", n) for n in range(k, k + 2)]) for k in (0, 2)]
-    monkeypatch.setattr(storage_parallel, "RESERVE", (1.0, 0))  # nothing left to spare
+    monkeypatch.setattr(storage_parallel, "RESERVE", 10**6)  # nothing left to spare
     parts = []
     outcomes = storage_parallel.store(
         groups, database, connections=4, memory_budget=1, on_commit=lambda p, _: parts.append(p)

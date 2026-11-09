@@ -202,7 +202,7 @@ def arguments(argv=None):
     parser.add_argument("--out", help="directory of the state, the report and the hours")
     parser.add_argument("--jobs", type=int, default=6, help="worker processes generating hours")
     parser.add_argument("--batch-daily", type=int, default=20, help="daily tests a transaction")
-    parser.add_argument("--connections", type=int, default=20, help="transactions at once")
+    parser.add_argument("--connections", type=int, default=25, help="transactions at once")
     parser.add_argument(
         "--memory-budget", type=float, default=4.0, help="GB the transactions in flight may take"
     )

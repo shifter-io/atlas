@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from . import storage_batch, storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
-from .partitions import holder, monthly
+from .partitions import creation, holder, monthly
 from .partitions import partition as partition
 from .stats import Histogram
 from .storage_batch import POOL
@@ -223,28 +223,53 @@ def _read(idx, directory, batch_id, ip_rows):
     return run
 
 
+def _begin(conn, pipeline, runs):
+    """Open the import's transaction under the shared and the runs' locks; the stored runs
+    (STORED rows) and the names of the partitions found, after one round trip."""
+    conn.execute("BEGIN")
+    conn.execute(f"SELECT pg_advisory_xact_lock_shared({INGEST_LOCK})")
+    conn.execute(RUN_LOCKS, ([run.run_id for run in runs],))
+    version = conn.execute("SELECT max(version) FROM schema_versions")
+    stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
+    # The names partition() looks for: the month's partition, then the day's.
+    wanted = storage_ingest.partitions(runs)
+    names = sorted({n for t, m in wanted for n in (monthly(t, m)[0], holder(t, m, ())[0])})
+    found = conn.execute(
+        "SELECT n FROM unnest(%s::text[]) n WHERE to_regclass(n) IS NOT NULL", (names,)
+    )
+    pipeline.sync()
+    if version.fetchone()[0] != SCHEMA_VERSION:
+        raise ValueError("Database schema requires db-migrate or a rebuild before import")
+    return stored.fetchall(), {n for (n,) in found}
+
+
+def _create_partitions(conn, missing):
+    """Leave the import's transaction and queue the missing partitions' creation in one of their
+    own, under the ingest lock held exclusively: creating one locks its parent and the tables its
+    foreign keys reference, so no import may hold locks on them meanwhile (it would deadlock)."""
+    conn.execute("ROLLBACK")
+    conn.execute("BEGIN")
+    conn.execute(f"SELECT pg_advisory_xact_lock({INGEST_LOCK})")
+    for table, name, start, end in missing:
+        for query in creation(table, name, start, end):
+            conn.execute(query)
+    conn.execute("COMMIT")
+
+
 def _store(runs, conn):
     """Store read runs in one transaction and three round trips on conn: the shared lock with the
-    reads under it, every statement of the batch, the scope totals with COMMIT."""
+    reads under it, every statement of the batch, the scope totals with COMMIT. A batch that
+    needs a new day's partitions creates them and begins again (one more round trip)."""
     conn.autocommit = True  # BEGIN below: psycopg's own would take a round trip in pipeline mode
     with conn.pipeline() as pipeline:
         # The entire history/enrichment/cache update commits together.
-        conn.execute("BEGIN")
-        conn.execute(f"SELECT pg_advisory_xact_lock_shared({INGEST_LOCK})")
-        conn.execute(RUN_LOCKS, ([run.run_id for run in runs],))
-        version = conn.execute("SELECT max(version) FROM schema_versions")
-        stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
-        # The names partition() looks for: the month's partition, then the day's.
-        wanted = storage_ingest.partitions(runs)
-        names = sorted({n for t, m in wanted for n in (monthly(t, m)[0], holder(t, m, ())[0])})
-        found = conn.execute(
-            "SELECT n FROM unnest(%s::text[]) n WHERE to_regclass(n) IS NOT NULL", (names,)
-        )
-        pipeline.sync()
-        if version.fetchone()[0] != SCHEMA_VERSION:
-            raise ValueError("Database schema requires db-migrate or a rebuild before import")
-        fresh = storage_batch.existing(runs, stored.fetchall())
-        scopes, new_ips, enriched = _store_runs(conn, runs, fresh, {n for (n,) in found})
+        stored, existing = _begin(conn, pipeline, runs)
+        missing = storage_ingest.missing(storage_batch.existing(runs, stored), existing)
+        if missing:
+            _create_partitions(conn, missing)  # sent with the next begin
+            stored, existing = _begin(conn, pipeline, runs)
+        fresh = storage_batch.existing(runs, stored)
+        scopes, new_ips, enriched = _store_runs(conn, runs, fresh, existing)
         pipeline.sync()
         scopes = scopes.fetchall()
         for idx, run_key, *_, summary in scopes:

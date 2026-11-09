@@ -12,15 +12,14 @@ network can go instead, and reports each committed group (`on_commit`) as it fin
 backoff on a new connection while the others go on; a group that still fails gets an
 IngestBatchError naming its run ids, once the others finished, for the caller's own retry.
 
-Bounds: N is capped so that a quarter of max_connections, and at least 20, stay free for the
-other users of the server, and groups are split so that N in flight fit the memory budget; both
-caps are printed. connections=1 stores the groups one after the other on one connection, with
-the statements of ingest_many and estimate_runs.
+Bounds: N (default 25, any number the server's free slots allow) is capped so that RESERVE
+(10) connection slots stay free for production, and groups are split so that N in flight fit
+the memory budget; both caps are printed. connections=1 stores the groups one after the other
+on one connection, with the statements of ingest_many and estimate_runs.
 """
 
 from __future__ import annotations
 
-import math
 import sys
 import threading
 import time
@@ -34,9 +33,9 @@ import psycopg
 from . import storage
 from .estimates import compute
 
-CONNECTIONS = 20
+CONNECTIONS = 25
 MEMORY_BUDGET = 4 << 30  # bytes
-RESERVE = (0.25, 20)  # the share of max_connections, and the number, left free for others
+RESERVE = 10  # connection slots always left free for production
 RETRIES = 3
 BACKOFF = 0.5  # seconds before the first retry, doubled for each next one
 EXPANSION = 20  # bytes in memory per byte of a run directory's files while it is stored
@@ -147,13 +146,11 @@ def _capped(credentials_file, wanted: int) -> int:
     """wanted, or fewer: the connections the server has free beyond its reserve (at least 1)."""
     with storage.connect(credentials_file) as conn:
         limit, used = conn.execute(CAPACITY).fetchone()
-    share, least = RESERVE
-    reserve = max(least, math.ceil(limit * share))
-    allowed = max(1, min(wanted, limit - used - reserve))
+    allowed = max(1, min(wanted, limit - used - RESERVE))
     if allowed < wanted:
         print(
             f"storage_parallel: warning: {allowed} connections, not {wanted}: max_connections "
-            f"{limit}, {used} in use, {reserve} kept free",
+            f"{limit}, {used} in use, {RESERVE} kept free",
             file=sys.stderr,
         )
     return allowed
