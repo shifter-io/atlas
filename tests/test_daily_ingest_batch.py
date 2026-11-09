@@ -151,6 +151,8 @@ async def test_a_campaign_hour_goes_in_batches(monkeypatch, hour):
         await hour(batch=0)
     with pytest.raises(ValueError, match="at least one connection"):
         await hour(connections=0)
+    with pytest.raises(TypeError, match="unexpected sizes"):
+        await hour(batches=3)
 
 
 async def test_a_failed_batch_is_retried_one_country_at_a_time(monkeypatch, hour, database):

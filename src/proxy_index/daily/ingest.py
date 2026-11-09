@@ -372,15 +372,19 @@ async def ingest_campaign(
     database=None,
     formulas=None,
     spool=None,
-    batch: int = batches.BATCH,
-    connections: int = storage_parallel.CONNECTIONS,
+    **sizes: int,
 ) -> dict:
     """Import every cell of a collected daily test and emit the events not yet emitted.
 
-    The cells' countries are stored about `batch` at a time, whole cells per batch (a larger
-    cell is split into batches of its own), `connections` batches at once. With `formulas`,
-    store each imported country's estimated hours, then release the ended ones.
+    The cells' countries are stored about `batch` (sizes, default batches.BATCH) at a time,
+    whole cells per batch (a larger cell is split into batches of its own), `connections`
+    (default storage_parallel.CONNECTIONS) batches at once. With `formulas`, store each
+    imported country's estimated hours, then release the ended ones.
     """
+    batch = sizes.pop("batch", batches.BATCH)
+    connections = sizes.pop("connections", storage_parallel.CONNECTIONS)
+    if sizes:
+        raise TypeError(f"ingest_campaign() got unexpected sizes {sorted(sizes)}")
     if batch < 1:
         raise ValueError("the batch must hold at least one daily test")
     if connections < 1:

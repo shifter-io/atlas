@@ -196,6 +196,24 @@ def _next(pending: list[int], parts: list[Group], running: dict) -> int:
     return next((k for k in pending if not parts[k].networks & busy), pending[0])
 
 
+def _run(executor, pool, parts: list[Group], connections: int, on_commit) -> list[Outcome]:
+    """Hand the parts out, at most `connections` in flight; each one's Outcome."""
+    found: list[Outcome] = [Outcome()] * len(parts)
+    pending, running = list(range(len(parts))), {}
+    while pending or running:
+        while pending and len(running) < connections:
+            k = _next(pending, parts, running)
+            pending.remove(k)
+            running[executor.submit(_store_group, parts[k], pool)] = k
+        done, _ = wait(running, return_when=FIRST_COMPLETED)
+        for future in done:
+            k = running.pop(future)
+            found[k] = future.result()
+            if on_commit and found[k].error is None:
+                on_commit(parts[k], found[k])
+    return found
+
+
 def store(
     groups: list[Group],
     credentials_file,
@@ -221,21 +239,10 @@ def store(
         f"runs a group (memory budget {memory_budget / 2**30:.1f} GB)",
         file=sys.stderr,
     )
-    found: list[Outcome | None] = [None] * len(parts)
-    pool, pending, running = Connections(credentials_file), list(range(len(parts))), {}
+    pool = Connections(credentials_file)
     try:
         with ThreadPoolExecutor(min(connections, len(parts))) as executor:
-            while pending or running:
-                while pending and len(running) < connections:
-                    k = _next(pending, parts, running)
-                    pending.remove(k)
-                    running[executor.submit(_store_group, parts[k], pool)] = k
-                done, _ = wait(running, return_when=FIRST_COMPLETED)
-                for future in done:
-                    k = running.pop(future)
-                    found[k] = future.result()
-                    if on_commit and found[k].error is None:
-                        on_commit(parts[k], found[k])
+            found = _run(executor, pool, parts, connections, on_commit)
     finally:
         pool.close()
     return [
