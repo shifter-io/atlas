@@ -375,20 +375,22 @@ class Pool:
         try:
             while not self.closing or self.running:
                 self._hand_out()
-                kind, *event = self.events.get()
-                if kind == "submit":
-                    key, self.parts[key], self.sizes[key] = event
-                    self.pending.append(key)
-                elif kind == "done":
-                    self._done(*event)
-                elif kind == "dead":
-                    self._dead(event[0])
+                self._handle(*self.events.get())
         finally:  # closed, or broken: no ticket is left unresolved
             for key in [*self.pending, *self.running]:
                 if not self.tickets[key].cancel() and not self.tickets[key].done():
                     self.tickets[key].set_exception(WorkerError("the store stopped"))
             for lane in self.lanes:
                 lane.close()
+
+    def _handle(self, kind: str, *event) -> None:
+        if kind == "submit":
+            key, self.parts[key], self.sizes[key] = event
+            self.pending.append(key)
+        elif kind == "done":
+            self._done(*event)
+        elif kind == "dead":
+            self._dead(event[0])
 
     def _hand_out(self) -> None:
         if not any(lane.alive for lane in self.lanes):

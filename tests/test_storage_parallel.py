@@ -122,7 +122,11 @@ def single(tmp_path, tests: int) -> list[Group]:
     """`tests` daily tests (as hour's), one a group."""
     return [
         Group(
-            [daily_test(tmp_path / run_id("daily", n), n, ips=300, repeats=100, provider=network(n))],
+            [
+                daily_test(
+                    tmp_path / run_id("daily", n), n, ips=300, repeats=100, provider=network(n)
+                )
+            ],
             networks=frozenset({network(n)}),
         )
         for n in range(tests)
@@ -331,7 +335,9 @@ def test_groups_of_one_network_are_not_handed_out_together():
     assert storage_parallel._next([1, 3], parts, running) == 1  # none free: the first
 
 
-def test_groups_store_the_same_rows_over_1_2_and_4_processes(databases, database_template, tmp_path):
+def test_groups_store_the_same_rows_over_1_2_and_4_processes(
+    databases, database_template, tmp_path
+):
     groups = hour(tmp_path)
     stored = {}
     for processes in (1, 2, 4):
@@ -396,7 +402,7 @@ def test_a_dead_worker_process_fails_its_groups_named_and_the_others_finish(
     """net-a's group waits on its network lock (held here) in one process; that process is
     killed: its group fails naming its run, the other process's group commits."""
     a, b = (
-        Group([pulse(tmp_path / name, n, provider=name)], networks=frozenset({name}))
+        Group([pulse(tmp_path / run_id("pulse", n), n, provider=name)], networks=frozenset({name}))
         for n, name in ((0, "net-a"), (5, "net-b"))
     )
     storage.ingest(pulse(tmp_path / "first", 2), database)  # the day's partitions
@@ -440,14 +446,14 @@ def test_an_open_pool_stores_groups_handed_ahead_once(database, tmp_path, monkey
     monkeypatch.setattr(storage_parallel.ThreadLane, "send", send)
     options = storage_parallel.Options(connections=4, memory_budget=1, processes=1)
     with storage_parallel.Pool(database, options) as pool:
-        ahead = pool.submit(groups[2:])
+        pool.submit(groups[2:])  # handed ahead of their store
         committed = []
         first = storage_parallel.store(groups[:2], database, pool=pool)
         later = storage_parallel.store(
             groups[2:], database, pool=pool, on_commit=lambda g, _: committed.append(g)
         )
-        assert pool.submit(groups[2:]) != ahead  # waited for: a new submit stores again
-    assert sent == [0, 0, 0, 0, 0, 0] and committed == groups[2:]
+        assert not pool.tickets  # waited for: a later submit would store them again
+    assert sent == [0, 0, 0, 0] and committed == groups[2:]  # the groups handed ahead, once
     assert [r["imported"] for o in first + later for r in o.results] == [True] * 4
 
 

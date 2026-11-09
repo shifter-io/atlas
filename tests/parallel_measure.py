@@ -7,11 +7,12 @@ round trips: `tc qdisc add dev lo root netem delay 38.5ms limit 100000`):
         [--connections 1 10 25 40] [--processes 1 2 4 7]
 stores the same synthetic daily tests (ingest_cases.daily_test, 30% of each test's IPs shared
 with the next) in batches of `--batch`, each batch one network's (`--networks` 18, as an hour's
-batches are whole cells), on a fresh database for each N and P, the day partitions made beforehand,
-as an hour's mostly are. One JSON line per N and P: wall seconds, rows stored a second, MB a second over
-the loopback link (both directions), daily tests a minute, the client's CPU (cores busy and
-seconds a test: this process's threads and its worker processes) and the host's (all cores, the database's included), and the seconds
-connections spent waiting for each lock (pg_locks, sampled every 50 ms); then whether every N
+batches are whole cells), on a fresh database for each N and P, the day partitions made
+beforehand, as an hour's mostly are. One JSON line per N and P: wall seconds, rows stored a
+second, MB a second over the loopback link (both directions), daily tests a minute, the
+client's CPU (cores busy and seconds a test: this process's threads and its worker processes)
+and the host's (all cores, the database's included), and the seconds connections spent
+waiting for each lock (pg_locks, sampled every 50 ms); then whether every N and P
 stored the same rows.
 """
 

@@ -8,10 +8,10 @@ chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the r
 sink writes) and enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
 are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
 transaction, `connections` (25) batches at once over `processes` worker processes
-(daily.batches over storage_parallel; a batch that fails is retried one country at a time). Then each
-cell gets `daily_test_started` and `daily_test_finished` (done only when every due country was
-measured and imported, failed otherwise), in campaign order. A database error fails its country
-or its cell's events, never the other cells.
+(daily.batches over storage_parallel; a batch that fails is retried one country at a time).
+Then each cell gets `daily_test_started` and `daily_test_finished` (done only when every due
+country was measured and imported, failed otherwise), in campaign order. A database error
+fails its country or its cell's events, never the other cells.
 
 A rerun is safe: a converted run is reused, `storage.ingest` replays as a no-op, and a cell
 whose events are recorded in `<root>/daily-ingest.json` gets no second pair. So the first pair
