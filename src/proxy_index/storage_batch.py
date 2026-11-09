@@ -111,11 +111,12 @@ def upsert_scopes(conn):
     """Add the new runs' providers, products, targets, pools and scopes where new (a new row takes
     the batch's first run's values), and give incoming_runs their ids."""
     conn.execute(
-        "INSERT INTO providers SELECT DISTINCT provider FROM incoming_runs ON CONFLICT DO NOTHING"
+        "INSERT INTO providers SELECT DISTINCT provider FROM incoming_runs ORDER BY 1 "
+        "ON CONFLICT DO NOTHING"
     )
     conn.execute(
         "INSERT INTO products(provider,name) SELECT DISTINCT provider,product FROM incoming_runs "
-        "ON CONFLICT DO NOTHING"
+        "ORDER BY 1,2 ON CONFLICT DO NOTHING"
     )
     conn.execute(
         "UPDATE incoming_runs i SET product_id=p.product_id FROM products p "

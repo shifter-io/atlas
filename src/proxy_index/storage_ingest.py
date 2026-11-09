@@ -226,14 +226,15 @@ def check_stored(run, stored):
 
 
 def add_observations(conn):
-    """Add the new runs' IP observations and count the IPs new to each pool."""
+    """Add the new runs' IP observations and count the IPs new to each pool (pool_ips in key
+    order, as every insert into a table imports share)."""
     conn.execute(
         "INSERT INTO ip_observations SELECT bucket,run_key,ip_id,count,first_seen,last_seen "
         "FROM incoming_observations"
     )
     conn.execute(
         "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT pool_id,ip_id FROM "
-        "incoming_observations ON CONFLICT DO NOTHING RETURNING pool_id) "
+        "incoming_observations ORDER BY pool_id,ip_id ON CONFLICT DO NOTHING RETURNING pool_id) "
         "UPDATE pool_stats p SET unique_ips=p.unique_ips+a.n FROM (SELECT pool_id,count(*) AS n "
         "FROM added GROUP BY pool_id) a WHERE p.pool_id=a.pool_id"
     )
@@ -338,6 +339,6 @@ def _store_enrichment(conn):
         "network_id.network_id,(g.attributes->>'matched')::boolean,nullif(("
         + extras
         + "),'{}'::jsonb) FROM incoming_enrichment g JOIN incoming_releases r USING(idx,release) "
-        "JOIN ip_addresses a USING(ip) " + joins + " ON CONFLICT DO NOTHING"
+        "JOIN ip_addresses a USING(ip) " + joins + " ORDER BY 1,2 ON CONFLICT DO NOTHING"
     )
     return conflicts

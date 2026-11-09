@@ -78,7 +78,7 @@ class Simulation(replay.Replay):
         self.state = self.open(go)
         self.model = simulate_model.Model(profile, self.plan, self.state["seed"])
         self.model.summaries.replay = self.state["replay_id"]  # every run's marker: the run's id
-        self.steps = simulate_steps.SimSteps(conn, args, self.state, self.model)
+        self.steps = simulate_steps.SimSteps(conn, args, self.state, self.model, self.save)
         self.names = ("daily", "browser", *(("pulses",) if args.pulses else ()), "release")
         self.stop, self.pool, self.counters = Event(), ThreadPoolExecutor(1), None
 
@@ -202,6 +202,10 @@ def arguments(argv=None):
     parser.add_argument("--out", help="directory of the state, the report and the hours")
     parser.add_argument("--jobs", type=int, default=6, help="worker processes generating hours")
     parser.add_argument("--batch-daily", type=int, default=20, help="daily tests a transaction")
+    parser.add_argument("--connections", type=int, default=20, help="transactions at once")
+    parser.add_argument(
+        "--memory-budget", type=float, default=4.0, help="GB the transactions in flight may take"
+    )
     parser.add_argument("--pulses", action="store_true", help="add HTTP pulses (off: none)")
     parser.add_argument("--siteapi", help="base URL of a siteapi reading the database")
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
@@ -218,8 +222,11 @@ def arguments(argv=None):
     parser.add_argument("--hour-timeout", type=float, default=86400.0, help=argparse.SUPPRESS)
     parser.set_defaults(pulse_concurrency=8, node_api=None, siteapi_pid=None)
     args = parser.parse_args(argv)
-    if min(args.days, args.jobs, args.batch_daily) < 1 or not 1 <= args.hours_per_day <= 24:
-        parser.error("--days, --jobs and --batch-daily are at least 1, the hours of a day 1..24")
+    if min(args.days, args.jobs, args.batch_daily, args.connections) < 1:
+        parser.error("--days, --jobs, --batch-daily and --connections are at least 1")
+    if not 1 <= args.hours_per_day <= 24 or args.memory_budget <= 0:
+        parser.error("the hours of a day are 1..24, the memory budget more than 0")
+    args.memory_budget = int(args.memory_budget * 2**30)
     if not args.plan_only and not (args.owner_go and args.out):
         parser.error("--owner-go and --out are required, except with --plan-only")
     return args
