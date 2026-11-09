@@ -4,7 +4,7 @@ ip_observations against v14's scope_ips, on a synthetic history of --gigabytes.
 The history: --scopes scopes (rows made by importing one small ingest_cases daily test each),
 each with --runs runs a day of --ips IPs over daily partitions, drawn from the scope's own pool
 of 3 × --ips addresses, filled in SQL until ip_observations (table and indexes) holds
---gigabytes. scope_ips is then filled with migrate_v13_v14.sql's back-fill (timed). The group:
+--gigabytes. scope_ips is then made again by migrate_v13_v14.sql (timed). The group:
 one new run per scope, half of its IPs seen before in its scope, its observations stored and its
 incoming_runs and incoming_observations built as ingest builds them, before _network. Each round
 runs both statements under EXPLAIN (ANALYZE, BUFFERS), rolled back, in alternating order.
@@ -124,18 +124,25 @@ def history(database: Path, args) -> datetime:
 
 
 def backfill(database: Path) -> None:
-    """migrate_v13_v14.sql's back-fill, timed, then VACUUM ANALYZE (as after a migration)."""
+    """migrate_v13_v14.sql in one transaction, timed (the table dropped first, as at v13), then
+    VACUUM ANALYZE (as after a migration)."""
     sql = Path(storage.__file__).with_name("migrate_v13_v14.sql").read_text()
+    with storage.connect(database) as conn:
+        conn.execute("DROP TABLE scope_ips")
     began = time.monotonic()
     with storage.connect(database) as conn:
-        conn.execute("TRUNCATE scope_ips")  # empty, as the migration creates it
-        conn.execute(sql[sql.index("INSERT INTO scope_ips") :])
-        rows = conn.execute("SELECT count(*) FROM scope_ips").fetchone()[0]
+        conn.execute(sql)
     seconds = time.monotonic() - began
     with storage.connect(database) as conn:
         conn.autocommit = True
         conn.execute("VACUUM ANALYZE")
-    print(json.dumps({"step": "backfill", "scope_ips": rows, "seconds": round(seconds, 1)}))
+        rows = conn.execute("SELECT count(*) FROM scope_ips").fetchone()[0]
+        sizes = conn.execute(
+            "SELECT pg_table_size('scope_ips'),pg_indexes_size('scope_ips')"
+        ).fetchone()
+    record = {"step": "backfill", "scope_ips": rows, "seconds": round(seconds, 1)}
+    record |= {"table_gb": round(sizes[0] / 1024**3, 2), "index_gb": round(sizes[1] / 1024**3, 2)}
+    print(json.dumps(record), flush=True)
 
 
 def group(conn, day: datetime, args) -> None:
