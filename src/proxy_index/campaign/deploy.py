@@ -2,7 +2,8 @@
 `teardown.py`).
 
 The manager is one droplet in `--region` (default: the inventory's `manager_region`, else lon1;
-MANAGER-REGION-1) of size `s-8vcpu-16gb` unless `--size` names another size offered there, with every ownership marker, in project Proxy Index, created without the droplet agent
+MANAGER-REGION-1) of size `s-8vcpu-16gb` unless `--size` names another size offered there, with
+every ownership marker, in project Proxy Index, created without the droplet agent
 (no web console). Only the Mac's campaign key logs in,
 and its firewall admits SSH only from the Mac's public IPv4. The DigitalOcean token is read from
 the Mac keychain only by `deploy` and travels only on SSH stdin into a root-only 0600 file;
