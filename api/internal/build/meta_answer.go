@@ -15,6 +15,7 @@ const metaPath = "/v1/meta"
 
 func init() {
 	RegisterAnswer(PageAnswer{Name: "meta", Route: "GET " + metaPath, Build: buildMeta, Samples: []string{metaPath},
+		InDataset: true, Request: func(p string) string { return queryRequest(p, metaPath) },
 		Key: func(r *http.Request) (string, error) {
 			_, err := Query(r)
 			return metaPath, err

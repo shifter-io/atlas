@@ -15,10 +15,12 @@ import (
 
 func init() {
 	RegisterAnswer(PageAnswer{
-		Name:  "overlap",
-		Build: buildOverlap,
-		Route: "GET /v1/overlap",
-		Key:   overlapKey,
+		Name:      "overlap",
+		Build:     buildOverlap,
+		Route:     "GET /v1/overlap",
+		Key:       overlapKey,
+		InDataset: true,
+		Request:   func(p string) string { return queryRequest(p, "/v1/overlap", "kind", "range") },
 		Samples: []string{"/v1/overlap", "/v1/overlap?range=24h", "/v1/overlap?kind=residential&range=7d",
 			"/v1/overlap?kind=residential&range=30d"},
 	})

@@ -17,7 +17,8 @@ import (
 func homePath(rangeID string) string { return "/v1/home/" + rangeID }
 
 func init() {
-	RegisterAnswer(PageAnswer{Name: "home", Route: "GET /v1/home", Build: buildHome,
+	RegisterAnswer(PageAnswer{Name: "home", Route: "GET /v1/home", Build: buildHome, InDataset: true,
+		Request: func(p string) string { return queryRequest(p, "/v1/home", "range") },
 		Samples: []string{"/v1/home", "/v1/home?range=24h", "/v1/home?range=7d"},
 		Key: func(r *http.Request) (string, error) {
 			q, err := Query(r, "range")

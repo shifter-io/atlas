@@ -122,7 +122,8 @@ type BrowserCell struct {
 const notEnoughData = "not_enough_data"
 
 func init() {
-	RegisterAnswer(PageAnswer{Name: "targets", Route: "GET /v1/targets", Key: targetsKey, Build: buildTargets,
+	RegisterAnswer(PageAnswer{Name: "targets", Route: "GET /v1/targets", Key: targetsKey, Build: buildTargets, InDataset: true,
+		Request: func(p string) string { return queryRequest(p, "/v1/targets", "kind", "range", "engine") },
 		Samples: []string{"/v1/targets", "/v1/targets?range=24h", "/v1/targets?kind=residential&range=7d", "/v1/targets?kind=datacenter",
 			"/v1/targets?kind=residential&range=30d&engine=camoufox", "/v1/targets?kind=residential&range=30d&engine=chrome"}})
 }

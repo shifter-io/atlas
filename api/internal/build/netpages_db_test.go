@@ -149,7 +149,8 @@ func heldBuild(t *testing.T, pool store.TxBeginner, in *store.Inputs, nc netCase
 
 // longPages is every page, and searches, of every place list and Coverage
 // answer of the case's networks, all networks and Germany, the place pages
-// of Germany's regions and cities, and the dataset file.
+// of Germany's regions and cities, and the dataset file without the
+// registered answers' pages.
 func longPages(t *testing.T, res *build.Result) map[string][]byte {
 	t.Helper()
 	ctx := context.Background()
@@ -198,7 +199,7 @@ func longPages(t *testing.T, res *build.Result) map[string][]byte {
 		keep(fmt.Sprintf("place %s %s", d, key), a, ok, err)
 	}
 	var file bytes.Buffer
-	if err := build.WriteDataset(&file, res.Dataset); err != nil {
+	if err := build.WriteDataset(&file, withoutRegisteredPages(res.Dataset)); err != nil {
 		t.Fatal(err)
 	}
 	out["dataset file"] = file.Bytes()

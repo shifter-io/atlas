@@ -35,13 +35,18 @@ type PageAnswer struct {
 	// Samples are request URLs (path and query) for the tests, /healthz and
 	// the bench; each must answer 200.
 	Samples []string
-	// InDataset adds the bodies to the dataset file's pages (DATASET-PAGES-2).
+	// InDataset adds the bodies to the dataset file's pages (DATASET-PAGES-2),
+	// each under Request(path); with Cut, the cut of every held path.
 	InDataset bool
+	// Request, needed with InDataset, is the request URL that serves the
+	// body stored under path, every parameter spelled out; "" leaves the
+	// body out of the dataset file.
+	Request func(path string) string
 	// Cut, when set, cuts each body on request instead of rendering every
 	// one at build: Build's values are held (Pages.Held), and a request is
 	// answered with Cut(held, Key(r)), 404 when not found, rendered and kept
 	// in the version's page LRU as the place pages are. For answers with
-	// many filtered pages; not with InDataset.
+	// many filtered pages.
 	Cut func(held map[string]any, path string) (body any, found bool)
 	// Root, when set, is the stored paths' root in place of "/v1/<Name>",
 	// for an answer under a reserved family's path (/v1/events/stats).
@@ -103,8 +108,8 @@ func RegisterAnswer(a PageAnswer) {
 		panic(fmt.Sprintf("build: answer name %q is invalid or reserved", a.Name))
 	case answers[a.Name].Name != "":
 		panic(fmt.Sprintf("build: answer %q registered twice", a.Name))
-	case a.Build == nil || a.Key == nil || !strings.HasPrefix(a.Route, "GET /v1/") || a.Cut != nil && a.InDataset:
-		panic(fmt.Sprintf("build: answer %q needs Build, Key and a GET /v1/ route, and no Cut with InDataset", a.Name))
+	case a.Build == nil || a.Key == nil || !strings.HasPrefix(a.Route, "GET /v1/") || a.InDataset && a.Request == nil:
+		panic(fmt.Sprintf("build: answer %q needs Build, Key and a GET /v1/ route, and Request with InDataset", a.Name))
 	case a.Root != "" && !strings.HasPrefix(a.Root, "/v1/") || a.Events && a.Cut == nil:
 		panic(fmt.Sprintf("build: answer %q needs a /v1/ Root, and Cut with Events", a.Name))
 	}
@@ -228,6 +233,24 @@ func QueryKind(q url.Values, def string) (string, error) {
 		return "", BadRequest("invalid kind")
 	}
 	return k, nil
+}
+
+// queryRequest is root with the segments of path under it as the query
+// parameters names, in order: "/v1/home/7d" under "/v1/home" with "range"
+// is "/v1/home?range=7d". A path with more segments than names is "".
+func queryRequest(path, root string, names ...string) string {
+	rest := strings.TrimPrefix(strings.TrimPrefix(path, root), "/")
+	if rest == "" {
+		return root
+	}
+	segs := strings.Split(rest, "/")
+	if len(segs) > len(names) {
+		return ""
+	}
+	for i, s := range segs {
+		segs[i] = names[i] + "=" + s
+	}
+	return root + "?" + strings.Join(segs, "&")
 }
 
 // MaxPage is the highest page a paged answer's request may ask for.

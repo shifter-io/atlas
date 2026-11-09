@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"sort"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/model"
 	"github.com/Zeus-Development/proxy-index/api/internal/server"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -238,7 +241,7 @@ func netAnswers(t *testing.T, res *build.Result) map[string][]byte {
 			out[p] = r.Identity
 		}
 	}
-	for name, part := range map[string]any{"dataset": res.Dataset, "details": res.Details, "pages": res.Pages} {
+	for name, part := range map[string]any{"dataset": withoutRegisteredPages(res.Dataset), "details": res.Details, "pages": res.Pages} {
 		if out[name], err = server.Marshal(part); err != nil {
 			t.Fatal(err)
 		}
@@ -429,6 +432,24 @@ func must(b []byte, err error) []byte {
 }
 
 // registered reports whether path is a registered page answer's.
+// withoutRegisteredPages is ds without the registered answers' pages
+// (DATASET-PAGES-2), each key a request one of their routes serves.
+func withoutRegisteredPages(ds *model.Dataset) *model.Dataset {
+	mux := http.NewServeMux()
+	for _, a := range build.Answers() {
+		mux.Handle(a.Route, http.NotFoundHandler())
+	}
+	pages := build.DatasetPages{}
+	for path, body := range ds.Pages.(build.DatasetPages) {
+		if _, route := mux.Handler(httptest.NewRequest(http.MethodGet, path, nil)); route == "" {
+			pages[path] = body
+		}
+	}
+	out := *ds
+	out.Pages = pages
+	return &out
+}
+
 func registered(path string) bool {
 	for _, a := range build.Answers() {
 		if a.Owns(path) {

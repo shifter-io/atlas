@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -17,12 +18,14 @@ import (
 // per build, rendered on first request.
 func init() {
 	RegisterAnswer(PageAnswer{
-		Name:    "pricing-history",
-		Route:   "GET /v1/networks/{slug}/pricing-history",
-		Key:     pricingHistoryKey,
-		Build:   buildPricingHistory,
-		Cut:     heldBody,
-		Samples: []string{"/v1/networks/all/pricing-history", "/v1/networks/all/pricing-history?kind=residential"},
+		Name:      "pricing-history",
+		Route:     "GET /v1/networks/{slug}/pricing-history",
+		Key:       pricingHistoryKey,
+		Build:     buildPricingHistory,
+		Cut:       heldBody,
+		InDataset: true,
+		Request:   pricingHistoryRequest,
+		Samples:   []string{"/v1/networks/all/pricing-history", "/v1/networks/all/pricing-history?kind=residential"},
 	})
 }
 
@@ -80,6 +83,17 @@ func pricingHistoryKey(r *http.Request) (string, error) {
 		return "", BadRequest("kind must be residential, datacenter, mobile or isp")
 	}
 	return "/v1/pricing-history/" + slug + "/" + kind, nil
+}
+
+// pricingHistoryRequest is the request for a stored path: the "primary"
+// body is the one without kind.
+func pricingHistoryRequest(path string) string {
+	slug, kind, _ := strings.Cut(strings.TrimPrefix(path, "/v1/pricing-history/"), "/")
+	base := "/v1/networks/" + slug + "/pricing-history"
+	if kind == "primary" {
+		return base
+	}
+	return base + "?kind=" + kind
 }
 
 func buildPricingHistory(c *Context) (map[string]any, error) {

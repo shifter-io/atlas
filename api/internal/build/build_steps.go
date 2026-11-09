@@ -379,7 +379,7 @@ func (b *builder) assemble() error {
 		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages}
 	res.Pages.buildRegistered(c)
 	res.Events.buildLive(c)
-	ds.Pages = datasetPages(res.Pages)
+	ds.Pages = datasetPages(res.Pages, &res.Events)
 	ds.Lists = datasetLists(res.Pages, s, b.entries)
 	var networks []RankingRow
 	if r := res.Pages.RankingsByKind[searchRanking]; r != nil {

@@ -435,12 +435,32 @@ what the server serves for it: `/v1/networks`, `/v1/rankings?range=<r>` for 24h,
 and 30d (and `&kind=<kind>` for each proxy kind), `/v1/networks/<slug>?kind=<kind>` for every network and category (the
 all-networks answer is `/v1/networks/all?kind=all`) and
 `/v1/networks/<slug>/chart?kind=<kind>&range=<r>`. The request without `kind`
-serves the network's `primaryKind`. Not in it: the country answers
-(`/v1/countries...`), the paged place lists (`.../places`, `.../cities`), search
-and the N/A manifest, which no page of the site's design draws
-(API-DATA-DESIGN-1). `TestTheDatasetFileRegeneratesEveryPageAnswer` checks the
-file against the answers. A rebuild that keeps the file (see "The dataset file"
-in `README.md`) keeps its pages too: they are the build's that wrote it.
+serves the network's `primaryKind`. The country answers are in it too:
+`/v1/countries` and `/v1/countries/<CC>` (contract K11).
+
+The page answers added from Phase 3 (`api/answers/`) are in it under their
+requests with every parameter spelled out (DATASET-PAGES-2):
+
+- `/v1/targets?kind=<kind>&range=<r>` for each proxy kind and range, and
+  `&engine=<engine>` (`camoufox`, `chrome`) for each engine view; the request
+  without `kind` and `range` is `kind=residential&range=30d`;
+- `/v1/overlap?kind=<kind>&range=<r>` for each kind built (residential always,
+  else the kinds measured) and range;
+- `/v1/home?range=<r>` and `/v1/meta`;
+- `/v1/events/stats?range=<r>` for each range. The per-network bodies
+  (`&network=<slug>`) are not in it. The server builds these answers again on
+  every events refresh; the file's are the build's that wrote it, as for every
+  page below;
+- `/v1/networks/<slug>/pricing-history?kind=<kind>` for each network and proxy
+  kind, and `/v1/networks/<slug>/pricing-history` (the body without `kind`,
+  `kindDefault` true) for each network, `all` included.
+
+Not in it: the paged reviews and community runs (`.../reviews`, `.../runs`),
+like the paged place lists (`.../places`, `.../cities`); search and the N/A
+manifest, which no page of the site's design draws (API-DATA-DESIGN-1).
+`TestTheDatasetFileRegeneratesEveryPageAnswer` checks the file against the
+answers. A rebuild that keeps the file (see "The dataset file" in `README.md`)
+keeps its pages too: they are the build's that wrote it.
 
 ### `/v1/rankings?range=24h|7d|30d&kind=`
 
