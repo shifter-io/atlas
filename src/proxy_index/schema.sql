@@ -330,6 +330,48 @@ CREATE TABLE IF NOT EXISTS test_events (
 ) PARTITION BY RANGE(at);
 CREATE INDEX IF NOT EXISTS test_events_at ON test_events(at DESC);
 CREATE INDEX IF NOT EXISTS test_events_product ON test_events(product_id,at DESC);
+-- The live tape's counts (schema v13) per 30-minute bucket of `at`, product (0: no product) and
+-- tape tab, kept by one statement trigger per insert into test_events (every partition fires
+-- the parent's): good counts signal > 0, bad signal < 0. The API's /v1/events/stats reads it.
+CREATE TABLE IF NOT EXISTS test_event_buckets (
+ bucket_start timestamptz NOT NULL, product_id integer NOT NULL, category text NOT NULL,
+ events integer NOT NULL, good integer NOT NULL, bad integer NOT NULL, last_at timestamptz NOT NULL,
+ PRIMARY KEY(bucket_start,product_id,category)
+);
+-- The buckets recounted from test_events (the v13 fill, and the replay wipe's recount). The tab is
+-- detect.category (the API's store.Category).
+CREATE OR REPLACE VIEW test_event_bucket_counts AS
+SELECT date_bin('30 minutes',at,'2000-01-01 00:00+00') AS bucket_start,
+ coalesce(product_id,0) AS product_id,CASE WHEN left(kind,7)='census_'
+ OR kind IN ('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census'
+ WHEN left(kind,6)='pulse_' THEN 'pulse' WHEN kind IN ('new_hosting_asn','ip_overlap') THEN 'audit'
+ ELSE 'incident' END AS category,count(*)::integer AS events,
+ (count(*) FILTER (WHERE signal>0))::integer AS good,
+ (count(*) FILTER (WHERE signal<0))::integer AS bad,max(at) AS last_at
+FROM test_events GROUP BY 1,2,3;
+-- One upsert per statement, its keys in order (concurrent inserts lock rows in the same order); it
+-- calls no function, so the roles that insert events need no EXECUTE right.
+CREATE OR REPLACE FUNCTION test_event_buckets_add() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ INSERT INTO test_event_buckets AS b
+ SELECT date_bin('30 minutes',at,'2000-01-01 00:00+00'),coalesce(product_id,0),
+  CASE WHEN left(kind,7)='census_'
+  OR kind IN ('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census'
+  WHEN left(kind,6)='pulse_' THEN 'pulse' WHEN kind IN ('new_hosting_asn','ip_overlap') THEN 'audit'
+  ELSE 'incident' END,count(*),count(*) FILTER (WHERE signal>0),count(*) FILTER (WHERE signal<0),
+  max(at)
+ FROM added GROUP BY 1,2,3 ORDER BY 1,2,3
+ ON CONFLICT (bucket_start,product_id,category) DO UPDATE SET events=b.events+excluded.events,
+  good=b.good+excluded.good,bad=b.bad+excluded.bad,last_at=greatest(b.last_at,excluded.last_at);
+ RETURN NULL;
+END$$;
+DO $$BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='test_event_buckets_add'
+  AND tgrelid='test_events'::regclass) THEN
+  CREATE TRIGGER test_event_buckets_add AFTER INSERT ON test_events REFERENCING NEW TABLE AS added
+  FOR EACH STATEMENT EXECUTE FUNCTION test_event_buckets_add();
+ END IF;
+END$$;
 -- Time a product was down in a country: opened by a census that stalled (source 'census') or a
 -- pulse 'down' event (source 'pulse'); ended_at stays NULL while it is still down.
 CREATE TABLE IF NOT EXISTS outages (

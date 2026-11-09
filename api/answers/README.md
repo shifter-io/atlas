@@ -28,6 +28,8 @@ samples by itself.
 | `Samples []string` | Request URLs (path and query) that must answer 200: the tests, `/healthz` and the bench ask for them. |
 | `InDataset bool` | Adds the bodies to the dataset file's `pages` under their stored paths. False until DATASET-PAGES-2. |
 | `Cut func(held map[string]any, path string) (any, bool)` | Optional, for answers with many filtered pages: `Build`'s values are held instead of rendered, and a request is answered with `Cut(held, Key(r))` (404 when not found), rendered at the fast level and kept in the version's page LRU, as the place pages are. Not with `InDataset`. The reviews, runs and pricing-history answers use it. |
+| `Root string` | Optional: the stored paths' root in place of `/v1/<Name>`, for an answer under a reserved family's path (`/v1/events/stats`). |
+| `Events bool` | Optional, with `Cut`: `Build` also runs on every events refresh (`build.WithEvents`), with the new events (`Context.Events`, its `Stats` the event counts) and the last build's `GeneratedAt` and `Pages`, all of the `Context` it may read. Its values are held in `Result.Events.Held`, and each body cut is kept in the version's events LRU (which every refresh replaces) with the events' `Cache-Control`. The events-stats answer uses it. |
 
 `build.Context` is what the build already holds: `GeneratedAt`, the published `Snapshot`, the
 networks (`Entries`), the window `Stats`, the provider `Details`, the `Dataset` (its targets,

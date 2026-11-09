@@ -179,9 +179,6 @@ func renderedAnswers(t *testing.T, db *testdb.DB, id int64, pages []string, edit
 	return out
 }
 
-// asBuilt leaves a built result as it is.
-func asBuilt(*build.Result) {}
-
 // sums is the hex SHA-256 of every answer.
 func sums(answers map[string][]byte) map[string]string {
 	out := make(map[string]string, len(answers))
@@ -253,7 +250,17 @@ var v4ScaleCases = []v4ScaleCase{
 	{"every-request", testscale.EveryRequest, append(slices.Clone(goldenPages), tapePages...), withTapeBurst},
 	{"QA-1", qa1Networks, []string{"/v1/networks/net00/places?dimension=city", "/v1/networks/net00/places?dimension=asn&range=7d&page=2",
 		"/v1/networks/net03/places?dimension=region&q=region+1", "/v1/countries/AA/cities", "/v1/countries/AB/cities?q=city+1",
-		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, asBuilt},
+		"/v1/networks/all/places?dimension=city&range=24h", "/v1/search?q=net"}, atAFixedTime},
+}
+
+// atAFixedTime is the build as built, its event counts (none) read at a fixed
+// time instead of now, so the /v1/events/stats answers hash the same on
+// every run.
+func atAFixedTime(res *build.Result) {
+	stats := res.Events.Stats
+	stats.End = time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
+	*res = *build.WithEvents(res, &store.Inputs{Fingerprint: res.Fingerprint, Events: res.Events.Raw, EventsComplete: res.Events.Complete,
+		EventStats: stats})
 }
 
 // v4ScaleAnswers stores the case as a v4 build and returns the SHA-256 of

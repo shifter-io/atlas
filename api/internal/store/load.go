@@ -290,14 +290,19 @@ type Inputs struct {
 	Late         []Event
 	LateComplete bool
 	EventsRead   EventsRead // the events read's snapshot and largest id
+	EventStats   EventStats // /v1/events/stats' counts (loadEventStats)
 	// SiteGaps is one line per site table read as empty because the table or
 	// a column it reads is missing (SiteLayout); none on a migrated database.
 	SiteGaps []string
 }
 
-// loadEvents reads the newest EventWindow events and, past them, the newest
-// NotableWindow non-routine ones and the LateWindow late ones.
+// loadEvents reads the event counts (loadEventStats), the newest EventWindow
+// events and, past them, the newest NotableWindow non-routine ones and the
+// LateWindow late ones.
 func (in *Inputs) loadEvents(ctx context.Context, tx pgx.Tx) (err error) {
+	if err := in.loadEventStats(ctx, tx); err != nil {
+		return err
+	}
 	if err := tx.QueryRow(ctx, eventsReadSQL).Scan(&in.EventsRead.MaxID, &in.EventsRead.Xmin, &in.EventsRead.Next); err != nil {
 		return fmt.Errorf("events read: %w", err)
 	}

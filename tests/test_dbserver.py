@@ -30,7 +30,7 @@ pytest_plugins = ["test_storage"]
 
 PARENTS = {"ip_observations", "run_buckets", "run_geo_buckets", "test_events"}
 FUNCTIONS = {"artifact_time", "histogram", "histogram_bins", "run_bucket_counters"}
-FUNCTIONS |= {"stored_run_summary"}
+FUNCTIONS |= {"stored_run_summary", "test_event_buckets_add"}
 JAN, FEB = datetime(2026, 1, 15, tzinfo=UTC), datetime(2026, 2, 1, tzinfo=UTC)
 
 
@@ -166,7 +166,7 @@ def test_check_reports_missing_function_rights_and_its_statements_close_them(ser
     runtime, api = f'"{roles.runtime}"', f'"{roles.api}"'
     histogram = "public.histogram(steps integer[], counts bigint[])"
     execute = gaps["execute"]["statements"]
-    assert len(execute) == 5 and gaps["execute"]["run_as"] == "admin"
+    assert len(execute) == 6 and gaps["execute"]["run_as"] == "admin"
     assert f"GRANT EXECUTE ON FUNCTION {histogram} TO {runtime}, {api};" in execute
     defaults = f'ALTER DEFAULT PRIVILEGES FOR ROLE "{roles.admin}" IN SCHEMA "public" '
     assert [s for s in gaps["default_privileges"]["statements"] if "FUNCTIONS" in s] == [

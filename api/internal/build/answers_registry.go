@@ -43,11 +43,28 @@ type PageAnswer struct {
 	// in the version's page LRU as the place pages are. For answers with
 	// many filtered pages; not with InDataset.
 	Cut func(held map[string]any, path string) (body any, found bool)
+	// Root, when set, is the stored paths' root in place of "/v1/<Name>",
+	// for an answer under a reserved family's path (/v1/events/stats).
+	Root string
+	// Events makes Build run on every events refresh (WithEvents) too, with
+	// the new events and the last build's GeneratedAt and Pages (all of the
+	// Context it may read). It needs Cut: the values are held in
+	// Result.Events.Held, and each body cut is kept in the version's events
+	// LRU, which every refresh replaces.
+	Events bool
+}
+
+// root is the stored paths' root: Root, else "/v1/<Name>".
+func (a PageAnswer) root() string {
+	if a.Root != "" {
+		return a.Root
+	}
+	return "/v1/" + a.Name
 }
 
 // Owns reports whether path is one of a's stored paths.
 func (a PageAnswer) Owns(path string) bool {
-	return path == "/v1/"+a.Name || strings.HasPrefix(path, "/v1/"+a.Name+"/")
+	return path == a.root() || strings.HasPrefix(path, a.root()+"/")
 }
 
 // Context is what a build already holds, handed to every registered answer.
@@ -88,6 +105,8 @@ func RegisterAnswer(a PageAnswer) {
 		panic(fmt.Sprintf("build: answer %q registered twice", a.Name))
 	case a.Build == nil || a.Key == nil || !strings.HasPrefix(a.Route, "GET /v1/") || a.Cut != nil && a.InDataset:
 		panic(fmt.Sprintf("build: answer %q needs Build, Key and a GET /v1/ route, and no Cut with InDataset", a.Name))
+	case a.Root != "" && !strings.HasPrefix(a.Root, "/v1/") || a.Events && a.Cut == nil:
+		panic(fmt.Sprintf("build: answer %q needs a /v1/ Root, and Cut with Events", a.Name))
 	}
 	answers[a.Name] = a
 }
@@ -112,12 +131,10 @@ func (pg *Pages) buildRegistered(c *Context) {
 func (pg *Pages) buildFrom(c *Context, all []PageAnswer) {
 	pg.Registered, pg.Held, pg.Unbuilt = map[string]any{}, map[string]map[string]any{}, map[string]string{}
 	for _, a := range all {
-		bodies, err := a.Build(c)
-		for path := range bodies {
-			if err == nil && !a.Owns(path) {
-				err = fmt.Errorf("stored path %s is outside /v1/%s", path, a.Name)
-			}
+		if a.Events {
+			continue // EventWindow.buildLive
 		}
+		bodies, err := a.built(c)
 		if err != nil {
 			pg.Unbuilt[a.Name] = err.Error()
 			continue
@@ -129,6 +146,37 @@ func (pg *Pages) buildFrom(c *Context, all []PageAnswer) {
 		for path, body := range bodies {
 			pg.Registered[path] = body
 		}
+	}
+}
+
+// built is a.Build(c), an error when a path is outside a's family.
+func (a PageAnswer) built(c *Context) (map[string]any, error) {
+	bodies, err := a.Build(c)
+	for path := range bodies {
+		if err == nil && !a.Owns(path) {
+			err = fmt.Errorf("stored path %s is outside %s", path, a.root())
+		}
+	}
+	return bodies, err
+}
+
+// buildLive fills w.Held with the bodies of every registered answer with
+// Events, built from c with w as its Events; c is kept, with only the fields
+// such an answer reads, for the next WithEvents. A failed answer is left out
+// and noted in w.Unbuilt.
+func (w *EventWindow) buildLive(c *Context) {
+	w.live = &Context{GeneratedAt: c.GeneratedAt, Pages: c.Pages, Events: w}
+	w.Held, w.Unbuilt = map[string]map[string]any{}, map[string]string{}
+	for _, a := range Answers() {
+		if !a.Events {
+			continue
+		}
+		bodies, err := a.built(w.live)
+		if err != nil {
+			w.Unbuilt[a.Name] = err.Error()
+			continue
+		}
+		w.Held[a.Name] = bodies
 	}
 }
 

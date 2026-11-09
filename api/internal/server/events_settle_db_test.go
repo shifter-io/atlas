@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
@@ -81,8 +82,11 @@ func TestNoCursorPassesAnIdOfAnOpenTransaction(t *testing.T) {
 	}
 	b, a := begin(), begin()
 	b.exec("INSERT INTO providers VALUES ('writer-b')") // B's xid, older than A's
-	a.exec(insert, 1)                                   // event 1, A stays open
-	b.exec(insert, 1)                                   // event 2
+	// Event 1, A stays open. A writer waits for an open transaction's
+	// test_event_buckets row of the same 30-minute bucket, product and tab
+	// (schema v13's trigger), so A's row is a census row and B's a pulse.
+	a.exec(strings.Replace(insert, "pulse_finished", "census_finished", 1), 1)
+	b.exec(insert, 1) // event 2
 	b.commit()
 	// Whatever else the server runs, a read while A is open marks a Next
 	// above A's xid, and its xmin is not above it: A was handed its xid.
