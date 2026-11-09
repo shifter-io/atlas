@@ -47,6 +47,7 @@ BROWSER = (
     "WHERE b.kind='browser'"
 )
 OWN = "SELECT count(*) FROM {} WHERE run_key IN (SELECT run_key FROM test_runs WHERE {})"
+MINE = "SELECT run_id FROM test_runs WHERE {}"
 SNAPSHOT = "SELECT payload FROM calculated_snapshots WHERE build_id=%s"
 PRODUCTION = ROOT / "configs" / "browser-pulse.production.example.toml"  # dict inputs
 BROWSER_DATA = ("test_runs", "run_buckets", "test_batches", "batch_runs", "test_events")
@@ -136,6 +137,10 @@ def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
         "daily_test_started": cells,
         "daily_test_finished": cells,
     }
+    # state.json records each batch of daily tests as its connection commits: each test once.
+    steps = [h["ingest"]["steps"]["daily"] for h in found["hours"]]
+    recorded = [run for step in steps for group in step.get("groups", []) for run in group]
+    assert sorted(recorded) == sorted(str(run) for (run,) in query(staging, MINE.format(marked)))
     # The full calculation after the days, the incremental one of the extra hour.
     full, incremental = (h["calculate"] for h in found["hours"][-2:])
     assert (full["kind"], incremental["kind"]) == ("full", "incremental")

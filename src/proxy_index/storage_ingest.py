@@ -175,14 +175,19 @@ def partitions(runs):
     return found | {(DAILY[2], row[0]) for run in runs for row in run.geo_rows}
 
 
-def insert_buckets(conn, runs, existing):
-    """Add the new runs' buckets, creating the daily partitions they, their IPs and geo rows need
-    where partition() would: existing holds the names found under the lock."""
+def missing(runs, existing):
+    """(table, name, start, end) of the daily partitions the runs' buckets, IPs and geo rows need
+    where partition() would put them, and existing (the names found) lacks."""
     wanted = {(t, *holder(t, moment, existing)) for t, moment in partitions(runs)}
-    for table, name, start, end in sorted(wanted):
-        if name not in existing:
-            for query in creation(table, name, start, end):
-                conn.execute(query)
+    return sorted(w for w in wanted if w[1] not in existing)
+
+
+def insert_buckets(conn, runs, existing):
+    """Add the new runs' buckets, creating any daily partition they, their IPs and geo rows need
+    that is still missing (storage._store creates them first): existing holds the names found."""
+    for table, name, start, end in missing(runs, existing):
+        for query in creation(table, name, start, end):
+            conn.execute(query)
     conn.execute(
         f"INSERT INTO run_buckets(bucket_start,run_key,{BUCKET_COLUMNS}) SELECT b.bucket_start,"
         f"r.run_key,b.{BUCKET_COLUMNS.replace(',', ',b.')} FROM incoming_buckets b "
@@ -226,14 +231,19 @@ def check_stored(run, stored):
 
 
 def add_observations(conn):
-    """Add the new runs' IP observations and count the IPs new to each pool."""
+    """Add the new runs' IP observations."""
     conn.execute(
         "INSERT INTO ip_observations SELECT bucket,run_key,ip_id,count,first_seen,last_seen "
         "FROM incoming_observations"
     )
+
+
+def add_pool_ips(conn):
+    """Count the IPs new to each pool (pool_ips in key order, as every insert into a table
+    imports share)."""
     conn.execute(
         "WITH added AS (INSERT INTO pool_ips SELECT DISTINCT pool_id,ip_id FROM "
-        "incoming_observations ON CONFLICT DO NOTHING RETURNING pool_id) "
+        "incoming_observations ORDER BY pool_id,ip_id ON CONFLICT DO NOTHING RETURNING pool_id) "
         "UPDATE pool_stats p SET unique_ips=p.unique_ips+a.n FROM (SELECT pool_id,count(*) AS n "
         "FROM added GROUP BY pool_id) a WHERE p.pool_id=a.pool_id"
     )
@@ -338,6 +348,6 @@ def _store_enrichment(conn):
         "network_id.network_id,(g.attributes->>'matched')::boolean,nullif(("
         + extras
         + "),'{}'::jsonb) FROM incoming_enrichment g JOIN incoming_releases r USING(idx,release) "
-        "JOIN ip_addresses a USING(ip) " + joins + " ON CONFLICT DO NOTHING"
+        "JOIN ip_addresses a USING(ip) " + joins + " ORDER BY 1,2 ON CONFLICT DO NOTHING"
     )
     return conflicts

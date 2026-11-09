@@ -316,8 +316,8 @@ waits for real time: the hours are generated ahead while earlier ones are stored
 ```sh
 uv run python scripts/scale/simulate.py --database <staging toml> \
   --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>" --profile <profile.json> --days 7 \
-  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--batch-daily 20] [--pulses] \
-  [--siteapi URL] [--plan-only] [--no-scope]
+  --first-day <YYYY-MM-DD> --out <dir> [--jobs 6] [--batch-daily 20] [--connections 25] \
+  [--memory-budget 4] [--pulses] [--siteapi URL] [--plan-only] [--no-scope]
 ```
 
 - The same command resumes from `<out>/state.json`; another database, first day, number of
@@ -362,9 +362,39 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
 
 1. **daily**: the hour's `daily/planner.py` cells, each a cell as `daily ingest` prepares one,
    go through `daily/ingest.store_cells`: whole cells about `--batch-daily` tests at a time,
-   each batch in one `storage.ingest_many` and one `compute.estimate_runs`, then each cell's
-   `daily_test_started` and `daily_test_finished` (`emit_cell`), once
-   (`<out>/daily-ingest.json` holds the hour's cells).
+   each batch in one `storage.ingest_many` and one `compute.estimate_runs`, `--connections`
+   batches at once (below), then each cell's `daily_test_started` and `daily_test_finished`
+   (`emit_cell`), once (`<out>/daily-ingest.json` holds the hour's cells). `state.json`
+   records each batch's run ids as it commits (the daily step's `groups`), written by the
+   main process only; a stopped hour stores again only the runs not stored yet (by run id).
+
+   **Parallel connections** (INGEST-PARALLEL-1, `storage_parallel.py`): each connection's
+   TCP receive window caps it at about 0.6 MB/s over the 77 ms link to the database, so the
+   hour's batches go over `--connections` (default 25; 40 and more where the server has the slots) connections at once, one worker thread
+   and one connection each. `--connections 1` is the serial path, statement for statement.
+   - *The locks, narrowed.* An import takes its locks at the start, before any write, in one
+     order: the ingest lock (817452901) shared, so imports run side by side while a purge, seed,
+     migration or rebuild (which take it exclusively) waits for them; its networks' locks
+     (817452906 with each provider's hash, sorted), so imports of one network go one after the
+     other while imports of different networks never wait for each other; its runs' locks
+     (817452904 with each run id's hash), so two imports of one run go one after the other.
+     Only the last statement before COMMIT, the `provider_overlap` increments for the batch's
+     IPs new to their provider, takes the global overlap lock (817452905): milliseconds. Each
+     network's counts (`pool_ips`, the IPs new to the provider before its `product_ips` are
+     added, each scope's new IPs and totals) are read after its lock (READ COMMITTED), so they
+     see every import of the network committed before, as the serial path does. With N
+     connections, at most as many are busy as there are networks with a batch pending (18
+     networks: at most 18).
+   - *No deadlocks.* Every multi-row insert into a table imports share goes in key order, and
+     two batches of one network are not stored at the same time while one of another network
+     can go instead. A deadlock (40P01) or serialization failure (40001) rolls back only that
+     batch, retried 3 times with backoff on a new connection; one that still fails is retried
+     one country at a time after the others (`daily/batches.py`).
+   - *Caps*, printed at the start of each hour: the connections are capped so that 10 of the
+     server's `max_connections` slots stay free for production, and so that the batches in
+     flight, estimated at 20 times their run directories' bytes, stay within `--memory-budget`
+     GB (default 4, inside the 6G memory cap). A batch is never split: N goes down instead. A
+     capped count is a warning, not an error.
 2. **browser**: one browser node per network of the settings' hosts, bound to its host's
    name (the tokens are issued once a process, never saved). The real planner
    (`orchestrator/browser.py`, queue mode) runs at each run's start with the model's settings

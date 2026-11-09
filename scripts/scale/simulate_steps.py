@@ -19,6 +19,7 @@ import simulate_check
 import simulate_model
 from replay_steps import NODE, REGIONS, SLUGS, ReplaySteps, ReplayWriter
 
+from proxy_index import storage_parallel
 from proxy_index.browser.contracts import BROWSER_REGION, BROWSER_REGION_ID
 from proxy_index.browser.settings import load_settings
 from proxy_index.daily import batches, ingest
@@ -125,8 +126,9 @@ class Producer:
 class SimSteps(ReplaySteps):
     """The replay's steps on the loader's database, the model's hour given (current)."""
 
-    def __init__(self, conn, args, state: dict, model):
+    def __init__(self, conn, args, state: dict, model, save):
         self.conn, self.args, self.state, self.rate = conn, args, state, None
+        self.save = save  # writes state.json
         self.replay, self.sim = state["replay_id"], model
         self.formulas = model.plan.formulas
         self.model = self.of(sorted(self.formulas))
@@ -136,7 +138,8 @@ class SimSteps(ReplaySteps):
         self.current: Current | None = None
         self.tokens: dict[int, dict] | None = None  # the browser nodes, issued once a run
 
-    # Step 1: the daily tests, batched as the daily ingest stores them.
+    # Step 1: the daily tests, batched as the daily ingest stores them, --connections batches
+    # at once; state.json records each batch's run ids as it commits (step["groups"]).
 
     def daily(self, day: int, start, step: dict) -> tuple[dict, bool]:
         hour, path = self.current.hour, Path(self.args.out) / DAILY_REPORT
@@ -146,12 +149,20 @@ class SimSteps(ReplaySteps):
         report = {"hour": start.isoformat(), "cells": {}}
         tests = {(t.lane.network, t.lane.country): t for t in hour.daily}
         cells = [self.cell(cell, tests) for cell in hour.cells]
+        groups = step.setdefault("groups", [])
+
+        def committed(group, outcome) -> None:
+            groups.append([result["run_id"] for result in outcome.results])
+            self.save()
+
+        options = storage_parallel.Options(self.args.connections, self.args.memory_budget)
 
         async def store():
             db = Database(str(self.args.database), size=2)
             try:
                 found = (db, self.args.database, None, path, previous, report, start)
-                await ingest.store_cells(ingest.CampaignHour(*found), cells, self.args.batch_daily)
+                own = ingest.CampaignHour(*found, options=options, on_commit=committed)
+                await ingest.store_cells(own, cells, self.args.batch_daily)
             finally:
                 await db.close()
 

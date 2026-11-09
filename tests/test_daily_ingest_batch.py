@@ -142,12 +142,17 @@ async def test_a_campaign_hour_goes_in_batches(monkeypatch, hour):
     # its events wait for the rerun; tor1's own import lets it have its pair.
     assert (fra1["events"], tor1["events"]) == (False, True)
     calls.clear()
-    again = await hour(batch=1)  # a batch per country: the rerun replays both
+    # A batch per country, one connection: the rerun replays both, one after the other.
+    again = await hour(batch=1, connections=1)
     assert calls == [("ingest_many", 1), ("estimate_runs", 1)] * 2
     assert again["cells"]["shifter/tor1"]["estimated"] == ["CA", "PM"]
     assert again["cells"]["shifter/fra1"]["events"] is True
     with pytest.raises(ValueError, match="at least one"):
         await hour(batch=0)
+    with pytest.raises(ValueError, match="at least one connection"):
+        await hour(connections=0)
+    with pytest.raises(TypeError, match="unexpected sizes"):
+        await hour(batches=3)
 
 
 async def test_a_failed_batch_is_retried_one_country_at_a_time(monkeypatch, hour, database):
@@ -183,13 +188,13 @@ async def test_a_product_lookup_error_leaves_the_events_for_a_rerun(monkeypatch,
     assert tor1["issues"] == ["events not emitted (OperationalError)"]
 
 
-def test_the_cli_passes_the_batch_size(tmp_path, monkeypatch, capsys):
+def test_the_cli_passes_the_batch_size_and_connections(tmp_path, monkeypatch, capsys):
     import proxy_index.campaign.collect as collect
 
     seen = []
 
     async def fake_ingest(root, credentials, mmdb, **options):
-        seen.append(options.get("batch"))
+        seen.append((options.get("batch"), options.get("connections")))
         return {"campaign_id": "c", "complete": True}
 
     monkeypatch.setattr(daily_ingest, "ingest_campaign", fake_ingest)
@@ -198,5 +203,5 @@ def test_the_cli_passes_the_batch_size(tmp_path, monkeypatch, capsys):
     (dest / collect.REPORT).write_text(json.dumps({"clean": True}))
     args = ["daily", "ingest", "--inventory", str(tmp_path / "inv"), "--campaign-id", "c"]
     args += ["--dest", str(dest), "--database-file", str(tmp_path / "db.toml")]
-    assert main([*args, "--batch", "5"]) == 0 and main(args) == 0
-    assert seen == [5, None]
+    assert main([*args, "--batch", "5", "--connections", "3"]) == 0 and main(args) == 0
+    assert seen == [(5, 3), (None, None)]

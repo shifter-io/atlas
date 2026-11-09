@@ -1,6 +1,7 @@
 """An hour's daily tests stored in batches (INGEST-BATCH-2): the converted countries of a batch
 go into the database through one `storage.ingest_many` and their estimated hours through one
-`compute.estimate_runs`, a fixed number of round trips whatever the batch's size.
+`compute.estimate_runs`, a fixed number of round trips whatever the batch's size. The batches of
+an hour go over several connections at once (storage_parallel, INGEST-PARALLEL-1).
 
 A batch that fails is retried one country at a time (`storage.ingest`, `compute.estimate_run`),
 so each failing country gets the issue it gets when imported alone, and only it fails.
@@ -14,7 +15,7 @@ from pathlib import Path
 
 import psycopg
 
-from .. import storage
+from .. import storage, storage_parallel
 from ..archive import rawfiles
 from ..estimates import compute
 
@@ -41,27 +42,48 @@ class Country:
         self.issue = f"{self.code}: not imported ({type(exc).__name__})"
 
 
-def store(countries: list[Country], credentials: Path, spool: Path | None) -> None:
-    """Import the countries not failed yet as one batch, keep each imported run's raw files when
-    `spool` is set, then store the estimated hours of those with a formula."""
-    ready = [country for country in countries if country.issue is None]
-    _import(ready, credentials)
-    imported = [country for country in ready if country.issue is None]
-    for country in imported if spool else ():  # ARCHIVE-1: 30 days here, then Spaces
+def store(
+    groups: list[tuple[list[Country], frozenset]],
+    credentials: Path,
+    spool: Path | None,
+    options: storage_parallel.Options | None = None,
+    on_commit=None,
+) -> None:
+    """Import each group's countries not failed yet as one batch, the batches over
+    options.connections connections at once (storage_parallel.store, which passes on_commit),
+    with the estimated hours of those with a formula; a group is (countries, their networks).
+    Keep each imported run's raw files when `spool` is set."""
+    ready = [([c for c in own if c.issue is None], networks) for own, networks in groups]
+    ready = [(countries, networks) for countries, networks in ready if countries]
+    jobs = [storage_parallel.Group([c.directory for c in own], _runs(own), n) for own, n in ready]
+    options = options or storage_parallel.Options()
+    found = storage_parallel.store(jobs, credentials, **vars(options), on_commit=on_commit)
+    for (countries, _), outcome in zip(ready, found, strict=True):
+        if outcome.error is not None:  # retried one at a time: each raises its own error
+            _one_at_a_time(countries, credentials)
+        imported = [country for country in countries if country.issue is None]
+        _spool(imported, spool)
+        estimated = [country for country in imported if country.formula is not None]
+        if outcome.error is None and outcome.estimate_error is None:
+            for country in estimated:
+                country.estimated = True
+        else:
+            _estimate(estimated, credentials)
+
+
+def _runs(countries: list[Country]) -> list[tuple]:
+    """The estimated hours to store: (run_id, country, formula) of those with a formula."""
+    return [(c.directory.name, c.code, c.formula) for c in countries if c.formula is not None]
+
+
+def _spool(countries: list[Country], spool: Path | None) -> None:
+    for country in countries if spool else ():  # ARCHIVE-1: 30 days here, then Spaces
         name = f"daily-{country.directory.name}.tar.gz"
         moment = datetime.now(UTC)
         country.spool_issue = rawfiles.try_spool(spool, moment, name, country.directory, move=False)
-    _estimate([country for country in imported if country.formula is not None], credentials)
 
 
-def _import(countries: list[Country], credentials: Path) -> None:
-    if not countries:
-        return
-    try:
-        storage.ingest_many([country.directory for country in countries], credentials)
-        return
-    except (storage.IngestBatchError, *IMPORT_ERRORS):
-        pass  # retried one at a time below: each country raises its own error
+def _one_at_a_time(countries: list[Country], credentials: Path) -> None:
     for country in countries:
         try:
             storage.ingest(country.directory, credentials)

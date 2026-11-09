@@ -1,6 +1,7 @@
 """storage.ingest_many's session temp tables: each holds the rows of every run of a batch with
-the run's index in it (idx), and is dropped at commit. A multi-row statement carries at most ROWS
-rows; all go in pipeline mode, so filling the tables costs no round trip."""
+the run's index in it (idx), and is dropped at commit. A multi-row statement carries as many rows
+as PostgreSQL's PARAMETERS allow; all go in pipeline mode, so filling the tables costs no round
+trip."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from psycopg import RawCursor
 
 from .storage_read import OUTCOME_KEYS
 
-ROWS = 1000
+PARAMETERS = 65535  # the most a statement can bind (the protocol's 16-bit count)
 # pool_stats' typed pool columns (storage_ingest._profile).
 POOL = (
     "target_id target_url target_engine target_version requested_country runner_location "
@@ -44,11 +45,12 @@ STORED = (
     "FROM run_enrichments e JOIN dbip_releases d USING(release_id) WHERE e.run_key=t.run_key) "
     "FROM test_runs t WHERE t.run_id=ANY(%s::uuid[])"
 )
-# Each new run's scope before the batch, and its summary as the stored rows rebuild it.
+# Each new run's key, and its summary as the stored rows rebuild it.
+SUMMARIES = "SELECT idx,run_key,stored_run_summary(run_key) FROM incoming_runs ORDER BY idx"
+# Each new run's scope before the batch (read under the network's lock).
 SCOPES = (
-    "SELECT r.idx,r.run_key,s.scope_id,s.metrics,s.histogram_steps,s.histogram_counts,"
-    "stored_run_summary(r.run_key) FROM incoming_runs r JOIN scope_stats s USING(scope_id) "
-    "ORDER BY r.idx"
+    "SELECT r.idx,s.scope_id,s.metrics,s.histogram_steps,s.histogram_counts FROM incoming_runs r "
+    "JOIN scope_stats s USING(scope_id) ORDER BY r.idx"
 )
 
 
@@ -61,13 +63,16 @@ def load(conn, rows):
 
 
 def many(conn, head, tail, types, rows):
-    """Run head + a VALUES list + tail over rows, ROWS at a time; types casts each value. The
-    placeholders are PostgreSQL's ($n): psycopg would parse thousands of %s again every time."""
+    """Run head + a VALUES list + tail over rows, as many at a time as PARAMETERS allows; types
+    casts each value. The placeholders are PostgreSQL's ($n): psycopg would parse thousands of
+    %s again every time."""
     if not rows:
         return
     casts = [f"::{kind}" for kind in types] if types else [""] * len(rows[0])
-    for start in range(0, len(rows), ROWS):
-        part, width = rows[start : start + ROWS], len(casts)
+    width = len(casts)
+    step = PARAMETERS // width
+    for start in range(0, len(rows), step):
+        part = rows[start : start + step]
         marks = ",".join(
             "(" + ",".join(f"${r * width + c + 1}{cast}" for c, cast in enumerate(casts)) + ")"
             for r in range(len(part))
@@ -111,11 +116,12 @@ def upsert_scopes(conn):
     """Add the new runs' providers, products, targets, pools and scopes where new (a new row takes
     the batch's first run's values), and give incoming_runs their ids."""
     conn.execute(
-        "INSERT INTO providers SELECT DISTINCT provider FROM incoming_runs ON CONFLICT DO NOTHING"
+        "INSERT INTO providers SELECT DISTINCT provider FROM incoming_runs ORDER BY 1 "
+        "ON CONFLICT DO NOTHING"
     )
     conn.execute(
         "INSERT INTO products(provider,name) SELECT DISTINCT provider,product FROM incoming_runs "
-        "ON CONFLICT DO NOTHING"
+        "ORDER BY 1,2 ON CONFLICT DO NOTHING"
     )
     conn.execute(
         "UPDATE incoming_runs i SET product_id=p.product_id FROM products p "

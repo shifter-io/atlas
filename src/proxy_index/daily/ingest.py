@@ -7,7 +7,8 @@ each country that completed and reconciles becomes an ingestible run directory u
 chunks aggregated into `ips.jsonl.gz` per 5-minute bucket and IP, the rows the runner's JSON
 sink writes) and enriched with DB-IP (`enrichment.enrich_run`). The countries of whole cells
 are then imported about `batch` (20) at a time, each batch in one `storage.ingest_many`
-transaction (daily.batches; a batch that fails is retried one country at a time). Then each
+transaction, `connections` (25) batches at once (daily.batches over storage_parallel; a batch
+that fails is retried one country at a time). Then each
 cell gets `daily_test_started` and `daily_test_finished` (done only when every due country was
 measured and imported, failed otherwise), in campaign order. A database error fails its country
 or its cell's events, never the other cells.
@@ -29,12 +30,14 @@ from __future__ import annotations
 
 import gzip
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
 
+from .. import storage_parallel
 from ..campaign.tick import load_spec
 from ..enrichment import enrich_run
 from ..estimates import compute, release
@@ -291,6 +294,8 @@ class CampaignHour:
     report: dict
     fallback: datetime
     products: set = field(default_factory=set)  # networks whose product row exists
+    options: storage_parallel.Options = field(default_factory=storage_parallel.Options)
+    on_commit: Callable | None = None  # storage_parallel.store's, as each batch commits
 
 
 async def _has_product(hour: CampaignHour, network: str, manifest: dict) -> bool:
@@ -305,22 +310,21 @@ async def _has_product(hour: CampaignHour, network: str, manifest: dict) -> bool
     return True
 
 
-async def _store_chunk(hour: CampaignHour, chunk: list[Cell], batch: int) -> None:
-    """Store the chunk's countries `batch` at a time, then finish its cells in order: each
-    one's spool alert, its events (once) and the saved report.
+def _groups(chunks: list[list[Cell]], batch: int) -> list[tuple[list, frozenset]]:
+    """Each chunk's countries `batch` at a time, with the networks they belong to."""
+    groups = []
+    for chunk in chunks:
+        owned = [(country, cell.network) for cell in chunk for country in cell.countries]
+        for start in range(0, len(owned), batch):
+            part = owned[start : start + batch]
+            groups.append(([country for country, _ in part], frozenset(n for _, n in part)))
+    return groups
 
-    A cell's events wait for a rerun when its network has no product row yet, as they would
-    cell by cell: unless the row existed before the chunk, only a cell at or after the
-    network's first import in the chunk looks it up.
-    """
-    if not chunk:
-        return
-    networks = {cell.network: cell.manifest for cell in chunk}
-    known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
-    countries = [country for cell in chunk for country in cell.countries]
-    for start in range(0, len(countries), batch):
-        batches.store(countries[start : start + batch], hour.credentials, hour.spool)
-    for cell in chunk:
+
+async def _finish(hour: CampaignHour, cells: list[Cell], known: set) -> None:
+    """Finish the stored cells in order: each one's spool alert, its events (once) and the saved
+    report."""
+    for cell in cells:
         report = finish_cell(cell.report, cell.countries, cell.complete)
         report["estimate_issues"] += cell.missing if report["ingested"] else []
         known |= {cell.network} if report["ingested"] else set()
@@ -331,21 +335,33 @@ async def _store_chunk(hour: CampaignHour, chunk: list[Cell], batch: int) -> Non
             report["events"] = await _emit_once(hour.db, report, cell.manifest, hour.fallback)
         hour.report["cells"][cell.key] = report
         # Saved after every cell, so an event pair is never emitted twice.
-        cells = hour.previous["cells"] | hour.report["cells"]
-        atomic_json(hour.path, hour.report | {"cells": cells})
+        cells_now = hour.previous["cells"] | hour.report["cells"]
+        atomic_json(hour.path, hour.report | {"cells": cells_now})
 
 
 async def store_cells(hour: CampaignHour, cells, batch: int) -> None:
-    """Store the cells' countries about `batch` at a time, whole cells per chunk (a larger cell
-    is a chunk of its own), each chunk finished as _store_chunk does. SIM-LOAD-1's generated
-    cells (scripts/scale/simulate_steps.py) go through it too."""
-    chunk = []
+    """Store the cells' countries about `batch` at a time, whole cells per batch (a larger cell
+    is split into batches of its own), all batches over hour.options.connections connections at
+    once (batches.store), then finish the cells in order (_finish). SIM-LOAD-1's generated
+    cells (scripts/scale/simulate_steps.py) go through it too.
+
+    A cell's events wait for a rerun when its network has no product row yet, as they would
+    cell by cell: unless the row existed before the store, only a cell at or after the
+    network's first import looks it up.
+    """
+    chunks, chunk = [], []
     for cell in cells:
         if chunk and sum(len(c.countries) for c in chunk) + len(cell.countries) > batch:
-            await _store_chunk(hour, chunk, batch)
+            chunks.append(chunk)
             chunk = []
         chunk.append(cell)
-    await _store_chunk(hour, chunk, batch)
+    chunks += [chunk] if chunk else []
+    ordered = [cell for chunk in chunks for cell in chunk]
+    networks = {cell.network: cell.manifest for cell in ordered}
+    known = {n for n, manifest in networks.items() if await _has_product(hour, n, manifest)}
+    groups = _groups(chunks, batch)
+    batches.store(groups, hour.credentials, hour.spool, hour.options, hour.on_commit)
+    await _finish(hour, ordered, known)
 
 
 async def ingest_campaign(
@@ -356,16 +372,23 @@ async def ingest_campaign(
     database=None,
     formulas=None,
     spool=None,
-    batch: int = batches.BATCH,
+    **sizes: int,
 ) -> dict:
     """Import every cell of a collected daily test and emit the events not yet emitted.
 
-    The cells' countries are stored about `batch` at a time, whole cells per chunk (a larger
-    cell is a chunk of its own). With `formulas`, store each imported country's estimated
-    hours, then release the ended ones.
+    The cells' countries are stored about `batch` (sizes, default batches.BATCH) at a time,
+    whole cells per batch (a larger cell is split into batches of its own), `connections`
+    (default storage_parallel.CONNECTIONS) batches at once. With `formulas`, store each
+    imported country's estimated hours, then release the ended ones.
     """
+    batch = sizes.pop("batch", batches.BATCH)
+    connections = sizes.pop("connections", storage_parallel.CONNECTIONS)
+    if sizes:
+        raise TypeError(f"ingest_campaign() got unexpected sizes {sorted(sizes)}")
     if batch < 1:
         raise ValueError("the batch must hold at least one daily test")
+    if connections < 1:
+        raise ValueError("the batches need at least one connection")
     spec = load_spec(root)
     path = root / REPORT
     previous = read_json(path) if path.exists() else {"cells": {}}
@@ -373,6 +396,7 @@ async def ingest_campaign(
     fallback = datetime.fromisoformat(spec.starts_at)
     db = database or Database(str(credentials), size=2)
     hour = CampaignHour(db, credentials, spool, path, previous, report, fallback)
+    hour.options.connections = connections
     try:
         await store_cells(hour, _prepared(root, spec, formulas, mmdb), batch)
         if formulas:

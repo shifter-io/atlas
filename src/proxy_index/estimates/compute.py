@@ -141,9 +141,10 @@ def _rows(runs: list, measured: dict) -> list[tuple]:
     return rows
 
 
-def estimate_runs(credentials, runs: list) -> list[int]:
+def estimate_runs(credentials, runs: list, *, conn=None) -> list[int]:
     """Store the estimated hours of imported runs, [(run_id, country, formula)], in one
-    transaction; returns the rows each run wrote.
+    transaction; returns the rows each run wrote. With conn (an open connection, idle) they go
+    over it and credentials is not read.
 
     Released hours never change, and an hour stays with the latest test that covers it, so a
     rerun (or an earlier test imported late) is a no-op for them. One round trip reads the runs
@@ -152,18 +153,24 @@ def estimate_runs(credentials, runs: list) -> list[int]:
     """
     if not runs:
         return []
-    with storage.connect(credentials) as conn:
-        conn.autocommit = True  # BEGIN below, in the pipeline: psycopg's own costs a round trip
-        found = conn.execute(MEASURED, ([run_id for run_id, _, _ in runs],)).fetchall()
-        measured = {idx: rest for idx, *rest in found}
-        rows = _rows(runs, measured)
-        with conn.pipeline():
-            conn.execute("BEGIN")
-            conn.execute(INCOMING)
-            storage_batch.many(conn, "INSERT INTO incoming_estimates VALUES ", "", None, rows)
-            written = conn.execute(UPSERT)
-            conn.execute("COMMIT")
-        keys = Counter(written.fetchall())
+    if conn is None:
+        with storage.connect(credentials) as own:
+            return _estimate(own, runs)
+    return _estimate(conn, runs)
+
+
+def _estimate(conn, runs: list) -> list[int]:
+    conn.autocommit = True  # BEGIN below, in the pipeline: psycopg's own costs a round trip
+    found = conn.execute(MEASURED, ([run_id for run_id, _, _ in runs],)).fetchall()
+    measured = {idx: rest for idx, *rest in found}
+    rows = _rows(runs, measured)
+    with conn.pipeline():
+        conn.execute("BEGIN")
+        conn.execute(INCOMING)
+        storage_batch.many(conn, "INSERT INTO incoming_estimates VALUES ", "", None, rows)
+        written = conn.execute(UPSERT)
+        conn.execute("COMMIT")
+    keys = Counter(written.fetchall())
     return [keys[measured[idx][0], runs[idx - 1][1]] for idx in range(1, len(runs) + 1)]
 
 

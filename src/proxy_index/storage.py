@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 
 from . import storage_batch, storage_ingest, storage_migrate
 from .partitions import RAW_DAYS as RAW_DAYS  # re-exported for the calculator
-from .partitions import holder, monthly
+from .partitions import creation, holder, monthly
 from .partitions import partition as partition
 from .stats import Histogram
 from .storage_batch import POOL
@@ -49,6 +49,25 @@ MIGRATABLE = {(4, V4_CHECKSUM): 4, (5, V5_CHECKSUM): 5, (6, V6_CHECKSUM): 6, (7,
 MIGRATABLE |= {(8, V8_CHECKSUM): 8, (8, V8_PRE_RENAME_CHECKSUM): 8, (9, V9_CHECKSUM): 9}
 MIGRATABLE |= {(10, V10_CHECKSUM): 10, (11, V11_CHECKSUM): 11, (12, V12_CHECKSUM): 12}
 PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
+# Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
+# seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Imports
+# of one network go one at a time: each takes its networks' locks before any write (so its
+# network's counts, _network, see every earlier import of it); only the cross-network overlap
+# (_overlap), the last statement, takes the overlap lock.
+# 817452902 is the calculation's lock and 817452903 detect's (detect.LOCK).
+INGEST_LOCK, OVERLAP_LOCK = 817452901, 817452905
+# Locks of two integers (never equal to a one-number key), taken at the start in this order,
+# each set sorted: the batch's networks' (providers'), then its runs' (two imports of one run go
+# one after the other).
+RUN_LOCK, NETWORK_LOCK = 817452904, 817452906
+NETWORK_LOCKS = (
+    f"SELECT pg_advisory_xact_lock({NETWORK_LOCK},h) FROM (SELECT DISTINCT hashtext(p) h "
+    "FROM unnest(%s::text[]) p ORDER BY h) s"
+)
+RUN_LOCKS = (
+    f"SELECT pg_advisory_xact_lock({RUN_LOCK},h) FROM (SELECT DISTINCT hashtext(r::text) h "
+    "FROM unnest(%s::uuid[]) r ORDER BY h) s"
+)
 
 
 def _schema():
@@ -169,7 +188,8 @@ def _rows(runs):
 
 
 def _store_runs(conn, runs, fresh, existing):
-    """Queue the batch's statements after the lock's round trip; the cursors to read after it."""
+    """Queue the batch's statements after the first round trip, its runs' own rows first, then
+    each network's counts; the cursors to read after it."""
     storage_batch.load(conn, _rows(runs))
     # A stored run without a batch joins the one it is imported with.
     unlinked = [r for r in runs if r.stored and r.stored.get("batch_id") is None]
@@ -179,16 +199,20 @@ def _store_runs(conn, runs, fresh, existing):
     storage_ingest.insert_runs(conn)
     storage_ingest.insert_buckets(conn, fresh, existing)
     storage_ingest.store_geo(conn, fresh)
-    scopes = conn.execute(storage_batch.SCOPES)
-    new_ips = _add_addresses(conn) if any(run.ips for run in fresh) else None
+    addresses = any(run.ips for run in fresh)
+    if addresses:
+        _add_addresses(conn)
     enriched = storage_ingest.enrich(conn) if any(run.added for run in runs) else None
-    return scopes, new_ips, enriched
+    summaries = conn.execute(storage_batch.SUMMARIES)
+    new_ips = _network(conn) if addresses else None
+    scopes = conn.execute(storage_batch.SCOPES)
+    return summaries, scopes, new_ips, enriched
 
 
 def _scope_totals(runs, scopes, new_ips):
     """(scope_id, metrics, histogram_steps, histogram_counts) after the new runs, in batch order."""
     totals = {}
-    for idx, _, scope_id, metrics, histogram_steps, histogram_counts, _ in scopes:
+    for idx, scope_id, metrics, histogram_steps, histogram_counts in scopes:
         run, histogram = runs[idx], runs[idx].histogram
         metrics, steps, counts = totals.get(scope_id, (metrics, histogram_steps, histogram_counts))
         lifetime = zip(accumulate(steps), counts, strict=True)
@@ -208,41 +232,70 @@ def _read(idx, directory, batch_id, ip_rows):
     return run
 
 
-def _store(runs, credentials_file):
-    """Store read runs in one transaction and three round trips: the lock with the reads under it,
-    every statement of the batch, the scope totals with COMMIT."""
-    conn = connect(credentials_file)
+def _begin(conn, pipeline, runs):
+    """Open the import's transaction under its locks, taken before any write in one order: the
+    ingest lock shared, its networks', its runs'. The stored runs (STORED rows) and the names of
+    the partitions found, after one round trip; every read after the locks (READ COMMITTED)
+    sees every import of the networks committed before."""
+    conn.execute("BEGIN")
+    conn.execute(f"SELECT pg_advisory_xact_lock_shared({INGEST_LOCK})")
+    conn.execute(NETWORK_LOCKS, (sorted({run.provider for run in runs}),))
+    conn.execute(RUN_LOCKS, ([run.run_id for run in runs],))
+    version = conn.execute("SELECT max(version) FROM schema_versions")
+    stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
+    # The names partition() looks for: the month's partition, then the day's.
+    wanted = storage_ingest.partitions(runs)
+    names = sorted({n for t, m in wanted for n in (monthly(t, m)[0], holder(t, m, ())[0])})
+    found = conn.execute(
+        "SELECT n FROM unnest(%s::text[]) n WHERE to_regclass(n) IS NOT NULL", (names,)
+    )
+    pipeline.sync()
+    if version.fetchone()[0] != SCHEMA_VERSION:
+        raise ValueError("Database schema requires db-migrate or a rebuild before import")
+    return stored.fetchall(), {n for (n,) in found}
+
+
+def _create_partitions(conn, missing):
+    """Leave the import's transaction and queue the missing partitions' creation in one of their
+    own, under the ingest lock held exclusively: creating one locks its parent and the tables its
+    foreign keys reference, so no import may hold locks on them meanwhile (it would deadlock)."""
+    conn.execute("ROLLBACK")
+    conn.execute("BEGIN")
+    conn.execute(f"SELECT pg_advisory_xact_lock({INGEST_LOCK})")
+    for table, name, start, end in missing:
+        for query in creation(table, name, start, end):
+            conn.execute(query)
+    conn.execute("COMMIT")
+
+
+def _store(runs, conn):
+    """Store read runs in one transaction and three round trips on conn: the shared lock with the
+    reads under it, every statement of the batch, the scope totals and the provider overlap
+    (under the overlap lock) with COMMIT. A batch that
+    needs a new day's partitions creates them and begins again (one more round trip)."""
     conn.autocommit = True  # BEGIN below: psycopg's own would take a round trip in pipeline mode
-    with conn, conn.pipeline() as pipeline:
-        # Serialize ingestion; measurements and website reads run independently.
+    with conn.pipeline() as pipeline:
         # The entire history/enrichment/cache update commits together.
-        conn.execute("BEGIN")
-        conn.execute("SELECT pg_advisory_xact_lock(817452901)")
-        version = conn.execute("SELECT max(version) FROM schema_versions")
-        stored = conn.execute(storage_batch.STORED, ([run.run_id for run in runs],))
-        # The names partition() looks for: the month's partition, then the day's.
-        wanted = storage_ingest.partitions(runs)
-        names = sorted({n for t, m in wanted for n in (monthly(t, m)[0], holder(t, m, ())[0])})
-        found = conn.execute(
-            "SELECT n FROM unnest(%s::text[]) n WHERE to_regclass(n) IS NOT NULL", (names,)
-        )
+        stored, existing = _begin(conn, pipeline, runs)
+        missing = storage_ingest.missing(storage_batch.existing(runs, stored), existing)
+        if missing:
+            _create_partitions(conn, missing)  # sent with the next begin
+            stored, existing = _begin(conn, pipeline, runs)
+        fresh = storage_batch.existing(runs, stored)
+        summaries, scopes, new_ips, enriched = _store_runs(conn, runs, fresh, existing)
         pipeline.sync()
-        if version.fetchone()[0] != SCHEMA_VERSION:
-            raise ValueError("Database schema requires db-migrate or a rebuild before import")
-        fresh = storage_batch.existing(runs, stored.fetchall())
-        scopes, new_ips, enriched = _store_runs(conn, runs, fresh, {n for (n,) in found})
-        pipeline.sync()
-        scopes = scopes.fetchall()
-        for idx, run_key, *_, summary in scopes:
+        for idx, run_key, summary in summaries.fetchall():
             storage_ingest.check_stored(runs[idx], summary)
             runs[idx].run_key = run_key
         if enriched and enriched[0].fetchall():
             raise ValueError("Conflicting enrichment for the same IP")
         if enriched and enriched[1].fetchone()[0]:
             raise ValueError("Enrichment release conflicts with prior data")
-        new_ips = dict(new_ips.fetchall()) if new_ips else {}
-        storage_batch.update_scopes(conn, _scope_totals(runs, scopes, new_ips))
-        conn.execute("COMMIT")  # sent with the scope totals; the pipeline's end waits for both
+        addresses, new_ips = new_ips is not None, dict(new_ips.fetchall()) if new_ips else {}
+        storage_batch.update_scopes(conn, _scope_totals(runs, scopes.fetchall(), new_ips))
+        if addresses:
+            _overlap(conn)
+        conn.execute("COMMIT")  # sent with the scope totals; the pipeline's end waits for all
     return [
         {"run_id": run.run_id, "run_key": run.run_key, "imported": not run.stored}
         | {"observation_rows": len(run.ips), "enrichment_releases_added": len(run.added)}
@@ -260,17 +313,23 @@ def _read_all(directories, batch_ids, ip_rows):
     return [_read(n, directory, batch_id, ip_rows) for n, (directory, batch_id) in pairs]
 
 
-def ingest_many(directories, credentials_file, *, batch_ids=None, ip_rows=True):
+def _connected(runs, credentials_file):
+    with connect(credentials_file) as conn:
+        return _store(runs, conn)
+
+
+def ingest_many(directories, credentials_file, *, batch_ids=None, ip_rows=True, conn=None):
     """Import run directories in one transaction and a fixed number of round trips, storing what
     importing them one at a time in this order does; per directory, what ingest returns.
 
     batch_ids holds one batch id (or None) per directory. Each directory is checked first and
     raises its own error; any error in the transaction rolls the batch back and raises
-    IngestBatchError naming its run ids, to retry one at a time with ingest.
+    IngestBatchError naming its run ids, to retry one at a time with ingest. With conn (an open
+    connection, idle) the batch goes over it and credentials_file is not read.
     """
     runs = _read_all(directories, batch_ids, ip_rows)
     try:
-        return _store(runs, credentials_file)
+        return _store(runs, conn) if conn else _connected(runs, credentials_file)
     except (psycopg.Error, ValueError) as error:
         raise IngestBatchError([run.run_id for run in runs]) from error
 
@@ -282,13 +341,14 @@ def ingest(directory, credentials_file, *, batch_id=None, ip_rows=True):
     A census may have requested=null (unbounded); geo.jsonl.gz, if listed, fills run_geo_buckets.
     It is ingest_many of one directory, raising the run's own error, not IngestBatchError.
     """
-    return _store(_read_all([directory], [batch_id], ip_rows), credentials_file)[0]
+    return _connected(_read_all([directory], [batch_id], ip_rows), credentials_file)[0]
 
 
 def _add_addresses(conn):
-    """Add the new addresses and product memberships; the cursor of (idx, IPs new to its scope)."""
+    """Add the new addresses and observations: the runs' own rows."""
+    # Every insert into a table other imports share goes in key order: no two wait on each other.
     conn.execute(
-        "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips "
+        "INSERT INTO ip_addresses(ip) SELECT DISTINCT ip FROM incoming_ips ORDER BY ip "
         "ON CONFLICT(ip) DO NOTHING"
     )
     conn.execute(
@@ -297,28 +357,47 @@ def _add_addresses(conn):
         "FROM incoming_ips i JOIN incoming_runs r USING(idx) JOIN ip_addresses a USING(ip)"
     )
     conn.execute("ANALYZE incoming_observations")
-    _membership(conn)
-    # Avoid another persisted membership set per performance configuration.
-    # First presence within this exact scope (first run of the batch): reads via test_runs_scope.
-    new_ips = conn.execute(
-        "SELECT idx,count(*) FROM (SELECT scope_id,ip_id,min(idx) AS idx FROM "
-        "incoming_observations GROUP BY scope_id,ip_id) n WHERE NOT EXISTS (SELECT 1 FROM "
-        "ip_observations o JOIN test_runs r USING(run_key) "
-        "WHERE o.ip_id=n.ip_id AND r.scope_id=n.scope_id) GROUP BY idx"
-    )
     storage_ingest.add_observations(conn)
-    return new_ips
 
 
-def _membership(conn):
-    # Only first-ever presence at this provider contributes to lifetime overlap.
+def _network(conn):
+    """The network's counts (under its lock): the IPs new to each pool, to each provider (before
+    its product memberships are added) and to each scope; the cursor of (idx, IPs new to its
+    scope)."""
+    storage_ingest.add_pool_ips(conn)
+    # Only first-ever presence at this provider contributes to lifetime overlap (_overlap).
     conn.execute(
         "CREATE TEMP TABLE new_provider_ips ON COMMIT DROP AS "
         "SELECT DISTINCT n.provider,n.ip_id FROM incoming_observations n "
         "WHERE NOT EXISTS (SELECT 1 FROM product_ips m JOIN products p USING(product_id) "
         "WHERE m.ip_id=n.ip_id AND p.provider=n.provider)"
     )
-    # Once per other provider with the IP, stored or in the batch; pairs in codepoint order.
+    conn.execute(
+        "INSERT INTO product_ips SELECT product_id,ip_id,min(first_seen),max(last_seen),"
+        "sum(count),count(DISTINCT idx) FROM incoming_observations GROUP BY product_id,ip_id "
+        "ORDER BY product_id,ip_id ON CONFLICT(product_id,ip_id) DO UPDATE SET "
+        "first_seen=least(product_ips.first_seen,excluded.first_seen),"
+        "last_seen=greatest(product_ips.last_seen,excluded.last_seen),"
+        "observation_count=product_ips.observation_count+excluded.observation_count,"
+        "run_count=product_ips.run_count+excluded.run_count"
+    )
+    # Avoid another persisted membership set per performance configuration.
+    # First presence within this exact scope (first run of the batch), the batch's own
+    # observations left out: reads via test_runs_scope.
+    return conn.execute(
+        "SELECT idx,count(*) FROM (SELECT scope_id,ip_id,min(idx) AS idx FROM "
+        "incoming_observations GROUP BY scope_id,ip_id) n WHERE NOT EXISTS (SELECT 1 FROM "
+        "ip_observations o JOIN test_runs r USING(run_key) WHERE o.ip_id=n.ip_id AND "
+        "r.scope_id=n.scope_id AND o.run_key NOT IN (SELECT run_key FROM incoming_runs)) "
+        "GROUP BY idx"
+    )
+
+
+def _overlap(conn):
+    """The cross-network step, the last before COMMIT: each IP new to its provider counts once
+    per other provider with it, stored (product_ips, read after the overlap lock, so every
+    import committed before is seen) or in the batch; pairs in codepoint order."""
+    conn.execute(f"SELECT pg_advisory_xact_lock({OVERLAP_LOCK})")
     pair = 'n.provider COLLATE "C",o.provider COLLATE "C"'
     conn.execute(
         f"INSERT INTO provider_overlap(provider_a,provider_b,shared_ips) SELECT least({pair}),"
@@ -326,17 +405,8 @@ def _membership(conn):
         "p.provider,m.ip_id FROM (SELECT DISTINCT ip_id FROM new_provider_ips) x JOIN product_ips "
         "m USING(ip_id) JOIN products p USING(product_id) UNION ALL SELECT provider,ip_id FROM "
         "new_provider_ips) o ON o.ip_id=n.ip_id AND o.provider<>n.provider GROUP BY 1,2 "
-        "ON CONFLICT(provider_a,provider_b) DO UPDATE SET "
+        "ORDER BY 1,2 ON CONFLICT(provider_a,provider_b) DO UPDATE SET "
         "shared_ips=provider_overlap.shared_ips+excluded.shared_ips,updated_at=now()"
-    )
-    conn.execute(
-        "INSERT INTO product_ips SELECT product_id,ip_id,min(first_seen),max(last_seen),"
-        "sum(count),count(DISTINCT idx) FROM incoming_observations GROUP BY product_id,ip_id "
-        "ON CONFLICT(product_id,ip_id) DO UPDATE SET "
-        "first_seen=least(product_ips.first_seen,excluded.first_seen),"
-        "last_seen=greatest(product_ips.last_seen,excluded.last_seen),"
-        "observation_count=product_ips.observation_count+excluded.observation_count,"
-        "run_count=product_ips.run_count+excluded.run_count"
     )
 
 
