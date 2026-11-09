@@ -111,7 +111,8 @@ def _calculate(args):
     from .calculator import calculate
 
     options = {"as_of": args.as_of, "publish": args.publish, "mode": args.mode}
-    options["parallel_reads"] = args.parallel_reads
+    if args.parallel_reads is not None:  # else the calculate.parallel_reads setting
+        options["parallel_reads"] = args.parallel_reads
     payload = calculate(args.database_file, args.methodology, **options)
     return _show({k: payload[k] for k in ("snapshot_id", "as_of", "readiness")})
 
