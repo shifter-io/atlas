@@ -54,8 +54,8 @@ OBSERVATIONS = (
     "%(day)s+(i%%12)*interval '5 minutes' FROM day_runs d JOIN pools p USING(scope_id),"
     "generate_series(0,%(ips)s-1) i"
 )
-POOL_START = "(SELECT min(ip_id) FROM ip_addresses WHERE ip>='11.0.0.0')"
-NEW_START = "(SELECT min(ip_id) FROM ip_addresses WHERE ip>='12.0.0.0')"
+POOL_START = "(SELECT min(ip_id) FROM ip_addresses WHERE ip>='10.1.0.0')"
+NEW_START = "(SELECT min(ip_id) FROM ip_addresses WHERE ip>='10.64.0.0')"
 
 
 def captured(build) -> str:
@@ -82,7 +82,7 @@ def setup(database: Path, work: Path, args) -> None:
     with storage.connect(database) as conn:
         conn.execute("CREATE TABLE scopes AS SELECT scope_id FROM scope_stats")
         conn.execute(
-            "INSERT INTO ip_addresses(ip) SELECT '11.0.0.0'::inet+n "
+            "INSERT INTO ip_addresses(ip) SELECT '10.1.0.0'::inet+n "
             "FROM generate_series(0,%s-1) n ORDER BY n",
             (args.scopes * size,),
         )
@@ -91,8 +91,8 @@ def setup(database: Path, work: Path, args) -> None:
             f"(row_number() OVER (ORDER BY scope_id)-1)*{size} AS base,{size} AS size FROM scopes"
         )
         gaps = conn.execute(
-            "SELECT count(*) FROM ip_addresses WHERE ip>='11.0.0.0' AND ip<'12.0.0.0' "
-            f"AND ip_id-{POOL_START}<>ip-'11.0.0.0'"
+            "SELECT count(*) FROM ip_addresses WHERE ip>='10.1.0.0' AND ip<'10.64.0.0' "
+            f"AND ip_id-{POOL_START}<>ip-'10.1.0.0'"
         ).fetchone()[0]
         assert gaps == 0, "pool addresses must have consecutive ids"
 
@@ -150,7 +150,7 @@ def group(conn, day: datetime, args) -> None:
     session): half of each run's IPs from its scope's pool (seen), half new addresses."""
     partition(conn, "ip_observations", day)
     conn.execute(
-        "INSERT INTO ip_addresses(ip) SELECT '12.0.0.0'::inet+n FROM generate_series(0,%s-1) n",
+        "INSERT INTO ip_addresses(ip) SELECT '10.64.0.0'::inet+n FROM generate_series(0,%s-1) n",
         (args.scopes * args.ips,),
     )
     conn.execute("CREATE TEMP TABLE incoming_runs (idx bigint,run_key bigint,scope_id bigint)")
