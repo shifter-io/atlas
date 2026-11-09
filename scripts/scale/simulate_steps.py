@@ -5,11 +5,12 @@ pulses (only with --pulses) and release (SIMULATE.md, "One simulated hour")."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import multiprocessing
 import shutil
 from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ import simulate_model
 from replay_steps import NODE, REGIONS, SLUGS, ReplaySteps, ReplayWriter
 
 from proxy_index.browser.contracts import BROWSER_REGION, BROWSER_REGION_ID
+from proxy_index.browser.settings import load_settings
 from proxy_index.daily import batches, ingest
 from proxy_index.onboarding.files import read_json
 from proxy_index.orchestrator.browser import browser_plan
@@ -32,8 +34,37 @@ WORKER: dict[str, Any] = {}  # a worker process's model (start)
 Current = namedtuple("Current", "hour figures directory")  # the hour being stored
 
 
+class SettingsChanged(Exception):
+    """The browser settings file is not the one the plan was read with."""
+
+
+@dataclass(frozen=True)
+class SettingsFile:
+    """The browser settings as the workers' plan carries them: the file's path and SHA-256.
+    Loaded settings do not pickle (their dict inputs are mappingproxies): each worker loads the
+    file itself, once (start)."""
+
+    path: str
+    sha256: str
+
+    @classmethod
+    def of(cls, path) -> SettingsFile:
+        path = Path(path).resolve()
+        return cls(str(path), hashlib.sha256(path.read_bytes()).hexdigest())
+
+    def load(self):
+        """load_settings of the file; SettingsChanged if it is not the plan's any more."""
+        found = hashlib.sha256(Path(self.path).read_bytes()).hexdigest()
+        if found != self.sha256:
+            name, wanted = Path(self.path).name, self.sha256
+            raise SettingsChanged(f"{name} changed since the plan: SHA-256 {found}, not {wanted}")
+        return load_settings(self.path)
+
+
 def start(profile: dict, plan, seed, replay_id: str) -> None:
-    """A worker's model; every summary it writes carries the run's own id as its marker."""
+    """A worker's model, from a plan whose browser settings are a SettingsFile; every summary it
+    writes carries the run's own id as its marker."""
+    plan = replace(plan, browser=plan.browser.load())
     WORKER["model"] = simulate_model.Model(profile, plan, seed)
     WORKER["model"].summaries.replay = replay_id
 

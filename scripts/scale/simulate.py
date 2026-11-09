@@ -70,7 +70,10 @@ class Simulation(replay.Replay):
         # replay.guard's last hour is the extra one after the days: one more day of one hour.
         ended = SimpleNamespace(**vars(args) | {"days": args.days + 1, "hours_per_day": 1})
         go = replay.guard(conn, ended)
+        # The workers' plan: the settings file as read before this process loads it.
+        settings = simulate_steps.SettingsFile.of(args.browser_settings)
         self.plan = read_plan(conn, args)
+        self.shared = replace(self.plan, browser=settings)
         self.out.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.state = self.open(go)
         self.model = simulate_model.Model(profile, self.plan, self.state["seed"])
@@ -108,7 +111,7 @@ class Simulation(replay.Replay):
         records = [self.record(index) for index in range(total + 1)]  # the model's (day, hour):
         slots = [(r["day"] + 1, datetime.fromisoformat(r["start"]).hour) for r in records]
         first = next((i for i, r in enumerate(records) if not r["ingest"]["done"]), total + 1)
-        given = (self.profile, self.plan, self.state["seed"], self.state["replay_id"])
+        given = (self.profile, self.shared, self.state["seed"], self.state["replay_id"])
         producer = simulate_steps.Producer(self.args.jobs, self.out / "generated", given, slots)
         if measure.has_statements(self.conn):
             self.counters = measure.snapshot(self.conn)
