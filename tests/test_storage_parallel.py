@@ -433,9 +433,7 @@ def test_a_dead_worker_process_fails_its_groups_named_and_the_others_finish(
     assert run_id("pulse", 5) in found
 
 
-def test_a_group_sent_to_a_process_that_died_waits_for_its_lane_s_dead_event(
-    database, tmp_path
-):
+def test_a_group_sent_to_a_process_that_died_waits_for_its_lane_s_dead_event(database, tmp_path):
     """A lane whose process died before the pool knew it: sending raises nothing in the
     dispatcher, and the "dead" event that follows fails the group with the lane's others."""
     events = queue.Queue()
