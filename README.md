@@ -127,9 +127,15 @@ schema v14 (`migrate_v13_v14.sql`) adds `scope_ips`, each scope's IP membership 
 `pool_ips` per pool), filled once from the stored observations in the migration's transaction:
 ingest counts the IPs new to a scope (its `unique_ips`) by inserting the batch's pairs into it,
 one key probe each, instead of scanning `ip_observations`, so the count no longer grows with the
-history. `db-init` verifies v14 and refuses other schemas.
-`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v13
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v14, in
+history; schema v15 (`migrate_v14_v15.sql`, DB-EXPLAIN-1) adds three partial indexes to
+`test_events` for the API's rare-value reads, which otherwise walk the whole tape:
+`test_events_notable (at DESC, event_id DESC)` over the non-routine rows (the notable read, and the
+`kinds` and `category` filters that admit no routine row, whose query repeats the predicate), and
+`test_events_country (country_code, at DESC)` and `test_events_target (target_id, at DESC)` over the
+rows that name one. No row changes; each index is built on every monthly partition and attached,
+and partitions made later get it from the parent. `db-init` verifies v15 and refuses other schemas.
+`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v14
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v15, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every

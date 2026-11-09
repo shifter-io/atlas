@@ -65,7 +65,7 @@ def migratable_start(versions, migratable):
     """The version an older schema starts at; raise unless it is an unmodified migratable one."""
     start = migratable.get(versions[0] if len(versions) == 1 else None)
     if start is None:
-        raise ValueError("Only an unmodified v4 to v13 schema can be migrated in place")
+        raise ValueError("Only an unmodified v4 to v14 schema can be migrated in place")
     return start
 
 
@@ -74,7 +74,7 @@ def layer_start(start, layered, layers, current_layer):
     after v2 it starts at (None from v2); raise unless migrate can upgrade it in place."""
     from .calculated import store
 
-    # A v6 to v13 database may already carry the current calculated layer, and a v6 or
+    # A v6 to v14 database may already carry the current calculated layer, and a v6 or
     # later one a calculated v3 to v6 layer (later is its version, else None).
     upgraded = layered and start >= 6 and layers == current_layer
     known = {(n, getattr(store, f"V{n}_CHECKSUM")): n for n in range(3, store.SCHEMA_VERSION)}
@@ -114,7 +114,7 @@ def migrate_base(conn, start, layered, from_v2, schema_version):
     if start == 6:
         checks |= V6_CHECKS
         conn.execute(V6_SNAPSHOT)
-    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v13_v14.sql
+    for step in range(max(start, 5), schema_version):  # migrate_v5_v6.sql .. v14_v15.sql
         conn.execute((ROOT / f"migrate_v{step}_v{step + 1}.sql").read_text())
     if start < 9:
         checks |= names.V8_CHECKS
@@ -166,9 +166,9 @@ def compacted(start, layered, upgraded):
 
     Dropped columns and updated rows keep their bytes until the tables are compacted: the v4
     columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
-    v5 → v6 to v13 → v14 (but v8 → v9) and calculated v2 → v3 only add tables (v12 → v13 and
+    v5 → v6 to v14 → v15 (but v8 → v9) and calculated v2 → v3 only add tables (v12 → v13 and
     v13 → v14 fill their new one), functions, a trigger, nullable or constant-default columns
-    and an index (and swap a check constraint or index), and calculated v12 → v13 drops a
+    and indexes (and swap a check constraint or index), and calculated v12 → v13 drops a
     foreign key: no rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []

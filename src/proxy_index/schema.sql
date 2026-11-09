@@ -335,6 +335,16 @@ CREATE TABLE IF NOT EXISTS test_events (
 ) PARTITION BY RANGE(at);
 CREATE INDEX IF NOT EXISTS test_events_at ON test_events(at DESC);
 CREATE INDEX IF NOT EXISTS test_events_product ON test_events(product_id,at DESC);
+-- The rare-value reads (schema v15): the non-routine rows (the API's notable read and its kind and
+-- tab filters, whose clause repeats this predicate, store.routineSQL), and the country and target
+-- filters. Partial, so the routine bulk of the tape costs them nothing.
+CREATE INDEX IF NOT EXISTS test_events_notable ON test_events(at DESC,event_id DESC)
+ WHERE NOT (left(kind,7)='census_' OR kind IN
+ ('daily_test_started','daily_test_finished','estimate_hour_released','pulse_finished'));
+CREATE INDEX IF NOT EXISTS test_events_country ON test_events(country_code,at DESC)
+ WHERE country_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS test_events_target ON test_events(target_id,at DESC)
+ WHERE target_id IS NOT NULL;
 -- The live tape's counts (schema v13) per 30-minute bucket of `at`, product (0: no product) and
 -- tape tab, kept by one statement trigger per insert into test_events (every partition fires
 -- the parent's): good counts signal > 0, bad signal < 0. The API's /v1/events/stats reads it.
