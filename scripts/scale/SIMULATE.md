@@ -378,7 +378,7 @@ replay.py's step loop runs each step until it is done; a failed part is recorded
      imports of one run still go one after the other. Its run's own rows (temp tables, runs,
      buckets, geo rows, addresses, observations, `pool_ips`, enrichment) go in without a
      global lock; only the last step
-     takes the overlap lock (817452903) and commits right after: the IPs first seen at their
+     takes the overlap lock (817452905) and commits right after: the IPs first seen at their
      network and the `provider_overlap` they add, `product_ips`, each scope's IPs new to it and
      the scope totals (`scope_stats`), the read-modify-writes other imports' commits change.
      Read after the lock, they see every committed import, as the serial path does.

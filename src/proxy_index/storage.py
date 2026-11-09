@@ -52,10 +52,12 @@ PERFORMANCE = ("concurrency", "timeout_seconds", "requests_per_second")
 # Imports hold the ingest lock shared, so they run side by side (INGEST-PARALLEL-1) while a purge,
 # seed, migration or rebuild, which holds it exclusively, waits for them and they for it. Only
 # the cross-network step (_shared) runs one import at a time, under the overlap lock.
-INGEST_LOCK, OVERLAP_LOCK = 817452901, 817452903
-# Two imports of one run go one after the other: the batch's runs' locks, taken in one order.
+# 817452902 is the calculation's lock and 817452903 detect's (detect.LOCK).
+INGEST_LOCK, OVERLAP_LOCK, RUN_LOCK = 817452901, 817452905, 817452904
+# Two imports of one run go one after the other: the batch's runs' locks, taken in one order
+# (keys of two integers: never equal to a one-number key).
 RUN_LOCKS = (
-    "SELECT pg_advisory_xact_lock(817452904,h) FROM (SELECT DISTINCT hashtext(r::text) h "
+    f"SELECT pg_advisory_xact_lock({RUN_LOCK},h) FROM (SELECT DISTINCT hashtext(r::text) h "
     "FROM unnest(%s::uuid[]) r ORDER BY h) s"
 )
 

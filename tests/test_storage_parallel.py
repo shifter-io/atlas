@@ -231,6 +231,17 @@ def test_the_caps_split_groups_and_spare_connections(database, tmp_path, monkeyp
     assert storage_parallel.store([], database) == []
 
 
+def test_the_import_locks_are_no_other_lock():
+    from proxy_index import detect
+    from proxy_index.archive import purge
+    from proxy_index.calculated import rollups
+    from proxy_index.orchestrator import batches
+
+    assert storage.INGEST_LOCK == purge.INGEST_LOCK
+    others = {detect.LOCK, rollups.LOCK, batches.PLAN_LOCK, storage.INGEST_LOCK}
+    assert storage.OVERLAP_LOCK not in others and len(others) == 3
+
+
 def test_groups_of_one_network_are_not_handed_out_together():
     parts = [Group([], networks=frozenset(n)) for n in ("a", "a", "b", "ab", "c")]
     running = {"f0": 0}  # a part of network a is in flight
