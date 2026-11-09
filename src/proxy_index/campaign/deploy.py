@@ -1,8 +1,9 @@
 """Deploy and run the campaign manager: create, harden, secrets, units, enable (teardown:
 `teardown.py`).
 
-The manager is one droplet in lon1 (`s-8vcpu-16gb` unless `--size` names another size offered
-there) with every ownership marker, in project Proxy Index, created without the droplet agent
+The manager is one droplet in `--region` (default: the inventory's `manager_region`, else lon1;
+MANAGER-REGION-1) of size `s-8vcpu-16gb` unless `--size` names another size offered there, with
+every ownership marker, in project Proxy Index, created without the droplet agent
 (no web console). Only the Mac's campaign key logs in,
 and its firewall admits SSH only from the Mac's public IPv4. The DigitalOcean token is read from
 the Mac keychain only by `deploy` and travels only on SSH stdin into a root-only 0600 file;
@@ -303,6 +304,7 @@ class DeployJob:
     token: TokenSource
     size: str | None = None  # a new manager's size; None: the recorded one, else MANAGER_SIZE
     environment: str = PRODUCTION  # CAMP-STAGING-1: staging runs beside it on its own names
+    region: str | None = None  # a new manager's region; None: the recorded one, else MANAGER_REGION
 
     def payload(self) -> bytes:
         assets = files("proxy_index.campaign").joinpath("assets")
@@ -380,7 +382,8 @@ async def _record_mac_key(
     inventory = load_inventory(path)
     project_id = await check_account(cloud, inventory, job.account)  # before any write
     environment = bound_environment(inventory, job.environment)
-    size = await manager_size(cloud, inventory, job.size)
+    region = manager_region(inventory, job.region)
+    size = await manager_size(cloud, inventory, job.size, region)
     if inventory.get("host") and inventory.get("campaigns"):
         await _refuse_while_running(Manager(inventory, path, shell), inventory["campaigns"])
     public = job.mac_key.with_name(job.mac_key.name + ".pub").read_text()
@@ -394,6 +397,7 @@ async def _record_mac_key(
         project_id=project_id,
         mac_key_id=mac_key_id,
         manager_size=size,
+        manager_region=region,
         user="root",
         identity=str(job.mac_key),
         identity_file=str(job.mac_key),
@@ -402,11 +406,30 @@ async def _record_mac_key(
     )
 
 
-async def manager_size(cloud: DigitalOcean, inventory: dict[str, Any], wanted: str | None) -> str:
+def manager_region(inventory: dict[str, Any], wanted: str | None) -> str:
+    """The manager's region: `wanted`, else the recorded one, else MANAGER_REGION (an inventory
+    from before regions were recorded is lon1). A recorded manager is never moved: another
+    region is refused until `teardown --keep-worker-assets` retires it."""
+    recorded = inventory.get("manager_region") or MANAGER_REGION
+    region = wanted or recorded
+    if inventory.get("manager_id") and region != recorded:
+        raise DeployError(
+            f"the recorded manager is in {recorded}; tear it down with "
+            f"--keep-worker-assets before deploying a manager in {region}"
+        )
+    return region
+
+
+async def manager_size(
+    cloud: DigitalOcean,
+    inventory: dict[str, Any],
+    wanted: str | None,
+    region: str = MANAGER_REGION,
+) -> str:
     """The manager's size: a recorded manager keeps its own (one created before sizes were
     recorded is MANAGER_SIZE); a new one takes `wanted`, else the size of an attempt that
     failed before its manager was recorded, else MANAGER_SIZE, and it must be offered in
-    MANAGER_REGION."""
+    the manager's `region`."""
     recorded = inventory.get("manager_size", MANAGER_SIZE) if inventory.get("manager_id") else None
     size = wanted or recorded or inventory.get("manager_size") or MANAGER_SIZE
     if recorded and size != recorded:
@@ -414,8 +437,8 @@ async def manager_size(cloud: DigitalOcean, inventory: dict[str, Any], wanted: s
             f"the recorded manager is {recorded}; tear it down with "
             f"--keep-worker-assets before deploying a {size} manager"
         )
-    if not recorded and MANAGER_REGION not in (await cloud.sizes()).get(size, []):
-        raise DeployError(f"size {size} is not offered in {MANAGER_REGION}")
+    if not recorded and region not in (await cloud.sizes()).get(size, []):
+        raise DeployError(f"size {size} is not offered in {region}")
     return size
 
 
@@ -452,8 +475,8 @@ async def _refuse_while_running(remote: Manager, campaigns: list[str]) -> None:
 async def _ensure_manager(
     cloud: DigitalOcean, job: DeployJob, inventory: dict, now: datetime, sleep: ops_api.Sleep
 ) -> Droplet:
-    """The recorded manager, or a new one of the recorded size: created, moved into Proxy
-    Index, then active."""
+    """The recorded manager, or a new one of the recorded size and region: created, moved
+    into Proxy Index, then active."""
     if not inventory.get("manager_id"):
         environment = ops_api.inventory_environment(inventory)
         name = names(environment).dated("manager", now, secrets.token_hex(2))
@@ -462,7 +485,7 @@ async def _ensure_manager(
         try:
             [droplet] = await cloud.create(
                 [name],
-                region=MANAGER_REGION,
+                region=inventory["manager_region"],
                 size=inventory["manager_size"],
                 image=BASE_IMAGE,
                 tags=[tag],
