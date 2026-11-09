@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import defaultdict
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import simulate_check
 import simulate_model
@@ -40,6 +42,16 @@ BUCKETS = (
     "CREATE TEMP TABLE wipe_event_buckets ON COMMIT DROP AS SELECT DISTINCT "
     f"{wipe_replay.BUCKET} AS bucket_start FROM test_events WHERE {wipe_replay.BATCHES}"
 )
+# The load's stored browser runs of the simulated days: their tries and bytes as the calculation
+# reads them (run_buckets), with the batch's network, target and hour.
+STORED = (
+    "SELECT p.provider,b.target_id,date_trunc('hour',b.scheduled_for),sum(k.completed)::bigint,"
+    "sum(k.bytes_down)::bigint FROM test_batches b JOIN test_runs t USING(batch_id) "
+    "JOIN scope_stats s USING(scope_id) JOIN products p USING(product_id) "
+    "JOIN run_buckets k ON k.run_key=t.run_key WHERE b.kind='browser' "
+    f"AND b.scheduled_for>=%(first)s AND b.scheduled_for<%(end)s AND t.summary->>'{REPLAY_MARKER}'"
+    "=%(replay)s GROUP BY t.run_key,1,2,3 HAVING sum(k.completed)>0"
+)
 RUN_ROWS = ("run_buckets", "run_geo_buckets", "ip_observations", "run_enrichments")
 RUN_ROWS += ("estimated_hours", "calculation_roles", "calculated_run_ranges")
 # (table, condition) in foreign-key order; a table the database lacks is skipped.
@@ -53,8 +65,9 @@ FACTS = (
 
 
 def check(args) -> dict:
-    """Both checks of the stored load in --out, from its state.json and the plan read in one
-    read-only transaction; checks.json and checks.md beside the report. Writes nothing else."""
+    """Both checks of the stored load in --out, from its state.json, and the plan and the stored
+    browser runs read in one read-only transaction (the model may have changed since they were
+    stored); checks.json and checks.md beside the report. Writes nothing else."""
     out = Path(args.out)
     state, data = json.loads((out / "state.json").read_text()), Path(args.profile).read_bytes()
     if hashlib.sha256(data).hexdigest() != state["profile_sha256"]:
@@ -68,10 +81,12 @@ def check(args) -> dict:
                 raise Refused(f"the state is the load of {state['database']!r}, not {database!r}")
             found = (start, args.formulas, args.browser_settings, state["pulses"])
             plan = simulate_model.read_plan(conn, *found)
+            runs = conn.execute(STORED, bounds(state, state["days"] - 1)).fetchall()
     model = simulate_model.Model(profile, replace(plan, days=state["days"]), state["seed"])
     per_day = state["hours_per_day"]
     records = [r for r in state["hours"][: (state["days"] - 1) * per_day] if "figures" in r]
     hours = simulate_report.stored(model, records)
+    stored_browser(hours, records, runs, model.plan.browser)
     size = simulate_check.size(profile, hours, model, simulate_check.snapshots(state))
     day = min(2, state["days"] - 1)
     stats = simulate_check.stats(profile, [model.hour(day, h) for h in range(per_day)])
@@ -80,6 +95,24 @@ def check(args) -> dict:
     write_private(out / "checks.json", json.dumps(found, indent=2))
     write_private(out / "checks.md", simulate_check.markdown(found))
     return {name: {key: found[name][key] for key in ("pass", "compared")} for name in KINDS}
+
+
+def bounds(state: dict, days: int) -> dict:
+    """The simulated days' first and end moments, the load's nodes and its id."""
+    first = datetime.combine(date.fromisoformat(state["first_day"]), time(), UTC)
+    found = {"first": first, "end": first + timedelta(days=days), "ids": state["nodes"]}
+    return found | {"replay": state["replay_id"]}
+
+
+def stored_browser(hours: list, records: list[dict], runs: list, settings) -> None:
+    """Each stored hour's browser runs: the database's, not the current model's."""
+    found = defaultdict(list)
+    for provider, target, hour, loads, size in runs:
+        own = SimpleNamespace(network=provider, target=target, engine=settings.engine(target))
+        found[hour].append(own)
+        own.loads, own.bytes_per_load = loads, size / loads
+    for record, hour in zip(records, hours, strict=True):
+        hour.browser = found.get(datetime.fromisoformat(record["start"]), [])
 
 
 def delete(conn, bounds: dict) -> dict:
@@ -110,14 +143,13 @@ def wipe(conn, state: dict, days: int, apply: bool, dry: Path) -> dict:
     run, the same delete committed when its counts equal the dry run's."""
     if apply and not dry.exists():
         raise Refused(f"no dry run ({dry.name}): run --rerun browser without --apply first")
-    first = datetime.combine(date.fromisoformat(state["first_day"]), time(), UTC)
-    bounds = {"first": first, "end": first + timedelta(days=days), "ids": state["nodes"]}
-    bounds["replay"] = state["replay_id"]
     with conn.transaction(force_rollback=not apply):
-        found = {"replay_id": state["replay_id"], "deleted": delete(conn, bounds)}
+        found = {"replay_id": state["replay_id"], "deleted": delete(conn, bounds(state, days))}
         if apply and json.loads(dry.read_text()) != found:  # a raise here rolls back
             raise Refused(f"the counts differ from the dry run's ({dry.name}): nothing deleted")
-    if not apply:
+    if apply:
+        dry.unlink()  # a later --apply needs a dry run of its own
+    else:
         write_private(dry, json.dumps(found, indent=2))
     return found
 

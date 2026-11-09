@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+import replay_report
 from profile_browser import spread
 from profile_hours import bucket
-from replay_report import table
 from simulate_browser import bytes_per_load, dig, outcomes, page_load
 
 MEAN = 0.10  # a generated mean within 10% of the reference's
@@ -29,7 +29,7 @@ RATIOS = {
     "observations_per_ip": ("ip_observations", "ip_addresses"),
     "enrichment_per_ip": ("ip_enrichment", "ip_addresses"),
     "buckets_per_run": ("run_buckets", "test_runs"),
-    **{f"{name}_per_new_ip": (name, "ip_addresses") for name in NEW_IPS[2:]},
+    **{f"{name}_per_ip": (name, "ip_addresses") for name in NEW_IPS[2:]},
 }
 SCHEDULES = (
     "BP-VERIFY-3's runs came from the old slot schedule; production's queue runs one run of the "
@@ -86,7 +86,8 @@ def within(check: dict, found, expected, limit: float = MEAN) -> dict:
 
 def browser_sizes(profile: dict, hours: list, model) -> list[dict]:
     """Per network x target x engine: tries per run against the plan's, and the runs' p50
-    bytes per page load against the profile's (simulate_browser.bytes_per_load, its basis)."""
+    bytes per page load against the profile's (simulate_browser.bytes_per_load, its basis). A
+    run is the model's or a stored one (`loads`, `bytes_per_load`)."""
     groups = defaultdict(list)
     for hour in hours:
         for run in hour.browser:
@@ -95,9 +96,9 @@ def browser_sizes(profile: dict, hours: list, model) -> list[dict]:
     checks = []
     for (network, target, engine), runs in sorted(groups.items()):
         group = {"kind": "browser", "network": network, "target": target, "engine": engine}
-        tries = sum(len(run.tries) for run in runs) / len(runs)
+        tries = sum(run.loads for run in runs) / len(runs)
         checks.append(within(group | {"check": "tries_per_run"}, tries, planned[target]))
-        loads = [sum(size for _, size, *_ in run.tries) / len(run.tries) for run in runs]
+        loads = [run.bytes_per_load for run in runs]
         expected, basis = bytes_per_load(profile, network, target, engine)
         found = within(group | {"check": "bytes_per_load_p50"}, spread(loads)["p50"], expected)
         checks.append(found | {"basis": basis})
@@ -108,7 +109,7 @@ def tries_day(profile: dict, hours: list) -> dict:
     """A day's browser tries, generated (the mean over the days), beside BP-VERIFY-3's."""
     days = Counter()
     for hour in hours:
-        days[hour.day] += sum(len(run.tries) for run in hour.browser)
+        days[hour.day] += sum(run.loads for run in hour.browser)
     real = sum(entry.get("browser_tries") or 0 for entry in dig(profile, "real_24h").values())
     generated = round(sum(days.values()) / len(days)) if days else 0
     return {"generated": generated, "bp_verify_3": real, "schedules": SCHEDULES}
@@ -166,10 +167,10 @@ def day_rows(profile: dict, hours: list, sizes: dict) -> tuple[list[dict], dict]
             continue
         grew, apart[str(day)] = growth(before, after)
         expected = expected_rows(profile, [hour for hour in hours if hour.day == day], day)
-        for table, rows in sorted(expected.items()):
-            if table in grew:
-                check = {"check": "day_rows", "day": day, "metric": table}
-                checks.append(within(check, grew[table], rows))
+        for name, rows in sorted(expected.items()):
+            if name in grew:
+                check = {"check": "day_rows", "day": day, "metric": name}
+                checks.append(within(check, grew[name], rows))
     return checks, apart
 
 
@@ -199,18 +200,18 @@ def expected_rows(profile: dict, hours: list, day: int) -> dict:
             ips[test.lane.network] += test.size
             new[test.lane.network] += test.size * (1 if day == 1 else 1 - test.lane.reuse)
     found = {}
-    for table in INGEST:
-        if table == "ip_observations" or table in NEW_IPS:
-            own = new if table in NEW_IPS else ips
-            given = [(n, reference_ratio(profile, n, table, "ip_addresses")) for n in own]
-            if table in NEW_IPS:
+    for name in INGEST:
+        if name == "ip_observations" or name in NEW_IPS:
+            own = new if name in NEW_IPS else ips
+            given = [(n, reference_ratio(profile, n, name, "ip_addresses")) for n in own]
+            if name in NEW_IPS:
                 given = [(n, 1 if ratio is None else ratio) for n, ratio in given]
             if all(ratio is not None for _, ratio in given):
-                found[table] = round(sum(own[n] * ratio for n, ratio in given))
+                found[name] = round(sum(own[n] * ratio for n, ratio in given))
             continue
-        means = {kind: dig(profile, "reference", kind, "rows_per_run", table) for kind in runs}
+        means = {kind: dig(profile, "reference", kind, "rows_per_run", name) for kind in runs}
         if all(mean.get("mean") is not None for mean in means.values()):
-            found[table] = round(sum(n * means[kind]["mean"] for kind, n in runs.items()))
+            found[name] = round(sum(n * means[kind]["mean"] for kind, n in runs.items()))
     return found
 
 
@@ -326,7 +327,7 @@ def markdown(found: dict) -> str:
         failed = [c for c in own["checks"] if not c["pass"]]
         lines += ["", f"## {name}: {own['compared'] - len(failed)} of {own['compared']} pass"]
         rows = [[c["check"], label(c), c.get("metric"), c["deviation"], c["limit"]] for c in failed]
-        lines += table(head, rows) if rows else ["", "No failure."]
+        lines += replay_report.table(head, rows) if rows else ["", "No failure."]
         thin = [c for c in own["checks"] if c.get("insufficient_reference")]
         lines += [""] if thin else []
         lines += [f"- insufficient reference: {label(c)} {c['check']}" for c in thin]
@@ -339,5 +340,5 @@ def markdown(found: dict) -> str:
         for name, entry in tables.items()
     ]
     lines += ["", "## Rows apart from the ingest's tables"]
-    lines += table(("Day", "Table", "Rows", "Why"), rows)
+    lines += replay_report.table(("Day", "Table", "Rows", "Why"), rows)
     return "\n".join(lines) + "\n"

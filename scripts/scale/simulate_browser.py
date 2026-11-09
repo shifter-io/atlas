@@ -87,6 +87,14 @@ class Browser:
     tries: tuple = field(repr=False)
 
     @property
+    def loads(self) -> int:
+        return len(self.tries)
+
+    @property
+    def bytes_per_load(self) -> float:
+        return sum(size for _, size, *_ in self.tries) / len(self.tries)
+
+    @property
     def bundle_bytes(self) -> int:
         return BUNDLE_BASE + sum(shot for *_, shot in self.tries)
 

@@ -302,7 +302,8 @@ follows the owner's notes on cadence and size (2026-11-08) and `docs/api-web-map
   - **daily ratios** per network (`ratio`), within 10% of the reference's
     (`reference.daily.networks.<n>`, else `reference.daily`): observation rows per unique
     IP, enrichment rows per IP, buckets per run, and `product_ips`, `pool_ips` and
-    `scope_ips` rows per IP (a table neither side counts is skipped). Absolute rows per run
+    `scope_ips` rows per IP of the run (a table neither side counts is skipped: today
+    `scope_ips`, which only `day_rows` compares). Absolute rows per run
     are not compared across networks: a run's size follows its country;
   - **unique IPs** per network and day (`unique_ips`) against the sum of its formulas'
     figures over its scheduled countries (`Lane.planned`), each varied by the day's jitter,
@@ -504,9 +505,12 @@ simulate.py check --out <run dir> --database <staging toml> --profile <profile.j
 simulate.py --rerun browser --days 7 ... (the load's own arguments) [--apply]
 ```
 
-- `check` runs both checks again from `<out>/state.json` and the plan, which it reads in one
-  read-only transaction: `size` over the stored days with the day sizes state.json kept,
-  `stats` of day 2 (day 1 alone: its own). It refuses another database or a profile whose
+- `check` runs both checks again from `<out>/state.json`, and from the plan and the stored
+  browser runs, which it reads in one read-only transaction: `size` over the stored days with
+  the day sizes state.json kept, `stats` of day 2 (day 1 alone: its own). The browser checks
+  measure each stored run's tries and bytes as the calculation reads them (`run_buckets`'
+  `completed` and `bytes_down`), so runs stored by an earlier model are measured as stored;
+  the daily figures are the ones state.json recorded at the load. It refuses another database or a profile whose
   SHA-256 is not the load's, and writes `checks.json` and `checks.md` (mode 600) beside the
   report, nothing else. It never loads or reloads data.
 - `--rerun browser` stores the load's browser runs of the simulated days again with the current
@@ -519,7 +523,9 @@ simulate.py --rerun browser --days 7 ... (the load's own arguments) [--apply]
     the live tape's buckets as `wipe_replay.py` does, rolls it all back, and writes the rows
     per table to `rerun-browser-dry-run.json`.
   - With `--apply` after a dry run: the same delete, committed only when its counts equal the
-    dry run's. Then every simulated hour's browser runs (about 1,008 for 7 days) go through
+    dry run's; the dry run's file then goes, so a later rerun needs its own. Then every simulated hour's browser runs (about 1,008 for 7 days) go through
     the load's browser step again (`rerun_browser` in the hour's record), resumable with the
     same command; the nodes are disabled at the end. The extra hour keeps its runs.
+  - A stop between the delete's commit and state.json's save leaves no record of the delete:
+    the next `--apply` is refused until a new dry run (which then deletes nothing) records it.
   - A recalculation follows only when the operator runs one.

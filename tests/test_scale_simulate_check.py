@@ -86,8 +86,8 @@ def test_daily_ratios_and_unique_ips_against_the_reference_and_the_formulas(gene
         "observations_per_ip",
         "enrichment_per_ip",
         "buckets_per_run",
-        "product_ips_per_new_ip",
-        "pool_ips_per_new_ip",
+        "product_ips_per_ip",
+        "pool_ips_per_ip",
     }  # no scope_ips: neither the model's tables nor the reference count them
     assert ratios and all(c["pass"] for c in ratios)
     ips = named(found, "unique_ips")
