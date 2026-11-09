@@ -249,6 +249,20 @@ def add_pool_ips(conn):
     )
 
 
+def add_scope_ips(conn):
+    """The cursor of (idx, IPs new to its scope): each scope's first presence of an IP, counted
+    at the batch's first run of that scope with it. The membership set per scope (scope_ips, as
+    pool_ips per pool, in key order) costs one key probe per pair, where scanning ip_observations
+    grew with the history."""
+    return conn.execute(
+        "WITH added AS (INSERT INTO scope_ips SELECT scope_id,ip_id FROM (SELECT DISTINCT "
+        "scope_id,ip_id FROM incoming_observations) s ORDER BY scope_id,ip_id "
+        "ON CONFLICT DO NOTHING RETURNING scope_id,ip_id) SELECT f.idx,count(*) FROM added "
+        "JOIN (SELECT scope_id,ip_id,min(idx) AS idx FROM incoming_observations "
+        "GROUP BY scope_id,ip_id) f USING(scope_id,ip_id) GROUP BY f.idx"
+    )
+
+
 def read_enrichments(run):
     """The run's enrichment reports checked against run.ips: (release, metadata, checksum, rows)."""
     directory, run_id, expected = run.source.parent, run.run_id, len(run.ips)

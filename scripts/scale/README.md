@@ -87,7 +87,7 @@ Per network and country:
 - **IPs.** Each network × country has its own block of synthetic addresses: IPv4 in
   the reserved IPv4 block 240/4 (class E) and IPv6 in `2001:db8::/32`. 30-60% of a test's IPs (one share per network) were
   also in the day before's test, and about 2% more come from another country of the same network.
-  `ip_addresses`, `product_ips`, `pool_ips` and `pool_stats.unique_ips` are kept as ingest keeps
+  `ip_addresses`, `product_ips`, `pool_ips`, `scope_ips` and `pool_stats.unique_ips` are kept as ingest keeps
   them.
 - **DB-IP.** One synthetic release per day; every IP of the day is enriched with it (about 0.5%
   unmatched). Places and ASNs are synthetic lists sized like DB-IP: up to 5,000 cities, 60
