@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib
 import json
 import multiprocessing
+import queue
 import sys
 import threading
 import time
@@ -430,6 +431,21 @@ def test_a_dead_worker_process_fails_its_groups_named_and_the_others_finish(
     with connect(database) as conn:
         found = {str(r) for (r,) in conn.execute("SELECT run_id FROM test_runs")}
     assert run_id("pulse", 5) in found
+
+
+def test_a_group_sent_to_a_process_that_died_waits_for_its_lane_s_dead_event(
+    database, tmp_path
+):
+    """A lane whose process died before the pool knew it: sending raises nothing in the
+    dispatcher, and the "dead" event that follows fails the group with the lane's others."""
+    events = queue.Queue()
+    lane = storage_parallel.ProcessLane(database, 1, events)
+    lane.process.kill()
+    lane.process.join(30)
+    assert events.get(timeout=30) == ("dead", lane)
+    lane.send("key", Group([pulse(tmp_path / run_id("pulse", 0), 0)]))
+    assert lane.running == {"key"}
+    lane.close()
 
 
 def test_an_open_pool_stores_groups_handed_ahead_once(database, tmp_path, monkeypatch):

@@ -260,7 +260,10 @@ class ProcessLane:
 
     def send(self, key, group: Group) -> None:
         self.running.add(key)
-        self.conn.send((key, group))
+        try:
+            self.conn.send((key, group))
+        except OSError:
+            pass  # died, not yet known here: its "dead" event fails the group, named
 
     def close(self) -> None:
         try:

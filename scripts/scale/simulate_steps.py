@@ -124,6 +124,11 @@ def stats(day: int, hours: int) -> dict:
     return simulate_check.stats(model.profile, [model.hour(day, h) for h in range(hours)])
 
 
+def _generated(future) -> bool:
+    """Whether a part is written (not cancelled by a stop, not failed)."""
+    return future.done() and not future.cancelled() and future.exception() is None
+
+
 class Producer:
     """The worker processes, generating hours (index -> (day, hour)) up to `ahead` hours ahead
     of the one being stored while the generated hours not stored yet take less than `spool`
@@ -157,13 +162,14 @@ class Producer:
         """Once all parts of an hour are written: its bytes and costs; then more hours."""
         with self.lock:
             found = self.pending.get(index, [])
-            if index in self.sizes or not all(f.done() and not f.exception() for f in found):
+            if index in self.sizes or not all(_generated(future) for future in found):
                 return
             parts = [future.result() for future in found]
             self.sizes[index] = sum(part["bytes"] for part in parts)
-            self.counts["generated_tests"] += sum(len(part["figures"]) for part in parts)
-            self.counts["generation_cpu_seconds"] += sum(part["cpu"] for part in parts)
-            self.counts["reused_parts"] += sum(part["reused"] for part in parts)
+            written = [part for part in parts if not part["reused"]]  # its CPU is generation's
+            self.counts["generated_tests"] += sum(len(part["figures"]) for part in written)
+            self.counts["generation_cpu_seconds"] += sum(part["cpu"] for part in written)
+            self.counts["reused_parts"] += len(parts) - len(written)
         self.wake.set()
 
     def feed(self) -> None:
@@ -191,7 +197,7 @@ class Producer:
     def ready(self, index: int) -> bool:
         with self.lock:
             found = self.pending.get(index)
-            return bool(found) and all(f.done() and not f.exception() for f in found)
+            return bool(found) and all(_generated(future) for future in found)
 
     def take(self, index: int) -> dict[str, dict]:
         """The hour's figures by run id once its parts are written; the next hours start."""
@@ -205,6 +211,7 @@ class Producer:
         with self.lock:
             self.pending.pop(index, None)
             self.sizes.pop(index, None)
+            self.current = max(self.current, index + 1)  # never generated again
         shutil.rmtree(self.directory(index), ignore_errors=True)
         self.wake.set()
 

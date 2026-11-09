@@ -12,6 +12,7 @@ import re
 import stat
 import sys
 from collections import Counter
+from concurrent.futures import Future
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -105,10 +106,18 @@ def daily_figures(found: dict, day: int | None = None) -> list:
 
 
 def test_two_days_store_the_cadence_and_the_rows_then_publish_a_build(
-    staging, inputs, tmp_path, capsys
+    staging, inputs, tmp_path, capsys, monkeypatch
 ):
     settings, out = query(staging, SETTINGS), tmp_path / "out"
+    real, left = simulate.storage_parallel.Pool.close, []
+
+    def close(pool):
+        left.append(len(pool.tickets))  # every group handed ahead was the hour's own
+        real(pool)
+
+    monkeypatch.setattr(simulate.storage_parallel.Pool, "close", close)
     assert simulate.main(argv(staging, inputs, out)) == 0
+    assert left == [0]
     assert json.loads(capsys.readouterr().out)["hours_done"] == 49
     found = state(out)
     days = (FIRST, FIRST + timedelta(days=1))
@@ -312,3 +321,61 @@ def test_production_settings_load_the_same_rows_with_one_or_two_jobs(
             found.append(replay_baseline.counts(conn))
     one, two = ({name: rows[f"public.{name}"] for name in BROWSER_DATA} for rows in found)
     assert one == two and one["test_runs"] > 0
+
+
+class Written:
+    """A Producer's pool whose parts are written at once: one test and 150 bytes each."""
+
+    def __init__(self):
+        self.submitted = []
+
+    def submit(self, work, day, hour, part, parts, directory):
+        self.submitted.append(hour)
+        done = Future()
+        done.set_result({"figures": {f"run-{hour}": {}}, "bytes": 150, "cpu": 0.5, "reused": False})
+        return done
+
+    def shutdown(self, **_):
+        pass
+
+
+def test_the_generator_pauses_at_the_spool_cap(tmp_path):
+    producer = simulate_steps.Producer(1, tmp_path / "generated", (), [(1, h) for h in range(6)])
+    producer.pool.shutdown()
+    producer.pool, producer.ahead, producer.spool = Written(), 4, 100
+    assert producer.take(0) == {"run-0": {}}
+    producer.top_up()  # (its feeding thread's, as each hour is written)
+    assert producer.pool.submitted == [0]  # hour 0 alone is over the cap
+    producer.done(0)
+    producer.top_up()
+    assert producer.pool.submitted == [0, 1]  # hour 0 is never generated again
+    producer.spool = 10**6
+    producer.top_up()
+    assert producer.pool.submitted == [0, 1, 2, 3, 4, 5]  # up to 4 hours ahead of hour 1
+    assert producer.ready(5) and not producer.ready(6)
+    found = {"generated_tests": 6, "generation_cpu_seconds": 3.0, "reused_parts": 0}
+    assert producer.counts == found
+    producer.close(finished=True)
+    assert not (tmp_path / "generated").exists()
+
+
+def test_a_spooled_part_with_a_changed_file_is_written_again(tmp_path):
+    shared = simulate_steps.SettingsFile.of(PRODUCTION)
+    plan = replace(cases.plan(tmp_path), browser=shared, regions=None)
+    simulate_steps.start(cases.profile(), plan, 7, "run")
+    model = simulate_steps.WORKER["model"]
+    hour = next(h for h in range(24) if model.hour(1, h).daily)
+    directory = str(tmp_path / "hour")
+    first = simulate_steps.generate(1, hour, 0, 1, directory)
+    assert first["reused"] is False and first["figures"] and first["bytes"] > 0
+    again = simulate_steps.generate(1, hour, 0, 1, directory)
+    assert again["reused"] is True
+    assert (again["figures"], again["bytes"]) == (first["figures"], first["bytes"])
+    changed = next((tmp_path / "hour").rglob("ips.jsonl.gz"))
+    original = changed.read_bytes()
+    changed.write_bytes(original[:-1] + bytes([original[-1] ^ 1]))  # same size, other SHA-256
+    third = simulate_steps.generate(1, hour, 0, 1, directory)
+    assert third["reused"] is False and changed.read_bytes() == original
+    assert (third["figures"], third["bytes"]) == (first["figures"], first["bytes"])
+    (tmp_path / "hour" / "part-0-of-1.json").write_text("{")  # a manifest cut short
+    assert simulate_steps.generate(1, hour, 0, 1, directory)["reused"] is False
