@@ -302,7 +302,18 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, v *Version, s
 // adding the answer cut gives when absent (404 when it has none, 500 when its
 // rows could not be read).
 func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, key string, cut func() (any, bool, error)) {
-	body, ok := v.pages.Get(key)
+	s.serveCutIn(w, r, v, cutCache{v.pages, CacheData}, key, cut)
+}
+
+// cutCache is where serveCutIn keeps a cut body, and its Cache-Control.
+type cutCache struct {
+	lru     *LRU
+	control string
+}
+
+// serveCutIn is serveCut keeping the body in c.lru with c.control.
+func (s *Server) serveCutIn(w http.ResponseWriter, r *http.Request, v *Version, c cutCache, key string, cut func() (any, bool, error)) {
+	body, ok := c.lru.Get(key)
 	if !ok {
 		res, found, err := cut()
 		if err != nil {
@@ -314,11 +325,11 @@ func (s *Server) serveCut(w http.ResponseWriter, r *http.Request, v *Version, ke
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
-		if body, err = Render(http.StatusOK, res, CacheData, LevelFast); err != nil {
+		if body, err = Render(http.StatusOK, res, c.control, LevelFast); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		v.pages.Add(key, body)
+		c.lru.Add(key, body)
 	}
 	s.write(w, r, v, body)
 }

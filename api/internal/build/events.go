@@ -27,8 +27,16 @@ type EventWindow struct {
 	Late         []store.Event
 	LateJSON     []EventRow
 	LateComplete bool
-	text         eventText
-	marks        cursorMarks
+	// Stats is the event counts read with the rows (store.Inputs.EventStats);
+	// Held is the bodies of the registered answers with Events built from
+	// them, by answer name (buildLive), and Unbuilt each one left out, with
+	// why. live is what the next WithEvents builds them from.
+	Stats   store.EventStats
+	Held    map[string]map[string]any
+	Unbuilt map[string]string
+	live    *Context
+	text    eventText
+	marks   cursorMarks
 }
 
 // EventRow is one /v1/events row: the framework's TestEvent and the live
@@ -103,7 +111,7 @@ func (t eventText) render(rows []store.Event) []EventRow {
 func newEventWindow(in *store.Inputs, text eventText) EventWindow {
 	return EventWindow{Raw: in.Events, JSON: text.render(in.Events), Complete: in.EventsComplete,
 		Notable: in.Notable, NotableJSON: text.render(in.Notable), NotableComplete: in.NotableComplete,
-		Late: in.Late, LateJSON: text.render(in.Late), LateComplete: in.LateComplete, text: text,
+		Late: in.Late, LateJSON: text.render(in.Late), LateComplete: in.LateComplete, Stats: in.EventStats, text: text,
 		marks: cursorMarks{}.next(in.EventsRead)}
 }
 
@@ -118,8 +126,9 @@ func (w *EventWindow) Provider(slug string) (string, bool) {
 }
 
 // WithEvents is res with the events of in (store.LoadEvents: Events,
-// Notable, their completeness, Fingerprint.MaxEventID and the read's
-// snapshot, added to res's cursor marks) in place of its own,
+// Notable, their completeness, the event counts, Fingerprint.MaxEventID and
+// the read's snapshot, added to res's cursor marks) in place of its own,
+// and the registered answers with Events built again from them,
 // for an events-only change. It is a shallow copy that shares every other
 // answer: the dataset's tape and the network answers' tapes were built from
 // res's events and keep them until the next full build.
@@ -127,6 +136,9 @@ func WithEvents(res *Result, in *store.Inputs) *Result {
 	out := *res
 	out.Events = newEventWindow(in, res.Events.text)
 	out.Events.marks = res.Events.marks.next(in.EventsRead)
+	if res.Events.live != nil {
+		out.Events.buildLive(res.Events.live)
+	}
 	out.Fingerprint.MaxEventID = in.Fingerprint.MaxEventID
 	return &out
 }

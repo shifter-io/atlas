@@ -117,9 +117,15 @@ kind `browser` (the browser pulse) and changes no row; schema v12 (`migrate_v11_
 the `ip_observations` index `(ip_id, bucket_start)`, which no query used, with
 `(bucket_start, ip_id)` for distinct-IP counts per time slice, and changes no row (building the
 index blocks writes to `ip_observations`; dropping the old one then blocks reads and writes until
-the migration commits, which follows at once). `db-init` verifies v12 and refuses other schemas.
-`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v11
-database, or an unmodified v4 database (and calculated v1 layer) through v5 to v12, in
+the migration commits, which follows at once); schema v13 (`migrate_v12_v13.sql`) adds
+`test_event_buckets`, the live tape's event counts per 30-minute bucket, product and tape tab
+(`good` counts `signal > 0`, `bad` `signal < 0`), kept by one statement-level `AFTER INSERT` trigger
+on `test_events` per insert statement or `COPY` (every partition fires it), and fills it from the
+stored events (the view `test_event_bucket_counts`) in the same transaction (creating the trigger blocks writes to `test_events` until
+the migration commits); the API's `/v1/events/stats` reads it (`api/answers/events-stats.md`).
+`db-init` verifies v13 and refuses other schemas.
+`proxy-index db-migrate --database-file .secrets/database.toml` upgrades an unmodified v5 to v12
+database, or an unmodified v4 database (and calculated v1 layer) through v5 to v13, in
 place, in one transaction that compares every rebuilt summary, scope, pool, bucket, location,
 network and per-IP enrichment (from v6 every test batch, and from v4 every cohort, breakdown and
 score) with its original before committing. Run it on every

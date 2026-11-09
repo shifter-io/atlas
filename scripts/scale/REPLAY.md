@@ -307,6 +307,9 @@ highest run key), the replay's nodes (above the baseline's highest node id, host
   run_buckets, run_geo_buckets, ip_observations, run_enrichments, estimated_hours,
   calculation_roles and batch_runs; the batches whose runs all belong to the replay's nodes, with
   their outages; the nodes (their token hash is in the row).
+- The live tape's bucket counts (`test_event_buckets`, schema v13) of every 30-minute bucket a
+  removed event fell in are counted again from the events left (`test_event_bucket_counts`):
+  the insert trigger only ever adds.
 - The calculation's caches of the replay: the run memos (`calculated_run_ranges`), the rollups
   and memos of the simulated days, the rollup hours written after the baseline (`through_run`
   above its highest run key), with their geo hours and pulse buckets, the distinct and slot

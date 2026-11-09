@@ -25,7 +25,7 @@ func (s *Server) unservedPages(v *Version) []string {
 	for _, p := range v.Result.Pages.Published {
 		c.product(p)
 	}
-	c.checkRegistered(v.Result.Pages)
+	c.checkRegistered(v.Result)
 	if c.more > 0 {
 		c.out = append(c.out, fmt.Sprintf("and %d more", c.more))
 	}

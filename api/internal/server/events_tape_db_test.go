@@ -21,9 +21,13 @@ var tapePages = []string{"/v1/events?after=0&limit=100", "/v1/events?after=100&l
 
 // withTapeBurst gives the build, in place of its events (none), a detect
 // burst of 300 Shifter events sharing one at: pulses in US and DE, and a
-// pulse down in DE as event 150. The dataset keeps its tape.
+// pulse down in DE as event 150, with their counts as a read in their
+// bucket (12:00 to 12:30) gives them: the trigger's row and the 24 newest
+// signals. The dataset keeps its tape.
 func withTapeBurst(res *build.Result) {
 	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	stats := store.EventStats{End: at.Add(30 * time.Minute), Buckets: []store.EventBucket{{Start: at, Provider: sptr("shifter"),
+		Category: "pulse", Events: 300, Bad: 1, LastAt: at}}}
 	rows := []store.Event{}
 	for id := int64(300); id >= 1; id-- {
 		e := store.Event{ID: id, At: at, Kind: "pulse_finished", Provider: sptr("shifter"), Product: sptr("residential"), Country: sptr("US"),
@@ -35,8 +39,11 @@ func withTapeBurst(res *build.Result) {
 			e.Kind, e.Signal, e.Severity, e.Data = "pulse_down", -1, "major", json.RawMessage(`{"requests":100,"errors":100}`)
 		}
 		rows = append(rows, e)
+		if len(stats.Recent) < store.RecentSignals {
+			stats.Recent = append(stats.Recent, store.RecentSignal{Provider: "shifter", At: at, ID: id, Signal: e.Signal})
+		}
 	}
-	*res = *build.WithEvents(res, &store.Inputs{Fingerprint: res.Fingerprint, Events: rows, EventsComplete: true})
+	*res = *build.WithEvents(res, &store.Inputs{Fingerprint: res.Fingerprint, Events: rows, EventsComplete: true, EventStats: stats})
 }
 
 // The every-request build's live tape (TAPE-ROWS-1): rows name the network

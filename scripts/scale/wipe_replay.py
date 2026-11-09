@@ -102,6 +102,18 @@ OVERLAP = (
     "UPDATE provider_overlap o SET shared_ips=w.shared FROM wipe_overlap w WHERE w.shared>0 "
     "AND (o.provider_a,o.provider_b)=(w.provider_a,w.provider_b) AND o.shared_ips<>w.shared",
 )
+# The live tape's bucket counts of the replay's events (schema v13): the buckets they fall in,
+# taken before the facts go, then recounted from the events left (the trigger counts inserts only).
+BUCKET = "date_bin('30 minutes',at,'2000-01-01 00:00+00')"
+EVENT_BUCKETS = (
+    "CREATE TEMP TABLE wipe_event_buckets ON COMMIT DROP AS SELECT DISTINCT "
+    f"{BUCKET} AS bucket_start FROM test_events WHERE {FACTS[0][1]}",
+)
+RECOUNT = (
+    "DELETE FROM test_event_buckets WHERE bucket_start IN (SELECT * FROM wipe_event_buckets)",
+    "INSERT INTO test_event_buckets SELECT * FROM test_event_bucket_counts "
+    "WHERE bucket_start IN (SELECT * FROM wipe_event_buckets)",
+)
 CURRENT = (
     "SELECT max(b.build_id) FROM calculation_builds b JOIN calculated_snapshots USING(build_id) "
     "WHERE b.published AND b.build_id<=%s"
@@ -213,10 +225,15 @@ def wipe(conn, state: dict, apply: bool) -> dict:
         conn.execute(statement, bounds)
     top = base["identities"].get("public.calculation_builds.build_id") or 0
     current = builds(conn, top) if exists(conn, "calculation_builds") else None
+    counted = exists(conn, "test_event_buckets")
+    for statement in EVENT_BUCKETS if counted else ():
+        conn.execute(statement, bounds)
     for name, condition in FACTS:
         if exists(conn, name):
             delete = sql.SQL(f"DELETE FROM {{}} WHERE {condition}")
             conn.execute(delete.format(sql.Identifier(name)), bounds)
+    for statement in RECOUNT if counted else ():
+        conn.execute(statement)
     lookups(conn, base)
     for statement in OVERLAP if exists(conn, "provider_overlap") else ():
         conn.execute(statement, bounds)
