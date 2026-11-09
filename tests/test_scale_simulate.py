@@ -14,7 +14,7 @@ import sys
 from collections import Counter
 from concurrent.futures import Future
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -52,6 +52,11 @@ MINE = "SELECT run_id FROM test_runs WHERE {}"
 SNAPSHOT = "SELECT payload FROM calculated_snapshots WHERE build_id=%s"
 PRODUCTION = ROOT / "configs" / "browser-pulse.production.example.toml"  # dict inputs
 BROWSER_DATA = ("test_runs", "run_buckets", "test_batches", "batch_runs", "test_events")
+BROWSER_RUNS = (
+    "SELECT t.run_key FROM test_runs t JOIN test_batches b USING(batch_id) "
+    "WHERE b.kind='browser' AND (b.scheduled_for<%(end)s) = %(simulated)s ORDER BY 1"
+)
+DAILY_DATA = ("test_runs", "run_buckets", "ip_observations", "run_enrichments", "estimated_hours")
 
 
 @pytest.fixture
@@ -241,6 +246,60 @@ def test_a_stopped_load_resumes_to_the_rows_of_an_uninterrupted_one(
         name: whole[f"public.{name}"] for name in data
     }
     assert mine["public.test_runs"] > 2 and mine["public.estimated_hours"] > 0
+
+
+def counted(database) -> dict:
+    """Each table's rows, and the daily tests' rows of DAILY_DATA."""
+    with simulate.storage.connect(database) as conn:
+        found = replay_baseline.counts(conn)
+    marked = "summary->>'test_kind'='daily'"
+    return found | {name: query(database, OWN.format(name, marked))[0][0] for name in DAILY_DATA}
+
+
+def test_check_reads_only_and_rerun_browser_replaces_only_the_browser_runs(
+    staging, inputs, tmp_path, capsys
+):
+    out, short = tmp_path / "out", ("--hours-per-day", "8")
+    load = argv(staging, inputs, out, 1, *short)
+    assert simulate.main(load) == 0
+    capsys.readouterr()
+    before, written = counted(staging), (out / "state.json").read_bytes()
+    recheck = ["check", "--out", str(out), "--database", str(staging)]
+    recheck += [f"--{key}={value}" for key, value in inputs.items()]
+    assert simulate.main(recheck) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["size"]["compared"] > 0 < result["stats"]["compared"]
+    assert counted(staging) == before and (out / "state.json").read_bytes() == written
+    checks = json.loads((out / "checks.json").read_text())
+    assert checks["stats_day"] == 1 and checks["size"]["apart"]["1"]
+    assert {c["check"] for c in checks["size"]["checks"]} >= {"tries_per_run", "day_rows"}
+    for name in ("checks.json", "checks.md"):
+        assert stat.S_IMODE((out / name).stat().st_mode) == 0o600
+    other = tmp_path / "other.json"
+    other.write_text("{}")
+    assert simulate.main([*recheck, f"--profile={other}"]) == 2
+    assert "not the load's profile" in capsys.readouterr().err
+    # --rerun browser: refused before a dry run, the dry run deletes nothing, then the apply
+    # replaces the simulated day's browser runs only.
+    end = datetime.combine(FIRST + timedelta(days=1), time(), UTC)
+    runs = {key: query(staging, BROWSER_RUNS, {"end": end, "simulated": key}) for key in (True, False)}
+    rerun = [*load, "--rerun", "browser"]
+    assert simulate.main([*rerun, "--apply"]) == 2 and "no dry run" in capsys.readouterr().err
+    assert simulate.main(rerun) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["dry_run"] and dry["deleted"]["test_runs"] == len(runs[True]) == 4
+    assert counted(staging) == before
+    assert simulate.main([*rerun, "--apply"]) == 0
+    after, stored = counted(staging), state(out)
+    assert stored["rerun_browser"]["done"] and stored["rerun_browser"]["deleted"] == dry["deleted"]
+    again = query(staging, BROWSER_RUNS, {"end": end, "simulated": True})
+    assert len(again) == len(runs[True]) and not set(again) & set(runs[True])
+    assert query(staging, BROWSER_RUNS, {"end": end, "simulated": False}) == runs[False]
+    assert {name: after[name] for name in DAILY_DATA} == {n: before[n] for n in DAILY_DATA}
+    for name in (*BROWSER_DATA, "ip_addresses", "pool_ips", "product_ips"):
+        assert after[f"public.{name}"] == before[f"public.{name}"], name
+    tokens = query(staging, "SELECT token_hash FROM nodes")
+    assert all(token.startswith("disabled:") for (token,) in tokens)
 
 
 def test_pulses_only_when_switched_on(staging, inputs, tmp_path):
