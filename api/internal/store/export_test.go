@@ -9,11 +9,6 @@ import (
 // MergeNewest exposes mergeNewest to the external tests.
 var MergeNewest = mergeNewest
 
-// EventsQuery is QueryEvents' query for f, or with notable its notable read.
-func EventsQuery(f EventFilter, notable bool) (string, []any) {
-	return eventsShape(notable, func(*ExplainParams) EventFilter { return f })(nil)
-}
-
 // ListQuery exposes listQuery to the external tests.
 var ListQuery = listQuery
 

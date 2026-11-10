@@ -182,7 +182,6 @@ def second_source(root: Path) -> None:
 @pytest.fixture
 def built(tmp_path, monkeypatch):
     monkeypatch.setattr(profile_hours, "TOP_PLACES", 2)
-    monkeypatch.setattr(profile_hours, "LONG_TAIL_PLACES", 2)
     formulas = tmp_path / "formulas"
     formulas.mkdir()
     for name in ("alpha", "beta", "gamma"):
@@ -275,25 +274,6 @@ def test_gap_pairs():
     tie = {"01": at(1, 1), "00": at(2, 0), "02": at(2, 2)}  # 23 and 25 h: the shorter
     assert profile_hours.gap_pairs(tie) == ([("01", "00")], 23)
     assert profile_hours.gap_pairs({"00": at(1, 0), "01": None}) == ([], None)
-
-
-def tuples(counts: list[int]) -> dict:
-    """The summary of one country whose i-th place has counts[i] records."""
-    found = profile_hours._Places()
-    for i, count in enumerate(counts):
-        for _ in range(count):
-            found.add(((f"C{i}", "R", f"City {i}", 64500 + i, "consumer"), 1.0, 2.0, "Org"))
-    return found.summary()
-
-
-def test_a_long_tail_keeps_up_to_the_long_tail_places(monkeypatch):
-    monkeypatch.setattr(profile_hours, "TOP_PLACES", 2)
-    monkeypatch.setattr(profile_hours, "LONG_TAIL_PLACES", 4)
-    long = tuples([50, 30, 8, 7, 5])  # the top 2 leave 20%: 4 kept, 5% in the tail
-    assert [place["city"] for place in long["top"]] == [f"City {i}" for i in range(4)]
-    assert long["tail_share"] == 0.05
-    short = tuples([60, 30, 5, 5])  # the top 2 leave 10%, not more: 2 kept
-    assert len(short["top"]) == 2 and short["tail_share"] == 0.1
 
 
 def test_places_top_tail_and_unmatched(built):

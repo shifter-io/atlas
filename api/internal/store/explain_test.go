@@ -81,9 +81,6 @@ func TestExplainTimesEveryStatement(t *testing.T) {
 	if p.Country == nil || *p.Country != "US" || p.City == nil || *p.City != "San Jose" {
 		t.Errorf("country %v, city %v: want US and San Jose", p.Country, p.City)
 	}
-	if p.EventCountry != store.NoEventCountry || p.EventTarget != store.NoEventTarget {
-		t.Errorf("country= %q, target= %q: want the placeholders, no event names one", p.EventCountry, p.EventTarget)
-	}
 	md := string(report.Markdown())
 	for _, e := range report.Statements {
 		if !strings.Contains(md, "`"+e.Name+"`") {

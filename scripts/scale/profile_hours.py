@@ -15,9 +15,6 @@ from pathlib import Path
 from proxy_index.formula.aggregate import HOURS, FormulaError, load_manifest, parse_record
 
 TOP_PLACES = 500
-# A long-tailed country (the top 500 leave more than LONG_TAIL of its records) keeps up to
-# LONG_TAIL_PLACES tuples, so the model draws its tail from real places.
-LONG_TAIL, LONG_TAIL_PLACES = 0.10, 2000
 PLACE = ("country_code", "region", "city", "asn", "usage_type")
 DAY_HOURS = 24
 # An hour's figures from its manifest slot: output name -> slot key.
@@ -85,15 +82,12 @@ class _Places:
 
     def summary(self) -> dict:
         ranked = sorted(self.tuples.items(), key=lambda item: (-item[1][0], repr(item[0])))
-        kept = TOP_PLACES
-        if sum(entry[0] for _, entry in ranked[TOP_PLACES:]) > LONG_TAIL * self.ips:
-            kept = LONG_TAIL_PLACES
         top = [
             dict(zip(PLACE, key, strict=True))
             | {"asn_name": name, "latitude": lat, "longitude": lon, "share": share(n, self.ips)}
-            for key, (n, lat, lon, name) in ranked[:kept]
+            for key, (n, lat, lon, name) in ranked[:TOP_PLACES]
         ]
-        tail = sum(entry[0] for _, entry in ranked[kept:])
+        tail = sum(entry[0] for _, entry in ranked[TOP_PLACES:])
         return {
             "ips": self.ips,
             "top": top,

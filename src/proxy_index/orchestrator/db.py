@@ -147,6 +147,9 @@ DEFAULTS: dict[str, Any] = {
     "calculate.heavy_parallel": 2,
     "calculate.heavy_rows": 1_000_000,
     "calculate.heavy_work_mem": "1GB",
+    # The series points' distinct IPs (calculated/point_ips.py) are counted in batches of at
+    # most this many estimated observation rows each.
+    "calculate.point_rows": 20_000_000,
     "calculate.max_parallel_memory": "6GB",
 }
 

@@ -30,7 +30,7 @@ from .. import storage, storage_parallel
 from ..orchestrator.control import read_setting
 
 # calculate.<name> (orchestrator/db.py DEFAULTS): the counts, then the memory settings.
-SETTINGS = ("parallel_reads", "heavy_parallel", "heavy_rows")
+SETTINGS = ("parallel_reads", "heavy_parallel", "heavy_rows", "point_rows")
 MEMORY = ("work_mem", "heavy_work_mem", "max_parallel_memory")
 MAX_PARALLEL_READS = 16
 MEMORY_UNITS = {"kB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
@@ -71,7 +71,8 @@ def settings(conn, parallel_reads=None):
     found = {name: read_setting(conn, f"calculate.{name}") for name in SETTINGS + MEMORY}
     if parallel_reads is not None:
         found["parallel_reads"] = parallel_reads
-    for name, most in zip(SETTINGS, (MAX_PARALLEL_READS, MAX_PARALLEL_READS, None), strict=True):
+    most_of = (MAX_PARALLEL_READS, MAX_PARALLEL_READS, None, None)
+    for name, most in zip(SETTINGS, most_of, strict=True):
         n = found[name]
         if type(n) is not int or n < 1 or most and n > most:
             raise ValueError(f"calculate.{name} must be a whole number from 1 to {most or 'any'}")
@@ -96,6 +97,46 @@ def plan(found, heavy, light):
 def worst_case(found, h, n):
     """The server memory h heavy and n light helpers may take at most, in bytes."""
     return (h * memory_bytes(found["heavy_work_mem"]) + n * memory_bytes(found["work_mem"])) * 2
+
+
+def helpers(conn, found, heavy, light, what):
+    """plan()'s (heavy, light) helpers for heavy and light keys (what they are) under the
+    settings found, lowered to the server's free connections, printed with the worst-case
+    server memory."""
+    h, n = plan(found, heavy, light)
+    if not h + n:
+        return 0, 0
+    allowed = storage_parallel.capped(conn, h + n, "calculate")
+    h, n = min(h, allowed), min(n, allowed - min(h, allowed))
+    print(
+        f"calculate: {h + n} parallel reads (of {found['parallel_reads']}): {h} heavy at "
+        f"{found['heavy_work_mem']} (of {found['heavy_parallel']}) for {heavy} {what} above "
+        f"{found['heavy_rows']} rows, {n} light at {found['work_mem']} for {light} {what}; "
+        f"worst-case server memory {worst_case(found, h, n) // MB} MB "
+        f"(max_parallel_memory {found['max_parallel_memory']})",
+        file=sys.stderr,
+    )
+    return h, n
+
+
+def open_helpers(conn, found, h, n):
+    """h + n snapshot connections (snapshot_connection()) opened at once: the first h at
+    heavy_work_mem, the others at conn's work_mem; all closed if one fails."""
+    exported = export(conn)
+    heavy_export = (exported[0], found["heavy_work_mem"], exported[2])
+    with ThreadPoolExecutor(h + n) as opener:
+        opening = [
+            opener.submit(snapshot_connection, conn, heavy_export if i < h else exported)
+            for i in range(h + n)
+        ]
+        wait(opening)
+    opened = [f.result() for f in opening if f.exception() is None]
+    for f in opening:
+        if f.exception() is not None:
+            for connection in opened:
+                connection.close()
+            raise f.exception()
+    return opened
 
 
 @contextmanager
@@ -170,21 +211,10 @@ class Prefetcher:
         limit = self.settings["heavy_rows"]
         heavy = sorted((k for k in order if rows[k] > limit), key=lambda k: -rows[k])
         light = [k for k in order if rows[k] <= limit]
-        h, n = self._helpers(len(heavy), len(light))
+        h, n = helpers(self.conn, self.settings, len(heavy), len(light), "groups")
         if not h + n:
             return
-        exported = export(self.conn)
-        heavy_export = (exported[0], self.settings["heavy_work_mem"], exported[2])
-        with ThreadPoolExecutor(h + n) as opener:
-            opening = [
-                opener.submit(snapshot_connection, self.conn, heavy_export if i < h else exported)
-                for i in range(h + n)
-            ]
-            wait(opening)
-        self.connections = [f.result() for f in opening if f.exception() is None]
-        for f in opening:
-            if f.exception() is not None:
-                raise f.exception()
+        self.connections = open_helpers(self.conn, self.settings, h, n)
         if h:
             self.lanes.append(_Lane(heavy if n else heavy + light, self.connections[:h]))
         if n:
@@ -192,25 +222,6 @@ class Prefetcher:
         self.lane_of = {key: lane for lane in self.lanes for key in lane.pending}
         with self.cond:
             self._dispatch()
-
-    def _helpers(self, heavy, light):
-        """plan()'s helpers, lowered to the server's free connections, printed with the
-        worst-case server memory."""
-        found = self.settings
-        h, n = plan(found, heavy, light)
-        if not h + n:
-            return 0, 0
-        allowed = storage_parallel.capped(self.conn, h + n, "calculate")
-        h, n = min(h, allowed), min(n, allowed - min(h, allowed))
-        print(
-            f"calculate: {h + n} parallel reads (of {found['parallel_reads']}): {h} heavy at "
-            f"{found['heavy_work_mem']} (of {found['heavy_parallel']}) for {heavy} groups above "
-            f"{found['heavy_rows']} rows, {n} light at {found['work_mem']} for {light} groups; "
-            f"worst-case server memory {worst_case(found, h, n) // MB} MB "
-            f"(max_parallel_memory {found['max_parallel_memory']})",
-            file=sys.stderr,
-        )
-        return h, n
 
     def _dispatch(self):
         """Start the next reads of each lane (self.cond held): its wanted key first, then its

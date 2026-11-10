@@ -214,6 +214,7 @@ def test_settings_and_their_bounds(database, capsys, monkeypatch):
             "parallel_reads": 8,
             "heavy_parallel": 2,
             "heavy_rows": 1_000_000,
+            "point_rows": 20_000_000,
             "work_mem": "256MB",
             "heavy_work_mem": "1GB",
             "max_parallel_memory": "6GB",

@@ -96,8 +96,7 @@ def read_plan(conn, start: date, formulas=FORMULAS, browser=BROWSER_SETTINGS, pu
 @dataclass(frozen=True)
 class Lane:
     """One network x country: test hour, unique IPs before the jitter, the share of a day's IPs
-    seen the day before, its first IP index, its formula with the country's entry, and the
-    formula's unique IPs (the profile's may replace them)."""
+    seen the day before, its first IP index, and its formula with the country's entry."""
 
     network: str
     country: str
@@ -107,7 +106,6 @@ class Lane:
     reuse: float
     offset: int
     formula: dict = field(repr=False, compare=False)
-    planned: int = 0
 
 
 class Model:
@@ -133,11 +131,11 @@ class Model:
         if reuse is None:
             reuse = REUSE[0] + (REUSE[1] - REUSE[0]) * unit(self.seed, "reuse", network)
         for country, hour in sorted(formula["schedule"].items()):
-            _, planned, _, entry = synthetic.measured(formula, country, fallback, self.seed)
-            ips = dig(hours, f"{hour:02d}", "countries", country).get("unique_ips") or planned
+            _, ips, _, entry = synthetic.measured(formula, country, fallback, self.seed)
+            ips = dig(hours, f"{hour:02d}", "countries", country).get("unique_ips") or ips
             own = formula | {"countries": {country: entry}}
             where = (network, country, len(self.lanes), hour)
-            self.lanes[network, country] = Lane(*where, ips, reuse, offset, own, planned)
+            self.lanes[network, country] = Lane(*where, ips, reuse, offset, own)
             offset += math.ceil(ips * (1 + JITTER)) * self.plan.days
         return offset
 

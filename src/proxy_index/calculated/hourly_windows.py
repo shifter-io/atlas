@@ -2,8 +2,8 @@
 and the memo tables' reads and writes.
 
 _count() counts the slices and series points (hourly.Item) no memo holds: their pool figures,
-first-seen bins (FIRST_SEEN) or distinct IPs per point (BUCKET_IPS). window_distinct() keeps the
-estimates' distinct IPs in calculated_distinct. _stored() is the figures a memo keeps and
+first-seen bins (FIRST_SEEN) or distinct IPs per point (point_ips.py). window_distinct() keeps
+the estimates' distinct IPs in calculated_distinct. _stored() is the figures a memo keeps and
 _restored() a slice's figures from them; _cached() reads a memo table and stores what it misses.
 This module never imports hourly.py; hourly.py imports these names back.
 """
@@ -15,20 +15,13 @@ from datetime import datetime, timedelta
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .point_ips import BUCKET_IPS as BUCKET_IPS
+from .point_ips import point_ips
 from .policy import digest
 from .poolfig import pool_figures
 from .sqlwindow import WindowSpec, distinct_ips, window_inputs
 
 HOUR = timedelta(hours=1)
-# Distinct IPs per series point: the runs' observations in [start, until), each point the
-# step-wide bin from start that holds them (series()'s slot()).
-BUCKET_IPS = """SELECT k.slot,date_bin(k.step,o.bucket_start,k.start) AS at,
- count(DISTINCT o.ip_id) AS ips
-FROM unnest(%s::int[],%s::bigint[],%s::timestamptz[],%s::timestamptz[],%s::interval[])
- AS k(slot,run_key,start,until,step)
-JOIN ip_observations o ON o.run_key=k.run_key AND o.bucket_start>=k.start
- AND o.bucket_start<k.until
-GROUP BY 1,2"""
 # IPs per 5-minute bin of their product's first sighting (sqlwindow's bins), of each slot's runs'
 # observations in [since, until): no labels, so no enrichment join.
 FIRST_SEEN = """SELECT k.slot,
@@ -84,7 +77,7 @@ def _count(conn, items):
     ):
         values[id(item)] = {"first_seen": _bins(bins, _start(item))}
     ips = [item for item in items if item.kind == "ips"]
-    counted = _point_ips(conn, ips)
+    counted = point_ips(conn, ips)
     for n, item in enumerate(ips):
         values[id(item)] = {"unique_ips": counted.get(n, 0)}
     return [values[id(item)] for item in items]
@@ -141,19 +134,6 @@ def _first_seen(conn, specs):
         for row in _rows(conn, FIRST_SEEN, columns):
             bins[row["slot"]][row["bin"]] = row["ips"]
     return bins
-
-
-def _point_ips(conn, items):
-    """Each series point's distinct IPs (BUCKET_IPS): {position in items: IPs}."""
-    columns = [[] for _ in range(5)]
-    for slot, item in enumerate(items):
-        for run, *_ in item.clips:
-            values = (slot, run, item.since, item.until, item.until - item.since)
-            for column, value in zip(columns, values, strict=True):
-                column.append(value)
-    if not columns[0]:
-        return {}
-    return {row["slot"]: row["ips"] for row in _rows(conn, BUCKET_IPS, columns)}
 
 
 def _cached(conn, table, column, wanted, compute):

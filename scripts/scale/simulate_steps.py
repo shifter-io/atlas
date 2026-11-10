@@ -331,10 +331,6 @@ class SimSteps(ReplaySteps):
         part = asyncio.run(hour.drive("", self.browser_nodes()))
         return part, part["failed"] == 0
 
-    def rerun_browser(self, day: int, start, step: dict) -> tuple[dict, bool]:
-        """--rerun browser (simulate_rerun.py): the hour's browser runs stored again."""
-        return self.browser(day, start, step)
-
     def browser_nodes(self) -> dict[int, dict]:
         """A browser node of every network of the settings' hosts, bound to its host's name,
         where the database has none but the run's (another's node gets no upload): id -> its

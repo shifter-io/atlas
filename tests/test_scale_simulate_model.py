@@ -249,25 +249,24 @@ def test_pulses_only_when_switched_on(tmp_path):
 def test_both_checks_pass_on_generated_days_and_fail_on_shifted_ones(tmp_path):
     built = plan(tmp_path)
     given = with_reference(profile(), week(profile(), built, 1))
-    generated, own = week(given, built, 2), model.Model(given, built, 2)
-    sized, stated = check.size(given, generated, own), check.stats(given, generated[24:48])
+    generated = week(given, built, 2)
+    sized, stated = check.size(given, generated), check.stats(given, generated[24:48])
     assert sized["pass"], [c for c in sized["checks"] if not c["pass"]]
     assert stated["pass"], [c for c in stated["checks"] if not c["pass"]]
     assert {c["check"] for c in stated["checks"]} >= {"requests_per_ip", "country", "asn", "city"}
     assert {"recurrence", "outcomes", "page_load_p50"} <= {c["check"] for c in stated["checks"]}
     allowed = {"check", "kind", "network", "target", "engine", "day", "metric", "deviation"}
-    allowed |= {"limit", "pass", "basis", "insufficient_reference"}  # no absolute figure
+    allowed |= {"limit", "in_band", "pass"}  # deviations and verdicts, no absolute figure
     assert all(set(c) <= allowed for c in sized["checks"] + stated["checks"])
     shifted = week(profile(1.4), built, 2)
-    assert not check.size(given, shifted, model.Model(profile(1.4), built, 2))["pass"]
+    assert not check.size(given, shifted)["pass"]
     failed = {c["check"] for c in check.stats(given, shifted[24:48])["checks"] if not c["pass"]}
     assert {"requests_per_ip", "country", "recurrence", "outcomes", "page_load_p50"} <= failed
 
 
 def test_nothing_to_compare_does_not_pass(tmp_path):
-    found = check.size({}, [], model.Model({}, plan(tmp_path), 1))
-    assert (found["pass"], found["compared"], found["checks"]) == (False, 0, [])
-    assert check.stats({}, []) == {"pass": False, "compared": 0, "checks": []}
+    hours = week({}, plan(tmp_path), days=(1,))
+    assert check.size({}, hours) == {"pass": False, "compared": 0, "checks": []}
 
 
 def test_production_cadence_from_the_formulas_and_the_production_queue():
