@@ -98,6 +98,11 @@ USED = "UPDATE calculated_distinct SET last_used=now() WHERE digest=ANY(%s)"
 REMEMBER = """INSERT INTO calculated_distinct(digest,counts) SELECT d,c::jsonb
 FROM unnest(%s::text[],%s::text[]) AS k(d,c)
 ON CONFLICT(digest) DO UPDATE SET counts=excluded.counts,last_used=now()"""
+# enable_sort's value, then a new one for the rest of the transaction (hashed()).
+SORTS = (
+    "SELECT current_setting('enable_sort') AS sorts",
+    "SELECT set_config('enable_sort',%s,true)",
+)
 COLLECT = (
     "DELETE FROM calculated_ip_last_seen WHERE last_seen<%(old)s",
     "DELETE FROM calculated_bucket_ips WHERE bucket_start<%(old)s",
@@ -158,7 +163,7 @@ def last_seen(conn, since):
     """{label: the IPs last seen at or after its cutoff} of since ({label: cutoff}), from one
     read of calculated_ip_last_seen: LAST_SEEN's IPs between cuts, summed from the latest."""
     cuts = sorted(set(since.values()))
-    rows = conn.cursor(row_factory=dict_row).execute(LAST_SEEN, {"cuts": cuts, "first": cuts[0]})
+    rows = hashed(conn, LAST_SEEN, {"cuts": cuts, "first": cuts[0]})
     between = {r["n"]: r["ips"] for r in rows}
     at, ips = {}, 0
     for n in range(len(cuts), 0, -1):
@@ -324,7 +329,7 @@ def _count_sets(conn, as_of, sets):
         return found
     names = ("slots", "members", "providers", "keys", "since")
     params = {name: [row[n] for row in rows] for n, name in enumerate(names)}
-    for row in conn.cursor(row_factory=dict_row).execute(COUNTS, params | {"as_of": as_of}):
+    for row in hashed(conn, COUNTS, params | {"as_of": as_of}):
         found[row["slot"]][row["a"], row["b"]] = (row["ips"], row["shared"])
         distinct[row["slot"]] += row["lead"]
     for counts, ips in zip(found, distinct, strict=True):
@@ -361,6 +366,18 @@ def _overlaps(out, cohort, label, members, found):
                     "ips_b": own[j][0],
                 }
             )
+
+
+def hashed(conn, statement, params):
+    """statement's rows (dicts), planned with sorts off for it alone (enable_sort, local to the
+    transaction, set back after): its distinct values are grouped by hashing, which the planner,
+    underestimating the observation rows a join gives, would sort (CALC-FLEET-DISTINCT-1)."""
+    cursor = conn.cursor(row_factory=dict_row)
+    sorts = cursor.execute(SORTS[0]).fetchone()["sorts"]
+    cursor.execute(SORTS[1], ("off",))
+    rows = cursor.execute(statement, params).fetchall()
+    cursor.execute(SORTS[1], (sorts,))
+    return rows
 
 
 def fill(points, ips):

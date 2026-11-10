@@ -236,33 +236,34 @@ def plan(conn, statement, params):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sort", ["on", "off"])
-async def test_the_plans_hash_and_read_last_seen_once(sort, database_template, databases, tmp_path):
-    """COUNTS and OVERLAP: every aggregate is hashed and no Sort sorts observation rows (as the
-    planner picks it, and with sorts disabled, so none is needed; a Sort of the run keys alone,
-    for a merge join, is no such sort). LAST_SEEN: one scan of calculated_ip_last_seen, no
-    subplan, no Sort of its rows."""
+async def test_the_plans_hash_and_read_last_seen_once(database_template, databases, tmp_path):
+    """Each statement runs with sorts off (hashed()), set back after it. So planned, COUNTS and
+    OVERLAP hash every aggregate and sort no observation row; LAST_SEEN scans
+    calculated_ip_last_seen once, with no subplan and no Sort of its rows."""
     database, end, keys, times = await history(database_template, databases, tmp_path)
     rng = random.Random(3)
     sets = cohorts(rng, keys, times, 6)
     members = overlap_members(rng, keys, times, 6)
+    statements = [fleetsql.COUNTS, network_scores.OVERLAP, fleetsql.LAST_SEEN]
     captured = []
 
     class Recording(psycopg.Cursor):
         def execute(self, query, params=None, **kwargs):
-            captured.append((query, params))
+            if query in statements:
+                sorts = self.connection.execute("SHOW enable_sort").fetchone()[0]
+                captured.append((query, params, sorts))
             return super().execute(query, params, **kwargs)
 
     with connect(database) as conn, conn.transaction():
-        conn.execute(f"SET LOCAL enable_sort = {sort}")
         conn.execute("ANALYZE")
         conn.cursor_factory = Recording
         fleetsql._count_sets(conn, end, sets)
         network_scores._counted(conn, members)
         fleetsql.last_seen(conn, {"24h": end - DAY, "7d": end - 7 * DAY})
-        statements = [fleetsql.COUNTS, network_scores.OVERLAP, fleetsql.LAST_SEEN]
-        assert [q for q, _ in captured] == statements
-        for statement, params in captured:
+        assert [(q, sorts) for q, _, sorts in captured] == [(q, "off") for q in statements]
+        assert conn.execute("SHOW enable_sort").fetchone()[0] == "on"
+        conn.execute("SET LOCAL enable_sort = off")
+        for statement, params, _ in captured:
             root = plan(conn, statement, params)
             nodes = list(_nodes(root))
             relation = "calculated_ip_last_seen" if statement == fleetsql.LAST_SEEN else "ip_obs"

@@ -34,9 +34,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import UTC, datetime
 
-from psycopg.rows import dict_row
-
 from .aggregate import component, product_inputs, target_score
+from .fleetsql import hashed
 from .inputs import previous_products
 from .policy import DIMENSIONS, effective
 
@@ -93,7 +92,7 @@ def _counted(conn, members):
     if not rows:
         return own, pairs
     columns = [[row[n] for row in rows] for n in range(5)]
-    for row in conn.cursor(row_factory=dict_row).execute(OVERLAP, columns):
+    for row in hashed(conn, OVERLAP, columns):
         if row["a"] == row["b"]:
             own[row["a"]] = (row["ips"], row["shared"])
         else:
