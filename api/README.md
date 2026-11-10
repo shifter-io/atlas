@@ -419,10 +419,10 @@ editorial ones.
   request with 8 bench workers, far below a cold read's 380 ms: its list was warm,
   the search slow. So a search looks up each place and
   ASN name's words once, not once per row (`store.matcher`), counts the distinct
-  countries, cities and ASNs by name index, sums the IPs in stored order, and sorts
-  only the rows it matched, by one number a row (IPs and position,
-  `NetRows.SortByIps`). A search matching all 150,000 rows of a list went from
-  174 ms to 20 ms (`BenchmarkBroadCoverageSearch`, IPs not in stored order, 4 CPUs);
+  countries, cities and ASNs by name index, sums the IPs in stored order, and of
+  the rows it matched keeps only the page's and those before it, most IPs first,
+  by one number a row (IPs and position, `NetRows.TopByIps`). A search matching all 150,000 rows of a list went from
+  174 ms to 11 ms (`BenchmarkBroadCoverageSearch`, IPs not in stored order, 4 CPUs);
   its first search after a build answers within the staging budget, 50 ms
   (`TestFirstCoverageSearchAfterABuild`).
 - **Memory** (SITEAPI-MEM-1). Production's unit allows the siteapi 7 GB (`MemoryMax=7G`); at

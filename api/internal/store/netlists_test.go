@@ -103,7 +103,8 @@ func TestNetListRowsAndOrder(t *testing.T) {
 }
 
 // SortByIps orders any indexes as a stable sort by IPs of the indexes in
-// position order: ties, and NULL IPs (the largest counter, first), included.
+// position order: ties, and NULL IPs (the largest counter, first), included;
+// TopByIps gives the first k of that order.
 func TestSortByIpsIsTheStableOrder(t *testing.T) {
 	t.Parallel()
 	rng := rand.New(rand.NewPCG(propertySeed, 1))
@@ -138,6 +139,18 @@ func TestSortByIpsIsTheStableOrder(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Errorf("%d indexes: not the stable order by IPs", len(want))
 		}
+	}
+	// TopByIps is that order's first k, and leaves its indexes as they were.
+	slices.Reverse(some)
+	given := slices.Clone(some)
+	want := l.SortByIps(slices.Clone(some))
+	for _, k := range []int{0, 1, 50, len(some) - 1} {
+		if got := l.TopByIps(some, k); !slices.Equal(got, want[:k]) || !slices.Equal(some, given) {
+			t.Errorf("top %d: %v, want %v", k, got[:min(k, 5)], want[:min(k, 5)])
+		}
+	}
+	if got := l.TopByIps(some, len(some)+5); !slices.Equal(got, want) {
+		t.Errorf("top past the end: not every index in order")
 	}
 }
 

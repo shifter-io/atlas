@@ -120,9 +120,9 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, quer
 			out.Totals.Ips += scaleBy(c.scale, counted(rows.Ips(int(i))))
 		}
 	}
-	rows.SortByIps(matched)
-	if start := (page - 1) * PageSize; start < len(matched) {
-		for _, i := range matched[start:min(len(matched), start+PageSize)] {
+	top := rows.TopByIps(matched, page*PageSize) // this page's rows and those before it
+	if start := (page - 1) * PageSize; start < len(top) {
+		for _, i := range top[start:] {
 			out.Rows = append(out.Rows, c.row(rows, i))
 		}
 	}
