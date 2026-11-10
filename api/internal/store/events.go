@@ -98,7 +98,9 @@ func Routine(kind string) bool {
 	return Category(kind) == "census" || kind == "pulse_finished"
 }
 
-// routineSQL is Routine in SQL for the row alias e.
+// routineSQL is Routine in SQL for the row alias e. NOT routineSQL is the
+// predicate of the partial index test_events_notable (framework schema v15),
+// written the same way so the planner can prove a query that has it uses it.
 const routineSQL = `(left(e.kind,7)='census_' OR e.kind IN
  ('daily_test_started','daily_test_finished','estimate_hour_released','pulse_finished'))`
 
@@ -245,6 +247,17 @@ func pickUnlessWords(rows []Event, f EventFilter) []Event {
 	return Pick(rows, f)
 }
 
+// nonRoutine reports whether every row f's kinds or tab admit is non-routine:
+// the audit and incident tabs, or kinds none of which is routine. Its query
+// then repeats notableClause, which changes no answer and lets the rare rows
+// be read from test_events_notable instead of walking the whole tape.
+func (f EventFilter) nonRoutine() bool {
+	if f.Category == "audit" || f.Category == "incident" {
+		return true
+	}
+	return len(f.Kinds) > 0 && !slices.ContainsFunc(f.Kinds, Routine)
+}
+
 func eventClauses(f EventFilter) (clauses []string, args []any) {
 	add := func(sql string, v any) {
 		args = append(args, v)
@@ -265,6 +278,9 @@ func eventClauses(f EventFilter) (clauses []string, args []any) {
  OR e.kind IN ('daily_test_started','daily_test_finished','estimate_hour_released') THEN 'census'
  WHEN left(e.kind,6)='pulse_' THEN 'pulse'
  WHEN e.kind IN ('new_hosting_asn','ip_overlap') THEN 'audit' ELSE 'incident' END=?`, f.Category)
+	}
+	if f.nonRoutine() {
+		clauses = append(clauses, notableClause)
 	}
 	if f.Since != nil {
 		add("e.at>?", *f.Since)
