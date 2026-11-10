@@ -22,8 +22,9 @@ attach() completes the windows in store.write(), once the network lists are writ
   per released hour in the 24h window and per UTC day in the 7d and 30d windows (their charts
   show daily points, and an hourly series would grow the head by about 2.4 kB a day);
 - the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
-  once a UTC day, carried from the previous head in between), and the balanced score, rank
-  and readiness, against the networks of the same kind and window (network_scores.py).
+  once a UTC day, carried from the previous head of the same implementation in between while it
+  has pairs), and the balanced score, rank and readiness, against the networks of the same kind
+  and window (network_scores.py).
 """
 
 from __future__ import annotations
@@ -291,7 +292,7 @@ def attach(conn, payload, written):
                 buckets[entry["id"], label, part] = (since, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
     previous = parts.previous(conn, groups=False)
-    shared = network_scores.overlap(conn, payload["networks"], previous, payload["as_of"])
+    shared = network_scores.overlap(conn, payload, previous)
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():

@@ -273,20 +273,21 @@ def read(conn, build_id):
 
 
 def previous(conn, groups=True):
-    """The current build's as_of, methodology id, groups and head networks with only their id
-    and scores (what inputs.previous_products() reads), projected in SQL; None without a
-    current build. Without groups, its products are [] (network.attach() reads the networks and
-    their overlaps)."""
+    """The current build's as_of, implementation and methodology ids, groups and head networks
+    with only their id and scores (what inputs.previous_products() reads), projected in SQL;
+    None without a current build. Without groups, its products are [] (network.attach() reads
+    the networks and their overlaps, network_scores.overlap() the implementation id)."""
     found = conn.cursor(row_factory=tuple_row).execute(
         "SELECT build_id,payload->'as_of',payload->'methodology'->'id',"
         + NETWORK_SCORES
-        + " FROM calculated_snapshots JOIN current_calculation USING(build_id)"
+        + ",payload->'implementation_id' FROM calculated_snapshots JOIN current_calculation "
+        "USING(build_id)"
     )
     row = found.fetchone()
     if row is None:
         return None
     products = list(_rows(conn, row[0], "products", value=SCORES)) if groups else []
-    head = {"as_of": row[1], "methodology": {"id": row[2]}}
+    head = {"as_of": row[1], "implementation_id": row[4], "methodology": {"id": row[2]}}
     return head | {"products": products, "networks": row[3]}
 
 
