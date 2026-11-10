@@ -2042,12 +2042,12 @@ Buckets: `WINDOWS[range].bars`: 24h → 48 × 30 min, 7d → 56 × 3 h, 30d → 
 | Pulse incidents | same | spikes, drops, down/recovered, est. 1-3% | 180-540 |
 | Daily tests | ~3,848/day | `daily_test_started` + `_finished` per network × region run (not per country), ≤2 per test | ≤320, in peak-hour bursts |
 | Estimate releases | hourly | one `estimate_hour_released` per network hour | ~18 in one burst at :00 |
-| Audits | per daily test | `new_hosting_asn` (rare), `ip_overlap` | tens |
+| Audits | per hour of daily tests (`daily/audits.py`), per batch (`detect`) | `new_hosting_asn` (rare), `ip_overlap` (at most one per network and hour) | ≤18, plus a rare new ASN |
 | **Total** | | | **~2,000-5,500 (central ~3,000; worst ~19,000)** |
 
 So ~50 events/min. About 12 events land per 15 s poll (worst ~80), all stamped with the minute's detection time. 24h is ~50k-130k rows, 30d ~1.5M-4M. More than 90% are routine (`pulse_finished` + census tab).
 
-The event volume above assumes HTTP pulses; production has none, see section 14 (about 5,000 to 8,000 events a day).
+The event volume above assumes HTTP pulses; production has none, see section 14 (about 5,000 to 8,000 events a day). Production's audits come from the daily ingest's audit step, not from `detect` (no batches there): without it the Audit tab stays empty (#815).
 
 **What the API holds.** `EventWindow` = 2,000 newest rows (~20-60 min at production volume) + 500 notable. `Dataset.tape` = 200 rows (~2-6 min; 100 notable + 100 newest). The page's 24h/7d/30d figures can never be computed from rows on the client. All metric cards, the heatmap, the rail and the counts need server aggregates (EV-STATS, gaps 1-9).
 
@@ -2173,7 +2173,7 @@ window logic the API and the scores use today. Nothing is interpolated to fill a
 | Estimated hours | 24 per daily test, released hourly as each hour ends | 24 `estimated_hours` rows per test | `estimates/compute.py` `hours`; the release step |
 | Browser targets | Once per 24 h per network × target, 100 tries, in each host's interleaved queue: 18 networks × 8 targets = 144 runs, 14,400 tries a day. The three AI sources are targets of their own; `ai_answers` is their group. | 100 tries; bundle bytes as measured by BP-VERIFY-3 (BP-VERIFY-4 once it reports) | #691 (merged): `orchestrator/browser_queue.py`, `[schedule] plan = "queue"`, `queue_period_minutes = 1440` |
 | HTTP pulses (`generic_http`, `generic_https`), census and load waves | **None in production.** The targets are configured with 30-minute pulses (`configs/targets.toml`), but pulses run only on pulse nodes, and no pulse node exists: DigitalOcean has no `pi-pulse-node` droplet (checked 2026-11-08). Census and load waves are off in production (`scripts/scale/README.md`). | (not generated) | `orchestrator/batches.py` `pulse_plan` (plans only networks with a node in the region) |
-| Test events (live tape) | From the tests above:<br>- `daily_test_started` and `daily_test_finished` per network × region cell, at most about 6,900 a day;<br>- one `estimate_hour_released` per network and hour, 432 a day;<br>- the daily ingest's audits (`new_hosting_asn`, `ip_overlap`).<br>The detector evaluates pulse batches only (`detect.py`), so without pulses there are no `pulse_finished`, down, recovered or latency events. That is about 5,000 to 8,000 events a day, not the 50k to 130k section 9 estimated from HTTP pulses. | | `daily/ingest.py` `emit_cell`; `orchestrator/events.py`; `detect.py` (`b.kind='pulse'`) |
+| Test events (live tape) | From the tests above:<br>- `daily_test_started` and `daily_test_finished` per network × region cell, at most about 6,900 a day;<br>- one `estimate_hour_released` per network and hour, 432 a day;<br>- the audits (`new_hosting_asn`, `ip_overlap`): `detect` writes them for finished batches (pulse and census), and the daily ingest's audit step for daily tests, which have no batch. After each hour's daily tests are stored it runs `detect`'s checks once on the hour's runs: a network's first hosting ASN (once per network and ASN, ever) and, once per network and hour, the network's IPs that another network's daily tests of the same hour also used.<br>The detector evaluates pulse batches only (`detect.py`), so without pulses there are no `pulse_finished`, down, recovered or latency events. That is about 5,000 to 8,000 events a day, not the 50k to 130k section 9 estimated from HTTP pulses. | | `daily/ingest.py` `emit_cell` and `store_cells`; `daily/audits.py`; `orchestrator/events.py`; `detect.py` (`b.kind='pulse'`) |
 
 **Assumption.** The owner could not be asked, so this is decided from the code and configs: production
 tests each country with one daily test per network per 24 hours, and each network × browser target
