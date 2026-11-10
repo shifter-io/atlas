@@ -52,16 +52,17 @@ def figures(hour, found: dict) -> dict:
 
 
 def stored(model, records: list[dict]) -> list:
-    """The stored hours as simulate_check.size reads them: each daily test's recorded network and
-    rows, and the model's browser runs."""
+    """The stored hours as simulate_check.size reads them: each daily test's recorded rows and
+    unique IPs with the model's lane (the figures keep the hour's test order), and the model's
+    browser runs."""
     hours = []
     for record in records:
         day, hour = record["day"] + 1, datetime.fromisoformat(record["start"]).hour
-        daily = []
-        for network, rows, *_ in record["figures"]["daily"]:
-            own = partial(dict, zip(TABLES, rows, strict=True))  # a call reads the zip once
-            daily.append(SimpleNamespace(lane=SimpleNamespace(network=network), tables=own))
-        hours.append(SimpleNamespace(day=day, daily=daily, browser=model.hour(day, hour).browser))
+        own, daily = model.hour(day, hour), []
+        for test, (_, rows, size, *_) in zip(own.daily, record["figures"]["daily"], strict=True):
+            tables = partial(dict, zip(TABLES, rows, strict=True))  # a call reads the zip once
+            daily.append(SimpleNamespace(lane=test.lane, tables=tables, size=size))
+        hours.append(SimpleNamespace(day=day, daily=daily, browser=own.browser))
     return hours
 
 

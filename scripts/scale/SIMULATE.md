@@ -90,8 +90,10 @@ A spread is `{count, p10, p50, p90, mean}` (nearest rank; `null` values when the
     that were also seen for another requested country of the network; `share` pools them.
 - `places.<CC>`: per requested country, the (country_code, region, city, asn, usage_type)
   tuples of DB-IP, counted over the (hour, IP) records of that country.
-  - `top`: the 500 with the most records. Each has its `share`, `latitude`, `longitude` (of
-    the first record seen) and `asn_name` (DB-IP's `asn_organization`).
+  - `top`: the 500 with the most records, or up to 2,000 when the 500 leave more than 10% of
+    the records in the tail (a long-tailed network), so the model draws that tail from real
+    places. Each has its `share`, `latitude`, `longitude` (of the first record seen) and
+    `asn_name` (DB-IP's `asn_organization`).
   - `tail_share`: all the other tuples together.
   - `unmatched_share`: records DB-IP did not match (`matched` false, or no enrichment).
   - `ips`: the records counted. The shares of `top`, `tail_share` and `unmatched_share` add up
@@ -253,7 +255,9 @@ the browser settings, which must be in queue mode. The result is a plain value (
 - **A browser run** has the target's tries (100). Its outcomes are the reference's nine counts
   (`reference.browser.targets`), else the profile's (the `unsplit` tries as `other_error`),
   else BROWSER-MODEL-1's hour, apportioned with one try moved a day (about a point). Its bytes
-  follow `bytes_per_load`'s mean (±10% a day), its successful page loads a lognormal through
+  per page load follow `bytes_per_load`'s p50 (±10% a day). A network whose runs recorded no
+  bytes has a p50 of 0: it takes the median of the other networks' p50s of the target and
+  engine, and only without any BP-VERIFY-2's mean (`simulate_browser.bytes_per_load`). Its successful page loads a lognormal through
   the reference's p50 and p90 (else 2.5 s and 4.5 s; the median ±3% a day), and its bundle
   bytes `bundle_bytes`' mean (±5% a day): each failed try carries a screenshot of incompressible
   bytes, together the mean less a 16 kB bundle without one. `run.tables()` counts the
@@ -270,7 +274,7 @@ IPs were seen the day before and the rest are new; a network without one draws i
 
 A window position's place and request rows come from evenly spread (Weyl) sequences, so a
 test takes each share almost exactly and an IP keeps its place from day to day. Places are the
-country's `places.<CC>.top` tuples by share, then 200 synthetic tail places (private ASNs
+country's `places.<CC>.top` tuples by share (up to 2,000 for a long tail), then 200 synthetic tail places (private ASNs
 4200000000 and up, names `Synthetic …`) for `tail_share`, then unmatched. A country the profile
 did not request has only tail places and synthetic's 0.5% unmatched.
 
@@ -283,21 +287,44 @@ lane's block is fixed by the plan.
 ### Checks
 
 Both return `{"pass", "compared", "checks"}`. Each check carries its group, `deviation`,
-`limit` and `pass`, never an absolute figure. Nothing compared does not pass.
+`limit` and `pass`, never an absolute figure. Nothing compared does not pass. Every rule
+follows the owner's notes on cadence and size (2026-11-08) and `docs/api-web-map.md` section
+14: real data from another schedule is compared per run or per try, never per day.
 
-- `size(profile, hours)`:
-  - per run kind × network (daily), or network × target × engine (browser), each metric's
-    runs against the reference: their p50 inside its p10–p90 band (`in_band`), their mean
-    within 10% of its mean (`deviation` relative). The daily metrics are the rows per table of
-    `reference.daily.networks.<n>` (else `reference.daily`). The browser metrics are `tries`,
-    `bytes_per_load` and `bundle_bytes` of the profile's target entry, and the rows of
-    `reference.browser`.
-  - per kind and day, the day's rows per table against the reference's mean × the day's runs
-    (within 10%).
+- `size(profile, hours, model, sizes)` (SIM-CHECK-2):
+  - **browser tries per run** (`tries_per_run`) against the plan, the target's tries in the
+    queue settings (100 per network × target a day), within 10%. The note
+    `browser_tries_day` puts a generated day's tries beside BP-VERIFY-3's (`real_24h`) and
+    names the different schedule: BP-VERIFY-3 is a reference per try only;
+  - **bytes per page load** (`bytes_per_load_p50`): the runs' p50 against
+    `simulate_browser.bytes_per_load`, within 10%; `basis` says whose figure it is
+    (`network`, `target` or `BP-VERIFY-2`). Outcomes and page loads are in `stats`;
+  - **daily ratios** per network (`ratio`), within 10% of the reference's
+    (`reference.daily.networks.<n>`, else `reference.daily`): observation rows per unique
+    IP, enrichment rows per IP, buckets per run, and `product_ips`, `pool_ips` and
+    `scope_ips` rows per IP of the run (a table neither side counts is skipped: today
+    `scope_ips`, which only `day_rows` compares). Absolute rows per run
+    are not compared across networks: a run's size follows its country;
+  - **unique IPs** per network and day (`unique_ips`) against the sum of its formulas'
+    figures over its scheduled countries (`Lane.planned`), each varied by the day's jitter,
+    within 10%;
+  - with `sizes` (state.json's snapshots, the baseline as day `0`), **a day's rows**
+    (`day_rows`) per table, within 10%. The append-only tables (`ip_observations`,
+    `run_buckets`, `test_runs`, `estimated_hours`, `test_events`) expect the runs × the
+    reference's rows per run of their kind, and `ip_observations` the day's IPs × its
+    observations per IP. The new-IP tables (`ip_addresses`, `ip_enrichment`, `product_ips`,
+    `pool_ips`, `scope_ips`) expect the day's new IPs × their rows per IP (1 where the
+    reference lacks the table): all of day 1's IPs, and on a later day each network's IPs ×
+    (1 − its recurrence). Rows the ingest does not write (`calculated_*`, `job_runs`, …) and
+    a table's rows on the day it appeared (a migration's back-fill, such as v14's
+    `scope_ips`) are left out and listed in `apart`, by day.
 - `stats(profile, hours)`, for one generated day, per network:
   - requests per IP against `seen_count_log2`: total variation distance at most 0.05;
-  - `country`, `asn` and `city` shares over the profile's requested countries (top 500, tail,
-    unmatched): the IP-weighted distance at most 0.05;
+  - `country`, `asn` and `city` shares over the profile's requested countries: the
+    IP-weighted distance at most 0.05, on the same support for both sides: the attribute's
+    50 values with the most share in the profile, one tail bucket for every other value
+    (real or synthetic) and unmatched. A network whose profile places hold fewer than 5,000
+    IPs is reported with `insufficient_reference` and passes;
   - recurrence of the tests after day 1 against `recurrence.share`: within 5 points;
   - per target and engine, each outcome's rate against the expected counts: within 2 points;
     the successful tries' page-load p50 against the reference's: within 10%.
@@ -305,7 +332,8 @@ Both return `{"pass", "compared", "checks"}`. Each check carries its group, `dev
 `tests/test_scale_simulate_model.py` builds a synthetic profile (2 networks, 3 countries, 2
 browser targets) and checks the cadence, the sizes, the ingest of a generated test and bundle,
 determinism, recurrence, pulses only when switched on, and both checks passing on generated
-days and failing on shifted ones.
+days and failing on shifted ones. `tests/test_scale_simulate_check.py` covers each rule of
+SIM-CHECK-2, the bytes per load and the long tail on the same profile.
 
 ## Loading the generated days (SIM-LOAD-1)
 
@@ -468,3 +496,37 @@ uninterrupted load, pulses switched on, `--plan-only` and the refusals. With the
 example settings (`configs/browser-pulse.production.example.toml`, dict inputs) it checks that
 the workers' plan pickles, that a changed settings file is refused, and that one hour loads the
 same rows with `--jobs 1` and `--jobs 2`.
+
+## Checking and re-storing a stored load (SIM-CHECK-2)
+
+```
+simulate.py check --out <run dir> --database <staging toml> --profile <profile.json> \
+  [--formulas formulas] [--browser-settings <settings>]
+simulate.py --rerun browser --days 7 ... (the load's own arguments) [--apply]
+```
+
+- `check` runs both checks again from `<out>/state.json`, and from the plan and the stored
+  browser runs, which it reads in one read-only transaction: `size` over the stored days with
+  the day sizes state.json kept, `stats` of day 2 (day 1 alone: its own). The browser checks
+  measure each stored run's tries and bytes as the calculation reads them (`run_buckets`'
+  `completed` and `bytes_down`), so runs stored by an earlier model are measured as stored;
+  the daily figures are the ones state.json recorded at the load. It refuses another database or a profile whose
+  SHA-256 is not the load's, and writes `checks.json` and `checks.md` (mode 600) beside the
+  report, nothing else. It never loads or reloads data.
+- `--rerun browser` stores the load's browser runs of the simulated days again with the current
+  model; the daily tests stay as stored. It takes the load's arguments, the same guards and
+  the owner's go (staging only), and needs the load's `state.json`.
+  - Without `--apply`, a dry run: in one transaction it deletes the browser batches of the
+    simulated days that hold a run of the load and are run by its nodes only (a batch the
+    planner made ahead without a run stays), their runs (marked with the load's id) and
+    every row that references them (`test_events`, `outages`, the runs' buckets,
+    observations, enrichments, estimated hours and calculation roles, `batch_runs`), recounts
+    the live tape's buckets as `wipe_replay.py` does, rolls it all back, and writes the rows
+    per table to `rerun-browser-dry-run.json`.
+  - With `--apply` after a dry run: the same delete, committed only when its counts equal the
+    dry run's; the dry run's file then goes, so a later rerun needs its own. Then every simulated hour's browser runs (about 1,008 for 7 days) go through
+    the load's browser step again (`rerun_browser` in the hour's record), resumable with the
+    same command; the nodes are disabled at the end. The extra hour keeps its runs.
+  - A stop between the delete's commit and state.json's save leaves no record of the delete:
+    the next `--apply` is refused until a new dry run (which then deletes nothing) records it.
+  - A recalculation follows only when the operator runs one.
