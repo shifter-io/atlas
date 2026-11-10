@@ -128,6 +128,30 @@ async def test_cohort_counts_equal_the_distinct_aggregates(database_template, da
 
 
 @pytest.mark.asyncio
+async def test_cohorts_counted_through_the_memo_equal_the_distinct_aggregates(
+    database_template, databases, tmp_path
+):
+    """_cohorts() (as fleet_entries() calls it) with cohorts of one to five members, none
+    remembered yet, then all remembered: the old counts both times."""
+    database, end, keys, times = await history(database_template, databases, tmp_path)
+    rng = random.Random(31)
+    as_of = times[-1] + timedelta(minutes=5)
+    cohort_members, sets = {}, []
+    for n, (_, members) in enumerate(cohorts(rng, keys, times, 12)):
+        hours = rng.choice([24, 168, 720])
+        window = {"windows": {"w": {"period": {"hours": hours}, "pool": {"unique_ips": 0}}}}
+        members = [(group | window, runs) for group, runs in members if len(members) > 1]
+        if members:
+            cohort_members[n, "w"] = (None, members)
+            sets.append((as_of - timedelta(hours=hours), members))
+    with connect(database) as conn:
+        expected = old_counts(conn, as_of, sets)
+        for _ in range(2):  # counted, then from the memo
+            assert fleetsql._cohorts(conn, as_of, cohort_members) == expected
+    assert len(sets) > 5 and any(counts for counts in expected)
+
+
+@pytest.mark.asyncio
 async def test_window_totals_equal_one_count_per_cutoff(database_template, databases, tmp_path):
     """Last-seen times on, between and after the cutoffs; cutoffs repeated, out of order, before
     and after every row: the same IPs per cutoff."""

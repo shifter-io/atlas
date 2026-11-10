@@ -244,13 +244,13 @@ def _cohorts(conn, as_of, cohort_members):
             found.append(None)
     if not sets:
         return found
-    digests, rows = _digests(conn, as_of, sets)
+    digests, estimated = _digests(conn, as_of, sets)
     cursor = conn.cursor(row_factory=dict_row)
     rows = cursor.execute(REMEMBERED, (list(digests.values()),))
     stored = {r["digest"]: r["counts"] for r in rows}
     cursor.execute(USED, (list(stored),))
     missed = [i for i in sets if digests[i] not in stored]
-    counted = _counts(conn, as_of, [sets[i] for i in missed], [rows[i] for i in missed])
+    counted = _counts(conn, as_of, [sets[i] for i in missed], [estimated[i] for i in missed])
     for i, counts in zip(missed, counted, strict=True):
         stored[digests[i]] = [[a, b, *n] for (a, b), n in counts.items()]
     fresh = {digests[i]: json.dumps(stored[digests[i]]) for i in missed}

@@ -57,6 +57,7 @@ ip AS (SELECT array_agg(slot) AS slots FROM s GROUP BY kind,ip_id)
 SELECT a,b,count(*) AS ips,count(*) FILTER (WHERE cardinality(slots)>1) AS shared
 FROM ip CROSS JOIN LATERAL unnest(slots) a CROSS JOIN LATERAL unnest(slots) b GROUP BY 1,2"""
 
+
 def overlap(conn, networks, previous, as_of):
     """{(network id, window label): overlap} of networks still holding their "_runs"
     (network.window()): exclusive and shared share of the network's IPs against the union of
