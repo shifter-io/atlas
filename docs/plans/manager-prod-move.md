@@ -55,10 +55,10 @@ are the operator's step-by-step checklist; you do not need them to answer.
 
 ## The owner's decisions
 
-Nine questions. Each has the same six parts: (a) what it is about, (b) what each option does,
-(c) the options, the recommended one first, (d) why the recommended one is best, (e) what is
-hard to undo, (f) what happens if you do not decide. You can answer all nine in one line (an
-example is at the end of this part).
+Nine questions. Each starts with a bold title, "Question N: ...", followed by the same five
+headings in the same order: what it's about, your options (numbered, the recommended one first),
+why we recommend it, what is hard to undo, and what happens if you don't decide. You can answer
+all nine in one line (an example is at the end of this part).
 
 Words used in the questions, each in one sentence:
 - **Manager:** the rented server that runs the whole schedule behind the website: it starts
@@ -80,281 +80,293 @@ Words used in the questions, each in one sentence:
 - **UTC:** the world's reference clock; in winter it equals London time, and Toronto is 5
   hours behind it.
 
-### 1. Do you approve this plan as the way to move?
+---
 
-(a) What it is about: today the manager in London waits 78 ms for every answer from the
+**Question 1: Do you approve this plan as the way to move?**
+
+**What it's about:** today the manager in London waits 78 ms for every answer from the
 database in Canada; from Toronto it would wait about 8 ms. The plan builds a second manager in
 Toronto beside London, switches over within one hour, keeps London ready for 3 days, then
 removes London. Example: Ben prepares the Toronto server during the week; on the agreed day he
 stops London and starts Toronto within 5 minutes, and Carla, reading the website at that
 moment, sees no break.
 
-(b) What happens with each option:
-- Approve: Ben prepares the Toronto server. Nothing in production changes during the
-  preparation, and each later step that changes production still needs its own yes
-  (question 7).
-- Not now: nothing changes and nothing costs more, but every question to the database keeps
-  taking 78 ms instead of 8, so storing each hour's results stays slow.
-- Ask for changes: the plan is rewritten as you say and asked again.
+**Your options:**
+1. **Approve the plan** (recommended)
+   - Ben prepares the Toronto server.
+   - Nothing in production changes during the preparation.
+   - Each later step that changes production still needs its own yes (question 7).
+2. **Not now**
+   - Nothing changes and nothing costs more.
+   - Every question to the database keeps taking 78 ms instead of 8, so storing each hour's
+     results stays slow.
+3. **Ask for changes** (say which)
+   - The plan is rewritten as you say and asked again.
 
-(c) Options:
-1. Approve the plan (recommended).
-2. Not now.
-3. Ask for changes (say which).
+**Why we recommend 1:** now, it removes the main cause of slow storing without touching the
+website; later, every growth in testing (more networks, more countries) waits ten times less on
+the database. Option 2 saves about $10 to $15 and the work, but keeps the slow link. Option 3
+delays the move.
 
-(d) Why 1: now, it removes the main cause of slow storing without touching the website; later,
-every growth in testing (more networks, more countries) waits ten times less on the database.
-Option 2 saves about $10 to $15 and the work, but keeps the slow link. Option 3 delays the move.
+**Hard to undo:** approving alone changes nothing; every real change asks you again.
 
-(e) Hard to undo: approving alone changes nothing; every real change asks you again.
+**If you don't decide:** nothing is done; London keeps running as today.
 
-(f) If you do not decide: nothing is done; London keeps running as today.
+---
 
-### 2. Which size should the new Toronto server be?
+**Question 2: Which size should the new Toronto server be?**
 
-(a) What it is about: a server's size is how many processors and how much memory it has, and it
+**What it's about:** a server's size is how many processors and how much memory it has, and it
 sets the price. London is DigitalOcean's size `s-8vcpu-16gb-amd`: 8 processors and 16 GB of
 memory. Example: if Ben picked a bigger size "to be safe", our tool that starts the
 orchestrator (the program that runs the timetable) would refuse it.
 
-(b) What happens with each option:
-- The same size as London: about the same price as London today, and our tools accept it as
-  they are. What we measured was slowed by the distance to the database, not by the
-  processors, so more processors would not help. The test machines, not the manager, do the
-  measuring. One known limit stays exactly as in London today: the orchestrator may use up to
-  12 GB of memory and one hourly calculation up to 8 GB, together more than the 16 GB. Before
-  the switch Ben reads London's real figures once (only reading, with your yes for that
-  reading); if any is close to its limit, you are asked this question again.
-- Another size: our tools accept only this one size, so a developer must change them first,
-  which delays the move. A bigger size costs more every month; a smaller one may run out of
-  memory.
+**Your options:**
+1. **The same size as London** (recommended)
+   - Costs about the same as London today, and our tools accept it as they are.
+   - What we measured was slowed by the distance to the database, not by the processors, so
+     more processors would not help. The test machines, not the manager, do the measuring.
+   - Risk: one known limit stays exactly as in London today. The orchestrator may use up to
+     12 GB of memory and one hourly calculation up to 8 GB, together more than the 16 GB.
+     Before the switch Ben reads London's real figures once (only reading, with your yes for
+     that reading); if any is close to its limit, you are asked this question again.
+2. **Another size** (say which)
+   - Our tools accept only this one size, so a developer must change them first, which delays
+     the move.
+   - A bigger size costs more every month; a smaller one may run out of memory.
 
-(c) Options:
-1. The same size as London (recommended).
-2. Another size (say which).
+**Why we recommend 1:** now, it needs no tool change and costs what London costs; later,
+Toronto's measurements during the trial show whether a change is ever needed. Option 2 adds a
+tool change and, if bigger, a monthly cost, for no measured gain.
 
-(d) Why 1: now, it needs no tool change and costs what London costs; later, Toronto's
-measurements during the trial show whether a change is ever needed. Option 2 adds a tool change
-and, if bigger, a monthly cost, for no measured gain.
-
-(e) Hard to undo: little. A size can be raised later with your approval, with the server off
+**Hard to undo:** little. A size can be raised later with your approval, with the server off
 for a few minutes; DigitalOcean does not let a server's disk shrink again after a raise.
 
-(f) If you do not decide: Ben uses the same size as London, the only one our tools accept today.
+**If you don't decide:** Ben uses the same size as London, the only one our tools accept
+today.
 
-### 3. A new production server, or the staging server already in Toronto?
+---
 
-(a) What it is about: there is already a manager in Toronto, built for staging (the separate
-copy for trials) to run a 7-day test with a full week of generated work. Example: it might look quicker for Ben to rename
-that staging server and make it production's.
+**Question 3: A new production server, or the staging server already in Toronto?**
 
-(b) What happens with each option:
-- A new production server: Ben makes it with our setup command (`campaign manager deploy
-  --region tor1`) in production's settings, beside London, for about $0.15 to $0.20 an hour.
-  Staging stays separate.
-- The staging server: our tools refuse it. Each server's record belongs to one environment,
-  and staging's names and labels (they start with `pi-camp-stg-`) cannot become production's.
-  It is also four times the size needed (DigitalOcean's `c-32`, about $1 an hour), and trials
-  and real work would share one machine.
+**What it's about:** there is already a manager in Toronto, built for staging (the separate
+copy for trials) to run a 7-day test with a full week of generated work. Example: it might look
+quicker for Ben to rename that staging server and make it production's.
 
-(c) Options:
-1. A new production server (recommended).
-2. The staging server.
+**Your options:**
+1. **A new production server** (recommended)
+   - Ben makes it with our setup command (`campaign manager deploy --region tor1`) in
+     production's settings, beside London.
+   - Costs about $0.15 to $0.20 an hour.
+   - Staging stays separate.
+2. **The staging server**
+   - Our tools refuse it. Each server's record belongs to one environment, and staging's names
+     and labels (they start with `pi-camp-stg-`) cannot become production's.
+   - It is four times the size needed (DigitalOcean's `c-32`, about $1 an hour).
+   - Trials and real work would share one machine.
 
-(d) Why 1: now, it works with today's tools and keeps trials away from the real system; later,
-staging can be rebuilt or removed freely without any risk to the website. Option 2 needs tool
-changes, costs about five times more per hour and mixes trials with the real system.
+**Why we recommend 1:** now, it works with today's tools and keeps trials away from the real
+system; later, staging can be rebuilt or removed freely without any risk to the website.
+Option 2 needs tool changes, costs about five times more per hour and mixes trials with the
+real system.
 
-(e) Hard to undo: nothing at this point. Until the switch, the new server can be removed with
+**Hard to undo:** nothing at this point. Until the switch, the new server can be removed with
 nothing lost.
 
-(f) If you do not decide: Ben makes a new production server, the only way our tools allow.
+**If you don't decide:** Ben makes a new production server, the only way our tools allow.
 
-### 4. What happens to the staging server in Toronto after its 7-day test?
+---
 
-(a) What it is about: the staging server in Toronto (built for GitHub task #768, "a staging
+**Question 4: What happens to the staging server in Toronto after its 7-day test?**
+
+**What it's about:** the staging server in Toronto (built for GitHub task #768, "a staging
 manager in Toronto") is running a 7-day test (GitHub task #718, "SIM-RUN-1": seven days of
-generated data run through it and checked against the real data). It costs about $1 an hour: about $24 a day,
-about $720 a month. Example: the test ends on a Friday; should the server keep running in case
-Dana, a developer, needs it next month?
+generated data run through it and checked against the real data). It costs about $1 an hour:
+about $24 a day, about $720 a month. Example: the test ends on a Friday; should the server keep
+running in case Dana, a developer, needs it next month?
 
-(b) What happens with each option:
-- Remove it completely (a full staging teardown) when the test has finished: its cost stops.
-  If staging needs a manager again later, a new one is built (about 15 minutes of setup).
-- Keep it: about $720 a month while it waits, ready at once for later staging work.
+**Your options:**
+1. **Remove it when its 7-day test has finished** (recommended)
+   - It is removed completely (a full staging teardown), and its cost stops.
+   - If staging needs a manager again later, a new one is built (about 15 minutes of setup).
+2. **Keep it for later staging work**
+   - It is ready at once for later staging work.
+   - Costs about $720 a month while it waits.
 
-(c) Options:
-1. Remove it when its 7-day test has finished (recommended).
-2. Keep it for later staging work.
+**Why we recommend 1:** now, it saves about $24 a day; later, a staging manager can be built
+again in minutes when one is needed. Option 2 keeps one ready, at about $720 a month.
 
-(d) Why 1: now, it saves about $24 a day; later, a staging manager can be built again in
-minutes when one is needed. Option 2 keeps one ready, at about $720 a month.
-
-(e) Hard to undo: removal is final. The server and the files on it are deleted; a new one can be
+**Hard to undo:** removal is final. The server and the files on it are deleted; a new one can be
 built, but not the same one.
 
-(f) If you do not decide: it keeps running, at about $1 an hour, until you do.
+**If you don't decide:** it keeps running, at about $1 an hour, until you do.
 
-### 5. Will you let the new Toronto server into the database?
+---
 
-(a) What it is about: the database server answers only computers on its allowed list. That list
+**Question 5: Will you let the new Toronto server into the database?**
+
+**What it's about:** the database server answers only computers on its allowed list. That list
 is kept in two places: OVH's firewall (the gate in front of the database server) and `pg_hba`
 (the database's own file of which address may log in, to which database, as which user). Only
 you can change them. Example: Ben builds the Toronto server and sends you its address in chat;
 you add it for the production database and for the user the manager logs in as (its "run-time
 role"), then answer "done".
 
-(b) What happens with each option:
-- Yes: before the switch you add Toronto's address. Ben then checks that Toronto can read the
-  database, while London still runs and nothing has changed. The address is sent in chat only,
-  never on GitHub, where it would be public. London's address stays on the list until London
-  has been removed, so London can take back over if needed; then you take it off (step D in
-  question 7).
-- No: Toronto cannot reach the database, so the move cannot happen; London keeps running.
+**Your options:**
+1. **Yes, I add Toronto before the switch and remove London after London's removal**
+   (recommended)
+   - Before the switch you add Toronto's address. Ben then checks that Toronto can read the
+     database, while London still runs and nothing has changed.
+   - The address is sent in chat only, never on GitHub, where it would be public.
+   - London's address stays on the list until London has been removed, so London can take back
+     over if needed; then you take it off (closing the database to London, the last step in
+     question 7).
+2. **No**
+   - Toronto cannot reach the database, so the move cannot happen; London keeps running.
 
-(c) Options:
-1. Yes, I add Toronto before the switch and remove London after London's removal
-   (recommended).
-2. No.
+**Why we recommend 1:** it is the only way the move can work, and doing it before the switch
+means a mistake shows up while nothing in production has changed. Option 2 stops the move.
 
-(d) Why 1: it is the only way the move can work, and doing it before the switch means a mistake
-shows up while nothing in production has changed. Option 2 stops the move.
+**Hard to undo:** nothing; an address can be taken off the list again at any time.
 
-(e) Hard to undo: nothing; an address can be taken off the list again at any time.
+**If you don't decide:** the move waits at this step; London keeps running.
 
-(f) If you do not decide: the move waits at this step; London keeps running.
+---
 
-### 6. When should the switch happen?
+**Question 6: When should the switch happen?**
 
-(a) What it is about: the switch is the hour when London's orchestrator (the program that runs
+**What it's about:** the switch is the hour when London's orchestrator (the program that runs
 the timetable) stops and Toronto's starts. Ben and you must both be reachable for 2 hours from
 its start. Example: you choose Tuesday 14:00 UTC (UTC is the world's reference clock; in winter
 it equals London time). Ben starts at 14:15, once that hour's calculation (it starts at 14:06)
 has finished, and the switch itself is done before 14:50.
 
-(b) What happens with each option:
-- A weekday hour you choose: the switch happens between 15 and 50 minutes past that hour, after
-  the hourly calculation and before the next hour's tests start at 56 minutes past. It must not
-  be between 03:15 and 05:45 UTC, because three daily jobs run then: deleting data older than
-  its keeping period (03:17), the database's nightly tidy-up (03:47) and the daily download of
-  DB-IP, the list that tells which country an internet address belongs to (05:23). You are
-  reachable for your yes (step A in question 7) and for any question.
-- Not yet: nothing happens; the preparation waits, with London running.
+**Your options:**
+1. **A weekday hour of your choice, outside 03:15 to 05:45 UTC** (recommended; name it, for
+   example "Tuesday 14:00 UTC")
+   - The switch happens between 15 and 50 minutes past that hour, after the hourly calculation
+     and before the next hour's tests start at 56 minutes past.
+   - It must not be between 03:15 and 05:45 UTC, because three daily jobs run then: deleting
+     data older than its keeping period (03:17), the database's nightly tidy-up (03:47) and the
+     daily download of DB-IP, the list that tells which country an internet address belongs to
+     (05:23).
+   - You are reachable for your yes (the switch, the first step in question 7) and for any
+     question.
+2. **Not yet**
+   - Nothing happens; the preparation waits, with London running.
 
-(c) Options:
-1. A weekday hour of your choice, outside 03:15 to 05:45 UTC (recommended; name it, for
-   example "Tuesday 14:00 UTC").
-2. Not yet.
-
-(d) Why 1: now, a weekday means people are around if something needs fixing, the minutes
-chosen avoid every hourly job, and 2 hours cover the switch and its checks (the first
+**Why we recommend 1:** now, a weekday means people are around if something needs fixing, the
+minutes chosen avoid every hourly job, and 2 hours cover the switch and its checks (the first
 calculation on Toronto, and the website's numbers moving). Option 2 keeps the slow link for
 longer.
 
-(e) Hard to undo: the switch itself can be undone in about 30 minutes, until London is removed.
+**Hard to undo:** the switch itself can be undone in about 30 minutes, until London is removed.
 
-(f) If you do not decide: no switch happens.
+**If you don't decide:** no switch happens.
 
-### 7. A separate yes from you before each step that changes production?
+---
 
-(a) What it is about: four steps change the real system. For each, Ben asks you at that moment,
+**Question 7: A separate yes from you before each step that changes production?**
+
+**What it's about:** four steps change the real system. For each, Ben asks you at that moment,
 and your yes is saved as a small answer file that our tool checks before it acts, the same way
-as every yes you gave before. Example: Ben writes "Go A? London stops and Toronto starts at
-14:15 UTC"; you answer "go A".
+as every yes you gave before. Example: Ben writes "Go for the switch? London stops and Toronto
+starts at 14:15 UTC"; you answer "go for the switch".
 
-The four steps:
-- **A, the switch:** London's orchestrator (the program that runs the timetable) stops and
-  Toronto's starts. It can be undone until step C.
-- **B, the hourly test in Toronto:** turning on the timer that starts test machines every hour
+The four steps, in this order:
+- **The switch:** London's orchestrator (the program that runs the timetable) stops and
+  Toronto's starts. It can be undone until London is removed.
+- **The hourly test in Toronto:** turning on the timer that starts test machines every hour
   (the command `hourly-enable`), only if that timer is on in London today.
-- **C, removing London:** the London server's teardown after the trial period: its secrets are
+- **Removing London:** the London server's teardown after the trial period: its secrets are
   erased and the server is deleted. This cannot be undone. It also lifts, for this move only,
   the standing rule that production's manager is never removed.
-- **D, closing the database to London:** you take London's address off the database's allowed
+- **Closing the database to London:** you take London's address off the database's allowed
   list (the list of computers the database accepts).
 
-(b) What happens with each option:
-- A separate yes per step: you decide each step with what is known at that moment; for
-  example, you see the trial's results before London is removed. It takes four short messages.
-- One yes now for all four: fewer messages, but London is removed without you seeing the
-  trial's results first.
+**Your options:**
+1. **A separate yes before each of the four steps** (recommended)
+   - You decide each step with what is known at that moment; for example, you see the trial's
+     results before London is removed.
+   - It takes four short messages.
+2. **One yes now for all four**
+   - Fewer messages.
+   - Risk: London is removed without you seeing the trial's results first.
 
-(c) Options:
-1. A separate yes before each of the four steps (recommended).
-2. One yes now for all four.
+**Why we recommend 1:** now, it keeps you able to stop the move at every point; later, nothing
+final happens without you having seen how Toronto ran. Option 2 gives up the chance to stop
+before the step that cannot be undone.
 
-(d) Why 1: now, it keeps you able to stop the move at every point; later, nothing final happens
-without you having seen how Toronto ran. Option 2 gives up the chance to stop before the step
-that cannot be undone.
+**Hard to undo:** removing London. After it there is no way back to London; going back would be
+a whole new move.
 
-(e) Hard to undo: step C. After it there is no way back to London; going back would be a whole
-new move.
+**If you don't decide:** no step runs without its yes, so the move stops before the switch.
 
-(f) If you do not decide: no step runs without its yes, so the move stops before step A.
+---
 
-### 8. How long should London stay ready after the switch (the soak)?
+**Question 8: How long should London stay ready after the switch (the soak)?**
 
-(a) What it is about: after the switch, Toronto does all the work while London stays switched
+**What it's about:** after the switch, Toronto does all the work while London stays switched
 on with nothing running, ready to take back over in about 30 minutes. This trial period is
 called the soak. Example: on day 2, Toronto's 05:23 download of DB-IP (the list of which country
 an internet address belongs to) fails; with London still there, Ben can switch back while it is
 fixed.
 
-(b) What happens with each option:
-- 72 hours: Toronto runs three full days, so every daily job runs three times (the DB-IP
-  download, the database's nightly tidy-up) and every browser test slot on each mini comes
-  three times. Both servers run for 3 days: about $10 to $15 in total.
-- 24 hours: about $7 to $10 less, but each daily job is seen only once.
-- Longer (say how long): each extra day costs about $3.60 to $4.80 more.
+**Your options:**
+1. **72 hours** (recommended)
+   - Toronto runs three full days, so every daily job runs three times (the DB-IP download, the
+     database's nightly tidy-up) and every browser test slot on each mini comes three times.
+   - Both servers run for 3 days: about $10 to $15 in total.
+2. **24 hours**
+   - About $7 to $10 less.
+   - Risk: each daily job is seen only once.
+3. **Longer** (say how long)
+   - Each extra day costs about $3.60 to $4.80 more.
 
-(c) Options:
-1. 72 hours (recommended).
-2. 24 hours.
-3. Longer (say how long).
+**Why we recommend 1:** now, three repeats show that each daily job works every day, not just
+once, for about $10 to $15; during them Ben compares Toronto with London (how long each hour
+takes to store, how fast the database answers, how long the calculation takes, how much memory
+is used). Option 2 saves a few dollars, but one bad day could pass unseen. Option 3 costs more
+for little extra.
 
-(d) Why 1: now, three repeats show that each daily job works every day, not just once, for
-about $10 to $15; during them Ben compares Toronto with London (how long each hour takes to
-store, how fast the database answers, how long the calculation takes, how much memory is used).
-Option 2 saves a few dollars, but one bad day could pass unseen. Option 3 costs more for little
-extra.
+**Hard to undo:** nothing during the trial. Its end leads to removing London, the step in
+question 7 that cannot be undone, which needs its own yes.
 
-(e) Hard to undo: nothing during the trial. Its end leads to step C in question 7, which needs
-its own yes.
+**If you don't decide:** Ben uses 72 hours, then asks for your yes to remove London; London is
+not removed without your yes for it.
 
-(f) If you do not decide: Ben uses 72 hours, then asks for step C; London is not removed without
-your yes for it.
+---
 
-### 9. Tool changes first, or some steps by hand?
+**Question 9: Tool changes first, or some steps by hand?**
 
-(a) What it is about: some steps of this move have no command in our tools yet. Section 8 of
+**What it's about:** some steps of this move have no command in our tools yet. Section 8 of
 this plan ("Missing tooling") lists the small tool changes developers can make before the
 switch. Example: without a copy command, Ben must type long copy commands by hand during the
 switch hour, while the clock runs.
 
-(b) What happens with each option:
-- Tool changes first: the switch waits for them (a few days of developer work). Then each step
-  is one checked command.
-- By hand: the switch can come sooner, but two steps are done by hand (writing the database
-  login file on Toronto, and copying London's files to Toronto), and today's tool refuses to
-  remove London (step C in question 7) while Toronto's test machines run, which is almost
-  always.
+**Your options:**
+1. **Tool changes first** (recommended)
+   - The switch waits for them (a few days of developer work).
+   - Then each step is one checked command.
+2. **By hand**
+   - The switch can come sooner.
+   - Two steps are done by hand: writing the database login file on Toronto, and copying
+     London's files to Toronto.
+   - Today's tool refuses to remove London (a step in question 7) while Toronto's test machines
+     run, which is almost always.
 
-(c) Options:
-1. Tool changes first (recommended).
-2. By hand.
+**Why we recommend 1:** now, fewer hand-typed commands during the switch hour means fewer
+chances of a mistake; later, the same commands serve any future move. Option 2 starts sooner
+but is riskier, and London still cannot be removed until the tool is changed.
 
-(d) Why 1: now, fewer hand-typed commands during the switch hour means fewer chances of a
-mistake; later, the same commands serve any future move. Option 2 starts sooner but is riskier,
-and London still cannot be removed until the tool is changed.
+**Hard to undo:** nothing.
 
-(e) Hard to undo: nothing.
+**If you don't decide:** the switch waits until you do.
 
-(f) If you do not decide: the switch waits until you do.
+---
 
-### Answer in one line
-
-Give the option number for each question, for example:
-"1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 Tuesday 14:00 UTC, 7: 1, 8: 1, 9: 1".
+**Your answer:** one line, for example
+`Q1: 1, Q2: 1, Q3: 1, Q4: 1, Q5: 1, Q6: 1 Tuesday 14:00 UTC, Q7: 1, Q8: 1, Q9: 1`.
 
 ## 1. Production's manager today (London)
 
