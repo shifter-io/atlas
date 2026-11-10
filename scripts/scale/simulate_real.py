@@ -86,6 +86,8 @@ class Source:
         is not readable or does not match its manifests."""
         root, counts, releases = Path(folder), {}, {}
         found = {path.parent.name: path.parent for path in root.glob("*/manifest.json")}
+        if not set(found) & set(formulas):  # a mistyped --source, not every network missing
+            raise FormulaError(f"{root.name}: no network folder of the formulas")
         missing, unscheduled = {str(day): [] for day in range(1, len(hours) + 1)}, set()
         for network in sorted(formulas):
             manifest = load_manifest(found[network])[1] if network in found else {"slots": {}}
@@ -188,7 +190,7 @@ def overlap(folder, hours: tuple[int, ...], formulas: dict) -> dict:
     windows) and over the last (24h), from the records the daily tests carry; each network's
     own. Counts only."""
     source = Source.read(folder, hours, formulas)
-    seen ={network: [set() for _ in hours] for network in sorted(formulas)}
+    seen = {network: [set() for _ in hours] for network in sorted(formulas)}
     for (network, day), counts in sorted(source.counts.items()):
         for rows in source.records(network, counts, day).values():
             seen[network][day - 1] |= {str(ipaddress.ip_address(row["ip"])) for row in rows}

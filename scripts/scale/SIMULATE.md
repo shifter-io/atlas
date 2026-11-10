@@ -657,7 +657,8 @@ uv run python scripts/scale/simulate_check.py real-overlap --source <LC-ENRICH-1
   its IPs per country and checked against its manifest slot (SHA-256, distinct IPs, request
   rows, each record's countries against its `seen_count`), then once more by the worker
   processes for the records, through `slices.py`'s reader (each record's fields). A source
-  that does not match its manifest is refused before any write. Real hour files are never
+  that does not match its manifest, or holds no folder of a formula's network (a mistyped
+  `--source`), is refused before any write. Real hour files are never
   copied into the repository or CI; the tests use reserved addresses only.
 - The store, the guards (`target.py`'s scratch targets, and staging with the owner's go), the
   marker, the resume and `--plan-only` are the load's above; another `--real-hours` resumes

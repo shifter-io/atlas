@@ -192,7 +192,9 @@ def test_a_test_with_two_releases_is_refused(tmp_path, source):
         test.write(tmp_path / "run")
 
 
-def test_a_source_that_differs_from_its_manifest_is_refused(source):
+def test_a_source_that_differs_from_its_manifest_is_refused(tmp_path, source):
+    with pytest.raises(ValueError, match="no network folder of the formulas"):
+        simulate_real.Source.read(tmp_path / "mistyped", HOURS, formulas())
     path = next((source / "alpha").glob("hour-*T12Z.jsonl.gz"))
     path.write_bytes(path.read_bytes() + b"\0")
     with pytest.raises(ValueError, match="sha256"):
