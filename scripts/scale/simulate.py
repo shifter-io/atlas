@@ -2,8 +2,10 @@
 """SIM-LOAD-1: load generated days into the staging database through the real ingest paths.
 
 SIMULATE.md ("Loading the generated days") gives the usage, the guards, the hour, the
-calculation and the report. The same command resumes from <out>/state.json. Exit 0 done, 2
-refused (nothing written), 130 stopped.
+calculation and the report. The same command resumes from <out>/state.json. `simulate.py check`
+checks a stored load again, read only; `--rerun browser` stores its browser runs again
+(SIMULATE.md, "Checking and re-storing a stored load"). Exit 0 done, 2 refused (nothing
+written), 130 stopped.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ import replay_baseline
 import simulate_check
 import simulate_model
 import simulate_report
+import simulate_rerun
 import simulate_steps
 import target
 from replay import Refused, now
@@ -207,7 +210,8 @@ class Simulation(replay.Replay):
         day = min(2, self.args.days)
         found = producer.pool.submit(simulate_steps.stats, day, self.args.hours_per_day)
         hours = simulate_report.stored(self.model, self.state["hours"][: self.total()])
-        size = simulate_check.size(self.profile, hours)
+        sizes = simulate_check.snapshots(self.state)
+        size = simulate_check.size(self.profile, hours, self.model, sizes)
         self.state |= {"checks": {"size": size, "stats": found.result()}, "stats_day": day}
         self.save()
 
@@ -257,6 +261,8 @@ def arguments(argv=None):
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
     parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
     parser.add_argument("--plan-only", action="store_true", help="print the plan; write nothing")
+    parser.add_argument("--rerun", choices=("browser",), help="store a load's browser runs again")
+    parser.add_argument("--apply", action="store_true", help="--rerun: delete (after a dry run)")
     parser.add_argument("--methodology", default=str(cycle.METHODOLOGY))
     parser.add_argument("--formulas", default=str(simulate_model.FORMULAS))
     parser.add_argument("--browser-settings", default=str(simulate_model.BROWSER_SETTINGS))
@@ -279,10 +285,30 @@ def arguments(argv=None):
     args.memory_budget = int(args.memory_budget * 2**30)
     if not args.plan_only and not (args.owner_go and args.out):
         parser.error("--owner-go and --out are required, except with --plan-only")
+    if args.apply and not args.rerun:
+        parser.error("--apply goes with --rerun")
     return args
 
 
+def check_arguments(argv):
+    parser = argparse.ArgumentParser(prog="simulate.py check", description="check a stored load")
+    parser.add_argument("--out", required=True, help="the load's directory (state.json)")
+    parser.add_argument("--database", required=True, help="credentials TOML of the database")
+    parser.add_argument("--profile", required=True, help="the load's profile")
+    parser.add_argument("--formulas", default=str(simulate_model.FORMULAS))
+    parser.add_argument("--browser-settings", default=str(simulate_model.BROWSER_SETTINGS))
+    return parser.parse_args(argv)
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["check"]:
+        try:
+            print(json.dumps(simulate_rerun.check(check_arguments(argv[1:])), indent=2))
+        except Refused as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+        return 0
     args = arguments(argv)
     signal.signal(signal.SIGTERM, signal.default_int_handler)  # a stop, as Ctrl-C
     profile = json.loads(Path(args.profile).read_text())
@@ -290,9 +316,12 @@ def main(argv=None) -> int:
         print(simulate_report.plan_table(plan_only(args, profile)), end="")
         return 0
     try:
+        if args.rerun and not (Path(args.out) / "state.json").exists():
+            raise Refused(f"--rerun: no load in {Path(args.out).name} (state.json)")
         with storage.connect(args.database) as conn:
             conn.autocommit = True
-            result = Simulation(conn, args, profile).run()
+            load = Simulation(conn, args, profile)
+            result = simulate_rerun.browser(load) if args.rerun else load.run()
     except Refused as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2

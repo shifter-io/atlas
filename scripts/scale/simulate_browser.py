@@ -48,6 +48,23 @@ def outcomes(profile: dict, network: str, target: str, engine: str) -> dict[str,
     return {name: found.get(name) or 0 for name in CODES}
 
 
+def bytes_per_load(profile: dict, network: str, target: str, engine: str) -> tuple[float, str]:
+    """(bytes per page load, its basis): the p50 of the network's `bytes_per_load`; without one
+    (a network whose runs recorded no bytes has 0), the median of the other networks' p50s of
+    the target and engine; else BP-VERIFY-2's mean."""
+    own = dig(profile, "networks", network, "browser", target, engine, "bytes_per_load")
+    if own.get("p50"):
+        return own["p50"], "network"
+    found = sorted(
+        p50
+        for entry in dig(profile, "networks").values()
+        if (p50 := dig(entry, "browser", target, engine, "bytes_per_load").get("p50"))
+    )
+    if found:
+        return found[(len(found) - 1) // 2], "target"
+    return browser_model.MEASURED[target].mean_mb * 1e6, "BP-VERIFY-2"
+
+
 def page_load(profile: dict, network: str, target: str, engine: str) -> tuple[float, float]:
     """(p50, p90) of the target's successful page loads: the reference's, else PAGE_LOAD_MS."""
     found = dig(profile, "reference", "browser", "targets", network, target, engine)
@@ -68,6 +85,14 @@ class Browser:
     start: datetime
     day: int
     tries: tuple = field(repr=False)
+
+    @property
+    def loads(self) -> int:
+        return len(self.tries)
+
+    @property
+    def bytes_per_load(self) -> float:
+        return sum(size for _, size, *_ in self.tries) / len(self.tries)
 
     @property
     def bundle_bytes(self) -> int:
@@ -99,7 +124,7 @@ def run(model, entry, day: int) -> Browser:
     codes = [CODES[name] for name, n in counts.items() for _ in range(n)]
     rng.shuffle(codes)
     own = dig(profile, "networks", network, "browser", target, engine)
-    mean = dig(own, "bytes_per_load").get("mean") or browser_model.MEASURED[target].mean_mb * 1e6
+    mean = bytes_per_load(profile, network, target, engine)[0]
     mean *= model.jitter("bytes", entry.network, target, day)
     sizes = apportion(round(mean * count), [rng.randint(50, 150) for _ in codes])
     p50, p90 = page_load(profile, network, target, engine)

@@ -14,7 +14,7 @@ import sys
 from collections import Counter
 from concurrent.futures import Future
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
@@ -52,6 +52,15 @@ MINE = "SELECT run_id FROM test_runs WHERE {}"
 SNAPSHOT = "SELECT payload FROM calculated_snapshots WHERE build_id=%s"
 PRODUCTION = ROOT / "configs" / "browser-pulse.production.example.toml"  # dict inputs
 BROWSER_DATA = ("test_runs", "run_buckets", "test_batches", "batch_runs", "test_events")
+BROWSER_RUNS = (
+    "SELECT t.run_key FROM test_runs t JOIN test_batches b USING(batch_id) "
+    "WHERE b.kind='browser' AND (b.scheduled_for<%(end)s) = %(simulated)s ORDER BY 1"
+)
+DOUBLED = (
+    "UPDATE run_buckets SET bytes_down=bytes_down*2 WHERE run_key IN (SELECT run_key FROM "
+    "test_runs JOIN test_batches USING(batch_id) WHERE kind='browser')"
+)
+DAILY_DATA = ("test_runs", "run_buckets", "ip_observations", "run_enrichments", "estimated_hours")
 
 
 @pytest.fixture
@@ -241,6 +250,90 @@ def test_a_stopped_load_resumes_to_the_rows_of_an_uninterrupted_one(
         name: whole[f"public.{name}"] for name in data
     }
     assert mine["public.test_runs"] > 2 and mine["public.estimated_hours"] > 0
+
+
+def counted(database) -> dict:
+    """Each table's rows, and the daily tests' rows of DAILY_DATA."""
+    with simulate.storage.connect(database) as conn:
+        found = replay_baseline.counts(conn)
+    marked = "summary->>'test_kind'='daily'"
+    return found | {name: query(database, OWN.format(name, marked))[0][0] for name in DAILY_DATA}
+
+
+def loaded(database, inputs, tmp_path) -> tuple[Path, list, list]:
+    """A one-day load of 8 hours: its directory, its arguments and its check's."""
+    out = tmp_path / "out"
+    load = argv(database, inputs, out, 1, "--hours-per-day", "8")
+    assert simulate.main(load) == 0
+    recheck = ["check", "--out", str(out), "--database", str(database)]
+    return out, load, recheck + [f"--{key}={value}" for key, value in inputs.items()]
+
+
+def checked(out: Path, recheck: list, capsys) -> dict:
+    capsys.readouterr()
+    assert simulate.main(recheck) == 0
+    result = json.loads(capsys.readouterr().out)
+    found = json.loads((out / "checks.json").read_text())
+    assert {name: found[name]["pass"] for name in result} == {
+        name: own["pass"] for name, own in result.items()
+    }
+    return found
+
+
+def bytes_checks(checks: dict) -> set:
+    """The verdicts of the browser bytes checks."""
+    return {c["pass"] for c in checks["size"]["checks"] if c["check"] == "bytes_per_load_p50"}
+
+
+def test_check_reads_only_and_measures_the_stored_browser_runs(staging, inputs, tmp_path, capsys):
+    out, _, recheck = loaded(staging, inputs, tmp_path)
+    before, written = counted(staging), (out / "state.json").read_bytes()
+    checks = checked(out, recheck, capsys)
+    assert checks["size"]["compared"] > 0 < checks["stats"]["compared"]
+    assert counted(staging) == before and (out / "state.json").read_bytes() == written
+    assert checks["stats_day"] == 1 and checks["size"]["apart"]["1"]
+    assert {c["check"] for c in checks["size"]["checks"]} >= {"tries_per_run", "day_rows"}
+    assert bytes_checks(checks) == {True}  # the stored runs' (run_buckets): the model's
+    for name in ("checks.json", "checks.md"):
+        assert stat.S_IMODE((out / name).stat().st_mode) == 0o600
+    other = tmp_path / "other.json"
+    other.write_text("{}")
+    assert simulate.main([*recheck, f"--profile={other}"]) == 2
+    assert "not the load's profile" in capsys.readouterr().err
+    # Runs stored by an earlier model (twice the bytes) fail, whatever the model says now.
+    with simulate.storage.connect(staging) as conn:
+        conn.execute(DOUBLED)
+    assert bytes_checks(checked(out, recheck, capsys)) == {False}
+
+
+def test_rerun_browser_replaces_only_the_browser_runs(staging, inputs, tmp_path, capsys):
+    out, load, recheck = loaded(staging, inputs, tmp_path)
+    with simulate.storage.connect(staging) as conn:
+        conn.execute(DOUBLED)  # as an earlier model stored them
+    before, end = counted(staging), datetime.combine(FIRST + timedelta(days=1), time(), UTC)
+    runs = {
+        key: query(staging, BROWSER_RUNS, {"end": end, "simulated": key}) for key in (True, False)
+    }
+    rerun = [*load, "--rerun", "browser"]
+    capsys.readouterr()
+    assert simulate.main([*rerun, "--apply"]) == 2 and "no dry run" in capsys.readouterr().err
+    assert simulate.main(rerun) == 0
+    dry = json.loads(capsys.readouterr().out)
+    assert dry["dry_run"] and dry["deleted"]["test_runs"] == len(runs[True]) > 0
+    assert counted(staging) == before
+    assert simulate.main([*rerun, "--apply"]) == 0
+    after, stored = counted(staging), state(out)
+    assert stored["rerun_browser"]["done"] and stored["rerun_browser"]["deleted"] == dry["deleted"]
+    again = query(staging, BROWSER_RUNS, {"end": end, "simulated": True})
+    assert len(again) == len(runs[True]) and not set(again) & set(runs[True])
+    assert query(staging, BROWSER_RUNS, {"end": end, "simulated": False}) == runs[False]
+    assert {name: after[name] for name in DAILY_DATA} == {n: before[n] for n in DAILY_DATA}
+    for name in (*BROWSER_DATA, "ip_addresses", "pool_ips", "product_ips"):
+        assert after[f"public.{name}"] == before[f"public.{name}"], name
+    tokens = query(staging, "SELECT token_hash FROM nodes")
+    assert all(token.startswith("disabled:") for (token,) in tokens)
+    assert not (out / simulate.simulate_rerun.DRY_RUN).exists()  # the next needs its own
+    assert bytes_checks(checked(out, recheck, capsys)) == {True}  # the model's bytes again
 
 
 def test_pulses_only_when_switched_on(staging, inputs, tmp_path):
