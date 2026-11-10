@@ -82,7 +82,8 @@ and the 40 together add up to about 25 ms. Every other page (home, targets, netw
 overlap, true cost, live tape) gets all its answers in under 12 ms in total. Every question the API asks the database finishes within 36 ms, against a
 limit of 100 ms. When new numbers arrive, the API is ready with them in 29 seconds (the limit is
 60; it took 95 before this phase's fixes). Turning a week of raw results into website numbers
-takes about 29 minutes after a code change, and the hourly update is shown in section 7.
+takes about 29 minutes after a code change, and about 11 minutes each hour after that (the
+limit is 50 minutes).
 
 ### What is not fast or not finished
 
@@ -858,9 +859,9 @@ in two requested countries counts in each country's window.
 |---|---|---|---|---|
 | Ingest (store) at 78 ms round trip | 35,000 rows/s, about 100 daily tests a minute (days 5–7, 8 connections) | unchanged code path | (none) | |
 | Full calculation (every group recounted) | 11,778 s on 9cf43c2 (window 4,508 s, writes 4,627 s in 450,298 statements, other reads 2,191 s); 1,786 s on 4315df5 | **1,720 s** (28.7 min) "after a deploy", as-of 03:00: all 3,866 groups recounted, 39,197 statements in 3,597 s, peak RSS 5.39 GB, 11.7 GB temp | (no budget; the first hour after a deploy) | |
-| Hourly incremental calculation | 5,413 s on 9cf43c2 (writes 4,041 s in 431,293 statements, other reads 1,045 s, window 164 s) | [[HOURLY]] | 3,000 s | [[HOURLYPASS]] |
-| siteapi full rebuild | 95.4 s (load 14.9, assemble 76.2, render 3.1) | **29.1 s** (load 18.4, assemble 6.9, render 2.8) | 60 s | pass |
-| siteapi memory | `MemoryPeak` 4.49 GB | 3.61 GB peak (`MemoryMax` 5 GB) | (cap 5 GB) | pass |
+| Hourly incremental calculation | 5,413 s on 9cf43c2 (writes 4,041 s in 431,293 statements, other reads 1,045 s, window 164 s) | **677 s** (11.3 min), as-of 04:00, the second build on the same code: 64 of 3,866 groups recounted (their windows gained the hour), the other 3,802 lists reused; 1,177 statements in 870 s; peak RSS 5.36 GB; 12.4 GB temp | 3,000 s | pass |
+| siteapi full rebuild | 95.4 s (load 14.9, assemble 76.2, render 3.1) | **29.1 s** (load 18.4, assemble 6.9, render 2.8); 28.2 s for the hourly build (load 17.3, assemble 7.0, render 2.8) | 60 s | pass |
+| siteapi memory | `MemoryPeak` 4.49 GB | 3.61 GB after the first rebuild, 3.95 GB after the second while serving (`MemoryMax` 5 GB) | (cap 5 GB) | pass |
 | Dataset file | 43.4 MB, about 1.1 s | 43.3 MB (gzip 6.97 MB, brotli 2.38 MB), about 1.1 s to write (the rebuild minus its load, assembly and render) | 2 s | pass |
 
 The calculation's largest statements after the deploy:
@@ -877,7 +878,15 @@ The calculation's largest statements after the deploy:
   38.8 GB before.
 - **The calculation's temp in all:** 10.6 GB as the calculator counts it, 11.7 GB by
   `pg_stat_database`; 57.4 GB before.
-[[HOURLYDETAIL]]
+
+**The hourly calculation's time:**
+- **Series point IPs: 490 s of its 677**, recounted every hour; 6.1 GB of temp for the 9 daily
+  points of the 7d and 30d series.
+- **`SPAN` distinct IPs:** 78 s.
+- **The 64 missed groups' windows:** 43 s.
+
+So the hour fits its budget 4.4 times over. The point IPs are now the largest part, and they
+write about 6 GB of temp on the shared database server every hour.
 
 ## 8. Data statistics per network
 
@@ -933,11 +942,11 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 **Misses this report found, waiting for their fix issues** (filed by the architect in this milestone):
 
 1. **Coverage search, first render:** 42 of 54 requests over 70 ms cold, 380 to 1,071 ms
-   (section 2.1). [[FIX1]]
+   (section 2.1). Fix issue: requested from the architect; this row is measured again after it merges.
 2. **46 map gaps:** nulls not listed in `na`, 29 from staging's empty catalog and 17 from sparse
-   24h data and fields never filled (section 4). [[FIX2]]
+   24h data and fields never filled (section 4). Fix issue: requested from the architect; this row is measured again after it merges.
 3. **Browser scores missing from v4 builds:** every `scores` and `browserOverall` null in every
-   range (section 6.3). [[FIX3]]
+   range (section 6.3). Fix issue: requested from the architect; this row is measured again after it merges.
 
 **Known limits:**
 - **`/v1/targets` size:** it fits under the 200 KB cap up to 23 networks (#735); past 22 it must
