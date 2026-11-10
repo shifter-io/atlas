@@ -225,6 +225,14 @@ def direct() -> dict:
     return found
 
 
+def union() -> dict:
+    """Per range: the distinct IPs of every network's tests together, counted plainly."""
+    days = [set(), set()]
+    for (_, _, day), ips in expected().items():
+        days[day - 1] |= set(ips)
+    return {"24h": len(days[1]), "7d": len(days[0] | days[1]), "30d": len(days[0] | days[1])}
+
+
 def test_the_overlap_reference_counts_the_shared_ips_and_names_none(tmp_path, source):
     folder = tmp_path / "formulas"
     folder.mkdir()
@@ -240,6 +248,7 @@ def test_the_overlap_reference_counts_the_shared_ips_and_names_none(tmp_path, so
         ("beta", "gamma"): (1, 1, 1)
     }
     assert found["networks"]["gamma"] == {"product": "residential", "24h": 10, "7d": 10, "30d": 10}
+    assert found["union"] == {"residential": union()}
     assert found["missing"] == {"1": ["gamma"], "2": []} and found["ignored"] == ["delta"]
     assert stat.S_IMODE(out.stat().st_mode) == 0o600
     assert not re.search(r"192\.0\.2|2001:db8", out.read_text())
