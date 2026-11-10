@@ -73,13 +73,15 @@ def _overlap(cur, runs, hour, emit):
     """One ip_overlap per network that shares addresses with another in the hour's tests."""
     if len({run["product_id"] for run in runs}) < 2:
         return
+    # Any earlier event of the network for the hour, whenever written: a simulated hour may
+    # lie after the moment it is stored.
     stamp = detect.timestamp(hour)
     for product, data in detect.overlaps(cur, RUN_IPS, ([r["run_key"] for r in runs],)):
         if _exists(
             cur,
-            "SELECT 1 FROM test_events WHERE product_id=%s AND at>=%s AND batch_id IS NULL "
+            "SELECT 1 FROM test_events WHERE product_id=%s AND batch_id IS NULL "
             "AND kind='ip_overlap' AND data->>'hour'=%s",
-            (product, min(hour, emit.now), stamp),
+            (product, stamp),
         ):
             continue
         runs_of = sum(1 for run in runs if run["product_id"] == product)
