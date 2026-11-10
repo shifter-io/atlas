@@ -9,6 +9,7 @@ sweep (every incremental build equals the full one, which counts IP sets in Pyth
 and later ones) and test_calculated_network_scores' (the overlaps equal the IP sets' rule).
 """
 
+import json
 import random
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -21,8 +22,6 @@ from sweep_prefix import prefix
 from test_calc_fleet import SWEEP
 from test_calculated_hourly_reads import DAY, HOUR, floor_hour
 from test_sqlwindow_onepass import _nodes
-
-MINUTE = timedelta(minutes=1)
 
 from proxy_index.calculated import fleetsql, network_scores
 from proxy_index.orchestrator.control import write_settings
@@ -58,6 +57,7 @@ UNION ALL
 SELECT a.slot,b.slot,count(*),NULL FROM m a JOIN m b ON b.kind=a.kind AND b.ip_id=a.ip_id
  AND b.slot<>a.slot GROUP BY 1,2"""
 PROVIDERS = ("alpha", "beta", "gamma")
+MINUTE = timedelta(minutes=1)
 
 
 async def history(database_template, databases, tmp_path):
@@ -266,7 +266,7 @@ async def test_the_plans_hash_and_read_last_seen_once(sort, database_template, d
             root = plan(conn, statement, params)
             nodes = list(_nodes(root))
             relation = "calculated_ip_last_seen" if statement == fleetsql.LAST_SEEN else "ip_obs"
-            assert not sorted_rows(root, relation), statement
+            assert not sorted_rows(root, relation), json.dumps(root, indent=1, default=str)
             if statement == fleetsql.LAST_SEEN:
                 scans = [n for n in nodes if n.get("Relation Name") == "calculated_ip_last_seen"]
                 assert len(scans) == 1 and not [n for n in nodes if "Subplan Name" in n]
