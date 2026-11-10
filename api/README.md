@@ -377,9 +377,9 @@ editorial ones.
   transactions at a time (`store.NetReadConns`; the pool has 4 more connections for
   the load and requests), largest first, and the load and the build take their rows
   from that set (`store.SnapshotRow.NetRows`), dropped with the load's inputs. On the
-  7-day staging data (54 lists, 4.4M rows) that is about 9 s, where one read at a
+  7-day staging data (54 lists, 4.85M rows) that is about 9 s, where one read at a
   time through the row cache took 69 s: each connection carries about 4 MB/s, and
-  the build read 173 dimensions twice once they had left the cache
+  the build read 173 dimensions (1.5M rows) again once they had left the cache
   (SITEAPI-REBUILD-1, `TestTheBuildReadsTheRowsItsLoadRead`).
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
