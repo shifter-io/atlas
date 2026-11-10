@@ -441,6 +441,8 @@ async def test_reference_rows_and_bytes_per_run_in_one_read_only_transaction(
             "INSERT INTO test_events(kind,batch_id,product_id) VALUES ('fixture',%s,%s)",
             (batch, product),
         )
+        release = json.dumps({"file": "dbip-full-2026-10-05.mmdb"})
+        conn.execute("UPDATE dbip_releases SET metadata=metadata||%s::jsonb", (release,))
     real, seen = profile_reference._read, []
 
     def read_once(conn, text):
@@ -476,6 +478,10 @@ async def test_reference_rows_and_bytes_per_run_in_one_read_only_transaction(
         "batch_runs": 0,
         "test_events": 0,
     }
+    daily = reference["daily"]
+    one = {"per_run": {"1": 1}, "per_ip": {"1": {"1": 1}}}  # 1 bucket, its 1 IP seen in it
+    assert daily["buckets"] == one == daily["networks"]["fixture"]["buckets"]
+    assert daily["releases"] == ["2026-10-05"] and "buckets" not in reference["browser"]
     found = reference["browser"]["rows_per_run"]
     assert found["batch_runs"]["mean"] == 1 and found["test_events"]["mean"] == 1
     assert reference["browser"]["networks"]["fixture"]["runs"] == 1

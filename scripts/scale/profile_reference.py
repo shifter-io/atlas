@@ -45,6 +45,15 @@ RUNS = (
     "SELECT r.run_key,r.kind,r.provider,r.batch_id,r.product_id,{counts} FROM r "
     "WHERE r.kind IS NOT NULL ORDER BY r.run_key"
 )
+# Per daily run, its IPs by the 5-minute buckets each was seen in (one observation row each).
+SEEN = (
+    "SELECT run_key,k,count(*) FROM (SELECT run_key,ip_id,count(*) AS k FROM ip_observations "
+    "WHERE run_key=ANY(%s) GROUP BY 1,2) o GROUP BY 1,2"
+)
+RELEASES = (
+    "SELECT DISTINCT d.metadata->>'file',d.metadata->>'built_at' FROM run_enrichments e "
+    "JOIN dbip_releases d USING(release_id) WHERE e.run_key=ANY(%s)"
+)
 EVENTS = "SELECT batch_id,product_id,count(*) FROM test_events WHERE batch_id=ANY(%s) GROUP BY 1,2"
 # Each table with its partitions: its own bytes (with TOAST) and its indexes' bytes.
 SIZES = (
@@ -74,6 +83,7 @@ BYTES_BASIS = (
     "the kind's mean rows per run"
 )
 _RANGE = re.compile(r"^(\d+)(?:-(\d+))?$")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def run_filter(text: str) -> tuple[sql.Composable, dict]:
@@ -110,6 +120,40 @@ def runs(conn, text: str) -> list[dict]:
 def rows_per_run(found: list[dict]) -> dict:
     """Per table, the spread of the runs' rows."""
     return {name: spread([run[name] for run in found]) for name in TABLES}
+
+
+def seen(conn, found: list[dict]) -> None:
+    """Add to each run `seen`: its IPs by the number of buckets each was seen in."""
+    counts: dict[int, Counter] = {}
+    for run_key, k, n in conn.execute(SEEN, ([run["run_key"] for run in found],)).fetchall():
+        counts.setdefault(run_key, Counter())[str(k)] = n
+    for run in found:
+        run["seen"] = counts.get(run["run_key"], Counter())
+
+
+def buckets(found: list[dict]) -> dict:
+    """`per_run`: runs per bucket count; `per_ip`: per a run's bucket count, its IPs by the
+    buckets each was seen in."""
+    per_run, per_ip = Counter(), {}
+    for run in found:
+        per_run[str(run["run_buckets"])] += 1
+        per_ip.setdefault(str(run["run_buckets"]), Counter()).update(run["seen"])
+    per_ip = {count: _ordered(ips) for count, ips in _ordered(per_ip).items()}
+    return {"per_run": _ordered(per_run), "per_ip": per_ip}
+
+
+def _ordered(counts: dict) -> dict:
+    return dict(sorted(counts.items(), key=lambda item: int(item[0])))
+
+
+def releases(conn, found: list[dict]) -> list[str]:
+    """The dates (ISO) of the DB-IP releases the runs were enriched with: each one's file name
+    (dbip-full-YYYY-MM-DD), else its build's day."""
+    dates = set()
+    for name, built in conn.execute(RELEASES, ([run["run_key"] for run in found],)).fetchall():
+        match = _DATE.search(name or "") or _DATE.search(built or "")
+        dates |= {match[0]} if match else set()
+    return sorted(dates)
 
 
 def sizes(conn, kinds: dict[str, list[dict]]) -> dict:
@@ -162,6 +206,14 @@ def read(path, text: str) -> dict:
             return _read(conn, text)
 
 
+def daily(conn, own: list[dict], entry: dict) -> None:
+    """The daily runs' buckets (all and per network) and DB-IP release dates (SIM-MODEL-3)."""
+    seen(conn, own)
+    entry["buckets"], entry["releases"] = buckets(own), releases(conn, own)
+    for name, network in entry["networks"].items():
+        network["buckets"] = buckets([run for run in own if run["provider"] == name])
+
+
 def _read(conn, text: str) -> dict:
     found = runs(conn, text)
     kinds: dict[str, list[dict]] = {}
@@ -189,4 +241,6 @@ def _read(conn, text: str) -> dict:
         }
         if kind == "browser":
             entries[kind]["targets"] = browser(conn, [run["run_key"] for run in own])
+        else:
+            daily(conn, own, entries[kind])
     return entries

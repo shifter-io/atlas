@@ -165,6 +165,13 @@ are left out.
     all its partitions.
   - `per_run.<table>`: `table_bytes` and `index_bytes` of the kind's mean run, that is bytes
     per row times the mean rows per run. `basis` says so.
+- `buckets` (daily only, and per network in `networks.<network>`; SIM-MODEL-3), from the
+  runs' 5-minute buckets:
+  - `per_run`: runs per number of `run_buckets` rows, such as `{"1": 30, "2": 50}`;
+  - `per_ip`: per a run's number of buckets, its IPs by the buckets each was seen in (its
+    `ip_observations` rows), such as `{"2": {"1": 800, "2": 200}}`.
+- `releases` (daily only): the dates of the DB-IP releases the runs were enriched with, from
+  each release's file name (`dbip-full-YYYY-MM-DD`), else its build's day.
 - `targets.<network>.<target>.<engine>` (browser only), from the runs' `run_buckets`:
   - `runs` and `tries`;
   - `outcomes`: all nine, as the calculation counts them (`calculated/browser.py`);
@@ -241,9 +248,22 @@ the browser settings, which must be in queue mode. The result is a plain value (
   figure at its test hour (`synthetic.measured`), and a country the formula lacks the network's
   10th-percentile country (`synthetic._fallback`). Each day varies it by up to ±10%
   (`JITTER`).
-- **Request rows per IP** follow `seen_count_log2`; an IP is in 1 to all of the test's 2 to 4
-  five-minute buckets (never more than its rows), one `ip_observations` row each. The number
-  of buckets turns over the lanes, so a day averages 3 a test.
+- **Request rows per IP** follow `seen_count_log2`.
+- **Buckets** (SIM-MODEL-3, `simulate_shape.py`): a test's five-minute buckets follow the
+  reference's `buckets.per_run` of its network (else of all daily runs), spread over the
+  network's lanes and days. An IP is in as many buckets as `buckets.per_ip` gives an IP of a
+  run with that many buckets, one `ip_observations` row each, never in more than its request
+  rows. Its request rows and its buckets follow one quantile, so an IP with more rows is in
+  more buckets. Without a reference, 2 to 4 buckets a test and an IP in 1 to all of them.
+- **DB-IP release:** production enriches each run with the release installed at its ingest
+  (`enrichment.enrich_run` on `dbip-full.mmdb`, which `dbip update` replaces when the CDN has
+  a newer dated file), and stores an IP's enrichment once per release (`ip_enrichment`'s key
+  is the IP and the release, inserted with `ON CONFLICT DO NOTHING`). DB-IP publishes one
+  release a month. So the model has one release a month, on the day of the month of the
+  reference's newest release (else the 1st): a day's tests take the newest release on or
+  before that day. Only on a day with a new release is every IP enriched again; otherwise only
+  the new IPs add `ip_enrichment` rows. The enrichment files name the release
+  `dbip-full-YYYY-MM-DD.mmdb`.
 - **Errors** are timeouts at the profile hour's error share (errors over attempts), varied by up
   to ±10% a day; without a profile hour, one per `ERROR_SHARE` successes. Latency bins are
   synthetic's, around a network median that varies by up to ±10% a day.
@@ -255,9 +275,13 @@ the browser settings, which must be in queue mode. The result is a plain value (
 - **A browser run** has the target's tries (100). Its outcomes are the reference's nine counts
   (`reference.browser.targets`), else the profile's (the `unsplit` tries as `other_error`),
   else BROWSER-MODEL-1's hour, apportioned with one try moved a day (about a point). Its bytes
-  per page load follow `bytes_per_load`'s p50 (±10% a day). A network whose runs recorded no
-  bytes has a p50 of 0: it takes the median of the other networks' p50s of the target and
-  engine, and only without any BP-VERIFY-2's mean (`simulate_browser.bytes_per_load`). Its successful page loads a lognormal through
+  per page load follow the `bytes_per_load` spread (SIM-MODEL-3): a log-normal through its
+  p50, as wide as its p10 and p90. Each day of a week takes a different seventh of it, in an
+  order fixed by the seed, so a week's runs of a network × target have the spread's median and
+  5 of 7 lie between its p10 and p90. A network whose runs recorded no bytes has a p50 of 0: it
+  takes the spread of the other network with the median p50 for the target and engine, and
+  only without any BP-VERIFY-2's mean, a p50 alone (`simulate_browser.bytes_spread`). Its
+  successful page loads a lognormal through
   the reference's p50 and p90 (else 2.5 s and 4.5 s; the median ±3% a day), and its bundle
   bytes `bundle_bytes`' mean (±5% a day): each failed try carries a screenshot of incompressible
   bytes, together the mean less a 16 kB bundle without one. `run.tables()` counts the
@@ -274,8 +298,12 @@ IPs were seen the day before and the rest are new; a network without one draws i
 
 A window position's place and request rows come from evenly spread (Weyl) sequences, so a
 test takes each share almost exactly and an IP keeps its place from day to day. Places are the
-country's `places.<CC>.top` tuples by share (up to 2,000 for a long tail), then 200 synthetic tail places (private ASNs
-4200000000 and up, names `Synthetic …`) for `tail_share`, then unmatched. A country the profile
+country's `places.<CC>.top` tuples (up to 2,000 for a long tail), then 200 synthetic tail
+places (private ASNs 4200000000 and up, names `Synthetic …`) for `tail_share`, then unmatched.
+The tuples are grouped by city (SIM-MODEL-3): the first sequence picks the city, each city one
+slice; a second one picks the tuple inside the city, ordered by its ASN's share in the
+country. A long tail's city then takes its share even when its tuples are many and small, and
+an ASN takes about one slice inside every city. A country the profile
 did not request has only tail places and synthetic's 0.5% unmatched.
 
 ### Determinism
@@ -315,7 +343,8 @@ follows the owner's notes on cadence and size (2026-11-08) and `docs/api-web-map
     observations per IP. The new-IP tables (`ip_addresses`, `ip_enrichment`, `product_ips`,
     `pool_ips`, `scope_ips`) expect the day's new IPs × their rows per IP (1 where the
     reference lacks the table): all of day 1's IPs, and on a later day each network's IPs ×
-    (1 − its recurrence). Rows the ingest does not write (`calculated_*`, `job_runs`, …) and
+    (1 − its recurrence). `ip_enrichment` expects all the day's IPs on a day with a new DB-IP
+    release (day 1 and each monthly release day), else the new IPs. Rows the ingest does not write (`calculated_*`, `job_runs`, …) and
     a table's rows on the day it appeared (a migration's back-fill, such as v14's
     `scope_ips`) are left out and listed in `apart`, by day.
 - `stats(profile, hours)`, for one generated day, per network:
@@ -334,6 +363,11 @@ browser targets) and checks the cadence, the sizes, the ingest of a generated te
 determinism, recurrence, pulses only when switched on, and both checks passing on generated
 days and failing on shifted ones. `tests/test_scale_simulate_check.py` covers each rule of
 SIM-CHECK-2, the bytes per load and the long tail on the same profile.
+`tests/test_scale_simulate_shape.py` (SIM-MODEL-3) checks the buckets per run and per IP
+against a reference's distributions, the monthly release with a week of one lane through the
+real ingest (`ip_enrichment` grows by the new IPs, and by every IP on the release day), a run's
+bytes per load against a wide spread's median and band, and a fragmented long tail's city and
+ASN distances.
 
 ## Loading the generated days (SIM-LOAD-1)
 

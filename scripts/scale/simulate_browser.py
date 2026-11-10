@@ -18,6 +18,7 @@ from synthetic import JITTER, apportion, key
 
 BUNDLE_BASE = 16_000  # bytes of a sealed bundle of 100 tries without a screenshot
 PAGE_LOAD_MS = (2500, 4500)  # p50 and p90 of a target the reference does not give
+WEEK = 7  # a run's bytes per page load: the day's seventh of the spread (run_bytes)
 LOAD_JITTER = 0.03  # a run's median page load varies by up to this share from day to day
 # Each outcome of calculated/browser.py as the error code a try records (ok: none).
 CODES = {"ok": None, "challenge": "challenge", "block": "blocked", "login_wall": "login_wall"}
@@ -48,21 +49,40 @@ def outcomes(profile: dict, network: str, target: str, engine: str) -> dict[str,
     return {name: found.get(name) or 0 for name in CODES}
 
 
-def bytes_per_load(profile: dict, network: str, target: str, engine: str) -> tuple[float, str]:
-    """(bytes per page load, its basis): the p50 of the network's `bytes_per_load`; without one
-    (a network whose runs recorded no bytes has 0), the median of the other networks' p50s of
-    the target and engine; else BP-VERIFY-2's mean."""
+def bytes_spread(profile: dict, network: str, target: str, engine: str) -> tuple[dict, str]:
+    """(the `bytes_per_load` spread a run's bytes per page load follow, its basis): the
+    network's; without a p50 (a network whose runs recorded no bytes has 0), the other network's
+    of the target and engine with the median p50; else BP-VERIFY-2's mean, a p50 alone."""
     own = dig(profile, "networks", network, "browser", target, engine, "bytes_per_load")
     if own.get("p50"):
-        return own["p50"], "network"
-    found = sorted(
-        p50
+        return own, "network"
+    found = [
+        spread
         for entry in dig(profile, "networks").values()
-        if (p50 := dig(entry, "browser", target, engine, "bytes_per_load").get("p50"))
-    )
+        if (spread := dig(entry, "browser", target, engine, "bytes_per_load")).get("p50")
+    ]
     if found:
-        return found[(len(found) - 1) // 2], "target"
-    return browser_model.MEASURED[target].mean_mb * 1e6, "BP-VERIFY-2"
+        return sorted(found, key=lambda s: s["p50"])[(len(found) - 1) // 2], "target"
+    return {"p50": browser_model.MEASURED[target].mean_mb * 1e6}, "BP-VERIFY-2"
+
+
+def bytes_per_load(profile: dict, network: str, target: str, engine: str) -> tuple[float, str]:
+    """(bytes per page load, its basis): bytes_spread's p50."""
+    found, basis = bytes_spread(profile, network, target, engine)
+    return found["p50"], basis
+
+
+def run_bytes(model, network: str, target: str, engine: str, day: int) -> float:
+    """A run's bytes per page load: a log-normal through bytes_spread's p50, as wide as its p10
+    and p90 (either alone without the other). Each day of a week takes another seventh of it,
+    in an order fixed by the seed, so a week's runs have the spread's median and band."""
+    found = bytes_spread(model.profile, network.split("/")[0], target, engine)[0]
+    p50, z90 = found["p50"], NormalDist().inv_cdf(0.9)
+    sides = [math.log(found[k] / p50) / z for k, z in (("p90", z90), ("p10", -z90)) if found.get(k)]
+    sigma = max(0.0, sum(sides) / len(sides)) if sides else 0.0
+    order = sorted(range(WEEK), key=lambda d: key(model.seed, "bytes", network, target, d))
+    u = (order.index((day - 1) % WEEK) + 0.5) / WEEK
+    return p50 * math.exp(sigma * NormalDist().inv_cdf(u))
 
 
 def page_load(profile: dict, network: str, target: str, engine: str) -> tuple[float, float]:
@@ -124,8 +144,7 @@ def run(model, entry, day: int) -> Browser:
     codes = [CODES[name] for name, n in counts.items() for _ in range(n)]
     rng.shuffle(codes)
     own = dig(profile, "networks", network, "browser", target, engine)
-    mean = bytes_per_load(profile, network, target, engine)[0]
-    mean *= model.jitter("bytes", entry.network, target, day)
+    mean = run_bytes(model, entry.network, target, engine, day)
     sizes = apportion(round(mean * count), [rng.randint(50, 150) for _ in codes])
     p50, p90 = page_load(profile, network, target, engine)
     median = p50 * model.jitter("load", entry.network, target, day, spread=LOAD_JITTER)
