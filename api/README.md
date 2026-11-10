@@ -170,7 +170,7 @@ its `class` and how it is closed:
 A check's request is expanded as the bench expands page requests: `{slug}` for every network
 (with `{kind}`, every kind of it), `{kind}` alone for every kind once, `{range}` for each range,
 `{cc}` for the first country of `/v1/countries`. Every request is sent once. A path uses dots
-for keys, `[]` for every element of a list and `*` for every key of an object (but `na`), such
+for keys, `[]` for every element of a list and `*` for every key of an object (but `na`, `naReason` and `naReasons`), such
 as `networks[].cells.*.engines.*.scores.success.status`. It passes in an answer when it reaches
 a value at least once (a list element or key without it is skipped, an empty list reaches
 nothing) and every null it reaches is explained: listed in the `na` of an object around it

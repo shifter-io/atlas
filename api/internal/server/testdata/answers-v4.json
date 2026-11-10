@@ -15,7 +15,7 @@
    "/v1/coverage/shifter": "b67238b21fb1bf0a5f9c365bdc7fa4ce20012fd3f6f6897bcef6fe17ac99f8fd",
    "/v1/networks": "4999558ff7d7f172e517b7fd0eb7b2b57925e30b4aec199aa34caf57060ada23",
    "/v1/networks/all/all": "7808b233d177bf158eb247f1e2a167d3dc448f7e4c4f5fda1d3306ae9a4f178a",
-   "/v1/networks/shifter/residential": "6e0b5428e1e4f2e71ca111c3aa24781e2cd482e23f8e11eba012788545d88d2e",
+   "/v1/networks/shifter/residential": "c99f82f3090ab13dbba2c3f920f8b8807e87d499f8a675c51de9725222acfb0a",
    "/v1/rankings/24h": "3dcef6108466ffc83e47494118ea7820c7ca745caa43fac3b5bcd7c71291b6a7",
    "/v1/rankings/24h/datacenter": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
    "/v1/rankings/24h/isp": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
@@ -40,7 +40,7 @@
    "GET /v1/search?q=shift": "361e6caa398b72d9427f0e5d545c81876712f4474e91a806672ac42ce3b5b9e4",
    "dataset": "aeebc2cead989da48da4715ff7ea3b68ce4259719e6e3355869654a800beaecb",
    "details": "42dd6a5c05c0aafdbe8d580ad2d03f8b64a2cd3d1416f28248dc416e78361016",
-   "pages": "eb182d7f4948205fe57c7594c02175ba70542a0ceab7f90b99dfdf4e21f84eaa"
+   "pages": "2da0d1b396a979efb19b77e3b5ceb454299d0f5373cc615381159764585fa7ab"
   },
   "v1": {
    "/v1/charts/all/all/24h": "b908d133f461c89cb7172f6175412b8b66de35369982c3d53f70d13e93afc45b",
@@ -57,7 +57,7 @@
    "/v1/coverage/shifter": "7718ee61071048eb8b2c948164520b898c3b1aa3636e9dfc70473c685aa5e344",
    "/v1/networks": "17bb588f6647c90a9a7487af71cb43dc45eb0ee453f87876eb9cb258cdb8221e",
    "/v1/networks/all/all": "306308cd09c093d6713382d464f27afb229981a61853d0fcad6557908f7df3a2",
-   "/v1/networks/shifter/residential": "3fa3c444540b62e82be32eb845d485cde1583ea50405db08b5e7070625edc5ba",
+   "/v1/networks/shifter/residential": "832d796e0d22153ba4230ddfe893a17ce1c838bfbacf8294b3506e6ab952ee42",
    "/v1/rankings/24h": "3fec1a8e8277934493b71a9941fb8b2ea7989330276fdc1618c0f408b812ec1b",
    "/v1/rankings/24h/datacenter": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
    "/v1/rankings/24h/isp": "8fc98c6184d00a37b71694d07bbc00e22de84c83aedaaf90a28cf5f18ec93a56",
@@ -82,7 +82,7 @@
    "GET /v1/search?q=shift": "ae02974f6b2e91814e4c90a4f12b6c254f7c28e3a389b68eace1bb9d1ac5538a",
    "dataset": "8e004cc5c4d18853d14f8034a2d2d235ef11f4f08b2569453035c4e3781ad840",
    "details": "97b18338d5c8e8809e5b3cf13ec57879a764a7ad9eb33f6236b9f1f222b64ae9",
-   "pages": "b4161e83614c941dd2b16a20864732cfa039334cb477b3f7e6549f73a477e23c"
+   "pages": "52729e2f2b957bcf6f97d96476a6afa3ac4d28c3881d5cf59dfbfd556afe3725"
   }
  }
 }

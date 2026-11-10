@@ -324,7 +324,7 @@ func (l loc) children(seg string) []loc {
 		}
 	case map[string]any:
 		for _, k := range slices.Sorted(maps.Keys(x)) {
-			if k == seg || seg == "*" && k != "na" {
+			if k == seg || seg == "*" && k != "na" && k != "naReason" && k != "naReasons" {
 				out = append(out, l.down(x[k], "."+k))
 			}
 		}

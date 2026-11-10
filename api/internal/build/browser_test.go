@@ -202,3 +202,21 @@ func TestBrowserScoresAbsentInAnOlderSnapshot(t *testing.T) {
 		t.Error("a missing scores object and an unranked metric share a reason")
 	}
 }
+
+// A window that publishes only its engines' scores (no top-level copy, as a
+// v4 network summary may: HOME-31) gives the target its main engine's.
+func TestBrowserScoresFallBackToTheMainEngines(t *testing.T) {
+	t.Parallel()
+	var w snap.Window
+	if err := json.Unmarshal([]byte(`{"targets": {"amazon_pdp": {"metrics": {}, "browser": {"outcome_rates": {"ok": 0.5},
+  "engine": "camoufox", "engines": {"camoufox": {"completed": 100, "scores": {"success": {"score": 10, "rank": 1, "ranked_of": 3,
+  "status": "ranked"}, "challenge": {"status": "all_similar"}, "block": {"status": "all_similar"}}},
+  "chrome": {"completed": 100, "scores": {"success": {"status": "too_few_networks"}, "challenge": {"status": "too_few_networks"},
+  "block": {"status": "too_few_networks"}}}}}}}}`), &w); err != nil {
+		t.Fatal(err)
+	}
+	b := browserBenchmark(w, model.TargetMeta{ID: "amazon_pdp"}, nil)
+	if b.Scores == nil || jsonString(t, b.Scores) != jsonString(t, b.Engines["camoufox"].Scores) || b.Scores.Success.Status != "ranked" {
+		t.Errorf("scores %s, camoufox %s", jsonString(t, b.Scores), jsonString(t, b.Engines["camoufox"].Scores))
+	}
+}

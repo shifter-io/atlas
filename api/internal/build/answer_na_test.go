@@ -142,6 +142,8 @@ func TestEveryPhase3AnswerListsItsNulls(t *testing.T) {
 		{&pg.Network["net00/residential"].NAList, "reviews", NACatalog},
 		{&pg.Network["net00/residential"].Profile.NAList, "pricing.listRate", NACatalog},
 		{&pg.Network["net00/residential"].Profile.NAList, "protocol.summary", NACatalog},
+		// Empty lists that mean "not collected" stay listed, as in the provider's na.
+		{&pg.Network["net00/residential"].Profile.NAList, "ipSamples", NANotMeasured},
 		{&pg.Network["net00/residential"].Stats["24h"].NAList, "claimShare", NACatalog},
 		{&pg.Network["net00/residential"].Stats["24h"].NAList, "ranks.listRate.rank", NACatalog},
 		{&pg.Registered["/v1/home/24h"].(*HomeAnswer).NAList, "profiles", NACatalog},

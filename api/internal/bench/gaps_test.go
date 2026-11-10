@@ -135,7 +135,7 @@ func TestCheckPath(t *testing.T) {
 	var body any
 	err := json.Unmarshal([]byte(`{"rows":[{"a":1,"b":null,"c":{"d":null}},{"a":2,"b":3}],"empty":[],"cells":{"x":{"e":{"chrome":{"s":"ranked"}}},"y":{}},
 		"keyed":{"targets":[{"target":"t1","v":null}],"na":["targets[t1].v"]},"num":5,"na":["rows[].c.d"],
-		"listed":{"profiles":[],"m":{},"na":["profiles","m"]}}`), &body)
+		"listed":{"profiles":[],"m":{},"na":["profiles","m"]},"reasons":{"na":["x"],"naReason":"catalog","naReasons":{"f":"catalog"}}}`), &body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +150,7 @@ func TestCheckPath(t *testing.T) {
 		"listed.profiles[].id": "", // an empty list listed in na
 		"listed.m.*.s":         "",
 		"listed.x[].id":        "missing",
+		"reasons.*.f":          "missing", // * skips na, naReason and naReasons
 		"empty":                "",
 		"cells.*.e.*.s":        "", // y has no e: one place is enough
 		"cells.*.f":            "missing",

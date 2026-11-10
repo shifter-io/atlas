@@ -107,8 +107,9 @@ var (
 	// Availability: no value without monitoring evidence.
 	evidenceFigures = setOf("uptimePct", "downtimeMinutes", "downtimeMinutes24h", "incidentCount", "incidents")
 	// Never tested in production's cadence: latency needs a latency test;
-	// TTFB, blocklists, stickiness and leaks are not tested.
-	unmeasuredFigures = setOf("latencyP50", "latencyP90", "latencyP99", "latencyMean", "medianLatency", "fastest",
+	// TTFB, blocklists, stickiness and leaks are not tested; exit-IP samples
+	// are not published.
+	unmeasuredFigures = setOf("ipSamples", "latencyP50", "latencyP90", "latencyP99", "latencyMean", "medianLatency", "fastest",
 		"ttfbP50", "blacklistHitRate", "stickinessHoldRate", "leakChecks")
 )
 
@@ -200,7 +201,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
 		pf := f
 		pf.ran = f.measured
-		if err := p.NAList.list(p, nil, pf.code); err != nil {
+		if err := p.NAList.list(p, profileEmpties(e, a.Kind), pf.code); err != nil {
 			return err
 		}
 	}
@@ -214,6 +215,27 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	f.ran = f.measured
 	return a.NAList.list(a, []string{"reviews", "communityRuns"}, f.code, "profile", "stats", "reviews[]", "communityRuns[]",
 		"changelog[]", "tape[]")
+}
+
+// profileEmpties is the provider's N/A paths a kind's profile may hold as an
+// empty list that means "not collected" (the provider's na lists them with
+// emptyIsNA): the kind's productMeasurements.<kind>.* paths without their
+// prefix, and its other paths. naOf keeps those that resolve to an empty
+// value in the profile (ipSamples, pricing.plans, bestFor, trust.leakChecks).
+func profileEmpties(e *entry, kind string) []string {
+	if e == nil {
+		return nil
+	}
+	out, prefix := []string{}, "productMeasurements."+kind+"."
+	for _, p := range e.P.NA {
+		switch {
+		case strings.HasPrefix(p, prefix):
+			out = append(out, strings.TrimPrefix(p, prefix))
+		case !strings.HasPrefix(p, "productMeasurements."):
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // listNA lists the N/A paths of the home's networks (rows: their ranking
