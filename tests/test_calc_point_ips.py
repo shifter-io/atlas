@@ -194,4 +194,4 @@ async def test_parallel_reads_bounds_the_point_helpers_too(database, tmp_path, m
     calculate(database, lenient_policy(tmp_path), as_of=end, mode="incremental", parallel_reads=1)
     err = capsys.readouterr().err
     found = re.findall(r"calculate: (\d+) parallel reads \(of (\d+)\)[^\n]* point batches", err)
-    assert found == [("1", "1")], err
+    assert found and set(found) == {("1", "1")}, err  # each step that counts points
