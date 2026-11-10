@@ -16,7 +16,7 @@ import json
 import signal
 import sys
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
@@ -29,6 +29,7 @@ import replay
 import replay_baseline
 import simulate_check
 import simulate_model
+import simulate_real
 import simulate_report
 import simulate_rerun
 import simulate_steps
@@ -37,7 +38,7 @@ from replay import Refused, now
 
 from proxy_index import storage, storage_parallel
 
-SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256")
+SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256", "real_hours")
 # Each table of public and site with its partitions: its own bytes (with TOAST) and its indexes'.
 BYTES = (
     "SELECT n.nspname||'.'||c.relname,sum(pg_table_size(coalesce(t.relid,c.oid)))::bigint,"
@@ -59,9 +60,17 @@ def tables(conn) -> dict:
 
 
 def read_plan(conn, args):
-    """The plan, read in the connection's transaction, for the days and the extra hour."""
+    """The plan, read in the connection's transaction, for the days and the extra hour; with
+    --real-hours, its real source (simulate_real.Source)."""
     found = (date.fromisoformat(args.first_day), args.formulas, args.browser_settings)
-    return replace(simulate_model.read_plan(conn, *found, args.pulses), days=args.days + 1)
+    plan = replace(simulate_model.read_plan(conn, *found, args.pulses), days=args.days + 1)
+    if not args.real_hours:
+        return plan
+    try:
+        real = simulate_real.Source.read(args.source, args.real_hours, plan.formulas)
+    except (ValueError, KeyError, OSError) as exc:
+        raise Refused(f"--source: {exc!r}") from None
+    return replace(plan, real=real)
 
 
 class Simulation(replay.Replay):
@@ -79,7 +88,7 @@ class Simulation(replay.Replay):
         self.shared = replace(self.plan, browser=settings)
         self.out.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.state = self.open(go)
-        self.model = simulate_model.Model(profile, self.plan, self.state["seed"])
+        self.model = simulate_real.model(profile, self.plan, self.state["seed"])
         self.model.summaries.replay = self.state["replay_id"]  # every run's marker: the run's id
         self.steps = simulate_steps.SimSteps(conn, args, self.state, self.model, self.save)
         self.names = ("daily", "browser", *(("pulses",) if args.pulses else ()), "release")
@@ -92,6 +101,7 @@ class Simulation(replay.Replay):
         path, args = self.out / "state.json", self.args
         wanted = {"database": go["database"], "first_day": args.first_day, "days": args.days + 1}
         wanted |= {"hours_per_day": args.hours_per_day, "pulses": args.pulses}
+        wanted["real_hours"] = list(args.real_hours) if args.real_hours else None
         wanted["profile_sha256"] = hashlib.sha256(Path(args.profile).read_bytes()).hexdigest()
         if path.exists():
             state = json.loads(path.read_text())
@@ -102,6 +112,7 @@ class Simulation(replay.Replay):
         replay_id = uuid.uuid4().hex
         state = {"replay_id": replay_id, "seed": args.seed or replay_id, "go": go, **wanted}
         state |= {"started_at": go["at"], "networks": sorted(self.plan.formulas)}
+        state["real"] = self.plan.real.notes if self.plan.real else None
         state |= {"baseline": replay_baseline.baseline(self.conn), "nodes": [], "hours": []}
         state["baseline"]["sizes"] = tables(self.conn)
         state |= {"sizes": {}, "resumed": [], "counts": {"retries": 0, "pause_seconds": 0}}
@@ -207,8 +218,11 @@ class Simulation(replay.Replay):
         """simulate_check.size over the stored days and .stats of day 2 (day 1 alone: its own)."""
         if "checks" in self.state:
             return
-        day = min(2, self.args.days)
-        found = producer.pool.submit(simulate_steps.stats, day, self.args.hours_per_day)
+        day, found = min(2, self.args.days), Future()
+        if self.plan.real:  # the profile's shapes are not the real records'
+            found.set_result({"pass": None, "compared": 0, "checks": [], "skipped": "real hours"})
+        else:
+            found = producer.pool.submit(simulate_steps.stats, day, self.args.hours_per_day)
         hours = simulate_report.stored(self.model, self.state["hours"][: self.total()])
         sizes = simulate_check.snapshots(self.state)
         size = simulate_check.size(self.profile, hours, self.model, sizes)
@@ -223,8 +237,9 @@ def plan_only(args, profile: dict) -> dict:
         conn.read_only = True
         with conn.transaction():
             plan = read_plan(conn, args)
-    model = simulate_model.Model(profile, plan, "plan-only")
-    return simulate_report.plan(model, profile, args.days, args.hours_per_day, args.pulses)
+    model = simulate_real.model(profile, plan, "plan-only")
+    found = simulate_report.plan(model, profile, args.days, args.hours_per_day, args.pulses)
+    return found | {"real": plan.real.notes if plan.real else None}
 
 
 def arguments(argv=None):
@@ -257,6 +272,10 @@ def arguments(argv=None):
         "--memory-budget", type=float, default=4.0, help="GB the transactions in flight may take"
     )
     parser.add_argument("--pulses", action="store_true", help="add HTTP pulses (off: none)")
+    parser.add_argument(
+        "--real-hours", type=simulate_real.hours, help="the real hour of each day, as 12,0"
+    )
+    parser.add_argument("--source", help="--real-hours: the LC-ENRICH-1 output (read only)")
     parser.add_argument("--siteapi", help="base URL of a siteapi reading the database")
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
     parser.add_argument("--no-scope", action="store_true", help="no systemd memory scope")
@@ -287,6 +306,10 @@ def arguments(argv=None):
         parser.error("--owner-go and --out are required, except with --plan-only")
     if args.apply and not args.rerun:
         parser.error("--apply goes with --rerun")
+    if bool(args.real_hours) != bool(args.source):
+        parser.error("--real-hours and --source go together")
+    if args.real_hours and len(args.real_hours) != args.days:
+        parser.error("--real-hours names one hour for each of the --days")
     return args
 
 
@@ -312,10 +335,10 @@ def main(argv=None) -> int:
     args = arguments(argv)
     signal.signal(signal.SIGTERM, signal.default_int_handler)  # a stop, as Ctrl-C
     profile = json.loads(Path(args.profile).read_text())
-    if args.plan_only:
-        print(simulate_report.plan_table(plan_only(args, profile)), end="")
-        return 0
     try:
+        if args.plan_only:
+            print(simulate_report.plan_table(plan_only(args, profile)), end="")
+            return 0
         if args.rerun and not (Path(args.out) / "state.json").exists():
             raise Refused(f"--rerun: no load in {Path(args.out).name} (state.json)")
         with storage.connect(args.database) as conn:

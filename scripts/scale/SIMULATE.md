@@ -622,3 +622,49 @@ simulate.py --rerun browser --days 7 ... (the load's own arguments) [--apply]
   - A stop between the delete's commit and state.json's save leaves no record of the delete:
     the next `--apply` is refused until a new dry run (which then deletes nothing) records it.
   - A recalculation follows only when the operator runs one.
+
+## Real hours (REAL-2DAY-1)
+
+A small real-data test: each simulated day's daily tests carry the real records of one of the
+24-hour real tests' hours (LC-ENRICH-1's hour files), instead of the model's addresses. Only
+the dates are relabelled; the IPs are real. It checks the overlap between networks on real
+shared IPs, and every other endpoint.
+
+```sh
+uv run python scripts/scale/simulate.py --database <toml> --owner-go "<go>" \
+  --profile <profile.json> --days 2 --first-day <YYYY-MM-DD> --out <dir> \
+  --real-hours 12,0 --source <LC-ENRICH-1 out dir> [--connections 25] [--plan-only]
+uv run python scripts/scale/simulate_check.py real-overlap --source <LC-ENRICH-1 out dir> \
+  --hours 12,0 --out <overlap.json> [--formulas formulas]
+```
+
+- `--real-hours H1,H2,...` names the real clock hour of each simulated day (one per `--days`),
+  and goes with `--source`. Day N's daily tests are one per network × requested country of
+  the network's hour-HN file whose formula schedules the country. Each holds that country's
+  records with `countries[CC]` > 0: the IP, `countries[CC]` as its request rows, the
+  enrichment (DB-IP's 14 fields) and the record's DB-IP release (the manifest's
+  `dbip_release` as its metadata when the SHA-256 is the same). One test has one release.
+- The rest is the model's, as in the generated days: the test runs at the country's formula
+  hour of the simulated day, its buckets, latency bins and timeouts follow `daily_directory`'s
+  rules and the profile, and the browser runs are the queue's (one 100-try run per network ×
+  target a day, BROWSER-MODEL-1). No pulses, census or load waves. No synthetic shared lanes
+  (SIM-OVERLAP-1): the real IPs carry the overlap. The extra hour after the days has no daily
+  test.
+- A network without the hour's file gets no test that day (byteful has only its 16:00 hour), a
+  country no formula schedules gets none, and a source folder without a formula is not read.
+  `--plan-only` and `report.md` name them under "Real hours"; state.json keeps them as `real`.
+- The source is read where it is, never copied: every hour file it uses is read once to count
+  its IPs per country and checked against its manifest slot (SHA-256, distinct IPs, request
+  rows, each record's countries against its `seen_count`), then once more by the worker
+  processes for the records, through `slices.py`'s reader (each record's fields). A source
+  that does not match its manifest, or holds no folder of a formula's network (a mistyped
+  `--source`), is refused before any write. Real hour files are never
+  copied into the repository or CI; the tests use reserved addresses only.
+- The store, the guards (`target.py`'s scratch targets, and staging with the owner's go), the
+  marker, the resume and `--plan-only` are the load's above; another `--real-hours` resumes
+  nothing (`state.json` keeps them). The `stats` check is skipped (the profile's shapes are
+  not the real records'); `size` runs. `simulate.py check` refuses a real-hours load.
+- `real-overlap` reads the same records (the same formulas, countries and checks) and writes,
+  mode 600, per network its product and distinct IPs, and per pair of networks the distinct
+  IPs both had: over every real hour together (`7d` and `30d`) and over the last one (`24h`).
+  Counts only, never an IP. The run compares it with `/v1/overlap` of the same windows.

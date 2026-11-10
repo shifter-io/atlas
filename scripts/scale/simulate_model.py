@@ -68,6 +68,7 @@ class Plan:
     countries: tuple[str, ...] = ()
     pulses: tuple[tuple[str, int], ...] = ()
     regions: Any = None  # a RegionMap; None: configs/regions.yaml
+    real: Any = None  # a simulate_real.Source: the daily tests carry real hours' records
 
     def day_start(self, day: int) -> datetime:
         if not 1 <= day <= self.days:
@@ -337,14 +338,7 @@ class Daily:
     def write(self, directory: Path) -> None:
         """The test's run directory: summary.json, ips.jsonl.gz and the DB-IP files."""
         model, lane = self.model, self.lane
-        places, observed = model.places(lane.network, lane.country), []
-        for n, place, b, rows in self.rows():
-            moment = self.started_at + timedelta(minutes=5 * b)
-            row = ReplaySteps.ips_row(self.run_id, address(n), rows, moment)
-            observed.append((row, places.enrichment(place)))
-        release, meta = model.release(self.day), {"synthetic": True}
-        meta["file"] = f"dbip-full-{model.released(self.day).isoformat()}.mmdb"
-        ips = cycle_steps.daily_files(directory, self.run_id, observed, release, meta)
+        ips = cycle_steps.daily_files(directory, self.run_id, *self.observed())
         errors = apportion(self.errors, [1] * self.buckets)
         bins = model.bins(lane.network, self.day)
         buckets = cycle_steps.daily_buckets(self.started_at, self.successes[0], errors, bins)
@@ -354,6 +348,17 @@ class Daily:
             self.run_id, target, self.started_at, buckets, ips, self.size
         )
         (directory / "summary.json").write_text(json.dumps(summary))
+
+    def observed(self) -> tuple[list, str, dict]:
+        """(ips row, enrichment) per (bucket, IP), the DB-IP release and its metadata."""
+        model, lane = self.model, self.lane
+        places, observed = model.places(lane.network, lane.country), []
+        for n, place, b, rows in self.rows():
+            moment = self.started_at + timedelta(minutes=5 * b)
+            row = ReplaySteps.ips_row(self.run_id, address(n), rows, moment)
+            observed.append((row, places.enrichment(place)))
+        meta = {"synthetic": True, "file": f"dbip-full-{model.released(self.day).isoformat()}.mmdb"}
+        return observed, model.release(self.day), meta
 
 
 @dataclass(frozen=True)

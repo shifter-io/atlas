@@ -73,6 +73,8 @@ def check(args) -> dict:
     state, data = json.loads((out / "state.json").read_text()), Path(args.profile).read_bytes()
     if hashlib.sha256(data).hexdigest() != state["profile_sha256"]:
         raise Refused(f"{Path(args.profile).name} is not the load's profile (profile_sha256)")
+    if state.get("real_hours"):
+        raise Refused("a --real-hours load: its checks are the run's (SIMULATE.md, Real hours)")
     profile, start = json.loads(data), date.fromisoformat(state["first_day"])
     with storage.connect(args.database) as conn:
         conn.read_only = True
