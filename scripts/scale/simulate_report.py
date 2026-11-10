@@ -105,7 +105,20 @@ def plan_table(found: dict) -> str:
         for name, size in sorted(entry["tables"].items()):
             gbs = "".join(f"{size[field] / GB:>11.3f}" for field in FIELDS[1:])
             lines.append(f"  {name:<20}{size['rows']:>14}{gbs}")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + real_lines(found.get("real"))) + "\n"
+
+
+def real_lines(real: dict | None) -> list[str]:
+    """--real-hours: each day's real hour and the networks without its file; the countries no
+    formula schedules and the source's networks without a formula (no test)."""
+    if not real:
+        return []
+    lines = ["", "## Real hours", ""]
+    for day, hour in enumerate(real["hours"], 1):
+        missing = ", ".join(real["missing"][str(day)]) or "none"
+        lines.append(f"- day {day}: real hour {hour:02d}, networks without it: {missing}")
+    lines.append(f"- not in a formula's schedule: {', '.join(real['unscheduled']) or 'none'}")
+    return lines + [f"- networks without a formula: {', '.join(real['ignored']) or 'none'}"]
 
 
 def growth(before: dict, after: dict, wanted: dict) -> dict:
@@ -155,6 +168,7 @@ def build(state: dict, profile: dict) -> dict:
     kinds = {kind: dig(profile, "reference", kind).get("basis") for kind in KINDS}
     report = {"cadence": CADENCE, "basis": BASIS | {"kinds": kinds}, "days": days}
     report |= {"first_day": state["first_day"], "resumed": len(state["resumed"])}
+    report["real"] = state.get("real")
     if "final" in state["sizes"]:
         found = growth(state["baseline"]["sizes"], state["sizes"]["final"], expected(profile, runs))
         report["final"] = {"runs": dict(runs), "tables": found}
@@ -211,6 +225,7 @@ def markdown(report: dict) -> str:
             f"- {name}: {found['compared']} compared, failed: {', '.join(failed) or 'none'}"
         )
     lines += ["", "## Basis", ""] + [f"- {key}: {text}" for key, text in report["basis"].items()]
+    lines += real_lines(report.get("real"))
     return "\n".join(lines) + "\n"
 
 

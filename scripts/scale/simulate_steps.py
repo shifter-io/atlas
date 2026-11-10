@@ -19,7 +19,7 @@ from typing import Any
 
 import browser_model
 import simulate_check
-import simulate_model
+import simulate_real
 from replay_steps import NODE, REGIONS, SLUGS, ReplaySteps, ReplayWriter
 
 from proxy_index import storage_parallel
@@ -71,7 +71,7 @@ def start(profile: dict, plan, seed, replay_id: str) -> None:
     """A worker's model, from a plan whose browser settings are a SettingsFile; every summary it
     writes carries the run's own id as its marker."""
     plan = replace(plan, browser=plan.browser.load())
-    WORKER["model"] = simulate_model.Model(profile, plan, seed)
+    WORKER["model"] = simulate_real.model(profile, plan, seed)
     WORKER["model"].summaries.replay = replay_id
 
 

@@ -1,10 +1,13 @@
 """SIM-GEN-1, SIM-CHECK-2, SIM-OVERLAP-1: the size and statistical checks of generated hours
 against the plan and the profile (SIMULATE.md, "Checks"). Each returns {"pass", "compared",
 "checks"}: every check with its relative deviation (or points, or a distance), its limit and its
-verdict, never an absolute figure; size adds its notes."""
+verdict, never an absolute figure; size adds its notes.
+
+`simulate_check.py real-overlap --source <dir> --hours 12,0 --out <file>`: simulate_real.main."""
 
 from __future__ import annotations
 
+import sys
 from collections import Counter, defaultdict
 
 import replay_report
@@ -394,3 +397,9 @@ def markdown(found: dict) -> str:
     lines += ["", "## Rows apart from the ingest's tables"]
     lines += replay_report.table(("Day", "Table", "Rows", "Why"), rows)
     return "\n".join(lines) + "\n"
+
+
+if __name__ == "__main__":
+    import simulate_real  # the model's: the checks above never need it
+
+    sys.exit(simulate_real.main(sys.argv[1:]))
