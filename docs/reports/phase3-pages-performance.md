@@ -1,8 +1,11 @@
 # Phase 3 report: every Proxy Index page from the API, fast at production volume (staging)
 
-**Status: not closed.** Three misses wait for their fix issues: the coverage search's first
-render, 46 map gaps on staging, and the browser scores missing from v4 builds (sections 2, 4, 6
-and 9). Under the issue's rule ("no miss at close") this report is re-measured after those fixes
+**Status: not closed.** Three misses wait for their fixes:
+- the coverage search's first render: #797;
+- 46 map gaps on staging: #798 and #799;
+- the browser scores missing from v4 builds: its issue is requested from the architect.
+
+They are in sections 2, 4, 6 and 9. Under the issue's rule ("no miss at close") this report is re-measured after those fixes
 merge, and closes only when every row passes.
 
 - **Code:** `main` at 0b0acf9 (2026-11-10), with #787, #788, #789 and #790 merged. Every other
@@ -91,15 +94,18 @@ Three things are not finished, and this report stays open until they are:
 
 1. **The coverage search.** The first time Ben searches a big network's list of cities and
    internet providers right after an hourly update, he waits about half a second to one second.
-   The limit is 0.07 seconds. Every later search is instant. A fix will be planned.
+   The limit is 0.07 seconds. Every later search is instant. The fix is planned: the API will prepare these lists before it
+   switches to new numbers.
 2. **Empty fields.** For 46 of the 160 website needs that the API now answers, some answers
    leave a value empty without saying why, which the website needs in order to show "N/A"
-   properly. 29 of them are empty only because the test copy has no price list, reviews or
-   target descriptions loaded. The other 17 are missing data in the 24-hour view, such as
+   properly. 29 of them are empty only because the test copy had no price list, reviews or
+   target descriptions loaded. Prices, trials, review labels and target categories are
+   catalog text that you write; until you do, the API will say "not filled in yet" instead
+   of leaving the field silently empty. The other 17 are missing data in the 24-hour view, such as
    uptime when a network had no test that day.
 3. **The new browser scores do not reach the website.** The 1-to-10 scores are calculated, but
    the newest way the API reads results skips them, so every score would show "N/A". A fix
-   will be planned.
+   is being planned.
 
 The test data also has a limit: its total size equals a real week, but the two largest tables
 (what each test saw, and where each address is located) hold more rows than production's would
@@ -320,7 +326,10 @@ limit plus 20 ms of network time per request.
 - **Why:** a first search reads and scans the whole City × ASN list. For the largest network that
   is 145,030 rows, `netlist.rows` 35.5 ms on the database server, then sent over the 9 ms link
   to the siteapi.
-- **Fix:** a fix issue (section 9), and this row is measured again after it merges.
+- **Fix:** #797 (COVERAGE-SEARCH-1). Before a new version is swapped in, the siteapi warms
+  the rows of every searchable list into its row cache, while the old version serves. The
+  target is a cold `q=` within 50 ms with the rebuild still at most 60 s. This row is measured
+  again after it merges.
 
 Because the bench runs on the same host as the siteapi, these times are close to server time:
 - 325 of 327 requests have a p99 within the strict server budget without the 20 ms allowance
@@ -470,9 +479,27 @@ on the 24h range or on the network answer's 24h figures. They fall into two grou
   HOME-15, HOME-26, HOME-31, TGT-1, TGT-3, TGT-6, TGT-12, NET-RANK-AVAIL, NET-TARGETS-RANGE,
   NET-TARGET-RANK, NET-TARGET-LATRANK, CMP-6, CMP-9, CMP-11, OVL-1, TC-4, TC-5.
 
-Both groups go to the fix issues of section 9:
-- **group (a):** either a catalog loaded into staging, or the API lists catalog nulls in `na`;
-- **group (b):** the API lists each null with its reason.
+What happens to them (the architect's decision):
+- **group (a), both:**
+  - Shifter's committed catalog (`api/scripts/catalog-shifter.sql`, `pricing-shifter.sql`) is now
+    loaded into staging, so Shifter has real catalog values in the next measurement;
+  - #798 (API-NA-2) lists every null of the new fields in `na` with a reason code (`catalog`,
+    `not_measured`, `no_run_in_window`, `no_evidence`, `not_computed_for_window`,
+    `insufficient_data`). The other 17 networks' prices, trials, review labels and target
+    categories are catalog content the owner writes (map section 12: TGT-8, CMP-15); until then
+    they pass as nulls listed in `na`.
+- **group (b):** #798 lists the nulls by design in `na`:
+  - `generic_https`, the 24h browser cells with no run;
+  - uptime without evidence, downtime and the 24h overlap.
+
+  It also fixes three real bugs: `targets[].scoreStatus` missing (TGT-3), the home market's
+  `medianLatency` and `fastest` (HOME-15), and `hardestRates[].scores` (HOME-31).
+
+  It also finds why `latencyP90`/`P99` and the `generic_http` cell's P50 are null. Probably
+  production's cadence has no load wave. It then serves the daily tests' latency flagged as
+  light load if the snapshot has it, and `na` `not_measured` otherwise.
+- **OVL-1's empty 7d pairs:** #799 (OVERLAP-7D-1). 7d should be counted once a UTC day and
+  carried; after the deploy it was empty, a bug in the carry.
 
 The verdict column gives the first failing request and path of each failing gap.
 
@@ -939,14 +966,15 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 | #790 (CALC-FLEET-DISTINCT-1) | last-seen counts in one pass, DISTINCT counts hash-aggregated | `LAST_SEEN` 87 s, fleet 60 s (10.5 GB temp), network scores 59 s (4.1 GB temp) | `COUNTS` 71 s in 26 calls; the whole calculation's temp 11.7 GB against 57.4 GB |
 | #793 (SIM-MODEL-3) | the simulator's per-IP rows, buckets, DB-IP cadence and browser bytes | section 6.1 | PR #796 in the queue; for a future load |
 
-**Misses this report found, waiting for their fix issues** (filed by the architect in this milestone):
+**Misses this report found, with their fix issues** (filed by the architect in this milestone;
+#720 depends on them, and this report is measured again after they merge):
 
 1. **Coverage search, first render:** 42 of 54 requests over 70 ms cold, 380 to 1,071 ms
-   (section 2.1). Fix issue: requested from the architect; this row is measured again after it merges.
+   (section 2.1). Fix: #797 (COVERAGE-SEARCH-1).
 2. **46 map gaps:** nulls not listed in `na`, 29 from staging's empty catalog and 17 from sparse
-   24h data and fields never filled (section 4). Fix issue: requested from the architect; this row is measured again after it merges.
+   24h data and fields never filled (section 4). Fix: #798 (API-NA-2) for the `na` reasons and three real bugs, #799 (OVERLAP-7D-1) for the 7d overlap pairs; Shifter's catalog is loaded into staging.
 3. **Browser scores missing from v4 builds:** every `scores` and `browserOverall` null in every
-   range (section 6.3). Fix issue: requested from the architect; this row is measured again after it merges.
+   range (section 6.3). Fix issue: requested from the architect.
 
 **Known limits:**
 - **`/v1/targets` size:** it fits under the 200 KB cap up to 23 networks (#735); past 22 it must
