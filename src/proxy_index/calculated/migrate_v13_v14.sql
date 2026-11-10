@@ -4,4 +4,4 @@
 -- A nullable column without a default rewrites no row, and no stored build gets one: the API
 -- reads a head without it as before, and the next publication writes it. store.V13_CHECKS
 -- compares every snapshot with the copy taken by store.V13_SNAPSHOT.
-ALTER TABLE calculated_snapshots ADD COLUMN IF NOT EXISTS api_head jsonb;
+ALTER TABLE calculated_snapshots ADD COLUMN IF NOT EXISTS api_head text;

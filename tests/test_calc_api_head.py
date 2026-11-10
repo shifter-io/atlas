@@ -11,6 +11,7 @@ calculated v9), which list_write.py and netlists.py write with the rows: they co
 rows, and the API's names of its dimensions (api/internal/store/netlists.go) are the framework's.
 """
 
+import json
 import re
 from collections import defaultdict
 from datetime import timedelta
@@ -78,11 +79,11 @@ async def test_publishing_writes_the_head_the_api_reads(database, tmp_path):
     head, api = stored[int(first["snapshot_id"])]
     assert head["schema_version"] == 4 and head["networks"] and "parts" in head
     assert {f["cohort"] for f in head["fleet"]} > {"*"}  # per-cohort rows are left out
-    assert api == expected(head) and "overlap" in head and "overlap" not in api
+    assert json.loads(api) == expected(head) and "overlap" in head
     assert stored[int(draft["snapshot_id"])][1] is None  # a draft gets it when published
     store.publish(database, draft["snapshot_id"])
     head, api = heads(database)[int(draft["snapshot_id"])]
-    assert api == expected(head)
+    assert json.loads(api) == expected(head)
     with connect(database) as conn:
         assert parts.write_api_head(conn) is False  # written once
 

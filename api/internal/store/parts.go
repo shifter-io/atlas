@@ -16,11 +16,11 @@ import (
 // whether it is: a head with networks and schema_version 4. It is read
 // without its parts count and its per-cohort overlap and fleet rows: the
 // api_head the build was published with (calculated v14, proxy-index
-// calculated/api_head.sql), read as it is stored, else, for a build
+// calculated/api_head.sql), its text read as it is stored, else, for a build
 // published before v14, built from the head (networkHeadSQL, network.go),
 // the same value. A build with an api_head is a v4 build. An older build's
 // payload is not read.
-const snapshotSQL = `SELECT s.build_id, s.content_hash, CASE WHEN s.api_head IS NOT NULL THEN s.api_head::text WHEN n.v4 THEN ` + networkHeadSQL + ` END, n.v4
+const snapshotSQL = `SELECT s.build_id, s.content_hash, CASE WHEN s.api_head IS NOT NULL THEN s.api_head WHEN n.v4 THEN ` + networkHeadSQL + ` END, n.v4
  FROM public.calculated_snapshots s JOIN public.current_calculation c ON c.build_id = s.build_id
  CROSS JOIN LATERAL (SELECT CASE WHEN s.api_head IS NOT NULL THEN true
   ELSE s.payload ? 'networks' AND s.payload->>'schema_version' IS NOT DISTINCT FROM '4' END AS v4) n WHERE c.singleton`
