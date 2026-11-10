@@ -85,6 +85,9 @@ type Lists struct {
 	Fetched int
 	// net holds the network lists of a v4 build (network.go).
 	net *NetLists
+	// RowCacheBytes bounds the rows net keeps in its row cache (0:
+	// DefaultRowCacheBytes).
+	RowCacheBytes int
 }
 
 // labels are the place and network names a list cache holds, shared by its

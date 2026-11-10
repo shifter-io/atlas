@@ -133,3 +133,59 @@ func TestReadAllOfADeletedList(t *testing.T) {
 		}
 	})
 }
+
+// A set's Warm puts its dimensions in the row cache, the largest first while
+// the limit holds them, so that requests read those from the cache, even
+// once the rows are deleted, and the others from the database
+// (COVERAGE-SEARCH-1). The load read the largest first, so the cache it left
+// held the smallest. A nil set warms nothing.
+func TestWarmFillsTheRowCache(t *testing.T) {
+	t.Parallel()
+	db, pool := networkLists(t)
+	ctx := context.Background()
+	load := func(limit int) (*store.NetLists, map[int64]*store.NetList, *store.NetRowSet) {
+		n := store.NewNetLists(pool)
+		n.SetRowCache(limit)
+		var lists map[int64]*store.NetList
+		var set *store.NetRowSet
+		within(t, pool, func(tx pgx.Tx) {
+			lists = loadNet(t, n, tx, 1, 2, 3)
+			var err error
+			if set, err = n.ReadAll(ctx, tx, lists, 0); err != nil {
+				t.Fatal(err)
+			}
+		})
+		return n, lists, set
+	}
+	// Each list: 3 ASN rows, 2 country, city and City x ASN rows, 1 region row.
+	all, allLists, allSet := load(store.DefaultRowCacheBytes)
+	few, fewLists, fewSet := load(9 * 24)
+	want := map[*store.NetRowSet]store.Warmed{
+		allSet: {Dimensions: 15, Rows: 30, Bytes: 30 * 24, Limit: store.DefaultRowCacheBytes},
+		fewSet: {Dimensions: 3, Rows: 9, Bytes: 9 * 24, Limit: 9 * 24, ColdDimensions: 12, ColdRows: 21, ColdLists: []int64{1, 2, 3}},
+	}
+	for set, w := range want {
+		if got := set.Warm(); !reflect.DeepEqual(got, w) {
+			t.Errorf("warmed %+v, want %+v", got, w)
+		}
+	}
+	db.Exec(t, `DELETE FROM calculated_list_rows`)
+	for id := range allLists {
+		for _, name := range netDimensions {
+			got, err := allLists[id].Rows(ctx, name)
+			if want, _ := store.RowsOf(store.WithNetRows(ctx, allSet), allLists[id], name); err != nil || got != want {
+				t.Errorf("list %d %s after the warm: %v, want the set's rows (%v)", id, name, got, err)
+			}
+			_, err = fewLists[id].Rows(ctx, name)
+			if warm := name == "asn"; (err == nil) != warm {
+				t.Errorf("list %d %s under a 9-row limit: read %v, want from the cache: %v", id, name, err, warm)
+			}
+		}
+	}
+	if all.Reads != 15 || few.Reads != 15+12 {
+		t.Errorf("%d and %d reads, want 15 and 27: the warmed dimensions read none", all.Reads, few.Reads)
+	}
+	if w := (*store.NetRowSet)(nil).Warm(); !reflect.DeepEqual(w, store.Warmed{}) {
+		t.Errorf("a nil set warmed %+v", w)
+	}
+}

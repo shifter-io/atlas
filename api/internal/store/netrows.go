@@ -21,7 +21,9 @@ import (
 // (SITEAPI-REBUILD-1). So the load reads each dimension of its lists once,
 // over NetReadConns connections at a time, largest first, into a NetRowSet;
 // the load and the build take their rows from it. Pages and searches read
-// through the row cache as before.
+// through the row cache, which the rebuild fills from the set before it
+// serves the new build (Warm): a search's first request reads no row from
+// the database (COVERAGE-SEARCH-1).
 
 // NetReadConns is how many connections a rebuild reads its network lists
 // over at a time; OpenReadOnly's pool has 4 more, for the load's transaction
@@ -33,10 +35,53 @@ const NetReadConns = 6
 // are read in the load's transaction, opening no connection.
 const NetReadParallelRows = 50_000
 
-// NetRowSet is every dimension's rows of one load's network lists.
+// NetRowSet is every dimension's rows of one load's network lists, read by
+// src.
 type NetRowSet struct {
 	mu   sync.Mutex
 	rows map[rowKey]*NetRows
+	src  *NetLists
+}
+
+// Warmed is what Warm put in the row cache, and what it left out because the
+// cache's limit (Limit bytes) holds less: dimensions, rows and bytes, and the
+// ids of the lists with a dimension left out.
+type Warmed struct {
+	Dimensions, Rows, Bytes, Limit int
+	ColdDimensions, ColdRows       int
+	ColdLists                      []int64
+}
+
+// Warm puts every dimension the set holds in its lists' row cache, the
+// largest first while the cache's limit holds them (every dimension of a
+// network list is searched by a q=: its place lists and its City x ASN
+// coverage), so that requests read none from the database. The rows are
+// those the set holds: the cache adds no copy. A nil set warms nothing.
+func (set *NetRowSet) Warm() Warmed {
+	if set == nil || set.src == nil {
+		return Warmed{}
+	}
+	set.mu.Lock()
+	entries := make([]rowEntry, 0, len(set.rows))
+	for k, r := range set.rows {
+		entries = append(entries, rowEntry{k, r})
+	}
+	set.mu.Unlock()
+	cache := &set.src.cache
+	cold := cache.warm(entries)
+	w := Warmed{Dimensions: len(entries) - len(cold), Limit: cache.limit, ColdDimensions: len(cold)}
+	for _, e := range cold {
+		w.ColdRows += e.rows.Len()
+		w.ColdLists = append(w.ColdLists, e.key.id)
+	}
+	for _, e := range entries {
+		w.Rows += e.rows.Len()
+	}
+	w.Rows -= w.ColdRows
+	w.Bytes = w.Rows * netRowBytes
+	slices.Sort(w.ColdLists)
+	w.ColdLists = slices.Compact(w.ColdLists)
+	return w
 }
 
 type netRowsKey struct{}
@@ -87,7 +132,7 @@ func (n *NetLists) readAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetL
 	slices.SortFunc(keys, func(a, b rowKey) int {
 		return cmp.Or(-cmp.Compare(lists[a.id].count[a.d], lists[b.id].count[b.d]), cmp.Compare(a.id, b.id), cmp.Compare(a.d, b.d))
 	})
-	set := &NetRowSet{rows: make(map[rowKey]*NetRows, len(keys))}
+	set := &NetRowSet{rows: make(map[rowKey]*NetRows, len(keys)), src: n}
 	read := func(tx pgx.Tx, k rowKey) error {
 		r, err := n.readOne(ctx, tx, lists[k.id], k.d)
 		if err != nil {

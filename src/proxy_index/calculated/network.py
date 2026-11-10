@@ -7,7 +7,8 @@ uses (calculator.build()) applied to the union: metrics, targets, series, uptime
 previous period's success rate from the groups' bucket rows, with every slot rule of the
 scheduled groups (their pulse slots, batches, outages and tested countries). Browser rows stay
 out of every network-level figure and count per target only (browser.py). Tests and new IPs
-are the groups' sums; pool shares the groups' weighted by their unique IPs.
+are the groups' sums; pool shares the groups' weighted by their unique IPs. The browser target
+scores and browser_overall rank the networks of one kind (target_scores.score_networks()).
 
 attach() completes the windows in store.write(), once the network lists are written:
 
@@ -22,8 +23,9 @@ attach() completes the windows in store.write(), once the network lists are writ
   per released hour in the 24h window and per UTC day in the 7d and 30d windows (their charts
   show daily points, and an hourly series would grow the head by about 2.4 kB a day);
 - the ownership overlap, counted in the database over the same window-bounded IPs (7d and 30d
-  once a UTC day, carried from the previous head in between), and the balanced score, rank
-  and readiness, against the networks of the same kind and window (network_scores.py).
+  once a UTC day, carried from the previous head of the same implementation in between while it
+  has pairs), and the balanced score, rank and readiness, against the networks of the same kind
+  and window (network_scores.py).
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import timedelta
 
-from . import browser, fleetsql, hourly, netlists, network_scores, parts
+from . import browser, fleetsql, hourly, netlists, network_scores, parts, target_scores
 from .aggregate import (
     KEYS,
     NOT_LATENCY_TARGET,
@@ -106,6 +108,7 @@ def summaries(fleet_groups, bucket_groups, by_product, flagged, as_of, config):
         cfg = configs[union.lead["id"]]  # its required targets and target groups
         entry["windows"] = {label: union.window(ms, label, cfg) for label, ms in labels.items()}
         networks.append(entry)
+    target_scores.score_networks(networks, config)
     return networks
 
 
@@ -291,7 +294,7 @@ def attach(conn, payload, written):
                 buckets[entry["id"], label, part] = (since, end, width)
     counted = hourly.bucket_ips(conn, runs, buckets)
     previous = parts.previous(conn, groups=False)
-    shared = network_scores.overlap(conn, payload["networks"], previous, payload["as_of"])
+    shared = network_scores.overlap(conn, payload, previous)
     estimated = defaultdict(list)
     for group in payload["products"]:
         for label, w in group["windows"].items():

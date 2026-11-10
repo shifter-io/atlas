@@ -35,8 +35,10 @@ var weekRanges = []string{"24h", "7d", "30d"}
 // docs/api-web-map.md section 10, after section 11, with every registered
 // answer's samples) against testscale.Week as a v4 build, over loopback with
 // keep-alive and brotli, within bench.CIGuard: first the cold ones, each asked
-// once (a City x ASN list page's first render, its rows not read yet, and
-// searches), then every page's requests, each repeated. The p99 of one page's
+// once (a q= search of every network's City x ASN lists, the first requests
+// after the build, whose rows the rebuild put in the row cache; a City x ASN
+// list page's first render; and searches), then every page's requests, each
+// repeated. The p99 of one page's
 // requests add up to at most the guard's page budget. A measurement over the
 // guard is taken once more (meter.within); one over the staging budget only
 // is a STAGING-BUDGET warning.
@@ -47,12 +49,16 @@ func TestPageLatency(t *testing.T) {
 	if testing.Short() || raceEnabled {
 		t.Skip("measures latency")
 	}
-	s := weekServer(t, db)
+	s := weekServer(t, db, testscale.Week)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 	m := &meter{t: t, base: ts.URL, client: &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4, DisableCompression: true}}}
 	guard, staging := bench.CIGuard(), bench.StagingBudgets()
 	sh, slugs := weekShape(t, s)
+	search := limits{ms(guard.Classes[bench.ClassListSearch].ColdMs), ms(staging.Classes[bench.ClassListSearch].ColdMs)}
+	m.within(bench.ClassListSearch+" first after the build", search, func(round int) timing {
+		return m.distinct(bench.ClassListSearch+" first after the build", []string{}, firstSearches(slugs, round))
+	})
 	for _, class := range []string{bench.ClassList, bench.ClassListSearch, bench.ClassSearch} {
 		l := limits{ms(guard.Classes[class].ColdMs), ms(staging.Classes[class].ColdMs)}
 		m.within(class+" cold", l, func(round int) timing {
@@ -96,13 +102,12 @@ func weekShape(t *testing.T, s *server.Server) (bench.Shape, []string) {
 
 func ms(v float64) time.Duration { return time.Duration(v * float64(time.Millisecond)) }
 
-// weekServer publishes testscale.Week as a v4 build with its browser targets
-// and test events, and returns a server of its build, which must take at most
-// rebuildLimit.
-func weekServer(t *testing.T, db *testdb.DB) *server.Server {
+// weekServer publishes week (testscale.Week's shape) as a v4 build with its
+// browser targets and test events, and returns a server of its build, which
+// must take at most rebuildLimit.
+func weekServer(t *testing.T, db *testdb.DB, week testscale.WeekShape) *server.Server {
 	ctx := context.Background()
 	start := time.Now()
-	week := testscale.Week
 	payload, err := week.Payload()
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +172,18 @@ func listSearches(slugs []string, from, n int) []string {
 	out := []string{}
 	for i := from; i < from+n; i++ {
 		out = append(out, fmt.Sprintf("/v1/networks/%s/coverage?range=%s&q=city+%d", slugs[i%len(slugs)], weekRanges[i%3], 100+i))
+	}
+	return out
+}
+
+// firstSearches is a q= search of each network's City x ASN list in every
+// range, round's own words: in round 0, the first request of each list.
+func firstSearches(slugs []string, round int) []string {
+	out := []string{}
+	for _, slug := range slugs {
+		for _, r := range weekRanges {
+			out = append(out, fmt.Sprintf("/v1/networks/%s/coverage?range=%s&q=city+%d", slug, r, 10+round))
+		}
 	}
 	return out
 }

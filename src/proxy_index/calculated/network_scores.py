@@ -25,8 +25,11 @@ networks of its kind. The IPs are the window's observations of the network's run
 freshly counted ips_ours equals pool.unique_ips. No IP set is held in Python. Each overlap's
 "as_of" is the cutoff it was counted at. The 24h overlap is counted every build; the 7d and 30d
 overlaps once a UTC day (owner decision, NET-SUM-2 question 1): a build whose previous head has
-them for the same networks, counted the same UTC day, carries them (carried()), so they can be
-up to a day old and their ips_ours is the pool of their own "as_of".
+them for the same networks, counted the same UTC day by the same implementation and with at least
+one pair, carries them (carried()), so they can be up to a day old and their ips_ours is the pool
+of their own "as_of". A previous head of another implementation (a deploy or a code change), or
+one whose window has no pair, is counted again (OVERLAP-7D-1): a count with no pair, such as one
+made before the window's IPs were stored, is never carried for the rest of the day.
 """
 
 from __future__ import annotations
@@ -58,12 +61,16 @@ SELECT a,b,count(*) AS ips,count(*) FILTER (WHERE cardinality(slots)>1) AS share
 FROM ip CROSS JOIN LATERAL unnest(slots) a CROSS JOIN LATERAL unnest(slots) b GROUP BY 1,2"""
 
 
-def overlap(conn, networks, previous, as_of):
-    """{(network id, window label): overlap} of networks still holding their "_runs"
+def overlap(conn, payload, previous):
+    """{(network id, window label): overlap} of payload's networks still holding their "_runs"
     (network.window()): exclusive and shared share of the network's IPs against the union of
     the other networks of its kind with IPs (compared_products), one peer row per such network
     sharing at least one IP, and "as_of" (when counted). A network without IPs has null shares
-    and no peers. previous is parts.previous(): a daily window it carries is not counted."""
+    and no peers. previous is parts.previous(): a daily window it carries is not counted, and
+    none is carried from a head of another implementation than payload's."""
+    networks, as_of = payload["networks"], payload["as_of"]
+    if previous and previous.get("implementation_id") != payload["implementation_id"]:
+        previous = None
     labels = defaultdict(list)
     for entry in networks:
         for label, w in entry["windows"].items():
@@ -103,12 +110,14 @@ def _counted(conn, members):
 
 def carried(networks, previous, as_of, label):
     """{network id: overlap} of a daily window from the previous head (parts.previous()) when
-    it has one for exactly these networks, counted the same UTC day as as_of and not after it;
-    else None (the window is counted)."""
+    it has one for exactly these networks, counted the same UTC day as as_of and not after it,
+    with at least one pair; else None (the window is counted)."""
     if label not in DAILY or not previous:
         return None
     old = {n["id"]: n["windows"].get(label, {}).get("overlap") for n in previous["networks"]}
     if set(old) != {n["id"] for n in networks}:
+        return None
+    if not any(found and found.get("peers") for found in old.values()):
         return None
     day = as_of.astimezone(UTC).date()
     for found in old.values():

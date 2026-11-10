@@ -88,7 +88,7 @@ type NetTotals struct {
 
 // NetLists is the network lists the API holds between loads, by list id,
 // the shared names of the rows read so far and the rows readers asked for
-// last (at most rowCacheBytes). Names are kept for the process's life, as
+// last (at most DefaultRowCacheBytes unless the Lists set it). Names are kept for the process's life, as
 // Lists keeps them: they are bounded by place_names and asn_label_names.
 type NetLists struct {
 	mu   sync.Mutex
@@ -107,7 +107,7 @@ type NetLists struct {
 
 // NewNetLists is an empty cache that reads rows through db.
 func NewNetLists(db TxBeginner) *NetLists {
-	n := &NetLists{db: db, cache: rowCache{limit: rowCacheBytes}}
+	n := &NetLists{db: db, cache: rowCache{limit: DefaultRowCacheBytes}}
 	n.reset()
 	return n
 }

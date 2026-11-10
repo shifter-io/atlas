@@ -31,3 +31,6 @@ func FetchK2(ctx context.Context, c *Lists, tx pgx.Tx, ids []int64) (map[int64]*
 func (n *NetLists) ReadAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetList, minRows int) (*NetRowSet, error) {
 	return n.readAll(ctx, tx, lists, minRows)
 }
+
+// SetRowCache sets n's row cache limit, in bytes.
+func (n *NetLists) SetRowCache(bytes int) { n.cache.limit = bytes }
