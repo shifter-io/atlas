@@ -16,7 +16,9 @@
 # background, while the Go tests run every package at once (-p = the CPU count) against a throwaway
 # PostgreSQL 17 (the framework CI's pinned build, kept in the server cache) loaded with the
 # framework schema from the same checkout (src/proxy_index). The slowest tests run in
-# their own process beside them, so the rest of their package does not wait for them. When
+# their own process beside them, so the rest of their package does not wait for them: one
+# of them is the siteapi's peak memory on a production week (TestPeakRSS, SITEAPI-MEM-1,
+# at most 3 GB; its peaks in the job summary), on a PostgreSQL cluster of its own. When
 # all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
 # within 2 ms) runs alone, so no other test shares the CPUs while it measures, then the
 # page latency test (TestPageLatency, PAGE-LATENCY-1: every request of every Proxy Index
@@ -65,6 +67,9 @@ env:
   PG_SHA256: aa8e2e97574bd789119ac01f1dddcd7a038c84e5c308d7b753018618258f0fbd
   # The slowest tests, in their own process beside the others.
   SLOW_TEST: ^TestEveryV4Answer$
+  # The siteapi's peak memory on a production week (SITEAPI-MEM-1), in its own process too:
+  # its builds run in a child process whose RSS it measures.
+  PEAK_RSS_TEST: ^TestPeakRSS$
   # The latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
   # Every page's requests on a production week, alone after that (PAGE-LATENCY-1), and the
@@ -182,21 +187,29 @@ jobs:
             rm -rf "$tmp"
           fi
           [ -e "$dir/.complete" ] || { echo "PostgreSQL $PG_VERSION is not installed in $dir"; exit 1; }
-          # A throwaway cluster and superuser password, for this job only.
-          data=$RUNNER_TEMP/pg-data
+          # Throwaway clusters and a superuser password, for this job only: pg on 5433 for
+          # the tests, pg-peak on 5434 for TestPeakRSS alone. Its week publishes hold long
+          # transactions, and running transactions are the cluster's: on the tests' cluster
+          # they moved the events cursor bound that TestEventAnswersAfterAnEventsOnlyRefresh
+          # compares (EV-CURSOR-SETTLE-1).
           pw=$(openssl rand -hex 24)
           echo "::add-mask::$pw"
-          (umask 077; printf '%s\n' "$pw" > "$RUNNER_TEMP/pg-pw")
-          # As the framework CI's cluster (scripts/postgres_local.py): UTF-8, C locale, checksums.
-          "$dir/bin/initdb" -D "$data" -U postgres --pwfile="$RUNNER_TEMP/pg-pw" --auth=scram-sha-256 \
-            --encoding=UTF8 --locale=C --data-checksums >/dev/null
-          rm -f "$RUNNER_TEMP/pg-pw"
-          "$dir/bin/pg_ctl" -D "$data" -o "-p 5433 -k $RUNNER_TEMP -c listen_addresses=127.0.0.1" -l "$RUNNER_TEMP/pg.log" -w start >/dev/null
-          admin=$RUNNER_TEMP/pg-admin.toml
-          (umask 077; printf '[postgres]\nhost = "127.0.0.1"\nport = 5433\nuser = "postgres"\npassword = "%s"\ndbname = "postgres"\n' "$pw" > "$admin")
+          for c in pg:5433 pg-peak:5434; do
+            name=${c%:*} port=${c#*:}
+            (umask 077; printf '%s\n' "$pw" > "$RUNNER_TEMP/pg-pw")
+            # As the framework CI's cluster (scripts/postgres_local.py): UTF-8, C locale, checksums.
+            "$dir/bin/initdb" -D "$RUNNER_TEMP/$name-data" -U postgres --pwfile="$RUNNER_TEMP/pg-pw" --auth=scram-sha-256 \
+              --encoding=UTF8 --locale=C --data-checksums >/dev/null
+            rm -f "$RUNNER_TEMP/pg-pw"
+            "$dir/bin/pg_ctl" -D "$RUNNER_TEMP/$name-data" -o "-p $port -k $RUNNER_TEMP -c listen_addresses=127.0.0.1" \
+              -l "$RUNNER_TEMP/$name.log" -w start >/dev/null
+            (umask 077; printf '[postgres]\nhost = "127.0.0.1"\nport = %s\nuser = "postgres"\npassword = "%s"\ndbname = "postgres"\n' \
+              "$port" "$pw" > "$RUNNER_TEMP/$name-admin.toml")
+          done
           {
             echo "PG_BIN=$dir/bin"
-            echo "PG_TEST_ADMIN_FILE=$admin"
+            echo "PG_TEST_ADMIN_FILE=$RUNNER_TEMP/pg-admin.toml"
+            echo "PG_PEAK_ADMIN_FILE=$RUNNER_TEMP/pg-peak-admin.toml"
             echo "PG_TEST_REQUIRED=1"
           } >> "$GITHUB_ENV"
       - name: Checks in the background, tests in parallel (database)
@@ -231,8 +244,11 @@ jobs:
           }
           background gofmt gofmt_check
           background vet go vet ./...
+          # TestPeakRSS on its own cluster (see the PostgreSQL step).
+          peak_test() { ( export PG_TEST_ADMIN_FILE=$PG_PEAK_ADMIN_FILE; gotest peak -count=1 -v -run "$PEAK_RSS_TEST" ./internal/build/ ); }
           background slow gotest slow -count=1 -run "$SLOW_TEST" ./internal/server/
-          background tests gotest tests -count=1 -p "$(nproc)" -skip "$SLOW_TEST|$LATENCY_TEST|$PAGE_LATENCY_TEST" ./...
+          background peak peak_test
+          background tests gotest tests -count=1 -p "$(nproc)" -skip "$SLOW_TEST|$PEAK_RSS_TEST|$LATENCY_TEST|$PAGE_LATENCY_TEST" ./...
           wait
 
           failed=0
@@ -249,6 +265,8 @@ jobs:
           grep -E '^(--- |ok)' "$EV/slow.log" || true
           # Never an empty pass: the slowest test ran and passed.
           grep -qE "^--- PASS: TestEveryV4Answer " "$EV/slow.log" || { echo "TestEveryV4Answer did not pass"; failed=1; }
+          grep -E 'rss: (first build|the rebuild)' "$EV/peak.log" | sed 's/^ *rss_db_test.go:[0-9]*: //' | tee -a "$GITHUB_STEP_SUMMARY" || true
+          grep -qE "^--- PASS: TestPeakRSS " "$EV/peak.log" || { echo "TestPeakRSS did not pass"; failed=1; }
           exit "$failed"
       - name: go test, the latency test alone (database)
         if: needs.api-changes.outputs.code == 'true'
@@ -327,4 +345,5 @@ jobs:
       - name: Stop PostgreSQL
         if: always() && env.PG_BIN != ''
         working-directory: .
-        run: '"$PG_BIN/pg_ctl" -D "$RUNNER_TEMP/pg-data" stop -m fast || true'
+        run: |
+          for name in pg pg-peak; do "$PG_BIN/pg_ctl" -D "$RUNNER_TEMP/$name-data" stop -m fast || true; done

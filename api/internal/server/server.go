@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/build"
+	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"golang.org/x/sync/errgroup"
 )
 
 // Version is one immutable generation of responses.
@@ -181,6 +183,7 @@ func (s *Server) Refresh(ctx context.Context, force bool) (bool, error) {
 		return false, err
 	}
 	s.current.Store(v)
+	memtrace.Mark(ctx, "serving")
 	s.rebuilt(v)
 	return true, nil
 }
@@ -211,6 +214,7 @@ func (s *Server) rebuild(ctx context.Context, prev *Version) (*Version, error) {
 	if err != nil {
 		return nil, err
 	}
+	memtrace.Mark(ctx, "dataset file")
 	f, err := s.files.ensure(v.Result.Dataset, datasetMarker(v.Result.Fingerprint), s.opts.Now())
 	if err == nil {
 		err = setDataset(v, f)
@@ -261,11 +265,13 @@ func (s *Server) fail(err error) {
 // (warm): the serving Version is swapped only after.
 func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	t0 := time.Now()
+	memtrace.Mark(ctx, "load")
 	in, err := s.src.Load(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load: %w", err)
 	}
 	t1 := time.Now()
+	memtrace.Mark(ctx, "assemble")
 	res, err := build.Build(in)
 	if err != nil {
 		return nil, fmt.Errorf("build: %w", err)
@@ -274,12 +280,14 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 		build.FollowEvents(res, prev.Result)
 	}
 	t2 := time.Now()
+	memtrace.Mark(ctx, "render and compression")
 	v, err := renderVersion(s.nextID.Add(1), res, s.opts, prev)
 	if err != nil {
 		return nil, err
 	}
 	v.LoadTime, v.AssembleTime, v.RenderTime = t1.Sub(t0), t2.Sub(t1), time.Since(t2)
 	if in.Snapshot != nil {
+		memtrace.Mark(ctx, "row cache warm")
 		s.warmed(v.ID, in.Snapshot.NetRows.Warm())
 	}
 	return v, nil
@@ -333,27 +341,24 @@ func renderVersion(id uint64, res *build.Result, opts Options, prev *Version) (*
 		jobs = append(jobs, job{path, value, CacheData})
 	}
 	reused := reusable(prev)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	errs := make(chan error, len(jobs)+2)
-	for _, j := range jobs {
-		wg.Add(1)
-		go func(j job) {
-			defer wg.Done()
+	rendered := make([]*Rendered, len(jobs))
+	var g errgroup.Group
+	g.SetLimit(RenderWorkers())
+	for i, j := range jobs {
+		g.Go(func() error {
 			r, err := reused.render(http.StatusOK, j.value, j.cache)
 			if err != nil {
-				errs <- fmt.Errorf("render %s: %w", j.path, err)
-				return
+				return fmt.Errorf("render %s: %w", j.path, err)
 			}
-			mu.Lock()
-			v.Static[j.path] = r
-			mu.Unlock()
-		}(j)
+			rendered[i] = r
+			return nil
+		})
 	}
-	wg.Wait()
-	close(errs)
-	if err := <-errs; err != nil {
+	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+	for i, j := range jobs {
+		v.Static[j.path] = rendered[i]
 	}
 	shareIdentical(v.Static)
 	if err := registeredFit(v); err != nil {

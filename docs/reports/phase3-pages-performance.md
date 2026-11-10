@@ -10,9 +10,11 @@ The first run (main 0b0acf9) found three misses, and each was fixed and is measu
 Three findings are follow-ups, not budget rows; section 9 has them:
 
 - **#808 (URGENT SITEAPI-MEM-1): the siteapi's memory.** The staging siteapi peaked at 3.86 to
-  4.10 GB, and its first start on the fixed code was killed at 5 GB. Production allows the
-  siteapi 3 GB (`MemoryMax`), so it would not fit production's limit until #808 brings the first
-  build's peak to at most 2.5 GB. This is the follow-up that matters most for production.
+  4.10 GB, and its first start on the fixed code was killed at 5 GB. The owner now allows
+  production's siteapi 7 GB (`MemoryMax=7G`, set by #812's checklist), with a target peak of
+  at most 3 GB. #808 (PR #811) brought the peak on the staging data to 0.90 GB for the first
+  build and 1.25 GB for a rebuild with two versions in memory: a pass. The staging check on the
+  merged code (first start, a rebuild and the hourly rebuild under `MemoryMax=7G`) follows.
 - **#809 (SIM-OVERLAP-1): the 7-day overlap figures can't be judged on this data.** The generated
   week has no address shared between two networks.
 - **#810 (OVERLAP-CARRY-1): the hourly 7-day overlap recount.** Counted empty pairs are not told
@@ -1077,7 +1079,7 @@ in two requested countries counts in each country's window.
 | Full calculation (every group recounted) "after a deploy" | 11,778 s on 9cf43c2 (window 4,508 s, writes 4,627 s in 450,298 statements, other reads 2,191 s); 1,786 s on 4315df5 | 1,720 s, as-of 03:00; 39,197 statements; peak RSS 5.39 GB; 11.7 GB temp | **2,128 s** (35.5 min), as-of 05:00; all 3,866 groups and the 7d and 30d overlap counted again (#799); 39,151 statements in 3,975 s; peak RSS 5.37 GB; 28.1 GB temp | 3,000 s (it is also an hour's build) | pass |
 | Hourly incremental calculation | 5,413 s on 9cf43c2 (writes 4,041 s in 431,293 statements, other reads 1,045 s, window 164 s) | 677 s, as-of 04:00; 64 groups recounted; 12.4 GB temp | **770 s** (12.8 min), as-of 06:00, the second build on the same code: 38 of 3,866 groups recounted, the others' lists reused; 857 statements in 862 s; peak RSS 5.34 GB; 18.9 GB temp | 3,000 s | pass |
 | siteapi full rebuild | 95.4 s (load 14.9, assemble 76.2, render 3.1) | 29.1 s; 28.2 s for the hourly build | **29.2 s** (load 18.2, assemble 6.9, render 3.0), with the row-cache warm (#797); 28.2 s for the hourly build (load 17.5, assemble 6.9, render 2.6) | 60 s | pass |
-| siteapi memory | `MemoryMax` 5 GB on staging; `MemoryPeak` 4.49 GB | 3.61 and 3.95 GB | 3.86 GB at the second start, 4.10 GB after the hourly rebuild while serving; **the first start was killed at 5 GB** | production's `MemoryMax` **3 GB** (plan 2.5 GB) | **over production's limit: #808** (section 9) |
+| siteapi memory: peak against the 3 GB target, under production's 7 GB limit | `MemoryMax` 5 GB on staging; `MemoryPeak` 4.49 GB | 3.61 and 3.95 GB | 3.86 GB at the second start, 4.10 GB after the hourly rebuild while serving; **the first start was killed at 5 GB**. With #808 (PR #811, read-only on the same data): **0.90 GB** for the first build and **1.25 GB** for a rebuild that compresses every answer again with the previous version in memory (0.95 and 1.26 GB under `MemoryMax=3G`) | peak **3 GB** (production's `MemoryMax` **7 GB**) | **pass with #808** (section 9) |
 | Dataset file | 43.4 MB, about 1.1 s | 43.3 MB, about 1.1 s | 43.3 MB (gzip 6.96 MB, brotli 2.39 MB), about 1.1 s to write (the rebuild minus its load, assembly and render) | 2 s | pass |
 
 The calculation's largest statements after the deploy (final run):
@@ -1150,8 +1152,8 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 | #754 (LATENCY-GATE-1) | CI checks a 5× guard; the strict budgets are measured here | flaky `TestPageLatency` | stable |
 | #719 (DB-EXPLAIN-1) | v15 partial `test_events` indexes | notable reads 1–4 ms on staging, 47–316 ms on a synthetic year | 0.03–0.04 ms (section 2.2) |
 | #787 (CALC-POINT-IPS-1) | series point IPs hash-aggregated in batches | 38.8 GB temp in 2 statements | 6.0 GB for 9 points, 0 MB for 144 points |
-| #788 (SITEAPI-REBUILD-1) | the rebuild reads each list's rows once, in parallel | 95.4 s | 29.1 s |
-| #789 (API-LOAD-STATEMENTS-1) | list counts and snapshot head stored at write time | 514.6 ms and 269.1 ms | 0.06 ms and 0.04 ms |
+| #788 (SITEAPI-REBUILD-1) | the rebuild reads each list's rows once, in parallel | 95.4 s | 29.2 s |
+| #789 (API-LOAD-STATEMENTS-1) | list counts and snapshot head stored at write time | 514.6 ms and 269.1 ms | 0.07 ms (`load.network_counts`) and 0.06 ms (`load.snapshot`) |
 | #790 (CALC-FLEET-DISTINCT-1) | last-seen counts in one pass, DISTINCT counts hash-aggregated | `LAST_SEEN` 87 s, fleet 60 s (10.5 GB temp), network scores 59 s (4.1 GB temp) | `COUNTS` 71 s in 26 calls; the whole calculation's temp 11.7 GB against 57.4 GB |
 | #793 (SIM-MODEL-3) | the simulator's per-IP rows, buckets, DB-IP cadence and browser bytes | section 6.1 | merged (PR #796) after this run; for a future load |
 
@@ -1180,8 +1182,11 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
   - **Production's limit:** production allows the siteapi 3 GB (`MemoryMax`; the plan is 2.5 GB,
     `api/internal/build/rss_db_test.go`). At production volume the siteapi is fast, but it would
     not fit that limit.
-  - **The fix:** #808 measures the first build's peak by phase and must bring it to at most
-    2.5 GB, before production runs this code.
+  - **The fix:** #808 (PR #811) measured the peak by phase: every answer was compressed at
+    once, each brotli encoder holding its 4 MB window. It compresses at most 8 at a time, with
+    the window fitted to the answer: 0.90 GB for the first build and 1.25 GB for a rebuild on
+    the staging data, against 3.96 and 5.96 GB before. The owner now allows production's
+    siteapi 7 GB (`MemoryMax=7G`, #812) with a target peak of 3 GB, which this meets.
 - **#809 (SIM-OVERLAP-1, not blocking): the 7-day overlap figures can't be judged on this data.**
   - **Why:** the generator gives every network its own addresses, so within the generated week
     no address is shared between two networks. 0 addresses seen in the last 7 days belong to
