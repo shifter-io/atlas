@@ -20,6 +20,8 @@ results/
 artifacts/
 .DS_Store
 reports/
+# docs/reports/ holds committed milestone reports, not run output
+!docs/reports/
 onboarding-networks/
 # the API (api/): local binary and runtime state; build the binary from source
 # (`go build` in api/), never commit or reuse a prebuilt one
