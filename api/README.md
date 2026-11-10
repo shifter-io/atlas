@@ -401,8 +401,7 @@ editorial ones.
   `row cache warmed` with the dimensions, rows and bytes. Lists the limit leaves out
   are logged as a warning (`row cache too small`); their searches read from the
   database as before. The cache takes the load's rows, no copy, and holds at most its
-  limit (`TestRowCacheWarmsTheLargestFirstWithinItsLimit`). The load itself leaves
-  the cache to the serving version. The 7-day staging data is 4.85M rows, 116 MB:
+  limit (`TestRowCacheWarmsTheLargestFirstWithinItsLimit`). The 7-day staging data is 4.85M rows, 116 MB:
   the default 256 MiB holds the new build's rows beside the serving one's
   (`TestFirstCoverageSearchAfterABuild`).
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in

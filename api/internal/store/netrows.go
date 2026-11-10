@@ -189,8 +189,7 @@ func (n *NetLists) readParallel(ctx context.Context, keys []rowKey, read func(pg
 }
 
 // readOne reads dimension d of l in tx: its rows outside the lock, so that
-// several transactions read at once, then their names, as rows does. It
-// leaves the row cache to the serving build until Warm.
+// several transactions read at once, then their names, as rows does.
 func (n *NetLists) readOne(ctx context.Context, tx pgx.Tx, l *NetList, d int) (*NetRows, error) {
 	scanned := make([]scannedRow, 0, l.count[d])
 	err := scanList(ctx, tx, true, 0, []int64{l.id}, netCodes[d:d+1], func(s *scannedRow) error {
@@ -208,6 +207,7 @@ func (n *NetLists) readOne(ctx context.Context, tx pgx.Tx, l *NetList, d int) (*
 		n.reset()
 		return nil, fmt.Errorf("network list %d: %w", l.id, err)
 	}
+	n.cache.add(rowKey{l.id, d}, r)
 	return r, nil
 }
 
