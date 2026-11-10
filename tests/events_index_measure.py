@@ -126,7 +126,7 @@ def setup(database: Path, args) -> int:
         conn.execute("VACUUM ANALYZE test_events")
         rows = conn.execute("SELECT count(*) FROM test_events").fetchone()[0]
         size = conn.execute(
-            "SELECT sum(pg_total_relation_size(inhrelid)) FROM pg_inherits "
+            "SELECT sum(pg_total_relation_size(inhrelid))::bigint FROM pg_inherits "
             "WHERE inhparent='test_events'::regclass"
         ).fetchone()[0]
     record = {"step": "year", "events": rows, "mb": round(size / 1024**2, 1)}
@@ -191,7 +191,7 @@ def build(database: Path) -> None:
         conn.autocommit = True
         conn.execute("ANALYZE test_events")
         size = conn.execute(
-            "SELECT sum(pg_relation_size(i.inhrelid)) FROM pg_inherits i "
+            "SELECT sum(pg_relation_size(i.inhrelid))::bigint FROM pg_inherits i "
             "WHERE i.inhparent::regclass::text = ANY(%s)",
             (list(INDEXES),),
         ).fetchone()[0]
