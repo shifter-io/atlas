@@ -80,9 +80,9 @@ This part is written for someone who has never seen the project. A few words fir
 ### What works and is fast
 
 Almost everything is fast, measured on staging with a full-size week. When Ana opens the
-Oxylabs page, almost every one of its 40 answers comes back in under 1 ms (the slowest in 6 ms),
-and the 40 together add up to about 25 ms. Every other page (home, targets, networks, compare,
-overlap, true cost, live tape) gets all its answers in under 12 ms in total. Every question the API asks the database finishes within 36 ms, against a
+Oxylabs page, each of its 40 answers takes the API under 1 ms to send,
+and the 40 together add up to about 7 ms (the limit is 10). Every other page (home, targets, networks, compare,
+overlap, true cost, live tape) gets all its answers in under 5 ms in total. Every question the API asks the database finishes within 36 ms, against a
 limit of 100 ms. When new numbers arrive, the API is ready with them in 29 seconds (the limit is
 60; it took 95 before this phase's fixes). Turning a week of raw results into website numbers
 takes about 29 minutes after a code change, and about 11 minutes each hour after that (the
@@ -237,7 +237,8 @@ headroom as data grows. Option 2 keeps the server untouched but leaves the test 
 ### 2.1 Requests
 
 `siteapi bench` on the staging host against the staging siteapi over loopback, on build 4
-(15 s after it was served):
+(15 s after it was served), with 8 workers (the bench's default); section 2.1's
+server-time verdict comes from a second run at concurrency 1:
 - every distinct request once cold (the first request since the build appeared), once without
   compression for its size, then 200 times warm over 8 workers with brotli;
 - 327 requests on 27 pages, grouped below as 55 route and query shapes;
@@ -331,12 +332,35 @@ limit plus 20 ms of network time per request.
   target is a cold `q=` within 50 ms with the rebuild still at most 60 s. This row is measured
   again after it merges.
 
-Because the bench runs on the same host as the siteapi, these times are close to server time:
-- 325 of 327 requests have a p99 within the strict server budget without the 20 ms allowance
-  (2 ms for an answer or list page, 5 ms for search, 50 ms for list search);
-- the two over it are `/v1/networks/webshare/pricing-history` at 6.0 ms and
-  `/v1/networks/iproyal/coverage?range=30d` (warm) at 4.4 ms. Both are within their bench
-  budget of 22 ms.
+**Server time, the verdict's measurement** (the architect's decision): the table's strict
+budgets are server time.
+- **The 8-worker run cannot show server time.** It gives client time with 8 workers contending
+  on one host, which is only an upper bound on server time.
+- **Its +20 ms per request is unused over loopback.** It is meant for a real network, so
+  passing against it would raise the budget in effect.
+- **So the whole bench ran again at concurrency 1.** Over loopback, warm, 200 repeats per
+  request, on build 5 (the hourly build, 04:21 UTC, Shifter's catalog loaded): client time
+  is then server time plus about 0.1 ms.
+- **The verdict uses the concurrency-1 run** against the strict server budgets: p99 at most
+  2 ms for an answer, events or a cached list page; 5 ms for search; 50 ms for a list search.
+  The cold first render is judged as above.
+
+| Class | Requests | 8 workers: max p99 ms | Over strict | 1 worker (server time): max p50 ms | 1 worker: max p99 ms | Over strict |
+|---|--:|--:|--:|--:|--:|--:|
+| `answer` | 216 | 4.02 (`/v1/networks/webshare/pricing-history`) | 1 | 0.11 | 0.87 (`/v1/meta`) | 0 |
+| `events` | 2 | 0.59 | 0 | 0.09 | 0.22 | 0 |
+| `search` | 1 | 0.44 | 0 | 0.08 | 0.11 | 0 |
+| `list` (cached) | 54 | 2.44 (`/v1/networks/iproyal/coverage?range=30d`) | 1 | 0.09 | 0.68 | 0 |
+| `list-search` (cached) | 54 | 0.74 | 0 | 0.09 | 0.20 | 0 |
+
+**Result on server time: 327 of 327 requests are within their strict p99 budget.**
+- **The two 8-worker outliers:** at concurrency 1, `/v1/networks/webshare/pricing-history`
+  takes 0.11 ms at p99 (4.02 ms with 8 workers) and `/v1/networks/iproyal/coverage?range=30d`
+  0.15 ms (2.44 ms).
+- **Why they were slow with 8 workers:** contention, not cutting. `pricing-history` is cut
+  from the build's held data on its first request, then kept in the version's page cache, an
+  LRU shared with the list pages.
+- **The cold coverage search stays the one request miss:** 919 ms at most in this run too.
 
 ### 2.2 Every SQL statement (`siteapi explain`)
 
@@ -410,8 +434,10 @@ Because the bench runs on the same host as the siteapi, these times are close to
 Each page's requests are the bench's page specs (`bench.Specs`, the "After section 11" column of
 `docs/api-web-map.md` section 10). The network page is one page per network.
 - **"Sum of p99"** adds the p99 of every request the page makes.
-- **The budget** is 10 ms plus 20 ms of network time per request.
 - **"Sum of cold"** is the first view right after a new build.
+- **The first table** is the 8-worker run against the bench's own budget (10 ms plus 20 ms of
+  network time per request). It is shown for comparison only.
+- **The verdict** is the server-time table after it.
 
 | Page | Requests | Sum of p99 ms | Budget ms | Sum of cold ms | Pass |
 |---|--:|--:|--:|--:|---|
@@ -443,12 +469,22 @@ Each page's requests are the bench's page specs (`bench.Specs`, the "After secti
 | freshness | 1 | 0.48 | 30 | 0.10 | pass |
 | search palette | 2 | 0.89 | 50 | 0.56 | pass |
 
-**Result: 27 of 27 pages are within their budget.**
-- **Network pages:** the largest page, 40 requests, sums to 22 to 26 ms at p99 over loopback.
-  That is within 810 ms, but above the 10 ms server-time sum, because the bench's time
-  includes the client's 8 workers. The siteapi does not report its own time per request.
-- **Their first view:** right after a new build it sums to 0.4 to 2.1 s on 16 networks,
-  almost all of it the coverage search of section 2.1.
+**Server time, the verdict** (concurrency 1, build 5, the same requests): each page's p99 sum
+against the strict 10 ms.
+
+| Page | 8 workers: sum of p99 ms | 1 worker (server time): sum of p99 ms | Budget ms | Pass |
+|---|--:|--:|--:|---|
+| a network page (18 pages, 40 requests each) | 22.17 to 25.98 | 6.37 to 7.43 | 10 | pass |
+| every other page (9 pages) | at most 11.23 (`/proxy-index/compare`) | at most 4.23 | 10 | pass |
+
+**Result on server time: 27 of 27 pages pass.**
+- **The largest network page:** oxylabs' 40 requests sum to 6.54 ms, and byteful's, a small
+  network, to 6.82 ms.
+- **The largest single requests:** `/v1/rankings?range=7d` at 0.73 ms, then `/v1/rankings?range=30d`
+  and `/v1/targets?range=30d` at about 0.25 ms. Every other request is under 0.25 ms.
+- **The first view after a new build** is not part of the page budget. On 16 networks it sums to
+  0.4 to 2.1 s, almost all of it the coverage search of section 2.1 (#797).
+
 
 ## 4. Every gap of the map
 
