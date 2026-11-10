@@ -30,6 +30,7 @@ from .inputs import (
 from .parallel_reads import Prefetcher, temp_written
 from .parts import previous as previous_payload
 from .parts import read as stored_payload
+from .parts import write_api_head
 from .policy import (
     browser_difficulty,
     effective,
@@ -176,6 +177,7 @@ def calculate(
                 (int(payload["snapshot_id"]),),
             )
             netlists.restore(conn)  # a retained build published again (store.publish())
+            write_api_head(conn)  # what the API reads of its head
             conn.execute(
                 "UPDATE calculation_builds SET published=true WHERE build_id=%s",
                 (int(payload["snapshot_id"]),),

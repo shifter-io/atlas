@@ -104,9 +104,9 @@ async def test_v12_layer_drops_the_list_rows_key_and_keeps_every_row(
     result = migrate(database)
     assert (result["from_calculated_schema_version"], result["calculated_schema_version"]) == (
         12,
-        13,
+        14,
     )
-    assert result["verified"] == list(store.V12_CHECKS)
+    assert result["verified"] == [*store.V12_CHECKS, *store.V13_CHECKS]
     with connect(database) as conn:
         assert conn.execute(FOREIGN_KEY).fetchone() == (0,)
         assert conn.execute(rows).fetchall() == before

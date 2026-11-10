@@ -458,6 +458,7 @@ def publish(database, snapshot):
             (int(snapshot),),
         )
         netlists.restore(conn)  # an older retained build made current gets its network lists
+        parts.write_api_head(conn)  # what the API reads of its head
         conn.execute(
             "UPDATE calculation_builds SET published=true WHERE build_id=%s", (int(snapshot),)
         )

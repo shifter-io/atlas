@@ -17,6 +17,36 @@ const (
 	ListFill    = "'test','{}','{}',0"
 )
 
+// countRowsSQL sets each list's entries to its rows' count per breakdown name,
+// as the framework writes them with the rows (the API reads a network list's
+// counts from them): the lists written with ListFill's '{}', or every list
+// when $1.
+const countRowsSQL = `UPDATE calculated_lists l SET entries = (SELECT jsonb_build_object(
+ 'country', count(*) FILTER (WHERE r.dimension = 'c'), 'region', count(*) FILTER (WHERE r.dimension = 'r'),
+ 'city', count(*) FILTER (WHERE r.dimension = 'g'), 'asn', count(*) FILTER (WHERE r.dimension = 'a'),
+ 'country_asn', count(*) FILTER (WHERE r.dimension = 'x'), 'city_asn', count(*) FILTER (WHERE r.dimension = 'y'))
+ FROM calculated_list_rows r WHERE r.list_id = l.list_id) WHERE $1 OR l.entries = '{}'`
+
+// CountListRows sets every list's entries to its rows' count per breakdown
+// name, for a test that changes a list's rows after writing them.
+func CountListRows(t testing.TB, c *pgx.Conn) {
+	t.Helper()
+	if err := countRows(context.Background(), c, true); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// countRows runs countRowsSQL, when the database has lists (not a calculated
+// v8 one, CalculatedV8).
+func countRows(ctx context.Context, c *pgx.Conn, all bool) error {
+	var lists bool
+	err := c.QueryRow(ctx, "SELECT to_regclass('calculated_lists') IS NOT NULL").Scan(&lists)
+	if err == nil && lists {
+		_, err = c.Exec(ctx, countRowsSQL, all)
+	}
+	return err
+}
+
 // Product registers provider and product name as the framework does (the
 // same rows Publish writes) and returns the product id. A list references its
 // product, so a list written before its snapshot is published needs this.

@@ -168,8 +168,8 @@ def compacted(start, layered, upgraded):
     columns, the v8 names, and calculated v6's ASN names and renumbered breakdown places.
     v5 → v6 to v14 → v15 (but v8 → v9) and calculated v2 → v3 only add tables (v12 → v13 and
     v13 → v14 fill their new one), functions, a trigger, nullable or constant-default columns
-    and indexes (and swap a check constraint or index), and calculated v12 → v13 drops a
-    foreign key: no rewrite.
+    and indexes (and swap a check constraint or index), calculated v12 → v13 drops a foreign
+    key and v13 → v14 adds a nullable column: no rewrite.
     """
     tables = ["enrichment_locations", "enrichment_networks"] if start < 9 else []
     if start == 4:
