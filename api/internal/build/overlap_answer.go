@@ -51,6 +51,8 @@ type OverlapNetwork struct {
 	LikelyUpstream *OverlapUpstream `json:"likelyUpstream"`
 	Peers          []OverlapPeer    `json:"peers"`
 	NAList
+	// ran: the window holds a run of the network (its nulls' reason).
+	ran bool
 }
 
 // Pool bases: where a network's poolIps comes from.
@@ -184,7 +186,7 @@ func share(part, whole Num) Num {
 // overlapNetwork is e's row from its window and its pairs (nil: no pair).
 func overlapNetwork(e *entry, w snap.Window, np *networkPairs) OverlapNetwork {
 	n := OverlapNetwork{Slug: e.P.Slug, Name: e.P.Name, ExclusiveShare: w.Overlap.ExclusiveShare,
-		SharedShare: w.Overlap.SharedShare, Peers: []OverlapPeer{}, PoolIps: nan}
+		SharedShare: w.Overlap.SharedShare, Peers: []OverlapPeer{}, PoolIps: nan, ran: ranIn(w)}
 	switch {
 	case np != nil && np.ours.OK():
 		n.PoolIps, n.PoolBasis = np.ours, model.S(PoolBasisOverlap)

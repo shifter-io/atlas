@@ -36,6 +36,14 @@ func TestEveryNAReasonCode(t *testing.T) {
 		{all, "blacklistHitRate", NANotMeasured},
 		{naFacts{measured: true}, "successRate", NANoRun},
 		{naFacts{measured: true}, "uptimePct", NANoRun},
+		// No run in the window comes before the cadence, evidence and
+		// calculator reasons (NO-RUN-WINDOW-1), not before the catalog's.
+		{naFacts{measured: true, priced: true}, "latencyP50", NANoRun},
+		{naFacts{measured: true, priced: true}, "uniqueIps", NANoRun},
+		{naFacts{measured: true, priced: true}, "downtimeMinutes", NANoRun},
+		{naFacts{measured: true, priced: true}, "captchaRate", NANoRun},
+		{naFacts{measured: true, priced: true}, "costPer1kSuccess", NANoRun},
+		{naFacts{measured: true}, "listRate", NACatalog},
 		{all, "uptimePct", NANoEvidence},
 		{all, "ranks.uptimePct.rank", NANoEvidence},
 		{all, "downtimeMinutes", NANoEvidence},
@@ -75,21 +83,24 @@ func TestAnNAListKeepsItsCommonReasonOnce(t *testing.T) {
 	}
 }
 
-// Overlap pairs are computed for 7d and 30d only: a 24h gap is
-// not_computed_for_window, another window's insufficient_data.
-func TestOverlapNAIn24hIsNotComputedForTheWindow(t *testing.T) {
+// Overlap pairs are computed in every range, 24h too: a null of a network
+// with a run is insufficient_data, of one with no run in the range
+// no_run_in_window, the market's insufficient_data (NO-RUN-WINDOW-1).
+func TestOverlapNAIsNoRunOnlyWithoutARun(t *testing.T) {
 	t.Parallel()
-	for rangeID, want := range map[string]string{"24h": NANotComputed, "7d": NAInsufficient} {
-		a := &OverlapAnswer{Range: rangeID, Networks: []OverlapNetwork{{Slug: "a", PoolIps: 5, ExclusiveShare: nan, SharedShare: nan,
-			ExclusiveIps: nan, Peers: []OverlapPeer{}}}, Market: OverlapMarket{SumOfPools: nan, SharedIps: nan, DistinctIps: nan,
-			DuplicatedShare: nan, LikelyResellers: []string{}}}
-		if err := a.listNA(); err != nil {
-			t.Fatal(err)
-		}
-		n := a.Networks[0]
-		if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveShare", "label", "peers", "poolBasis", "sharedShare"}) ||
-			n.ReasonOf("peers") != want || a.ReasonOf("market.distinctIps") != want {
-			t.Errorf("%s: na %v reason %s, market na %v", rangeID, n.NA, n.ReasonOf("peers"), a.NA)
+	for _, rangeID := range []string{"24h", "7d"} {
+		for ran, want := range map[bool]string{true: NAInsufficient, false: NANoRun} {
+			a := &OverlapAnswer{Range: rangeID, Networks: []OverlapNetwork{{Slug: "a", PoolIps: 5, ExclusiveShare: nan, SharedShare: nan,
+				ExclusiveIps: nan, Peers: []OverlapPeer{}, ran: ran}}, Market: OverlapMarket{SumOfPools: nan, SharedIps: nan, DistinctIps: nan,
+				DuplicatedShare: nan, LikelyResellers: []string{}}}
+			if err := a.listNA(); err != nil {
+				t.Fatal(err)
+			}
+			n := a.Networks[0]
+			if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveShare", "label", "peers", "poolBasis", "sharedShare"}) ||
+				n.ReasonOf("peers") != want || n.ReasonOf("label") != want || a.ReasonOf("market.distinctIps") != NAInsufficient {
+				t.Errorf("%s ran %v: na %v reason %s, market na %v", rangeID, ran, n.NA, n.ReasonOf("peers"), a.NA)
+			}
 		}
 	}
 }
@@ -150,7 +161,7 @@ func TestEveryPhase3AnswerListsItsNulls(t *testing.T) {
 		{&pg.Registered["/v1/home/24h"].(*HomeAnswer).NAList, "market.cheapest", NACatalog},
 		{&pg.Registered["/v1/targets/residential/24h"].(*TargetsAnswer).NAList, "targets[].difficulty", NACatalog},
 		{&pg.Registered["/v1/targets/residential/24h"].(*TargetsAnswer).NAList, "networks[].cells.amazon_pdp.costPer1kSuccess", NACatalog},
-		{&pg.Registered["/v1/overlap/residential/24h"].(*OverlapAnswer).Networks[0].NAList, "peers", NANotComputed},
+		{&pg.Registered["/v1/overlap/residential/24h"].(*OverlapAnswer).Networks[0].NAList, "peers", NAInsufficient},
 		{&meta.NAList, "profiles", NACatalog},
 	}
 	for _, r := range reasons {
