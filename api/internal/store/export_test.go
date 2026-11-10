@@ -26,3 +26,8 @@ func FetchK2(ctx context.Context, c *Lists, tx pgx.Tx, ids []int64) (map[int64]*
 	}
 	return c.fetch(ctx, tx, true, 0, ids, withCityAsn)
 }
+
+// ReadAll exposes readAll to the external tests.
+func (n *NetLists) ReadAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetList, minRows int) (*NetRowSet, error) {
+	return n.readAll(ctx, tx, lists, minRows)
+}

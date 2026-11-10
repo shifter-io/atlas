@@ -74,7 +74,7 @@ func mergeSources(ctx context.Context, srcs []placeSource, dimension, cc string,
 	var out []PlaceRow
 	merged := map[string]*PlaceRow{}
 	for i, s := range srcs {
-		rows, err := s.list.Rows(ctx, dimension)
+		rows, err := store.RowsOf(ctx, s.list, dimension)
 		if err != nil {
 			return nil, err
 		}
@@ -183,4 +183,14 @@ func (c *countryLists) indexes(into map[listKey]*placeIndex) {
 		into[k] = &placeIndex{srcs: c.srcs[placeList{k.rangeID, k.dimension}], dimension: k.dimension, cc: k.scope[len("country/"):],
 			tagged: true, total: c.count[k], first: firstPage(rows)}
 	}
+}
+
+// netRowsCtx is the context a build reads row's network lists with: their
+// rows as the load read them (store.SnapshotRow.NetRows), so the build reads
+// none again.
+func netRowsCtx(row *store.SnapshotRow) context.Context {
+	if row == nil {
+		return context.Background()
+	}
+	return store.WithNetRows(context.Background(), row.NetRows)
 }

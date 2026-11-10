@@ -205,30 +205,3 @@ func longPages(t *testing.T, res *build.Result) map[string][]byte {
 	out["dataset file"] = file.Bytes()
 	return out
 }
-
-// A build whose network list lost its rows after the load (contract K2
-// deleted it) fails, naming the list, instead of serving lists without them.
-func TestABuildFailsWhenAListCannotBeRead(t *testing.T) {
-	t.Parallel()
-	db := testdb.New(t)
-	c := db.Conn(t)
-	defer c.Close(context.Background())
-	nc := writeNetLists(t, c)
-	v4, groups := netPayloads(t, c, nc)
-	db.PublishParts(t, v4, groups, nil)
-	ctx := context.Background()
-	pool, err := store.OpenReadOnly(ctx, db.DSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	in, err := store.LoadLists(ctx, pool, store.NewLists())
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := nc.netLists["acme"]["7d"]
-	db.Exec(t, `DELETE FROM calculated_list_rows WHERE list_id = $1 AND dimension = 'g'`, id)
-	if res, err := build.Build(in); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("network list %d: ", id)) {
-		t.Errorf("a build without list %d's city rows: %v, %v", id, res != nil, err)
-	}
-}
