@@ -192,17 +192,20 @@ def expected_rows(profile: dict, hours: list, day: int) -> dict:
     """A day's rows per ingest table. Append-only: the daily IPs x the reference's observations
     per IP, else the runs x the reference's rows per run of their kind. New-IP tables: the new
     IPs (day 1 all, later days the share not recurring) x the reference's rows per IP (1 for a
-    table it lacks)."""
-    runs, ips, new = Counter(), Counter(), Counter()
+    table it lacks); ip_enrichment all the day's IPs on a day with a new DB-IP release (the
+    ingest enriches an IP once per release), else the new ones."""
+    runs, ips, new, enriched = Counter(), Counter(), Counter(), Counter()
     for hour in hours:
         runs.update({"daily": len(hour.daily), "browser": len(hour.browser)})
         for test in hour.daily:
-            ips[test.lane.network] += test.size
-            new[test.lane.network] += test.size * (1 if day == 1 else 1 - test.lane.reuse)
+            network, fresh = test.lane.network, test.size * (1 - test.lane.reuse)
+            fresh = test.size if day == 1 else fresh
+            ips[network], new[network] = ips[network] + test.size, new[network] + fresh
+            enriched[network] += test.size if test.model.renewed(day) else fresh
     found = {}
     for name in INGEST:
         if name == "ip_observations" or name in NEW_IPS:
-            own = new if name in NEW_IPS else ips
+            own = {"ip_observations": ips, "ip_enrichment": enriched}.get(name, new)
             given = [(n, reference_ratio(profile, n, name, "ip_addresses")) for n in own]
             if name in NEW_IPS:
                 given = [(n, 1 if ratio is None else ratio) for n, ratio in given]

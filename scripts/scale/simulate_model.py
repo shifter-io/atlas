@@ -24,18 +24,18 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from functools import cached_property
-from itertools import accumulate
 from pathlib import Path
 from typing import Any
 
 import cycle_steps
 import simulate_browser
+import simulate_shape
 import synthetic
 import writer
 from replay_plan import COUNTRIES, TARGETS
 from replay_steps import ReplaySteps, ReplayWriter
 from simulate_browser import Browser, dig
-from simulate_places import Places
+from simulate_places import PHI, Places
 from synthetic import JITTER, REUSE, address, apportion, key, mix, unit
 
 from proxy_index.browser.settings import load_settings
@@ -118,6 +118,8 @@ class Model:
         self.regions = plan.regions or load_regions()
         slugs = {code: region.slug for region in self.regions.regions for code in region.countries}
         self.summaries = Summaries(seed, slugs)
+        self.buckets = {name: simulate_shape.Buckets(profile, name) for name in plan.formulas}
+        self.monthly = simulate_shape.release_day(profile)
         self.lanes: dict[tuple[str, str], Lane] = {}
         self.shapes: dict[tuple[str, str], Places] = {}
         offset = 0
@@ -148,21 +150,6 @@ class Model:
             self.shapes[network, country] = Places(country, measured, salt)
         return self.shapes[network, country]
 
-    def histogram(self, network: str) -> tuple[list[float], list[tuple[int, int]]]:
-        """(cumulative shares, (low, high) request rows) of the profile's requests per IP."""
-        seen = dig(self.profile, "networks", network, "seen_count_log2") or {"1": 1}
-        found = sorted((int(k.split("-")[0]), int(k.split("-")[-1]), n) for k, n in seen.items())
-        total = sum(n for *_, n in found)
-        cdf = [value / total for value in accumulate(n for *_, n in found)]
-        return cdf, [(low, high) for low, high, _ in found]
-
-    def error_share(self, network: str, hour: int) -> float:
-        """Errors over attempts in the network's profile hour; synthetic's share without one."""
-        hours = dig(self.profile, "networks", network).get("hours", [])
-        found = next((h for h in hours if h["hour"] == f"{hour:02d}"), {})
-        total = (found.get("successes") or 0) + (found.get("errors") or 0)
-        return (found.get("errors") or 0) / total if total else 1 / (synthetic.ERROR_SHARE + 1)
-
     def jitter(self, *parts, spread: float = JITTER) -> float:
         """A factor within 1 +- spread, fixed by the seed and the parts."""
         return 1 + spread * (2 * unit(self.seed, *parts) - 1)
@@ -181,12 +168,21 @@ class Model:
         first, size, recurring = self.window(lane, day)
         k = key(self.seed, "daily", lane.network, lane.country, day)
         started = self.plan.day_start(day) + timedelta(hours=lane.hour, minutes=5 * (1 + k % 8))
-        # 2 to 4 buckets, in turn over the lanes: a day's buckets are 3 a test on average.
-        buckets = max(1, min(2 + (lane.position + day) % 3, size))
+        # The network's buckets per run, its lanes (consecutive positions) spread over them.
+        u = (lane.position * PHI + day * ROOT2) % 1
+        buckets = max(1, min(self.buckets[lane.network].per_run(u), size))
         return Daily(self, lane, day, first, size, recurring, started, buckets)
 
+    def released(self, day: int) -> date:
+        """The date of the DB-IP release the day's tests are enriched with: one a month."""
+        return simulate_shape.release_date(self.plan.start + timedelta(days=day - 1), self.monthly)
+
     def release(self, day: int) -> str:
-        return hashlib.sha256(f"{MARKER}:{self.seed}:{day}".encode()).hexdigest()
+        return hashlib.sha256(f"{MARKER}:{self.seed}:{self.released(day)}".encode()).hexdigest()
+
+    def renewed(self, day: int) -> bool:
+        """Whether the day's release is new: every IP of the day is enriched again."""
+        return day == 1 or self.released(day) != self.released(day - 1)
 
     def bins(self, network: str, day: int) -> list[int]:
         """Latency bins around the network's median (as synthetic.Model.latency), per day."""
@@ -281,18 +277,23 @@ class Daily:
         """(IP index, window position, request rows, place) of each IP of the test."""
         lane, model = self.lane, self.model
         places = model.places(lane.network, lane.country)
-        cdf, ranges = model.histogram(lane.network)
+        cdf, ranges = simulate_shape.requests(model.profile, lane.network)
         for p in range(self.first, self.first + self.size):
-            n = lane.offset + p
-            u = (p + 7919 * self.day) * ROOT2 % 1
+            n, u = lane.offset + p, self.quantile(p)
             low, high = ranges[min(bisect.bisect_right(cdf, u), len(ranges) - 1)]
             yield n, p, low + mix(n ^ model.salt ^ self.day) % (high - low + 1), places.pick(p, n)
 
+    def quantile(self, p: int) -> float:
+        """The IP's quantile of the day: its request rows and its buckets both follow it."""
+        return (p + 7919 * self.day) * ROOT2 % 1
+
     def rows(self):
         """(IP index, place, bucket, request rows) per (5-minute bucket, IP), as ingested: an IP
-        is in one to all buckets, never in more than its request rows."""
+        is in the buckets the reference gives an IP at its quantile (more rows, more buckets),
+        never in more than its request rows."""
+        shape = self.model.buckets[self.lane.network]
         for n, p, count, place in self.ips():
-            width = min(count, 1 + mix(n ^ self.model.salt ^ (self.day << 32)) % self.buckets)
+            width = min(count, shape.per_ip(self.buckets, self.quantile(p)))
             for j, rows in enumerate(apportion(count, [1] * width)):
                 yield n, place, (p + j) % self.buckets, rows
 
@@ -308,7 +309,7 @@ class Daily:
     def errors(self) -> int:
         """Timeouts at the profile hour's error share (cycle_steps' buckets count no other)."""
         lane, model = self.lane, self.model
-        share = model.error_share(lane.network, lane.hour)
+        share = simulate_shape.error_share(model.profile, lane.network, lane.hour)
         jitter = model.jitter("errors", lane.network, lane.country, self.day)
         return round(sum(self.successes[0]) * share / (1 - share) * jitter) if share < 1 else 0
 
@@ -340,6 +341,7 @@ class Daily:
             row = ReplaySteps.ips_row(self.run_id, address(n), rows, moment)
             observed.append((row, places.enrichment(place)))
         release, meta = model.release(self.day), {"synthetic": True}
+        meta["file"] = f"dbip-full-{model.released(self.day).isoformat()}.mmdb"
         ips = cycle_steps.daily_files(directory, self.run_id, observed, release, meta)
         errors = apportion(self.errors, [1] * self.buckets)
         bins = model.bins(lane.network, self.day)
