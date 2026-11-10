@@ -113,6 +113,7 @@ type serveFlags struct {
 	common
 	listen, filesDir                 string
 	interval, dataPeriod, cacheFloor time.Duration
+	rowCacheMiB                      int
 }
 
 func parseServe(args []string) serveFlags {
@@ -124,6 +125,7 @@ func parseServe(args []string) serveFlags {
 	fs.DurationVar(&f.dataPeriod, "data-period", server.DefaultDataPeriod, "data update schedule: data answers are cached until the published snapshot's next period")
 	fs.DurationVar(&f.cacheFloor, "cache-floor", server.DefaultCacheFloor, "data answer TTL when the next update is unknown or overdue")
 	fs.StringVar(&f.filesDir, "files-dir", env("SITEAPI_FILES_DIR", "/var/lib/proxy-index-api/files"), "directory the dataset file is written to and served from")
+	fs.IntVar(&f.rowCacheMiB, "row-cache", store.DefaultRowCacheBytes>>20, "MiB of network list rows kept in memory; a rebuild fills it, the largest lists first, before it serves")
 	fs.Parse(args) //nolint:errcheck
 	return f
 }
@@ -132,6 +134,9 @@ func serve(args []string) error {
 	f := parseServe(args)
 	if err := server.ValidDataPeriod(f.dataPeriod); err != nil {
 		return err
+	}
+	if f.rowCacheMiB <= 0 {
+		return fmt.Errorf("row cache: %d MiB, want more than 0", f.rowCacheMiB)
 	}
 	if err := os.MkdirAll(f.filesDir, 0o755); err != nil {
 		return fmt.Errorf("files directory: %w", err)
@@ -149,7 +154,7 @@ func serve(args []string) error {
 	defer pool.Close()
 	b := server.BinaryInfo()
 	slog.Info("siteapi starting", "revision", deref(b.Revision, "unknown"), "revision_time", deref(b.Time, "unknown"), "modified", b.Modified != nil && *b.Modified)
-	srv := server.New(server.DBSource{Pool: pool, Lists: store.NewLists()}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
+	srv := server.New(server.DBSource{Pool: pool, Lists: &store.Lists{RowCacheBytes: f.rowCacheMiB << 20}}, server.Options{Interval: f.interval, DataPeriod: f.dataPeriod, CacheFloor: f.cacheFloor,
 		FilesDir: f.filesDir})
 	// A build older than payload v4 serves nothing, but /healthz says why.
 	if _, err := srv.Refresh(ctx, true); err != nil && !errors.Is(err, store.ErrBeforeV4) {

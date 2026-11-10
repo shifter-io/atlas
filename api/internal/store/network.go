@@ -120,6 +120,9 @@ func (c *Lists) networkLists(db TxBeginner) *NetLists {
 	c.held, c.missing = nil, nil
 	if c.net == nil || c.net.db != db {
 		c.net = NewNetLists(db)
+		if c.RowCacheBytes > 0 {
+			c.net.cache.limit = c.RowCacheBytes
+		}
 	}
 	return c.net
 }

@@ -67,8 +67,9 @@ env:
   SLOW_TEST: ^TestEveryV4Answer$
   # The latency test, run alone after every other test (API-SUM-FIX-1).
   LATENCY_TEST: ^TestServeFromDatabase$
-  # Every page's requests on a production week, alone after that (PAGE-LATENCY-1).
-  PAGE_LATENCY_TEST: ^TestPageLatency$
+  # Every page's requests on a production week, alone after that (PAGE-LATENCY-1), and the
+  # first q= search of a 150,000-row list after a build (COVERAGE-SEARCH-1).
+  PAGE_LATENCY_TEST: ^(TestPageLatency|TestFirstCoverageSearchAfterABuild)$
 
 jobs:
   api-changes:
@@ -277,6 +278,7 @@ jobs:
           grep -E '^(--- |ok)|p99|published|rebuild' "$log"
           # Never an empty pass: the test ran, measured and passed.
           grep -qE '^--- PASS: TestPageLatency ' "$log"
+          grep -qE '^--- PASS: TestFirstCoverageSearchAfterABuild ' "$log"
           grep -qE 'list cold .* p99' "$log"
       - name: CI time (slowest Go tests, budgets)
         # Also after a failed test step: the summary is there for failed runs too. Fails
