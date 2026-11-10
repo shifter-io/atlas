@@ -28,6 +28,6 @@ func FetchK2(ctx context.Context, c *Lists, tx pgx.Tx, ids []int64) (map[int64]*
 }
 
 // ReadAll exposes readAll to the external tests.
-func (n *NetLists) ReadAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetList) (*NetRowSet, error) {
-	return n.readAll(ctx, tx, lists)
+func (n *NetLists) ReadAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetList, minRows int) (*NetRowSet, error) {
+	return n.readAll(ctx, tx, lists, minRows)
 }

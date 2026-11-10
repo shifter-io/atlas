@@ -50,7 +50,7 @@ func TestReadAllReadsEveryDimensionOnce(t *testing.T) {
 	ctx := context.Background()
 	within(t, pool, func(tx pgx.Tx) {
 		lists := loadNet(t, n, tx, 1, 2, 3)
-		set, err := n.ReadAll(ctx, tx, lists)
+		set, err := n.ReadAll(ctx, tx, lists, 0)
 		if err != nil || n.Reads != 15 {
 			t.Fatalf("%d reads (%v), want 15: 3 lists x 5 dimensions", n.Reads, err)
 		}
@@ -79,11 +79,22 @@ func TestReadAllThroughAConnection(t *testing.T) {
 	defer tx.Rollback(ctx) //nolint:errcheck
 	n := store.NewNetLists(c)
 	lists := loadNet(t, n, tx, 1, 2)
-	set, err := n.ReadAll(ctx, tx, lists)
+	set, err := n.ReadAll(ctx, tx, lists, 0)
 	if err != nil || n.Reads != 10 {
 		t.Fatalf("%d reads (%v), want 10", n.Reads, err)
 	}
 	sameRows(t, store.WithNetRows(ctx, set), pool, lists)
+	// Through a pool, lists of fewer rows than asked are read the same way:
+	// in the load's transaction, which sees no later delete.
+	byPool := store.NewNetLists(pool)
+	within(t, pool, func(tx pgx.Tx) {
+		few := loadNet(t, byPool, tx, 3)
+		db.Exec(t, `DELETE FROM calculated_list_rows WHERE list_id = 3`)
+		set, err := byPool.ReadAll(ctx, tx, few, store.NetReadParallelRows)
+		if r, _ := store.RowsOf(store.WithNetRows(ctx, set), few[3], "city"); err != nil || r == nil || r.Len() != 2 {
+			t.Errorf("list 3 in the load's transaction: %v (%v)", r, err)
+		}
+	})
 	if got, err := store.RowsOf(ctx, nil, "city"); err != nil || got.Len() != 0 {
 		t.Errorf("no list: %v rows (%v)", got, err)
 	}
@@ -101,13 +112,13 @@ func TestReadAllOfADeletedList(t *testing.T) {
 	within(t, pool, func(tx pgx.Tx) { lists = loadNet(t, n, tx, 1, 2, 3) })
 	db.Exec(t, `DELETE FROM calculated_list_rows WHERE list_id = 2 AND dimension = 'y'`)
 	within(t, pool, func(tx pgx.Tx) {
-		if _, err := n.ReadAll(ctx, tx, lists); err == nil || !strings.Contains(err.Error(), "network list 2: 0 y rows, 2 when it was loaded") {
+		if _, err := n.ReadAll(ctx, tx, lists, 0); err == nil || !strings.Contains(err.Error(), "network list 2: 0 y rows, 2 when it was loaded") {
 			t.Errorf("a deleted list: %v", err)
 		}
 	})
 	delete(lists, 2)
 	within(t, pool, func(tx pgx.Tx) {
-		set, err := n.ReadAll(ctx, tx, lists)
+		set, err := n.ReadAll(ctx, tx, lists, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,7 +128,7 @@ func TestReadAllOfADeletedList(t *testing.T) {
 		tx.Rollback(ctx) //nolint:errcheck
 		c, cancel := context.WithCancel(ctx)
 		cancel()
-		if _, err := n.ReadAll(c, tx, lists); err == nil {
+		if _, err := n.ReadAll(c, tx, lists, 0); err == nil {
 			t.Error("a read with a cancelled context succeeded")
 		}
 	})

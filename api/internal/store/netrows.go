@@ -28,6 +28,11 @@ import (
 // and requests.
 const NetReadConns = 6
 
+// NetReadParallelRows is the fewest rows a load's lists hold for it to read
+// them over connections of their own: fewer (about half a second's reading)
+// are read in the load's transaction, opening no connection.
+const NetReadParallelRows = 50_000
+
 // NetRowSet is every dimension's rows of one load's network lists.
 type NetRowSet struct {
 	mu   sync.Mutex
@@ -66,14 +71,16 @@ func rowsFrom(ctx context.Context, tx pgx.Tx, l *NetList, dimension string) (*Ne
 
 // readAll reads every dimension with rows of the lists that read from the
 // database: over up to NetReadConns read-only transactions of their own when
-// n reads through a pool, else in tx (the load's) one after another: a
-// pgx.Conn has one transaction at a time.
-func (n *NetLists) readAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetList) (*NetRowSet, error) {
+// n reads through a pool and they hold at least minRows rows, else in tx
+// (the load's) one after another: a pgx.Conn has one transaction at a time.
+func (n *NetLists) readAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetList, minRows int) (*NetRowSet, error) {
 	var keys []rowKey
+	total := 0
 	for id, l := range lists {
 		for d := range netCodes {
 			if l != nil && l.src == n && l.count[d] > 0 {
 				keys = append(keys, rowKey{id, d})
+				total += l.count[d]
 			}
 		}
 	}
@@ -91,7 +98,7 @@ func (n *NetLists) readAll(ctx context.Context, tx pgx.Tx, lists map[int64]*NetL
 		set.mu.Unlock()
 		return nil
 	}
-	if _, ok := n.db.(*pgxpool.Pool); !ok {
+	if _, ok := n.db.(*pgxpool.Pool); !ok || total < minRows {
 		for _, k := range keys {
 			if err := read(tx, k); err != nil {
 				return nil, err

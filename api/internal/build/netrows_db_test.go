@@ -13,7 +13,9 @@ import (
 
 // A build reads no list row from the database (SITEAPI-REBUILD-1): its load
 // read every row of its network lists once, so a build whose rows were
-// deleted after its load gives the answers a build gives before.
+// deleted after its load gives the answers a build gives before. (Before, it
+// read them again and failed; a list deleted before the load read its rows
+// fails the load, naming the list: store's TestReadAllOfADeletedList.)
 func TestTheBuildReadsTheRowsItsLoadRead(t *testing.T) {
 	t.Parallel()
 	db := testdb.New(t)

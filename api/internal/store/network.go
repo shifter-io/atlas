@@ -104,7 +104,7 @@ func (s *SnapshotRow) readNetworks(ctx context.Context, tx pgx.Tx, cache *Lists,
 	return s.setNetworks(ctx, tx, func(ids []int64) (map[int64]*NetList, error) {
 		lists, err := net.Load(ctx, tx, ids)
 		if err == nil {
-			s.NetRows, err = net.readAll(ctx, tx, lists)
+			s.NetRows, err = net.readAll(ctx, tx, lists, NetReadParallelRows)
 		}
 		return lists, err
 	})
