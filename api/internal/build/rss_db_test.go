@@ -22,9 +22,10 @@ import (
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
-// peakLimit is the most RSS a build may reach: production's unit allows the
-// siteapi 3 GB (MemoryMax), and the build keeps 0.5 GB of headroom.
-const peakLimit = 2_500_000_000
+// peakLimit is the most RSS a build may reach at the 7-day volume: production's
+// unit allows the siteapi 7 GB (MemoryMax), and a build peaks at most 3 GB,
+// for 30 days of data and growth.
+const peakLimit = 3_000_000_000
 
 // TestPeakRSS measures the siteapi's memory on testscale.Week as a v4 build
 // (SITEAPI-MEM-1), as `siteapi serve` builds it: a server.Server reading

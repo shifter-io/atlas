@@ -30,13 +30,13 @@ func cgroupRoot(t *testing.T, max string) string {
 	return root
 }
 
-func TestMemoryLimitIsFiveSixthsOfTheUnits(t *testing.T) {
+func TestMemoryLimitIsNineTenthsOfTheUnits(t *testing.T) {
 	t.Setenv("GOMEMLIMIT", "")
 	defer debug.SetMemoryLimit(debug.SetMemoryLimit(-1))
-	if got := setMemoryLimit(cgroupRoot(t, "3221225472")); got != 2684354560 {
-		t.Errorf("3 GiB unit: limit %d, want 2.5 GiB", got)
+	if got := setMemoryLimit(cgroupRoot(t, "7516192768")); got != 6764573491 {
+		t.Errorf("7 GiB unit: limit %d, want 6.3 GiB", got)
 	}
-	if got := debug.SetMemoryLimit(-1); got != 2684354560 {
+	if got := debug.SetMemoryLimit(-1); got != 6764573491 {
 		t.Errorf("the runtime's limit is %d", got)
 	}
 	for _, root := range []string{cgroupRoot(t, "max"), t.TempDir()} {

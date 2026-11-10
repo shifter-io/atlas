@@ -20,8 +20,8 @@ import (
 
 // memLimitShare is the share of the unit's memory limit (cgroup v2
 // memory.max) the Go runtime's soft limit is set to when GOMEMLIMIT is
-// unset: the GC works harder before the kernel would kill (3 GB: 2.5 GB).
-const memLimitShare = 5.0 / 6
+// unset: the GC works harder before the kernel would kill (7 GB: 6.3 GB).
+const memLimitShare = 0.9
 
 // setMemoryLimit sets the Go soft memory limit to memLimitShare of the
 // unit's limit, read under root ("/" in production), unless GOMEMLIMIT is

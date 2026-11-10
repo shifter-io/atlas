@@ -62,7 +62,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--row-cache` | `256` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, the largest lists first (Caching: the warm step) |
 | `--mem-trace` | none | serve: a directory for a memory trace: the RSS every 200 ms (`rss.tsv`), each rebuild phase's start and the previous one's peak in the log (`memory phase`), and Go's heap profile at the peak (`heap.pprof`) (Caching: Memory) |
 | `--pprof` | none | serve: a loopback address (`127.0.0.1:6060`) serving Go's profiles (`/debug/pprof/`); any other address is refused |
-| `GOMEMLIMIT` | 5/6 of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
+| `GOMEMLIMIT` | 90% of the unit's `MemoryMax` | serve: Go's soft memory limit; unset, it is read from the process's cgroup (`memory.max`), so the GC works harder before the kernel would kill (Caching: Memory) |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 | `--out` | (required) | dump: the output file; explain, bench: the output directory |
@@ -414,10 +414,11 @@ editorial ones.
   limit (`TestRowCacheWarmsTheLargestFirstWithinItsLimit`). The 7-day staging data is 4.85M rows, 116 MB:
   the default 256 MiB holds the new build's rows beside the serving one's
   (`TestFirstCoverageSearchAfterABuild`).
-- **Memory** (SITEAPI-MEM-1). Production's unit allows the siteapi 3 GB (`MemoryMax`); a
-  build, first or rebuild, peaks at most 2.5 GB, the rebuild while the serving version
-  stays in memory. Unless `GOMEMLIMIT` is set, `serve` sets Go's soft limit to 5/6 of the
-  unit's `memory.max` (2.5 GB of 3 GB). On the 7-day staging data (54 lists, 4.73M rows,
+- **Memory** (SITEAPI-MEM-1). Production's unit allows the siteapi 7 GB (`MemoryMax=7G`); at
+  the 7-day volume a build, first or rebuild, peaks at most 3 GB, the rebuild while the
+  serving version stays in memory, leaving room for 30 days of data and growth. Unless
+  `GOMEMLIMIT` is set, `serve` sets Go's soft limit to 90% of the unit's `memory.max` (6.3 GB
+  of 7 GB). On the 7-day staging data (54 lists, 4.73M rows,
   32 CPUs) the first build peaked at 3.96 GB and a rebuild that compresses every answer
   again, the previous version serving, at 5.96 GB, when every answer was compressed by a
   goroutine of its own: each brotli encoder at quality 11 holds 8 bytes per position of
@@ -427,7 +428,7 @@ editorial ones.
   largest parts left are the list reads (0.5 GB) and the assembly (0.4 GB). On
   `testscale.Week` (3.8M rows, 4 CPUs): 2.29 and 2.88 GB before, 1.17 and 1.32 GB after. `TestPeakRSS` (`internal/build/rss_db_test.go`)
   measures it in a child process, the serve path's phases sampled every 200 ms
-  (`internal/memtrace`), and fails either build above 2.5 GB; CI runs it in its own
+  (`internal/memtrace`), and fails either build above 3 GB; CI runs it in its own
   process. `serve --mem-trace DIR` takes the same measurement on a real database.
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the

@@ -18,7 +18,7 @@
 # framework schema from the same checkout (src/proxy_index). The slowest tests run in
 # their own process beside them, so the rest of their package does not wait for them: one
 # of them is the siteapi's peak memory on a production week (TestPeakRSS, SITEAPI-MEM-1,
-# at most 2.5 GB; its peaks in the job summary). When
+# at most 3 GB; its peaks in the job summary). When
 # all of that has finished, the cached-answer latency test (TestServeFromDatabase, p99
 # within 2 ms) runs alone, so no other test shares the CPUs while it measures, then the
 # page latency test (TestPageLatency, PAGE-LATENCY-1: every request of every Proxy Index
