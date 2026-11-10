@@ -510,50 +510,59 @@ def _hosting(cur, cfg, batch, runs, emit):
             )
 
 
-def _overlap(cur, batch, runs, emit):
-    """Exit addresses a product's census shared with other providers in the same census slot."""
-    if sum(1 for r in runs if r["run_key"]) < 2:
-        return
-    query = (
-        "WITH o AS MATERIALIZED (SELECT DISTINCT br.product_id,p.provider,io.ip_id "
-        "FROM batch_runs br JOIN products p USING(product_id) "
-        "JOIN ip_observations io ON io.run_key=br.run_key "
-        "WHERE br.batch_id=%s AND br.status='done') "
-    )
+# The IPs of a batch's done runs, as (product_id, provider, ip_id) rows for overlaps().
+BATCH_IPS = (
+    "SELECT DISTINCT br.product_id,p.provider,io.ip_id "
+    "FROM batch_runs br JOIN products p USING(product_id) "
+    "JOIN ip_observations io ON io.run_key=br.run_key "
+    "WHERE br.batch_id=%s AND br.status='done'"
+)
+
+
+def overlaps(cur, source, params):
+    """(product_id, data) of each product, in order, that shares exit addresses with another
+    provider among the rows `source` selects ((product_id, provider, ip_id), with params): its
+    share of shared addresses, their count, its unique addresses and the count per provider."""
+    query = "WITH o AS MATERIALIZED (" + source + ") "
     totals = {
         row["product_id"]: row
         for row in cur.execute(
             query + "SELECT a.product_id,count(*) AS unique_ips,count(*) FILTER (WHERE EXISTS "
             "(SELECT 1 FROM o b WHERE b.ip_id=a.ip_id AND b.provider<>a.provider)) AS shared "
             "FROM o a GROUP BY 1",
-            (batch["batch_id"],),
+            params,
         )
     }
     peers = {}
     for row in cur.execute(
         query + "SELECT a.product_id,b.provider,count(DISTINCT a.ip_id) AS shared FROM o a "
         "JOIN o b ON b.ip_id=a.ip_id AND b.provider<>a.provider GROUP BY 1,2 ORDER BY 1,2",
-        (batch["batch_id"],),
+        params,
     ):
         peers.setdefault(row["product_id"], {})[row["provider"]] = row["shared"]
-    for product, row in sorted(totals.items()):
-        if not row["shared"] or _had(
-            cur, batch["batch_id"], product, ("ip_overlap",), batch["finished_at"]
-        ):
-            continue
-        emit(
-            "ip_overlap",
-            batch,
+    return [
+        (
             product,
-            (0, "info"),
             {
-                "region": batch["region"],
                 "value": row["shared"] / row["unique_ips"],
                 "shared_ips": row["shared"],
                 "unique_ips": row["unique_ips"],
                 "peers": peers.get(product, {}),
             },
         )
+        for product, row in sorted(totals.items())
+        if row["shared"]
+    ]
+
+
+def _overlap(cur, batch, runs, emit):
+    """Exit addresses a product's census shared with other providers in the same census slot."""
+    if sum(1 for r in runs if r["run_key"]) < 2:
+        return
+    for product, data in overlaps(cur, BATCH_IPS, (batch["batch_id"],)):
+        if _had(cur, batch["batch_id"], product, ("ip_overlap",), batch["finished_at"]):
+            continue
+        emit("ip_overlap", batch, product, (0, "info"), {"region": batch["region"]} | data)
 
 
 def detect(conn, now, *, config=None):

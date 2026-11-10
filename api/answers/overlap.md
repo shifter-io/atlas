@@ -38,9 +38,9 @@ is stored per kind and range (`/v1/overlap/<kind>/<range>`), precomputed with th
 | `market.networks` | How many networks are in `networks[]`. | |
 | `market.sumOfPools` | Σ `poolIps`. | |
 | `market.sharedIps` | Σ `sharedIps` of every pair, each pair once. | |
-| `market.distinctIps` | The kind's fleet entry's unique IPs (cohort `*:<kind>`, CALC-PAGE-INPUTS-1) when the snapshot publishes one; otherwise `max(0, sumOfPools − sharedIps)`. | |
-| `market.basis` | `kind_fleet` or `sum_of_pools_minus_shared_ips`: which `distinctIps` is. The second counts an IP held by three or more pools more than once. | |
-| `market.duplicatedShare` | `1 − distinctIps / sumOfPools` (at least 0); null with no pool. | |
+| `market.distinctIps` | The distinct IPs across the kind's networks in the range, each IP once however many networks saw it: the unique IPs of the kind's fleet entry (cohort `*:<kind>`, CALC-PAGE-INPUTS-1), which the calculator counts as `count(DISTINCT ip_id)` over the kind's runs in the window, for 24h, 7d and 30d. Null with `insufficient_data` when the snapshot publishes no such entry; never `sumOfPools − sharedIps`, which counts an IP of k networks k(k−1)/2 times (OVERLAP-DISTINCT-2). | `fleet[]` row `*:<kind>`, `unique_ips` |
+| `market.basis` | `kind_fleet`: `distinctIps` is the kind's fleet entry. Null with `distinctIps`. | |
+| `market.duplicatedShare` | `1 − distinctIps / sumOfPools` (at least 0); null with `insufficient_data` with no pool or no `distinctIps`. | |
 | `market.likelyResellers` | The slugs of the networks with a `likelyUpstream`, the largest `shareOfOurs` first. | |
 | `na`, `naReason`, `naReasons` | The market's nulls with their reason; each `networks[]` row carries its own, with `peers` when empty. Every range's pairs are computed (24h every build, 7d and 30d once a UTC day). A network with no run in the range has `no_run_in_window`, every other null `insufficient_data`; `likelyUpstream` is null by contract (`answers/README.md`, "Missing data"). | |
 

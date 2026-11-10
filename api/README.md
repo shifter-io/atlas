@@ -269,7 +269,8 @@ so a read's snapshot keeps seeing the rows of the build it read.
 A payload v4 build (contract K9: `schema_version` 4 and the head's `networks`, one
 summary per provider and proxy kind over all its product groups) is read from two
 things only (`internal/store/network.go`): its head without the `parts` count, every
-`overlap` row and the per-cohort `fleet` rows (it keeps the every-group `*` entries),
+`overlap` row and the per-cohort `fleet` rows (it keeps the every-group `*` entries and
+the per-kind `*:<kind>` ones, `/v1/overlap`'s `market.distinctIps`),
 and the network lists its windows name (contract
 K10, `store.NetLists`: each list's row counts, held between rebuilds like the group
 lists, which a v4 read drops; the rows stay in the database). That head is
