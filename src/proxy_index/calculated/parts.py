@@ -13,6 +13,9 @@ key); every reader here accepts both.
 
 A payload v3 window references its list (slim.refer()); read(), export() and store.read_parts()
 fill it back from calculated_list_rows (fill()), so every reader gets the v2 window.
+
+When a build is published, write_api_head() stores the part of its v4 head the API reads
+(calculated_snapshots.api_head, calculated v14), so the API reads it without building it.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from psycopg.rows import tuple_row
 
@@ -50,6 +54,8 @@ LEGACY = (
     + FILTER.format("e.value->>'product_id'", "e.value->>'cohort'")
     + ") r ORDER BY r.n"
 )
+# The current build's API head (schema.sql), when its head is a v4 head without one.
+API_HEAD = (Path(__file__).parent / "api_head.sql").read_text()
 # Only the keys of each value listed in %(keys)s.
 KEYS = (
     "(SELECT coalesce(jsonb_object_agg(k.key,k.value),'{}') FROM jsonb_each(r.value) k "
@@ -250,6 +256,11 @@ def head(conn, build_id):
         "SELECT payload FROM calculated_snapshots WHERE build_id=%s", (int(build_id),)
     ).fetchone()
     return row[0] if row else None
+
+
+def write_api_head(conn):
+    """Store the current build's API head (API_HEAD); return whether one was written."""
+    return conn.execute(API_HEAD).rowcount == 1
 
 
 def read(conn, build_id):

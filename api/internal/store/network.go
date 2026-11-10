@@ -39,7 +39,8 @@ import (
 
 // networkHeadSQL is a v4 head (s.payload) as text, without "parts", without
 // "overlap" (its rows are per cohort; a network's are its overlap.peers) and
-// with only the every-group ("*") rows of "fleet".
+// with only the every-group ("*") rows of "fleet": what proxy-index
+// calculated/api_head.sql stores as api_head when a build is published.
 const networkHeadSQL = `((s.payload - 'parts' - 'overlap' - 'fleet') || CASE WHEN s.payload ? 'fleet' THEN jsonb_build_object('fleet',
  (SELECT coalesce(jsonb_agg(f ORDER BY i), '[]'::jsonb) FROM jsonb_array_elements(s.payload->'fleet') WITH ORDINALITY e(f, i)
   WHERE f->>'cohort' = '*')) ELSE '{}'::jsonb END)::text`

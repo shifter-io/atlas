@@ -259,11 +259,15 @@ so a read's snapshot keeps seeing the rows of the build it read.
 
 A payload v4 build (contract K9: `schema_version` 4 and the head's `networks`, one
 summary per provider and proxy kind over all its product groups) is read from two
-things only (`internal/store/network.go`): its head, through a SQL projection that
-leaves out the `parts` count, every `overlap` row and the per-cohort `fleet` rows (it
-keeps the every-group `*` entries), and the network lists its windows name (contract
+things only (`internal/store/network.go`): its head without the `parts` count, every
+`overlap` row and the per-cohort `fleet` rows (it keeps the every-group `*` entries),
+and the network lists its windows name (contract
 K10, `store.NetLists`: each list's row counts, held between rebuilds like the group
-lists, which a v4 read drops; the rows stay in the database). No product part and no group list is read. Each network is then given to the
+lists, which a v4 read drops; the rows stay in the database). That head is
+`calculated_snapshots.api_head`, which the framework stores when it publishes a build
+(calculated v14, proxy-index `calculated/api_head.sql`), read as it is stored; for a
+build published before v14 the API builds the same head from the stored one with that
+SQL projection (`networkHeadSQL`), 250 ms on the 7-day staging data. No product part and no group list is read. Each network is then given to the
 build as one product group (`cohort` `network`, `id` `<provider>:<kind>:network`),
 so every answer is made by the build's product-group code. Each window gets from its list its `breakdowns.country` and
 `pool.countries_breakdown` (every country), `breakdowns.city_asn` (every City × ASN

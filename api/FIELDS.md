@@ -737,7 +737,9 @@ A build whose head has `schema_version` 4 and `networks` (proxy-index calculated
 contract K9) is read from its head and its network lists (contract K10) only: no
 product part and no group list. The head is read without its `parts` count, its
 `overlap` rows (a network's are its windows' `overlap.peers`) and its per-cohort
-`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. The API serves
+`fleet` rows; the every-group `fleet` entries (cohort `*`) stay. That is the head's
+`api_head`, stored when the build is published (calculated v14); a build published
+before v14 has none, and the API builds the same head from its stored one. The API serves
 no build before v4: while the current build is older, every data route answers
 503 and `/healthz` has `status` `unavailable` and `reason`
 `calculation older than payload v4: recalculate` (README, "Endpoints").

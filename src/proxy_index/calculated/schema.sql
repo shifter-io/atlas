@@ -197,9 +197,13 @@ CREATE TABLE IF NOT EXISTS calculated_overlaps (
  ips_a bigint NOT NULL, ips_b bigint NOT NULL,
  PRIMARY KEY(build_id,cohort,window_hours,product_a,product_b), CHECK(product_a<product_b)
 );
+-- api_head (calculated v14, parts.write_api_head()) is the part of a v4 head the API reads: the
+-- head without "parts" and "overlap", and with only the every-group ("*") rows of "fleet". It is
+-- written when the build is published, so the API reads it as it is; NULL for a build published
+-- before v14 and for a head before v4, which the API reads as it did before.
 CREATE TABLE IF NOT EXISTS calculated_snapshots (
  build_id bigint PRIMARY KEY REFERENCES calculation_builds(build_id),
- content_hash text NOT NULL, payload jsonb NOT NULL
+ content_hash text NOT NULL, payload jsonb NOT NULL, api_head jsonb
 );
 -- Contract K1 (calculated v8, parts.py): payload holds the head of a build stored since v8 and
 -- the whole payload of an older one; the head's product groups and runs are these rows, one
