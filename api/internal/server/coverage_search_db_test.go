@@ -16,7 +16,10 @@ import (
 // its lists' rows in the row cache before it served (COVERAGE-SEARCH-1). The
 // rows are deleted after the build, so a read would fail the answer. Each
 // search, the first request of its list, answers within the list-search cold
-// budget. Serial and alone: api.yml runs it with TestPageLatency.
+// budget. A first search that matches every row (q=city: each row's city is
+// "City <n>"), as Proxy-cheap's q=us matched much of its list, answers within
+// the staging budget itself, 50 ms (COVERAGE-SEARCH-2). Serial and alone:
+// api.yml runs it with TestPageLatency.
 func TestFirstCoverageSearchAfterABuild(t *testing.T) {
 	db := testdb.New(t)
 	if testing.Short() {
@@ -39,6 +42,15 @@ func TestFirstCoverageSearchAfterABuild(t *testing.T) {
 			if took > budget && !raceEnabled {
 				t.Errorf("%s: %v, over the %v list-search cold budget", path, took, budget)
 			}
+		}
+	}
+	broad := ms(bench.StagingBudgets().Classes[bench.ClassListSearch].ColdMs)
+	for _, r := range weekRanges {
+		path := fmt.Sprintf("/v1/networks/%s/coverage?range=%s&q=city", slug, r)
+		took := m.get(path)
+		t.Logf("%-72s %v", path, took)
+		if took > broad && !raceEnabled {
+			t.Errorf("%s: %v, over the %v list-search staging budget", path, took, broad)
 		}
 	}
 }

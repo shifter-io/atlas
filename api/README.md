@@ -414,6 +414,17 @@ editorial ones.
   limit (`TestRowCacheWarmsTheLargestFirstWithinItsLimit`). The 7-day staging data is 4.85M rows, 116 MB:
   the default 256 MiB holds the new build's rows beside the serving one's
   (`TestFirstCoverageSearchAfterABuild`).
+- **A broad search** (COVERAGE-SEARCH-2). A search's work grows with the rows it
+  matches: Proxy-cheap's `q=us` on the two-day real data took 74 ms on its first
+  request with 8 bench workers, far below a cold read's 380 ms: its list was warm,
+  the search slow. So a search looks up each place and
+  ASN name's words once, not once per row (`store.matcher`), counts the distinct
+  countries, cities and ASNs by name index, sums the IPs in stored order, and sorts
+  only the rows it matched, by one number a row (IPs and position,
+  `NetRows.SortByIps`). A search matching all 150,000 rows of a list went from
+  174 ms to 20 ms (`BenchmarkBroadCoverageSearch`, IPs not in stored order, 4 CPUs);
+  its first search after a build answers within the staging budget, 50 ms
+  (`TestFirstCoverageSearchAfterABuild`).
 - **Memory** (SITEAPI-MEM-1). Production's unit allows the siteapi 7 GB (`MemoryMax=7G`); at
   the 7-day volume a build, first or rebuild, peaks at most 3 GB, the rebuild while the
   serving version stays in memory, leaving room for 30 days of data and growth. Unless
