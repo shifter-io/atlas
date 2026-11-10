@@ -15,8 +15,7 @@ from datetime import datetime, timedelta
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from .point_ips import BUCKET_IPS as BUCKET_IPS
-from .point_ips import point_ips
+from . import point_ips
 from .policy import digest
 from .poolfig import pool_figures
 from .sqlwindow import WindowSpec, distinct_ips, window_inputs
@@ -77,7 +76,7 @@ def _count(conn, items):
     ):
         values[id(item)] = {"first_seen": _bins(bins, _start(item))}
     ips = [item for item in items if item.kind == "ips"]
-    counted = point_ips(conn, ips)
+    counted = point_ips.point_ips(conn, ips)
     for n, item in enumerate(ips):
         values[id(item)] = {"unique_ips": counted.get(n, 0)}
     return [values[id(item)] for item in items]

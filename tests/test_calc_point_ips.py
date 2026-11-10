@@ -5,6 +5,8 @@ values equal one batch's and a fresh count's, for a first build and an increment
 
 import json
 import re
+import subprocess
+import sys
 from datetime import UTC, datetime
 
 import psycopg
@@ -15,7 +17,7 @@ from test_calc_parallel_reads import opened_helpers, rows
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import history, without
 
-from proxy_index.calculated import hourly, hourly_windows, point_ips, store
+from proxy_index.calculated import hourly, point_ips, store
 from proxy_index.calculated.calculator import calculate
 from proxy_index.orchestrator.control import write_settings
 from proxy_index.providers.credentials import read_credentials
@@ -31,6 +33,13 @@ def test_cut_bounds_each_batch_and_puts_the_largest_first():
     assert cut({0: 0}, 1) == [(0, [0])]
 
 
+def test_the_module_imports_first():
+    """point_ips.py imports parallel_reads.py, whose imports reach hourly_windows.py, which
+    imports point_ips.py back: no name of it may be needed while it loads."""
+    code = "import proxy_index.calculated.point_ips"
+    assert subprocess.run([sys.executable, "-c", code], check=False).returncode == 0
+
+
 def recorded(monkeypatch):
     """The items point_ips() counts and the batches it cuts, from now on."""
     items, batches = [], []
@@ -44,7 +53,7 @@ def recorded(monkeypatch):
         batches.append(original_cut(sizes, most))
         return batches[-1]
 
-    monkeypatch.setattr(hourly_windows, "point_ips", points)
+    monkeypatch.setattr(point_ips, "point_ips", points)
     monkeypatch.setattr(point_ips, "cut", cut)
     return items, batches
 
