@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
@@ -86,7 +87,7 @@ func RowCounts(rows map[string][]store.NetRow) map[string]int {
 // rows when complete, else its breakdowns or, without those, its pool lists).
 // requested > 0 gives every network that many requested countries. The head
 // is as store reads it: without parts, runs, overlap rows or per-cohort fleet
-// rows.
+// rows (it keeps the every-group "*" and "*:<kind>" ones).
 func NetworkHead(row *store.SnapshotRow, requested int, write ListWriter) ([]byte, error) {
 	var doc map[string]any
 	var typed snap.Snapshot
@@ -107,7 +108,7 @@ func NetworkHead(row *store.SnapshotRow, requested int, write ListWriter) ([]byt
 	}
 	fleet := []any{}
 	for _, f := range asList(doc["fleet"]) {
-		if f.(map[string]any)["cohort"] == snap.AllCohorts {
+		if c, _ := f.(map[string]any)["cohort"].(string); strings.HasPrefix(c, snap.AllCohorts) {
 			fleet = append(fleet, f)
 		}
 	}

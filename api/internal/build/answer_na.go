@@ -263,6 +263,8 @@ func (a *HomeAnswer) listNA(rows []RankingRow) error {
 
 // listNA lists the N/A paths of the overlap's networks and its market. 24h
 // windows have no overlap pairs: the calculator computes them for 7d and 30d.
+// The market's distinct count is the kind's fleet entry, published for every
+// window: its nulls are insufficient_data in 24h too.
 func (a *OverlapAnswer) listNA() error {
 	code := func(string) string { return NAInsufficient }
 	if a.Range == "24h" {
@@ -273,5 +275,11 @@ func (a *OverlapAnswer) listNA() error {
 			return err
 		}
 	}
-	return a.NAList.list(a, nil, code, "networks")
+	market := func(p string) string {
+		if strings.HasPrefix(p, "market.") {
+			return NAInsufficient
+		}
+		return code(p)
+	}
+	return a.NAList.list(a, nil, market, "networks")
 }

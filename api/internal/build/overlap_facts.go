@@ -34,14 +34,9 @@ const (
 	upstreamRatioAbove = 3
 )
 
-// Market bases: where market.distinctIps comes from.
-const (
-	// BasisKindFleet: the kind's fleet entry (cohort "*:<kind>"), each IP once.
-	BasisKindFleet = "kind_fleet"
-	// BasisPoolsMinusPairs: sumOfPools − sharedIps, which counts an IP held
-	// by three or more pools more than once.
-	BasisPoolsMinusPairs = "sum_of_pools_minus_shared_ips"
-)
+// BasisKindFleet is where market.distinctIps comes from: the kind's fleet
+// entry (cohort "*:<kind>"), each IP once however many networks saw it.
+const BasisKindFleet = "kind_fleet"
 
 // OverlapPeer is one network another one shares exit IPs with, in one range.
 type OverlapPeer struct {
@@ -62,13 +57,13 @@ type OverlapUpstream struct {
 // OverlapMarket is a kind's duplication in one range, on one basis: the
 // range's measured pools and pairs of that kind.
 type OverlapMarket struct {
-	Networks        int      `json:"networks"`
-	SumOfPools      Num      `json:"sumOfPools"`
-	SharedIps       Num      `json:"sharedIps"`
-	DistinctIps     Num      `json:"distinctIps"`
-	DuplicatedShare Num      `json:"duplicatedShare"`
-	Basis           string   `json:"basis"`
-	LikelyResellers []string `json:"likelyResellers"`
+	Networks        int       `json:"networks"`
+	SumOfPools      Num       `json:"sumOfPools"`
+	SharedIps       Num       `json:"sharedIps"`
+	DistinctIps     Num       `json:"distinctIps"`
+	DuplicatedShare Num       `json:"duplicatedShare"`
+	Basis           model.Str `json:"basis"`
+	LikelyResellers []string  `json:"likelyResellers"`
 }
 
 // OwnershipLabel is ownershipFor's label of a pool's exclusive and shared
@@ -105,8 +100,10 @@ func LikelyUpstream(peers []OverlapPeer) *OverlapUpstream {
 }
 
 // MarketOverlap is the market of nets, a kind's networks in one range.
-// fleetDistinct is the kind's fleet entry's unique IPs for the range (NaN
-// when the snapshot publishes none): it is distinctIps when known.
+// fleetDistinct is the kind's fleet entry's unique IPs for the range: it is
+// distinctIps. NaN (the snapshot publishes none) leaves distinctIps,
+// duplicatedShare and basis null: no sum of pools minus pairs stands in, as it
+// counts an IP of k networks k(k−1)/2 times.
 func MarketOverlap(nets []OverlapNetwork, fleetDistinct Num) OverlapMarket {
 	m := OverlapMarket{Networks: len(nets), LikelyResellers: []string{}}
 	var sum, shared float64
@@ -135,13 +132,12 @@ func MarketOverlap(nets []OverlapNetwork, fleetDistinct Num) OverlapMarket {
 		m.LikelyResellers = append(m.LikelyResellers, n.Slug)
 	}
 	m.SumOfPools, m.SharedIps = Num(sum), Num(shared)
-	m.DistinctIps, m.Basis = fleetDistinct, BasisKindFleet
-	if !fleetDistinct.OK() {
-		m.DistinctIps, m.Basis = Num(math.Max(0, sum-shared)), BasisPoolsMinusPairs
+	m.DistinctIps, m.DuplicatedShare = fleetDistinct, nan
+	if fleetDistinct.OK() {
+		m.Basis = model.S(BasisKindFleet)
 	}
-	m.DuplicatedShare = nan
-	if sum > 0 {
-		m.DuplicatedShare = Num(math.Max(0, 1-m.DistinctIps.F()/sum))
+	if fleetDistinct.OK() && sum > 0 {
+		m.DuplicatedShare = Num(math.Max(0, 1-fleetDistinct.F()/sum))
 	}
 	return m
 }

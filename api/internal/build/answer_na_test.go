@@ -76,7 +76,8 @@ func TestAnNAListKeepsItsCommonReasonOnce(t *testing.T) {
 }
 
 // Overlap pairs are computed for 7d and 30d only: a 24h gap is
-// not_computed_for_window, another window's insufficient_data.
+// not_computed_for_window, another window's insufficient_data. The market's
+// nulls (no kind fleet entry) are insufficient_data in every window.
 func TestOverlapNAIn24hIsNotComputedForTheWindow(t *testing.T) {
 	t.Parallel()
 	for rangeID, want := range map[string]string{"24h": NANotComputed, "7d": NAInsufficient} {
@@ -88,7 +89,7 @@ func TestOverlapNAIn24hIsNotComputedForTheWindow(t *testing.T) {
 		}
 		n := a.Networks[0]
 		if !slices.Equal(n.NA, []string{"exclusiveIps", "exclusiveShare", "label", "peers", "poolBasis", "sharedShare"}) ||
-			n.ReasonOf("peers") != want || a.ReasonOf("market.distinctIps") != want {
+			n.ReasonOf("peers") != want || a.ReasonOf("market.distinctIps") != NAInsufficient {
 			t.Errorf("%s: na %v reason %s, market na %v", rangeID, n.NA, n.ReasonOf("peers"), a.NA)
 		}
 	}
