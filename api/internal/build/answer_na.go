@@ -18,8 +18,6 @@ const (
 	NANoRun = "no_run_in_window"
 	// NANoEvidence: availability without monitoring evidence in the window.
 	NANoEvidence = "no_evidence"
-	// NANotComputed: computed for other windows only (overlap pairs in 24h).
-	NANotComputed = "not_computed_for_window"
 	// NAInsufficient: the calculator published null for another stated reason.
 	NAInsufficient = "insufficient_data"
 )
@@ -199,9 +197,7 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 	f := naFacts{measured: e != nil && e.Snap[a.Kind] != nil || a.Kind == AllNetworks}
 	if p := a.Profile; p != nil {
 		f.priced, f.claimed = p.Pricing.ListRate.OK(), p.Pool.ClaimedPoolSize.OK()
-		pf := f
-		pf.ran = f.measured
-		if err := p.NAList.list(p, profileEmpties(e, a.Kind), pf.code); err != nil {
+		if err := p.NAList.list(p, profileEmpties(e, a.Kind), a.windowCode(f, profileRange)); err != nil {
 			return err
 		}
 	}
@@ -212,9 +208,41 @@ func (a *NetworkAnswer) listNA(e *entry) error {
 			return err
 		}
 	}
-	f.ran = f.measured
-	return a.NAList.list(a, []string{"reviews", "communityRuns"}, f.code, "profile", "stats", "reviews[]", "communityRuns[]",
-		"changelog[]", "tape[]")
+	return a.NAList.list(a, []string{"reviews", "communityRuns"}, a.windowCode(f, totalsRange), "profile", "stats", "reviews[]",
+		"communityRuns[]", "changelog[]", "tape[]")
+}
+
+// windowCode is the reason code of a network answer's path under f, whose
+// window (rangeOf: "" for none) has a run when its totals have requests: a
+// window without one gives its nulls no_run_in_window (NO-RUN-WINDOW-1).
+func (a *NetworkAnswer) windowCode(f naFacts, rangeOf func(string) string) func(string) string {
+	return func(p string) string {
+		wf := f
+		wf.ran = f.measured
+		if r := rangeOf(p); r != "" {
+			t := a.Ranges[r]
+			wf.ran = wf.ran && t != nil && t.Requests.OK() && t.Requests > 0
+		}
+		return wf.code(p)
+	}
+}
+
+// totalsRange is the range of a network answer path under ranges.<range>.
+func totalsRange(p string) string {
+	if r, ok := strings.CutPrefix(p, "ranges."); ok {
+		return strings.SplitN(r, ".", 2)[0]
+	}
+	return ""
+}
+
+// profileRange is the range of a profile path's figure: 24h for a 24h
+// figure (pool.uniqueIps24h, performance.requests24h), else 30d, the window
+// of the profile's measured blocks.
+func profileRange(p string) string {
+	if strings.HasSuffix(figure(p), "24h") {
+		return "24h"
+	}
+	return "30d"
 }
 
 // profileEmpties is the provider's N/A paths a kind's profile may hold as an
@@ -261,25 +289,20 @@ func (a *HomeAnswer) listNA(rows []RankingRow) error {
 	return a.NAList.list(a, []string{"profiles", "insights.hardestRates"}, code, "networks", "tape[]", "profiles[]")
 }
 
-// listNA lists the N/A paths of the overlap's networks and its market. 24h
-// windows have no overlap pairs: the calculator computes them for 7d and 30d.
-// The market's distinct count is the kind's fleet entry, published for every
-// window: its nulls are insufficient_data in 24h too.
+// listNA lists the N/A paths of the overlap's networks and its market. Every
+// range's pairs are computed (24h every build, 7d and 30d once a UTC day): a
+// network with no run in the range has no_run_in_window, other nulls
+// insufficient_data.
 func (a *OverlapAnswer) listNA() error {
-	code := func(string) string { return NAInsufficient }
-	if a.Range == "24h" {
-		code = func(string) string { return NANotComputed }
-	}
+	insufficient := func(string) string { return NAInsufficient }
 	for i := range a.Networks {
-		if err := a.Networks[i].NAList.list(&a.Networks[i], []string{"peers"}, code); err != nil {
+		n, code := &a.Networks[i], insufficient
+		if !n.ran {
+			code = func(string) string { return NANoRun }
+		}
+		if err := n.NAList.list(n, []string{"peers"}, code); err != nil {
 			return err
 		}
 	}
-	market := func(p string) string {
-		if strings.HasPrefix(p, "market.") {
-			return NAInsufficient
-		}
-		return code(p)
-	}
-	return a.NAList.list(a, nil, market, "networks")
+	return a.NAList.list(a, nil, insufficient, "networks")
 }

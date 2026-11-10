@@ -740,6 +740,12 @@ groups, a window with no released hour) keeps its measured IPs, and so do a
 row or daily point when the block has no `breakdown_scale`, and the
 every-group fleet figures of `/v1/networks/all`.
 
+A window with no run of its group (no completed request in it) has no IP
+figure (NO-RUN-WINDOW-1): its unique IPs, `ipsSum` and IP chart points are
+null or empty, with the reason `no_run_in_window` (`answers/README.md`,
+"Missing data"), even when the block holds an estimate for it. A window with a
+run keeps the mapping above.
+
 Coverage rows (`/v1/networks/{slug}/coverage`, `lists.*.city_asn`) follow the same
 mapping as any breakdown row: their `ips` are the measured row's IPs × `breakdown_scale`.
 
