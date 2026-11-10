@@ -417,13 +417,15 @@ editorial ones.
 - **Memory** (SITEAPI-MEM-1). Production's unit allows the siteapi 3 GB (`MemoryMax`); a
   build, first or rebuild, peaks at most 2.5 GB, the rebuild while the serving version
   stays in memory. Unless `GOMEMLIMIT` is set, `serve` sets Go's soft limit to 5/6 of the
-  unit's `memory.max` (2.5 GB of 3 GB). On `testscale.Week` (54 lists, 3.8M rows; a
-  4-CPU server) a build peaked at 2.29 GB and the next hour's rebuild at 2.88 GB, when
-  every answer was compressed by a goroutine of its own: each brotli encoder at quality
-  11 holds 8 bytes per position of its 4 MB window (32 MB) whatever the body's size, 4 GB
-  at the peak. With the window fitted to the body and at most 8 bodies at once, the build
-  peaks at 1.17 GB and the rebuild at 1.32 GB; the largest parts left are the list reads
-  (0.5 GB) and the assembly (0.5 GB). `TestPeakRSS` (`internal/build/rss_db_test.go`)
+  unit's `memory.max` (2.5 GB of 3 GB). On the 7-day staging data (54 lists, 4.73M rows,
+  32 CPUs) the first build peaked at 3.96 GB and a rebuild that compresses every answer
+  again, the previous version serving, at 5.96 GB, when every answer was compressed by a
+  goroutine of its own: each brotli encoder at quality 11 holds 8 bytes per position of
+  its 4 MB window (32 MB) whatever the body's size, 3.2 GB of the heap at the peak. With
+  the window fitted to the body and at most 8 bodies at once, the first build peaks at
+  0.90 GB and the rebuild at 1.25 GB, and under `MemoryMax=3G` at 0.95 and 1.26 GB; the
+  largest parts left are the list reads (0.5 GB) and the assembly (0.4 GB). On
+  `testscale.Week` (3.8M rows, 4 CPUs): 2.29 and 2.88 GB before, 1.17 and 1.32 GB after. `TestPeakRSS` (`internal/build/rss_db_test.go`)
   measures it in a child process, the serve path's phases sampled every 200 ms
   (`internal/memtrace`), and fails either build above 2.5 GB; CI runs it in its own
   process. `serve --mem-trace DIR` takes the same measurement on a real database.
