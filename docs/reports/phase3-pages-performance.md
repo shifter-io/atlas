@@ -7,11 +7,16 @@ The first run (main 0b0acf9) found three misses, and each was fixed and is measu
 - **46 map gaps:** #798 (PR #805) and #799 (PR #803).
 - **The browser scores missing from v4 builds:** #800, PR #804.
 
-Two findings remain that are not budget rows; section 9 has them:
+Three findings are follow-ups, not budget rows; section 9 has them:
 
-- **The 7-day overlap pairs are still empty**, because the generated week has no address shared
-  between two networks.
-- **The staging siteapi was killed once for memory at its first start on the fixed code.**
+- **#808 (URGENT SITEAPI-MEM-1): the siteapi's memory.** The staging siteapi peaked at 3.86 to
+  4.10 GB, and its first start on the fixed code was killed at 5 GB. Production allows the
+  siteapi 3 GB (`MemoryMax`), so it would not fit production's limit until #808 brings the first
+  build's peak to at most 2.5 GB. This is the follow-up that matters most for production.
+- **#809 (SIM-OVERLAP-1): the 7-day overlap figures can't be judged on this data.** The generated
+  week has no address shared between two networks.
+- **#810 (OVERLAP-CARRY-1): the hourly 7-day overlap recount.** Counted empty pairs are not told
+  apart from pairs not counted yet.
 
 - **Code:**
   - **The final measurement:** `main` at 76b6fd3 (2026-11-10), which has #797, #798, #799 and
@@ -116,16 +121,19 @@ in the last 24 hours (between one in five and one in seven). The 7-day and 30-da
 
 ### What still needs attention
 
-1. **Memory.** The first time the new API program started on the test copy, it used more than
-   its 5 GB memory limit while preparing its numbers, and the computer stopped it. The second
-   start worked and used 3.9 GB. Nobody knows yet why the first one needed more. Before
-   production, the team checks the memory limit of the real API against this, or makes the
-   preparation use less.
-2. **Shared addresses in the test data.** The overlap page shows which networks share internet
-   addresses. In our generated week, no two networks share an address, so the 7-day view shows
-   every network as fully exclusive and has no pairs to show. That is right for this data, but
-   the test data does not show the page working for 7 days. The 30-day view shows 252 pairs,
-   from older real data. Real networks do share addresses.
+1. **Memory: the one thing to fix before production.** The API is fast at production volume,
+   but it uses more memory than production's server gives it. While it prepares new numbers
+   it needed 3.9 to 4.1 GB on the test copy, and once more than 5 GB, when the computer
+   stopped it. Production allows it 3 GB. So, as things stand, the real API would be stopped
+   for using too much memory. A fix is planned and marked urgent: the API's preparation must use
+   at most 2.5 GB. Nothing goes to production before that fix.
+2. **The overlap page's 7-day view can't be judged yet.** The overlap page shows which
+   networks share internet addresses. Our test data was generated so that every network has its
+   own addresses, so within the generated week no two networks share one. The 7-day view
+   therefore shows every network as fully exclusive, with no pairs. That is right for this data
+   but says nothing about real networks, which do share addresses. The 30-day view shows 252
+   pairs, from an older hour of real data. Generating test data with shared addresses is
+   planned.
 
 The test data also has a limit: its total size equals a real week, but the two largest tables
 (what each test saw, and where each address is located) hold more rows than production's would
@@ -332,10 +340,10 @@ one step. Option 2 saves disk now but costs about 10 hours of loading for the ne
 
 ---
 
-**Question 7: Do we keep the separate test server after this report?**
+**Question 7: Do we keep the Toronto test server after this report?**
 
-**What it's about:** the measurements in this report ran from a separate server, used only for
-tests (our "staging manager"). It costs a monthly server bill while it runs. It also holds the
+**What it's about:** the measurements in this report ran from a separate server in Toronto, used
+only for tests (our "staging manager"). It costs a monthly server bill while it runs. It also holds the
 tools for the planned re-load with the corrected data model. For example, Elena, who checks the
 hosting bill, sees this server next to the production ones.
 
@@ -1155,27 +1163,37 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
    #800 (SCORES-V4-1, PR #804) fixed it, and every browser cell with tries now has a status
    (section 6.3).
 
-**Findings that remain** (not a budget row; for the architect):
-- **The staging siteapi was killed once for memory on the fixed code.**
-  - **What happened:** its first start on 76b6fd3 (07:15 UTC, `MemoryMax` 5 GB, the limit #718
-    set for the staging siteapi) was killed by the kernel's out-of-memory killer 27 s into its
-    first build, before the row-cache warm logged.
-  - **The second start:** the same binary on the same build served at a peak of 3.86 GB.
-    After the hourly rebuild, while serving, its peak was 4.10 GB.
-  - **Before the fixes:** the first run's peaks were 3.61 and 3.95 GB.
-  - **The cause is not known.** One kill in two starts means the rebuild's peak can come close
-    to 5 GB. Production's siteapi needs its memory limit checked against it, or the rebuild's
-    peak lowered.
-- **The 7-day overlap pairs are empty on staging.**
-  - **Why:** no address is shared between two networks within the generated week. 0 addresses
-    seen in the last 7 days belong to more than one network; across all time there are 285,954,
-    all from the real hour of 2026-10-31, which only the 30d window holds (252 pairs).
-  - **What the API serves:** the 7d answer lists `peers` in `na` as `insufficient_data`, and
-    reports every network as `fully_exclusive`, which is true for this data.
-  - **What it means:** #799's recount ran (the 504 s overlap statement after the deploy), but the
-    data has nothing to count. The generator gives every network its own addresses. Real data
-    shares addresses, so the 7d pairs can only be shown on a load that models shared
-    addresses (for #793's model or a follow-up).
+**Follow-ups this report found** (filed by the architect; not budget rows, so they do not hold
+#720):
+
+- **#808 (URGENT SITEAPI-MEM-1): the siteapi's memory at production's limit.** This is the one
+  that matters most for production.
+  - **What happened on staging:** the first start on 76b6fd3 (07:15 UTC, `MemoryMax` 5 GB, the
+    limit #718 set for the staging siteapi) was killed by the kernel's out-of-memory killer 27 s
+    into its first build, before the row-cache warm logged. The second start of the same binary
+    on the same build served at a peak of 3.86 GB, and 4.10 GB after the hourly rebuild while
+    serving. The first run's peaks were 3.61 and 3.95 GB.
+  - **Production's limit:** production allows the siteapi 3 GB (`MemoryMax`; the plan is 2.5 GB,
+    `api/internal/build/rss_db_test.go`). At production volume the siteapi is fast, but it would
+    not fit that limit.
+  - **The fix:** #808 measures the first build's peak by phase and must bring it to at most
+    2.5 GB, before production runs this code.
+- **#809 (SIM-OVERLAP-1, not blocking): the 7-day overlap figures can't be judged on this data.**
+  - **Why:** the generator gives every network its own addresses, so within the generated week
+    no address is shared between two networks. 0 addresses seen in the last 7 days belong to
+    more than one network. Across all time there are 285,954, all from the real hour of
+    2026-10-31, which only the 30d window holds (252 pairs).
+  - **What the API serves:** the 7d answer lists `peers` in `na` as `insufficient_data`, and reports
+    every network as `fully_exclusive`, which is true for this data.
+  - **The real data shares addresses between networks.** So the overlap page's 7-day pairs,
+    exclusivity and resale signs need a load that models shared addresses (#809). #799's
+    recount itself ran: the 504 s overlap statement after the deploy.
+- **#810 (OVERLAP-CARRY-1): the hourly 7-day recount.**
+  - **The cause:** #799 counts the 7d and 30d pairs again when the previous head has none. With
+    the 7d pairs always empty on staging, every hourly build counted them again (248 s, part of
+    18.9 GB of temp each hour, section 7).
+  - **The fix:** #810 records in the head when a window's overlap was counted, so counted empty
+    pairs are carried, not recounted every hour.
 
 **Known limits:**
 - **`/v1/targets` size:** it fits under the 200 KB cap up to 23 networks (#735); past 22 it must
