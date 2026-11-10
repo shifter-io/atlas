@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 import psycopg
 from psycopg.rows import dict_row
@@ -109,13 +109,12 @@ def _on_helpers(conn, found, batches):
     try:
         with ThreadPoolExecutor(h + n, thread_name_prefix="calc-points") as pool:
             futures = [pool.submit(_drain, c, pending) for cs, pending in lanes for c in cs]
-            try:
-                for future in futures:
-                    counted |= future.result()
-            except BaseException:
+            done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+            if any(f.exception() for f in done):
                 for _, pending in lanes:
                     pending.clear()
-                raise
+            for future in futures:
+                counted |= future.result()
     finally:
         for other in connections:
             other.close()

@@ -17,7 +17,7 @@ from test_calc_parallel_reads import opened_helpers, rows
 from test_calculated_hourly_reads import HOUR, floor_hour
 from test_calculated_incremental import history, without
 
-from proxy_index.calculated import hourly, point_ips, store
+from proxy_index.calculated import hourly, parallel_reads, point_ips, store
 from proxy_index.calculated.calculator import calculate
 from proxy_index.orchestrator.control import write_settings
 from proxy_index.providers.credentials import read_credentials
@@ -173,3 +173,24 @@ async def test_a_calculation_in_batches_equals_one_in_one_batch(
         assert json.dumps(a) == json.dumps(b), as_of
         a, b = rows(database), rows(other)
         assert a["calculated_series"] and [t for t in a if a[t] != b[t]] == [], as_of
+
+
+@pytest.mark.asyncio
+async def test_parallel_reads_bounds_the_point_helpers_too(database, tmp_path, monkeypatch, capsys):
+    """`calculate --parallel-reads 1` (kept in the calculation's transaction by configure())
+    gives the point step one helper, not the settings table's 8."""
+    end = floor_hour(datetime.now(UTC)) + HOUR
+    await history(database, tmp_path, end)
+    with connect(database) as conn:
+        write_settings(conn, {"calculate.point_rows": 1})
+        with parallel_reads.Prefetcher(conn) as prefetch:
+            prefetch.configure(3)
+            assert parallel_reads.settings(conn)["parallel_reads"] == 3
+        conn.rollback()  # the override ends with the transaction
+        assert parallel_reads.settings(conn)["parallel_reads"] == 8
+        conn.rollback()
+    opened_helpers(monkeypatch)
+    calculate(database, lenient_policy(tmp_path), as_of=end, mode="incremental", parallel_reads=1)
+    err = capsys.readouterr().err
+    found = re.findall(r"calculate: (\d+) parallel reads \(of (\d+)\)[^\n]* point batches", err)
+    assert found == [("1", "1")], err

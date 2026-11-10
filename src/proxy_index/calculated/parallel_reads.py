@@ -36,6 +36,9 @@ MAX_PARALLEL_READS = 16
 MEMORY_UNITS = {"kB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4}
 EXPORT = "SELECT pg_export_snapshot(),current_setting('work_mem'),current_setting('TimeZone')"
 IMPORTED = "SELECT set_config('work_mem',%s,true),set_config('TimeZone',%s,true)"
+# `calculate --parallel-reads` for the rest of the transaction (Prefetcher.configure()), so the
+# other steps' helpers (point_ips.py) follow it too.
+OVERRIDE = "proxy_index.parallel_reads"
 MB = 1024**2
 TEMP = (
     "SELECT temp_bytes FROM pg_stat_clear_snapshot(),pg_stat_database "
@@ -67,8 +70,13 @@ def snapshot_connection(conn, exported):
 
 def settings(conn, parallel_reads=None):
     """The calculate.* settings (orchestrator/db.py DEFAULTS, the settings table), validated;
-    parallel_reads (`calculate --parallel-reads`) overrides the table's."""
+    parallel_reads (`calculate --parallel-reads`, else the one configure() kept in conn's
+    transaction) overrides the table's."""
     found = {name: read_setting(conn, f"calculate.{name}") for name in SETTINGS + MEMORY}
+    if parallel_reads is None:
+        cursor = conn.cursor(row_factory=tuple_row)
+        kept = cursor.execute("SELECT current_setting(%s,true)", (OVERRIDE,)).fetchone()[0]
+        parallel_reads = int(kept) if (kept or "").isdigit() else None
     if parallel_reads is not None:
         found["parallel_reads"] = parallel_reads
     most_of = (MAX_PARALLEL_READS, MAX_PARALLEL_READS, None, None)
@@ -201,6 +209,8 @@ class Prefetcher:
         self.settings = settings(self.conn, parallel_reads)
         work_mem = sql.Literal(self.settings["work_mem"])
         self.conn.execute(sql.SQL("SET LOCAL work_mem TO {}").format(work_mem))
+        if parallel_reads is not None:
+            self.conn.execute("SELECT set_config(%s,%s,true)", (OVERRIDE, str(parallel_reads)))
 
     def start(self, order, read, rows):
         """Read each key of order (the consumer's order) with read(connection, key) on the
