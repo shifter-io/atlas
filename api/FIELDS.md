@@ -39,10 +39,18 @@ General rules:
   - community run `rejectionReason`, `overlapShare`.
   - changelog `providerSlug`, `providerName`, `delta` for fleet-wide entries.
   - target `group` for a target that is not a source of a group target.
+  - page answers: `observedDays` when the history covers the range, an overlap
+    row's `likelyUpstream` and the home's `insights.exclusivity[].upstream`
+    without a reseller signature, the all-networks answer's `profile`, and a
+    browser score's `score`, `rank` and `rankedOf` (and a target's
+    `scoreStatus.<engine>.rankedOf`) unless its `status` is `ranked`.
 - Browser targets' fields (`outcomes`, `pageLoadP50`/`P90`, `sources`, `engine`, `engines`, `scores`) are written
   only on browser targets' entries; a network target's entry has exactly its
   older fields (see "Browser targets" below).
 - Reasons for every N/A path are in `/v1/coverage` (`build/na.go` `reasons`).
+  The page answers added from Phase 3 also give each path a reason code
+  beside their `na` (`naReason`, `naReasons`; api/answers/README.md, "Missing
+  data").
 
 ## Dataset (top level)
 
@@ -140,7 +148,7 @@ not read).
 | `performance.successRate` | `w.metrics.success_rate` (every-request snapshots: the mean of the time-slot success rates; `request_success_rate`, successes ÷ requests, is not served) | data | ✱ |
 | `performance.successRateDelta24h`, `successRateDelta30d` | not mapped (the per-window `success_delta` is in `/v1/networks/{slug}` `stats[].successDeltaPts`) | always | ✱ |
 | `performance.latencyDelta24h`, `ttfbP50` | none | always | ✱ |
-| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`, null without a load test; older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
+| `performance.latencyP50`/`P90`/`P99` | the latency target's (`generic_http`, product rule: the only target with a latency) headline latency: every-request snapshots (metrics with `time_slots`) `w.targets.generic_http.metrics.latency_under_load_ms`; without a load test in the window (production runs none, docs/api-web-map.md section 14) its light-load `latency_ms`, the daily tests' own (API-NA-2); older snapshots its `latency_ms`. Null without a `generic_http` target; the window's own latency (a mix of targets) is never used | data | ✱ |
 | `performance.latencyMean` *(added)* | the `mean` key (milliseconds, framework #161) of the same headline latency object as `latencyP50`, by the same rule (under load: each light-load slot's mean × the slot's mean factor, load-run mean ÷ reference-pulse mean, averaged as the percentiles are). Like the percentiles it comes from the 1 ms ceiling histograms, so it can be up to about 1 ms above the mean of the raw latencies. Per-row lists and `series` latency points carry no mean | data: `latencyP50`'s cases, or a snapshot written before the mean | |
 | `performance.captchaRate`, `blockRate` | `w.metrics.challenge_rate`, `block_rate` (snapshot v2) | data (always for a v1 snapshot) | ✱ |
 | `performance.timeoutRate` | `w.metrics.timeout_rate` | data | ✱ |
@@ -247,8 +255,9 @@ is the list-rate range (`jsnum.PriceRange`, format.ts `priceRange`), e.g.
 `windowStats` (`/v1/rankings` rows, `/v1/networks/{slug}` `stats` and its
 `/chart` answers) reads the snapshot window: `successRate = metrics.success_rate`,
 `latencyP50/P90/P99` the `generic_http` target's headline latency (under load
-in every-request snapshots, else `latency_ms`), `lightLatencyP50/P90/P99` its
-light-load `latency_ms` in every-request snapshots (null otherwise),
+in every-request snapshots with a load test in the window, else `latency_ms`:
+without a load test, the daily tests' own), `lightLatencyP50/P90/P99` its
+light-load `latency_ms` beside a latency under load (null otherwise),
 `latencyTarget` `"generic_http"`,
 the `latency` series only where the window's latency is that target's alone, `costPer1kSuccess = wireCostPer1k(listRate, metrics)` of that window
 (so a priced measured network gets a `valueRank` and enters the fleet bills),
@@ -271,8 +280,8 @@ network without a snapshot product, and wherever the window has no value):
 | `datacenterAsnShare` | `pool.datacenter_asn_share` |
 | `exclusiveShare`, `sharedShare` | `overlap.exclusive_share`, `shared_share`, by the rule of `overlap.exclusiveShare` above: an observed pool (`pool.unique_ips` > 0) with `compared_products: 0` is 1 and 0 (older snapshots publish null for it); no observed pool stays null |
 | `observedDays` | days from the range's first history point (the merged history behind `successDeltaPts`) to `period.end`, rounded up; 0 below one day; null when the history covers the range or there is none (the old site's "the last N days" / "the last <1 day") |
-| `latencyUnderLoad` | true when `latencyP50` is under load (every-request snapshots); false when the latency shown is light load (`latency_ms` of an older snapshot, or `lightLatencyP50` alone in an every-request window without a load test); null without latency |
-| `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when `lightLatencyP50` is set (`"HTTP, under load"`); null without `latencyTarget` |
+| `latencyUnderLoad` | true when `latencyP50` is under load (an every-request window with a load test); false when the latency shown is light load (`latency_ms` of an older snapshot, or of an every-request window without a load test: production's daily tests); null without latency |
+| `latencyNote` | every-request.ts `latencyNote`: the target's label (`"HTTP"` for `generic_http`), plus `", under load"` when the headline is under load (`lightLatencyP50` set beside it: `"HTTP, under load"`); null without `latencyTarget` |
 | `wireGbPer1k` | `(metrics.bytes_up + bytes_down) ÷ completed × 1000 ÷ 1024³`: GB of wire traffic per 1,000 requests, the figure `costPer1kSuccess` and `pricing.costBasis` are built on |
 
 `availability` is the per-bucket fractional availability history, mapped from
@@ -487,7 +496,7 @@ catalog network without a snapshot product has no score or rank.
 
 Row fields, from that range's `windowStats` (see "Window statistics of a
 measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90`,
-`latencyP99` (the headline basis, under load in every-request snapshots),
+`latencyP99` (the headline basis: under load with a load test in the window, else light load),
 `latencyDeltaPct`, `uniqueIps` (the group's distinct IPs), `requests`,
 `uptimePct`, `downtimeMinutes`, `costPer1kSuccess`, every per-range figure
 (`captchaRate`, `blockRate`, `requestSuccessRate`, `countries`, `regions`,
@@ -496,7 +505,9 @@ measured provider"): `successRate`, `successDeltaPts`, `latencyP50`, `latencyP90
 range, null without a snapshot product), `trend` (the window's success history
 thinned to at most 26 values) and `trendT` (each trend point's time, minutes
 before the build). `valueRank` is the position on the cost board of the row's
-kind (cheapest `costPer1kSuccess` first, null when unpriced).
+kind (cheapest `costPer1kSuccess` first, null when unpriced). Each row lists
+its nulls in `na` with their reasons (`naReason`, `naReasons`; api/answers/README.md,
+"Missing data"), and the answer its own (`cost.*`, `profiles` when empty).
 
 From the provider's blocks (the kind's with `kind`): `tagline`; `listRate`
 (`pricePerGbAtScale`, else `pricePerGb`), `pricePerGb`, `pricePerGbAtScale`,
@@ -595,9 +606,11 @@ Besides the summed totals and places above, a network's answer carries what
 - `profile`: the Provider's presentation (`source`, `slug`, `name`, `tagline`,
   `kinds`, `primaryKind`, `hq`, `founded`, `claim`, `verdict`, `strengths`,
   `weaknesses`, `bestFor`, `website`, `products`, `measuredProduct`, `score`,
-  `reviews`, `framework`, `na`) and the category's measured blocks as in
+  `reviews`, `framework`) and the category's measured blocks as in
   `productMeasurements.<kind>` (`pool`, `performance`, `pricing`, `trust`,
-  `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`.
+  `targets`, `ipSamples`, `incidents`, `overlap`) plus `tileRanks.<kind>`, with
+  its own `na` (the profile's null paths, such as `pricing.listRate`) and
+  reasons (api/answers/README.md, "Missing data").
   Left out: `geo` and `asns` (paged by `/places`), `series` (the chart
   answers) and `countryLatencyRanks` (the place rows carry their ranks). The whole
   provider stays in `/v1/dataset`. Beside the Provider's fields (NETWORK-EXTRAS-1):
@@ -646,6 +659,8 @@ Besides the summed totals and places above, a network's answer carries what
     this network has no cost or success rate.
   - `claimShare`: the range's `uniqueIps` ÷ `profile.pool.claimedPoolSize`
     (the old site's "pool vs claim"), null without a claimed pool size.
+  - `na`, `naReason`, `naReasons`: the range's nulls and their reasons
+    (api/answers/README.md, "Missing data").
 - the network's newest `reviews` (published), `communityRuns`, `changelog`
   and `tape` rows, at most 20 each (`build.RecordCap`; the lists are newest
   first), and `records`, the full length of each list. The whole history
@@ -653,6 +668,10 @@ Besides the summed totals and places above, a network's answer carries what
   answer's kind only (NET-RECORDS-KIND): a review's and a run's product kind
   (`residential_rotating`, ...) of that category, a tape row's `product`
   equal to it. The changelog has no product and is the network's.
+
+The answer's own nulls (`network.*`, `days[]`, `ranges.*`) and its empty
+`reviews` and `communityRuns` are in its `na`, with reasons; each record
+carries its own `na`.
 
 The all-networks answer has `profile: null`, empty `stats` and empty records.
 

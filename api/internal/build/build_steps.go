@@ -374,6 +374,9 @@ func (b *builder) assemble() error {
 	res.Pages.Rankings, res.Pages.RankingsByKind = rankings(ds, b.entries, b.stats, res.Details)
 	res.Pages.addRangeRanks()
 	res.Pages.addProtocols(b.entries, ds.Scopes)
+	if err := res.Pages.listNA(b.entries); err != nil {
+		return err
+	}
 	res.Pages.Published = publishedProducts(s, b.entries, in.Providers)
 	c := &Context{GeneratedAt: ds.GeneratedAt, Snapshot: s, Entries: b.entries, Stats: b.stats, Details: res.Details,
 		Dataset: ds, Events: &res.Events, Inputs: in, Pages: res.Pages}

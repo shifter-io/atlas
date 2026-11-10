@@ -205,16 +205,28 @@ func checkBrowserBenchmark(t *testing.T, b model.TargetBenchmark, labels map[str
 }
 
 // withoutBrowserFacts is rankings without what browser targets add to them:
-// the target counts and each row's overall browser score.
+// the target counts and each row's overall browser score (and its N/A).
 func withoutBrowserFacts(rankings map[string]*build.RankingsAnswer) map[string]build.RankingsAnswer {
 	out := map[string]build.RankingsAnswer{}
 	for key, ans := range rankings {
 		a := *ans
 		a.Targets, a.Networks = build.TargetCounts{}, append([]build.RankingRow{}, ans.Networks...)
 		for i := range a.Networks {
-			a.Networks[i].BrowserOverall = nil
+			a.Networks[i].BrowserOverall, a.Networks[i].NAList = nil, withoutBrowserNA(a.Networks[i].NAList)
 		}
 		out[key] = a
+	}
+	return out
+}
+
+// withoutBrowserNA is l without the overall browser score's paths, every
+// other path with its reason spelled out (the most common one may change).
+func withoutBrowserNA(l build.NAList) build.NAList {
+	out := build.NAList{NA: []string{}, Reasons: map[string]string{}}
+	for _, p := range l.NA {
+		if !strings.HasPrefix(p, "browserOverall") {
+			out.NA, out.Reasons[p] = append(out.NA, p), l.ReasonOf(p)
+		}
 	}
 	return out
 }

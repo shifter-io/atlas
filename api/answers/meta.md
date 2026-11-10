@@ -28,4 +28,4 @@ into the website. Map: `docs/api-web-map.md`, section 11, W7 (HC-1, HC-2, HC-3).
 | `targetCounts.cards` | integer | The targets with `card` true. |
 | `ranges[]` | `id` (`24h`, `7d`, `30d`), `label`, `short`, `days`, `bucket`, `resolution`, `axis`, `phrase` | The API's range list (`build.Ranges`, the website's `ranges.ts`). |
 | `scopes[]` | `TestScope`: `id`, `label`, `summary`, `cadence`, `targets` (ids or `"all"`), `liveIpSampling`, `poolTracking`, `overlapAudit`, `stickinessTest`, `geoCoverage`, `rationale`, `na` | `Dataset.scopes` (`site.scopes`). |
-| `na` | paths | The answer's own null fields (`grades`, `snapshot.*`, `weights.*`); `targets[]`, `profiles[]` and `scopes[]` carry their own `na`. |
+| `na`, `naReason`, `naReasons` | paths, codes | The answer's own null fields (`grades`, `snapshot.*`, `weights.*`) and `profiles` when empty (`catalog`: no `site.ranking_profiles` rows), each with its reason (`answers/README.md`, "Missing data"); `targets[]`, `profiles[]` and `scopes[]` carry their own `na`. |

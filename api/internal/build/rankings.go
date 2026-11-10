@@ -22,6 +22,8 @@ type RankingsAnswer struct {
 	Fleet       RankingFleet           `json:"fleet"`
 	Cost        CostSummary            `json:"cost"`
 	Networks    []RankingRow           `json:"networks"`
+	// NAList lists the answer's own nulls (cost, profiles); each row has its own.
+	NAList
 }
 
 // RankingRow is one network of a ranking. Position is its place in the list
@@ -66,6 +68,7 @@ type RankingRow struct {
 	// BrowserOverall is the range's overall browser success score per engine;
 	// nil (null) when the range has none.
 	BrowserOverall map[string]RowBrowserScore `json:"browserOverall"`
+	NAList
 	// successes is the range's successful requests, for the answer's fleet.
 	successes Num
 }

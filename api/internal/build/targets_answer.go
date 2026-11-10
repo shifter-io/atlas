@@ -27,6 +27,10 @@ type TargetsAnswer struct {
 	CardCount int             `json:"cardCount"`
 	Targets   []TargetEntry   `json:"targets"`
 	Networks  []TargetNetwork `json:"networks"`
+	// NAList lists every target's, network's and cell's nulls once for all
+	// of them (targets[].difficulty, networks[].cells.<target>.<field>; see
+	// listNA).
+	NAList
 }
 
 // TargetEntry is one target's meta (dataset order) with its fleet means and
@@ -48,8 +52,11 @@ type TargetEntry struct {
 	Card bool `json:"card"`
 	// Fleet is, per engine, the mean success over the networks with tries.
 	Fleet map[string]FleetMean `json:"fleet"`
-	// ScoreStatus is, per engine, the success score status the networks share.
+	// ScoreStatus is, per engine, the success score status the networks
+	// share: every engine's on a browser target, none on a network target.
 	ScoreStatus map[string]ScoreStatus `json:"scoreStatus"`
+	// measured is a target the framework measures (not catalog-only).
+	measured bool
 }
 
 // FleetMean is the unweighted mean success of Networks networks.
@@ -76,6 +83,9 @@ type TargetNetwork struct {
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall"`
 	// Cells is every measured target's figures, by target id.
 	Cells map[string]*TargetCell `json:"cells"`
+	// tried is triedTargets of the network's group; price its list rate.
+	tried map[string]bool
+	price Num
 }
 
 // TargetCell is one network's figures on one target in the range, in one
@@ -177,6 +187,9 @@ func buildTargets(c *Context) (map[string]any, error) {
 			for _, engine := range append([]string{""}, TargetEngines...) {
 				ans := &TargetsAnswer{GeneratedAt: c.GeneratedAt, Range: r.ID, Kind: kind, CardCount: cards, Targets: targets,
 					Networks: engineView(nets, measured, engine)}
+				if err := ans.listNA(engine); err != nil {
+					return nil, err
+				}
 				if engine != "" {
 					ans.Engine = model.S(engine)
 				}
@@ -245,7 +258,7 @@ func targetNetworks(entries []*entry, targets []model.TargetMeta, kind, rangeID 
 			price = listRate(pm.Pricing)
 		}
 		net := TargetNetwork{Slug: e.P.Slug, Name: e.P.Name, Rank: score.Rank, BrowserOverall: browserOverall(w),
-			Cells: targetCells(w, targets, price)}
+			Cells: targetCells(w, targets, price), tried: triedTargets(sp), price: price}
 		list = append(list, ranked{RankingRow{Name: e.P.Name, Score: score.Score}, net})
 	}
 	sort.SliceStable(list, func(i, j int) bool { return rankingLess(list[i].row, list[j].row) })
@@ -314,7 +327,7 @@ func targetEntry(t model.TargetMeta, weights map[string]Num, nets []TargetNetwor
 	}
 	te := TargetEntry{ID: t.ID, Label: t.Label, Category: t.Category, Difficulty: t.Difficulty, ScoreWeight: weight,
 		PassCondition: t.PassCondition, Engine: t.Engine, Group: t.Group, Sources: t.Sources,
-		Card: t.Group == nil && t.Source == model.SourceMeasured}
+		Card: t.Group == nil && t.Source == model.SourceMeasured, measured: t.Source == model.SourceMeasured}
 	if !te.Difficulty.OK() {
 		te.Difficulty = weight
 	}
@@ -322,6 +335,13 @@ func targetEntry(t model.TargetMeta, weights map[string]Num, nets []TargetNetwor
 		te.Sources = []string{}
 	}
 	te.Fleet, te.ScoreStatus = fleetOf(t.ID, nets)
+	if model.SV(t.Engine) == model.EngineBrowser {
+		for _, engine := range TargetEngines {
+			if _, ok := te.ScoreStatus[engine]; !ok {
+				te.ScoreStatus[engine] = ScoreStatus{Status: notEnoughData, RankedOf: nan}
+			}
+		}
+	}
 	return te
 }
 

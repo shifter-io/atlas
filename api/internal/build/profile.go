@@ -49,7 +49,7 @@ type NetworkProfile struct {
 	BrowserOverall map[string]model.BrowserOverall `json:"browserOverall,omitempty"`
 	// TileRanks is the category's precomputed ranks by range.
 	TileRanks map[string]model.TileRanks `json:"tileRanks"`
-	NA        []string                   `json:"na"`
+	NAList
 }
 
 // RangeStats is a range's WindowStats without its histories, which are the
@@ -67,6 +67,7 @@ type RangeStats struct {
 	Latency      *struct{} `json:"latency,omitempty"`
 	Pool         *struct{} `json:"pool,omitempty"`
 	Bands        *struct{} `json:"bands,omitempty"`
+	NAList
 }
 
 // ChartAnswer is /v1/networks/{slug}/chart?kind=&range=: the histories a
@@ -98,7 +99,7 @@ func networkProfile(p *model.Provider, kind string) *NetworkProfile {
 		BestFor: p.BestFor, Website: p.Website, Products: p.Products, MeasuredProduct: p.MeasuredProduct, Score: profileScore(p.Score),
 		Framework: p.Framework, Pool: m.Pool, Performance: m.Performance, Pricing: profilePricing(m.Pricing), Trust: m.Trust,
 		Targets: m.Targets, IPSamples: m.IPSamples, Incidents: m.Incidents, Overlap: m.Overlap, BrowserOverall: m.BrowserOverall,
-		TileRanks: p.TileRanks[kind], NA: p.NA}
+		TileRanks: p.TileRanks[kind]}
 }
 
 // addDetails completes every network answer with its profile, its window

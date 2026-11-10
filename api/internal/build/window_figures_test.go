@@ -68,6 +68,7 @@ func TestLatencyUnderLoadFlagAndNote(t *testing.T) {
 	t.Parallel()
 	http := "generic_http"
 	everyRequest := snap.Metrics{TimeSlots: &snap.TimeSlots{}}
+	loaded := snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyUnderLoadMs: &snap.Latency{P50: 1400}}
 	for _, c := range []struct {
 		name        string
 		m           snap.Metrics
@@ -76,9 +77,11 @@ func TestLatencyUnderLoadFlagAndNote(t *testing.T) {
 		want        *bool
 		note        *string
 	}{
-		{"under load", everyRequest, 1400, 900, &http, boolPtr(true), ptr("HTTP, under load")},
+		{"under load", loaded, 1400, 900, &http, boolPtr(true), ptr("HTTP, under load")},
 		{"light load only (older snapshot)", snap.Metrics{}, 900, nan, &http, boolPtr(false), ptr("HTTP")},
-		{"light load only (no load test)", everyRequest, nan, 900, &http, boolPtr(false), ptr("HTTP, under load")},
+		// No load test (production's cadence): the headline is the daily
+		// tests' own latency, with no second latency beside it.
+		{"light load only (no load test)", everyRequest, 900, nan, &http, boolPtr(false), ptr("HTTP")},
 		{"no latency", everyRequest, nan, nan, nil, nil, nil},
 	} {
 		ws := &WindowStats{LatencyP50: c.head, LightLatencyP50: c.light, LatencyTarget: c.target}
@@ -194,4 +197,30 @@ func sameLabels(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// Without a load test in the window (production runs none), the headline
+// latency is the daily tests' own light-load percentiles, P90 and P99
+// included, and no light-load latency is shown beside it (API-NA-2).
+func TestHeadlineLatencyWithoutALoadTestIsTheDailyTestsOwn(t *testing.T) {
+	t.Parallel()
+	light := snap.Latency{P50: 300, P90: 700, P99: 1500}
+	under := snap.Latency{P50: 900, P90: 1800, P99: 4000}
+	for _, c := range []struct {
+		name         string
+		m            snap.Metrics
+		head, beside snap.Latency
+	}{
+		{"older snapshot", snap.Metrics{LatencyMs: light}, light, naLatency},
+		{"every request, no load test", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light}, light, naLatency},
+		{"every request, a load test without P50", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light,
+			LatencyUnderLoadMs: &snap.Latency{P50: nan, P90: 1}}, light, naLatency},
+		{"every request, under load", snap.Metrics{TimeSlots: &snap.TimeSlots{}, LatencyMs: light, LatencyUnderLoadMs: &under}, under, light},
+	} {
+		head, beside := headlineLatency(c.m), lightLatency(c.m)
+		if head.P50 != c.head.P50 || head.P90 != c.head.P90 || head.P99 != c.head.P99 || !sameNum(beside.P50, c.beside.P50) ||
+			!sameNum(beside.P99, c.beside.P99) {
+			t.Errorf("%s: headline %+v beside %+v, want %+v and %+v", c.name, head, beside, c.head, c.beside)
+		}
+	}
 }

@@ -33,6 +33,8 @@ type OverlapAnswer struct {
 	Range       string           `json:"range"`
 	Networks    []OverlapNetwork `json:"networks"`
 	Market      OverlapMarket    `json:"market"`
+	// NAList lists the market's nulls; each network has its own.
+	NAList
 }
 
 // OverlapNetwork is one network's pool against the other networks of its kind.
@@ -48,6 +50,7 @@ type OverlapNetwork struct {
 	Label          model.Str        `json:"label"`
 	LikelyUpstream *OverlapUpstream `json:"likelyUpstream"`
 	Peers          []OverlapPeer    `json:"peers"`
+	NAList
 }
 
 // Pool bases: where a network's poolIps comes from.
@@ -92,7 +95,11 @@ func buildOverlap(c *Context) (map[string]any, error) {
 	out := map[string]any{}
 	for kind := range kinds {
 		for _, r := range Ranges {
-			out[overlapPath(kind, r.ID)] = OverlapFor(c, kind, r.ID)
+			ans := OverlapFor(c, kind, r.ID)
+			if err := ans.listNA(); err != nil {
+				return nil, err
+			}
+			out[overlapPath(kind, r.ID)] = ans
 		}
 	}
 	return out, nil

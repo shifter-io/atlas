@@ -216,7 +216,9 @@ type loc struct {
 
 // checkPath is why path fails in body, or "". A path passes when it
 // reaches a value at least once, and every null it reaches is null by
-// contract (a trailing ?) or listed in the `na` of an object around it.
+// contract (a trailing ?) or listed in the `na` of an object around it. A
+// path that reaches nothing passes when it stops only at empty lists or
+// objects, each listed in an `na` (no catalog profile, no review).
 func checkPath(body any, path string) string {
 	found := walk(body, path)
 	for _, l := range found {
@@ -224,10 +226,52 @@ func checkPath(body any, path string) string {
 			return "null at " + l.path(0) + ", not listed in na"
 		}
 	}
-	if len(found) == 0 {
+	if len(found) > 0 {
+		return ""
+	}
+	ends := emptyEnds(body, path)
+	for _, l := range ends {
+		if !l.inNA() {
+			return "missing (empty at " + l.path(0) + ", not listed in na)"
+		}
+	}
+	if len(ends) == 0 {
 		return "missing"
 	}
 	return ""
+}
+
+// segments is a path's keys, [] and * in order.
+func segments(path string) []string {
+	return strings.Split(strings.ReplaceAll(strings.TrimSuffix(path, "?"), "[]", ".[]"), ".")
+}
+
+// emptyEnds is every empty list ([]) or object (*) where path stops in v.
+func emptyEnds(v any, path string) []loc {
+	var out []loc
+	cur := []loc{{value: v}}
+	for _, seg := range segments(path) {
+		var next []loc
+		for _, l := range cur {
+			if (seg == "[]" || seg == "*") && isEmpty(l.value) {
+				out = append(out, l)
+			} else if l.value != nil {
+				next = append(next, l.children(seg)...)
+			}
+		}
+		cur = next
+	}
+	return out
+}
+
+func isEmpty(v any) bool {
+	switch x := v.(type) {
+	case []any:
+		return len(x) == 0
+	case map[string]any:
+		return len(x) == 0
+	}
+	return false
 }
 
 // matchPath is why a value at path does not match the regexp, or "".
@@ -253,7 +297,7 @@ func matchPath(body any, path, pattern string) string {
 // a missing key drops it.
 func walk(v any, path string) []loc {
 	out := []loc{{value: v}}
-	for _, seg := range strings.Split(strings.ReplaceAll(strings.TrimSuffix(path, "?"), "[]", ".[]"), ".") {
+	for _, seg := range segments(path) {
 		var next []loc
 		for _, l := range out {
 			if l.value == nil {
@@ -280,7 +324,7 @@ func (l loc) children(seg string) []loc {
 		}
 	case map[string]any:
 		for _, k := range slices.Sorted(maps.Keys(x)) {
-			if k == seg || seg == "*" && k != "na" {
+			if k == seg || seg == "*" && k != "na" && k != "naReason" && k != "naReasons" {
 				out = append(out, l.down(x[k], "."+k))
 			}
 		}

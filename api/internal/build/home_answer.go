@@ -49,6 +49,9 @@ type HomeAnswer struct {
 	Labels   [][]string             `json:"labels"`
 	Tape     []model.TapeEvent      `json:"tape"`
 	Profiles []model.RankingProfile `json:"profiles"`
+	// NAList lists the market's, the insights' and empty profiles' nulls; each
+	// network, tape row and profile has its own.
+	NAList
 }
 
 // HomePick is a network a market card names, with its figure.
@@ -142,6 +145,7 @@ type HomeNetwork struct {
 	Curve              HomeSeries                 `json:"curve"`
 	LatencySpark       HomeSeries                 `json:"latencySpark"`
 	SuccessSpark       HomeSeries                 `json:"successSpark"`
+	NAList
 }
 
 func buildHome(c *Context) (map[string]any, error) {
@@ -167,6 +171,9 @@ func buildHome(c *Context) (map[string]any, error) {
 		ans.Insights = homeInsights(c, rows.Networks, r.ID)
 		for _, row := range rows.Networks {
 			ans.Networks = append(ans.Networks, ans.network(row, byslug[row.Slug], c.Stats[row.Slug][r.ID], r))
+		}
+		if err := ans.listNA(rows.Networks); err != nil {
+			return nil, err
 		}
 		out[homePath(r.ID)] = ans
 	}
