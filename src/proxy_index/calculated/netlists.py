@@ -14,7 +14,10 @@ summed. A sum counts an IP that two groups of the network saw twice, so a merged
 group row's, as today) is an upper bound of its distinct IPs. p50/p90/p99 come from the member row
 with the most successes; ties go to the lowest list id, then position. Positions follow completed
 desc, ips desc, place_id, asn_label_id, NULLs last. content_hash is the sha256 of the rows (their
-text, in dimension and position order) and entries counts them by dimension name.
+text, in dimension and position order) and entries counts them by dimension name. The same
+statement counts the network's places from the merged rows (COUNTED): each dimension's distinct keys
+of the rows with IPs, as poolfig.pool_figures() counts a group's, never its rows, which are labels
+(an ASN once per usage type and name, a country once per name) and places of requests alone.
 
 A network list is written for every build and is referenced by no window: collect() keeps it only
 while its created_build is the current build or a draft whose payload prune() kept (KEPT), so each
@@ -40,7 +43,31 @@ LATENCY = ("p50", "p90", "p99")
 # The member row a merged row takes its percentiles from.
 TOP = "successes DESC NULLS LAST,list_id,position"
 ORDER = "sum(completed) DESC NULLS LAST,sum(ips) DESC,place_id NULLS LAST,asn_label_id NULLS LAST"
-# One statement per network window: the merged rows (m), the list row (l) and its rows.
+# A network window's place counts (network.PLACES): (dimension, key, condition) of each, the
+# distinct keys poolfig.pool_figures() counts with Python's truthiness: a country code, a region
+# code (else name) in its country, a city in its country and region, an ASN number. Only rows
+# with IPs count: a row of requests alone (a census location, a requested country's requests
+# without an exit address) names no place of the pool.
+REGION = "CASE WHEN p.region_code<>'' THEN p.region_code ELSE p.region END"
+COUNTED = {
+    "countries": ("c", "p.country_code", ""),
+    "regions": ("r", f"jsonb_build_array(p.country_code,{REGION})", f" AND {REGION}<>''"),
+    "cities": ("g", f"jsonb_build_array(p.country_code,{REGION},p.city)", " AND p.city<>''"),
+    "asns": ("a", "n.asn", ""),
+}
+PLACE_COUNTS = (
+    " d AS (SELECT jsonb_build_object("
+    + ",".join(
+        f"'{name}',count(DISTINCT {key}) FILTER (WHERE m.dimension='{code}' AND m.ips>0"
+        + ("" if code == "a" else " AND p.country_code<>''")
+        + f"{condition})"
+        for name, (code, key, condition) in COUNTED.items()
+    )
+    + ") AS places FROM m LEFT JOIN place_names p USING(place_id) "
+    "LEFT JOIN asn_labels USING(asn_label_id) LEFT JOIN asn_names n USING(asn_name_id))"
+)
+# One statement per network window: the merged rows (m), the list row (l), its rows and its place
+# counts (d).
 SHAPE = (
     "WITH m AS (SELECT dimension,(row_number() OVER (PARTITION BY dimension ORDER BY "
     f"{ORDER})-1)::integer AS position,place_id,asn_label_id,"
@@ -56,8 +83,9 @@ SHAPE = (
     "''),'UTF8')),'hex'),jsonb_build_object("
     + ",".join(f"'{k}',count(*) FILTER (WHERE dimension='{c}')" for k, c in DIMENSIONS.items())
     + "),'{}',%(build)s FROM m RETURNING list_id,entries),"
-    f" r AS (INSERT INTO calculated_list_rows({LIST_ROW_COLUMNS}) SELECT l.list_id,m.* FROM m,l)"
-    " SELECT list_id,entries FROM l"
+    f" r AS (INSERT INTO calculated_list_rows({LIST_ROW_COLUMNS}) SELECT l.list_id,m.* FROM m,l),"
+    + PLACE_COUNTS
+    + " SELECT list_id,entries,places FROM l,d"
 )
 # A new list takes the next id; a restored one the id its build's head names (%(list)s).
 MERGE = SHAPE.replace("<id>", "").replace("<select>", "SELECT ")
@@ -96,7 +124,7 @@ def write_network_lists(conn, build_id, payload, group_lists, ids=None):
     group_lists maps (group id, window label) to the group's list_id (what lists.persist()
     returned for each group). ids, when given, maps (network_id, label) to the list_id to write
     again (restore()): only those windows are written. Returns {(network_id, label): (list_id,
-    entries)}.
+    entries, places)}: places are the window's distinct place counts (COUNTED).
     """
     networks = defaultdict(list)
     for group in payload["products"]:
