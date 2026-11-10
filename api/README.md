@@ -284,7 +284,9 @@ editorial ones.
 
 - **Versions.** A build reads everything in one `REPEATABLE READ, READ ONLY`
   transaction (`store.Load`), assembles every response (`build.Build`), then renders
-  each one to immutable bytes. Each body is stored three ways: identity, gzip
+  each one to immutable bytes. The snapshot head and the network list counts are read
+  as the framework stored them (`calculated_snapshots.api_head`, written at
+  publication, and `calculated_lists.entries`), so neither read grows with the build. Each body is stored three ways: identity, gzip
   (level 9) and brotli (quality 11, or quality 10 with a 16 MB window above 512 KB).
   The new version is swapped in through an atomic pointer. Requests only look up
   bytes.
@@ -367,7 +369,10 @@ editorial ones.
   While the window holds ids above it, each refresh reads the events again.
 - **Network lists** (contracts K10, K11; read for a payload v4 build; API-MEM-1).
   `store.NetLists` holds only each network window's list id and row count per
-  dimension, reading the counts only of list ids it does not hold. A dimension's rows
+  dimension, reading the counts only of list ids it does not hold, from
+  `calculated_lists.entries` (the rows per breakdown name, which the framework writes
+  with the rows and which is NOT NULL since calculated v9): one row a list by the
+  primary key, whatever the lists' length, not a count of their rows. A dimension's rows
   are read from `calculated_list_rows` (by list id, in position order, in a read-only
   transaction of their own) when the build, a page or a search needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
   and ASN names shared by every list; at most 40 MB per million rows,

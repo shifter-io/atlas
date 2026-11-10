@@ -3,6 +3,7 @@ package store
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
@@ -111,9 +112,16 @@ func NewNetLists(db TxBeginner) *NetLists {
 	return n
 }
 
-// netCountSQL is the row count of each network dimension of lists $1.
-const netCountSQL = `SELECT list_id, dimension::text, count(*) FROM public.calculated_list_rows
- WHERE list_id = ANY($1) AND dimension = ANY(($2::text[])::"char"[]) GROUP BY list_id, dimension`
+// netEntries are the breakdown names of netCodes' dimensions, by which
+// calculated_lists.entries counts a list's rows (proxy-index calculated
+// list_write.py and netlists.py write it with the rows; tests/test_calc_api_head.py
+// checks these names against the rows a build stores).
+var netEntries = [len(netCodes)]string{"country", "region", "city", "asn", "city_asn"}
+
+// netCountSQL is the row counts of lists $1 by breakdown name, as the
+// framework stored them with the rows (calculated_lists.entries, NOT NULL
+// since calculated v9): a primary-key read of one row a list.
+const netCountSQL = `SELECT list_id, entries FROM public.calculated_lists WHERE list_id = ANY($1)`
 
 // Load makes n hold exactly the lists ids, reading in tx the row counts of
 // those it does not hold yet, and returns them by id. Lists not in ids are
@@ -150,11 +158,20 @@ func (n *NetLists) counts(ctx context.Context, tx pgx.Tx, ids []int64, fresh map
 	}
 	n.Fetched += len(ids)
 	var id int64
-	var code string
-	var count int
-	rows, _ := tx.Query(ctx, netCountSQL, ids, strings.Split(netCodes, ""))
-	_, err := pgx.ForEachRow(rows, []any{&id, &code, &count}, func() error {
-		fresh[id].count[strings.IndexByte(netCodes, code[0])] = count
+	var raw []byte
+	rows, _ := tx.Query(ctx, netCountSQL, ids)
+	_, err := pgx.ForEachRow(rows, []any{&id, &raw}, func() error {
+		var entries map[string]int
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return fmt.Errorf("list %d entries: %w", id, err)
+		}
+		for d, name := range netEntries {
+			n, ok := entries[name]
+			if !ok {
+				return fmt.Errorf("list %d entries have no %s count", id, name)
+			}
+			fresh[id].count[d] = n
+		}
 		return nil
 	})
 	if err != nil {

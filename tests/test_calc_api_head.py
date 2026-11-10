@@ -1,19 +1,27 @@
-"""API-LOAD-STATEMENTS-1: the head the API reads, stored when a build is published.
+"""API-LOAD-STATEMENTS-1: what the API reads at each load, stored when a build is written.
 
 calculated_snapshots.api_head (calculated v14, calculated/api_head.sql) is the v4 head without
 "parts" and "overlap", with only the every-group fleet rows: what the API built from the head on
 every load before. These tests show that both ways of publishing write it, that it is that
 projection of the stored head, that a head before v4 gets none, and that a v13 layer migrates
 without changing a stored build. api/internal/store reads one build both ways.
+
+The API reads a network list's row counts from calculated_lists.entries (NOT NULL since
+calculated v9), which list_write.py and netlists.py write with the rows: they count the stored
+rows, and the API's names of its dimensions (api/internal/store/netlists.go) are the framework's.
 """
 
+import re
+from collections import defaultdict
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from calculated_cases import benchmark_scenario
 from migration_cases import catalog
 
-from proxy_index.calculated import parts, store
+from proxy_index.calculated import netlists, parts, store
+from proxy_index.calculated.aggregate import BREAKDOWNS
 from proxy_index.calculated.calculator import calculate
 from proxy_index.storage import connect, migrate
 
@@ -21,6 +29,32 @@ pytest_plugins = ["test_storage", "calculated_template"]
 
 HEADS = "SELECT build_id,payload,api_head FROM calculated_snapshots ORDER BY build_id"
 KEPT = "build_id,content_hash,payload"
+NETLISTS_GO = Path(__file__).parents[1] / "api/internal/store/netlists.go"
+COUNTED = (
+    "SELECT l.list_id,l.cohort,l.entries,r.dimension::text,count(r.position) "
+    "FROM calculated_lists l LEFT JOIN calculated_list_rows r USING(list_id) GROUP BY 1,2,3,4"
+)
+
+
+def api_dimensions():
+    """The API's breakdown name of each network list dimension code (netCodes, netEntries)."""
+    text = NETLISTS_GO.read_text()
+    codes = re.search(r'const netCodes = "(\w+)"', text).group(1)
+    names = re.search(r"var netEntries = \[len\(netCodes\)\]string\{([^}]*)\}", text).group(1)
+    names = re.findall(r'"(\w+)"', names)
+    assert len(codes) == len(names)
+    return dict(zip(codes, names, strict=True))
+
+
+def stored_lists(database):
+    """{list_id: (cohort, entries, {dimension: rows counted})} of every stored list."""
+    lists = defaultdict(lambda: [None, None, {}])
+    with connect(database) as conn:
+        for list_id, cohort, entries, dimension, rows in conn.execute(COUNTED):
+            lists[list_id][:2] = cohort, entries
+            if dimension:
+                lists[list_id][2][dimension] = rows
+    return lists
 
 
 def expected(head):
@@ -100,3 +134,28 @@ async def test_v13_layer_gains_the_api_head_and_keeps_every_build(
         assert conn.execute(check).fetchone() == (1,)
         conn.rollback()
     assert catalog(database) == catalog(databases(template=calculated_template))
+
+
+@pytest.mark.asyncio
+async def test_list_entries_count_the_stored_rows(database, tmp_path):
+    await benchmark_scenario(database, tmp_path)
+    lists = stored_lists(database)
+    cohorts = {cohort == netlists.COHORT for cohort, _, _ in lists.values()}
+    assert cohorts == {True, False}  # group lists and network lists (the MERGE)
+    for cohort, entries, counted in lists.values():
+        names = netlists.DIMENSIONS if cohort == netlists.COHORT else BREAKDOWNS
+        assert set(entries) == set(names) and set(counted) <= set(names.values())
+        assert entries == {name: counted.get(code, 0) for name, code in names.items()}
+
+
+@pytest.mark.asyncio
+async def test_the_api_names_each_dimension_as_the_framework_counts_it(database, tmp_path):
+    api = api_dimensions()
+    assert api == {code: name for name, code in netlists.DIMENSIONS.items()}
+    await benchmark_scenario(database, tmp_path)
+    network = [v for v in stored_lists(database).values() if v[0] == netlists.COHORT]
+    assert network
+    for _, entries, counted in network:
+        assert {code: entries[name] for code, name in api.items()} == {
+            code: counted.get(code, 0) for code in api
+        }

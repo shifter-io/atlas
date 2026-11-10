@@ -349,7 +349,8 @@ func (d *DB) register(t testing.TB, c *pgx.Conn, head []byte, products []json.Ra
 var apiHead = filepath.Join("calculated", "api_head.sql")
 
 // current makes build the current calculation and writes its API head, as a
-// publication does: the API reads a v4 build's head from it.
+// publication does (the API reads a v4 build's head from it), and the
+// entries of the lists written without them (countRows).
 func current(t testing.TB, c *pgx.Conn, build int64) {
 	t.Helper()
 	ctx := context.Background()
@@ -357,6 +358,9 @@ func current(t testing.TB, c *pgx.Conn, build int64) {
 		t.Fatal(err)
 	}
 	if err := loadFramework(ctx, c, apiHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := countRows(ctx, c, false); err != nil {
 		t.Fatal(err)
 	}
 }

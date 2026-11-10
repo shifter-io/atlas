@@ -60,7 +60,7 @@ func (s *statementLog) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.T
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sql = append(s.sql, d.SQL)
-	if strings.Contains(d.SQL, "calculated_list_rows") && len(d.Args) > 0 {
+	if strings.Contains(d.SQL, "calculated_list") && len(d.Args) > 0 {
 		if ids, ok := d.Args[0].([]int64); ok {
 			s.listIDs = append(s.listIDs, ids...)
 			if d.SQL == networkCountsSQL {

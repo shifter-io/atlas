@@ -35,6 +35,9 @@ func explainDB(t *testing.T) *testdb.DB {
   SELECT 2,'g',2,place_id,1,1 FROM place_names WHERE city = 'San Jose';
  INSERT INTO test_events(at,kind,signal,severity) VALUES ('2026-11-02T15:00:00Z','pulse_down',-1,'major'),
   ('2026-11-02T16:00:00Z','latency_rise',-1,'minor'), ('2026-11-02T16:30:00Z','pulse_finished',0,'info')`)
+	c := db.Conn(t)
+	testdb.CountListRows(t, c)
+	c.Close(context.Background())
 	return db
 }
 
