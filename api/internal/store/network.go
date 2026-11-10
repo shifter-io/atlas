@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/memtrace"
 	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/jackc/pgx/v5"
 )
@@ -105,6 +106,7 @@ func (s *SnapshotRow) readNetworks(ctx context.Context, tx pgx.Tx, cache *Lists,
 	return s.setNetworks(ctx, tx, func(ids []int64) (map[int64]*NetList, error) {
 		lists, err := net.Load(ctx, tx, ids)
 		if err == nil {
+			memtrace.Mark(ctx, "list reads")
 			s.NetRows, err = net.readAll(ctx, tx, lists, NetReadParallelRows)
 		}
 		return lists, err

@@ -77,6 +77,27 @@ func (d *DB) PublishV4With(t testing.TB, payload []byte, o V4Lists) int64 {
 	return id
 }
 
+// Republish publishes the current build's head again as a new build, edited
+// by edit (its as-of an hour later, say). Its network windows name the same
+// lists, as a build that reuses every list does. It returns the build id.
+func (d *DB) Republish(t testing.TB, edit func(head []byte) []byte) int64 {
+	t.Helper()
+	ctx := context.Background()
+	c := d.Conn(t)
+	defer c.Close(ctx)
+	var head []byte
+	if err := c.QueryRow(ctx, "SELECT s.payload::text FROM calculated_snapshots s JOIN current_calculation USING (build_id)").Scan(&head); err != nil {
+		t.Fatal(err)
+	}
+	head = edit(head)
+	id := d.register(t, c, head, nil)
+	if _, err := c.Exec(ctx, "INSERT INTO calculated_snapshots VALUES ($1,$2,$3)", id, "test-"+hex.EncodeToString(randomBytes()), head); err != nil {
+		t.Fatal(err)
+	}
+	current(t, c, id)
+	return id
+}
+
 // copyNetLists gives each list of to list from's rows, from several
 // connections at once. The copies skip the foreign key checks (replica
 // mode): their names are those of rows that passed them.
