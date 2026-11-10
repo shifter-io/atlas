@@ -60,10 +60,19 @@ type ExplainParams struct {
 	// WindowMinID is those events' smallest id, where the late read starts.
 	WindowMinID int64 `json:"window_min_id"`
 	// EventCountry and EventTarget are the newest of those events' country
-	// and target, the country= and target= filters.
+	// and target, the country= and target= filters; NoEventCountry and
+	// NoEventTarget when none names one.
 	EventCountry string `json:"event_country"`
 	EventTarget  string `json:"event_target"`
 }
+
+// NoEventCountry and NoEventTarget name no country and no target: the
+// filters explain times when no event of the window names one, which
+// matches nothing, their slowest case without an index (the whole tape).
+const (
+	NoEventCountry = "ZZ"
+	NoEventTarget  = "none"
+)
 
 func fixed(sql string) func(*ExplainParams) (string, []any) {
 	return func(*ExplainParams) (string, []any) { return sql, nil }
@@ -255,7 +264,7 @@ func explainParams(ctx context.Context, tx pgx.Tx) (*ExplainParams, error) {
 // (now and 0 while there are none).
 func (p *ExplainParams) readCursor(ctx context.Context, tx pgx.Tx) error {
 	rows, err := collect(ctx, tx, eventsNewestSQL, ScanEvent, EventWindow)
-	p.CursorAt = time.Now()
+	p.CursorAt, p.EventCountry, p.EventTarget = time.Now(), NoEventCountry, NoEventTarget
 	if len(rows) > 0 {
 		p.CursorAt, p.CursorID = rows[len(rows)-1].At, rows[len(rows)-1].ID
 	}
