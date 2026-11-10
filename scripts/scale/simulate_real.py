@@ -12,6 +12,9 @@ checked as slices.py checks them: the manifest's sha256 and counts, and every re
 
 overlap() is `simulate_check.py real-overlap`: per pair of networks the distinct IPs both had,
 counted straight from the same records. Counts only, never an IP.
+
+`--real-hour-override byteful=16,none` (owner, 2026-11-10) gives one network its own real hours:
+byteful's day 1 is its real 16:00 hour, and it has no test on day 2. The notes name every override.
 """
 
 from __future__ import annotations
@@ -48,6 +51,16 @@ def hours(text: str) -> tuple[int, ...]:
     return found
 
 
+def override(text: str) -> tuple[str, tuple[int | None, ...]]:
+    """'byteful=16,none' as ('byteful', (16, None)): a network's own real hour of each day,
+    none for no test that day."""
+    network, sep, given = text.partition("=")
+    found = tuple(None if part == "none" else int(part) for part in given.split(","))
+    if not (sep and network) or not all(hour is None or 0 <= hour <= 23 for hour in found):
+        raise ValueError(f"an override is <network>=<hour>,<hour|none>: {text!r}")
+    return network, found
+
+
 def formulas(path) -> dict:
     """The formulas of a folder by network, as simulate_model.read_plan loads them."""
     names = sorted(file.stem for file in Path(path).glob("*.json"))
@@ -79,12 +92,16 @@ class Source:
     counts: dict = field(repr=False)  # (network, day) -> {country: IPs}
     releases: dict = field(repr=False)  # network -> its manifest's dbip_release
     notes: dict = field(default_factory=dict)
+    overrides: dict = field(default_factory=dict)  # network -> its own hour of each day or None
 
     @classmethod
-    def read(cls, folder, hours: tuple[int, ...], formulas: dict) -> Source:
-        """Index the source for the formulas' networks; ValueError, KeyError or OSError if it
-        is not readable or does not match its manifests."""
-        root, counts, releases = Path(folder), {}, {}
+    def read(cls, folder, hours: tuple[int, ...], formulas: dict, overrides=None) -> Source:
+        """Index the source for the formulas' networks, each on its override's hours if it has
+        one; ValueError, KeyError or OSError if it is not readable or does not match its
+        manifests."""
+        root, counts, releases, overrides = Path(folder), {}, {}, dict(overrides or {})
+        if unknown := sorted(set(overrides) - set(formulas)):
+            raise FormulaError(f"--real-hour-override: no formula for {unknown}")
         found = {path.parent.name: path.parent for path in root.glob("*/manifest.json")}
         if not set(found) & set(formulas):  # a mistyped --source, not every network missing
             raise FormulaError(f"{root.name}: no network folder of the formulas")
@@ -93,7 +110,9 @@ class Source:
             manifest = load_manifest(found[network])[1] if network in found else {"slots": {}}
             releases[network] = manifest.get("dbip_release") or {}
             schedule = formulas[network]["schedule"]
-            for day, hour in enumerate(hours, 1):
+            for day, hour in enumerate(overrides.get(network, hours), 1):
+                if hour is None:  # the override's day without a test
+                    continue
                 slot = manifest["slots"].get(f"{hour:02d}", {})
                 if slot.get("status") != "present":
                     missing[str(day)].append(network)
@@ -103,7 +122,14 @@ class Source:
                 unscheduled |= {f"{network}/{code}" for code in own if code not in schedule}
         ignored = sorted(set(found) - set(formulas))
         notes = {"hours": list(hours), "missing": missing, "unscheduled": sorted(unscheduled)}
-        return cls(str(root), hours, counts, releases, notes | {"ignored": ignored})
+        notes["ignored"] = ignored
+        if overrides:
+            notes["overrides"] = {network: list(own) for network, own in sorted(overrides.items())}
+        return cls(str(root), hours, counts, releases, notes, overrides)
+
+    def hour(self, network: str, day: int) -> int | None:
+        """The network's real hour of the day: its override's, else the day's."""
+        return self.overrides.get(network, self.hours)[day - 1]
 
     def size(self, network: str, country: str, day: int) -> int:
         return self.counts.get((network, day), {}).get(country, 0)
@@ -113,7 +139,7 @@ class Source:
         hour file, by country."""
         folder = Path(self.folder, network)
         own = slices.Network(network, folder, load_manifest(folder)[1], {}, {})
-        return slices.by_country(own, f"{self.hours[day - 1]:02d}", set(countries))
+        return slices.by_country(own, f"{self.hour(network, day):02d}", set(countries))
 
 
 def model(profile: dict, plan, seed):
@@ -185,11 +211,11 @@ class Daily(simulate_model.Daily):
         return observed, release, meta if meta.get("sha256") == release else {}
 
 
-def overlap(folder, hours: tuple[int, ...], formulas: dict) -> dict:
+def overlap(folder, hours: tuple[int, ...], formulas: dict, overrides=None) -> dict:
     """Per pair of networks the distinct IPs both had over every real hour (the 7d and 30d
     windows) and over the last (24h), from the records the daily tests carry; each network's
     own. Counts only."""
-    source = Source.read(folder, hours, formulas)
+    source = Source.read(folder, hours, formulas, overrides)
     seen = {network: [set() for _ in hours] for network in sorted(formulas)}
     for (network, day), counts in sorted(source.counts.items()):
         for rows in source.records(network, counts, day).values():
@@ -206,7 +232,8 @@ def overlap(folder, hours: tuple[int, ...], formulas: dict) -> dict:
         pairs.append({"networks": [one, other], "24h": len(seen[one][-1] & seen[other][-1])})
         pairs[-1] |= {"7d": both, "30d": both}
     found = {"hours": list(hours), "basis": BASIS, "networks": networks, "pairs": pairs}
-    return found | {key: source.notes[key] for key in ("missing", "unscheduled", "ignored")}
+    names = ("missing", "unscheduled", "ignored", "overrides")
+    return found | {key: source.notes[key] for key in names if key in source.notes}
 
 
 def main(argv=None) -> int:
@@ -216,10 +243,14 @@ def main(argv=None) -> int:
     command.add_argument("--source", required=True, help="the LC-ENRICH-1 output (read only)")
     command.add_argument("--hours", required=True, type=hours, help="the real hours, as 12,0")
     command.add_argument("--out", required=True, help="the JSON file of the counts")
+    command.add_argument(
+        "--real-hour-override", type=override, action="append", help="as byteful=16,none"
+    )
     command.add_argument("--formulas", default=str(simulate_model.FORMULAS))
     args = parser.parse_args(argv)
     try:
-        found = overlap(args.source, args.hours, formulas(args.formulas))
+        given = dict(args.real_hour_override or ())
+        found = overlap(args.source, args.hours, formulas(args.formulas), given)
     except (ValueError, KeyError, OSError) as exc:
         print(f"real-overlap: {exc!r}", file=sys.stderr)
         return 2

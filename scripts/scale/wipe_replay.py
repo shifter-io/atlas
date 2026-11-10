@@ -10,6 +10,9 @@ The dry run (the default) deletes in one transaction and rolls it back: it print
 the rows it would delete, and keeps them in wipe-dry-run.json beside the state. --apply runs
 the same transaction, commits it only when every table's count equals the dry run's, and prints
 the counts afterwards. REPLAY.md ("Wiping the replay") lists what is removed and what never is.
+In production's database (PROD-AS-STAGING-1) the dry run and --apply need target.py's three
+instead of the LAUNCH-WIPE go: --owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>",
+--i-know-this-is-production and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1.
 """
 
 from __future__ import annotations
@@ -255,14 +258,19 @@ def wipe(conn, state: dict, apply: bool) -> dict:
     }
 
 
-def refusal(args, state: dict, database: str) -> str | None:
+def refusal(conn, args, state: dict) -> tuple[str | None, dict | None]:
+    """(refusal, None), or (None, production's go record when the database is production's)."""
+    database = conn.execute("SELECT current_database()").fetchone()[0]
     if state["database"] != database:
-        return f"the state is the replay of {state['database']!r}, not of {database!r}"
+        return f"the state is the replay of {state['database']!r}, not of {database!r}", None
+    if database == target.PRODUCTION:  # the dry run too: it locks production's tables
+        acknowledged = args.i_know_this_is_production
+        return target.owner_go_refusal(conn, args.owner_go, acknowledged, runs=False)
     if not args.apply:
-        return None
+        return None, None
     if not args.owner_go:
-        return f"--apply needs --owner-go {GO_FORM}"
-    return target.go_date_refusal(args.owner_go, datetime.now(UTC).date(), GO, GO_FORM)
+        return f"--apply needs --owner-go {GO_FORM}", None
+    return target.go_date_refusal(args.owner_go, datetime.now(UTC).date(), GO, GO_FORM), None
 
 
 def run(args) -> dict:
@@ -271,12 +279,12 @@ def run(args) -> dict:
     with connect(args.database) as conn:
         # One snapshot: the counts see the wipe's deletes, not other sessions' commits.
         conn.isolation_level = IsolationLevel.REPEATABLE_READ
-        found = refusal(args, state, conn.execute("SELECT current_database()").fetchone()[0])
+        found, production = refusal(conn, args, state)
         if found:
             raise Refused(found)
         if args.apply and not dry.exists():
             raise Refused(f"no dry run ({dry}): run without --apply first")
-        result = wipe(conn, state, args.apply)
+        result = wipe(conn, state, args.apply) | {"production": production}
         if not args.apply:
             conn.rollback()
             write_private(dry, json.dumps(result, indent=2))
@@ -295,6 +303,7 @@ def main(argv=None) -> int:
     parser.add_argument("--state", required=True, help="the replay's state.json")
     parser.add_argument("--apply", action="store_true", help="delete (after a dry run)")
     parser.add_argument("--owner-go", help=f"the owner's go for --apply: {GO_FORM}")
+    parser.add_argument(target.ACKNOWLEDGE, action="store_true", help="the database is production")
     args = parser.parse_args(argv)
     try:
         result = run(args)
