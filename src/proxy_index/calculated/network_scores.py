@@ -45,20 +45,17 @@ DAILY = ("7d", "30d")
 UNPLACED = "No network place counts in this window"
 
 # Each network's distinct IPs in its window (slot: its position; kind: its kind's position),
-# then per network its IPs and those another network of its kind also has, and per pair of
-# networks of a kind the IPs they share. Rows with peer null are a network's own counts.
+# then per IP of a kind the networks that have it, and per pair (a, b) of those networks the
+# IPs they share (a = b: the network's own IPs, and those another network of its kind also has).
+# Distinct values are counted in two levels of GROUP BY, which hash, not by a DISTINCT, which
+# sorts (CALC-FLEET-DISTINCT-1).
 OVERLAP = """WITH k AS (SELECT * FROM unnest(%s::int[],%s::int[],%s::bigint[],%s::timestamptz[],
  %s::timestamptz[]) AS k(slot,kind,run_key,since,until)),
-s AS (SELECT DISTINCT k.slot,k.kind,o.ip_id FROM k JOIN ip_observations o
- ON o.run_key=k.run_key AND o.bucket_start>=k.since AND o.bucket_start<k.until),
-c AS (SELECT kind,ip_id,count(*) AS networks FROM s GROUP BY 1,2),
-m AS (SELECT s.* FROM s JOIN c USING(kind,ip_id) WHERE c.networks>1)
-SELECT s.slot,NULL::int AS peer,count(*) AS ips,count(*) FILTER (WHERE c.networks>1) AS shared
- FROM s JOIN c USING(kind,ip_id) GROUP BY 1
-UNION ALL
-SELECT a.slot,b.slot,count(*),NULL FROM m a JOIN m b ON b.kind=a.kind AND b.ip_id=a.ip_id
- AND b.slot<>a.slot GROUP BY 1,2"""
-
+s AS (SELECT k.slot,k.kind,o.ip_id FROM k JOIN ip_observations o
+ ON o.run_key=k.run_key AND o.bucket_start>=k.since AND o.bucket_start<k.until GROUP BY 1,2,3),
+ip AS (SELECT array_agg(slot) AS slots FROM s GROUP BY kind,ip_id)
+SELECT a,b,count(*) AS ips,count(*) FILTER (WHERE cardinality(slots)>1) AS shared
+FROM ip CROSS JOIN LATERAL unnest(slots) a CROSS JOIN LATERAL unnest(slots) b GROUP BY 1,2"""
 
 def overlap(conn, networks, previous, as_of):
     """{(network id, window label): overlap} of networks still holding their "_runs"
@@ -96,10 +93,10 @@ def _counted(conn, members):
         return own, pairs
     columns = [[row[n] for row in rows] for n in range(5)]
     for row in conn.cursor(row_factory=dict_row).execute(OVERLAP, columns):
-        if row["peer"] is None:
-            own[row["slot"]] = (row["ips"], row["shared"])
+        if row["a"] == row["b"]:
+            own[row["a"]] = (row["ips"], row["shared"])
         else:
-            pairs[row["slot"]][row["peer"]] = row["ips"]
+            pairs[row["a"]][row["b"]] = row["ips"]
     return own, pairs
 
 
