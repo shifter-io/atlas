@@ -84,7 +84,7 @@ def hour_file(folder: Path, hour: int, rows: list) -> dict:
     """The hour file as LC-ENRICH-1 writes it, and its manifest slot."""
     lines = []
     for ip, countries in rows:
-        place = {"country_code": next(iter(countries)), "city": "City 1", "asn": 64500}
+        place = {"country_code": "US", "city": "City 1", "asn": 64500}  # one IP, one place
         record = {"ip": ip, "seen_count": sum(countries.values()), "regions": {"r1": 1}}
         record |= {"countries": countries, "enrichment": enrichment(place | {"asn_name": "Org"})}
         lines.append(json.dumps(record | {"dbip_release": RELEASE}, separators=(",", ":")))
@@ -128,7 +128,7 @@ def real_plan(tmp_path, source: Path):
     return replace(plan, formulas=formulas(), days=3, real=real)
 
 
-def tests_of(model) -> dict:
+def daily_of(model) -> dict:
     """(network, country, day) -> {IP: request rows} of the model's daily tests."""
     found = {}
     for day in (1, 2, 3):
@@ -152,7 +152,7 @@ def test_a_days_tests_hold_the_real_records_of_its_hour(tmp_path, source):
     plan = real_plan(tmp_path, source)
     model = simulate_real.model(profile(), plan, 7)
     assert isinstance(model, simulate_real.Model) and not model.pools
-    assert tests_of(model) == expected()  # gamma none on day 1, none on the extra day
+    assert daily_of(model) == expected()  # gamma none on day 1, none on the extra day
     assert plan.real.notes == {
         "hours": [12, 0],
         "missing": {"1": ["gamma"], "2": []},
@@ -175,7 +175,8 @@ def test_a_written_test_is_its_records_spread_over_buckets(tmp_path, source):
         rows = [json.loads(line) for line in lines]
     found = {}
     for row in rows:
-        found[row["ip"]] = found.get(row["ip"], 0) + row["count"]
+        ip = str(ipaddress.ip_address(row["ip"]))
+        found[ip] = found.get(ip, 0) + row["count"]
         assert row["dbip_release"] == RELEASE and row["enrichment"]["asn"] == 64500
     assert found == expected()["alpha", "US", 2] and len(rows) >= len(found)
     report = json.loads((tmp_path / "run" / f"enrichment-{RELEASE}.json").read_text())
