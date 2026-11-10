@@ -183,6 +183,7 @@ async def test_parallel_reads_bounds_the_point_helpers_too(database, tmp_path, m
     await history(database, tmp_path, end)
     with connect(database) as conn:
         write_settings(conn, {"calculate.point_rows": 1})
+    with connect(database) as conn:
         with parallel_reads.Prefetcher(conn) as prefetch:
             prefetch.configure(3)
             assert parallel_reads.settings(conn)["parallel_reads"] == 3
