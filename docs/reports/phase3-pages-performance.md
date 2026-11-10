@@ -9,9 +9,10 @@ They are in sections 2, 4, 6 and 9. Under the issue's rule ("no miss at close") 
 merge, and closes only when every row passes.
 
 - **Code:** `main` at 0b0acf9 (2026-11-10), with #787, #788, #789 and #790 merged. Every other
-  issue of the milestone is merged or closed, except SIM-MODEL-3 (#793, PR #796 in the merge
-  queue). That issue changes only the simulator (`scripts/scale/`), not the calculation or the
-  API, and does not block this report.
+  issue of the milestone is merged or closed, apart from the fix issues of section 9.
+  SIM-MODEL-3 (#793) merged as PR #796 after this run's code was taken. It changes only the
+  simulator (`scripts/scale/`), not the calculation or the API, and the stored week was
+  generated before it.
 - **Staging only:** every step ran on #718's staging host against the staging database
   (`proxy_reviews_staging`), with credentials files that name it. No step connected to the
   production database or changed a production service, setting, firewall or credential.
@@ -51,8 +52,8 @@ merge, and closes only when every row passes.
     - **Browser bytes per page load:** up to 40% high, mostly the ChatGPT target.
     - **proxy-cheap's places:** its cities and ASNs differ a little from the reference.
   - **So the speed figures are on the cautious side:** the observation and enrichment tables,
-    the largest, are bigger than production's would be for the same tests. SIM-MODEL-3 (#793)
-    fixes the model for a future load.
+    the largest, are bigger than production's would be for the same tests. SIM-MODEL-3 (#793,
+    merged) fixes the model for a future load.
 
 ## 1. For the owner
 
@@ -248,8 +249,9 @@ server-time verdict comes from a second run at concurrency 1:
 - a shape's figures are the worst over its requests, and "(N networks)" means it was requested
   for every network's slug.
 
-**The budgets** are the strict staging budgets, `bench.StagingBudgets()` (#716, #754): each
-limit plus 20 ms of network time per request.
+**The budgets** in this run are the bench's default, `bench.DefaultBudgets()`: the strict staging
+budgets, `bench.StagingBudgets()` (#716, #754), plus `NetworkMs`, 20 ms of network time per
+request. The verdict uses the strict budgets on server time (below).
 
 | Class | Requests | Cold ms | p99 ms |
 |---|---|--:|--:|
@@ -430,7 +432,10 @@ budgets are server time.
   `load.snapshot` (269.1 ms), now take 0.06 ms and 0.04 ms. They read the values the
   calculation stores.
 - **#719's partial indexes:** the notable-event reads dropped from 1 to 4 ms to 0.03 to 0.04 ms.
-- **Every plan reads through an index.** Planning time is under 9 ms for every statement.
+- **Plans:** every statement on a large table reads through an index. The 13 sequential scans
+  are on small tables: the site catalog (0 rows on staging), `revision` (1 row), the 11
+  framework targets, the 18 products and `test_event_buckets` (5,535 rows).
+- **Planning time** is under 9 ms for every statement.
 
 ## 3. Every page against its budget
 
@@ -481,12 +486,18 @@ against the strict 10 ms.
 | every other page (9 pages) | at most 11.23 (`/proxy-index/compare`) | at most 4.23 | 10 | pass |
 
 **Result on server time: 27 of 27 pages pass.**
-- **The largest network page:** oxylabs' 40 requests sum to 6.54 ms, and byteful's, a small
-  network, to 6.82 ms.
-- **The largest single requests:** `/v1/rankings?range=7d` at 0.73 ms, then `/v1/rankings?range=30d`
-  and `/v1/targets?range=30d` at about 0.25 ms. Every other request is under 0.25 ms.
+- **Network pages:** the largest sum is infatica's 7.43 ms. Oxylabs (a large network) sums to
+  6.54 ms, and byteful (a small one) to 6.82 ms.
+- **The largest requests of a network page:**
+  - `/v1/rankings?range=7d` at 0.73 ms;
+  - infatica's `/coverage?range=30d` at 0.68 ms and rayobyte's `/chart?range=30d` at 0.66 ms;
+  - `/v1/rankings?range=30d` and `/v1/targets?range=30d` at about 0.25 ms.
+
+  Every other request of a network page is at most 0.24 ms. Outside the network pages the
+  largest is `/v1/meta` at 0.87 ms (section 2.1).
 - **The first view after a new build** is not part of the page budget. On 16 networks it sums to
-  0.4 to 2.1 s, almost all of it the coverage search of section 2.1 (#797).
+  0.86 to 2.13 s, almost all of it the coverage search of section 2.1 (#797). On byteful and
+  proxy-cheap it is 19 and 20 ms.
 
 
 ## 4. Every gap of the map
@@ -844,8 +855,9 @@ Every deviation over 10%, named:
   #784's check, which counts recurrence, finds them in line.
 - **`ip_enrichment` is 26% below this column but about twice #784's.** The generator enriched
   every IP again each day, with a new DB-IP release daily; production uses one a month (#793).
-- **`ip_observations`:** 13% more rows than this column, and 36% to 70% more observation rows
-  per IP than the reference in #784's per-IP check. The model writes more rows per IP (#793).
+- **`ip_observations`:** 13% more rows than this column, and 16% (proxy-cheap) to 70% (massive) more
+  observation rows per IP than the reference in #784's per-IP check. The issue's "47% to 70%"
+  covers 12 of the 18 networks; the other six are at 16% to 44%. The model writes more rows per IP (#793).
 - **Small tables** (`run_buckets`, `run_enrichments`, `test_runs`, `estimated_hours`): their index
   and table bytes are smaller or larger by 13% to 67%. These are megabytes a day, from the
   reference's per-run means over a small real hour.
@@ -1014,7 +1026,7 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 | #788 (SITEAPI-REBUILD-1) | the rebuild reads each list's rows once, in parallel | 95.4 s | 29.1 s |
 | #789 (API-LOAD-STATEMENTS-1) | list counts and snapshot head stored at write time | 514.6 ms and 269.1 ms | 0.06 ms and 0.04 ms |
 | #790 (CALC-FLEET-DISTINCT-1) | last-seen counts in one pass, DISTINCT counts hash-aggregated | `LAST_SEEN` 87 s, fleet 60 s (10.5 GB temp), network scores 59 s (4.1 GB temp) | `COUNTS` 71 s in 26 calls; the whole calculation's temp 11.7 GB against 57.4 GB |
-| #793 (SIM-MODEL-3) | the simulator's per-IP rows, buckets, DB-IP cadence and browser bytes | section 6.1 | PR #796 in the queue; for a future load |
+| #793 (SIM-MODEL-3) | the simulator's per-IP rows, buckets, DB-IP cadence and browser bytes | section 6.1 | merged (PR #796) after this run; for a future load |
 
 **Misses this report found, with their fix issues** (filed by the architect in this milestone;
 #720 depends on them, and this report is measured again after they merge):
