@@ -3,7 +3,7 @@
 **Status: not closed.** Three misses wait for their fixes:
 - the coverage search's first render: #797;
 - 46 map gaps on staging: #798 and #799;
-- the browser scores missing from v4 builds: its issue is requested from the architect.
+- the browser scores missing from v4 builds: #800 (URGENT SCORES-V4-1).
 
 They are in sections 2, 4, 6 and 9. Under the issue's rule ("no miss at close") this report is re-measured after those fixes
 merge, and closes only when every row passes.
@@ -104,8 +104,11 @@ Three things are not finished, and this report stays open until they are:
    of leaving the field silently empty. The other 17 are missing data in the 24-hour view, such as
    uptime when a network had no test that day.
 3. **The new browser scores do not reach the website.** The 1-to-10 scores are calculated, but
-   the newest way the API reads results skips them, so every score would show "N/A". A fix
-   is being planned.
+   the newest way the API reads results skips them, so every score would show "N/A". The fix is
+   planned and urgent. Even after it, many scores for the last 24 hours will honestly show "not
+   enough data": we test each network on each website once a day with 100 tries, and about one
+   day in seven a network has no test of a given website within the last 24 hours. The 7-day and
+   30-day scores have enough tries.
 
 The test data also has a limit: its total size equals a real week, but the two largest tables
 (what each test saw, and where each address is located) hold more rows than production's would
@@ -894,8 +897,19 @@ The cause is a gap of the v4 builds, not of the data:
   but not their `scores` or `browser_overall`;
 - the product parts that do hold them (18 parts in build 4) are not read by the v4 path.
 
-It is a miss with a fix issue (section 9). Measured again after it, this count gives the
-`not_enough_data` share.
+It is a miss: #800 (URGENT SCORES-V4-1).
+- **The cause:** the calculator scores the product groups' windows only, while a v4 build is
+  served from the head's network summaries, which are built without scores.
+- **#689's API tests passed** because their v4 fixtures had scores written in by hand.
+- **#800's fix:**
+  - scores the network summaries, ranking networks per target, window and engine;
+  - adds an end-to-end test from the calculator's own head to an API fixture;
+  - tightens the gap manifest, so a browser cell with tries must have a score status.
+
+After #800 merges, staging is recalculated and `bench --gaps` runs again. This section then
+gives, per range, how many browser cells are `ranked`, `not_enough_data`, `too_few_networks`
+and `all_similar`. With one 100-try run a day, many 24h cells are expected to be
+`not_enough_data` (13.7% of 24h windows hold no run at all, section 6.3's table).
 
 ### 6.4 Three networks' 24h figures recomputed
 
@@ -1010,7 +1024,7 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 2. **46 map gaps:** nulls not listed in `na`, 29 from staging's empty catalog and 17 from sparse
    24h data and fields never filled (section 4). Fix: #798 (API-NA-2) for the `na` reasons and three real bugs, #799 (OVERLAP-7D-1) for the 7d overlap pairs; Shifter's catalog is loaded into staging.
 3. **Browser scores missing from v4 builds:** every `scores` and `browserOverall` null in every
-   range (section 6.3). Fix issue: requested from the architect.
+   range (section 6.3). Fix: #800 (URGENT SCORES-V4-1): the network summaries get their scores, with an end-to-end test from the calculator's head.
 
 **Known limits:**
 - **`/v1/targets` size:** it fits under the 200 KB cap up to 23 networks (#735); past 22 it must
