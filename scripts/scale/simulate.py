@@ -39,6 +39,7 @@ from replay import Refused, now
 from proxy_index import storage, storage_parallel
 
 SAME = ("database", "first_day", "days", "hours_per_day", "pulses", "profile_sha256", "real_hours")
+SAME += ("real_hour_overrides",)
 # Each table of public and site with its partitions: its own bytes (with TOAST) and its indexes'.
 BYTES = (
     "SELECT n.nspname||'.'||c.relname,sum(pg_table_size(coalesce(t.relid,c.oid)))::bigint,"
@@ -67,7 +68,8 @@ def read_plan(conn, args):
     if not args.real_hours:
         return plan
     try:
-        real = simulate_real.Source.read(args.source, args.real_hours, plan.formulas)
+        given = (args.source, args.real_hours, plan.formulas, args.real_hour_override)
+        real = simulate_real.Source.read(*given)
     except (ValueError, KeyError, OSError) as exc:
         raise Refused(f"--source: {exc!r}") from None
     return replace(plan, real=real)
@@ -102,6 +104,8 @@ class Simulation(replay.Replay):
         wanted = {"database": go["database"], "first_day": args.first_day, "days": args.days + 1}
         wanted |= {"hours_per_day": args.hours_per_day, "pulses": args.pulses}
         wanted["real_hours"] = list(args.real_hours) if args.real_hours else None
+        overrides = args.real_hour_override
+        wanted["real_hour_overrides"] = {k: list(v) for k, v in overrides.items()} or None
         wanted["profile_sha256"] = hashlib.sha256(Path(args.profile).read_bytes()).hexdigest()
         if path.exists():
             state = json.loads(path.read_text())
@@ -245,7 +249,10 @@ def plan_only(args, profile: dict) -> dict:
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--database", required=True, help="credentials TOML of the database")
-    parser.add_argument("--owner-go", help=f"the owner's go: {target.GO_FORM}")
+    parser.add_argument(
+        "--owner-go", help=f"the owner's go: {target.GO_FORM} or {target.PRODUCTION_GO_FORM}"
+    )
+    parser.add_argument(target.ACKNOWLEDGE, action="store_true", help="the go is production's")
     parser.add_argument("--profile", required=True, help="the profile (SIM-PROFILE-1)")
     parser.add_argument("--days", required=True, type=int, help="simulated days")
     parser.add_argument("--first-day", required=True, help="date of simulated day 1 (UTC)")
@@ -275,6 +282,12 @@ def arguments(argv=None):
     parser.add_argument(
         "--real-hours", type=simulate_real.hours, help="the real hour of each day, as 12,0"
     )
+    parser.add_argument(
+        "--real-hour-override",
+        type=simulate_real.override,
+        action="append",
+        help="--real-hours: one network's own hours, as byteful=16,none",
+    )
     parser.add_argument("--source", help="--real-hours: the LC-ENRICH-1 output (read only)")
     parser.add_argument("--siteapi", help="base URL of a siteapi reading the database")
     parser.add_argument("--siteapi-timeout", type=float, default=600.0)
@@ -292,7 +305,11 @@ def arguments(argv=None):
     parser.add_argument("--seed", help=argparse.SUPPRESS)
     parser.add_argument("--hour-timeout", type=float, default=86400.0, help=argparse.SUPPRESS)
     parser.set_defaults(pulse_concurrency=8, node_api=None, siteapi_pid=None)
-    args = parser.parse_args(argv)
+    return checked(parser, parser.parse_args(argv))
+
+
+def checked(parser, args):
+    """The arguments, after the checks argparse cannot make; parser.error otherwise."""
     if min(args.days, args.jobs, args.batch_daily, args.connections, args.store_ahead) < 1:
         parser.error("--days, --jobs, --batch-daily, --connections, --store-ahead are at least 1")
     if (args.processes is not None and args.processes < 1) or args.ahead < 0:
@@ -310,6 +327,14 @@ def arguments(argv=None):
         parser.error("--real-hours and --source go together")
     if args.real_hours and len(args.real_hours) != args.days:
         parser.error("--real-hours names one hour for each of the --days")
+    overrides = args.real_hour_override or []
+    args.real_hour_override = dict(overrides)
+    if overrides and not args.real_hours:
+        parser.error("--real-hour-override goes with --real-hours")
+    if len(args.real_hour_override) != len(overrides):
+        parser.error("--real-hour-override names a network once")
+    if any(len(own) != args.days for own in args.real_hour_override.values()):
+        parser.error("--real-hour-override names one hour (or none) for each of the --days")
     return args
 
 

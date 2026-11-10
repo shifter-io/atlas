@@ -54,7 +54,7 @@ def test_without_the_go_staging_and_production_are_refused_as_before(staging, ca
 def test_production_is_refused_with_a_valid_go(production, capsys):
     assert check(production).startswith("the database is")
     found = check(production, GO)
-    assert "is production's: the replay runs only in 'proxy_reviews_staging'" in found
+    assert "is production's: a target only with --owner-go 'owner-go PRODUCTION-AS" in found
     assert target.main(["check", "--database", str(production), "--owner-go", GO]) == 2
     assert "refused: " in capsys.readouterr().out
 

@@ -447,9 +447,10 @@ uv run python scripts/scale/simulate.py --database <staging toml> \
   holds the first start's and each `resumed` entry its own. Exit 0 done, 2 refused (nothing written), 130
   stopped (Ctrl-C or SIGTERM).
 - **Guards**, checked before any write, are the replay's (`replay.guard`): `target.refusal`
-  with the owner's go accepts `proxy_reviews_staging` only (production is refused, with or
-  without a go); no `job_runs` row of the last 5 minutes (a live scheduler); and the extra hour
-  after the days must have ended.
+  with the owner's go accepts `proxy_reviews_staging`, and production's `proxy_reviews` only with
+  the production go, `--i-know-this-is-production` and `PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1`
+  ("Production as a second staging database" below); no `job_runs` row of the last 5 minutes
+  (a live scheduler); and the extra hour after the days must have ended.
 - Every run's summary carries `scale_replay` with the load's own id, and the state holds the
   baseline, the nodes and the days (the extra hour's day included), so `wipe_replay.py
   --state <out>/state.json` removes exactly what the load wrote.
@@ -668,3 +669,57 @@ uv run python scripts/scale/simulate_check.py real-overlap --source <LC-ENRICH-1
   mode 600, per network its product and distinct IPs, and per pair of networks the distinct
   IPs both had: over every real hour together (`7d` and `30d`) and over the last one (`24h`).
   Counts only, never an IP. The run compares it with `/v1/overlap` of the same windows.
+- `--real-hour-override <network>=<H1>,<H2|none>` (owner, 2026-11-10; repeatable, one per
+  network) gives one network its own real hour of each day instead of `--real-hours`', `none`
+  for no test that day: `byteful=16,none` makes byteful's day 1 its real 16:00 hour and gives it
+  no test on day 2. It goes with `--real-hours`, names one hour or `none` for each of the
+  `--days`, and a network once. A `none` day is not a missing hour. `--plan-only` and
+  `report.md` name every override under "Real hours" ("override byteful: day 1: 16, day 2:
+  none"); state.json keeps them (`real_hour_overrides`, and `real.overrides`), and a resume with
+  other overrides is refused. `real-overlap` takes the same option so its counts match the load.
+
+## Production as a second staging database (PROD-AS-STAGING-1)
+
+Owner decision, 2026-11-10: "the real-data two-day test (#815) uses the production database
+`proxy_reviews` as a second staging database. Production is not live yet, the owner has
+approved the shared role and credentials", and "clean the db and make the db structure up to
+date". `proxy_reviews_staging` (the 91 GB speed dataset) stays as it is.
+
+```sh
+export PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1
+GO="owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"
+uv run python scripts/scale/clean_target.py --database <production toml> --out <dir> \
+  --owner-go "$GO" --i-know-this-is-production            # dry run: read clean-dry-run.json
+uv run python scripts/scale/clean_target.py --database <production toml> --out <dir> \
+  --owner-go "$GO" --i-know-this-is-production --apply    # within the hour
+uv run proxy-index db-migrate --database-file <production toml>   # the structure up to date
+uv run python scripts/scale/simulate.py --database <production toml> --owner-go "$GO" \
+  --i-know-this-is-production --real-hours 12,0 --real-hour-override byteful=16,none ...
+```
+
+- The guard (`target.py`) accepts `proxy_reviews` only with all three: the dated go, the
+  acknowledgement and the environment variable. It prints a banner to stderr and records the
+  go, the database, the role and the UTC time in the state (`go.production`) and the report
+  (`production`). Without all three it refuses as before, naming the three.
+- **Cleaning a target.** `clean_target.py` empties every table of the public schema except
+  the kept ones, with one `TRUNCATE ... RESTART IDENTITY` (no `CASCADE`: a kept table that
+  referenced an emptied one would fail it, never be emptied with it), and drops the emptied
+  tables' partitions. Emptied: the measurement tables (runs, buckets, geo buckets,
+  observations, IPs, enrichment, memberships, pools, scopes, products' measurement rows,
+  estimated hours, batches, batch runs, test events and their buckets, outages, nodes, job
+  runs, alerts, load references) and every calculated output (builds, snapshots and parts,
+  lists and rows, windows, scores, series, overlaps, memos, roles, cohorts, labels). **Kept**,
+  row for row: `settings`, `countries`, `targets`, `runner_regions`, `methodologies`,
+  `schema_versions`, `calculation_schema`, `providers`, `products` (the seed) and the whole
+  `site` schema (the catalog); the dry run's `keep` lists them.
+- The dry run (the default) runs it in one REPEATABLE READ transaction and rolls it back. The
+  transaction first locks the emptied tables, then takes the ingest's and the calculation's
+  advisory locks, so its counts are the rows the delete removes. It prints, and writes to
+  `<out>/clean-dry-run.json` (mode 600), per table the rows it would delete (`deleted`), the kept
+  tables' rows (`kept`), the partitions and the go.
+- `--apply` needs that file, of the same database and from the last hour; it runs the same
+  transaction and commits only when every table's deleted rows equal the dry run's, else rolls
+  back. Both refuse while a `job_runs` row started in the last 5 minutes (an orchestrator
+  writes there), as `replay.py` does, and a database neither production nor staging.
+- On `proxy_reviews_staging` it takes its own go, `--owner-go "owner-go CLEAN-STAGING
+  <YYYY-MM-DD>"`, never the replay's or production's.

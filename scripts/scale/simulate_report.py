@@ -117,6 +117,9 @@ def real_lines(real: dict | None) -> list[str]:
     for day, hour in enumerate(real["hours"], 1):
         missing = ", ".join(real["missing"][str(day)]) or "none"
         lines.append(f"- day {day}: real hour {hour:02d}, networks without it: {missing}")
+    for network, own in real.get("overrides", {}).items():
+        days = (f"day {d}: {'none' if h is None else f'{h:02d}'}" for d, h in enumerate(own, 1))
+        lines.append(f"- override {network}: {', '.join(days)}")
     lines.append(f"- not in a formula's schedule: {', '.join(real['unscheduled']) or 'none'}")
     return lines + [f"- networks without a formula: {', '.join(real['ignored']) or 'none'}"]
 
@@ -168,6 +171,7 @@ def build(state: dict, profile: dict) -> dict:
     kinds = {kind: dig(profile, "reference", kind).get("basis") for kind in KINDS}
     report = {"cadence": CADENCE, "basis": BASIS | {"kinds": kinds}, "days": days}
     report |= {"first_day": state["first_day"], "resumed": len(state["resumed"])}
+    report["production"] = state["go"].get("production")  # PROD-AS-STAGING-1's go, or None
     report["real"] = state.get("real")
     if "final" in state["sizes"]:
         found = growth(state["baseline"]["sizes"], state["sizes"]["final"], expected(profile, runs))
@@ -199,6 +203,8 @@ def markdown(report: dict) -> str:
         "",
         f"Cadence: {report['cadence']}.",
     ]
+    if found := report.get("production"):
+        lines += ["", f"Production database {found['database']} used as staging: {found}."]
     head = ("Day", "Hours", "Daily", "Browser", "Pulses", "Rows", "Rows/s", "Ingest s")
     rows = [
         [d["day"], d["hours"], *(d["runs"].get(kind, 0) for kind in KINDS), d.get("rows")]

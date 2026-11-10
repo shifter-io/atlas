@@ -71,8 +71,10 @@ def memory_scope(enabled: bool = True) -> list[str]:
 
 
 def guard(conn, args) -> dict:
-    """The accepted go's record; refuse another database, a live scheduler or unended days."""
-    found = target.refusal(conn, owner_go=args.owner_go)
+    """The accepted go's record; refuse another database, a live scheduler or unended days.
+    Production's (simulate.py's acknowledgement only) keeps target's record under production."""
+    acknowledged = getattr(args, "i_know_this_is_production", False)
+    found, record = target.owner_go_refusal(conn, args.owner_go, acknowledged)
     if found:
         raise Refused(found)
     if conn.execute(LIVE).fetchone()[0]:
@@ -82,7 +84,8 @@ def guard(conn, args) -> dict:
     if last > datetime.now(UTC):
         raise Refused(f"the last simulated hour ends at {last.isoformat()}, not before now")
     database = conn.execute("SELECT current_database()").fetchone()[0]
-    return {"go": args.owner_go, "database": database, "at": now()}
+    go = {"go": args.owner_go, "database": database, "at": now()}
+    return go | ({"production": record} if record.get("production") else {})
 
 
 def first_start(args) -> datetime:

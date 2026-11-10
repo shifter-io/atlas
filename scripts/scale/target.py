@@ -5,6 +5,8 @@ Usage:
   target.py sql                       the SQL the admin role runs to create and drop the schema
   target.py check --database <toml>   read-only: may this session be written to?
   target.py check --database <toml> --owner-go "owner-go REPLAY-RUN-1 <YYYY-MM-DD>"
+  target.py check --database <toml> --owner-go "owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>"
+                  --i-know-this-is-production       (and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1)
 
 The scripts write to a database named proxy_scale, or to the schema proxy_scale of another
 database (production's proxy_reviews) when every process of the run has
@@ -14,12 +16,17 @@ create or drop a schema; the admin role does, with the SQL `target.py sql` print
 
 The one exception is the owner's go for REPLAY-RUN-1 (#614): with it, the replay alone may write
 to the staging database proxy_reviews_staging (same server as production, created empty) while it
-holds no test run but the replay's (owner_go_refusal). Production's proxy_reviews stays refused.
+holds no test run but the replay's (owner_go_refusal). Production's proxy_reviews stays refused,
+except as a second staging database (PROD-AS-STAGING-1, #817): simulate.py, wipe_replay.py and
+clean_target.py accept it only with all three of --owner-go "owner-go PRODUCTION-AS-STAGING
+<YYYY-MM-DD>", --i-know-this-is-production and PROXY_INDEX_ALLOW_PRODUCTION_TARGET=1 in the
+environment (production_refusal). generate.py, cycle.py and replay.py never pass them.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from datetime import UTC, date, datetime
@@ -41,6 +48,12 @@ STAGING = "proxy_reviews_staging"
 REPLAY_MARKER = "scale_replay"
 GO = re.compile(r"owner-go REPLAY-RUN-1 (\d{4}-\d{2}-\d{2})")
 GO_FORM = "'owner-go REPLAY-RUN-1 <YYYY-MM-DD>'"
+PRODUCTION_GO = re.compile(r"owner-go PRODUCTION-AS-STAGING (\d{4}-\d{2}-\d{2})")
+PRODUCTION_GO_FORM = "'owner-go PRODUCTION-AS-STAGING <YYYY-MM-DD>'"
+ACKNOWLEDGE = "--i-know-this-is-production"
+ALLOW = "PROXY_INDEX_ALLOW_PRODUCTION_TARGET"
+NEEDS = f"--owner-go {PRODUCTION_GO_FORM}, {ACKNOWLEDGE} and {ALLOW}=1 in the environment"
+BANNER = "*** PRODUCTION DATABASE {!r} AS STAGING: owner go {!r}, role {!r}, {} ***"
 IDENTITY = "SELECT current_database(),current_user,to_regclass('public.test_runs') IS NOT NULL"
 FOREIGN_RUNS = f"SELECT count(*) FROM public.test_runs WHERE NOT (summary ? '{REPLAY_MARKER}')"
 
@@ -59,33 +72,56 @@ def go_date_refusal(owner_go: str, today: date, pattern=GO, form=GO_FORM) -> str
     return None
 
 
-def owner_go_refusal(conn, owner_go: str) -> tuple[str | None, dict | None]:
-    """(refusal, None), or (None, the accepted go's record) when the go is the owner's, the
-    database is staging's and it holds no test run without the replay's marker. The record is
-    printed to stderr and kept in the replay's state and report."""
+def production_refusal(owner_go: str | None, acknowledged: bool, today: date) -> str | None:
+    """None only with all three: the owner's dated production go, the acknowledgement and the
+    environment's ALLOW=1; else the refusal, naming the three and the first one missing."""
+    needs = f"{PRODUCTION!r} is production's: a target only with {NEEDS}"
+    if not acknowledged:
+        return f"{needs}; {ACKNOWLEDGE} is missing"
+    if os.environ.get(ALLOW) != "1":
+        return f"{needs}; {ALLOW} is not 1"
+    found = go_date_refusal(owner_go or "", today, PRODUCTION_GO, PRODUCTION_GO_FORM)
+    return f"{needs}; {found}" if found else None
+
+
+def owner_go_refusal(
+    conn, owner_go: str | None, acknowledged: bool = False, runs: bool = True
+) -> tuple[str | None, dict | None]:
+    """(refusal, None), or (None, the accepted go's record) when the go is the owner's for the
+    database: staging's with the REPLAY-RUN-1 go, or production's with all three of
+    production_refusal; and, with `runs`, it holds no test run without the replay's marker.
+    The record is printed to stderr (production's with a banner) and kept in the state and
+    report."""
     now = datetime.now(UTC)
     database, role, has_runs = conn.execute(IDENTITY).fetchone()
     if database == PRODUCTION:
-        return f"{database!r} is production's: the replay runs only in {STAGING!r}", None
-    if database != STAGING:
-        return f"the owner's go is for {STAGING!r}, not the database {database!r}", None
-    found = go_date_refusal(owner_go, now.date())
+        found = production_refusal(owner_go, acknowledged, now.date())
+    elif database != STAGING:
+        found = f"the owner's go is for {STAGING!r}, not the database {database!r}"
+    else:
+        found = go_date_refusal(owner_go or "", now.date())
     if found:
         return found, None
-    foreign = conn.execute(FOREIGN_RUNS).fetchone()[0] if has_runs else 0
+    foreign = conn.execute(FOREIGN_RUNS).fetchone()[0] if runs and has_runs else 0
     if foreign:
         return f"{database!r} holds {foreign} test runs without the {REPLAY_MARKER!r} marker", None
     record = {"go": owner_go, "database": database, "role": role, "at": now.isoformat()}
+    if database == PRODUCTION:
+        record["production"] = True
+        print(BANNER.format(database, owner_go, role, record["at"]), file=sys.stderr)
     print(f"owner go accepted: {record}", file=sys.stderr)
     return None, record
 
 
-def refusal(conn, expected: str = SCRATCH, owner_go: str | None = None) -> str | None:
+def refusal(
+    conn, expected: str = SCRATCH, owner_go: str | None = None, acknowledged: bool = False
+) -> str | None:
     """None when the session may be written to: the database `expected`, or the schema
     proxy_scale alone on the search path; otherwise what the session is, for the refusal.
-    With the owner's go (the replay only), the staging database instead (owner_go_refusal)."""
+    With the owner's go (the replay, the load), the staging database instead, or production's
+    with its acknowledgement (owner_go_refusal)."""
     if owner_go is not None:
-        return owner_go_refusal(conn, owner_go)[0]
+        return owner_go_refusal(conn, owner_go, acknowledged)[0]
     database, schema, path = conn.execute(STATE).fetchone()
     if database == expected or (schema == SCRATCH and path == SCRATCH):
         return None
@@ -96,7 +132,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", choices=("sql", "check"))
     parser.add_argument("--database", help="credentials TOML (check)")
-    parser.add_argument("--owner-go", help=f"the owner's go for REPLAY-RUN-1: {GO_FORM}")
+    parser.add_argument("--owner-go", help=f"the owner's go: {GO_FORM} or {PRODUCTION_GO_FORM}")
+    parser.add_argument(ACKNOWLEDGE, action="store_true", help="the go is for production")
     args = parser.parse_args(argv)
     if args.command == "sql":
         print(SQL, end="")
@@ -107,7 +144,8 @@ def main(argv=None) -> int:
 
     with storage.connect(args.database) as conn:
         database, schema, path = conn.execute(STATE).fetchone()
-        found = refusal(conn, owner_go=args.owner_go)
+        acknowledged = args.i_know_this_is_production
+        found = refusal(conn, owner_go=args.owner_go, acknowledged=acknowledged)
     print(f"database {database!r}, schema {schema!r}, search_path {path!r}")
     if found and args.owner_go is not None:
         print(f"refused: {found}")
