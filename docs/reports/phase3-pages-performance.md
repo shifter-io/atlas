@@ -51,7 +51,7 @@ Three findings are follow-ups, not budget rows; section 9 has them:
        So the hour is the as-of step, as #718 did.
   7. **The staging siteapi is stopped** after the measurements.
 - **Not run:** the 200 MB download test. It waits for the owner's send-buffer change on the
-  database server (section 1, decision 5).
+  database server (section 1, Question 8).
 - **The data's limit:**
   - **Total volume is production's:** 26,936 daily tests, about 192M observation rows, 91.4 GB.
     Every speed figure in this report holds for that total.
@@ -116,8 +116,8 @@ Every number the website asks for is now either there, or empty with a reason th
 show as "N/A". For example, Carla sees "price not filled in yet" for a network whose price
 list is not written. The new 1-to-10 browser scores now reach the website. For the last 24
 hours, some show "no test in the last 24 hours". We test each network on each website once a
-day with 100 tries, so at any given hour about one network-and-website pair in six has no test
-in the last 24 hours (between one in five and one in seven). The 7-day and 30-day scores always have one.
+day with 100 tries, so about one network-and-website pair in seven has no test in the last
+24 hours on average over the week, and up to one in five at a given hour. The 7-day and 30-day scores always have one.
 
 ### What still needs attention
 
@@ -184,7 +184,8 @@ last 24 hours.
 2. **Let them follow the chosen range**
    - Visitors see the newest picture, but the score jumps when they switch.
    - For 24 hours many browser scores are missing. We test each network on each website once a
-     day, so at any hour about one in six has no test in the last 24 hours, and its score shows
+     day, so on average about one in seven (up to one in five at a given hour) has no test in the last
+     24 hours, and its score shows
      "N/A".
    - No cost; the risk is a confusing, often empty headline.
 
@@ -203,7 +204,8 @@ confusing state.
 
 **What it's about:** we test each network on each website (Google, Amazon, ChatGPT and five
 more) once a day, with 100 tries. 100 tries is exactly the least a score needs. So a 24-hour
-browser score rests on one test, and at any hour about one network-and-website pair in six has
+browser score rests on one test, and about one network-and-website pair in seven on average
+(up to one in five at a given hour) has
 no test in the last 24 hours. For example, Ana picks "24 hours" on the targets page and sees a
 score for Oxylabs on Google but "N/A" for Oxylabs on Amazon, only because Amazon's daily test
 for Oxylabs ran 26 hours ago.
@@ -214,7 +216,7 @@ for Oxylabs ran 26 hours ago.
    - Operators: a website change; the API already serves every range.
    - No cost, no risk.
 2. **Keep separate 24-hour scores**
-   - Visitors see the newest test, but about one score in six shows "N/A", and each one rests
+   - Visitors see the newest test, but about one score in seven on average (up to one in five) shows "N/A", and each one rests
      on a single 100-try test.
    - No cost; the risk is a patchy, jumpy view.
 3. **Test each network on each website twice a day**
@@ -299,7 +301,7 @@ cannot fill them in from code.
 **Your options:**
 1. **You, or someone you name, write the rows before production** (recommended)
    - Every card shows prices, trials and categories on day one.
-   - Writing time for the content before launch; the team then loads the rows with SQL.
+   - Writing time for the content before launch; the team then adds them to the database.
    - No cost, no risk.
 2. **Launch without them and add them later**
    - The pages work, with "N/A" where the catalog is empty.
@@ -644,7 +646,9 @@ against the strict 10 ms.
 
 **Result on server time: 27 of 27 pages pass.**
 - **Network pages:** the largest sum is byteful's 6.04 ms, which includes its 0.69 ms coverage
-  search; oxylabs sums to 5.42 ms. No other request of a network page is over 0.21 ms.
+  search; oxylabs sums to 5.42 ms.
+- **The largest requests of a network page:** byteful's coverage search at 0.69 ms and
+  proxyempire's reviews page at 0.48 ms. Every other network-page request is at most 0.26 ms.
 - **The first view after a new build** sums to 17 to 31 ms on a network page. The first run took
   0.86 to 2.13 s, almost all of it the cold coverage search that #797 fixed.
 
@@ -1073,7 +1077,7 @@ in two requested countries counts in each country's window.
 | Full calculation (every group recounted) "after a deploy" | 11,778 s on 9cf43c2 (window 4,508 s, writes 4,627 s in 450,298 statements, other reads 2,191 s); 1,786 s on 4315df5 | 1,720 s, as-of 03:00; 39,197 statements; peak RSS 5.39 GB; 11.7 GB temp | **2,128 s** (35.5 min), as-of 05:00; all 3,866 groups and the 7d and 30d overlap counted again (#799); 39,151 statements in 3,975 s; peak RSS 5.37 GB; 28.1 GB temp | 3,000 s (it is also an hour's build) | pass |
 | Hourly incremental calculation | 5,413 s on 9cf43c2 (writes 4,041 s in 431,293 statements, other reads 1,045 s, window 164 s) | 677 s, as-of 04:00; 64 groups recounted; 12.4 GB temp | **770 s** (12.8 min), as-of 06:00, the second build on the same code: 38 of 3,866 groups recounted, the others' lists reused; 857 statements in 862 s; peak RSS 5.34 GB; 18.9 GB temp | 3,000 s | pass |
 | siteapi full rebuild | 95.4 s (load 14.9, assemble 76.2, render 3.1) | 29.1 s; 28.2 s for the hourly build | **29.2 s** (load 18.2, assemble 6.9, render 3.0), with the row-cache warm (#797); 28.2 s for the hourly build (load 17.5, assemble 6.9, render 2.6) | 60 s | pass |
-| siteapi memory | `MemoryPeak` 4.49 GB | 3.95 GB | 3.86 GB at the second start; **the first start was killed at 5 GB** (section 9); 4.10 GB after the hourly rebuild while serving | (cap 5 GB) | see section 9 |
+| siteapi memory | `MemoryMax` 5 GB on staging; `MemoryPeak` 4.49 GB | 3.61 and 3.95 GB | 3.86 GB at the second start, 4.10 GB after the hourly rebuild while serving; **the first start was killed at 5 GB** | production's `MemoryMax` **3 GB** (plan 2.5 GB) | **over production's limit: #808** (section 9) |
 | Dataset file | 43.4 MB, about 1.1 s | 43.3 MB, about 1.1 s | 43.3 MB (gzip 6.96 MB, brotli 2.39 MB), about 1.1 s to write (the rebuild minus its load, assembly and render) | 2 s | pass |
 
 The calculation's largest statements after the deploy (final run):
@@ -1139,7 +1143,7 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 
 | Issue | What | Before | After |
 |---|---|---|---|
-| #735 (TARGETS-SIZE-1) | `/v1/targets` split per engine, under the 200 KB cap | 254,816 bytes, over the cap | at most 88,131 bytes (identity) on staging |
+| #735 (TARGETS-SIZE-1) | `/v1/targets` split per engine, under the 200 KB cap | 254,816 bytes, over the cap | at most 88,131 bytes (identity) in the first run; 132,335 bytes on 76b6fd3, after #798's `na` entries and #800's scores |
 | #739 (CI-GATE-1) | the merge queue requires `api` | red `main` merged twice | required since 2026-11-08 22:09 |
 | #745, #747 | red `main`: map row out of step; package did not compile | | fixed (section 10) |
 | #749 (EV-CURSOR-SETTLE-1) | `/v1/events?after=` never skips a late row | found in review | fixed |
@@ -1196,8 +1200,15 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
     pairs are carried, not recounted every hour.
 
 **Known limits:**
-- **`/v1/targets` size:** it fits under the 200 KB cap up to 23 networks (#735); past 22 it must
-  be paged or split by target category. Its largest body on staging is 88 KB for 18 networks.
+- **`/v1/targets` size:**
+  - **#735's limit is out of date.** It said the body fits under the 200 KB cap up to 23
+    networks, but that was worked out before #798's `na` entries and #800's scores, which made
+    the body about 50% larger.
+  - **Today's largest body** is 132,335 bytes for 18 networks (`/v1/targets`, 30d).
+  - **A bound:** if every byte grew with the number of networks, 200 KB (204,800 bytes) would hold
+    27 networks. Fixed parts (the target list, the fleet means) only raise that number.
+  - **Needs re-checking:** the limit must be checked again on the current body before a 25th
+    network is added; past it, the answer must be paged or split by target category.
 - **Staging's events:** 17,334 rows of 3 routine kinds, with no country and no target (no pulses).
   So the rare event reads were also measured on #719's synthetic year: 0.7 to 2.6 ms with the
   v15 indexes.
@@ -1205,7 +1216,8 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
   pricing row and 24 plans. The other site tables are empty: reviews, profiles, targets and
   scopes. The answers that read them were timed at that size. These tables hold at most
   hundreds of rows in production, and they are read once per build.
-- **The 200 MB download test** is not run (decision 5).
+- **The 200 MB download test** is not run (section 1, Question 8: the database server's send
+  buffers).
 - **One connection's download speed:** the database server caps each connection at about
   15 MB/s (#718's measurement), so the calculation's reads are parallel and size-first (#778).
 
