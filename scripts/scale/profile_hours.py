@@ -200,6 +200,7 @@ class Network:
     def summary(self) -> tuple[dict, dict]:
         """(the network's profile entry, its real_24h enrichment totals)."""
         days = {code: _distinct(self._country_hours(code)) for code in sorted(self.places)}
+        self.days = days  # kept by profile.py for the overlap between networks
         shared, distinct = _shared(days)
         recurrence = self.recurrence()
         recurrence["other_country"] = {

@@ -1,13 +1,14 @@
-"""SIM-GEN-1, SIM-CHECK-2: the size and statistical checks of generated hours against the plan
-and the profile (SIMULATE.md, "Checks"). Each returns {"pass", "compared", "checks"}: every
-check with its relative deviation (or points, or a distance), its limit and its verdict, never
-an absolute figure; size adds its notes."""
+"""SIM-GEN-1, SIM-CHECK-2, SIM-OVERLAP-1: the size and statistical checks of generated hours
+against the plan and the profile (SIMULATE.md, "Checks"). Each returns {"pass", "compared",
+"checks"}: every check with its relative deviation (or points, or a distance), its limit and its
+verdict, never an absolute figure; size adds its notes."""
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 
 import replay_report
+import simulate_overlap
 from profile_browser import spread
 from profile_hours import bucket
 from simulate_browser import bytes_per_load, dig, outcomes, page_load
@@ -21,6 +22,8 @@ ATTRIBUTES = {"country": ("country_code",), "asn": ("asn",)}
 ATTRIBUTES["city"] = ("country_code", "region", "city")
 TOP_K = 50  # an attribute's distance: over the profile's top 50 values and one tail bucket
 REFERENCE_IPS = 5000  # fewer IPs in a network's places: an insufficient reference
+OVERLAP = 0.20  # a pair's shared share within 20% (relative) of the profile's
+OVERLAP_IPS = 1000  # fewer shared IPs in the profile: an insufficient reference
 APPEND = ("ip_observations", "run_buckets", "test_runs", "estimated_hours", "test_events")
 NEW_IPS = ("ip_addresses", "ip_enrichment", "product_ips", "pool_ips", "scope_ips")
 INGEST = APPEND + NEW_IPS
@@ -193,19 +196,27 @@ def expected_rows(profile: dict, hours: list, day: int) -> dict:
     per IP, else the runs x the reference's rows per run of their kind. New-IP tables: the new
     IPs (day 1 all, later days the share not recurring) x the reference's rows per IP (1 for a
     table it lacks); ip_enrichment all the day's IPs on a day with a new DB-IP release (the
-    ingest enriches an IP once per release), else the new ones."""
-    runs, ips, new, enriched = Counter(), Counter(), Counter(), Counter()
+    ingest enriches an IP once per release), else the new ones. ip_addresses and ip_enrichment
+    (keyed by the IP) count an IP two networks share once: each test half its shared IPs."""
+    runs, ips, new, enriched, distinct = Counter(), Counter(), Counter(), Counter(), Counter()
     for hour in hours:
         runs.update({"daily": len(hour.daily), "browser": len(hour.browser)})
         for test in hour.daily:
             network, fresh = test.lane.network, test.size * (1 - test.lane.reuse)
             fresh = test.size if day == 1 else fresh
             ips[network], new[network] = ips[network] + test.size, new[network] + fresh
-            enriched[network] += test.size if test.model.renewed(day) else fresh
+            halves = [(n / 2, (n if day == 1 else n - r) / 2) for *_, n, r in test.blocks[1:]]
+            once = sum(half for _, half in halves)  # the other network's test counts the rest
+            distinct[network] += fresh - once
+            if test.model.renewed(day):
+                enriched[network] += test.size - sum(half for half, _ in halves)
+            else:
+                enriched[network] += fresh - once
     found = {}
     for name in INGEST:
         if name == "ip_observations" or name in NEW_IPS:
-            own = {"ip_observations": ips, "ip_enrichment": enriched}.get(name, new)
+            own = {"ip_observations": ips, "ip_enrichment": enriched}
+            own = own.get(name) or {"ip_addresses": distinct}.get(name, new)
             given = [(n, reference_ratio(profile, n, name, "ip_addresses")) for n in own]
             if name in NEW_IPS:
                 given = [(n, 1 if ratio is None else ratio) for n, ratio in given]
@@ -219,8 +230,9 @@ def expected_rows(profile: dict, hours: list, day: int) -> dict:
 
 
 def stats(profile: dict, hours) -> dict:
-    """Requests per IP, places, recurrence and browser outcomes and page loads per network."""
-    tests, runs = defaultdict(list), defaultdict(list)
+    """Requests per IP, places, recurrence and browser outcomes and page loads per network; the
+    IPs each pair of networks shares."""
+    hours, tests, runs = list(hours), defaultdict(list), defaultdict(list)
     for hour in hours:
         for test in hour.daily:
             tests[test.lane.network].append(test)
@@ -231,7 +243,44 @@ def stats(profile: dict, hours) -> dict:
         checks += daily(dig(profile, "networks", network), network, own)
     for (network, target, engine), own in sorted(runs.items()):
         checks += browser(profile, network, target, engine, own)
-    return verdict(checks)
+    return verdict(checks + overlap(profile, hours))
+
+
+def common(one, other) -> int:
+    """The IPs two tests share: the overlaps of their blocks' IP index ranges."""
+    return sum(
+        max(0, min(a + i + n, b + j + m) - max(a + i, b + j))
+        for a, i, n, _ in one.blocks
+        for b, j, m, _ in other.blocks
+    )
+
+
+def overlap(profile: dict, hours: list) -> list[dict]:
+    """Per pair of the profile's `overlap` and per network of it, the share of its tests' IPs
+    the other network's tests of the same day and country also had, against the profile's: per
+    country the profile measured, and over the countries that take the network's figure."""
+    tests = defaultdict(dict)  # (day, country) -> network -> test
+    for hour in hours:
+        for test in hour.daily:
+            tests[hour.day, test.lane.country][test.lane.network] = test
+    checks = []
+    for pair in dig(profile, "overlap").get("pairs") or []:
+        names, groups = pair["networks"], {}  # country (None: the network's) -> figures
+        for (_, country), own in sorted(tests.items()):
+            entry = simulate_overlap.source(profile, pair, country)
+            if entry is None or not all(name in own for name in names):
+                continue
+            one, other = (own[name] for name in names)
+            group = groups.setdefault(None if entry is pair else country, [entry, 0, 0, 0])
+            group[1:] = [group[1] + common(one, other), group[2] + one.size, group[3] + other.size]
+        for country, (entry, shared, *sizes) in sorted(groups.items(), key=lambda g: g[0] or ""):
+            for name, other, size in zip(names, names[::-1], sizes, strict=True):
+                check = {"kind": "overlap", "network": name, "other": other, "country": country}
+                expected = entry["shares"][name]
+                checks.append(within(check | {"check": "shared"}, shared / size, expected, OVERLAP))
+                if entry["shared"] < OVERLAP_IPS:  # reported, never failed
+                    checks[-1] |= {"insufficient_reference": True, "pass": True}
+    return checks
 
 
 def daily(shape: dict, network: str, tests: list) -> list[dict]:
@@ -316,7 +365,7 @@ def browser(profile: dict, network: str, target: str, engine: str, runs: list) -
 
 
 def label(check: dict) -> str:
-    keys = ("kind", "network", "target", "engine", "day")
+    keys = ("kind", "network", "other", "country", "target", "engine", "day")
     return " ".join(str(check[key]) for key in keys if check.get(key) is not None)
 
 

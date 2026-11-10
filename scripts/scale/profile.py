@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import profile_browser
+import profile_overlap
 import profile_reference
 import psycopg
 from profile_hours import Network, ProfileError
@@ -44,13 +45,14 @@ def networks(formulas: Path) -> list[str]:
     return found
 
 
-def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]]:
-    """(network entries, real_24h totals, gaps) from the LC-ENRICH-1 folders, one network at a
-    time (its hashes are freed before the next)."""
+def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict], dict]:
+    """(network entries, real_24h totals, gaps, overlap) from the LC-ENRICH-1 folders, one
+    network at a time (its hourly hashes are freed before the next; its distinct ones are kept
+    for the overlap)."""
     folders = {path.parent.name: path.parent for path in enrich.glob("*/manifest.json")}
     if not folders:  # a mistyped or empty --enrich: not a profile where every network is a gap
         raise ProfileError(f"{enrich.name}: no network folder with a manifest.json")
-    entries, totals, gaps = {}, {}, []
+    entries, totals, gaps, days = {}, {}, [], {}
     for name in wanted:
         if name not in folders:
             gaps.append({"source": "enrich", "network": name, "what": "no network folder"})
@@ -58,6 +60,7 @@ def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]
         network = Network(folders[name])
         network.read()
         entries[name], totals[name] = network.summary()
+        days[name] = network.days
         for hour in entries[name]["hours"]:
             if hour["status"] != "present":
                 what = f"no IPs ({hour['status']})"
@@ -66,12 +69,12 @@ def enrich_part(enrich: Path, wanted: list[str]) -> tuple[dict, dict, list[dict]
                 )
     for name in sorted(set(folders) - set(wanted)):
         gaps.append({"source": "enrich", "network": name, "what": "no formula: not profiled"})
-    return entries, totals, gaps
+    return entries, totals, gaps, profile_overlap.overlap(days)
 
 
 def build(enrich: Path, browser: list[Path], out: Path, formulas: Path = FORMULAS) -> dict:
     wanted = networks(formulas)
-    entries, totals, gaps = enrich_part(enrich, wanted)
+    entries, totals, gaps, overlap = enrich_part(enrich, wanted)
     targets, browser_totals, browser_gaps = profile_browser.profile(browser, wanted)
     for name in wanted:
         entries.setdefault(name, {})["browser"] = targets.get(name, {})
@@ -80,6 +83,7 @@ def build(enrich: Path, browser: list[Path], out: Path, formulas: Path = FORMULA
         "profile_version": PROFILE_VERSION,
         "networks": entries,
         "real_24h": totals,
+        "overlap": overlap,
         "gaps": gaps + browser_gaps,
     }
     write(out, profile)

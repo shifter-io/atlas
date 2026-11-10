@@ -62,6 +62,7 @@ uv run python scripts/scale/profile.py reference --database <toml> \
 profile_version   1
 networks          per network: product, hours, seen_count_log2, recurrence, places, browser
 real_24h          per network: the measured 24-hour totals
+overlap           per pair of networks: the IPs they share (SIM-OVERLAP-1)
 gaps              what the sources lack
 reference         per run kind: rows and bytes per run (profile.py reference)
 ```
@@ -130,6 +131,20 @@ these per-run sizes. It never turns that hourly volume into a daily one: product
 daily test per network × country per day, and each network × browser target once per 24 h
 (`docs/api-web-map.md` section 14).
 
+### `overlap` (SIM-OVERLAP-1)
+
+The IPs two networks share over the 24 hours, from the hour files: resellers and the same
+residential device sold through several pools. Counts and shares only, never an address.
+- `basis`: what is counted, the distinct IPs of the 24 hours.
+- `pairs`: one entry per pair of networks with at least one shared IP, by name; a pair that
+  shares none is absent.
+  - `networks`: the two names, in order;
+  - `shared` and `shares.<network>`: the distinct IPs both had, and that count over each
+    network's distinct IPs (any requested country);
+  - `countries.<CC>`: per country both requested with a shared IP, the same over the IPs that
+    served that country's requests (an IP is in a country when it served it at least one
+    request row). A country both requested that is absent shared none.
+
 ### `gaps`
 
 One entry per thing a source lacks: `{source, network?, hour?, target?, what}`, with `source`
@@ -180,19 +195,21 @@ are left out.
 
 ## Privacy
 
-IPs are only hashed in memory, with the process's salted 64-bit hash, to count distinct IPs
-and recurrence. The hashes are never written. The output holds counts, shares, DB-IP labels,
-network, target and country names, and nothing else. `tests/test_scale_profile.py` builds
-LC-ENRICH-1 and BP-VERIFY-3 shaped fixtures with reserved addresses only (192.0.2.0/24,
-2001:db8::/32). It checks that no input address, host name or path appears in the output bytes.
+IPs are only hashed in memory, with the process's salted 64-bit hash, to count distinct IPs,
+recurrence and the IPs networks share. The hashes are never written. The output holds counts,
+shares, DB-IP labels, network, target and country names, and nothing else.
+`tests/test_scale_profile.py` builds LC-ENRICH-1 and BP-VERIFY-3 shaped fixtures with reserved
+addresses only (192.0.2.0/24, 2001:db8::/32). It checks that no input address, host name or
+path appears in the output bytes.
 
 ## Speed and memory
 
 One pass per hour file, gzip read line by line, and one network in memory at a time. A
 network's memory is 8 bytes per (hour, country, IP), plus a set of one hour's IPs while
-recurrence is counted. Its places are bounded by its distinct DB-IP tuples. The PR (#700)
-gives the time per GB of hour files, and the peak memory, measured on a disposable server with
-a 1 GB fixture.
+recurrence is counted. Its places are bounded by its distinct DB-IP tuples. For the overlap,
+each network's distinct IPs per country stay (8 bytes each, every network's together), and
+one merge of them all counts the pairs at the end. The PR (#700) gives the time per GB of hour
+files, and the peak memory, measured on a disposable server with a 1 GB fixture.
 
 ## The generated days (SIM-GEN-1)
 
@@ -291,7 +308,8 @@ the browser settings, which must be in queue mode. The result is a plain value (
 
 Every network × scheduled country is a lane with its own block of IP indexes, as in
 `synthetic.py`: 3 of every 4 indexes are IPv4 addresses in the reserved block 240/4 while that
-space lasts, the others IPv6 in 2001:db8::/32. No real address is used. Day `d`'s window starts the
+space lasts, the others IPv6 in 2001:db8::/32. No real address is used; the IPs two networks
+share come from shared lanes ("Shared IPs" below). Day `d`'s window starts the
 network's `recurrence.share` of its size before the end of day `d − 1`'s, so that share of its
 IPs were seen the day before and the rest are new; a network without one draws it from
 `REUSE` (30–60%).
@@ -306,11 +324,38 @@ country. A long tail's city then takes its share even when its tuples are many a
 an ASN takes about one slice inside every city. A country the profile
 did not request has only tail places and synthetic's 0.5% unmatched.
 
+### Shared IPs (SIM-OVERLAP-1)
+
+Each pair of the profile's `overlap`, in each country both networks schedule, takes a share of
+each network's IPs: the country's `countries.<CC>.shares` when the profile has it, none in a
+country both requested without one, and the network's `shares` in any other country (one the
+profile did not request for both). Where both shares are above 0 the pair has a **shared
+lane** in the country (`simulate_overlap.py`): its own block of IP indexes after the
+networks' lanes, synthetic addresses only. A pair the profile lacks shares nothing, and no IP
+is shared across countries.
+
+- **A day's shared IPs** are the shared lane's window, and both networks' tests take all of
+  it, so each address appears in both. Its size is the geometric mean of the two networks'
+  share of their test sizes, so each side is within half the two sizes' mismatch of its share
+  (within about 10% with the ±10% daily jitter), never more than the network's part of its
+  lane (below). A test takes the rest of its size from its own lane.
+- **A lane whose shares add up to more than 1** has them scaled down to 1, and each pool's
+  most is its part of the lane's shares, so a test's shared IPs never exceed its size.
+- **Recurrence holds for shared IPs too:** a shared window slides from day to day like a
+  lane's, at the lower `recurrence.share` of the two networks, and the own window recurs what
+  the network's share still needs, so a test's recurrence is its network's as before. A shared
+  IP keeps its window position from day to day, and so its place and its quantile.
+- **Places:** each network draws a shared IP's place from its own country places at the
+  shared position, so its measured places hold. The ingest stores an IP's enrichment once per
+  release (`ON CONFLICT DO NOTHING`), so the database keeps the first network's.
+- **Rows:** `ip_addresses` and `ip_enrichment` are keyed by the IP, so a shared IP adds one
+  row there for the two tests; `product_ips` and `pool_ips` one per network.
+
 ### Determinism
 
 The same profile, plan and seed give equal hours and byte-identical run files, whether an hour
 is generated alone or with others: every figure is a hash of the seed and its names, and each
-lane's block is fixed by the plan.
+lane's block is fixed by the plan (a shared lane's by the plan and the profile's `overlap`).
 
 ### Checks
 
@@ -343,9 +388,11 @@ follows the owner's notes on cadence and size (2026-11-08) and `docs/api-web-map
     observations per IP. The new-IP tables (`ip_addresses`, `ip_enrichment`, `product_ips`,
     `pool_ips`, `scope_ips`) expect the day's new IPs × their rows per IP (1 where the
     reference lacks the table): all of day 1's IPs, and on a later day each network's IPs ×
-    (1 − its recurrence). `ip_enrichment` expects all the day's IPs on a day with a new DB-IP
-    release (day 1 and each monthly release day), else the new IPs. Rows the ingest does not write (`calculated_*`, `job_runs`, …) and
-    a table's rows on the day it appeared (a migration's back-fill, such as v14's
+    (1 − its recurrence). `ip_addresses` and `ip_enrichment` count a new IP two networks share
+    once (each test half of its new shared IPs). `ip_enrichment` expects all the day's IPs on
+    a day with a new DB-IP release (day 1 and each monthly release day), else the new IPs. Rows
+    the ingest does not write (`calculated_*`, `job_runs`, …) and a table's rows on the day it
+    appeared (a migration's back-fill, such as v14's
     `scope_ips`) are left out and listed in `apart`, by day.
 - `stats(profile, hours)`, for one generated day, per network:
   - requests per IP against `seen_count_log2`: total variation distance at most 0.05;
@@ -355,14 +402,25 @@ follows the owner's notes on cadence and size (2026-11-08) and `docs/api-web-map
     (real or synthetic) and unmatched. A network whose profile places hold fewer than 5,000
     IPs is reported with `insufficient_reference` and passes;
   - recurrence of the tests after day 1 against `recurrence.share`: within 5 points;
+  - the IPs a pair shares (`shared`, kind `overlap`, SIM-OVERLAP-1): per pair of the
+    profile's `overlap` and per network of it, the share of its tests' IPs that the other
+    network's tests of the same day and country also had, against the profile's share, within
+    20% relative. It is grouped per country the profile measured (`country`), and over the
+    countries that take the network's figure (`country` null). A group whose profile figure
+    has fewer than 1,000 shared IPs is reported with `insufficient_reference` and passes;
   - per target and engine, each outcome's rate against the expected counts: within 2 points;
     the successful tries' page-load p50 against the reference's: within 10%.
 
 `tests/test_scale_simulate_model.py` builds a synthetic profile (2 networks, 3 countries, 2
 browser targets) and checks the cadence, the sizes, the ingest of a generated test and bundle,
 determinism, recurrence, pulses only when switched on, and both checks passing on generated
-days and failing on shifted ones. `tests/test_scale_simulate_check.py` covers each rule of
-SIM-CHECK-2, the bytes per load and the long tail on the same profile.
+days and failing on shifted ones. `tests/test_scale_simulate_overlap.py` (SIM-OVERLAP-1)
+builds a profile's overlap from hour files without an address. On a synthetic profile with 3
+networks and 2 shared pairs it checks that the generated pairs share at the profile's shares,
+per country and over the network, that no other pair shares an IP, that shared IPs recur, the
+`shared` check passing and failing a shifted profile, the new-IP rows counting a shared IP
+once, and a lane's shares above 1 scaled down. `tests/test_scale_simulate_check.py` covers
+each rule of SIM-CHECK-2, the bytes per load and the long tail on the same profile.
 `tests/test_scale_simulate_shape.py` (SIM-MODEL-3) checks the buckets per run and per IP
 against a reference's distributions, the monthly release with a week of one lane through the
 real ingest (`ip_enrichment` grows by the new IPs, and by every IP on the release day), a run's

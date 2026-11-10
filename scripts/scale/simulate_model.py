@@ -9,9 +9,10 @@ hour(profile, plan, seed, day, hour) returns the runs production runs in one UTC
 - no HTTP pulse, census or load wave, unless the plan has pulses (load_plan(pulses=True); see
   docs/api-web-map.md section 14).
 Sizes and shapes come from the profile (SIM-PROFILE-1), else the formulas; addresses from
-synthetic.py's lanes, one block per network x country. Everything is a pure function of
-(profile, plan, seed): the model touches no database, and an hour comes out the same whether it
-is generated alone or with others. load_plan reads the plan once from a database.
+synthetic.py's lanes, one block per network x country, and simulate_overlap.py's shared lanes.
+Everything is a pure function of (profile, plan, seed): the model touches no database, and an
+hour comes out the same whether it is generated alone or with others. load_plan reads the plan
+once from a database.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from typing import Any
 
 import cycle_steps
 import simulate_browser
+import simulate_overlap
 import simulate_shape
 import synthetic
 import writer
@@ -125,6 +127,7 @@ class Model:
         offset = 0
         for network in sorted(plan.formulas):
             offset = self._lanes(network, offset)
+        self.pools = simulate_overlap.pools(profile, self.lanes, offset, plan.days)
 
     def _lanes(self, network: str, offset: int) -> int:
         """Add a network's lanes from `offset`, each with a block for every day; the next free."""
@@ -154,24 +157,18 @@ class Model:
         """A factor within 1 +- spread, fixed by the seed and the parts."""
         return 1 + spread * (2 * unit(self.seed, *parts) - 1)
 
-    def window(self, lane: Lane, day: int) -> tuple[int, int, int]:
-        """(first position, size, positions also used the day before) of a lane on a day."""
-        start = end = size = recurring = 0
-        for d in range(1, day + 1):
-            before = size
-            size = max(1, round(lane.ips * self.jitter("size", lane.network, lane.country, d)))
-            recurring = min(round(lane.reuse * size), before)
-            start, end = end - recurring, end - recurring + size
-        return start, size, recurring
+    def size(self, lane: Lane, day: int) -> int:
+        """A lane's unique IPs on a day."""
+        return max(1, round(lane.ips * self.jitter("size", lane.network, lane.country, day)))
 
     def daily(self, lane: Lane, day: int) -> Daily:
-        first, size, recurring = self.window(lane, day)
+        blocks, size = simulate_overlap.blocks(self, lane, day), self.size(lane, day)
         k = key(self.seed, "daily", lane.network, lane.country, day)
         started = self.plan.day_start(day) + timedelta(hours=lane.hour, minutes=5 * (1 + k % 8))
         # The network's buckets per run, its lanes (consecutive positions) spread over them.
         u = (lane.position * PHI + day * ROOT2) % 1
         buckets = max(1, min(self.buckets[lane.network].per_run(u), size))
-        return Daily(self, lane, day, first, size, recurring, started, buckets)
+        return Daily(self, lane, day, blocks, size, started, buckets)
 
     def released(self, day: int) -> date:
         """The date of the DB-IP release the day's tests are enriched with: one a month."""
@@ -257,11 +254,14 @@ class Daily:
     model: Model = field(repr=False, compare=False)
     lane: Lane
     day: int
-    first: int  # first window position of the lane
+    blocks: tuple  # simulate_overlap.blocks: the lane's, then its shared lanes'
     size: int  # unique IPs
-    recurring: int  # IPs the lane's test of the day before also had
     started_at: datetime
     buckets: int
+
+    @property
+    def recurring(self) -> int:  # IPs the lane's test of the day before also had
+        return sum(block[3] for block in self.blocks)
 
     @property
     def run_id(self) -> str:
@@ -278,10 +278,12 @@ class Daily:
         lane, model = self.lane, self.model
         places = model.places(lane.network, lane.country)
         cdf, ranges = simulate_shape.requests(model.profile, lane.network)
-        for p in range(self.first, self.first + self.size):
-            n, u = lane.offset + p, self.quantile(p)
-            low, high = ranges[min(bisect.bisect_right(cdf, u), len(ranges) - 1)]
-            yield n, p, low + mix(n ^ model.salt ^ self.day) % (high - low + 1), places.pick(p, n)
+        for offset, first, count, _ in self.blocks:
+            for p in range(first, first + count):
+                n, u = offset + p, self.quantile(p)
+                low, high = ranges[min(bisect.bisect_right(cdf, u), len(ranges) - 1)]
+                rows = low + mix(n ^ model.salt ^ self.day) % (high - low + 1)
+                yield n, p, rows, places.pick(p, n)
 
     def quantile(self, p: int) -> float:
         """The IP's quantile of the day: its request rows and its buckets both follow it."""
