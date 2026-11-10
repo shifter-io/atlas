@@ -562,6 +562,11 @@ touched. The framework schema is calculated v10 (v9 and its memo tables). The su
     rewrites them; `api/answers/README.md`)
   - the committed fixtures as v4 builds answer as main did before browser targets
     (`testdata/answers-v4.json`)
+  - **the calculator's browser scores are served**: `api/fixtures/measured/head-v4-browser-scores.json`,
+    the API head of a build the framework calculated and published
+    (`tests/test_calc_network_target_scores.py` writes it with `SCORES_V4_FIXTURE_WRITE=1`),
+    gives every network's ranked `scores` and `browserOverall` in `/v1/targets` and
+    `/v1/networks/{slug}`
   - headers, ETag per coding, 304 (strong, weak, other coding, `*`), HEAD, 405, 404
   - brotli and gzip bodies decode to the identity bytes
   - rebuild only on change

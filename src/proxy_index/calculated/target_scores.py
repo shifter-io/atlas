@@ -2,7 +2,8 @@
 browser pulse K-BP6, docs/index.html).
 
 score() runs once per build, after every product window is built, over all product groups of
-each window label. For each browser target and engine it ranks the networks with at least
+each window label, and again over the network summaries of payload v4 (score_networks()), the
+windows the API reads. For each browser target and engine it ranks the networks with at least
 MIN_REQUESTS completed tries of that engine on three outcome rates (success: `ok`, higher is
 better; challenge and block, lower is better) and scores rank r of M as 1 + 9 x (M - r) / (M - 1),
 ties sharing the average of their ranks. Engines are never mixed: Chrome tries never move a
@@ -18,6 +19,8 @@ from __future__ import annotations
 import copy
 import math
 from collections import defaultdict
+
+from .policy import browser_difficulty
 
 # A network is ranked for a target only with this many completed tries of the engine in the
 # window (the standard error of a rate near 50% is 5 points at 100 tries, 7 at 50).
@@ -51,6 +54,17 @@ def score(products, difficulty, groups):
     for windows in by_label.values():
         _target_scores(windows)
         _overall(windows, counted)
+
+
+def score_networks(networks, config):
+    """score() of a build's network summaries (network.summaries()), each kind's networks
+    ranked against each other per target, window and engine. config: the methodology."""
+    kinds = defaultdict(list)
+    for entry in networks:
+        kinds[entry["kind"]].append(entry)
+    difficulty = browser_difficulty(config)
+    for peers in kinds.values():
+        score(peers, difficulty, config.get("target_groups", {}))
 
 
 def _target_scores(windows):

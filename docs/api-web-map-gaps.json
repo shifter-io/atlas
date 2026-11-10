@@ -999,19 +999,19 @@
     {
      "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
      "paths": [
-      "networks[].cells.*.scores.success.status?"
+      "networks[].cells.*.scores.success.status"
      ]
     },
     {
      "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
      "paths": [
-      "networks[].cells.*.scores.success.status?"
+      "networks[].cells.*.scores.success.status"
      ]
     },
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].browserOverall.*.success.status?"
+      "networks[].browserOverall.*.success.status"
      ]
     }
    ]
@@ -1058,7 +1058,7 @@
     {
      "request": "/v1/rankings?range={range}",
      "paths": [
-      "networks[].browserOverall.*.success.status?"
+      "networks[].browserOverall.*.success.status"
      ]
     }
    ]
@@ -1403,7 +1403,7 @@
     {
      "request": "/v1/rankings?range={range}",
      "paths": [
-      "networks[].browserOverall.*.success.status?"
+      "networks[].browserOverall.*.success.status"
      ]
     }
    ]
@@ -2277,19 +2277,19 @@
     {
      "request": "/v1/targets?kind=residential&range={range}&engine=camoufox",
      "paths": [
-      "networks[].cells.*.scores.success.status?"
+      "networks[].cells.*.scores.success.status"
      ]
     },
     {
      "request": "/v1/targets?kind=residential&range={range}&engine=chrome",
      "paths": [
-      "networks[].cells.*.scores.success.status?"
+      "networks[].cells.*.scores.success.status"
      ]
     },
     {
      "request": "/v1/targets?kind=residential&range={range}",
      "paths": [
-      "networks[].browserOverall.*.success.status?"
+      "networks[].browserOverall.*.success.status"
      ]
     }
    ]
