@@ -64,3 +64,32 @@ registry (`testdata/answers-v4.json` and the build package's `network-one-group`
 `network-long-lists`) leave registered answers out, so a new answer changes only its own file;
 an answer with `InDataset` also changes `dataset.json`, whose file holds its bodies (the
 `/v1/events/stats` ones at the case's fixed time).
+
+## Missing data
+
+Every page answer follows the API's rule (`api/README.md`): a field is always present, a
+value the API does not have is `null`, and the entity it belongs to lists its path in `na`.
+The answers added from Phase 3 (`/v1/rankings`, `/v1/networks/{slug}`'s `profile`, `stats`
+and own fields, `/v1/home`, `/v1/targets`, `/v1/overlap`, `/v1/meta`) also say why, with a
+reason code from the fixed set below (`build/answer_na.go`):
+
+| Code | Why the field is null |
+|---|---|
+| `catalog` | It comes from a `site.*` catalog row that does not exist: list rates (`listRate`, `pricePerGb`, `pricePerGbAtScale`, `priceLabel`), trial (`trial`, `trialKind`, `hasTrial`), anything priced (`costPer1kSuccess`, `costRank`, `valueRank`, the cost summary's and the home's cheapest, dearest and spread, an `alternative`) when the network has no list rate, `claimShare` without a claimed pool size, `kycVerified`, `consentDisclosed`, `stickinessAdvertised`, `protocol.summary` and `.schedule`, a target's `difficulty`, `passCondition` and `category`, editorial text, empty `profiles`, and a network's empty `reviews` and `communityRuns`. |
+| `not_measured` | The network, target or figure has no test in production's cadence (docs/api-web-map.md section 14): a `generic_https` cell, a target or engine with no try in the network's 30-day window, a catalog network, latency without a latency test, TTFB, blocklist, stickiness and leak checks. |
+| `no_run_in_window` | The network or target is measured but has no run in this window (a 24h browser cell, a network window without requests, the home's hardest target with no network's success). |
+| `no_evidence` | Availability without monitoring evidence in the window: `uptimePct`, `downtimeMinutes`, incident counts. |
+| `not_computed_for_window` | Computed for other windows only: `/v1/overlap` in 24h (overlap pairs are computed for 7d and 30d). |
+| `insufficient_data` | The calculator published null for another stated reason (a score not ready, a delta without an earlier window, an outcome not classified). |
+
+An entity carries the codes beside its `na`: `naReason` is the most common one, and
+`naReasons` maps each path whose code differs to it (both left out when `na` is empty), so a
+path's reason is `naReasons[path]`, else `naReason`. `/v1/targets` lists its targets',
+networks' and cells' nulls once at its root, as a list's elements are listed
+(`targets[].difficulty`, `networks[].rank`, `networks[].cells.<target>.costPer1kSuccess`),
+each with the reason most of those entities have: per-cell lists would add about a kilobyte
+per network to a body sized for 23 networks.
+
+`TestEveryPhase3AnswerListsItsNulls` (build package) checks every answer of a
+production-sized build without catalog rows: every null is listed in an `na` around it or
+null by contract (api/FIELDS.md), and every listed path is null or empty.

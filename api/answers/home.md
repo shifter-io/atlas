@@ -29,6 +29,7 @@ its follow-up W6b, the insight cards (HOME-27, HOME-29 to HOME-31, HOME-35, HOME
 | `labels` | list of label lists | Every distinct label list of the networks' series, once. A series' `labels` is its index here, so networks on the same schedule share one list. Each label is the old site's `bucketLabel` ("now", "5 min ago", "3h 10m ago", "2 days ago") of the point's age before its window's end. |
 | `tape[]` | `TapeEvent` (`id`, `kind`, `providerSlug`, `providerName`, `product`, `title`, `detail`, `signal`, `value`, `agoSeconds`, `at`, `source`, `na`) | The first 25 rows of the dataset's tape: the measured test events mapped by `TapeFromEvents`, newest first, then the editorial rows. A client ages them from `at`. |
 | `profiles[]` | `id`, `label`, `description`, `weights`, `na` | `Dataset.profiles` (`site.ranking_profiles`). |
+| `na`, `naReason`, `naReasons` | paths, codes | The market's and insights' nulls, and `profiles` or `insights.hardestRates` when empty, each with its reason (`answers/README.md`, "Missing data"): no list rate is `catalog` (`market.cheapest`, `insights.value.best`), no latency test `not_measured` (`market.medianLatency`, `market.fastest`). Each `networks[]` row, tape row and profile carries its own. |
 
 ### `market`
 
@@ -76,7 +77,7 @@ W2). Every list may be empty; a figure the build does not have is null, never in
 
 The scalar figures are the network's ranking row of the range (`/v1/rankings?range=`, W2), as
 it is there; only the curve, the sparks, `schedule`, `lightLatencyP50`, `claimed`, `claimShare`
-and `incidents` are added.
+and `incidents` are added, with the row's own `na`, `naReason` and `naReasons`.
 
 | Field | Source |
 |---|---|

@@ -42,6 +42,7 @@ is stored per kind and range (`/v1/overlap/<kind>/<range>`), precomputed with th
 | `market.basis` | `kind_fleet` or `sum_of_pools_minus_shared_ips`: which `distinctIps` is. The second counts an IP held by three or more pools more than once. | |
 | `market.duplicatedShare` | `1 − distinctIps / sumOfPools` (at least 0); null with no pool. | |
 | `market.likelyResellers` | The slugs of the networks with a `likelyUpstream`, the largest `shareOfOurs` first. | |
+| `na`, `naReason`, `naReasons` | The market's nulls with their reason; each `networks[]` row carries its own, with `peers` when empty. In 24h the reason is `not_computed_for_window` (the calculator computes overlap pairs for 7d and 30d only), else `insufficient_data`; `likelyUpstream` is null by contract (`answers/README.md`, "Missing data"). | |
 
 Every figure of a body is on one basis: this kind's and this range's measured pools and pairs. It
 never mixes 24h pools with 30d pairs, the defect of the dataset's `totals.distinctIpsAcrossFleet`

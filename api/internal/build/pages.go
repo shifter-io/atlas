@@ -193,6 +193,9 @@ type NetworkAnswer struct {
 	Changelog     []model.ChangeEvent    `json:"changelog"`
 	Tape          []model.TapeEvent      `json:"tape"`
 	Records       RecordCounts           `json:"records"` // full lengths of the four lists, each capped at RecordCap
+	// NAList lists the answer's own nulls and empty reviews and runs; the
+	// profile, each range's stats and each record carry their own.
+	NAList
 }
 
 // CountryIndexRow is one country of /v1/countries (30-day window); IpsSum

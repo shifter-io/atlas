@@ -33,9 +33,9 @@ type MetaAnswer struct {
 	TargetCounts TargetCounts           `json:"targetCounts"`
 	Ranges       []RangeMeta            `json:"ranges"`
 	Scopes       []model.TestScope      `json:"scopes"`
-	// NA lists the answer's own null fields; targets, profiles and scopes
-	// carry their own.
-	NA []string `json:"na"`
+	// NAList lists the answer's own null fields and empty profiles;
+	// targets, profiles and scopes carry their own.
+	NAList
 }
 
 // MetaSnapshot names the published calculation (all null without one).
@@ -76,7 +76,8 @@ func buildMeta(c *Context) (map[string]any, error) {
 	if m.Targets, m.TargetCounts, err = metaTargets(ds.Targets, scoreWeights(c.Snapshot)); err != nil {
 		return nil, err
 	}
-	if m.NA, err = naOf(m, nil, false, "profiles", "targets", "ranges", "scopes"); err != nil {
+	f := naFacts{measured: true, ran: true, priced: true}
+	if err = m.NAList.list(m, []string{"profiles"}, f.code, "profiles", "targets", "ranges", "scopes"); err != nil {
 		return nil, err
 	}
 	return map[string]any{metaPath: m}, nil

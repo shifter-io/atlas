@@ -15,7 +15,9 @@ passthrough. Open pages poll `/v1/version` to update in place when the data chan
 - Missing data is explicit. Every field is always present. A value the API does not
   have is JSON `null`, and every entity carries an `na` array listing the paths of its
   missing fields. `/v1/coverage` reports every gap with the reason and the table
-  or column that would fill it. `api/FIELDS.md` maps every field to its source.
+  or column that would fill it; the page answers added from Phase 3 give each path
+  a reason code beside it (`naReason`, `naReasons`: api/answers/README.md, "Missing
+  data"). `api/FIELDS.md` maps every field to its source.
 - There are no demo networks. Every network comes from the framework (its published
   snapshot and provider list) or from a catalog row in `site.providers`. Rows an earlier
   build loaded as `is_demo = true` (the four design networks) are never read; `seed-demo`
@@ -172,11 +174,14 @@ as `networks[].cells.*.engines.*.scores.success.status`. It passes in an answer 
 a value at least once (a list element or key without it is skipped, an empty list reaches
 nothing) and every null it reaches is explained: listed in the `na` of an object around it
 (by its path from that object, list positions and `[<id>]` keys compared as `[]`), or null by
-contract, which the path marks with a trailing `?`. `match` gives a regexp every value at a
+contract, which the path marks with a trailing `?`. A path that reaches nothing passes when
+every place it stops is an empty list or object listed in such an `na` (such as `profiles`
+without catalog profiles, or a network's `reviews` before its first review); otherwise it is
+`missing`, naming the first unlisted empty list. `match` gives a regexp every value at a
 path must match (a number as its JSON text), such as `^residential$` for a `kind=` filter.
 
 A gap passes when every path passes in every answer of its checks; it fails with the first
-failing request of each path and why (`missing`, `null at <path>, not listed in na`, a value
+failing request of each path and why (`missing`, `missing (empty at <path>, not listed in na)`, `null at <path>, not listed in na`, a value
 that does not match, or a request that does not answer 200). `gaps.json` and `gaps.md` are
 written beside `bench.json` and `bench.md`: the counts, then every gap with its verdict and
 evidence; `website`, `owner` and `withdrawn` gaps are listed with their reason and no verdict.

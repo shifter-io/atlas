@@ -11,6 +11,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Zeus-Development/proxy-index/api/internal/server"
+	"github.com/Zeus-Development/proxy-index/api/internal/store"
+	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
 
 // gapServer answers the bench's shape requests, a list answer per range
@@ -130,25 +134,29 @@ func TestExpandCheck(t *testing.T) {
 func TestCheckPath(t *testing.T) {
 	var body any
 	err := json.Unmarshal([]byte(`{"rows":[{"a":1,"b":null,"c":{"d":null}},{"a":2,"b":3}],"empty":[],"cells":{"x":{"e":{"chrome":{"s":"ranked"}}},"y":{}},
-		"keyed":{"targets":[{"target":"t1","v":null}],"na":["targets[t1].v"]},"num":5,"na":["rows[].c.d"]}`), &body)
+		"keyed":{"targets":[{"target":"t1","v":null}],"na":["targets[t1].v"]},"num":5,"na":["rows[].c.d"],
+		"listed":{"profiles":[],"m":{},"na":["profiles","m"]}}`), &body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cases := map[string]string{
-		"rows[].a":          "",
-		"rows[].b":          "null at rows[].b, not listed in na",
-		"rows[].b?":         "",
-		"rows[].c.d":        "", // in the root's na
-		"rows[].c.d.e":      "", // a null ancestor in na
-		"rows[].z":          "missing",
-		"empty[].a":         "missing",
-		"empty":             "",
-		"cells.*.e.*.s":     "", // y has no e: one place is enough
-		"cells.*.f":         "missing",
-		"keyed.targets[].v": "",
-		"num[]":             "missing",
-		"num.x":             "missing",
-		"num.*":             "missing",
+		"rows[].a":             "",
+		"rows[].b":             "null at rows[].b, not listed in na",
+		"rows[].b?":            "",
+		"rows[].c.d":           "", // in the root's na
+		"rows[].c.d.e":         "", // a null ancestor in na
+		"rows[].z":             "missing",
+		"empty[].a":            "missing (empty at empty, not listed in na)",
+		"listed.profiles[].id": "", // an empty list listed in na
+		"listed.m.*.s":         "",
+		"listed.x[].id":        "missing",
+		"empty":                "",
+		"cells.*.e.*.s":        "", // y has no e: one place is enough
+		"cells.*.f":            "missing",
+		"keyed.targets[].v":    "",
+		"num[]":                "missing",
+		"num.x":                "missing",
+		"num.*":                "missing",
 	}
 	for path, want := range cases {
 		if got := checkPath(body, path); got != want {
@@ -222,6 +230,50 @@ func TestTheRepositoryManifestAgainstAFixtureBuild(t *testing.T) {
 	for _, name := range []string{"gaps.json", "gaps.md"} {
 		if fi, err := os.Stat(filepath.Join(dir, name)); err != nil || fi.Mode().Perm() != 0o600 {
 			t.Errorf("%s: %v %v", name, fi, err)
+		}
+	}
+}
+
+// fleetSource is a build of production's 18 networks with browser targets in
+// memory, without catalog rows (as staging's); the gaps do not depend on how
+// many countries a network has, so it has 10.
+type fleetSource struct{ source }
+
+func (fleetSource) Load(context.Context) (*store.Inputs, error) {
+	return testscale.NetworkInputs(testscale.NetworkShape{Shape: testscale.Shape{Networks: 18, Countries: 1, Exits: 10, Tail: 10,
+		Events: 50, Browser: true}, Requested: 10})
+}
+
+// The 46 gaps PERF-REPORT-1 (#720) found failing on staging's build 4, all
+// "null not listed in na" or "missing" (API-NA-2, #798), pass against a build
+// of production's 18 networks: with a value, or null (or empty) and listed in na.
+func TestThe720GapFailuresPassForTheProductionFleet(t *testing.T) {
+	t.Parallel()
+	failed := strings.Fields(`HOME-15 HOME-17 HOME-18 HOME-24 HOME-25 HOME-26 HOME-27 HOME-31 HOME-36 HC-1 HC-5 TGT-1 TGT-3
+		TGT-5 TGT-6 TGT-7 TGT-12 NETS-1 NET-LISTRATE NET-LEADS NET-PROTOCOL NET-RANK-PRICE NET-RANK-AVAIL NET-TARGETS-RANGE
+		NET-TARGET-META NET-TARGET-RANK NET-TARGET-LATRANK NET-TRIAL-BOOL NET-VALUE-RANK NET-SCOPE-COPY NET-ALT-PRICE
+		NET-VERIFY-LABEL NET-SCOPE-UNUSED CMP-6 CMP-8 CMP-9 CMP-11 CMP-12 OVL-1 TC-1 TC-2 TC-3 TC-4 TC-5 TC-6 TC-8`)
+	m, err := LoadManifest(filepath.Join("..", "..", "..", "docs", "api-web-map-gaps.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := server.New(fleetSource{}, server.Options{FilesDir: t.TempDir()})
+	if _, err := s.Refresh(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	r, err := CheckGaps(context.Background(), ts.URL, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdicts := map[string]GapResult{}
+	for _, g := range r.Gaps {
+		verdicts[g.ID] = g
+	}
+	for _, id := range failed {
+		if g := verdicts[id]; g.Verdict != "pass" {
+			t.Errorf("%s: %q %+v", id, g.Verdict, g.Failures)
 		}
 	}
 }

@@ -45,11 +45,12 @@ func noFigures() WindowFigures {
 // windowFigures reads a range's figures from the snapshot window w.
 func windowFigures(sp *snap.Product, w snap.Window, rangeID string, ws *WindowStats) WindowFigures {
 	m := w.Metrics
+	lm, _ := latencyMetrics(w)
 	exclusive, shared := overlapShares(w)
 	return WindowFigures{CaptchaRate: m.ChallengeRate, BlockRate: m.BlockRate, RequestSuccessRate: m.RequestSuccessRate,
 		Countries: w.Pool.Countries, Regions: w.Pool.Regions, Cities: w.Pool.Cities, Asns: w.Pool.Asns,
 		DatacenterAsnShare: w.Pool.DatacenterAsnShare, ExclusiveShare: exclusive, SharedShare: shared,
-		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(m, ws),
+		ObservedDays: observedDays(sp, rangeID), LatencyUnderLoad: latencyUnderLoad(lm, ws),
 		LatencyNote: latencyNote(ws), WireGbPer1k: wireGbPer1k(m)}
 }
 
@@ -84,12 +85,12 @@ func observedDays(sp *snap.Product, rangeID string) Num {
 	return Num(math.Ceil(days))
 }
 
-// latencyUnderLoad is true when the headline latency is under load
-// (every-request snapshots), false when the latency shown is light-load
-// (older snapshots, or an every-request window without a load test) and nil
-// without latency.
-func latencyUnderLoad(m snap.Metrics, ws *WindowStats) *bool {
-	under := ws.LatencyP50.OK() && m.EveryRequest()
+// latencyUnderLoad is true when the headline latency is under load (lm, the
+// latency target's metrics, from a load test), false when the latency shown
+// is light-load (older snapshots, or an every-request window without a load
+// test) and nil without latency.
+func latencyUnderLoad(lm snap.Metrics, ws *WindowStats) *bool {
+	under := ws.LatencyP50.OK() && underLoad(lm)
 	if !ws.LatencyP50.OK() && !ws.LightLatencyP50.OK() {
 		return nil
 	}
@@ -97,7 +98,8 @@ func latencyUnderLoad(m snap.Metrics, ws *WindowStats) *bool {
 }
 
 // latencyNote ports every-request.ts latencyNote: the latency target's label,
-// with ", under load" in every-request snapshots; nil without a target.
+// with ", under load" when the headline is (a light-load latency beside it);
+// nil without a target.
 func latencyNote(ws *WindowStats) *string {
 	if ws.LatencyTarget == nil {
 		return nil

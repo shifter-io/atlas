@@ -288,23 +288,28 @@ func seriesLatency(w snap.Window, r snap.SeriesRow) snap.Latency {
 	return naLatency
 }
 
-// headlineLatency ports presentation.ts headlineLatency: the latency the site
-// leads with. Every-request snapshots: latency under load (N/A without a load
-// test in the window). Older snapshots: latency_ms, their only latency.
-func headlineLatency(m snap.Metrics) snap.Latency {
-	if !m.EveryRequest() {
-		return m.LatencyMs
-	}
-	if m.LatencyUnderLoadMs == nil {
-		return naLatency
-	}
-	return *m.LatencyUnderLoadMs
+// underLoad reports whether m's headline latency is latency under load: an
+// every-request snapshot's window with a load test.
+func underLoad(m snap.Metrics) bool {
+	return m.EveryRequest() && m.LatencyUnderLoadMs != nil && m.LatencyUnderLoadMs.P50.OK()
 }
 
-// lightLatency is an every-request snapshot's light-load latency (pulses
-// only), shown next to the headline; N/A for older snapshots.
+// headlineLatency ports presentation.ts headlineLatency: the latency the site
+// leads with. Every-request snapshots: latency under load, else (no load test
+// in the window: production runs none, docs/api-web-map.md section 14) the
+// light-load latency of its own tests, the daily tests'. Older snapshots:
+// latency_ms, their only latency.
+func headlineLatency(m snap.Metrics) snap.Latency {
+	if underLoad(m) {
+		return *m.LatencyUnderLoadMs
+	}
+	return m.LatencyMs
+}
+
+// lightLatency is the light-load latency shown next to a headline latency
+// under load; N/A otherwise (it is then the headline, or there is none).
 func lightLatency(m snap.Metrics) snap.Latency {
-	if !m.EveryRequest() {
+	if !underLoad(m) {
 		return naLatency
 	}
 	return m.LatencyMs
