@@ -54,8 +54,7 @@ def figures(hour, found: dict) -> dict:
 def stored(model, records: list[dict]) -> list:
     """The stored hours as simulate_check.size reads them: each daily test's recorded rows and
     unique IPs with the model's lane and the model (its releases; the figures keep the hour's
-    test order), and the model's
-    browser runs."""
+    test order), and the model's browser runs."""
     hours = []
     for record in records:
         day, hour = record["day"] + 1, datetime.fromisoformat(record["start"]).hour
