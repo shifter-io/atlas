@@ -372,7 +372,15 @@ editorial ones.
   rows, so answers are as before. A list keeps its rows while its build is retained
   (contract K2 deletes lists, never changes them), so a page of the build being served
   during a rebuild reads its own rows; a read that finds fewer rows than the list had
-  at its load fails, and the page answers 500.
+  at its load fails, and the page answers 500. A full rebuild reads every row of its
+  lists, so its load reads each dimension of each list once, over 6 read-only
+  transactions at a time (`store.NetReadConns`; the pool has 4 more connections for
+  the load and requests), largest first, and the load and the build take their rows
+  from that set (`store.SnapshotRow.NetRows`), dropped with the load's inputs. On the
+  7-day staging data (54 lists, 4.4M rows) that is about 9 s, where one read at a
+  time through the row cache took 69 s: each connection carries about 4 MB/s, and
+  the build read 173 dimensions twice once they had left the cache
+  (SITEAPI-REBUILD-1, `TestTheBuildReadsTheRowsItsLoadRead`).
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
   published build's `created_at`, the site tables' newest `updated_at`,

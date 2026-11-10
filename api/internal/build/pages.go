@@ -1,7 +1,6 @@
 package build
 
 import (
-	"context"
 	"sort"
 
 	"github.com/Zeus-Development/proxy-index/api/internal/model"
@@ -226,7 +225,7 @@ type CountryAnswer struct {
 // network list's rows cannot be read.
 func buildPages(generatedAt string, entries []*entry, stats map[string]map[string]*WindowStats, details map[string]*ProviderDetail,
 	s *snap.Snapshot, row *store.SnapshotRow) (*Pages, error) {
-	nr := &netRead{ctx: context.Background(), row: row}
+	nr := &netRead{ctx: netRowsCtx(row), row: row}
 	pg := &Pages{Network: map[string]*NetworkAnswer{}, Primary: map[string]string{}, Country: map[string]*CountryAnswer{},
 		Charts: map[string]*ChartAnswer{}, lists: map[listKey]*placeIndex{}, coverage: map[listKey]*coverageList{}}
 	pg.Networks = NetworksAnswer{GeneratedAt: generatedAt, Networks: []NetworkRow{}}

@@ -236,6 +236,9 @@ type SnapshotRow struct {
 	// Networks is each network window's compact list (network.go) of a v4
 	// build; nil before v4.
 	Networks map[PlaceWindow]*NetList
+	// NetRows is every row of Networks, read once by the load for it and
+	// the build (WithNetRows); nil before v4.
+	NetRows *NetRowSet
 }
 
 // Event is one public.test_events row in the framework's /v1/events shape.

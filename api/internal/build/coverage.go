@@ -95,7 +95,7 @@ func (pg *Pages) Coverage(ctx context.Context, generatedAt, scope, rangeID, quer
 		out.GeneratedAt = generatedAt
 		return &out, true, nil
 	}
-	rows, err := c.list.Rows(ctx, "city_asn")
+	rows, err := store.RowsOf(ctx, c.list, "city_asn")
 	if err != nil {
 		return nil, false, err
 	}

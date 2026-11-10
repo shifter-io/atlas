@@ -93,14 +93,21 @@ func (s *SnapshotRow) networks() (field, []field, []networkEntry, error) {
 }
 
 // readNetworks reads a v4 build's network lists into cache (nil: a fresh
-// one), drops the group lists it held, and sets Full and Networks. The lists
-// read their rows through db afterwards.
+// one), drops the group lists it held, and sets Full, Networks and NetRows
+// (every row of those lists, netrows.go). The lists read their rows through
+// db afterwards.
 func (s *SnapshotRow) readNetworks(ctx context.Context, tx pgx.Tx, cache *Lists, db TxBeginner) error {
 	if cache == nil {
 		cache = NewLists()
 	}
 	net := cache.networkLists(db)
-	return s.setNetworks(ctx, tx, func(ids []int64) (map[int64]*NetList, error) { return net.Load(ctx, tx, ids) })
+	return s.setNetworks(ctx, tx, func(ids []int64) (map[int64]*NetList, error) {
+		lists, err := net.Load(ctx, tx, ids)
+		if err == nil {
+			s.NetRows, err = net.readAll(ctx, tx, lists)
+		}
+		return lists, err
+	})
 }
 
 // networkLists is the cache's network lists reading through db, made on
@@ -143,6 +150,7 @@ func (s *SnapshotRow) setNetworks(ctx context.Context, tx pgx.Tx, load func(ids 
 	if err != nil {
 		return fmt.Errorf("snapshot %d network lists: %w", s.BuildID, err)
 	}
+	ctx = WithNetRows(ctx, s.NetRows)
 	s.Networks = map[PlaceWindow]*NetList{}
 	networks := s.Payload[nf.Start:nf.End]
 	groups := make([][]byte, len(items))
@@ -246,14 +254,14 @@ func listWindow(ctx context.Context, tx pgx.Tx, raw []byte, l *NetList) ([]byte,
 	return raw, err
 }
 
-// headRows is l's country and ASN rows (read in tx when not cached) as a
+// headRows is l's country and ASN rows (ctx's NetRowSet's, else read in tx when not cached) as a
 // typed list, for the arrays listWindow writes; observations, challenges,
 // blocks, p90 and p99 are NULL: a compact row does not keep them, and no
 // answer shows them.
 func (l *NetList) headRows(ctx context.Context, tx pgx.Tx) (*List, error) {
 	out := &List{rows: map[byte][]ListRow{}}
 	for _, name := range []string{"country", "asn"} {
-		v, err := l.rowsIn(ctx, tx, name)
+		v, err := rowsFrom(ctx, tx, l, name)
 		if err != nil {
 			return nil, err
 		}
