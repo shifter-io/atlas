@@ -1150,8 +1150,8 @@ little from the reference. byteful has too few reference IPs for a recurrence ch
 | #754 (LATENCY-GATE-1) | CI checks a 5× guard; the strict budgets are measured here | flaky `TestPageLatency` | stable |
 | #719 (DB-EXPLAIN-1) | v15 partial `test_events` indexes | notable reads 1–4 ms on staging, 47–316 ms on a synthetic year | 0.03–0.04 ms (section 2.2) |
 | #787 (CALC-POINT-IPS-1) | series point IPs hash-aggregated in batches | 38.8 GB temp in 2 statements | 6.0 GB for 9 points, 0 MB for 144 points |
-| #788 (SITEAPI-REBUILD-1) | the rebuild reads each list's rows once, in parallel | 95.4 s | 29.1 s |
-| #789 (API-LOAD-STATEMENTS-1) | list counts and snapshot head stored at write time | 514.6 ms and 269.1 ms | 0.06 ms and 0.04 ms |
+| #788 (SITEAPI-REBUILD-1) | the rebuild reads each list's rows once, in parallel | 95.4 s | 29.2 s |
+| #789 (API-LOAD-STATEMENTS-1) | list counts and snapshot head stored at write time | 514.6 ms and 269.1 ms | 0.07 ms (`load.network_counts`) and 0.06 ms (`load.snapshot`) |
 | #790 (CALC-FLEET-DISTINCT-1) | last-seen counts in one pass, DISTINCT counts hash-aggregated | `LAST_SEEN` 87 s, fleet 60 s (10.5 GB temp), network scores 59 s (4.1 GB temp) | `COUNTS` 71 s in 26 calls; the whole calculation's temp 11.7 GB against 57.4 GB |
 | #793 (SIM-MODEL-3) | the simulator's per-IP rows, buckets, DB-IP cadence and browser bytes | section 6.1 | merged (PR #796) after this run; for a future load |
 
