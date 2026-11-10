@@ -1,14 +1,20 @@
 package store
 
 import (
+	"cmp"
 	"container/list"
+	"slices"
 	"sync"
 	"unsafe"
 )
 
-// rowCacheBytes bounds the network-list rows a NetLists keeps once read
-// (API-MEM-1): the rows readers asked for last, by list and dimension.
-const rowCacheBytes = 64 << 20
+// DefaultRowCacheBytes bounds the network-list rows a NetLists keeps once
+// read (API-MEM-1), unless Lists.RowCacheBytes sets it (siteapi serve
+// -row-cache): the rows readers asked for last, by list and dimension. A
+// rebuild of the 7-day staging data reads 4.85M rows, 116 MB
+// (COVERAGE-SEARCH-1): 256 MiB holds them all while the serving build's rows
+// are still cached.
+const DefaultRowCacheBytes = 256 << 20
 
 // netRowBytes is the size of one compact row.
 const netRowBytes = int(unsafe.Sizeof(netRow{}))
@@ -20,7 +26,7 @@ type rowKey struct {
 }
 
 // rowCache is a least-recently-used cache of read rows within limit bytes
-// (rowCacheBytes); a dimension larger than that is read again each time it is
+// (DefaultRowCacheBytes); a dimension larger than that is read again each time it is
 // asked for.
 type rowCache struct {
 	limit int
@@ -65,6 +71,45 @@ func (c *rowCache) add(k rowKey, rows *NetRows) {
 	}
 	c.at[k] = c.order.PushFront(&rowEntry{k, rows})
 	c.bytes += size(rows)
+	c.evict()
+}
+
+// warm caches as many of entries as limit holds, the largest first, as the
+// most recently used, the largest in front; it drops the least recently used
+// other rows past the bound. It returns the entries it left out (cold).
+func (c *rowCache) warm(entries []rowEntry) (cold []rowEntry) {
+	slices.SortFunc(entries, func(a, b rowEntry) int {
+		return cmp.Or(-cmp.Compare(size(a.rows), size(b.rows)), cmp.Compare(a.key.id, b.key.id), cmp.Compare(a.key.d, b.key.d))
+	})
+	var kept []rowEntry
+	total := 0
+	for _, e := range entries {
+		if total+size(e.rows) > c.limit {
+			cold = append(cold, e)
+			continue
+		}
+		kept = append(kept, e)
+		total += size(e.rows)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.at == nil {
+		c.order, c.at = list.New(), map[rowKey]*list.Element{}
+	}
+	for _, e := range slices.Backward(kept) {
+		if el := c.at[e.key]; el != nil {
+			c.order.MoveToFront(el)
+			continue
+		}
+		c.at[e.key] = c.order.PushFront(&rowEntry{e.key, e.rows})
+		c.bytes += size(e.rows)
+	}
+	c.evict()
+	return cold
+}
+
+// evict drops the least recently used rows past the bound.
+func (c *rowCache) evict() {
 	for c.bytes > c.limit {
 		e := c.order.Remove(c.order.Back()).(*rowEntry)
 		delete(c.at, e.key)

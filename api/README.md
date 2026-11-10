@@ -57,6 +57,7 @@ with (other paths answer 404) and writes its own migration checksums. `/healthz`
 | `--interval` | `10s` | serve: change-detection poll |
 | `--data-period` | `1h` | serve: data update schedule (must divide 24h); data answers are cached until the published snapshot's next period (see Caching) |
 | `--cache-floor` | `30s` | serve: data answer TTL while the next update is unknown or overdue |
+| `--row-cache` | `256` | serve: MiB of network list rows kept in memory; a rebuild fills it before it serves, the largest lists first (Caching: the warm step) |
 | `--files-dir`, `SITEAPI_FILES_DIR` | `/var/lib/proxy-index-api/files` | serve: where the dataset file is written and served from (created if missing; in production inside the unit's only writable path) |
 | `--endpoint`, `--pretty` | `/v1/dataset` | dump |
 | `--out` | (required) | dump: the output file; explain, bench: the output directory |
@@ -376,8 +377,8 @@ editorial ones.
   are read from `calculated_list_rows` (by list id, in position order, in a read-only
   transaction of their own) when the build, a page or a search needs them, as 24-byte rows (IPs, completed, successes, p50 and indexes into place
   and ASN names shared by every list; at most 40 MB per million rows,
-  `TestNetListsMemory`), and the rows read last stay in a 64 MB cache (least recently
-  used first out). Most-IPs-first order, every-word search and totals run over those
+  `TestNetListsMemory`), and the rows read last stay in a row cache of `--row-cache`
+  MiB (default 256; least recently used first out). Most-IPs-first order, every-word search and totals run over those
   rows, so answers are as before. A list keeps its rows while its build is retained
   (contract K2 deletes lists, never changes them), so a page of the build being served
   during a rebuild reads its own rows; a read that finds fewer rows than the list had
@@ -391,6 +392,19 @@ editorial ones.
   time through the row cache took 69 s: each connection carries about 4 MB/s, and
   the build read 173 dimensions (1.5M rows) again once they had left the cache
   (SITEAPI-REBUILD-1, `TestTheBuildReadsTheRowsItsLoadRead`).
+- **The warm step** (COVERAGE-SEARCH-1). A `q=` search (a network's coverage, place
+  and country lists) needs every row of its list; read from the database at request
+  time, the first search after a build took 380 to 1,071 ms on staging. So once a
+  build is assembled and rendered, before its version is swapped in, the rebuild puts
+  the rows its load read (`store.NetRowSet.Warm`: every dimension is searchable) in
+  the row cache, the largest first while `--row-cache` holds them, and logs
+  `row cache warmed` with the dimensions, rows and bytes. Lists the limit leaves out
+  are logged as a warning (`row cache too small`); their searches read from the
+  database as before. The cache takes the load's rows, no copy, and holds at most its
+  limit (`TestRowCacheWarmsTheLargestFirstWithinItsLimit`). The load itself leaves
+  the cache to the serving version. The 7-day staging data is 4.85M rows, 116 MB:
+  the default 256 MiB holds the new build's rows beside the serving one's
+  (`TestFirstCoverageSearchAfterABuild`).
 - **The dataset file** (contract K4). `/v1/dataset` redirects to a file in
   `--files-dir`, written with its `.gz` and `.br` only when its marker changed: the
   published build's `created_at`, the site tables' newest `updated_at`,

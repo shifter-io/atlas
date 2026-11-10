@@ -257,7 +257,8 @@ func (s *Server) fail(err error) {
 }
 
 // build reads and renders a new Version, reusing prev's bodies whose bytes
-// did not change (reuse.go).
+// did not change (reuse.go), and puts its network list rows in the row cache
+// (warm): the serving Version is swapped only after.
 func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 	t0 := time.Now()
 	in, err := s.src.Load(ctx)
@@ -278,7 +279,24 @@ func (s *Server) build(ctx context.Context, prev *Version) (*Version, error) {
 		return nil, err
 	}
 	v.LoadTime, v.AssembleTime, v.RenderTime = t1.Sub(t0), t2.Sub(t1), time.Since(t2)
+	if in.Snapshot != nil {
+		s.warmed(v.ID, in.Snapshot.NetRows.Warm())
+	}
 	return v, nil
+}
+
+// warmed logs what a build put in the row cache before it serves
+// (store.NetRowSet.Warm), and warns about the lists the cache's limit left
+// out: their searches read from the database.
+func (s *Server) warmed(id uint64, w store.Warmed) {
+	if w.Dimensions+w.ColdDimensions == 0 {
+		return
+	}
+	s.log.Info("row cache warmed", "version", id, "dimensions", w.Dimensions, "rows", w.Rows, "bytes", w.Bytes, "limit_bytes", w.Limit)
+	if w.ColdDimensions > 0 {
+		s.log.Warn("row cache too small: lists left cold (siteapi serve -row-cache)", "version", id, "dimensions", w.ColdDimensions,
+			"rows", w.ColdRows, "lists", w.ColdLists)
+	}
 }
 
 // RenderVersion pre-renders every static response of a build and, with

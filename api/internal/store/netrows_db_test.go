@@ -133,3 +133,50 @@ func TestReadAllOfADeletedList(t *testing.T) {
 		}
 	})
 }
+
+// A load leaves the row cache to the serving build; its set's Warm puts
+// every dimension in the cache, so that requests read none from the database,
+// even once the rows are deleted (COVERAGE-SEARCH-1). A nil set warms nothing.
+func TestWarmFillsTheRowCache(t *testing.T) {
+	t.Parallel()
+	db, pool := networkLists(t)
+	n := store.NewNetLists(pool)
+	ctx := context.Background()
+	var lists map[int64]*store.NetList
+	var set *store.NetRowSet
+	within(t, pool, func(tx pgx.Tx) {
+		lists = loadNet(t, n, tx, 1, 2, 3)
+		var err error
+		if set, err = n.ReadAll(ctx, tx, lists, 0); err != nil {
+			t.Fatal(err)
+		}
+	})
+	before, err := lists[1].Rows(ctx, "city")
+	if err != nil || n.Reads != 16 {
+		t.Fatalf("a read before the warm: %d reads (%v), want 16: the load cached none", n.Reads, err)
+	}
+	w := set.Warm()
+	want := store.Warmed{Dimensions: 15, Rows: 30, Bytes: 30 * 24, Limit: store.DefaultRowCacheBytes}
+	if !reflect.DeepEqual(w, want) {
+		t.Errorf("warmed %+v, want %+v", w, want)
+	}
+	db.Exec(t, `DELETE FROM calculated_list_rows`)
+	for id, l := range lists {
+		for _, name := range netDimensions {
+			got, err := l.Rows(ctx, name)
+			want, _ := store.RowsOf(store.WithNetRows(ctx, set), l, name)
+			if id == 1 && name == "city" {
+				want = before // cached before the warm, which replaces no cached rows
+			}
+			if err != nil || got != want {
+				t.Errorf("list %d %s after the warm: %v, want the set's rows (%v)", id, name, got, err)
+			}
+		}
+	}
+	if n.Reads != 16 {
+		t.Errorf("%d reads after the warm, want 16", n.Reads)
+	}
+	if w := (*store.NetRowSet)(nil).Warm(); !reflect.DeepEqual(w, store.Warmed{}) {
+		t.Errorf("a nil set warmed %+v", w)
+	}
+}
