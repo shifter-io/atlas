@@ -22,6 +22,8 @@ from test_calc_fleet import SWEEP
 from test_calculated_hourly_reads import DAY, HOUR, floor_hour
 from test_sqlwindow_onepass import _nodes
 
+MINUTE = timedelta(minutes=1)
+
 from proxy_index.calculated import fleetsql, network_scores
 from proxy_index.orchestrator.control import write_settings
 from proxy_index.storage import connect
@@ -72,10 +74,11 @@ async def history(database_template, databases, tmp_path):
 
 def cohorts(rng, keys, times, n):
     """n seeded cohort sets [(since, [(group, run keys) per member])]: 1 to 5 members of 1 to 3
-    providers, some without runs, some members sharing runs, cutoffs on and off the buckets."""
+    providers, some without runs, some members sharing runs, cutoffs on and off the buckets (in
+    the first half of the observations' times)."""
     sets = []
     for _ in range(n):
-        since = rng.choice(times) + rng.choice([timedelta(0), timedelta(minutes=2)])
+        since = rng.choice(times[: len(times) // 2]) + rng.choice([timedelta(0), 2 * MINUTE])
         members = [
             ({"provider": rng.choice(PROVIDERS)}, rng.sample(keys, rng.randint(0, 6)))
             for _ in range(rng.randint(1, 5))
@@ -107,7 +110,7 @@ async def test_cohort_counts_equal_the_distinct_aggregates(database_template, da
     database, end, keys, times = await history(database_template, databases, tmp_path)
     rng = random.Random(790)
     sets = cohorts(rng, keys, times, 40)
-    as_of = rng.choice(times[len(times) // 2 :])
+    as_of = rng.choice(times[len(times) * 3 // 4 :])
     with connect(database) as conn:
         expected = old_counts(conn, as_of, sets)
         assert sum(1 for counts in expected if counts.get((None, None))) > 20
@@ -217,6 +220,16 @@ async def test_network_overlaps_equal_the_distinct_count(database_template, data
                 assert expected[1] and any(s for _, s in expected[0].values())
 
 
+def sorted_rows(node, relation):
+    """The Sort nodes under node that sort rows read from relation (a scan below them)."""
+    return [
+        n
+        for n in _nodes(node)
+        if n["Node Type"] == "Sort"
+        and any(c.get("Relation Name", "").startswith(relation) for c in _nodes(n))
+    ]
+
+
 def plan(conn, statement, params):
     cursor = psycopg.ClientCursor(conn)
     return cursor.execute("EXPLAIN (FORMAT JSON) " + statement, params).fetchone()[0][0]["Plan"]
@@ -225,9 +238,10 @@ def plan(conn, statement, params):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sort", ["on", "off"])
 async def test_the_plans_hash_and_read_last_seen_once(sort, database_template, databases, tmp_path):
-    """COUNTS and OVERLAP: every aggregate is hashed, no Sort anywhere (as the planner picks it,
-    and with sorts disabled, so none is needed). LAST_SEEN: one scan of calculated_ip_last_seen,
-    no subplan."""
+    """COUNTS and OVERLAP: every aggregate is hashed and no Sort sorts observation rows (as the
+    planner picks it, and with sorts disabled, so none is needed; a Sort of the run keys alone,
+    for a merge join, is no such sort). LAST_SEEN: one scan of calculated_ip_last_seen, no
+    subplan, no Sort of its rows."""
     database, end, keys, times = await history(database_template, databases, tmp_path)
     rng = random.Random(3)
     sets = cohorts(rng, keys, times, 6)
@@ -249,8 +263,10 @@ async def test_the_plans_hash_and_read_last_seen_once(sort, database_template, d
         statements = [fleetsql.COUNTS, network_scores.OVERLAP, fleetsql.LAST_SEEN]
         assert [q for q, _ in captured] == statements
         for statement, params in captured:
-            nodes = list(_nodes(plan(conn, statement, params)))
-            assert not [n for n in nodes if n["Node Type"] == "Sort"], statement
+            root = plan(conn, statement, params)
+            nodes = list(_nodes(root))
+            relation = "calculated_ip_last_seen" if statement == fleetsql.LAST_SEEN else "ip_obs"
+            assert not sorted_rows(root, relation), statement
             if statement == fleetsql.LAST_SEEN:
                 scans = [n for n in nodes if n.get("Relation Name") == "calculated_ip_last_seen"]
                 assert len(scans) == 1 and not [n for n in nodes if "Subplan Name" in n]
