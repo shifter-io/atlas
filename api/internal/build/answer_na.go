@@ -236,13 +236,13 @@ func totalsRange(p string) string {
 }
 
 // profileRange is the range of a profile path's figure: 24h for a 24h
-// figure (pool.uniqueIps24h, performance.requests24h), none for the others,
-// which are the 30d window's.
+// figure (pool.uniqueIps24h, performance.requests24h), else 30d, the window
+// of the profile's measured blocks.
 func profileRange(p string) string {
 	if strings.HasSuffix(figure(p), "24h") {
 		return "24h"
 	}
-	return ""
+	return "30d"
 }
 
 // profileEmpties is the provider's N/A paths a kind's profile may hold as an

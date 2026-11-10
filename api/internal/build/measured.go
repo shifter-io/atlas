@@ -141,7 +141,7 @@ func writeMeasuredCopy(mv *measuredView, p *snap.Product, score snap.Score) {
 func verdict(w snap.Window, census *censusTotals, score snap.Score) string {
 	m := w.Metrics
 	totals := fmt.Sprintf("%s completed requests, %s successes and %s unique IPs.",
-		jsnum.Locale(m.Completed.F()), jsnum.Locale(m.Successes.F()), jsnum.Locale(ipsOf(w).F()))
+		jsnum.Count(m.Completed.F()), jsnum.Count(m.Successes.F()), jsnum.Count(ipsOf(w).F()))
 	if census == nil {
 		return totals + " This is one pool sample; a complete performance benchmark and overall score are not available yet."
 	}
@@ -166,7 +166,7 @@ func strengths(w snap.Window, census *censusTotals) []string {
 		success = " time-weighted success over every request"
 	}
 	out := []string{
-		jsnum.Locale(ipsOf(w).F()) + ipsPhrase(w),
+		jsnum.Count(ipsOf(w).F()) + ipsPhrase(w),
 		jsnum.Pct(w.Metrics.SuccessRate.F(), 2) + success,
 	}
 	if census != nil {

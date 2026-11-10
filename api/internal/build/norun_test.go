@@ -3,8 +3,10 @@ package build
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/Zeus-Development/proxy-index/api/internal/snap"
 	"github.com/Zeus-Development/proxy-index/api/internal/store"
 	"github.com/Zeus-Development/proxy-index/api/internal/testscale"
 )
@@ -143,4 +145,24 @@ func overlapRowOf(t *testing.T, a *OverlapAnswer, slug string) *OverlapNetwork {
 	}
 	t.Fatalf("no overlap row %s", slug)
 	return nil
+}
+
+// The generated copy of a network whose 30d window has no run, or no 30d
+// window at all, says N/A for its missing counts, never NaN.
+func TestTheCopyOfAWindowWithoutARunHasNoNaN(t *testing.T) {
+	t.Parallel()
+	p := decodeProduct(t, estimateProduct)
+	month := p.Window("30d")
+	month.Metrics.Completed, month.Metrics.Successes = 0, 0
+	for name, w := range map[string]snap.Window{"no run": month, "no window": {}} {
+		lines := append([]string{verdict(w, nil, snap.Score{})}, strengths(w, nil)...)
+		for _, l := range lines {
+			if strings.Contains(l, "NaN") {
+				t.Errorf("%s: %q", name, l)
+			}
+		}
+		if !strings.Contains(lines[0], "N/A unique IPs") || lines[1] != "N/A distinct exit IPs observed" {
+			t.Errorf("%s: %q", name, lines[:2])
+		}
+	}
 }
